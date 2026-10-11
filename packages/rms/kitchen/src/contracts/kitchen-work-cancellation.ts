@@ -34,6 +34,9 @@ export type KitchenBatchCancellationResult =
     }
   | { readonly status: "NoKitchenWork"; readonly evidenceDigest: string };
 
+/** WP-2423 Q6 step 2: per order line state used to offer item cancellation in the merchant queue. */
+export type KitchenOrderItemCancellationState = "NotStarted" | "Started" | "Cancelled";
+
 /** One append-only row per cancelled work item; all rows of one cancellation share the batch facts. */
 export interface KitchenWorkCancellationRecord {
   readonly cancellationReference: string;

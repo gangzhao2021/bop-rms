@@ -4,6 +4,8 @@ import { createPostgresOrderAcceptanceReader } from "./order-acceptance-store.js
 import { parseOrderingReference } from "../../domain/cart.js";
 import type { StaffOrderCancellationRecord } from "../../application/staff-order-cancellation.js";
 import { readStaffOrderCancellations } from "./staff-order-cancellation-store.js";
+import type { StaffItemCancellationRecord } from "../../application/staff-item-cancellation.js";
+import { readStaffItemCancellations } from "./staff-item-cancellation-store.js";
 
 type Options = Parameters<typeof createPostgresDiningOrderPreparationSource>[0];
 type Input = Parameters<
@@ -13,7 +15,7 @@ type Input = Parameters<
 /** Complete immutable item membership and per-Batch acceptance under the Order fence.
  * `cancellation` is the unpaid checkout cancellation (never with acceptance); `staffCancellation`
  * (WP-2423 Q6) is a staff cancellation of a paid Batch, always after its acceptance. Either makes
- * the Batch Cancelled.
+ * the Batch Cancelled. `itemStaffCancellation` (step 2a) cancels that one line only.
  * Kitchen progress and serving remain separate owner facts, never inferred here.
  */
 export function createPostgresDiningOrderItemStateReader(options: Options) {
@@ -120,6 +122,28 @@ export function createPostgresDiningOrderItemStateReader(options: Options) {
           throw new Error("ORDER_ITEM_STATE_UNAVAILABLE");
         staffCancellations.set(record.orderBatchReference, record);
       }
+      // WP-2423 Q6 step 2a: whole lines staff cancelled before preparation; the Batch stays active.
+      const itemCancellations = new Map<string, StaffItemCancellationRecord>();
+      const itemRecords = await readStaffItemCancellations(input.transaction, state, [
+        state.orderReference,
+      ]).catch(() => {
+        throw new Error("ORDER_ITEM_STATE_UNAVAILABLE");
+      });
+      for (const record of itemRecords) {
+        const members = batches.get(record.orderBatchReference);
+        if (
+          record.orderReference !== state.orderReference ||
+          record.cancelledOrderVersion > state.orderVersion ||
+          record.cancelledAt > input.observedAt ||
+          cancellations.has(record.orderBatchReference) ||
+          !members ||
+          record.orderItemReferences.some(
+            (line) => !members.includes(line) || itemCancellations.has(line),
+          )
+        )
+          throw new Error("ORDER_ITEM_STATE_UNAVAILABLE");
+        for (const line of record.orderItemReferences) itemCancellations.set(line, record);
+      }
       const acceptanceReader = createPostgresOrderAcceptanceReader({
         brandReference: state.brandReference,
         storeReference: state.storeReference,
@@ -150,6 +174,18 @@ export function createPostgresDiningOrderItemStateReader(options: Options) {
         )
           throw new Error("ORDER_ITEM_STATE_UNAVAILABLE");
         if (
+          [...itemCancellations.values()].some(
+            (record) =>
+              record.orderBatchReference === orderBatchReference &&
+              (!acceptance ||
+                acceptance.acceptedOrderVersion > record.expectedOrderVersion ||
+                acceptance.acceptedAt > record.cancelledAt ||
+                (staffCancellation !== null &&
+                  staffCancellation.expectedOrderVersion < record.cancelledOrderVersion)),
+          )
+        )
+          throw new Error("ORDER_ITEM_STATE_UNAVAILABLE");
+        if (
           acceptance &&
           (acceptance.acceptedOrderVersion > state.orderVersion ||
             acceptance.acceptedAt > input.observedAt)
@@ -174,6 +210,7 @@ export function createPostgresDiningOrderItemStateReader(options: Options) {
               acceptance,
               cancellation,
               staffCancellation,
+              itemStaffCancellation: itemCancellations.get(orderItemReference) ?? null,
               orderedQuantity,
             }),
           );

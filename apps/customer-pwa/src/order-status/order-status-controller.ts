@@ -163,6 +163,9 @@ function parseSources(
     ...(value !== null && typeof value === "object" && Object.hasOwn(value, "staffCancellations")
       ? ["staffCancellations"]
       : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "itemCancellations")
+      ? ["itemCancellations"]
+      : []),
   ]);
   const checkedAt = parseInstant(raw.checkedAt);
   if (Date.parse(checkedAt) < Date.parse(submittedAt)) return invalid();
@@ -246,6 +249,63 @@ function parseSources(
           cancelledAt: sourceInstant(entry.cancelledAt),
           reason: entry.reason as StaffCancellationReason,
           refundStatus: entry.refundStatus as "Pending" | "Refunded",
+        });
+      }),
+    );
+  }
+  // WP-2423 Q6 step 2: items the Store cancelled one by one; each item at most once.
+  let itemCancellations: OrderStatusSources["itemCancellations"];
+  if (Object.hasOwn(raw, "itemCancellations")) {
+    const itemCount = batches.reduce((sum, batch) => sum + batch.items.length, 0);
+    if (!Array.isArray(raw.itemCancellations) || raw.itemCancellations.length > itemCount)
+      return invalid();
+    const currency = batches[0]?.items[0]?.lineTotal.currencyCode;
+    const seen = new Set<string>();
+    itemCancellations = Object.freeze(
+      raw.itemCancellations.map((value: unknown) => {
+        const entry = exact(value, [
+          "orderBatchReference",
+          "orderItemReferences",
+          "cancelledAt",
+          "reason",
+          "refundStatus",
+          "refundAmount",
+        ]);
+        const orderBatchReference = parseReference(entry.orderBatchReference);
+        const batch = batches.find((item) => item.orderBatchReference === orderBatchReference);
+        if (
+          !batch ||
+          !Array.isArray(entry.orderItemReferences) ||
+          entry.orderItemReferences.length < 1 ||
+          entry.orderItemReferences.length > batch.items.length ||
+          !["CustomerRequest", "SoldOut", "StoreError", "DuplicateOrder"].includes(
+            String(entry.reason),
+          ) ||
+          !["Pending", "Refunded"].includes(String(entry.refundStatus))
+        )
+          return invalid();
+        const orderItemReferences = Object.freeze(
+          entry.orderItemReferences.map((item: unknown) => {
+            const orderItemReference = parseReference(item);
+            if (
+              seen.has(orderItemReference) ||
+              !batch.items.some((line) => line.orderItemReference === orderItemReference)
+            )
+              return invalid();
+            seen.add(orderItemReference);
+            return orderItemReference;
+          }),
+        );
+        const refundAmount = parseMoney(entry.refundAmount);
+        if (refundAmount.amountMinor < 0n || refundAmount.currencyCode !== currency)
+          return invalid();
+        return Object.freeze({
+          orderBatchReference,
+          orderItemReferences,
+          cancelledAt: sourceInstant(entry.cancelledAt),
+          reason: entry.reason as StaffCancellationReason,
+          refundStatus: entry.refundStatus as "Pending" | "Refunded",
+          refundAmount,
         });
       }),
     );
@@ -342,6 +402,7 @@ function parseSources(
     ...(pickup === undefined ? {} : { pickup }),
     ...(unpaidCancellation === undefined ? {} : { unpaidCancellation }),
     ...(staffCancellations === undefined ? {} : { staffCancellations }),
+    ...(itemCancellations === undefined ? {} : { itemCancellations }),
   });
 }
 

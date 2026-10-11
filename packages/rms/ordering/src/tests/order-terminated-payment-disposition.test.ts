@@ -64,7 +64,7 @@ describe("Ordering terminated paid disposition", () => {
     { phase: "Accepted", version: 2 },
     { phase: "Fulfilled" },
     { version: 1 },
-    { version: 4 },
+    { version: 104 },
     { orderReference: id(99) },
     { orderBatchReference: id(99) },
     { brandReference: id(99) },

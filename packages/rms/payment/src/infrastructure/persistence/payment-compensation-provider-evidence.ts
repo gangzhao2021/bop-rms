@@ -7,6 +7,7 @@ import {
   parsePaymentCompensationCase,
   type PaymentProviderConfirmedRefundFact,
 } from "../../application/paid-without-fulfillable-order.js";
+import { decodePaymentCompensationAction } from "../../application/payment-compensation-action-codec.js";
 import { createPostgresPaymentTerminalStore } from "./payment-terminal-store.js";
 /** Verifies committed retrieval evidence. Case/lease binding remains the refund store's responsibility. */
 export function createPostgresPaymentCompensationProviderEvidence(options: {
@@ -40,11 +41,36 @@ export function createPostgresPaymentCompensationProviderEvidence(options: {
       terminal.paymentAttemptReference !== fact.paymentAttemptReference ||
       terminal.environment !== scope.environment ||
       terminal.providerAccountReference !== scope.providerAccountReference ||
-      terminal.amount?.amountMinor !== fact.amount.amountMinor ||
+      !terminal.amount ||
       terminal.amount.currencyCode !== fact.amount.currencyCode ||
+      fact.amount.amountMinor > terminal.amount.amountMinor ||
       terminal.occurredAt > fact.providerConfirmedAt
     )
       return false;
+    // WP-2423 Q6 step 2a: the fact records the compensation's own refund. Below the whole capture it
+    // is the remainder after other owners' refunds, so it must be exactly this case's durable
+    // action amount. The Provider snapshot still has to show the whole capture refunded.
+    if (fact.amount.amountMinor !== terminal.amount.amountMinor) {
+      const actions = await tx.query(
+        "SELECT record_json::text AS record FROM rms_payment.payment_compensation_action_history WHERE brand_id=$1 AND store_id=$2 AND case_id=$3 ORDER BY history_version DESC LIMIT 1",
+        [scope.brandReference, scope.storeReference, fact.compensationCaseReference],
+      );
+      if (actions.rows.length !== 1) return false;
+      const action = decodePaymentCompensationAction(actions.rows[0]?.record);
+      if (
+        action.compensationCaseReference !== fact.compensationCaseReference ||
+        action.brandReference !== fact.brandReference ||
+        action.storeReference !== fact.storeReference ||
+        action.paymentTransactionReference !== fact.paymentTransactionReference ||
+        action.paymentAttemptReference !== fact.paymentAttemptReference ||
+        action.originalPaymentMethod !== fact.originalPaymentMethod ||
+        action.terminalEvidenceDigest !== terminal.evidenceDigest ||
+        action.amount.amountMinor !== fact.amount.amountMinor ||
+        action.amount.currencyCode !== fact.amount.currencyCode ||
+        action.claimedAt > fact.providerConfirmedAt
+      )
+        return false;
+    }
     const result = await tx.query(
       `SELECT EXISTS (
     SELECT 1 FROM rms_payment.payment_provider_observation o
@@ -66,7 +92,7 @@ export function createPostgresPaymentCompensationProviderEvidence(options: {
         terminal.providerIntentReference,
         fact.evidenceDigest,
         fact.providerConfirmedAt,
-        fact.amount.amountMinor.toString(),
+        terminal.amount.amountMinor.toString(),
         scope.environment,
         fact.originalPaymentMethod,
         fact.orderReference,

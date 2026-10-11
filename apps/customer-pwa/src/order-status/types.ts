@@ -31,6 +31,8 @@ export interface OrderStatusSources {
   readonly unpaidCancellation?: null | { readonly cancelledAt: string };
   /** WP-2423 Q6: batches the Store cancelled after payment, before the kitchen started. */
   readonly staffCancellations?: readonly StaffCancellation[];
+  /** WP-2423 Q6 step 2: single items the Store cancelled after payment, before the kitchen started. */
+  readonly itemCancellations?: readonly ItemCancellation[];
 }
 
 export type StaffCancellationReason =
@@ -41,6 +43,16 @@ export interface StaffCancellation {
   readonly cancelledAt: string;
   readonly reason: StaffCancellationReason;
   readonly refundStatus: "Pending" | "Refunded";
+}
+
+/** Refund is the cancelled items' price and tax, never the tip. */
+export interface ItemCancellation {
+  readonly orderBatchReference: string;
+  readonly orderItemReferences: readonly string[];
+  readonly cancelledAt: string;
+  readonly reason: StaffCancellationReason;
+  readonly refundStatus: "Pending" | "Refunded";
+  readonly refundAmount: { readonly amountMinor: bigint; readonly currencyCode: string };
 }
 
 export interface OrderStatusView {

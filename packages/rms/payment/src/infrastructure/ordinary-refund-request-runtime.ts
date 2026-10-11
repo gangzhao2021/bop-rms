@@ -10,6 +10,7 @@ import { parsePaymentReference } from "../application/payment-provider-adapter.j
 import {
   parseOrdinaryRefundRequest,
   ordinaryRefundPaymentAmount,
+  type OrdinaryRefundCancellationClaim,
 } from "../application/ordinary-refund-request.js";
 import {
   createPostgresOrdinaryRefundRequestContextSource,
@@ -25,7 +26,12 @@ const fail = (): never => {
 };
 const ref = (value: unknown) => String(parsePaymentReference(value));
 function selection(value: unknown) {
+  const hasClaim =
+    value !== null &&
+    typeof value === "object" &&
+    Object.prototype.hasOwnProperty.call(value, "claim");
   const raw = exactPaymentObject(value, [
+    ...(hasClaim ? ["claim"] : []),
     "orderReference",
     "requestReference",
     "operationReference",
@@ -78,6 +84,21 @@ function selection(value: unknown) {
     expectedClaimVersion: raw.expectedClaimVersion,
     reasonCode: raw.reasonCode,
     items: Object.freeze(items),
+    claim: hasClaim ? cancellationClaim(raw.claim) : null,
+  });
+}
+function cancellationClaim(value: unknown): OrdinaryRefundCancellationClaim {
+  const raw = exactPaymentObject(value, ["kind", "cancellationReference", "cancellationDigest"]);
+  if (
+    raw.kind !== "Cancellation" ||
+    typeof raw.cancellationDigest !== "string" ||
+    !/^sha256:[a-f0-9]{64}$/u.test(raw.cancellationDigest)
+  )
+    return fail();
+  return Object.freeze({
+    kind: "Cancellation" as const,
+    cancellationReference: ref(raw.cancellationReference),
+    cancellationDigest: raw.cancellationDigest,
   });
 }
 type Intent = ReturnType<typeof selection>;
@@ -126,7 +147,8 @@ export function createPostgresOrdinaryRefundRequestRuntime(options: {
       (previous.actorReference !== intent.actorReference ||
         previous.requestReference !== intent.requestReference ||
         previous.reasonCode !== intent.reasonCode ||
-        previous.expectedClaimVersion !== intent.expectedClaimVersion)
+        previous.expectedClaimVersion !== intent.expectedClaimVersion ||
+        JSON.stringify(previous.claim ?? null) !== JSON.stringify(intent.claim))
     )
       return fail();
     if (!previous && intent.expectedClaimVersion !== context.history.length) return fail();
@@ -191,7 +213,8 @@ export function createPostgresOrdinaryRefundRequestRuntime(options: {
       )
         return fail();
       const allocation = allocateOrdinaryRefundFromQuote(quote, {
-        tipAmountMinor: preparation.tip.amountMinor,
+        // Item cancellation refunds exclude tip: ordinary allocation with tip = 0.
+        tipAmountMinor: intent.claim === null ? preparation.tip.amountMinor : 0n,
         items: basis.items.map((item) => ({
           orderItemReference: item.orderItemReference,
           quoteLineReference: item.quoteLineReference,
@@ -244,6 +267,7 @@ export function createPostgresOrdinaryRefundRequestRuntime(options: {
         0n,
       ),
       payments,
+      ...(intent.claim === null ? {} : { claim: intent.claim }),
     });
     const store = createPostgresOrdinaryRefundRequestStore({
       scope,

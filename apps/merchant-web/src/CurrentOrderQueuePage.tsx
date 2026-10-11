@@ -6,6 +6,13 @@ import {
   staffCancellationReasonLabel,
   staffCancellationSummary,
 } from "./StaffOrderCancelAction.js";
+import {
+  ItemRefundCheck,
+  StaffItemCancelAction,
+  itemCancellationStatus,
+} from "./StaffItemCancelAction.js";
+import { orderMoney } from "./order-money.js";
+export { orderMoney } from "./order-money.js";
 import { createOrderAcceptanceClient } from "./order-acceptance-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { StatePanel } from "@bop-rms/ui";
@@ -16,6 +23,7 @@ export { storeTime } from "./StoreTime.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import {
+  cancelledItemsRefund,
   createCurrentOrderQueueClient,
   CurrentOrderQueueError,
   type CurrentOrderDetail,
@@ -54,37 +62,50 @@ export function filterCurrentOrderItems(
                 (order.currentPhase ?? "Unavailable") === filters.phase)),
   );
 }
-/** "$6.78" for 678 CAD minor units; the currency's own minor-unit exponent, no floating point. */
-export function orderMoney(value: { readonly amountMinor: string; readonly currencyCode: string }) {
-  const exponent =
-    new Intl.NumberFormat("en-CA", {
-      style: "currency",
-      currency: value.currencyCode,
-    }).resolvedOptions().maximumFractionDigits ?? 2;
-  const negative = value.amountMinor.startsWith("-");
-  const digits = (negative ? value.amountMinor.slice(1) : value.amountMinor).padStart(
-    exponent + 1,
-    "0",
-  );
-  const amount =
-    exponent === 0 ? digits : digits.slice(0, -exponent) + "." + digits.slice(-exponent);
-  return (
-    (negative ? "−" : "") + (value.currencyCode === "CAD" ? "$" : value.currencyCode + " ") + amount
-  );
+/** WP-2423 Q6 step 2: what "Check refund" on a cancelled item needs (omitted: not offered). */
+export interface ItemRefundCheckContext {
+  readonly orderReference: string;
+  readonly csrf: string;
+  readonly fetcher?: typeof fetch | undefined;
+  /** Re-read the order once the refund completed. */
+  readonly onChecked: () => void;
 }
-
 /** WP-2423 OPS-ORDER-DETAIL: what was ordered — items with options and notes, and the totals. */
-export function CurrentOrderLines({ lines }: { readonly lines: CurrentOrderDetail["lines"] }) {
+export function CurrentOrderLines({
+  lines,
+  refundCheck,
+}: {
+  readonly lines: CurrentOrderDetail["lines"];
+  readonly refundCheck?: ItemRefundCheckContext | undefined;
+}) {
   const t = lines.totals;
+  const cancelledRefund = cancelledItemsRefund(lines.items);
+  // One "Check refund" per pending cancellation, on its first line.
+  const checkReferences = new Set<string>();
+  const checkLines = new Map<string, string>();
+  for (const item of lines.items) {
+    const reference = item.cancellation?.cancellationReference ?? null;
+    if (
+      item.cancellation?.refundStatus !== "Pending" ||
+      reference === null ||
+      checkReferences.has(reference)
+    )
+      continue;
+    checkReferences.add(reference);
+    checkLines.set(item.orderItemReference, reference);
+  }
   return (
     <section className="order-lines" aria-label="Items ordered">
       <h3>Items</h3>
       <ul>
         {lines.items.map((item) => (
-          <li key={item.orderItemReference}>
+          <li
+            key={item.orderItemReference}
+            className={item.cancellation === null ? undefined : "order-line-cancelled"}
+          >
             <span className="order-line-quantity">{item.quantity} ×</span>
             <span className="order-line-name">
-              {item.name}
+              <span className="order-line-title">{item.name}</span>
               {item.options.length > 0 ? (
                 <span className="order-line-options">
                   {item.options
@@ -96,6 +117,21 @@ export function CurrentOrderLines({ lines }: { readonly lines: CurrentOrderDetai
               ) : null}
               {item.customerNote !== null ? (
                 <span className="order-line-note">Note: {item.customerNote}</span>
+              ) : null}
+              {item.cancellation !== null ? (
+                <span className="order-line-cancellation">
+                  <strong>{itemCancellationStatus(item.cancellation)}</strong>
+                  <span>Reason: {staffCancellationReasonLabel[item.cancellation.reasonCode]}</span>
+                  {refundCheck !== undefined && checkLines.has(item.orderItemReference) ? (
+                    <ItemRefundCheck
+                      orderReference={refundCheck.orderReference}
+                      cancellationReference={checkLines.get(item.orderItemReference) ?? ""}
+                      csrf={refundCheck.csrf}
+                      fetcher={refundCheck.fetcher}
+                      onChecked={refundCheck.onChecked}
+                    />
+                  ) : null}
+                </span>
               ) : null}
             </span>
             <span className="order-line-amount">{orderMoney(item.subtotal)}</span>
@@ -128,6 +164,14 @@ export function CurrentOrderLines({ lines }: { readonly lines: CurrentOrderDetai
           <dd>{orderMoney(t.total)}</dd>
         </div>
       </dl>
+      {cancelledRefund !== null ? (
+        <dl className="order-lines-totals order-lines-cancelled-refund">
+          <div>
+            <dt>Cancelled items refund</dt>
+            <dd>−{orderMoney(cancelledRefund)}</dd>
+          </div>
+        </dl>
+      ) : null}
     </section>
   );
 }
@@ -136,9 +180,11 @@ export function CurrentOrderLines({ lines }: { readonly lines: CurrentOrderDetai
 function QueuedOrderLines({
   orderReference,
   client,
+  refundCheck,
 }: {
   readonly orderReference: string;
   readonly client: ReturnType<typeof createCurrentOrderQueueClient>;
+  readonly refundCheck?: ItemRefundCheckContext | undefined;
 }) {
   const [state, setState] = useState<
     { kind: "Loading" | "Unavailable" } | { kind: "Ready"; detail: CurrentOrderDetail }
@@ -156,7 +202,7 @@ function QueuedOrderLines({
     return () => controller.abort();
   }, [orderReference, client]);
   return state.kind === "Ready" ? (
-    <CurrentOrderLines lines={state.detail.lines} />
+    <CurrentOrderLines lines={state.detail.lines} refundCheck={refundCheck} />
   ) : (
     <p className="order-lines-state" role="status">
       {state.kind === "Loading"
@@ -767,10 +813,27 @@ export function CurrentOrderQueuePage({
                   fetcher={fetcher}
                   lines={
                     detail !== undefined ? (
-                      <CurrentOrderLines lines={detail.lines} />
+                      <CurrentOrderLines
+                        lines={detail.lines}
+                        refundCheck={{
+                          orderReference: order.orderReference,
+                          csrf,
+                          fetcher,
+                          onChecked: () => reload(after),
+                        }}
+                      />
                     ) : open ? (
                       <>
-                        <QueuedOrderLines orderReference={order.orderReference} client={client} />
+                        <QueuedOrderLines
+                          orderReference={order.orderReference}
+                          client={client}
+                          refundCheck={{
+                            orderReference: order.orderReference,
+                            csrf,
+                            fetcher,
+                            onChecked: () => reload(after),
+                          }}
+                        />
                         <Link to={`/operations/orders/${order.orderReference}`}>Open order</Link>
                       </>
                     ) : null
@@ -786,16 +849,37 @@ export function CurrentOrderQueuePage({
                 />
               )}
               action={(order, batch) =>
-                batch.canCancel ? (
-                  <fieldset disabled={servingBusy}>
-                    <StaffOrderCancelAction
-                      key={batch.orderBatchReference}
-                      order={order}
-                      batch={batch}
-                      csrf={csrf}
-                      fetcher={fetcher}
-                      onSettled={() => reload(after)}
-                    />
+                batch.canCancel || batch.canCancelItems ? (
+                  <fieldset disabled={servingBusy} className="order-cancel-actions">
+                    {batch.canCancel ? (
+                      <StaffOrderCancelAction
+                        key={batch.orderBatchReference}
+                        order={order}
+                        batch={batch}
+                        csrf={csrf}
+                        fetcher={fetcher}
+                        onSettled={() => reload(after)}
+                      />
+                    ) : null}
+                    {/* WP-2423 Q6 step 2: items are chosen from the order's lines (order detail). */}
+                    {!batch.canCancelItems ? null : detail !== undefined ? (
+                      <StaffItemCancelAction
+                        key={"items-" + batch.orderBatchReference}
+                        order={order}
+                        batch={batch}
+                        lines={detail.lines.items}
+                        csrf={csrf}
+                        fetcher={fetcher}
+                        onSettled={() => reload(after)}
+                      />
+                    ) : (
+                      <Link
+                        className="order-cancel-items-link"
+                        to={`/operations/orders/${order.orderReference}`}
+                      >
+                        Cancel items
+                      </Link>
+                    )}
                   </fieldset>
                 ) : batch.canRequestAcceptance ? (
                   <fieldset disabled={servingBusy}>

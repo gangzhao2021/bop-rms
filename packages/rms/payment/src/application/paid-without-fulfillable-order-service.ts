@@ -621,8 +621,9 @@ function verifyAction(
     readonly caseReference: string;
     readonly disposition: PaidWithoutFulfillableOrderDisposition;
     readonly source: PaymentCompensationSource;
-    readonly observation: PaymentProviderSnapshot;
-    readonly amountMinor: bigint;
+    // Not used to verify: a durable action is bound by its own amount and observation digests.
+    readonly observation?: PaymentProviderSnapshot;
+    readonly amountMinor?: bigint;
     readonly now: string;
   },
   ports: PaidWithoutFulfillableOrderPorts,
@@ -858,6 +859,9 @@ async function resolveOrClaimAction(
     }
     return verified;
   }
+  // WP-2423 Q6 step 2a: another owner's refund (for example an item Cancellation refund) is still
+  // awaiting Provider confirmation. Claiming now would also refund that pending amount, so the
+  // case waits non-terminally and claims only once it is confirmed (or released).
   if (input.source.pendingRefundClaimedAmount.amountMinor > 0n) return null;
 
   const interacEvidence =
@@ -981,6 +985,8 @@ function verifyRefundComposition(
     readonly source: PaymentCompensationSource;
     readonly disposition: PaidWithoutFulfillableOrderDisposition;
     readonly trustedThrough: string;
+    /** The compensation's own refunded amount; see compensationRefundAmount. */
+    readonly amountMinor: bigint;
   },
   ports: PaidWithoutFulfillableOrderPorts,
 ) {
@@ -1015,7 +1021,7 @@ function verifyRefundComposition(
     fact.brandReference !== expected.source.brandReference ||
     fact.storeReference !== expected.source.storeReference ||
     fact.originalPaymentMethod !== expected.source.originalPaymentMethod ||
-    fact.amount.amountMinor !== expected.source.capturedAmount.amountMinor ||
+    fact.amount.amountMinor !== expected.amountMinor ||
     fact.amount.currencyCode !== "CAD" ||
     Date.parse(fact.providerConfirmedAt) < Date.parse(expected.source.terminalOccurredAt) ||
     Date.parse(fact.recordedAt) < Date.parse(fact.providerConfirmedAt) ||
@@ -1038,7 +1044,7 @@ function verifyRefundComposition(
     event.payload.paymentIntentReference !== expected.source.paymentIntentReference ||
     event.payload.paymentAttemptReference !== expected.source.paymentAttemptReference ||
     event.payload.orderReference !== expected.source.orderReference ||
-    event.payload.amountMinor !== expected.source.capturedAmount.amountMinor.toString() ||
+    event.payload.amountMinor !== expected.amountMinor.toString() ||
     event.payload.currencyCode !== "CAD" ||
     event.payload.refundKind !== "PaidWithoutFulfillableOrderCompensation" ||
     event.payload.providerConfirmedAt !== fact.providerConfirmedAt ||
@@ -1054,9 +1060,41 @@ function verifyRefundComposition(
   return Object.freeze({ fact, event });
 }
 
+/** Resolve and verify the durable compensation action without claiming one. */
+async function resolveClaimedAction(
+  ports: PaidWithoutFulfillableOrderPorts,
+  input: Parameters<typeof verifyAction>[1],
+): Promise<PaymentCompensationActionReceipt | null> {
+  let existing;
+  try {
+    existing = await ports.actions.resolve({ actionReference: input.actionReference });
+  } catch {
+    return dependency();
+  }
+  return existing === null ? null : verifyAction(existing, input, ports);
+}
+
+/**
+ * WP-2423 Q6 step 2a: the compensation refunds, and records as its own refund fact, only what
+ * remains of the capture after other owners' refunds (ordinary and Cancellation refunds). That
+ * amount is the durable action amount claimed as captured minus the Provider-refunded floor, which
+ * equals the refunds other owners had confirmed at claim time. It is taken from the persisted
+ * action, never recomputed from the current source: once the compensation's own refund is
+ * confirmed the source counts it too. Without an action, the Provider was already fully refunded
+ * before any claim; that is the compensation's only when no other owner holds a refund, so it is
+ * the whole capture, byte-for-byte as before.
+ */
+function compensationRefundAmount(
+  action: PaymentCompensationActionReceipt | null,
+  source: PaymentCompensationSource,
+): bigint {
+  return action === null ? source.capturedAmount.amountMinor : action.amount.amountMinor;
+}
+
 async function resolveRefundComposition(
   ports: PaidWithoutFulfillableOrderPorts,
-  input: Parameters<typeof verifyRefundComposition>[1],
+  input: Omit<Parameters<typeof verifyRefundComposition>[1], "amountMinor">,
+  expectedAmount: () => Promise<bigint>,
 ) {
   let existing;
   try {
@@ -1066,7 +1104,9 @@ async function resolveRefundComposition(
   } catch {
     return dependency();
   }
-  return existing === null ? null : verifyRefundComposition(existing, input, ports);
+  return existing === null
+    ? null
+    : verifyRefundComposition(existing, { ...input, amountMinor: await expectedAmount() }, ports);
 }
 
 async function ensureRefund(
@@ -1080,13 +1120,18 @@ async function ensureRefund(
     readonly truth: PaymentProviderSnapshot;
     readonly lease: PaymentCompensationLeaseReceipt;
     readonly trustedThrough: string;
+    /** The compensation's own refunded amount (compensationRefundAmount). */
+    readonly amountMinor: bigint;
   },
 ) {
-  const existing = await resolveRefundComposition(ports, input);
+  const existing = await resolveRefundComposition(ports, input, async () => input.amountMinor);
   if (existing !== null) return existing;
+  // The Provider shows the whole capture refunded: the compensation's amount completes it.
   if (
     input.truth.status !== "Captured" ||
-    input.truth.refundedAmount.amountMinor !== input.source.capturedAmount.amountMinor
+    input.truth.refundedAmount.amountMinor !== input.source.capturedAmount.amountMinor ||
+    input.amountMinor <= 0n ||
+    input.amountMinor > input.source.capturedAmount.amountMinor
   )
     return sourceUnavailable();
   let causationReference;
@@ -1112,7 +1157,7 @@ async function ensureRefund(
     brandReference: input.source.brandReference,
     storeReference: input.source.storeReference,
     originalPaymentMethod: input.source.originalPaymentMethod,
-    amount: input.source.capturedAmount,
+    amount: createMoney({ amountMinor: input.amountMinor, currencyCode: parseCurrencyCode("CAD") }),
     source: "ProviderRetrieval",
     providerConfirmedAt: input.truth.observedAt,
     recordedAt: input.truth.observedAt,
@@ -1485,12 +1530,15 @@ async function executeClaimed(
     lease,
     now,
   });
-  let refundComposition = await resolveRefundComposition(ports, {
-    ...references,
-    disposition,
-    source,
-    trustedThrough: now,
-  });
+  let refundComposition = await resolveRefundComposition(
+    ports,
+    { ...references, disposition, source, trustedThrough: now },
+    async () =>
+      compensationRefundAmount(
+        await resolveClaimedAction(ports, { ...references, disposition, source, now }),
+        source,
+      ),
+  );
   if (caseRecord.refundDisposition === "ProviderConfirmed" && refundComposition === null)
     return sourceUnavailable();
   let refundDisposition:
@@ -1511,15 +1559,32 @@ async function executeClaimed(
     );
     if (initialTruth !== null) {
       if (initialTruth.refundedAmount.amountMinor === source.capturedAmount.amountMinor) {
-        refundComposition = await ensureRefund(ports, {
+        const claimed = await resolveClaimedAction(ports, {
           ...references,
           disposition,
           source,
-          truth: initialTruth,
-          lease,
-          trustedThrough: initialTruth.observedAt,
+          now,
         });
-        refundDisposition = "ProviderConfirmed";
+        if (
+          claimed === null &&
+          (source.confirmedRefundedAmount.amountMinor > 0n ||
+            source.pendingRefundClaimedAmount.amountMinor > 0n)
+        ) {
+          // WP-2423 Q6 step 2a: fully refunded without any compensation claim while other owners
+          // hold refunds; recording a compensation refund would count their money twice.
+          refundDisposition = "ReconciliationRequired";
+        } else {
+          refundComposition = await ensureRefund(ports, {
+            ...references,
+            disposition,
+            source,
+            truth: initialTruth,
+            lease,
+            trustedThrough: initialTruth.observedAt,
+            amountMinor: compensationRefundAmount(claimed, source),
+          });
+          refundDisposition = "ProviderConfirmed";
+        }
       } else {
         const remaining =
           source.capturedAmount.amountMinor - initialTruth.refundedAmount.amountMinor;
@@ -1631,6 +1696,7 @@ async function executeClaimed(
                   truth: postTruth,
                   lease,
                   trustedThrough: postTruth.observedAt,
+                  amountMinor: action.amount.amountMinor,
                 });
                 refundDisposition = "ProviderConfirmed";
                 nextPhase = "ProviderConfirmed";

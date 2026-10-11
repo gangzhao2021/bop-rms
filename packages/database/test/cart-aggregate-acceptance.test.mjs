@@ -57,6 +57,7 @@ async function prove(context) {
       { table_name: "order_fulfillment_completion_record" },
       { table_name: "order_header" },
       { table_name: "order_item" },
+      { table_name: "order_item_staff_cancellation" },
       { table_name: "order_number_allocation" },
       { table_name: "order_number_counter" },
       { table_name: "order_payment_acceptance_wait" },

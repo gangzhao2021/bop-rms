@@ -2101,6 +2101,24 @@ async function scanUnsupported(root, module, diagnostics) {
               "order_payment_disposition_record",
             ],
           },
+          // WP-2423 Q6 step 2a: staff cancel item lines of a paid, accepted Batch before preparation.
+          "src/infrastructure/persistence/staff-item-cancellation-store.ts": {
+            owner: "ordering",
+            tables: [
+              "order_header",
+              "order_batch",
+              "order_item",
+              "order_revision",
+              "order_item_staff_cancellation",
+              "order_staff_cancellation",
+              "order_batch_checkout_cancellation",
+              "order_termination_record",
+              "order_closure_version",
+              "order_fulfillment_completion_record",
+              "order_acceptance_record",
+              "order_payment_disposition_record",
+            ],
+          },
           // WP-2423 Q6: staff cancel a paid, accepted Order/Batch before the kitchen starts it.
           "src/infrastructure/persistence/staff-order-cancellation-store.ts": {
             owner: "ordering",

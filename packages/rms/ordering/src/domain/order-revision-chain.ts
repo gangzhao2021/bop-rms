@@ -41,6 +41,7 @@ export function parseOrderRevision(value: unknown) {
         "Fulfillment",
         "BatchCancellation",
         "StaffBatchCancellation",
+        "StaffItemCancellation",
       ].includes(raw.kind)
     )
       return invalid();
@@ -62,7 +63,8 @@ export function parseOrderRevision(value: unknown) {
         | "Termination"
         | "Fulfillment"
         | "BatchCancellation"
-        | "StaffBatchCancellation",
+        | "StaffBatchCancellation"
+        | "StaffItemCancellation",
     });
   } catch {
     return invalid();

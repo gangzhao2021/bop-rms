@@ -153,6 +153,7 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         "canRequestAcceptance",
         "canCancel",
         "staffCancellation",
+        "canCancelItems",
       ]);
       const orderBatchReference = reference(batch.orderBatchReference);
       const staffCancellation = parseStaffCancellation(batch.staffCancellation, submittedAt);
@@ -186,6 +187,15 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
               : ["Submitted", "Accepted", "InProgress", "Ready"].includes(
                   String(item.currentPhase),
                 )))) ||
+        typeof batch.canCancelItems !== "boolean" ||
+        // WP-2423 Q6: items can be cancelled only in a paid, accepted batch the Store has not cancelled.
+        (batch.canCancelItems &&
+          (staffCancellation !== null ||
+            batch.acceptanceStatus !== "Accepted" ||
+            batch.canRequestAcceptance ||
+            item.unfulfillable !== null ||
+            item.pickupNotCollected !== false ||
+            item.currentVersion === null)) ||
         // A pickup cancelled by the Store is a cancelled Order; a dine-in batch is a cancelled batch.
         (staffCancellation !== null &&
           (batch.canRequestAcceptance ||
@@ -205,6 +215,8 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         canCancel: batch.canCancel,
         /** WP-2423 Q6: the Store cancelled this batch; the payment is refunded in full. */
         staffCancellation,
+        /** WP-2423 Q6 step 2: at least one item of this batch can be cancelled on its own now. */
+        canCancelItems: batch.canCancelItems,
       });
     });
     if (
@@ -254,6 +266,39 @@ const money = (value: unknown) => {
 };
 const text = (value: unknown, max: number) =>
   typeof value === "string" && value.length <= max ? value : fail();
+/**
+ * WP-2423 Q6 step 2: the Store cancelled this item line; refund is the line's net + tax (never the
+ * tip). The cancellation reference is present when the server exposes it (used to check the refund).
+ */
+function parseItemCancellation(value: unknown, submittedAt: string, currencyCode: string) {
+  if (value === null) return null;
+  const withReference =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "cancellationReference");
+  const raw = exact(value, [
+    "reasonCode",
+    "cancelledAt",
+    "refundStatus",
+    "refund",
+    ...(withReference ? ["cancellationReference"] : []),
+  ]);
+  const cancelledAt = instant(raw.cancelledAt);
+  const refund = money(raw.refund);
+  if (
+    !staffCancellationReasons.includes(raw.reasonCode as StaffCancellationReason) ||
+    (raw.refundStatus !== "Pending" && raw.refundStatus !== "Refunded") ||
+    cancelledAt < submittedAt ||
+    refund.amountMinor.startsWith("-") ||
+    refund.currencyCode !== currencyCode
+  )
+    return fail();
+  return Object.freeze({
+    reasonCode: raw.reasonCode as StaffCancellationReason,
+    cancelledAt,
+    refundStatus: raw.refundStatus as "Pending" | "Refunded",
+    refund,
+    cancellationReference: withReference ? reference(raw.cancellationReference) : null,
+  });
+}
 /** WP-2423 OPS-ORDER-DETAIL: one Order with what was ordered (names, options, notes, amounts). */
 export function parseCurrentOrderDetail(value: unknown, orderReference: string) {
   const raw = exact(value, ["screenId", "order", "lines"]);
@@ -279,6 +324,8 @@ export function parseCurrentOrderDetail(value: unknown, orderReference: string) 
       "tax",
       "fee",
       "total",
+      "canCancel",
+      "cancellation",
     ]);
     if (
       typeof item.quantity !== "number" ||
@@ -286,9 +333,21 @@ export function parseCurrentOrderDetail(value: unknown, orderReference: string) 
       item.quantity < 1 ||
       item.quantity > 999 ||
       !Array.isArray(item.options) ||
-      item.options.length > 100
+      item.options.length > 100 ||
+      typeof item.canCancel !== "boolean"
     )
       return fail();
+    const total = money(item.total);
+    const cancellation = parseItemCancellation(
+      item.cancellation,
+      order.submittedAt,
+      total.currencyCode,
+    );
+    const batch = order.batches.find(
+      (entry) => entry.orderBatchReference === item.orderBatchReference,
+    );
+    // WP-2423 Q6 step 2: only an uncancelled item of a batch that offers item cancellation.
+    if (item.canCancel && (cancellation !== null || batch?.canCancelItems !== true)) return fail();
     return Object.freeze({
       orderItemReference: reference(item.orderItemReference),
       orderBatchReference: reference(item.orderBatchReference),
@@ -310,9 +369,19 @@ export function parseCurrentOrderDetail(value: unknown, orderReference: string) 
       discount: money(item.discount),
       tax: money(item.tax),
       fee: money(item.fee),
-      total: money(item.total),
+      total,
+      /** WP-2423 Q6 step 2: this line may be cancelled now (kitchen not started, caller allowed). */
+      canCancel: item.canCancel,
+      cancellation,
     });
   });
+  // A batch offers item cancellation exactly when one of its lines can be cancelled.
+  for (const batch of order.batches)
+    if (
+      batch.canCancelItems !==
+      items.some((item) => item.canCancel && item.orderBatchReference === batch.orderBatchReference)
+    )
+      return fail();
   const totals = exact(lines.totals, ["subtotal", "discount", "tax", "fee", "total"]);
   return Object.freeze({
     view: queue,
@@ -330,6 +399,18 @@ export function parseCurrentOrderDetail(value: unknown, orderReference: string) 
   });
 }
 export type CurrentOrderDetail = ReturnType<typeof parseCurrentOrderDetail>;
+export type CurrentOrderLine = CurrentOrderDetail["lines"]["items"][number];
+/** WP-2423 Q6 step 2: what the cancelled items refund in total (null when nothing was cancelled). */
+export function cancelledItemsRefund(items: readonly CurrentOrderLine[]) {
+  const refunds = items.flatMap((item) => (item.cancellation ? [item.cancellation.refund] : []));
+  const first = refunds[0];
+  if (first === undefined) return null;
+  if (refunds.some((refund) => refund.currencyCode !== first.currencyCode)) return null;
+  return Object.freeze({
+    amountMinor: refunds.reduce((sum, refund) => sum + BigInt(refund.amountMinor), 0n).toString(),
+    currencyCode: first.currencyCode,
+  });
+}
 export function createCurrentOrderQueueClient(fetcher: typeof fetch = fetch) {
   return Object.freeze({
     load(after: string | null, signal: AbortSignal) {

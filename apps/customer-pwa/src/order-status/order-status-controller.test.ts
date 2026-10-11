@@ -399,6 +399,62 @@ describe("independent order status sources", () => {
       ),
     ).toThrow();
   });
+  it("WP-2423 Q6 step 2: admits items the store cancelled with their refund", () => {
+    const input = sourced();
+    const batch = input.order.batches[0];
+    if (!batch) throw new Error("fixture");
+    const order = {
+      ...input.order,
+      batches: [
+        {
+          ...batch,
+          items: [
+            ...batch.items,
+            { ...batch.items[0], orderItemReference: id(5), displayName: "Synthetic tea" },
+          ],
+        },
+      ],
+    };
+    const entry = {
+      orderBatchReference: id(3),
+      orderItemReferences: [id(5)],
+      cancelledAt: "2026-08-11T13:58:00.000Z",
+      reason: "SoldOut",
+      refundStatus: "Pending",
+      refundAmount: { amountMinor: 1468n, currencyCode: "CAD" },
+    };
+    const withItems = {
+      ...input,
+      order,
+      sources: { ...input.sources, itemCancellations: [entry] },
+    };
+    const parsed = parseOrderStatusView(withItems, id(1));
+    expect(parsed.sources?.itemCancellations).toEqual([entry]);
+    // A batch with a cancelled item keeps its own kitchen status.
+    expect(parsed.sources?.kitchen?.batches[0]?.status).toBe("Ready");
+    expect(parseOrderStatusView(input, id(1)).sources).not.toHaveProperty("itemCancellations");
+    for (const itemCancellations of [
+      [entry, { ...entry, orderItemReferences: [id(5)] }],
+      [{ ...entry, orderItemReferences: [] }],
+      [{ ...entry, orderItemReferences: [id(5), id(5)] }],
+      [{ ...entry, orderItemReferences: [id(99)] }],
+      [{ ...entry, orderBatchReference: id(99) }],
+      [{ ...entry, reason: "SOLD_OUT" }],
+      [{ ...entry, refundStatus: "Failed" }],
+      [{ ...entry, refundAmount: { amountMinor: -1n, currencyCode: "CAD" } }],
+      [{ ...entry, refundAmount: { amountMinor: 1468n, currencyCode: "USD" } }],
+      [{ ...entry, refundAmount: { amountMinor: "1468", currencyCode: "CAD" } }],
+      [{ ...entry, cancelledAt: "2026-08-11T14:01:00.000Z" }],
+      [{ ...entry, staffName: "Sam" }],
+      null,
+    ])
+      expect(() =>
+        parseOrderStatusView(
+          { ...withItems, sources: { ...withItems.sources, itemCancellations } },
+          id(1),
+        ),
+      ).toThrow();
+  });
   it("accepts a scoped nonempty subset without inventing another batch state", () => {
     const input = sourced();
     const first = input.order.batches[0];

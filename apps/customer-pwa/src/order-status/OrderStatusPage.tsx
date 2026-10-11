@@ -5,7 +5,12 @@ import {
   createUnavailableOrderStatusClient,
   type OrderStatusController,
 } from "./order-status-controller.js";
-import type { OrderStatusView, StaffCancellation, StaffCancellationReason } from "./types.js";
+import type {
+  ItemCancellation,
+  OrderStatusView,
+  StaffCancellation,
+  StaffCancellationReason,
+} from "./types.js";
 import { PickupCodePanel } from "../pickup-code/PickupCodePanel.js";
 import type { PickupCodeController } from "../pickup-code/pickup-code-controller.js";
 import { CustomerPage, type CustomerStoreContext } from "../journey/CustomerPage.js";
@@ -25,6 +30,50 @@ export function staffRefundText(cancellation: StaffCancellation): string {
   return cancellation.refundStatus === "Refunded"
     ? "Your payment was refunded in full."
     : "Refund pending — your payment is being returned in full.";
+}
+/**
+ * WP-2423 Q6 step 2: "Cancelled · Refund pending $4.52" next to an item the store cancelled. The
+ * amount is shown when the cancellation covers only this item (the refund is per cancellation).
+ */
+export function itemCancellationText(cancellation: ItemCancellation): string {
+  const amount =
+    cancellation.orderItemReferences.length === 1
+      ? " " +
+        formatMoney(cancellation.refundAmount.amountMinor, cancellation.refundAmount.currencyCode)
+      : "";
+  return (
+    "Cancelled · " +
+    (cancellation.refundStatus === "Refunded" ? "Refunded" : "Refund pending") +
+    amount
+  );
+}
+/** WP-2423 Q6 step 2: where the money for cancelled items is (tax included, tip not refunded). */
+export function itemRefundSummary(cancellations: readonly ItemCancellation[]): string[] {
+  const currency = cancellations[0]?.refundAmount.currencyCode;
+  if (currency === undefined) return [];
+  const sum = (status: ItemCancellation["refundStatus"]) => {
+    const entries = cancellations.filter((entry) => entry.refundStatus === status);
+    return entries.length === 0
+      ? null
+      : formatMoney(
+          entries.reduce((total, entry) => total + entry.refundAmount.amountMinor, 0n),
+          currency,
+        );
+  };
+  const refunded = sum("Refunded");
+  const pending = sum("Pending");
+  return [
+    ...(refunded === null
+      ? []
+      : [
+          `Cancelled items: ${refunded} refunded to your original payment (tax included, tip not refunded).`,
+        ]),
+    ...(pending === null
+      ? []
+      : [
+          `Cancelled items: a refund of ${pending} to your original payment is pending (tax included, tip not refunded).`,
+        ]),
+  ];
 }
 /** WP-2423 Q6: the store cancelled the whole order (a pickup, or every dine-in round). */
 export function staffCancelledOrder(view: OrderStatusView): StaffCancellation | null {
@@ -84,6 +133,9 @@ function StatusContent({
     view.order.orderType === "Pickup" && Boolean(view.sources?.unpaidCancellation?.cancelledAt);
   const storeCancelled = staffCancelledOrder(view);
   const staffCancellations = view.sources?.staffCancellations ?? [];
+  const itemCancellations = view.sources?.itemCancellations ?? [];
+  const cancelledItem = (orderItemReference: string) =>
+    itemCancellations.find((entry) => entry.orderItemReferences.includes(orderItemReference));
   const kitchen = view.sources?.kitchen;
   const kitchenLabel = kitchenStatus(view);
   const diningItems = view.order.orderType === "DineIn" ? view.sources?.dining?.items : undefined;
@@ -97,13 +149,16 @@ function StatusContent({
           ),
       )
       .every((batch) =>
-        batch.items.every((item) =>
-          diningItems.some(
-            (served) =>
-              served.orderBatchReference === batch.orderBatchReference &&
-              served.orderItemReference === item.orderItemReference &&
-              served.servedQuantity === item.quantity,
-          ),
+        batch.items.every(
+          (item) =>
+            // WP-2423 Q6 step 2: a cancelled item is not waiting to be served.
+            cancelledItem(item.orderItemReference) !== undefined ||
+            diningItems.some(
+              (served) =>
+                served.orderBatchReference === batch.orderBatchReference &&
+                served.orderItemReference === item.orderItemReference &&
+                served.servedQuantity === item.quantity,
+            ),
         ),
       );
   const someServed = diningItems?.some((item) => item.servedQuantity > 0) === true;
@@ -271,29 +326,39 @@ function StatusContent({
                 </p>
               ) : null}
               <ul>
-                {batch.items.map((item) => (
-                  <li key={item.orderItemReference}>
-                    <span>
-                      {item.quantity} × {item.displayName}
-                    </span>
-                    <span>
-                      {formatMoney(item.lineTotal.amountMinor, item.lineTotal.currencyCode)}
-                    </span>
-                    {view.sources?.dining ? (
-                      <span>
-                        Served{" "}
-                        {
-                          view.sources.dining.items.find(
-                            (entry) =>
-                              entry.orderItemReference === item.orderItemReference &&
-                              entry.orderBatchReference === batch.orderBatchReference,
-                          )?.servedQuantity
-                        }{" "}
-                        of {item.quantity}
+                {batch.items.map((item) => {
+                  const itemCancellation = cancelledItem(item.orderItemReference);
+                  return (
+                    <li
+                      key={item.orderItemReference}
+                      className={itemCancellation ? "order-status__item--cancelled" : undefined}
+                    >
+                      <span className="order-status__item-name">
+                        {item.quantity} × {item.displayName}
                       </span>
-                    ) : null}
-                  </li>
-                ))}
+                      <span className="order-status__item-amount">
+                        {formatMoney(item.lineTotal.amountMinor, item.lineTotal.currencyCode)}
+                      </span>
+                      {itemCancellation ? (
+                        <span className="order-status__item-cancelled">
+                          {itemCancellationText(itemCancellation)}
+                        </span>
+                      ) : view.sources?.dining ? (
+                        <span>
+                          Served{" "}
+                          {
+                            view.sources.dining.items.find(
+                              (entry) =>
+                                entry.orderItemReference === item.orderItemReference &&
+                                entry.orderBatchReference === batch.orderBatchReference,
+                            )?.servedQuantity
+                          }{" "}
+                          of {item.quantity}
+                        </span>
+                      ) : null}
+                    </li>
+                  );
+                })}
               </ul>
             </article>
           );
@@ -302,6 +367,11 @@ function StatusContent({
           <span>Items total</span>
           <span>{formatMoney(total, currency)}</span>
         </p>
+        {itemRefundSummary(itemCancellations).map((line) => (
+          <p key={line} className="order-status__item-refund">
+            {line}
+          </p>
+        ))}
       </section>
     </>
   );

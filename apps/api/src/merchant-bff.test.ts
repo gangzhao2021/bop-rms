@@ -6,6 +6,7 @@ import {
 } from "@bop/publishing";
 import { MerchantProductWriteFeatureDisabled } from "./merchant-product-write-authority.js";
 import { StaffOrderCancellationError } from "./merchant-order-staff-cancellation.js";
+import { StaffItemCancellationError } from "./merchant-order-item-staff-cancellation.js";
 import { BrowserSessionError } from "@bop/identity";
 import { parsePaymentReference, ReconciliationFollowUpError } from "@rms/payment";
 import { parsePaymentInstant } from "@rms/payment";
@@ -4945,4 +4946,79 @@ it("WP-2423 Q4: anchors Hours & ordering navigation to the selected Store", () =
     expect(() =>
       parseMerchantWorkspaceSnapshot({ ...workspace, navigation: [{ ...item, ...change }] }),
     ).toThrow("MERCHANT_WORKSPACE_DENIED");
+});
+
+it("WP-2423 Q6 step 2a: protects item cancellation transport and maps owner refusals to stable codes", async () => {
+  const preview = vi.fn(async () => ({
+    scope: "Items" as const,
+    refund: {
+      amountMinor: "565",
+      currencyCode: "CAD" as const,
+      includesTip: false,
+      netAmountMinor: "500",
+      taxAmountMinor: "65",
+    },
+  }));
+  const cancel = vi.fn();
+  const refund = vi.fn(async () => ({
+    refund: { status: "Refunded" as const, amountMinor: "565", currencyCode: "CAD" as const },
+  }));
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      orderItemStaffCancellation: { preview, cancel, refund } as unknown as NonNullable<
+        MerchantBffRouterOptions["orderItemStaffCancellation"]
+      >,
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  const root = `http://127.0.0.1:${address.port}`;
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const submit = (path: string, extra: Record<string, string> = {}) =>
+    request(root, "/merchant/orders/cancel-items" + path, {
+      method: "POST",
+      body: '{"a":1}',
+      headers: { ...headers, ...extra },
+    });
+  for (const extra of [{ Origin: "https://foreign.invalid" }, { "X-BOP-CSRF": "" }, { Cookie: "" }])
+    expect((await submit("/preview", extra)).status).toBe(403);
+  expect(preview).not.toHaveBeenCalled();
+  const previewed = await submit("/preview");
+  expect(previewed.status).toBe(200);
+  expect(previewed.headers.get("cache-control")).toBe("no-store");
+  expect(((await previewed.json()) as { refund: { amountMinor: string } }).refund.amountMinor).toBe(
+    "565",
+  );
+  expect(preview).toHaveBeenCalledWith({ sessionCookie, csrf, command: { a: 1 } });
+  expect(
+    ((await (await submit("/refund")).json()) as { refund: { status: string } }).refund.status,
+  ).toBe("Refunded");
+  for (const [code, status, error] of [
+    ["ORDER_CANCELLATION_PREPARATION_STARTED", 409, "order_preparation_started"],
+    ["ORDER_ITEM_CANCELLATION_STOCK_LEGACY", 409, "order_item_stock_legacy"],
+    ["ORDER_CANCELLATION_PERMISSION_DENIED", 403, "order_cancellation_permission_denied"],
+    ["ORDER_CANCELLATION_UNAVAILABLE", 503, "order_cancellation_unavailable"],
+  ] as const) {
+    cancel.mockRejectedValueOnce(new StaffItemCancellationError(code));
+    const refused = await submit("");
+    expect(refused.status).toBe(status);
+    expect(await refused.json()).toEqual({ error });
+  }
+  cancel.mockRejectedValueOnce(new Error("synthetic-private"));
+  const denied = await submit("");
+  expect(denied.status).toBe(403);
+  expect(await denied.text()).not.toContain("synthetic");
 });

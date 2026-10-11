@@ -92,6 +92,26 @@ export function composeMerchantDependencies(
             createSimulatedProvider: provider,
           }),
       }),
+    // WP-2423 Q6 step 2a: TEST-ONLY internal simulator for item cancellation refunds (dispatch
+    // through the ordinary refund journal; an unknown result is only looked up).
+    cancellationRefundProvider: {
+      refundPayment: async (request) => {
+        const simulator = await provider();
+        try {
+          return await simulator.adapter.refundPayment(request);
+        } finally {
+          simulator.close();
+        }
+      },
+      lookupRefund: async (request) => {
+        const simulator = await provider();
+        try {
+          return await simulator.adapter.lookupRefund(request);
+        } finally {
+          simulator.close();
+        }
+      },
+    },
     // WP-2423 P6: TEST-ONLY internal simulator for the unmatched capture refund.
     refundUnmatchedCapture: async (request) => {
       const simulator = await provider();

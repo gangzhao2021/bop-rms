@@ -145,6 +145,8 @@ export async function exerciseCapturedOrderFulfillment({
       role,
   );
   await admin.query("GRANT UPDATE ON rms_fulfillment.fulfillment TO " + role);
+  // WP-2423 Q6 step 2a: the readiness read folds staff item cancellations of the pickup.
+  await admin.query("GRANT SELECT ON rms_fulfillment.fulfillment_item_cancellation TO " + role);
   await admin.query(
     "GRANT SELECT ON rms_fulfillment.pickup_handoff_record,rms_fulfillment.pickup_proof_generation,rms_fulfillment.pickup_proof_invalidation,rms_fulfillment.pickup_proof_operation,rms_fulfillment.pickup_proof_verification TO " +
       role,

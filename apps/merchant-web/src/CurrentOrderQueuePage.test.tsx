@@ -10,7 +10,7 @@ import {
   acceptanceWindow,
   awaitingBatchReferences,
 } from "./CurrentOrderQueuePage.js";
-import { parseCurrentOrderQueue } from "./current-order-queue-client.js";
+import { parseCurrentOrderDetail, parseCurrentOrderQueue } from "./current-order-queue-client.js";
 it("renders actual Accepted version and visibly unresolved state without fabricated summaries", () => {
   const item = {
     orderReference: "01909968-0000-7000-8000-000000000001",
@@ -28,6 +28,7 @@ it("renders actual Accepted version and visibly unresolved state without fabrica
         canRequestAcceptance: false,
         canCancel: false,
         staffCancellation: null,
+        canCancelItems: false,
       },
     ],
     canRequestAcceptance: false,
@@ -85,6 +86,7 @@ it("filters only by exact public order number and fields present on the current 
         canRequestAcceptance: false,
         canCancel: false,
         staffCancellation: null,
+        canCancelItems: false,
       },
     ],
     canRequestAcceptance: false,
@@ -129,6 +131,7 @@ it("labels a cancelled additional Batch distinctly from unaccepted work", () => 
             canRequestAcceptance: false,
             canCancel: false,
             staffCancellation: null,
+            canCancelItems: false,
           },
           {
             orderBatchReference: id(3),
@@ -137,6 +140,7 @@ it("labels a cancelled additional Batch distinctly from unaccepted work", () => 
             canRequestAcceptance: false,
             canCancel: false,
             staffCancellation: null,
+            canCancelItems: false,
           },
         ],
         canRequestAcceptance: false,
@@ -219,6 +223,8 @@ it("WP-2423: shows what was ordered with options, notes and totals", () => {
             tax: money("182"),
             fee: money("0"),
             total: money("1582"),
+            canCancel: false,
+            cancellation: null,
           },
         ],
         totals: {
@@ -257,6 +263,7 @@ it("WP-2423: shows a paid order that was not accepted in time as expired and ref
         canRequestAcceptance: false,
         canCancel: false,
         staffCancellation: null,
+        canCancelItems: false,
       },
     ],
     canRequestAcceptance: false,
@@ -312,6 +319,7 @@ it("WP-2423: shows a pickup the Store closed as not collected", () => {
         canRequestAcceptance: false,
         canCancel: false,
         staffCancellation: null,
+        canCancelItems: false,
       },
     ],
     canRequestAcceptance: false,
@@ -358,6 +366,7 @@ it("WP-2423 Q1: grades the acceptance window and shows it only while the order c
         canRequestAcceptance: true,
         canCancel: false,
         staffCancellation: null,
+        canCancelItems: false,
       },
     ],
     canRequestAcceptance: true,
@@ -409,6 +418,7 @@ it("WP-2423 Q1: shows an unpaid submission as awaiting payment, never acceptable
         canRequestAcceptance: false,
         canCancel: false,
         staffCancellation: null,
+        canCancelItems: false,
       },
     ],
     canRequestAcceptance: false,
@@ -449,6 +459,7 @@ it("WP-2423 Q6: offers cancellation only where allowed and shows the Store's can
     canRequestAcceptance: false,
     canCancel: false,
     staffCancellation: null as null | Record<string, string>,
+    canCancelItems: false,
   };
   const pickup = {
     orderReference: id(1),
@@ -520,4 +531,102 @@ it("WP-2423 Q6: offers cancellation only where allowed and shows the Store's can
   expect(diningHtml).not.toContain("cancel:1");
   expect(diningHtml).not.toContain("cancel:2");
   expect(diningHtml).not.toContain("SOLD_OUT");
+});
+
+it("WP-2423 Q6 step 2: marks cancelled items, their refund and the refund total", () => {
+  const id = (n: number) => `01909968-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
+  const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+  const line = (n: number, name: string, cancellation: unknown = null) => ({
+    orderItemReference: id(200 + n),
+    orderBatchReference: id(90),
+    name,
+    options: [],
+    quantity: 1,
+    customerNote: null,
+    unitPrice: money("1000"),
+    subtotal: money("1000"),
+    discount: money("0"),
+    tax: money("130"),
+    fee: money("0"),
+    total: money("1130"),
+    canCancel: false,
+    cancellation,
+  });
+  const pending = {
+    reasonCode: "SOLD_OUT",
+    cancelledAt: "2026-10-11T12:04:00.000Z",
+    refundStatus: "Pending",
+    refund: money("1130"),
+    cancellationReference: id(700),
+  };
+  const { lines } = parseCurrentOrderDetail(
+    {
+      screenId: "OPS-ORDER-DETAIL",
+      order: {
+        orderReference: id(1),
+        orderNumber: "ORD-1001",
+        orderType: "Pickup",
+        sourceChannel: "Qr",
+        submittedAt: "2026-10-11T12:00:00.000Z",
+        observedAt: "2026-10-11T12:05:00.000Z",
+        initialBatchReference: id(90),
+        batches: [
+          {
+            orderBatchReference: id(90),
+            sequence: 1,
+            acceptanceStatus: "Accepted",
+            canRequestAcceptance: false,
+            canCancel: false,
+            staffCancellation: null,
+            canCancelItems: false,
+          },
+        ],
+        canRequestAcceptance: false,
+        unfulfillable: null,
+        pickupNotCollected: false,
+        acceptBy: null,
+        awaitingPayment: false,
+        currentPhase: "InProgress",
+        currentVersion: 5,
+      },
+      lines: {
+        items: [
+          line(1, "Synthetic rice bowl"),
+          line(2, "Synthetic tea", pending),
+          line(3, "Synthetic juice", pending),
+          line(4, "Synthetic cake", {
+            ...pending,
+            refundStatus: "Refunded",
+            refund: money("565"),
+            cancellationReference: id(701),
+          }),
+        ],
+        totals: {
+          subtotal: money("4000"),
+          discount: money("0"),
+          tax: money("520"),
+          fee: money("0"),
+          total: money("4520"),
+        },
+      },
+    },
+    id(1),
+  );
+  const html = renderToStaticMarkup(
+    <CurrentOrderLines
+      lines={lines}
+      refundCheck={{ orderReference: id(1), csrf: "synthetic", onChecked: () => undefined }}
+    />,
+  );
+  expect(html.match(/class="order-line-cancelled"/gu)).toHaveLength(3);
+  expect(html).toContain("Cancelled · refund pending · $11.30");
+  expect(html).toContain("Cancelled · refunded · $5.65");
+  expect(html).toContain("Reason: Sold out");
+  // One check per pending cancellation; none for a completed refund.
+  expect(html.match(/Check refund/gu)).toHaveLength(1);
+  // The original total stays; the cancelled items' refund is shown beside it.
+  expect(html).toContain("$45.20");
+  expect(html).toMatch(/Cancelled items refund<\/dt><dd>−\$28\.25<\/dd>/u);
+  // Without a refund check context (or a cancellation reference) no button is offered.
+  expect(renderToStaticMarkup(<CurrentOrderLines lines={lines} />)).not.toContain("Check refund");
 });

@@ -406,16 +406,30 @@ export function createPostgresKitchenWorkLifecycleStore(
             }
           : null,
         capturedExpo: completed?.operation.capturedExpo ?? null,
-        ticketReadiness: mapped.map((item) => {
-          const result = readyResults.find((r) => r.orderItemReference === item.orderItemReference);
-          return {
-            orderItemReference: item.orderItemReference,
-            requiredQuantity: item.requiredQuantity,
-            readyResultReference: result?.readyResultReference ?? null,
-            readyQuantity: result?.readyQuantity ?? null,
-            readyAt: result?.readyAt ?? null,
-          };
-        }),
+        // WP-2423 Q6: a line staff cancelled is no longer part of the order's readiness. The
+        // target stays listed so a command on cancelled work is refused as a precondition.
+        ticketReadiness: mapped
+          .filter(
+            (item) =>
+              item.orderItemReference === target.orderItemReference ||
+              mapped.some(
+                (value) =>
+                  value.orderItemReference === item.orderItemReference &&
+                  value.workItemStatus !== "Cancelled",
+              ),
+          )
+          .map((item) => {
+            const result = readyResults.find(
+              (r) => r.orderItemReference === item.orderItemReference,
+            );
+            return {
+              orderItemReference: item.orderItemReference,
+              requiredQuantity: item.requiredQuantity,
+              readyResultReference: result?.readyResultReference ?? null,
+              readyQuantity: result?.readyQuantity ?? null,
+              readyAt: result?.readyAt ?? null,
+            };
+          }),
       });
     },
     commit: writer,

@@ -41,6 +41,7 @@ function row(
           cancelledAt: string;
           refundStatus: "Pending" | "Refunded";
         },
+        canCancelItems: false,
       },
     ],
     canRequestAcceptance: awaiting,
@@ -96,6 +97,8 @@ export function currentOrderDetailFixture(orderReference: string) {
           tax: money("325"),
           fee: money("0"),
           total: money("2825"),
+          canCancel: false,
+          cancellation: null,
         },
         {
           orderItemReference: id(22),
@@ -110,6 +113,8 @@ export function currentOrderDetailFixture(orderReference: string) {
           tax: money("52"),
           fee: money("0"),
           total: money("452"),
+          canCancel: false,
+          cancellation: null,
         },
       ],
       totals: {

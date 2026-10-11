@@ -19,11 +19,16 @@ export function parseOrderInitialExecution(value: unknown) {
       ],
       "ACTOR_SHAPE_INVALID",
     );
+    // WP-2423 Q6 step 2a: up to 100 staff item cancellations may follow acceptance, each one
+    // revision; the Order stays Accepted until it is cancelled or completed.
+    const version = raw.version;
+    const afterAcceptance =
+      typeof version === "number" && Number.isSafeInteger(version) && version >= 2;
     if (!(
-      (raw.phase === "Submitted" && raw.version === 1) ||
-      (raw.phase === "Accepted" && raw.version === 2) ||
-      (raw.phase === "Rejected" && raw.version === 2) ||
-      (raw.phase === "Cancelled" && (raw.version === 2 || raw.version === 3))
+      (raw.phase === "Submitted" && version === 1) ||
+      (raw.phase === "Accepted" && afterAcceptance && (version as number) <= 102) ||
+      (raw.phase === "Rejected" && version === 2) ||
+      (raw.phase === "Cancelled" && afterAcceptance && (version as number) <= 103)
     ))
       throw new Error("invalid");
     return Object.freeze({

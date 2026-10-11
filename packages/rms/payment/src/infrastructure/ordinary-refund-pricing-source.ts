@@ -7,6 +7,7 @@ import {
 } from "@rms/pricing";
 import type { createPostgresOrdinaryRefundCaptureSource } from "./persistence/ordinary-refund-capture-source.js";
 import { parsePaymentReference } from "../application/payment-provider-adapter.js";
+import { ordinaryRefundClaimKind } from "../application/ordinary-refund-request.js";
 type CaptureOptions = Parameters<typeof createPostgresOrdinaryRefundCaptureSource>[0];
 type PricingValidator = CaptureOptions["validatePricing"];
 const components = [
@@ -115,7 +116,9 @@ export function createPostgresOrdinaryRefundPricingSource(options: {
       });
     }
     const allocation = allocateOrdinaryRefundFromQuote(quote, {
-      tipAmountMinor: preparation.tip.amountMinor,
+      // Item cancellation refunds never include tip (allocated with tip = 0).
+      tipAmountMinor:
+        ordinaryRefundClaimKind(request) === "Cancellation" ? 0n : preparation.tip.amountMinor,
       items: mapping,
     });
     if (

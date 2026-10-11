@@ -3,6 +3,14 @@ const databaseAccessManifestInput = {
   module: { moduleName: "ordering", packageName: "@rms/ordering", layer: "RMS" },
   tables: [
     {
+      table: "order_item_staff_cancellation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/ordering" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "order_staff_cancellation",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/ordering" },
@@ -335,6 +343,64 @@ const databaseAccessManifestInput = {
     },
   ],
   accesses: [
+    {
+      id: "staff-item-cancellation.read.order_item_staff_cancellation",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_item_staff_cancellation" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/staff-item-cancellation-store.ts",
+    },
+    {
+      id: "staff-item-cancellation.write.order_item_staff_cancellation",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_item_staff_cancellation" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: null,
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/staff-item-cancellation-store.ts",
+    },
+    {
+      id: "staff-item-cancellation.write.order_revision",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_revision" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: null,
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/staff-item-cancellation-store.ts",
+    },
+    {
+      id: "staff-item-cancellation.read.order-termination-store",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_item_staff_cancellation" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source: "packages/rms/ordering/src/infrastructure/persistence/order-termination-store.ts",
+    },
+    {
+      id: "staff-item-cancellation.read.order-revision-position",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_item_staff_cancellation" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source: "packages/rms/ordering/src/infrastructure/persistence/order-revision-position.ts",
+    },
+    {
+      id: "staff-item-cancellation.read.order-submitted-history-source",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_item_staff_cancellation" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/order-submitted-history-source.ts",
+    },
     {
       id: "staff-order-cancellation.read.order_staff_cancellation",
       operation: "read",

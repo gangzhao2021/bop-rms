@@ -39,7 +39,10 @@ export async function exerciseOrderFulfillmentCompletion({
   await admin.query(
     "GRANT SELECT,INSERT ON rms_ordering.order_fulfillment_completion_record TO " + role,
   );
-  await admin.query("GRANT SELECT ON rms_ordering.order_termination_record TO " + role);
+  await admin.query(
+    "GRANT SELECT ON rms_ordering.order_termination_record,rms_ordering.order_item_staff_cancellation TO " +
+      role,
+  );
   await admin.query("GRANT SELECT,INSERT ON rms_ordering.order_revision TO " + role);
   const ownerScope = { brandReference: scope.brandReference, storeReference: scope.storeReference };
   const lookup = {

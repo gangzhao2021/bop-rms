@@ -196,6 +196,24 @@ export class CustomerOrderStatusHandler {
                           refundStatus: cancellation.refundStatus,
                         })),
                       }),
+                  ...(sources.itemCancellations === undefined
+                    ? {}
+                    : {
+                        // A refund the Provider failed is the Store's follow-up; to the customer
+                        // it stays pending until refunded.
+                        itemCancellations: sources.itemCancellations.map((cancellation) => ({
+                          orderBatchReference: cancellation.orderBatchReference,
+                          orderItemReferences: [...cancellation.orderItemReferences],
+                          cancelledAt: cancellation.cancelledAt,
+                          reason: cancellation.reason,
+                          refundStatus:
+                            cancellation.refundStatus === "Refunded" ? "Refunded" : "Pending",
+                          refundAmount: {
+                            amountMinor: cancellation.refundAmount.amountMinor.toString(),
+                            currencyCode: cancellation.refundAmount.currencyCode,
+                          },
+                        })),
+                      }),
                 },
               };
         response.status(200).json({ schemaVersion: 1, status: { ...status, ...publicSources } });

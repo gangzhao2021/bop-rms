@@ -115,3 +115,14 @@ it("returns an empty source but rejects lost current authority", async () => {
   f.authorize.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
   await expect(f.read(f.tx, input)).rejects.toThrow();
 });
+it("recovers a compensation that refunded only the remainder after other owners' refunds", async () => {
+  // WP-2423 Q6 step 2a: captured 11600, item Cancellation refund 9040, compensation 2560.
+  const f = fixture();
+  f.terminal.amount = { amountMinor: 11600n, currencyCode: "CAD" };
+  f.fact.amount = { amountMinor: 2560n, currencyCode: "CAD" };
+  f.action.amount = { amountMinor: 2560n, currencyCode: "CAD" };
+  const page = await f.read(f.tx, input);
+  expect(page.records[0]?.request.amount).toEqual({ amountMinor: 2560n, currencyCode: "CAD" });
+  f.terminal.amount = { amountMinor: 2000n, currencyCode: "CAD" };
+  await expect(f.read(f.tx, input)).rejects.toThrow();
+});

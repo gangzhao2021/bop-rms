@@ -66,6 +66,18 @@ function decodeStatus(value: unknown, orderReference: string): OrderStatusView {
   let sources: Record<string, unknown> | undefined;
   if (Object.hasOwn(status, "sources")) {
     sources = record(status.sources);
+    // WP-2423 Q6 step 2: item cancellation refunds are money like the rest of the status.
+    if (Object.hasOwn(sources, "itemCancellations")) {
+      if (!Array.isArray(sources.itemCancellations) || sources.itemCancellations.length > 2000)
+        throw new Error("invalid status");
+      sources = {
+        ...sources,
+        itemCancellations: sources.itemCancellations.map((value: unknown) => {
+          const entry = record(value);
+          return { ...entry, refundAmount: decodeMoney(entry.refundAmount) };
+        }),
+      };
+    }
     if (sources.payments !== null) {
       if (!Array.isArray(sources.payments) || sources.payments.length > 100)
         throw new Error("invalid status");

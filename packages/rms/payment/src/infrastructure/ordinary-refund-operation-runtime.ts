@@ -1,6 +1,7 @@
 import type { ConsumerTransaction } from "@bop/eventing";
 import { exactPaymentObject } from "../application/payment-intent-creation.js";
 import { assertOrdinaryRefundRequester } from "../application/ordinary-refund-approval.js";
+import { ordinaryRefundClaimKind } from "../application/ordinary-refund-request.js";
 import { createPostgresOrdinaryRefundOperationExecutionSource } from "./ordinary-refund-operation-execution-source.js";
 import {
   createPostgresOrdinaryRefundEscalationSource,
@@ -24,6 +25,8 @@ type Options = SubjectOptions & {
   executor: ExecutionOptions["executor"];
   authority: ApprovalOptions["authority"];
   businessDate: EscalationOptions["businessDate"];
+  /** Required for Cancellation claims (fail closed when absent). */
+  cancellationAuthority?: ExecutionOptions["cancellationAuthority"];
 };
 /** Preparation runtime with mandatory actual Payment sources. The composition
  * root must supply current workforce and published Store adapters; caller keeps
@@ -41,6 +44,9 @@ export function createPostgresOrdinaryRefundOperationRuntime(options: Options) {
   const execute = createPostgresOrdinaryRefundOperationExecutionSource({
     ...captureOptions,
     executor: options.executor,
+    ...(options.cancellationAuthority === undefined
+      ? {}
+      : { cancellationAuthority: options.cancellationAuthority }),
   });
   const subject = createPostgresOrdinaryRefundApprovalSubjectSource(options);
   const approval = createPostgresOrdinaryRefundApprovalValidationSource(options);
@@ -64,6 +70,14 @@ export function createPostgresOrdinaryRefundOperationRuntime(options: Options) {
       })(tx, query);
       if (escalation.claimVersion !== operation.claimVersion) return false;
       const current = await subject(tx, { ...query, observedAt: escalation.observedAt });
+      if (ordinaryRefundClaimKind(current.request) === "Cancellation") {
+        // Authority was checked by the execution source against the cancellation record.
+        return (
+          operation.approvalReference === null &&
+          operation.executorReference === current.requesterReference &&
+          !escalation.decision.requiresIndependentApproval
+        );
+      }
       const expected = {
         ...options.scope,
         orderReference: operation.orderReference,

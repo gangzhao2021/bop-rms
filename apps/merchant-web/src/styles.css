@@ -7076,6 +7076,105 @@ body:has(.product-complete-draft) .bop-shell__header,
   border-color: var(--bop-color-danger);
   color: var(--bop-color-danger);
 }
+/* WP-2423 Q6 step 2: cancelling single items before the kitchen starts them. */
+.order-cancel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.order-item-cancel-dialog {
+  width: min(520px, calc(100vw - 32px));
+}
+.order-item-cancel-items {
+  display: grid;
+  gap: 0;
+  margin: 0 0 16px;
+  padding: 0;
+  border: 0;
+}
+.order-item-cancel-items legend {
+  margin-bottom: 6px;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.order-cancel-dialog .order-item-cancel-items label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  margin: 0;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--bop-color-border-default);
+  font-size: 14px;
+  font-weight: 400;
+}
+.order-item-cancel-items input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 1px 0 0;
+}
+.order-item-cancel-name {
+  display: grid;
+  gap: 2px;
+}
+.order-item-cancel-items label[data-unavailable] {
+  color: var(--bop-color-text-muted);
+}
+.order-item-cancel-unavailable {
+  font-size: 12px;
+}
+.order-cancel-dialog .order-item-cancel-refund {
+  padding: 10px 12px;
+  border-inline-start: 3px solid var(--bop-color-border-strong);
+  background: var(--bop-color-surface-raised);
+  font-size: 13px;
+}
+.order-line-cancelled .order-line-title,
+.order-line-cancelled .order-line-amount {
+  color: var(--bop-color-text-muted);
+  text-decoration: line-through;
+}
+.order-line-cancelled .order-line-quantity {
+  color: var(--bop-color-text-muted);
+}
+.order-line-cancellation {
+  display: grid;
+  gap: 2px;
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: 400;
+}
+.order-line-cancellation strong {
+  font-weight: 600;
+  color: var(--bop-color-text-default);
+}
+.order-line-cancellation > span {
+  color: var(--bop-color-text-muted);
+}
+.order-line-refund-check {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.order-line-refund-check [role="status"] {
+  color: var(--bop-color-text-muted);
+}
+.order-workbench-detail .order-lines-cancelled-refund {
+  margin-top: 4px;
+}
+.order-lines-cancelled-refund > div:last-child {
+  border-top: 0;
+  padding-top: 0;
+  font-weight: 400;
+  color: var(--bop-color-text-muted);
+}
 .order-queue-awaiting,
 .order-queue-stale {
   margin: 0 0 12px;

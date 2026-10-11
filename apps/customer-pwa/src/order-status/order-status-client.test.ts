@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { setCustomerCsrfCredential } from "../session/customer-transaction-context.js";
 import { createHttpOrderStatusClient } from "./order-status-client.js";
 import { createOrderStatusController } from "./order-status-controller.js";
+import type { OrderStatusView } from "./types.js";
 
 const id = (n: number) => `018f7a00-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 function payload() {
@@ -81,6 +82,54 @@ describe("customer order status HTTP client", () => {
       }
     },
   );
+
+  it("WP-2423 Q6 step 2: decodes item cancellation refunds as lossless money", async () => {
+    setCustomerCsrfCredential("a".repeat(43));
+    const body = payload();
+    const status = {
+      ...body.status,
+      sources: {
+        checkedAt: "2026-08-11T14:00:00.000Z",
+        kitchen: null,
+        payments: null,
+        itemCancellations: [
+          {
+            orderBatchReference: id(3),
+            orderItemReferences: [id(4)],
+            cancelledAt: "2026-08-11T13:58:00.000Z",
+            reason: "StoreError",
+            refundStatus: "Refunded",
+            refundAmount: { amountMinor: "2598", currencyCode: "CAD" },
+          },
+        ],
+      },
+    };
+    const result = (await createHttpOrderStatusClient(responder({ ...body, status })).load(
+      id(1),
+    )) as OrderStatusView;
+    expect(result.sources?.itemCancellations?.[0]?.refundAmount).toEqual({
+      amountMinor: 2598n,
+      currencyCode: "CAD",
+    });
+    const bad = {
+      ...body,
+      status: {
+        ...status,
+        sources: {
+          ...status.sources,
+          itemCancellations: [
+            {
+              ...status.sources.itemCancellations[0],
+              refundAmount: { amountMinor: 2598, currencyCode: "CAD" },
+            },
+          ],
+        },
+      },
+    };
+    await expect(createHttpOrderStatusClient(responder(bad)).load(id(1))).rejects.toMatchObject({
+      code: "service_unavailable",
+    });
+  });
 
   it("loads the exact same-origin order with current session and lossless money", async () => {
     setCustomerCsrfCredential("a".repeat(43));

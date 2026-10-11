@@ -13,6 +13,7 @@ import {
 } from "@bop/identity";
 import {
   createOrderStatusQueryService,
+  createPostgresStaffItemCancellationReader,
   createPostgresStaffOrderCancellationReader,
   loadPickupPaymentWindowClosure,
   createPostgresOrderStatusProjectionStore,
@@ -22,6 +23,7 @@ import {
 } from "@rms/ordering";
 import type { CustomerCheckoutSessionAuthorizationOptions } from "./customer-checkout-session-authorization.js";
 import { readStaffCancellationRefundStatus } from "./merchant-order-staff-cancellation.js";
+import { readItemCancellationRefundStatus } from "./merchant-order-item-staff-cancellation.js";
 
 /** WP-2423 Q6: customer-safe reason categories; staff identity and internal codes stay private. */
 const customerCancellationReasons = Object.freeze({
@@ -42,6 +44,12 @@ export function createCustomerOrderStatusRead(
     readonly paymentScope?: {
       brandReference: string;
       storeReference: string;
+      providerAccountReference: string;
+      environment: "Test" | "Live";
+    };
+    /** WP-2423 Q6 step 2a: Payment scope item cancellation refunds are read under. */
+    readonly itemRefundScope?: {
+      tenantReference: string;
       providerAccountReference: string;
       environment: "Test" | "Live";
     };
@@ -241,6 +249,31 @@ export function createCustomerOrderStatusRead(
                   stillAuthorized,
                 ),
               });
+          // WP-2423 Q6 step 2a: lines the Store cancelled after payment and their refund.
+          const itemCancellations = [];
+          if (await stillAuthorized())
+            for (const record of await createPostgresStaffItemCancellationReader(
+              options.scope,
+            ).listByOrders(transaction, [orderReference]))
+              itemCancellations.push({
+                orderBatchReference: String(record.orderBatchReference),
+                orderItemReferences: record.orderItemReferences.map(String),
+                cancelledAt: String(record.cancelledAt),
+                reason: customerCancellationReasons[record.reasonCode],
+                refundStatus:
+                  options.itemRefundScope === undefined
+                    ? ("Pending" as const)
+                    : await readItemCancellationRefundStatus(
+                        transaction,
+                        { ...options.scope, ...options.itemRefundScope },
+                        record,
+                        stillAuthorized,
+                      ),
+                refundAmount: {
+                  amountMinor: record.refundAmountMinor,
+                  currencyCode: record.currencyCode,
+                },
+              });
           if (!(await stillAuthorized()))
             throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
           const checkedAt = now();
@@ -269,6 +302,7 @@ export function createCustomerOrderStatusRead(
                     unpaidCancellation: unpaid === null ? null : { cancelledAt: unpaid.closedAt },
                   }),
               ...(staffCancellations.length === 0 ? {} : { staffCancellations }),
+              ...(itemCancellations.length === 0 ? {} : { itemCancellations }),
             },
           };
         });

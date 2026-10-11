@@ -107,6 +107,8 @@ export function deriveOrdinaryRefundConfirmedPosition(value: unknown) {
     // Provider creation and local confirmation are distinct instants.
     providerCreatedAt: confirmedAt === null ? null : createdAt,
     providerRefundReference,
+    // Provider-reported terminal status; failed/canceled never releases occupancy locally.
+    providerTerminalStatus: terminalStatus as "succeeded" | "failed" | "canceled" | null,
     observationCount: history.length,
     historyDigest:
       "sha256:" +

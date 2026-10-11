@@ -1,4 +1,5 @@
 import { exerciseFulfillmentReadyStore } from "./fulfillment-ready-store.mjs";
+import { exerciseFulfillmentItemCancellation } from "./fulfillment-item-cancellation.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { appendAuditRecordInTransaction } from "../../bop/audit/src/index.ts";
@@ -163,6 +164,8 @@ export async function exercisePickupFulfillmentStore(client) {
   assert.equal(replay.status, "AlreadyCreated");
   assert.deepEqual(replay.effect, result.effect);
   await exerciseFulfillmentReadyStore({ client, run, scope, creation: result.effect, id, sha });
+  // WP-2423 Q6 step 2: staff-cancelled pickup lines.
+  await exerciseFulfillmentItemCancellation({ client, run, scope, id, sha });
   eligible = false;
   const restored = await run((transaction) =>
     repository.resolveByOrder({ ...scope, orderReference: id(3), transaction }),

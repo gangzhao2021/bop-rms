@@ -668,6 +668,9 @@ describe("migration catalog", () => {
       "2000_023_create_unmatched_capture_refund",
       "2000_024_create_kitchen_work_cancellation",
       "2000_025_create_order_staff_cancellation",
+      "2000_026_create_order_item_staff_cancellation",
+      "2000_027_alter_ordinary_refund_request_claim_kind",
+      "2000_028_create_fulfillment_item_cancellation",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

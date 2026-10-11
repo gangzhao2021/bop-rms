@@ -2349,6 +2349,51 @@
       "privilege": "SELECT",
       "principal": "worker",
       "approval": "WP-2423 Owner 2026-10-10 (批准订单取消流程) / 2026-10-11 (继续: Q6 staff cancels a paid order or batch before the kitchen starts; full refund incl. tip; stock released) (worker readers of dine-in batch state, revision position and compensation discovery read the staff cancellation, like order_batch_checkout_cancellation)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_item_staff_cancellation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (批准订单取消流程) / 2026-10-11 (按你建议做: Q6 staff cancels items not yet started; refund of exactly those items)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_item_staff_cancellation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (批准订单取消流程) / 2026-10-11 (按你建议做: Q6 staff cancels items not yet started; refund of exactly those items)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_item_staff_cancellation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "worker",
+      "approval": "WP-2423 Owner 2026-10-10 (批准订单取消流程) / 2026-10-11 (按你建议做: Q6 staff cancels items not yet started; refund of exactly those items) (worker readers of order revision position, initial execution history and dine-in item state read the item cancellation, like order_staff_cancellation)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "fulfillment_item_cancellation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (批准订单取消流程) / 2026-10-11 (按你建议做: Q6 staff cancels items not yet started; refund of exactly those items)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "fulfillment_item_cancellation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (批准订单取消流程) / 2026-10-11 (按你建议做: Q6 staff cancels items not yet started; refund of exactly those items)"
     }
   ]
 }

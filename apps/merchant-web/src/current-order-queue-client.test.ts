@@ -1,5 +1,6 @@
 import { expect, it, vi } from "vitest";
 import {
+  cancelledItemsRefund,
   createCurrentOrderQueueClient,
   parseCurrentOrderDetail,
   parseCurrentOrderQueue,
@@ -21,6 +22,7 @@ const row = (n = 1) => ({
       canRequestAcceptance: false,
       canCancel: false,
       staffCancellation: null,
+      canCancelItems: false,
     },
   ],
   canRequestAcceptance: false,
@@ -113,6 +115,7 @@ it.each(
         canRequestAcceptance: true,
         canCancel: false,
         staffCancellation: null,
+        canCancelItems: false,
       },
     ],
     [
@@ -123,6 +126,7 @@ it.each(
         canRequestAcceptance: false,
         canCancel: false,
         staffCancellation: null,
+        canCancelItems: false,
       },
     ],
     [row().batches[0], row().batches[0]],
@@ -151,6 +155,7 @@ it.each(["InProgress", "Ready"])(
             canRequestAcceptance,
             canCancel: false,
             staffCancellation: null,
+            canCancelItems: false,
           },
         ],
       };
@@ -178,6 +183,7 @@ it.each(["Fulfilled", "Rejected", "Cancelled"])(
           canRequestAcceptance: true,
           canCancel: false,
           staffCancellation: null,
+          canCancelItems: false,
         },
       ],
     };
@@ -217,6 +223,7 @@ it("preserves cancelled Batch and refuses a contradictory acceptance action", ()
         canRequestAcceptance: false,
         canCancel: false,
         staffCancellation: null,
+        canCancelItems: false,
       },
     ],
   };
@@ -276,6 +283,8 @@ const line = (n: number) => ({
   tax: money("78"),
   fee: money("0"),
   total: money("678"),
+  canCancel: false,
+  cancellation: null as unknown,
 });
 const detail = () => ({
   screenId: "OPS-ORDER-DETAIL",
@@ -415,6 +424,113 @@ it("WP-2423 Q6: reads staff cancellation and refuses inconsistent cancel capabil
       ],
     },
     { ...row(), batches: [{ ...batch, staffCancellation: undefined }] },
+  ])
+    expect(() =>
+      parseCurrentOrderQueue({ items: [item], nextAfterOrderReference: null }),
+    ).toThrow();
+});
+it("WP-2423 Q6 step 2: reads item cancellation capability and cancelled lines", () => {
+  const batch = { ...row().batches[0], canCancelItems: true };
+  const cancelled = {
+    reasonCode: "SOLD_OUT",
+    cancelledAt: "2026-09-14T00:00:40.000Z",
+    refundStatus: "Pending",
+    refund: money("452"),
+  };
+  const value = (items: unknown[], batches: unknown[] = [batch]) => ({
+    ...detail(),
+    order: { ...row(1), batches },
+    lines: { ...detail().lines, items },
+  });
+  const parsed = parseCurrentOrderDetail(
+    value([
+      { ...line(1), canCancel: true },
+      { ...line(2), cancellation: cancelled },
+      {
+        ...line(3),
+        cancellation: {
+          ...cancelled,
+          refundStatus: "Refunded",
+          refund: money("678"),
+          cancellationReference: id(700),
+        },
+      },
+    ]),
+    id(1),
+  );
+  expect(parsed.order.batches[0]?.canCancelItems).toBe(true);
+  expect(parsed.lines.items[0]?.canCancel).toBe(true);
+  expect(parsed.lines.items[1]?.cancellation).toEqual({
+    ...cancelled,
+    cancellationReference: null,
+  });
+  expect(parsed.lines.items[2]?.cancellation?.cancellationReference).toBe(id(700));
+  expect(cancelledItemsRefund(parsed.lines.items)).toEqual(money("1130"));
+  expect(cancelledItemsRefund(parseCurrentOrderDetail(detail(), id(1)).lines.items)).toBeNull();
+  for (const invalid of [
+    // A cancellable line needs a batch that offers item cancellation, and vice versa.
+    value([{ ...line(1), canCancel: true }], [row().batches[0]]),
+    value([line(1)]),
+    // A cancelled line cannot be cancelled again.
+    value([{ ...line(1), canCancel: true, cancellation: cancelled }]),
+    value([
+      { ...line(1), canCancel: "true" },
+      { ...line(2), canCancel: true },
+    ]),
+    value([
+      { ...line(1), canCancel: true },
+      { ...line(2), cancellation: { ...cancelled, refundStatus: "Failed" } },
+    ]),
+    value([
+      { ...line(1), canCancel: true },
+      { ...line(2), cancellation: { ...cancelled, reasonCode: "X" } },
+    ]),
+    value([
+      { ...line(1), canCancel: true },
+      { ...line(2), cancellation: { ...cancelled, refund: money("-1") } },
+    ]),
+    value([
+      { ...line(1), canCancel: true },
+      {
+        ...line(2),
+        cancellation: { ...cancelled, refund: { amountMinor: "1", currencyCode: "USD" } },
+      },
+    ]),
+    value([
+      { ...line(1), canCancel: true },
+      { ...line(2), cancellation: { ...cancelled, cancelledAt: "2026-09-13T23:00:00.000Z" } },
+    ]),
+    value([
+      { ...line(1), canCancel: true },
+      { ...line(2), cancellation: { ...cancelled, actorName: "Sam" } },
+    ]),
+    value([
+      { ...line(1), canCancel: true },
+      { ...line(2), cancellation: { ...cancelled, cancellationReference: "not-a-reference" } },
+    ]),
+    value([{ ...line(1), canCancel: true, cancellation: undefined }]),
+  ])
+    expect(() => parseCurrentOrderDetail(invalid, id(1))).toThrow();
+  // Items of a batch the Store cancelled as a whole, or not yet accepted, cannot be offered.
+  for (const item of [
+    {
+      ...row(),
+      currentPhase: "Cancelled",
+      currentVersion: 3,
+      batches: [
+        {
+          ...batch,
+          staffCancellation: {
+            reasonCode: "SOLD_OUT",
+            cancelledAt: "2026-09-14T00:00:30.000Z",
+            refundStatus: "Pending",
+          },
+        },
+      ],
+    },
+    { ...row(), batches: [{ ...batch, acceptanceStatus: "NotAccepted" }] },
+    { ...row(), batches: [{ ...batch, canCancelItems: "true" }] },
+    { ...row(), batches: [{ ...row().batches[0], canCancelItems: undefined }] },
   ])
     expect(() =>
       parseCurrentOrderQueue({ items: [item], nextAfterOrderReference: null }),

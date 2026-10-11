@@ -80,6 +80,7 @@ export function evaluateOrdinaryRefundEscalation(value: unknown) {
     const seen = new Set<string>();
     let cumulativeOrdinaryAmountMinor = 0n;
     let requested = false;
+    let requestedCancellation = false;
     for (const value of raw.claims) {
       const claim = exactPaymentObject(value, [
         ...scopeKeys,
@@ -97,7 +98,12 @@ export function evaluateOrdinaryRefundEscalation(value: unknown) {
       seen.add(reference);
       const claimedAmount = amount(claim.amountMinor);
       if (claim.currencyCode !== "CAD") return fail();
-      if (claim.kind !== "Ordinary" && claim.kind !== "Compensation") return fail();
+      if (
+        claim.kind !== "Ordinary" &&
+        claim.kind !== "Compensation" &&
+        claim.kind !== "Cancellation"
+      )
+        return fail();
       const occupying = [
         "Requested",
         "Approved",
@@ -115,18 +121,25 @@ export function evaluateOrdinaryRefundEscalation(value: unknown) {
         released = true;
       }
       if (reference === requestReference) {
-        if (claim.kind !== "Ordinary" || terminal) return fail();
+        if ((claim.kind !== "Ordinary" && claim.kind !== "Cancellation") || terminal) return fail();
         requested = true;
+        requestedCancellation = claim.kind === "Cancellation";
       }
       if (claim.kind === "Ordinary" && !released) cumulativeOrdinaryAmountMinor += claimedAmount;
     }
     if (!requested) return fail();
-    const reasons = [
-      ...(differentBusinessDate ? ["DifferentBusinessDate" as const] : []),
-      ...(olderThan24Hours ? ["MoreThan24Hours" as const] : []),
-      ...(cumulativeOrdinaryAmountMinor > 10000n ? ["OrderOrdinaryTotalAboveCad100" as const] : []),
-      ...(raw.manualAllocationOverride ? ["ManualAllocationOverride" as const] : []),
-    ];
+    // A staff item cancellation is authorized by its Ordering cancellation record:
+    // it never escalates and never consumes ordinary refund headroom.
+    const reasons = requestedCancellation
+      ? []
+      : [
+          ...(differentBusinessDate ? ["DifferentBusinessDate" as const] : []),
+          ...(olderThan24Hours ? ["MoreThan24Hours" as const] : []),
+          ...(cumulativeOrdinaryAmountMinor > 10000n
+            ? ["OrderOrdinaryTotalAboveCad100" as const]
+            : []),
+          ...(raw.manualAllocationOverride ? ["ManualAllocationOverride" as const] : []),
+        ];
     return Object.freeze({
       policyVersion: ordinaryRefundPolicyVersion,
       requiresIndependentApproval: reasons.length > 0,

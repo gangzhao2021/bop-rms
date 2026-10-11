@@ -61,15 +61,43 @@ describe("customer-safe Kitchen status", () => {
     expect(f.query.mock.calls[0]?.[1]).toEqual([id(1), id(2), id(3)]);
     expect(f.query.mock.calls[1]?.[1]).toEqual([id(1), id(2), id(4)]);
   });
-  it("refuses a partly cancelled batch, which Kitchen never writes", async () => {
+  it("reports a cancelled line per item and the batch over its remaining lines", async () => {
+    const f = fixture("Cancelled");
+    const other = (status: string, ready: boolean) => ({
+      ...f.item,
+      kitchen_work_item_id: id(9),
+      order_item_id: id(10),
+      status,
+      completed_quantity: status === "Completed" ? 1 : 0,
+      ready_result_id: ready ? id(11) : null,
+      ready_quantity: ready ? 1 : null,
+      ready_required_quantity: ready ? 1 : null,
+    });
+    for (const [status, ready, expected] of [
+      ["Queued", false, "Queued"],
+      ["In Progress", false, "InProgress"],
+      ["Completed", true, "Ready"],
+    ] as const) {
+      f.query.mockImplementation(async (sql: string) => ({
+        rows: sql.includes("FROM rms_kitchen.kitchen_ticket")
+          ? [f.ticket]
+          : [f.item, other(status, ready)],
+        rowCount: 1,
+      }));
+      const result = await f.load();
+      expect(result?.batches[0]?.status).toBe(expected);
+      expect(result?.batches[0]?.items).toEqual([
+        { orderItemReference: id(7), status: "Cancelled" },
+        { orderItemReference: id(10), status: expected },
+      ]);
+    }
+  });
+  it("refuses a line whose work items are only partly cancelled, which Kitchen never writes", async () => {
     const f = fixture("Cancelled");
     f.query.mockImplementation(async (sql: string) => ({
       rows: sql.includes("FROM rms_kitchen.kitchen_ticket")
         ? [f.ticket]
-        : [
-            f.item,
-            { ...f.item, kitchen_work_item_id: id(9), order_item_id: id(10), status: "Queued" },
-          ],
+        : [f.item, { ...f.item, kitchen_work_item_id: id(9), status: "Queued" }],
       rowCount: 1,
     }));
     await expect(f.load()).rejects.toMatchObject({ code: "KITCHEN_WORK_DEPENDENCY_UNAVAILABLE" });

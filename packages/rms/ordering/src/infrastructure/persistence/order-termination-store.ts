@@ -141,6 +141,35 @@ async function initialHistory(tx: ConsumerTransaction, scope: Scope) {
       occurredAt: at,
     });
   }
+  // WP-2423 Q6 step 2a: staff item cancellations after acceptance advance the Order version while
+  // the Order stays Accepted with its remaining lines.
+  const itemCancellations = await tx.query(
+    "SELECT cancellation_id::text AS cancellation,order_batch_id::text AS batch,expected_order_version,cancelled_order_version," +
+      "expected_source_checkpoint::text AS checkpoint,cancelled_at FROM rms_ordering.order_item_staff_cancellation " +
+      "WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 ORDER BY cancelled_order_version LIMIT 101",
+    values.slice(0, 3),
+  );
+  if (itemCancellations.rows.length > 100) return fail(true);
+  for (const c of itemCancellations.rows) {
+    const at = parseOrderingInstant(
+      c.cancelled_at instanceof Date ? c.cancelled_at.toISOString() : c.cancelled_at,
+    );
+    if (
+      state.phase !== "Accepted" ||
+      c.batch !== scope.orderBatchReference ||
+      c.expected_order_version !== state.version ||
+      c.cancelled_order_version !== state.version + 1 ||
+      c.checkpoint !== state.checkpoint ||
+      at < state.occurredAt
+    )
+      return fail(true);
+    state = Object.freeze({
+      ...state,
+      version: c.cancelled_order_version,
+      checkpoint: parseOrderingReference(c.cancellation),
+      occurredAt: at,
+    });
+  }
   const terminal = await tx.query(
     "SELECT " +
       selection +
@@ -437,6 +466,7 @@ async function multiBatchPreparationVersion(
         "WHEN 'Acceptance' THEN EXISTS (SELECT 1 FROM rms_ordering.order_acceptance_record a WHERE a.brand_id=r.brand_id AND a.store_id=r.store_id AND a.order_id=r.order_id AND a.acceptance_id=r.revision_id AND a.expected_order_version=r.expected_version AND a.accepted_order_version=r.version AND a.accepted_at=r.occurred_at) " +
         "WHEN 'BatchCancellation' THEN EXISTS (SELECT 1 FROM rms_ordering.order_batch_checkout_cancellation c WHERE c.brand_id=r.brand_id AND c.store_id=r.store_id AND c.order_id=r.order_id AND c.cancellation_id=r.revision_id AND c.expected_source_checkpoint=r.previous_revision_id AND c.expected_order_version=r.expected_version AND c.cancelled_order_version=r.version AND c.cancelled_at=r.occurred_at) " +
         "WHEN 'StaffBatchCancellation' THEN EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation c WHERE c.brand_id=r.brand_id AND c.store_id=r.store_id AND c.order_id=r.order_id AND c.cancellation_id=r.revision_id AND c.order_type='DineIn' AND c.expected_source_checkpoint=r.previous_revision_id AND c.expected_order_version=r.expected_version AND c.cancelled_order_version=r.version AND c.cancelled_at=r.occurred_at) " +
+        "WHEN 'StaffItemCancellation' THEN EXISTS (SELECT 1 FROM rms_ordering.order_item_staff_cancellation c WHERE c.brand_id=r.brand_id AND c.store_id=r.store_id AND c.order_id=r.order_id AND c.cancellation_id=r.revision_id AND c.expected_source_checkpoint=r.previous_revision_id AND c.expected_order_version=r.expected_version AND c.cancelled_order_version=r.version AND c.cancelled_at=r.occurred_at) " +
         "WHEN 'AdditionalBatch' THEN EXISTS (SELECT 1 FROM rms_ordering.additional_dining_batch_record a JOIN rms_ordering.order_batch b ON b.order_batch_id=a.order_batch_id AND b.brand_id=a.brand_id AND b.store_id=a.store_id AND b.order_id=a.order_id AND b.submission_id=a.submission_id WHERE a.brand_id=r.brand_id AND a.store_id=r.store_id AND a.order_id=r.order_id AND a.submission_id=r.revision_id AND b.submitted_at=r.occurred_at AND a.batch_sequence=(SELECT count(*)+1 FROM rms_ordering.order_revision p WHERE p.brand_id=r.brand_id AND p.store_id=r.store_id AND p.order_id=r.order_id AND p.kind='AdditionalBatch' AND p.version<=r.version)) ELSE false END AS operation_bound " +
         "FROM rms_ordering.order_revision r WHERE r.brand_id=$1 AND r.store_id=$2 AND r.order_id=$3 ORDER BY r.version LIMIT 10002",
       values,
@@ -485,7 +515,9 @@ async function multiBatchPreparationVersion(
     allCancelled,
     // WP-2423 Q6: a staff-cancelled Batch keeps the dine-in Order open (paid and accepted before);
     // its history is resolved here, never by the initial-window reader.
-    staffCancelled: rows.some((row) => row.kind === "StaffBatchCancellation"),
+    staffCancelled: rows.some(
+      (row) => row.kind === "StaffBatchCancellation" || row.kind === "StaffItemCancellation",
+    ),
     canonicalPhase: rows.some((row) => row.kind === "Acceptance")
       ? ("Accepted" as const)
       : ("Submitted" as const),

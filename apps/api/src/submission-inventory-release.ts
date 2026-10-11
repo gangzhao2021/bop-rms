@@ -5,6 +5,7 @@ import { parseOrderingReference, parseOrderingInstant } from "@rms/ordering";
 import {
   createPostgresSubmissionFinalValidationStore,
   createPostgresStockReservationStore,
+  advanceInventoryReservation,
   planInventoryReservationSetRelease,
   systemReservationReleaseReasonCodes,
   type StockReservationWrite,
@@ -30,6 +31,24 @@ export type SubmissionInventoryReleaseResult = Readonly<
   | {
       status: "NotReleasable";
       reason: "NoInventoryRecord" | "DeferredInventory" | "ProductionStarted" | "PartiallySettled";
+    }
+>;
+/**
+ * WP-2423 Q6 step 2a: per-line release of the stock reserved for some Order lines. Only per-line
+ * (schema 2) reservations can be released line by line; a submission reserved with the legacy
+ * submission-wide schema 1 is LegacyReservation and nothing is written.
+ */
+export type OrderLineInventoryReleaseResult = Readonly<
+  | { status: "Released" | "AlreadyApplied"; entryCount: number }
+  | { status: "NothingToRelease"; reason: "NotTracked" | "AlreadyReleased" }
+  | {
+      status: "NotReleasable";
+      reason:
+        | "NoInventoryRecord"
+        | "DeferredInventory"
+        | "ProductionStarted"
+        | "PartiallySettled"
+        | "LegacyReservation";
     }
 >;
 export interface SubmissionInventoryReleaseRequest {
@@ -219,6 +238,121 @@ export function createSubmissionInventoryRelease(options: {
     return null;
   }
   return Object.freeze({
+    /**
+     * WP-2423 Q6 step 2a: releases, all or nothing, the per-line reservations of the given cart
+     * lines (Order lines' source cart lines). Idempotent per source: a replay finds the same child
+     * operations and returns AlreadyApplied. The caller rolls back on any thrown failure.
+     */
+    async releaseLines(
+      transaction: ConsumerTransaction,
+      request: SubmissionInventoryReleaseRequest & {
+        readonly cartLineReferences: readonly string[];
+      },
+    ): Promise<OrderLineInventoryReleaseResult> {
+      const lines = new Set(
+        request.cartLineReferences.map((line) => String(parseOrderingReference(line))),
+      );
+      if (lines.size === 0 || lines.size !== request.cartLineReferences.length) return fail();
+      const opened = await open(transaction, request);
+      const settled = await settle(opened);
+      if (settled !== null) return settled;
+      const { set, store, child, allowed, releasedAt } = opened;
+      if (set === null) return fail();
+      if (set.entries.some((entry) => entry.reservation.schemaVersion !== 2))
+        return Object.freeze({ status: "NotReleasable", reason: "LegacyReservation" });
+      const selected = set.entries.filter((entry) =>
+        lines.has(String(entry.reservation.binding.cartItemReference)),
+      );
+      if (selected.length === 0) {
+        if (!(await allowed())) return fail();
+        return Object.freeze({ status: "NothingToRelease", reason: "NotTracked" });
+      }
+      let priors = 0;
+      for (const entry of selected) {
+        const prior = await store.resolveOperation(
+          child(entry.reservation.reservationReference, "operation"),
+        );
+        if (prior !== null) {
+          if (
+            prior.movementReference !== child(entry.reservation.reservationReference, "movement") ||
+            prior.auditReference !== child(entry.reservation.reservationReference, "audit") ||
+            prior.reservation.remainingQuantity !== "0"
+          )
+            return fail();
+          priors++;
+        }
+      }
+      if (priors === selected.length) {
+        if (!(await allowed())) return fail();
+        return Object.freeze({ status: "AlreadyApplied", entryCount: selected.length });
+      }
+      if (priors !== 0) return fail();
+      const current = [];
+      let started = false,
+        settledEntries = 0;
+      for (const entry of selected) {
+        const observed = await store.loadCurrent(entry.reservation.reservationReference);
+        if (
+          observed === null ||
+          observed.accountReference !== entry.accountReference ||
+          canonicalizeRfc8785(observed.reservation.binding) !==
+            canonicalizeRfc8785(entry.reservation.binding)
+        )
+          return fail();
+        const reservation = observed.reservation;
+        if (reservation.productionStartedAt !== null || reservation.consumedQuantity !== "0")
+          started = true;
+        if (reservation.remainingQuantity === "0") settledEntries++;
+        current.push({ accountReference: observed.accountReference, reservation });
+      }
+      if (!(await allowed())) return fail();
+      if (started) return Object.freeze({ status: "NotReleasable", reason: "ProductionStarted" });
+      if (settledEntries === selected.length)
+        return Object.freeze({ status: "NothingToRelease", reason: "AlreadyReleased" });
+      if (settledEntries !== 0)
+        return Object.freeze({ status: "NotReleasable", reason: "PartiallySettled" });
+      for (const { accountReference, reservation: before } of current) {
+        const version = await store.loadAccountLedgerVersion(accountReference);
+        if (version === null) return fail();
+        const reservation = advanceInventoryReservation(before, {
+          reservationReference: before.reservationReference,
+          binding: before.binding,
+          expectedVersion: before.version,
+          action: "Release",
+          quantity: before.remainingQuantity,
+          occurredAt: releasedAt,
+        });
+        const operationReference = child(reservation.reservationReference, "operation");
+        const result = await store.commit({
+          operationReference,
+          accountReference,
+          action: "Release",
+          expectedLedgerVersion: version,
+          quantity: before.remainingQuantity,
+          reservation,
+          movementReference: child(reservation.reservationReference, "movement"),
+          audit: {
+            auditId: child(reservation.reservationReference, "audit"),
+            brandId: scope.brandReference,
+            storeId: scope.storeReference,
+            actor: { type: "System" },
+            actionCode: "INVENTORY_RESERVATION_RELEASE",
+            targetType: "InventoryReservation",
+            targetId: reservation.reservationReference,
+            reasonCode,
+            correlationId: operationReference,
+            occurredAt: releasedAt,
+            sourceChannel: "SYSTEM",
+            dataClassification: "Internal",
+            retentionPolicyCode: "AUDIT_DEFAULT",
+            retentionPolicyVersion: 1,
+          },
+        });
+        if (result.status !== "Applied") return fail();
+      }
+      if (!(await allowed())) return fail();
+      return Object.freeze({ status: "Released", entryCount: selected.length });
+    },
     /** Verifies a release previously written for this exact source; never writes. */
     async verify(
       transaction: ConsumerTransaction,

@@ -112,7 +112,9 @@ export function createPostgresConfirmedCompensationRefundSource(options: {
         !terminal ||
         terminal.outcome !== "Succeeded" ||
         !terminal.amount ||
-        terminal.amount.amountMinor !== fact.amount.amountMinor ||
+        // WP-2423 Q6 step 2a: a compensation refunds what remains after other owners' refunds,
+        // so its (action-bound) amount may be below the capture but never above it.
+        terminal.amount.amountMinor < fact.amount.amountMinor ||
         terminal.amount.currencyCode !== fact.amount.currencyCode ||
         terminal.evidenceDigest !== action.terminalEvidenceDigest ||
         terminal.recordedAt > action.claimedAt

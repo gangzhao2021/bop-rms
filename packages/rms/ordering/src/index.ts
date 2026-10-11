@@ -398,3 +398,20 @@ export {
   type StaffOrderCancellationPreparation,
   type StaffOrderCancellationNotEligibleReason,
 } from "./infrastructure/persistence/staff-order-cancellation-store.js";
+export {
+  parseStaffItemCancellationPlan,
+  parseStaffItemCancellationRecord,
+  parseStaffItemCancellationSelection,
+  staffItemCancellationMaximumLines,
+  type StaffItemCancellationLine,
+  type StaffItemCancellationPlan,
+  type StaffItemCancellationRecord,
+} from "./application/staff-item-cancellation.js";
+export {
+  createPostgresStaffItemCancellationStore,
+  createPostgresStaffItemCancellationReader,
+  staffItemCancellationDigest,
+  readStaffBatchLineSources,
+  type StaffItemCancellationPreparation,
+  type StaffItemCancellationNotEligibleReason,
+} from "./infrastructure/persistence/staff-item-cancellation-store.js";

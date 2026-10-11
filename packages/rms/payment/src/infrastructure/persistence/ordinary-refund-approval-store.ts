@@ -12,6 +12,7 @@ import {
   parsePaymentInstant,
 } from "../../application/payment-intent-creation.js";
 import { parsePaymentReference } from "../../application/payment-provider-adapter.js";
+import { ordinaryRefundClaimKind } from "../../application/ordinary-refund-request.js";
 import { createPostgresOrdinaryRefundApprovalSource } from "../ordinary-refund-approval-source.js";
 
 type Options = Parameters<typeof createPostgresOrdinaryRefundApprovalSource>[0];
@@ -305,6 +306,7 @@ export function createPostgresOrdinaryRefundApprovalValidationSource(options: Op
     const time = clock.rows[0]?.now;
     const observedAt = parsePaymentInstant(time instanceof Date ? time.toISOString() : time);
     const current = await currentSubject(tx, { orderReference, requestReference, observedAt });
+    if (ordinaryRefundClaimKind(current.request) !== "Ordinary") return fail();
     const stored = await createPostgresOrdinaryRefundApprovalReader({
       scope: options.scope,
       authorize: (transaction, query) =>

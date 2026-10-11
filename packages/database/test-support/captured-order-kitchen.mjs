@@ -62,7 +62,7 @@ export async function exerciseCapturedOrderKitchen({
       role,
   );
   await admin.query(
-    "GRANT SELECT ON rms_ordering.order_batch_checkout_cancellation,rms_ordering.order_staff_cancellation TO " +
+    "GRANT SELECT ON rms_ordering.order_batch_checkout_cancellation,rms_ordering.order_staff_cancellation,rms_ordering.order_item_staff_cancellation TO " +
       role,
   );
   await admin.query("GRANT SELECT,INSERT,UPDATE ON platform_eventing.consumer_inbox TO " + role);

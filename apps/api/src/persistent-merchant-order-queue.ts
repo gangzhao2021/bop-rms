@@ -1,5 +1,6 @@
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
+  createPostgresStaffItemCancellationReader,
   createPostgresStaffOrderCancellationReader,
   listStoreConfirmedOrderBatches,
   listStorePaidOrderBatches,
@@ -7,7 +8,7 @@ import {
   loadMerchantOrderLines,
   type StaffOrderCancellationRecord,
 } from "@rms/ordering";
-import { listStoreStartedKitchenBatches } from "@rms/kitchen";
+import { listStoreKitchenOrderItemStates, listStoreStartedKitchenBatches } from "@rms/kitchen";
 import {
   listStorePickupAcceptanceDeadlines,
   listStoreUncollectedPickupOrders,
@@ -21,6 +22,7 @@ import {
   type StaffOrderRefundStatus,
 } from "./merchant-order-staff-cancellation.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { readItemCancellationRefundStatus } from "./merchant-order-item-staff-cancellation.js";
 
 /** Read-only merchant intent; session identity and selected scope are resolved inside its transaction. */
 export function createPersistentMerchantOrderQueue(options: {
@@ -29,6 +31,11 @@ export function createPersistentMerchantOrderQueue(options: {
   acceptanceConfigured?: boolean;
   /** WP-2423: the locale item names are shown in on the order detail (the Store's locale). */
   locale?: string;
+  /** WP-2423 Q6 step 2a: Payment configuration the item cancellation refunds are read under. */
+  resolveRefundConfiguration?(
+    transaction: ConsumerTransaction,
+    scope: { tenantReference: string; brandReference: string; storeReference: string },
+  ): Promise<{ providerAccountReference: string; environment: "Test" | "Live" }>;
 }) {
   const source = options.persistence;
   const currentSession = createPostgresCurrentBrowserSessionSource({
@@ -72,6 +79,7 @@ export function createPersistentMerchantOrderQueue(options: {
       let cancelAllowed = false;
       let stillAllowed: () => Promise<boolean> = async () => false;
       let ownerScope: { brandReference: string; storeReference: string } | null = null;
+      let tenantReference: string | null = null;
       const read = createMerchantOrderQueueRead({
         transactions: { run: (work) => work(businessTransaction) },
         quoteVersion: options.quoteVersion,
@@ -95,6 +103,7 @@ export function createPersistentMerchantOrderQueue(options: {
             brandReference: String(resolved.context.brand.brandReference),
             storeReference: String(resolved.store.storeReference),
           };
+          tenantReference = String(resolved.selected.tenantReference);
           return {
             tenantReference: resolved.selected.tenantReference,
             brandReference: String(resolved.context.brand.brandReference),
@@ -193,6 +202,17 @@ export function createPersistentMerchantOrderQueue(options: {
       >();
       let confirmed: ReadonlySet<string> = new Set<string>();
       const started = new Set<string>();
+      const itemCancellations = new Map<
+        string,
+        {
+          cancellationReference: string;
+          reasonCode: StaffOrderCancellationRecord["reasonCode"];
+          cancelledAt: string;
+          refundStatus: "Pending" | "Refunded";
+        }
+      >();
+      /** Line → its batch, for lines whose kitchen work has not started. */
+      const cancellableLines = new Map<string, string>();
       if (scoped !== null && orderReferences.length > 0) {
         for (const record of await createPostgresStaffOrderCancellationReader(scoped).listByOrders(
           businessTransaction,
@@ -223,11 +243,110 @@ export function createPersistentMerchantOrderQueue(options: {
             ))
               started.add(batch);
         }
+        // WP-2423 Q6 step 2a: lines staff cancelled (with their refund) and which lines of the
+        // paid, accepted batches the kitchen has not started.
+        for (const record of await createPostgresStaffItemCancellationReader(scoped).listByOrders(
+          businessTransaction,
+          orderReferences,
+        )) {
+          const refundStatus =
+            options.resolveRefundConfiguration === undefined || tenantReference === null
+              ? ("Pending" as const)
+              : await readItemCancellationRefundStatus(
+                  businessTransaction,
+                  {
+                    tenantReference,
+                    ...scoped,
+                    ...(await options.resolveRefundConfiguration(businessTransaction, {
+                      tenantReference,
+                      ...scoped,
+                    })),
+                  },
+                  record,
+                  stillAllowed,
+                );
+          for (const line of record.orderItemReferences)
+            itemCancellations.set(String(line), {
+              cancellationReference: String(record.cancellationReference),
+              reasonCode: record.reasonCode,
+              cancelledAt: String(record.cancelledAt),
+              // A Provider-failed refund stays "pending" here; "Check refund" shows the failure.
+              refundStatus: refundStatus === "Refunded" ? "Refunded" : "Pending",
+            });
+        }
+        if (cancelAllowed)
+          for (const batch of [...confirmed].filter((value) => !cancellations.has(value)))
+            for (const [line, state] of await listStoreKitchenOrderItemStates(
+              businessTransaction,
+              scoped,
+              [batch],
+            ))
+              if (state === "NotStarted" && !itemCancellations.has(line))
+                cancellableLines.set(line, batch);
         if (!(await stillAllowed())) throw new Error("MERCHANT_ORDER_QUEUE_UNAVAILABLE");
       }
+      const batchOpen = (
+        item: (typeof result.items)[number],
+        batch: (typeof result.items)[number]["batches"][number],
+      ) => {
+        const closed = unfulfillable.get(item.orderReference) ?? null;
+        return (
+          cancelAllowed &&
+          closed === null &&
+          !uncollected.has(item.orderReference) &&
+          batch.acceptanceStatus === "Accepted" &&
+          confirmed.has(batch.orderBatchReference) &&
+          !cancellations.has(batch.orderBatchReference) &&
+          item.currentVersion !== null &&
+          (item.orderType === "Pickup"
+            ? item.currentPhase === "Accepted"
+            : ["Submitted", "Accepted", "InProgress", "Ready"].includes(String(item.currentPhase)))
+        );
+      };
+      const openBatches = new Set(
+        result.items.flatMap((item) =>
+          item.batches
+            .filter((batch) => batchOpen(item, batch))
+            .map((batch) => batch.orderBatchReference),
+        ),
+      );
+      const lineCancellable = (line: string) => {
+        const batch = cancellableLines.get(line);
+        return batch !== undefined && openBatches.has(batch);
+      };
+      const detailLines =
+        lines === null || only === undefined
+          ? lines
+          : Object.freeze({
+              ...lines,
+              items: Object.freeze(
+                lines.items.map((line) => {
+                  const cancelled = itemCancellations.get(line.orderItemReference) ?? null;
+                  return Object.freeze({
+                    ...line,
+                    canCancel: cancelled === null && lineCancellable(line.orderItemReference),
+                    cancellation:
+                      cancelled === null
+                        ? null
+                        : Object.freeze({
+                            ...cancelled,
+                            // A whole line is refunded: its net (after discount) plus tax, no tip.
+                            refund: Object.freeze({
+                              amountMinor: (
+                                BigInt(line.subtotal.amountMinor) -
+                                BigInt(line.discount.amountMinor) +
+                                BigInt(line.tax.amountMinor)
+                              ).toString(),
+                              currencyCode: line.tax.currencyCode,
+                            }),
+                          }),
+                  });
+                }),
+              ),
+            });
       return Object.freeze({
         ...result,
-        lines,
+        lines: detailLines,
         items: Object.freeze(
           result.items.map((item) => {
             const latestBatchSequence = item.batches.reduce(
@@ -275,6 +394,9 @@ export function createPersistentMerchantOrderQueue(options: {
                             String(item.currentPhase),
                           )),
                     staffCancellation: cancellations.get(batch.orderBatchReference) ?? null,
+                    canCancelItems:
+                      openBatches.has(batch.orderBatchReference) &&
+                      [...cancellableLines.values()].includes(batch.orderBatchReference),
                   }),
                 ),
               ),

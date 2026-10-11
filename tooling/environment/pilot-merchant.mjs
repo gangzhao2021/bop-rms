@@ -64,6 +64,8 @@ import { createPersistentMerchantBffService } from "../../apps/api/dist/persiste
 import { createMerchantServiceControl } from "../../apps/api/dist/merchant-service-control.js";
 import { createMerchantUnmatchedCaptureRefund } from "../../apps/api/dist/merchant-unmatched-capture-refund.js";
 import { createMerchantOrderStaffCancellation } from "../../apps/api/dist/merchant-order-staff-cancellation.js";
+import { createMerchantOrderItemStaffCancellation } from "../../apps/api/dist/merchant-order-item-staff-cancellation.js";
+import { createMerchantOrdinaryRefundBusinessDate } from "../../apps/api/dist/merchant-ordinary-refund-business-date.js";
 import { createPersistentMerchantOrderQueue } from "../../apps/api/dist/persistent-merchant-order-queue.js";
 import { createInternalStoreConfiguration } from "./pilot-store-configuration.mjs";
 export async function createInternalMerchant(
@@ -87,6 +89,7 @@ export async function createInternalMerchant(
     taxConfigCurrencyMetadata,
     loadPricingCurrencyMetadata,
     refundUnmatchedCapture,
+    cancellationRefundProvider,
   },
 ) {
   const session = await createInternalMerchantSession(resources);
@@ -460,6 +463,41 @@ export async function createInternalMerchant(
     authentication: service,
     resolveRefundConfiguration: refundConfiguration,
   });
+  // WP-2423 Q6 step 2a: staff cancel item lines before the kitchen starts them. The Cancellation
+  // refund claim is dispatched after commit through the ordinary refund journal (simulated
+  // Provider, TEST-ONLY); the last remaining lines go through the whole cancellation above.
+  const orderItemStaffCancellation =
+    cancellationRefundProvider === undefined
+      ? undefined
+      : createMerchantOrderItemStaffCancellation({
+          persistence,
+          authentication: service,
+          nextReference: () => resources.credentials.reference(),
+          installContext: async (tx, scope) => {
+            for (const key of ["tenantReference", "brandReference", "storeReference"])
+              if (scope[key] !== selected[key])
+                throw new Error("INTERNAL_ORDER_CANCELLATION_SCOPE_DENIED");
+            await tx.query(
+              "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+              [scope.tenantReference, scope.brandReference, scope.storeReference],
+            );
+          },
+          wholeCancellation: orderStaffCancellation,
+          resolveRefundConfiguration: async (tx, scope) => {
+            const configuration = await refundConfiguration(tx, scope);
+            return {
+              providerAccountReference: configuration.providerAccountReference,
+              environment: configuration.environment,
+            };
+          },
+          businessDate: createMerchantOrdinaryRefundBusinessDate({
+            ...selected,
+            ...persistence.publication,
+            timeZone: resources.operating.timeZone,
+            authorize: async (_tx, at) => at <= resources.now(),
+          }),
+          provider: cancellationRefundProvider,
+        });
   const ordinaryRefundStatus = createMerchantOrdinaryRefundStatus({
     persistence,
     authentication: service,
@@ -708,6 +746,13 @@ export async function createInternalMerchant(
       quoteVersion: 2,
       acceptanceConfigured: true,
       locale: "en-CA",
+      resolveRefundConfiguration: async (tx, scope) => {
+        const configuration = await refundConfiguration(tx, scope);
+        return {
+          providerAccountReference: configuration.providerAccountReference,
+          environment: configuration.environment,
+        };
+      },
     }),
   );
   return {
@@ -810,6 +855,7 @@ export async function createInternalMerchant(
       compensationQuery,
       ...(unmatchedCaptureRefund === undefined ? {} : { unmatchedCaptureRefund }),
       orderStaffCancellation,
+      ...(orderItemStaffCancellation === undefined ? {} : { orderItemStaffCancellation }),
       ordinaryRefundSend,
       ordinaryRefundReconciliation,
       ordinaryRefund,

@@ -52,7 +52,12 @@ export {
 
 export { createPostgresPickupFulfillmentStore } from "./infrastructure/persistence/pickup-fulfillment-store.js";
 
-export { createPostgresFulfillmentReadinessStore } from "./infrastructure/persistence/fulfillment-readiness-store.js";
+export {
+  createPostgresFulfillmentItemCancellation,
+  createPostgresFulfillmentReadinessStore,
+} from "./infrastructure/persistence/fulfillment-readiness-store.js";
+
+export * from "./domain/fulfillment-item-cancellation.js";
 
 export { createPostgresPickupProofStore } from "./infrastructure/persistence/pickup-proof-store.js";
 

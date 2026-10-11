@@ -61,6 +61,7 @@ test("@production session closing advances both steps and recovers a lost finali
                 canRequestAcceptance: false,
                 canCancel: false,
                 staffCancellation: null,
+                canCancelItems: false,
               },
             ],
             canRequestAcceptance: false,

@@ -7,6 +7,7 @@ import {
   createPostgresKitchenCustomerStatusReader,
   createPostgresKitchenQueueSourceReader,
   createPostgresKitchenWorkLifecycleStore,
+  listStoreKitchenOrderItemStates,
   listStoreStartedKitchenBatches,
 } from "../../rms/kitchen/src/index.ts";
 
@@ -133,9 +134,26 @@ export async function exerciseKitchenWorkCancellation({ admin, context, role, id
           validUntil: "2026-08-09T16:00:00.000Z",
         }),
       },
-      expo: { resolve: async () => assert.fail("Expo is not part of cancellation") },
+      // Item cancellation cases complete the remaining line with Expo disabled (ready on completion).
+      expo: {
+        resolve: async () =>
+          value.expoDisabled
+            ? {
+                decisionReference: next(),
+                decisionVersion: 1,
+                decisionDigest: hash("synthetic Expo disabled"),
+                producerContractVersion: 1,
+                brandReference: value.brandId,
+                storeReference: value.storeId,
+                purpose: "KitchenReadiness",
+                mode: "Disabled",
+                evaluatedAt: now,
+                validUntil: new Date(Date.parse(now) + 60000).toISOString(),
+              }
+            : assert.fail("Expo is not part of cancellation"),
+      },
     });
-    return (action, version, at) => {
+    return (action, version, at, ticketVersion = version, extra = {}) => {
       now = at;
       return service.execute({
         action,
@@ -146,9 +164,10 @@ export async function exerciseKitchenWorkCancellation({ admin, context, role, id
         ticketReference: value.ticketId,
         workItemReference: value.workItemId,
         orderItemReference: value.orderItemId,
-        expectedTicketVersion: String(version),
+        expectedTicketVersion: String(ticketVersion),
         expectedWorkItemVersion: String(version),
         correlationReference: value.correlationId,
+        ...extra,
       });
     };
   };
@@ -391,6 +410,227 @@ export async function exerciseKitchenWorkCancellation({ admin, context, role, id
     assert.equal(
       (await scoped(empty, (tx) => cancellation(empty).cancel(tx, command(empty)))).status,
       "NoKitchenWork",
+    );
+
+    // 6. WP-2423 Q6 step 2: staff cancel one line; the rest of the ticket stays active and the
+    // remaining line can still be prepared through ready. Order ready then counts only that line.
+    const lineOf = (value, ordinal) =>
+      ordinal === 1
+        ? { workItemId: value.workItemId, orderItemId: value.orderItemId }
+        : {
+            workItemId: id(value.base + ordinal * 10 + 1),
+            orderItemId: id(value.base + ordinal * 10 + 4),
+          };
+    const itemCommand = (value, lines, overrides = {}) => ({
+      ...command(value, overrides),
+      orderItemReferences: lines,
+    });
+    const outbox = (ticketId, type) =>
+      admin.query(
+        "SELECT event_id,aggregate_version::text AS version,causation_id,payload_json FROM platform_eventing.outbox_event " +
+          "WHERE aggregate_id=$1 AND event_type=$2 ORDER BY aggregate_version",
+        [ticketId, type],
+      );
+    const mixed = { ...(await seed(88000, 2)), base: 88000, expoDisabled: true };
+    const mixedA = lineOf(mixed, 1);
+    const mixedB = lineOf(mixed, 2);
+    const mixedCommand = itemCommand(mixed, [mixedA.orderItemId]);
+    const partial = await scoped(mixed, (tx) => cancellation(mixed).cancelItems(tx, mixedCommand));
+    assert.equal(partial.status, "Cancelled");
+    assert.equal(partial.workItemCount, 1);
+    assert.deepEqual(
+      await scoped(mixed, (tx) => cancellation(mixed).cancelItems(tx, mixedCommand)),
+      { ...partial, status: "AlreadyCancelled" },
+    );
+    const mixedState = await admin.query(
+      "SELECT kitchen_work_item_id,status,version::text AS version FROM rms_kitchen.kitchen_work_item " +
+        "WHERE kitchen_ticket_id=$1 ORDER BY order_item_id",
+      [mixed.ticketId],
+    );
+    assert.deepEqual(
+      mixedState.rows.map((row) => [row.kitchen_work_item_id, row.status, row.version]),
+      [
+        [mixedA.workItemId, "Cancelled", "2"],
+        [mixedB.workItemId, "Queued", "1"],
+      ],
+    );
+    // The cancelled line refuses lifecycle commands; the other line runs to ready.
+    await assert.rejects(
+      lifecycle({ ...mixed, ...mixedA }, operator)(
+        "AcceptKitchenWorkItem",
+        2,
+        "2026-08-09T14:11:00.000Z",
+        2,
+      ),
+      { code: "KITCHEN_WORK_PRECONDITION_FAILED" },
+    );
+    const runB = lifecycle({ ...mixed, ...mixedB }, operator);
+    assert.equal(
+      (await runB("AcceptKitchenWorkItem", 1, "2026-08-09T14:11:00.000Z", 2)).outcome,
+      "Accepted",
+    );
+    assert.equal(
+      (await runB("StartKitchenWorkItem", 2, "2026-08-09T14:12:00.000Z", 3)).outcome,
+      "Started",
+    );
+    assert.equal(
+      (
+        await runB("CompleteKitchenWorkItem", 3, "2026-08-09T14:13:00.000Z", 4, {
+          quantityDelta: 2,
+        })
+      ).outcome,
+      "CompletedAndOrderItemReady",
+    );
+    const mixedReady = await outbox(mixed.ticketId, "KitchenOrderReady");
+    assert.equal(mixedReady.rows.length, 1);
+    assert.equal(mixedReady.rows[0].payload_json.itemCount, 1);
+    assert.equal(mixedReady.rows[0].payload_json.readyItemCount, 1);
+    const mixedCustomer = await scoped(mixed, (transaction) =>
+      createPostgresKitchenCustomerStatusReader({
+        brandReference: mixed.brandId,
+        storeReference: mixed.storeId,
+        authorize: async () => true,
+      }).loadByOrder({ transaction, orderReference: mixed.orderId }),
+    );
+    assert.equal(mixedCustomer.batches[0].status, "Ready");
+    assert.deepEqual(mixedCustomer.batches[0].items, [
+      { orderItemReference: mixedA.orderItemId, status: "Cancelled" },
+      { orderItemReference: mixedB.orderItemId, status: "Ready" },
+    ]);
+
+    // 7. The remaining line is already ready when staff cancel the last unfinished line: the
+    // cancellation itself publishes KitchenOrderReady in the same transaction.
+    const late = { ...(await seed(89000, 2)), base: 89000, expoDisabled: true };
+    const lateA = lineOf(late, 1);
+    const lateB = lineOf(late, 2);
+    const runLateB = lifecycle({ ...late, ...lateB }, operator);
+    await runLateB("AcceptKitchenWorkItem", 1, "2026-08-09T14:03:00.000Z", 1);
+    await runLateB("StartKitchenWorkItem", 2, "2026-08-09T14:04:00.000Z", 2);
+    await runLateB("CompleteKitchenWorkItem", 3, "2026-08-09T14:05:00.000Z", 3, {
+      quantityDelta: 2,
+    });
+    assert.equal((await outbox(late.ticketId, "KitchenOrderReady")).rows.length, 0);
+    const lateCommand = itemCommand(late, [lateA.orderItemId]);
+    assert.equal(
+      (await scoped(late, (tx) => cancellation(late).cancelItems(tx, lateCommand))).status,
+      "Cancelled",
+    );
+    const lateReady = await outbox(late.ticketId, "KitchenOrderReady");
+    assert.equal(lateReady.rows.length, 1);
+    assert.equal(lateReady.rows[0].causation_id, lateCommand.operationReference);
+    assert.equal(lateReady.rows[0].version, "5");
+    assert.deepEqual(lateReady.rows[0].payload_json, {
+      kitchenTicketReference: late.ticketId,
+      orderReference: late.orderId,
+      orderBatchReference: late.orderBatchId,
+      readyItemCount: 1,
+      itemCount: 1,
+      readyAt: lateCommand.cancelledAt,
+    });
+
+    // 8. Started is judged per line; the whole batch then refuses because a line started.
+    const busy = { ...(await seed(90000, 2)), base: 90000 };
+    const busyA = lineOf(busy, 1);
+    const busyB = lineOf(busy, 2);
+    const runBusyB = lifecycle({ ...busy, ...busyB }, operator);
+    await runBusyB("AcceptKitchenWorkItem", 1, "2026-08-09T14:03:00.000Z", 1);
+    await runBusyB("StartKitchenWorkItem", 2, "2026-08-09T14:04:00.000Z", 2);
+    await assert.rejects(
+      scoped(busy, (tx) =>
+        cancellation(busy).cancelItems(tx, itemCommand(busy, [busyB.orderItemId])),
+      ),
+      { code: "KITCHEN_WORK_STARTED" },
+    );
+    assert.equal(
+      (
+        await scoped(busy, (tx) =>
+          cancellation(busy).cancelItems(tx, itemCommand(busy, [busyA.orderItemId])),
+        )
+      ).status,
+      "Cancelled",
+    );
+    await assert.rejects(
+      scoped(busy, (tx) => cancellation(busy).cancel(tx, command(busy))),
+      { code: "KITCHEN_WORK_STARTED" },
+    );
+    assert.equal(
+      await scoped(busy, (tx) =>
+        cancellation(busy).cancelItems(tx, itemCommand(busy, [busyA.orderItemId])),
+      ).catch((error) => error.code),
+      "KITCHEN_CANCELLATION_UNAVAILABLE",
+    );
+
+    // 9. Whole-batch cancellation after a line was cancelled cancels only the remaining lines.
+    const rest = { ...(await seed(91000, 3)), base: 91000 };
+    await scoped(rest, (tx) =>
+      cancellation(rest).cancelItems(tx, itemCommand(rest, [lineOf(rest, 2).orderItemId])),
+    );
+    const restCommand = command(rest, { cancelledAt: "2026-08-09T14:20:00.000Z" });
+    const whole = await scoped(rest, (tx) => cancellation(rest).cancel(tx, restCommand));
+    assert.equal(whole.status, "Cancelled");
+    assert.equal(whole.workItemCount, 2);
+    assert.deepEqual(await scoped(rest, (tx) => cancellation(rest).cancel(tx, restCommand)), {
+      ...whole,
+      status: "AlreadyCancelled",
+    });
+    const restRows = await admin.query(
+      "SELECT operation_id,result_ticket_version::text AS version FROM rms_kitchen.kitchen_work_cancellation " +
+        "WHERE kitchen_ticket_id=$1 ORDER BY result_ticket_version",
+      [rest.ticketId],
+    );
+    assert.deepEqual(
+      restRows.rows.map((row) => [
+        row.operation_id === restCommand.operationReference,
+        row.version,
+      ]),
+      [
+        [false, "2"],
+        [true, "3"],
+        [true, "4"],
+      ],
+    );
+    await assert.rejects(
+      scoped(rest, (tx) =>
+        cancellation(rest).cancel(tx, command(rest, { cancelledAt: "2026-08-09T14:21:00.000Z" })),
+      ),
+      { code: "KITCHEN_CANCELLATION_UNAVAILABLE" },
+    );
+    const restCustomer = await scoped(rest, (transaction) =>
+      createPostgresKitchenCustomerStatusReader({
+        brandReference: rest.brandId,
+        storeReference: rest.storeId,
+        authorize: async () => true,
+      }).loadByOrder({ transaction, orderReference: rest.orderId }),
+    );
+    assert.equal(restCustomer.batches[0].status, "Cancelled");
+    const lineStates = await scoped(rest, (tx) =>
+      listStoreKitchenOrderItemStates(
+        tx,
+        { brandReference: rest.brandId, storeReference: rest.storeId },
+        [mixed.orderBatchId, busy.orderBatchId, rest.orderBatchId],
+      ),
+    );
+    assert.equal(lineStates.get(mixedA.orderItemId), "Cancelled");
+    assert.equal(lineStates.get(mixedB.orderItemId), "Started");
+    assert.equal(lineStates.get(busyA.orderItemId), "Cancelled");
+    assert.equal(lineStates.get(busyB.orderItemId), "Started");
+    assert.ok(
+      [1, 2, 3].every(
+        (ordinal) => lineStates.get(lineOf(rest, ordinal).orderItemId) === "Cancelled",
+      ),
+    );
+    const fresh = { ...(await seed(92000, 1)), base: 92000 };
+    assert.equal(
+      (
+        await scoped(fresh, (tx) =>
+          listStoreKitchenOrderItemStates(
+            tx,
+            { brandReference: fresh.brandId, storeReference: fresh.storeId },
+            [fresh.orderBatchId],
+          ),
+        )
+      ).get(fresh.orderItemId),
+      "NotStarted",
     );
 
     // 5. Database guards: append-only rows, terminal Cancelled items, no lifecycle facts after

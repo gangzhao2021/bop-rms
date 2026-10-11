@@ -60,6 +60,7 @@ test("@production serving retains its intent after a lost response and locks ref
                 canRequestAcceptance: false,
                 canCancel: false,
                 staffCancellation: null,
+                canCancelItems: false,
               },
             ],
             canRequestAcceptance: false,

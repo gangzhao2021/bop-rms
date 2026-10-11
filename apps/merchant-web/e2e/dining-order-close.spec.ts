@@ -60,6 +60,7 @@ test("@production order closure retries the same intent then renders read-only h
                 canRequestAcceptance: false,
                 canCancel: false,
                 staffCancellation: null,
+                canCancelItems: false,
               },
             ],
             canRequestAcceptance: false,

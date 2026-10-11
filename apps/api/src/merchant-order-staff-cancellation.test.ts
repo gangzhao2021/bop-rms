@@ -11,11 +11,14 @@ const d = vi.hoisted(() => ({
   releaseFactory: vi.fn(),
   position: vi.fn(),
   positionFactory: vi.fn(),
+  lines: vi.fn(),
+  releaseLines: vi.fn(),
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => d.scope }));
 vi.mock("@rms/ordering", async (original) => ({
   ...(await original<object>()),
   createPostgresStaffOrderCancellationStore: d.ordering,
+  readStaffBatchLineSources: d.lines,
 }));
 vi.mock("@rms/kitchen", async (original) => ({
   ...(await original<object>()),
@@ -73,7 +76,11 @@ function setup() {
     workItemCount: 2,
     evidenceDigest: "sha256:" + "a".repeat(64),
   });
-  d.releaseFactory.mockReturnValue({ release: d.release });
+  d.releaseFactory.mockReturnValue({ release: d.release, releaseLines: d.releaseLines });
+  d.lines.mockResolvedValue([
+    { orderItemReference: id(50), sourceCartLineReference: id(60), itemCancelled: false },
+    { orderItemReference: id(51), sourceCartLineReference: id(61), itemCancelled: false },
+  ]);
   d.release.mockResolvedValue({ status: "Released", entryCount: 1 });
   d.positionFactory.mockReturnValue(d.position);
   d.position.mockResolvedValue({ confirmedMinor: 1130n, pendingMinor: 0n });
@@ -233,5 +240,21 @@ it("WP-2423 Q6: a started kitchen item or unreleasable stock refuses the whole c
   d.commit.mockRejectedValueOnce(new Error("synthetic-private"));
   await expect(f.operation(f.input)).rejects.toMatchObject({
     code: "ORDER_CANCELLATION_UNAVAILABLE",
+  });
+});
+
+it("WP-2423 Q6 step 2a: after item cancellations the whole cancellation releases only the remaining lines", async () => {
+  const f = setup();
+  d.lines.mockResolvedValue([
+    { orderItemReference: id(50), sourceCartLineReference: id(60), itemCancelled: true },
+    { orderItemReference: id(51), sourceCartLineReference: id(61), itemCancelled: false },
+  ]);
+  d.releaseLines.mockResolvedValue({ status: "Released", entryCount: 1 });
+  expect((await f.operation(f.input)).status).toBe("Cancelled");
+  expect(d.release).not.toHaveBeenCalled();
+  expect(d.releaseLines.mock.calls[0]?.[1]).toMatchObject({ cartLineReferences: [id(61)] });
+  d.releaseLines.mockResolvedValue({ status: "NotReleasable", reason: "ProductionStarted" });
+  await expect(f.operation(f.input)).rejects.toMatchObject({
+    code: "ORDER_CANCELLATION_STOCK_NOT_RELEASABLE",
   });
 });

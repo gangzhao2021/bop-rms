@@ -32,11 +32,32 @@ const list = (value: unknown, maximum: number): unknown[] => {
   return result;
 };
 
+/** Staff item cancellation binding. Authority comes from the Ordering
+ * cancellation record, never from an independent refund approver. */
+export interface OrdinaryRefundCancellationClaim {
+  readonly kind: "Cancellation";
+  readonly cancellationReference: string;
+  readonly cancellationDigest: string;
+}
+function parseClaim(value: unknown): OrdinaryRefundCancellationClaim {
+  const raw = exactPaymentObject(value, ["kind", "cancellationReference", "cancellationDigest"]);
+  if (raw.kind !== "Cancellation") return fail();
+  return Object.freeze({
+    kind: "Cancellation" as const,
+    cancellationReference: ref(raw.cancellationReference),
+    cancellationDigest: digest(raw.cancellationDigest),
+  });
+}
 /** Immutable request, not approval or Provider dispatch authority. Owner adapters
  * must validate capture membership and reproduce Pricing before this is recorded. */
 export function parseOrdinaryRefundRequest(value: unknown) {
   try {
+    const hasClaim =
+      value !== null &&
+      typeof value === "object" &&
+      Object.prototype.hasOwnProperty.call(value, "claim");
     const raw = exactPaymentObject(value, [
+      ...(hasClaim ? ["claim"] : []),
       "tenantReference",
       "brandReference",
       "storeReference",
@@ -132,13 +153,22 @@ export function parseOrdinaryRefundRequest(value: unknown) {
         });
       })
       .sort((a, b) => a.paymentAttemptReference.localeCompare(b.paymentAttemptReference));
+    const claim = hasClaim ? parseClaim(raw.claim) : null;
+    if (
+      claim !== null &&
+      (payments.length !== 1 ||
+        payments.some((payment) =>
+          payment.items.some((item) => item.components.tipAmountMinor !== 0n),
+        ))
+    )
+      return fail();
     const total = amount(raw.amountMinor);
     if (
       total === 0n ||
       total !== payments.reduce((sum, payment) => sum + ordinaryRefundPaymentAmount(payment), 0n)
     )
       return fail();
-    return Object.freeze({
+    const record = {
       tenantReference: ref(raw.tenantReference),
       brandReference: ref(raw.brandReference),
       storeReference: ref(raw.storeReference),
@@ -155,12 +185,22 @@ export function parseOrdinaryRefundRequest(value: unknown) {
       currencyCode: "CAD" as const,
       amountMinor: total,
       payments: Object.freeze(payments),
-    });
+    };
+    // Encode claim only when present so legacy records stay byte-identical.
+    return Object.freeze(claim === null ? record : { ...record, claim }) as Readonly<
+      typeof record
+    > & { readonly claim?: OrdinaryRefundCancellationClaim };
   } catch {
     return fail();
   }
 }
 export type OrdinaryRefundRequest = ReturnType<typeof parseOrdinaryRefundRequest>;
+/** Ordinary when absent; legacy records never carry the key. */
+export function ordinaryRefundClaimKind(request: {
+  readonly claim?: OrdinaryRefundCancellationClaim;
+}): "Ordinary" | "Cancellation" {
+  return request.claim === undefined ? "Ordinary" : "Cancellation";
+}
 export function ordinaryRefundPaymentAmount(payment: {
   readonly items: readonly {
     readonly components: Readonly<Record<(typeof componentKeys)[number], bigint>>;

@@ -8,6 +8,7 @@ import {
   createPostgresStaffOrderCancellationStore,
   parseOrderingInstant,
   parseOrderingReference,
+  readStaffBatchLineSources,
   staffOrderCancellationReasonCodes,
   type StaffOrderCancellationReasonCode,
   type StaffOrderCancellationRecord,
@@ -251,12 +252,13 @@ export function createMerchantOrderStaffCancellation(options: {
         const record = created.record;
         // Stock reserved at submission returns in the same transaction, or nothing is cancelled.
         // The ledger movement names the cancelling staff member; the release audit is System-owned.
-        const inventory = await createSubmissionInventoryRelease({
+        const releaser = createSubmissionInventoryRelease({
           scope: selected,
           systemActorReference: actorReference,
           reasonCode: "STAFF_CANCELLED_BEFORE_PREPARATION",
           now: options.persistence.now,
-        }).release(tx, {
+        });
+        const request = {
           source: {
             kind: "StaffOrderCancellationInventory/v1",
             reference: String(record.cancellationReference),
@@ -266,7 +268,23 @@ export function createMerchantOrderStaffCancellation(options: {
           },
           releasedAt: String(record.cancelledAt),
           authorize: allowed,
-        });
+        };
+        // WP-2423 Q6 step 2a: once lines of this Batch were cancelled (and their stock released),
+        // the remaining lines are released line by line.
+        const lines = await readStaffBatchLineSources(
+          tx,
+          selected,
+          orderReference,
+          orderBatchReference,
+        );
+        const inventory = lines.some((line) => line.itemCancelled)
+          ? await releaser.releaseLines(tx, {
+              ...request,
+              cartLineReferences: lines
+                .filter((line) => !line.itemCancelled)
+                .map((line) => String(line.sourceCartLineReference)),
+            })
+          : await releaser.release(tx, request);
         if (inventory.status === "NotReleasable")
           return fail("ORDER_CANCELLATION_STOCK_NOT_RELEASABLE");
         return replied("Cancelled", record);

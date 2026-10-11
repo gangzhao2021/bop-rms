@@ -44,8 +44,9 @@ export function createDiningOrderPreparationProgress(
             member.cancellation ||
             progress.has(item.orderItemReference) ||
             kitchenCancelled.has(item.orderItemReference) ||
-            // WP-2423 Q6: kitchen work is Cancelled exactly when staff cancelled its batch.
-            (item.status === "Cancelled") !== Boolean(member.staffCancellation)
+            // WP-2423 Q6: kitchen work is Cancelled exactly when staff cancelled its batch or line.
+            (item.status === "Cancelled") !==
+              Boolean(member.staffCancellation || member.itemStaffCancellation)
           )
             throw new Error("ORDER_PROGRESS_UNAVAILABLE");
           if (item.status === "Cancelled") kitchenCancelled.add(item.orderItemReference);
@@ -59,7 +60,7 @@ export function createDiningOrderPreparationProgress(
           orderBatchReference: item.orderBatchReference,
           orderedQuantity: item.orderedQuantity,
           phase:
-            item.cancellation || item.staffCancellation
+            item.cancellation || item.staffCancellation || item.itemStaffCancellation
               ? ("Cancelled" as const)
               : current === "Ready"
                 ? ("Ready" as const)
@@ -89,7 +90,7 @@ export function createDiningOrderPreparationProgress(
         kitchenEvidenceComplete: order.items.every(
           (item) =>
             item.acceptance === null ||
-            Boolean(item.staffCancellation) ||
+            Boolean(item.staffCancellation || item.itemStaffCancellation) ||
             progress.has(item.orderItemReference),
         ),
         items: Object.freeze(items),

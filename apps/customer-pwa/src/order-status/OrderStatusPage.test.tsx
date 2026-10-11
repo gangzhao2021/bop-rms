@@ -523,3 +523,92 @@ it("WP-2423 Q6: notes a dine-in round the store cancelled without hiding the res
   expect(html).not.toContain("Order cancelled by the store");
   expect(isOrderSettled(view)).toBe(false);
 });
+
+it("WP-2423 Q6 step 2: marks items the store cancelled and where their refund is", () => {
+  const state = readyState();
+  if (state.status !== "ready") throw new Error("fixture");
+  const first = state.view.order.batches[0];
+  const bowl = first?.items[0];
+  if (!first || !bowl) throw new Error("fixture");
+  const tea = {
+    ...bowl,
+    orderItemReference: id(5),
+    displayName: "Synthetic tea",
+    quantity: 1,
+    lineTotal: { amountMinor: 400n, currencyCode: "CAD" },
+  };
+  const juice = { ...tea, orderItemReference: id(6), displayName: "Synthetic juice" };
+  const cancellation = {
+    orderBatchReference: id(3),
+    orderItemReferences: [id(5)],
+    cancelledAt: "2026-08-11T13:58:00.000Z",
+    reason: "SoldOut" as const,
+    refundStatus: "Pending" as const,
+    refundAmount: { amountMinor: 452n, currencyCode: "CAD" },
+  };
+  const view = {
+    ...state.view,
+    order: {
+      ...state.view.order,
+      orderType: "DineIn" as const,
+      canonicalPhase: "In Progress" as const,
+      batches: [{ ...first, items: [bowl, tea, juice] }],
+    },
+    sources: {
+      checkedAt: "2026-08-11T14:00:00.000Z",
+      kitchen: {
+        batches: [
+          {
+            orderBatchReference: id(3),
+            status: "InProgress" as const,
+            updatedAt: "2026-08-11T13:57:00.000Z",
+          },
+        ],
+      },
+      payments: [],
+      dining: {
+        items: [
+          { orderItemReference: id(4), orderBatchReference: id(3), servedQuantity: 2 },
+          { orderItemReference: id(5), orderBatchReference: id(3), servedQuantity: 0 },
+          { orderItemReference: id(6), orderBatchReference: id(3), servedQuantity: 1 },
+        ],
+      },
+      itemCancellations: [cancellation],
+    },
+  };
+  const html = render({ ...state, view });
+  expect(html).toContain("order-status__item--cancelled");
+  expect(html).toContain("Cancelled · Refund pending $4.52");
+  expect(html).toContain(
+    "Cancelled items: a refund of $4.52 to your original payment is pending (tax included, tip not refunded).",
+  );
+  // A cancelled item is not waiting to be served; the round is not cancelled.
+  expect(html).toContain("Items served");
+  expect(html).not.toContain("This round was cancelled by the store.");
+  expect(html).not.toContain("Order cancelled by the store");
+  expect(html).not.toContain("SoldOut");
+  // The original items total stays; the refund is explained beneath it.
+  expect(html).toMatch(/Items total<\/span><span>\$33\.98/u);
+  const refunded = render({
+    ...state,
+    view: {
+      ...view,
+      sources: {
+        ...view.sources,
+        itemCancellations: [
+          {
+            ...cancellation,
+            orderItemReferences: [id(5), id(6)],
+            refundStatus: "Refunded" as const,
+            refundAmount: { amountMinor: 904n, currencyCode: "CAD" },
+          },
+        ],
+      },
+    },
+  });
+  // A cancellation of several items refunds them together: the amount is in the summary.
+  expect(refunded.match(/Cancelled · Refunded</gu)).toHaveLength(2);
+  expect(refunded).toContain(
+    "Cancelled items: $9.04 refunded to your original payment (tax included, tip not refunded).",
+  );
+});

@@ -8,6 +8,7 @@ import { createPostgresOrdinaryRefundCaptureSource } from "./persistence/ordinar
 import { createPostgresOrdinaryRefundApprovalValidationSource } from "./persistence/ordinary-refund-approval-store.js";
 import { createPostgresOrdinaryRefundOperationExecutionSource } from "./ordinary-refund-operation-execution-source.js";
 import { assertOrdinaryRefundRequester } from "../application/ordinary-refund-approval.js";
+import { ordinaryRefundClaimKind } from "../application/ordinary-refund-request.js";
 
 type Options = Parameters<typeof createPostgresOrdinaryRefundOperationRuntime>[0];
 /** Journal current first-dispatch authority. A renewed approval binds current
@@ -28,6 +29,9 @@ export function createPostgresOrdinaryRefundDispatchRuntime(options: Options) {
   const execution = createPostgresOrdinaryRefundOperationExecutionSource({
     ...captureOptions,
     executor: options.executor,
+    ...(options.cancellationAuthority === undefined
+      ? {}
+      : { cancellationAuthority: options.cancellationAuthority }),
   });
   return createPostgresOrdinaryRefundDispatchStore({
     scope: options.scope,
@@ -66,6 +70,20 @@ export function createPostgresOrdinaryRefundDispatchRuntime(options: Options) {
       })(tx, query);
       if (escalation.claimVersion !== current.claimVersion || providerBinding === undefined)
         throw new Error("ORDINARY_REFUND_DISPATCH_SOURCE_CHANGED");
+      if (ordinaryRefundClaimKind(current.request) === "Cancellation") {
+        // Execution source already re-checked the cancellation authority port.
+        if (
+          approvalReference !== null ||
+          operation.executorReference !== current.requesterReference ||
+          escalation.decision.requiresIndependentApproval
+        )
+          throw new Error("ORDINARY_REFUND_DISPATCH_APPROVAL_REQUIRED");
+        return {
+          providerBinding,
+          claimVersion: current.claimVersion,
+          claimsDigest: current.subject.claimsDigest,
+        };
+      }
       const expected = {
         ...options.scope,
         orderReference: operation.orderReference,

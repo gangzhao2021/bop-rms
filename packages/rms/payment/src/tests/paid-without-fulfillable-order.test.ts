@@ -1602,4 +1602,111 @@ describe("WP-1310 paid-without-fulfillable compensation service", () => {
       expect((error as Error).message).not.toContain("Provider");
     }
   });
+
+  describe("WP-2423 Q6 step 2a: compensation after other owners' refunds", () => {
+    const cad = (amountMinor: bigint) => ({ amountMinor, currencyCode: "CAD" });
+
+    it("refunds and records only the remainder, verified from the action on replay", async () => {
+      // Captured 2000, an item Cancellation refund of 1500 already Provider-confirmed.
+      const value = serviceHarness({
+        sourceOverrides: { confirmedRefundedAmount: cad(1_500n) },
+        retrievePlan: [1_500n],
+      });
+      const first = await value.service.execute(disposition());
+      expect(first.status).toBe("AwaitingOperationsReconciliation");
+      expect(value.refundAmounts).toEqual([500n]);
+      expect(value.state.action?.amount.amountMinor).toBe(500n);
+      expect(value.state.refundComposition?.fact.amount.amountMinor).toBe(500n);
+      expect(value.state.refundComposition?.event.payload.amountMinor).toBe("500");
+      // The current source now counts the compensation's own confirmed refund too; the replay
+      // must still verify 500 from the durable action, not recompute captured - confirmed = 0.
+      value.state.setSource(
+        value.state.makeSource({ confirmedRefundedAmount: cad(2_000n), sourceVersion: 5 }),
+      );
+      expect((await value.service.execute(disposition())).status).toBe(
+        "AwaitingOperationsReconciliation",
+      );
+      value.state.setOperations(true);
+      expect((await value.service.execute(disposition())).status).toBe("Closed");
+      expect(value.counts.refund).toBe(1);
+    });
+
+    it("records the action amount when the full Provider refund is only seen on a later run", async () => {
+      const value = serviceHarness({
+        sourceOverrides: { confirmedRefundedAmount: cad(1_500n) },
+        retrievePlan: [1_500n, "Failure", 2_000n],
+        refundBehaviors: ["ThrowAfterEffect"],
+      });
+      expect((await value.service.execute(disposition())).status).toBe(
+        "AwaitingProviderConfirmation",
+      );
+      // The claimed action is now a pending compensation-owned refund in the source.
+      value.state.setSource(
+        value.state.makeSource({
+          confirmedRefundedAmount: cad(1_500n),
+          pendingRefundClaimedAmount: cad(500n),
+          sourceVersion: 5,
+        }),
+      );
+      expect((await value.service.execute(disposition())).status).toBe(
+        "AwaitingOperationsReconciliation",
+      );
+      expect(value.counts.refund).toBe(1);
+      expect(value.state.refundComposition?.fact.amount.amountMinor).toBe(500n);
+    });
+
+    it("waits while another owner's refund is pending instead of refunding it too", async () => {
+      const value = serviceHarness({
+        sourceOverrides: {
+          confirmedRefundedAmount: cad(1_000n),
+          pendingRefundClaimedAmount: cad(500n),
+        },
+        retrievePlan: [1_000n, 1_500n],
+      });
+      expect((await value.service.execute(disposition())).status).toBe("ReconciliationRequired");
+      expect(value.counts.refund).toBe(0);
+      expect(value.state.action).toBeNull();
+      expect(value.state.refundComposition).toBeNull();
+      // Once that refund is confirmed, only what remains is claimed and refunded.
+      value.state.setSource(
+        value.state.makeSource({ confirmedRefundedAmount: cad(1_500n), sourceVersion: 5 }),
+      );
+      expect((await value.service.execute(disposition())).status).toBe(
+        "AwaitingOperationsReconciliation",
+      );
+      expect(value.refundAmounts).toEqual([500n]);
+      expect(value.state.refundComposition?.fact.amount.amountMinor).toBe(500n);
+    });
+
+    it("does not claim another owner's refund that completed the capture without an action", async () => {
+      const value = serviceHarness({
+        sourceOverrides: {
+          confirmedRefundedAmount: cad(1_500n),
+          pendingRefundClaimedAmount: cad(500n),
+        },
+        retrievePlan: [2_000n],
+      });
+      expect((await value.service.execute(disposition())).status).toBe("ReconciliationRequired");
+      expect(value.counts.refund).toBe(0);
+      expect(value.state.refundComposition).toBeNull();
+    });
+
+    it("rejects a recorded refund whose amount differs from the durable action amount", async () => {
+      const value = serviceHarness({
+        sourceOverrides: { confirmedRefundedAmount: cad(1_500n) },
+        retrievePlan: [1_500n],
+      });
+      await value.service.execute(disposition());
+      const recorded = value.state.refundComposition;
+      if (recorded === null) throw new Error("expected synthetic refund composition");
+      const fact = { ...recorded.fact, amount: cad(2_000n) } as typeof recorded.fact;
+      value.state.setRefundComposition({
+        fact,
+        event: createPaymentRefundedEnvelope({ fact }),
+      });
+      await expect(compensationCode(value.service.execute(disposition()))).resolves.toBe(
+        "PAYMENT_COMPENSATION_OPERATION_CONFLICT",
+      );
+    });
+  });
 });

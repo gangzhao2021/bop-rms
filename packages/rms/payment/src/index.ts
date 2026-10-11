@@ -141,6 +141,32 @@ export { createPostgresOrdinaryRefundWorkSource } from "./infrastructure/persist
 export { createPostgresOrdinaryRefundSendRuntime } from "./infrastructure/ordinary-refund-send-runtime.js";
 export { createPostgresOrdinaryRefundReconciliationRuntime } from "./infrastructure/ordinary-refund-reconciliation-runtime.js";
 
+export {
+  createPostgresCancellationRefundRuntime,
+  createPostgresCancellationRefundFollowUp,
+  readCancellationRefundStatus,
+  type CancellationRefundScope,
+  type CancellationRefundAuthorizeQuery,
+  type CancellationRefundRuntimeOptions,
+  type CancellationRefundPreviewInput,
+  type CancellationRefundRecordInput,
+  type CancellationRefundPreview,
+  type CancellationRefundRecordResult,
+  type CancellationRefundStatus,
+} from "./infrastructure/cancellation-refund-runtime.js";
+export {
+  readPaymentRemainingRefundable,
+  type PaymentRemainingRefundableQuery,
+} from "./infrastructure/payment-remaining-refundable.js";
+export type {
+  OrdinaryRefundCancellationAuthority,
+  OrdinaryRefundCancellationAuthorityQuery,
+} from "./infrastructure/ordinary-refund-operation-execution-source.js";
+export {
+  ordinaryRefundClaimKind,
+  type OrdinaryRefundCancellationClaim,
+} from "./application/ordinary-refund-request.js";
+
 export { createPostgresOrderPaymentRefundPosition } from "./infrastructure/order-payment-refund-position.js";
 
 export { createPostgresOrderPaymentAttemptPosition } from "./infrastructure/persistence/order-payment-attempt-position.js";

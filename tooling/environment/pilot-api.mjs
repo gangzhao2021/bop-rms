@@ -106,6 +106,11 @@ export async function createRuntime(
         transactions: resources.transactions,
         binding: (tx) => configuredEntry.binding({ run: (work) => work(tx) }),
         paymentScope: { ...resources.scope, providerAccountReference, environment: "Test" },
+        itemRefundScope: {
+          tenantReference: resources.publicProfile.binding.tenantReference,
+          providerAccountReference,
+          environment: "Test",
+        },
       },
       checkoutSessions: diningCheckout.checkoutSessions,
       ...quote,

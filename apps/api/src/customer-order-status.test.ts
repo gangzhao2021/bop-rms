@@ -217,3 +217,39 @@ it("WP-2423 Q6: serializes only customer-safe store cancellations with their ref
   expect(body.status.sources.staffCancellations).toEqual([cancellation]);
   expect(JSON.stringify(body)).not.toContain("private");
 });
+it("WP-2423 Q6 step 2a: serializes item cancellations with refund amount; a failed refund shows as pending", async () => {
+  const f = await setup();
+  const cancellation = {
+    orderBatchReference: "0190fa01-0000-7000-8000-000000000002",
+    orderItemReferences: ["0190fa01-0000-7000-8000-000000000003"],
+    cancelledAt: "2026-09-12T11:40:00.000Z",
+    reason: "SoldOut",
+  };
+  f.read.mockResolvedValue({
+    ...f.result,
+    sources: {
+      checkedAt: "2026-09-12T12:00:00.000Z",
+      kitchen: null,
+      payments: null,
+      itemCancellations: [
+        {
+          ...cancellation,
+          refundStatus: "Failed",
+          refundAmount: { amountMinor: 565n, currencyCode: "CAD" },
+          actorReference: "private",
+        },
+      ],
+    },
+  });
+  const body = (await (await f.send()).json()) as {
+    status: { sources: Record<string, unknown> };
+  };
+  expect(body.status.sources.itemCancellations).toEqual([
+    {
+      ...cancellation,
+      refundStatus: "Pending",
+      refundAmount: { amountMinor: "565", currencyCode: "CAD" },
+    },
+  ]);
+  expect(JSON.stringify(body)).not.toContain("private");
+});

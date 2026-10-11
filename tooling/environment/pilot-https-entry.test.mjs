@@ -113,6 +113,7 @@ it("preserves configured refund roles, provider and Pickup workstation without g
   expect(pickup.mock.calls[0][3].workstation).toBe(merchantConfig.workstation);
   expect(Object.keys(dependencies).sort()).toEqual(
     [
+      "cancellationRefundProvider",
       "exceptionPaymentMode",
       "providerAccountReference",
       "expectedDatabaseName",

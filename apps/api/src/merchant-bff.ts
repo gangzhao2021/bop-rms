@@ -189,6 +189,10 @@ import {
   StaffOrderCancellationError,
   type createMerchantOrderStaffCancellation,
 } from "./merchant-order-staff-cancellation.js";
+import {
+  StaffItemCancellationError,
+  type createMerchantOrderItemStaffCancellation,
+} from "./merchant-order-item-staff-cancellation.js";
 import { PickupHandoffError, PickupProofError } from "@rms/fulfillment";
 import { UnmatchedCaptureRefundError } from "@rms/payment";
 import type { createMerchantUnmatchedCaptureRefund } from "./merchant-unmatched-capture-refund.js";
@@ -484,6 +488,8 @@ export interface MerchantBffRouterOptions {
   readonly pickupNotCollected?: ReturnType<typeof createMerchantPickupNotCollected>;
   /** WP-2423 Q6: staff cancel a paid order or batch before the kitchen starts it. */
   readonly orderStaffCancellation?: ReturnType<typeof createMerchantOrderStaffCancellation>;
+  /** WP-2423 Q6 step 2a: staff cancel item lines before the kitchen starts them. */
+  readonly orderItemStaffCancellation?: ReturnType<typeof createMerchantOrderItemStaffCancellation>;
   /** WP-2423 P6: refund a Provider capture that matches no payment or Order. */
   readonly unmatchedCaptureRefund?: ReturnType<typeof createMerchantUnmatchedCaptureRefund>;
   readonly kitchenQuery?: ReturnType<typeof createMerchantKitchenQuery>;
@@ -1515,6 +1521,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
               acceptanceStatus: batch.acceptanceStatus,
               canRequestAcceptance: batch.canRequestAcceptance,
               canCancel: batch.canCancel,
+              canCancelItems: batch.canCancelItems,
               staffCancellation:
                 batch.staffCancellation === null
                   ? null
@@ -1577,6 +1584,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
               acceptanceStatus: batch.acceptanceStatus,
               canRequestAcceptance: batch.canRequestAcceptance,
               canCancel: batch.canCancel,
+              canCancelItems: batch.canCancelItems,
               staffCancellation:
                 batch.staffCancellation === null
                   ? null
@@ -9223,6 +9231,62 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         response.status(status).set("Cache-Control", NO_STORE).json({ error: code });
       });
   });
+  // WP-2423 Q6 step 2a: staff cancel item lines before the kitchen starts them; those items'
+  // net and tax are refunded (the last remaining lines cancel the whole order or batch).
+  const itemCancellationError = (response: express.Response, error: unknown) => {
+    if (!(error instanceof StaffItemCancellationError)) {
+      denied(response);
+      return;
+    }
+    const [status, code] = (
+      {
+        ORDER_CANCELLATION_INPUT_INVALID: [400, "order_cancellation_input_invalid"],
+        ORDER_CANCELLATION_PERMISSION_DENIED: [403, "order_cancellation_permission_denied"],
+        ORDER_CANCELLATION_NOT_FOUND: [404, "order_cancellation_not_found"],
+        ORDER_CANCELLATION_VERSION_CONFLICT: [409, "order_version_conflict"],
+        ORDER_CANCELLATION_PREPARATION_STARTED: [409, "order_preparation_started"],
+        ORDER_CANCELLATION_NOT_CANCELLABLE: [409, "order_not_cancellable"],
+        ORDER_CANCELLATION_STOCK_NOT_RELEASABLE: [409, "order_stock_not_releasable"],
+        ORDER_ITEM_CANCELLATION_STOCK_LEGACY: [409, "order_item_stock_legacy"],
+        ORDER_CANCELLATION_UNAVAILABLE: [503, "order_cancellation_unavailable"],
+      } as const
+    )[error.code];
+    response.status(status).set("Cache-Control", NO_STORE).json({ error: code });
+  };
+  const itemCancellationRoute = (
+    path: string,
+    run: (
+      service: NonNullable<MerchantBffRouterOptions["orderItemStaffCancellation"]>,
+      input: { sessionCookie: string; csrf: string; command: unknown },
+    ) => Promise<unknown>,
+  ) =>
+    router.post(path, sameOriginMutation(options), (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant");
+      const csrf = exactHeader(request, "x-bop-csrf");
+      if (
+        sessionCookie === null ||
+        csrf === null ||
+        csrf.length === 0 ||
+        Object.keys(request.query).length !== 0
+      ) {
+        denied(response);
+        return;
+      }
+      const service = options.orderItemStaffCancellation;
+      if (!service) {
+        response.status(503).json({ error: "order_cancellation_unavailable" });
+        return;
+      }
+      void run(service, { sessionCookie, csrf, command: request.body })
+        .then((result) => {
+          response.set("Cache-Control", NO_STORE);
+          response.json(result);
+        })
+        .catch((error: unknown) => itemCancellationError(response, error));
+    });
+  itemCancellationRoute("/orders/cancel-items/preview", (service, input) => service.preview(input));
+  itemCancellationRoute("/orders/cancel-items", (service, input) => service.cancel(input));
+  itemCancellationRoute("/orders/cancel-items/refund", (service, input) => service.refund(input));
   router.post("/orders/close", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant"),
       csrf = exactHeader(request, "x-bop-csrf");

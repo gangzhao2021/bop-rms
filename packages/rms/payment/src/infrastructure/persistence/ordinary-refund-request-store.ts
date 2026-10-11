@@ -5,6 +5,7 @@ import type { ConsumerTransaction } from "@bop/eventing";
 import {
   decodeOrdinaryRefundRequest,
   encodeOrdinaryRefundRequest,
+  ordinaryRefundClaimKind,
   ordinaryRefundPaymentAmount,
   parseOrdinaryRefundRequest,
   type OrdinaryRefundRequest,
@@ -744,7 +745,7 @@ export function createPostgresOrdinaryRefundEscalationSource(options: {
         ...scope,
         orderReference,
         requestReference: entry.requestReference,
-        kind: "Ordinary",
+        kind: ordinaryRefundClaimKind(entry),
         status: "Requested",
         amountMinor: entry.amountMinor,
         currencyCode: entry.currencyCode,

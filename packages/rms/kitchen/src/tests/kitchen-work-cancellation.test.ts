@@ -9,6 +9,7 @@ import {
   parseKitchenWorkCancelledEnvelope,
   parseKitchenWorkLifecycleEnvelope,
 } from "../index.js";
+import { listStoreKitchenOrderItemStates } from "../index.js";
 import { kitchenBatchCancellationEvidenceDigest } from "../infrastructure/persistence/kitchen-work-cancellation-store.js";
 
 const id = (n: number) => `0198c000-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -47,8 +48,9 @@ function harness(
   state: {
     ticket?: Record<string, unknown> | null;
     items?: ItemRow[];
-    started?: boolean;
+    started?: boolean | readonly string[];
     cancellations?: Record<string, unknown>[];
+    readyLines?: readonly string[];
   } = {},
 ) {
   const calls: { sql: string; values: readonly unknown[] }[] = [];
@@ -72,7 +74,18 @@ function harness(
       return result(state.items ?? [item(1), item(2)]);
     if (sql.includes("FROM rms_kitchen.kitchen_work_cancellation"))
       return result(state.cancellations ?? []);
-    if (sql.includes("KITCHEN_WORK_ITEM_STARTED")) return result(state.started ? [{}] : []);
+    if (sql.includes("FROM rms_kitchen.kitchen_order_item_ready_result"))
+      return result((state.readyLines ?? []).map((line) => ({ order_item_id: line })));
+    if (sql.includes("KITCHEN_WORK_ITEM_STARTED")) {
+      const started = state.started;
+      const targeted = (values[3] ?? []) as readonly string[];
+      return result(
+        started === true ||
+          (Array.isArray(started) && started.some((value) => targeted.includes(value)))
+          ? [{}]
+          : [],
+      );
+    }
     if (sql.startsWith("SELECT") && sql.includes("platform_audit.audit_chain_head"))
       return result([{ next_sequence: "1", previous_hash: null, recorded_at: cancelledAt }]);
     if (sql.startsWith("UPDATE platform_audit.audit_chain_head"))
@@ -104,6 +117,31 @@ const cancellation = (allowed = true) =>
     tenantReference: id(99),
     authorize: async () => allowed,
   });
+
+function insertedRows(calls: { sql: string; values: readonly unknown[] }[]) {
+  return calls
+    .filter((call) => call.sql.startsWith("INSERT INTO rms_kitchen.kitchen_work_cancellation"))
+    .map((call) => ({
+      kitchen_work_cancellation_id: call.values[0],
+      operation_id: call.values[1],
+      kitchen_ticket_id: call.values[4],
+      kitchen_work_item_id: call.values[5],
+      order_id: call.values[6],
+      order_batch_id: call.values[7],
+      order_item_id: call.values[8],
+      before_status: call.values[9],
+      expected_ticket_version: call.values[10],
+      result_ticket_version: call.values[11],
+      expected_work_item_version: call.values[12],
+      result_work_item_version: call.values[13],
+      actor_id: call.values[14],
+      order_cancellation_id: call.values[16],
+      evidence_digest: call.values[17],
+      event_id: call.values[18],
+      audit_id: call.values[19],
+      cancelled_at: new Date(String(call.values[20])),
+    }));
+}
 
 describe("Kitchen staff batch cancellation (WP-2423 Q6)", () => {
   it("round-trips one strict KitchenWorkCancelled event per batch", () => {
@@ -319,6 +357,275 @@ describe("Kitchen staff batch cancellation (WP-2423 Q6)", () => {
     ).rejects.toMatchObject({ code: "KITCHEN_CANCELLATION_UNAVAILABLE" });
     await expect(
       listStoreStartedKitchenBatches(transaction, scope, ["not-a-reference"]),
+    ).rejects.toMatchObject({ code: "KITCHEN_CANCELLATION_UNAVAILABLE" });
+  });
+});
+
+describe("Kitchen staff item cancellation (WP-2423 Q6 step 2)", () => {
+  // Line 201 is split into work items 101 and 103; line 202 has work item 102.
+  const split = () => [
+    item(1),
+    item(3, { order_item_id: id(201) }),
+    item(2, { status: "In Progress", version: "3" }),
+  ];
+  const sorted = (rows: ItemRow[]) =>
+    [...rows].sort((a, b) =>
+      a.order_item_id === b.order_item_id
+        ? a.kitchen_work_item_id.localeCompare(b.kitchen_work_item_id)
+        : a.order_item_id.localeCompare(b.order_item_id),
+    );
+  const itemsInput = (lines: string[], overrides: Record<string, unknown> = {}) => ({
+    ...input(overrides),
+    orderItemReferences: lines,
+  });
+
+  it("cancels every work item of the selected line and leaves the rest of the ticket active", async () => {
+    const test = harness({ items: sorted(split()) });
+    const result = await cancellation().cancelItems(test.transaction, itemsInput([id(201)]));
+    expect(result).toMatchObject({ status: "Cancelled", workItemCount: 2 });
+    const rows = insertedRows(test.calls);
+    expect(rows.map((row) => [row.kitchen_work_item_id, row.order_item_id])).toEqual([
+      [id(101), id(201)],
+      [id(103), id(201)],
+    ]);
+    expect(rows.map((row) => [row.expected_ticket_version, row.result_ticket_version])).toEqual([
+      ["2", "3"],
+      ["3", "4"],
+    ]);
+    const updated = test.calls.filter((call) =>
+      call.sql.startsWith("UPDATE rms_kitchen.kitchen_work_item"),
+    );
+    expect(updated.map((call) => call.values[3])).toEqual([id(101), id(103)]);
+    // The started check covers only the targeted work items, not the line in progress.
+    const started = test.calls.find((call) => call.sql.includes("KITCHEN_WORK_ITEM_STARTED"));
+    expect(started?.values[3]).toEqual([id(101), id(103)]);
+    const outbox = test.calls.filter((call) => call.sql.includes("outbox_event"));
+    expect(outbox.map((call) => call.values[1])).toEqual(["KitchenWorkCancelled"]);
+    expect(result.evidenceDigest).toBe(
+      kitchenBatchCancellationEvidenceDigest({
+        orderReference: order,
+        orderBatchReference: batch,
+        kitchenTicketReference: ticket,
+        items: [101, 103].map((n, index) => ({
+          workItemReference: id(n),
+          orderItemReference: id(201),
+          beforeStatus: "Queued" as const,
+          expectedTicketVersion: 2n + BigInt(index),
+          resultTicketVersion: 3n + BigInt(index),
+          expectedWorkItemVersion: 1n,
+          resultWorkItemVersion: 2n,
+        })),
+      }),
+    );
+  });
+
+  it.each([
+    ["the line is in progress", { items: sorted(split()) }, [id(202)]],
+    ["a work item of the line recorded a Start", { started: [id(103)] }, [id(201)]],
+  ])("refuses when %s and writes nothing", async (_name, state, lines) => {
+    const test = harness({ items: sorted(split()), ...state });
+    await expect(
+      cancellation().cancelItems(test.transaction, itemsInput(lines)),
+    ).rejects.toMatchObject({ code: "KITCHEN_WORK_STARTED" });
+    expect(test.calls.some((call) => /^(UPDATE|INSERT|SAVEPOINT)/u.test(call.sql))).toBe(false);
+  });
+
+  it("allows a line while another line has started", async () => {
+    const test = harness({ items: sorted(split()), started: [id(102)] });
+    expect((await cancellation().cancelItems(test.transaction, itemsInput([id(201)]))).status).toBe(
+      "Cancelled",
+    );
+  });
+
+  it.each([
+    ["a line not on the ticket", [id(299)]],
+    ["a duplicate line", [id(201), id(201)]],
+    ["no line", []],
+  ])("refuses %s", async (_name, lines) => {
+    const test = harness({ items: sorted(split()) });
+    await expect(
+      cancellation().cancelItems(test.transaction, itemsInput(lines)),
+    ).rejects.toMatchObject({ code: "KITCHEN_CANCELLATION_UNAVAILABLE" });
+    expect(test.calls.some((call) => /^(UPDATE|INSERT|SAVEPOINT)/u.test(call.sql))).toBe(false);
+  });
+
+  it("publishes KitchenOrderReady when every remaining line is already ready", async () => {
+    const items = [item(1), item(2, { status: "Completed", version: "5" })];
+    const ready = harness({ items, readyLines: [id(202)] });
+    expect(
+      (await cancellation().cancelItems(ready.transaction, itemsInput([id(201)]))).status,
+    ).toBe("Cancelled");
+    const outbox = ready.calls.filter((call) => call.sql.includes("outbox_event"));
+    expect(outbox.map((call) => call.values[1])).toEqual([
+      "KitchenWorkCancelled",
+      "KitchenOrderReady",
+    ]);
+    // Same ticket version as the cancellation event; System actor; ready at the cancellation.
+    expect(outbox[1]?.values[8]).toBe("3");
+    expect(outbox[1]?.values[11]).toBe("System");
+    expect(JSON.parse(String(outbox[1]?.values[13]))).toEqual({
+      kitchenTicketReference: ticket,
+      orderReference: order,
+      orderBatchReference: batch,
+      readyItemCount: 1,
+      itemCount: 1,
+      readyAt: cancelledAt,
+    });
+    const notReady = harness({ items, readyLines: [] });
+    await cancellation().cancelItems(notReady.transaction, itemsInput([id(201)]));
+    expect(
+      notReady.calls
+        .filter((call) => call.sql.includes("outbox_event"))
+        .map((call) => call.values[1]),
+    ).toEqual(["KitchenWorkCancelled"]);
+  });
+
+  it("replays the same item cancellation and refuses a cancelled line under another operation", async () => {
+    const first = harness({ items: sorted(split()) });
+    const command = itemsInput([id(201)]);
+    const created = await cancellation().cancelItems(first.transaction, command);
+    const state = {
+      ticket: { version: "4", updated_at: cancelledAt },
+      items: sorted([
+        item(1, { status: "Cancelled", version: "2", updated_at: cancelledAt }),
+        item(3, {
+          order_item_id: id(201),
+          status: "Cancelled",
+          version: "2",
+          updated_at: cancelledAt,
+        }),
+        item(2, { status: "In Progress", version: "3" }),
+      ]),
+      cancellations: insertedRows(first.calls),
+    };
+    const replay = harness(state);
+    expect(await cancellation().cancelItems(replay.transaction, command)).toEqual({
+      ...created,
+      status: "AlreadyCancelled",
+    });
+    expect(replay.calls.some((call) => /^(UPDATE|INSERT|SAVEPOINT)/u.test(call.sql))).toBe(false);
+    // The same operation naming a different line is not a replay.
+    await expect(
+      cancellation().cancelItems(harness(state).transaction, {
+        ...command,
+        orderItemReferences: [id(202)],
+      }),
+    ).rejects.toMatchObject({ code: "KITCHEN_CANCELLATION_UNAVAILABLE" });
+    // A new operation cannot cancel the line again.
+    await expect(
+      cancellation().cancelItems(
+        harness(state).transaction,
+        itemsInput([id(201)], { operationReference: id(30), orderCancellationReference: id(31) }),
+      ),
+    ).rejects.toMatchObject({ code: "KITCHEN_CANCELLATION_UNAVAILABLE" });
+  });
+
+  it("cancels only the remaining work items when the whole batch is cancelled after a line", async () => {
+    const first = harness({ items: [item(1), item(2)] });
+    await cancellation().cancelItems(first.transaction, itemsInput([id(201)]));
+    const earlier = insertedRows(first.calls);
+    const state = {
+      ticket: { version: "3", updated_at: cancelledAt },
+      items: [item(1, { status: "Cancelled", version: "2", updated_at: cancelledAt }), item(2)],
+      cancellations: earlier,
+    };
+    const later = "2026-08-11T12:05:00.000Z";
+    const whole = harness(state);
+    const command = input({
+      operationReference: id(40),
+      orderCancellationReference: id(41),
+      auditReference: id(42),
+      eventReference: id(43),
+      cancelledAt: later,
+    });
+    const result = await cancellation().cancel(whole.transaction, command);
+    expect(result).toMatchObject({ status: "Cancelled", workItemCount: 1 });
+    const rows = insertedRows(whole.calls);
+    expect(rows.map((row) => [row.kitchen_work_item_id, row.expected_ticket_version])).toEqual([
+      [id(102), "3"],
+    ]);
+    // Replay of the whole cancellation sees only its own rows.
+    const replay = harness({
+      ticket: { version: "4", updated_at: later },
+      items: [
+        item(1, { status: "Cancelled", version: "2", updated_at: cancelledAt }),
+        item(2, { status: "Cancelled", version: "2", updated_at: later }),
+      ],
+      cancellations: [...earlier, ...rows],
+    });
+    expect(await cancellation().cancel(replay.transaction, command)).toEqual({
+      ...result,
+      status: "AlreadyCancelled",
+    });
+    // Nothing remains for a different whole cancellation.
+    await expect(
+      cancellation().cancel(
+        harness({
+          ticket: { version: "4", updated_at: later },
+          items: [
+            item(1, { status: "Cancelled", version: "2", updated_at: cancelledAt }),
+            item(2, { status: "Cancelled", version: "2", updated_at: later }),
+          ],
+          cancellations: [...earlier, ...rows],
+        }).transaction,
+        input({
+          operationReference: id(50),
+          orderCancellationReference: id(51),
+          cancelledAt: later,
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "KITCHEN_CANCELLATION_UNAVAILABLE" });
+  });
+
+  it("refuses a Cancelled work item without its cancellation row", async () => {
+    const test = harness({
+      items: [item(1, { status: "Cancelled", version: "2" }), item(2)],
+    });
+    await expect(cancellation().cancel(test.transaction, input())).rejects.toMatchObject({
+      code: "KITCHEN_CANCELLATION_UNAVAILABLE",
+    });
+  });
+
+  it("lists per line kitchen state for the merchant queue", async () => {
+    const rows = [
+      { order_item_id: id(201), status: "Queued", started: false },
+      { order_item_id: id(202), status: "Held", started: false },
+      { order_item_id: id(203), status: "Queued", started: true },
+      { order_item_id: id(204), status: "Completed", started: false },
+      { order_item_id: id(205), status: "Cancelled", started: false },
+      { order_item_id: id(206), status: "Queued", started: false },
+      { order_item_id: id(206), status: "In Progress", started: true },
+    ];
+    const query = vi.fn(async () => ({ rows, rowCount: rows.length }));
+    const transaction = { query } as unknown as ConsumerTransaction;
+    const scope = { brandReference: brand, storeReference: store };
+    expect(
+      Object.fromEntries(await listStoreKitchenOrderItemStates(transaction, scope, [batch])),
+    ).toEqual({
+      [id(201)]: "NotStarted",
+      [id(202)]: "NotStarted",
+      [id(203)]: "Started",
+      [id(204)]: "Started",
+      [id(205)]: "Cancelled",
+      [id(206)]: "Started",
+    });
+    expect(await listStoreKitchenOrderItemStates(transaction, scope, [])).toEqual(new Map());
+    await expect(
+      listStoreKitchenOrderItemStates(
+        transaction,
+        scope,
+        Array.from({ length: 101 }, (_, index) => id(1000 + index)),
+      ),
+    ).rejects.toMatchObject({ code: "KITCHEN_CANCELLATION_UNAVAILABLE" });
+    query.mockResolvedValueOnce({
+      rows: [
+        { order_item_id: id(201), status: "Cancelled", started: false },
+        { order_item_id: id(201), status: "Queued", started: false },
+      ],
+      rowCount: 2,
+    });
+    await expect(
+      listStoreKitchenOrderItemStates(transaction, scope, [batch]),
     ).rejects.toMatchObject({ code: "KITCHEN_CANCELLATION_UNAVAILABLE" });
   });
 });

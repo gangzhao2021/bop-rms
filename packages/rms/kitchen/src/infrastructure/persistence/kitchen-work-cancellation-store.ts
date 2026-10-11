@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { appendAuditRecordInTransaction } from "@bop/audit";
 import { appendEventInTransaction, type ConsumerTransaction } from "@bop/eventing";
 
+import { parseKitchenOrderReadyEnvelope } from "../../application/kitchen-ready-events.js";
 import { createKitchenWorkCancelledEnvelope } from "../../application/kitchen-work-cancelled-event.js";
 import {
   KitchenBatchCancellationError,
@@ -10,6 +11,7 @@ import {
   kitchenWorkCancellationReasonCode,
   kitchenWorkCancellationSourceChannel,
   type KitchenBatchCancellationResult,
+  type KitchenOrderItemCancellationState,
   type KitchenWorkCancellationRecord,
 } from "../../contracts/kitchen-work-cancellation.js";
 import {
@@ -164,11 +166,37 @@ interface CancelInput {
   nextReference(): string;
 }
 
+interface CancelItemsInput extends CancelInput {
+  /** Order lines to cancel; every work item of each line is cancelled (a line may be split). */
+  readonly orderItemReferences: readonly string[];
+}
+
+type CancellationScope =
+  | { readonly kind: "Batch" }
+  | { readonly kind: "Items"; readonly orderItemReferences: readonly string[] };
+
+interface LockedWorkItem {
+  readonly workItemReference: string;
+  readonly orderItemReference: string;
+  readonly version: bigint;
+  readonly status: string;
+  readonly updatedAt: string;
+}
+
+function parseOrderItemReferences(value: unknown): readonly string[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 100) return unavailable();
+  const references = value.map((entry) => parseKitchenTicketReference(entry));
+  if (new Set(references).size !== references.length) return unavailable();
+  return Object.freeze(references);
+}
+
 /**
- * WP-2423 Q6 Kitchen half of the staff cancellation command. The caller owns the transaction,
+ * WP-2423 Q6 Kitchen half of the staff cancellation commands. The caller owns the transaction,
  * tenant context and every foreign owner fence (Ordering disposition) taken before this locks the
- * kitchen ticket and then its work items. Either every work item of the batch becomes Cancelled or
- * nothing is written. The outbox event uses the Kitchen convention tenantId = brand.
+ * kitchen ticket and then its work items. `cancel` cancels every work item of the batch that is
+ * not already cancelled; `cancelItems` cancels every work item of the selected order lines and
+ * leaves the rest of the ticket active. Either every targeted work item becomes Cancelled or
+ * nothing is written. Outbox events use the Kitchen convention tenantId = brand.
  */
 export function createPostgresKitchenBatchCancellation(options: {
   readonly brandReference: string;
@@ -190,9 +218,10 @@ export function createPostgresKitchenBatchCancellation(options: {
     guarded(() => parseKitchenTicketReference(options.tenantReference));
   const scope = { brandReference: brand, storeReference: store };
 
-  async function cancel(
+  async function execute(
     tx: ConsumerTransaction,
     raw: CancelInput,
+    target: CancellationScope,
   ): Promise<KitchenBatchCancellationResult> {
     const input = guarded(() => ({
       orderReference: parseKitchenTicketReference(raw.orderReference),
@@ -252,7 +281,7 @@ export function createPostgresKitchenBatchCancellation(options: {
       [brand, store, ticketReference],
     );
     if (itemRows.rows.length < 1 || itemRows.rows.length > 100) return unavailable();
-    const items = itemRows.rows.map((row) =>
+    const items: readonly LockedWorkItem[] = itemRows.rows.map((row) =>
       guarded(() => {
         if (
           row.order_id !== input.orderReference ||
@@ -270,33 +299,66 @@ export function createPostgresKitchenBatchCancellation(options: {
     );
 
     const existing = await loadKitchenWorkCancellations(tx, scope, ticketReference);
-    if (existing.length > 0) {
-      const first = existing[0];
+    if (
+      existing.some(
+        (row) =>
+          row.orderReference !== input.orderReference ||
+          row.orderBatchReference !== input.orderBatchReference ||
+          !items.some(
+            (item) =>
+              item.workItemReference === row.workItemReference &&
+              item.orderItemReference === row.orderItemReference &&
+              item.status === "Cancelled" &&
+              item.version === row.resultWorkItemVersion,
+          ),
+      ) ||
+      // Every Cancelled work item is explained by its cancellation row.
+      items.some(
+        (item) =>
+          item.status === "Cancelled" &&
+          !existing.some((row) => row.workItemReference === item.workItemReference),
+      )
+    )
+      return unavailable();
+    // Replay considers only the rows of this operation or this Ordering cancellation; rows of
+    // earlier item cancellations belong to other operations.
+    const mine = existing.filter(
+      (row) =>
+        row.operationReference === input.operationReference ||
+        row.orderCancellationReference === input.orderCancellationReference,
+    );
+    if (mine.length > 0) {
+      const first = mine[0];
       if (
         first === undefined ||
-        existing.length !== items.length ||
-        existing.some(
+        mine.some(
           (row) =>
             row.operationReference !== first.operationReference ||
             row.orderCancellationReference !== first.orderCancellationReference ||
             row.evidenceDigest !== first.evidenceDigest ||
-            row.orderBatchReference !== input.orderBatchReference ||
-            row.orderReference !== input.orderReference,
-        ) ||
-        (first.operationReference !== input.operationReference &&
-          first.orderCancellationReference !== input.orderCancellationReference)
+            row.eventReference !== first.eventReference ||
+            row.auditReference !== first.auditReference,
+        )
       )
         return unavailable();
-      const ordered = items.map((item) => {
-        const row = existing.find((value) => value.workItemReference === item.workItemReference);
+      if (target.kind === "Batch") {
+        if (items.some((item) => item.status !== "Cancelled")) return unavailable();
+      } else {
+        const lines = new Set(mine.map((row) => row.orderItemReference));
         if (
-          row === undefined ||
-          item.status !== "Cancelled" ||
-          item.version !== row.resultWorkItemVersion ||
-          row.orderItemReference !== item.orderItemReference
+          lines.size !== target.orderItemReferences.length ||
+          target.orderItemReferences.some((line) => !lines.has(line)) ||
+          items.some(
+            (item) =>
+              lines.has(item.orderItemReference) &&
+              !mine.some((row) => row.workItemReference === item.workItemReference),
+          )
         )
           return unavailable();
-        return row;
+      }
+      const ordered = items.flatMap((item) => {
+        const row = mine.find((value) => value.workItemReference === item.workItemReference);
+        return row === undefined ? [] : [row];
       });
       const evidenceDigest = kitchenBatchCancellationEvidenceDigest({
         orderReference: input.orderReference,
@@ -304,7 +366,8 @@ export function createPostgresKitchenBatchCancellation(options: {
         kitchenTicketReference: ticketReference,
         items: ordered,
       });
-      if (evidenceDigest !== first.evidenceDigest) return unavailable();
+      if (ordered.length !== mine.length || evidenceDigest !== first.evidenceDigest)
+        return unavailable();
       return Object.freeze({
         status: "AlreadyCancelled" as const,
         kitchenTicketReference: ticketReference,
@@ -313,22 +376,66 @@ export function createPostgresKitchenBatchCancellation(options: {
       });
     }
 
+    let targets: readonly LockedWorkItem[];
+    if (target.kind === "Batch") {
+      // Lines an earlier item cancellation already removed stay as they are.
+      targets = items.filter((item) => item.status !== "Cancelled");
+    } else {
+      targets = items.filter((item) =>
+        target.orderItemReferences.includes(item.orderItemReference),
+      );
+      if (
+        target.orderItemReferences.some(
+          (line) => !targets.some((item) => item.orderItemReference === line),
+        )
+      )
+        return unavailable();
+    }
+    if (targets.length === 0) return unavailable();
     const started = await tx.query(
       "SELECT 1 FROM rms_kitchen.kitchen_work_lifecycle_operation WHERE brand_id=$1 AND store_id=$2 " +
-        "AND kitchen_ticket_id=$3 AND action_code='KITCHEN_WORK_ITEM_STARTED' LIMIT 1",
-      [brand, store, ticketReference],
+        "AND kitchen_ticket_id=$3 AND kitchen_work_item_id=ANY($4::uuid[]) " +
+        "AND action_code='KITCHEN_WORK_ITEM_STARTED' LIMIT 1",
+      [brand, store, ticketReference, targets.map((item) => item.workItemReference)],
     );
-    if (items.some((item) => item.status === "Cancelled")) return unavailable();
-    if (started.rows.length > 0 || items.some((item) => !["Queued", "Held"].includes(item.status)))
+    if (targets.some((item) => item.status === "Cancelled")) return unavailable();
+    if (
+      started.rows.length > 0 ||
+      targets.some((item) => !["Queued", "Held"].includes(item.status))
+    )
       throw new KitchenBatchCancellationError("KITCHEN_WORK_STARTED");
     // Kitchen history is monotonic: a cancellation never precedes a fact it replaces.
     if (
       Date.parse(input.cancelledAt) < Date.parse(ticketUpdatedAt) ||
-      items.some((item) => Date.parse(input.cancelledAt) < Date.parse(item.updatedAt))
+      targets.some((item) => Date.parse(input.cancelledAt) < Date.parse(item.updatedAt))
     )
       return unavailable();
 
-    const plan = items.map((item, index) => ({
+    // The lines left active after this cancellation. When each already has its ready result,
+    // removing the last unfinished lines makes the order ready, exactly as the last ready line would.
+    const remainingLines = [
+      ...new Set(
+        items
+          .filter(
+            (item) =>
+              item.status !== "Cancelled" &&
+              !targets.some((value) => value.workItemReference === item.workItemReference),
+          )
+          .map((item) => item.orderItemReference),
+      ),
+    ];
+    let orderReady = false;
+    if (remainingLines.length > 0) {
+      const ready = await tx.query(
+        "SELECT order_item_id FROM rms_kitchen.kitchen_order_item_ready_result " +
+          "WHERE brand_id=$1 AND store_id=$2 AND kitchen_ticket_id=$3",
+        [brand, store, ticketReference],
+      );
+      const readyLines = new Set(ready.rows.map((row) => String(row.order_item_id)));
+      orderReady = remainingLines.every((line) => readyLines.has(line));
+    }
+
+    const plan = targets.map((item, index) => ({
       cancellationReference: guarded(() => parseKitchenTicketReference(raw.nextReference())),
       workItemReference: item.workItemReference,
       orderItemReference: item.orderItemReference,
@@ -338,7 +445,14 @@ export function createPostgresKitchenBatchCancellation(options: {
       expectedWorkItemVersion: item.version,
       resultWorkItemVersion: item.version + 1n,
     }));
-    const owned = [...generated, ...plan.map((item) => item.cancellationReference)];
+    const orderReadyEventReference = orderReady
+      ? guarded(() => parseKitchenTicketReference(raw.nextReference()))
+      : null;
+    const owned = [
+      ...generated,
+      ...plan.map((item) => item.cancellationReference),
+      ...(orderReadyEventReference === null ? [] : [orderReadyEventReference]),
+    ];
     const observed = [
       brand,
       store,
@@ -347,6 +461,13 @@ export function createPostgresKitchenBatchCancellation(options: {
       input.orderBatchReference,
       input.actorReference,
       ...items.flatMap((item) => [item.workItemReference, item.orderItemReference]),
+      ...existing.flatMap((row) => [
+        row.cancellationReference,
+        row.operationReference,
+        row.orderCancellationReference,
+        row.eventReference,
+        row.auditReference,
+      ]),
     ];
     if (
       new Set(owned).size !== owned.length ||
@@ -389,6 +510,38 @@ export function createPostgresKitchenBatchCancellation(options: {
         }),
       }),
     );
+    // Same System event the lifecycle publishes when the last line becomes ready; the pickup
+    // proof consumer and the queue refresh follow it.
+    const orderReadyEvent =
+      orderReadyEventReference === null
+        ? null
+        : guarded(() =>
+            parseKitchenOrderReadyEnvelope({
+              eventId: orderReadyEventReference,
+              eventType: "KitchenOrderReady",
+              schemaVersion: 1,
+              occurredAt: input.cancelledAt,
+              producerModule: "@rms/kitchen",
+              tenantId: brand,
+              storeId: store,
+              aggregateType: "KitchenTicket",
+              aggregateId: ticketReference,
+              aggregateVersion: finalTicketVersion,
+              correlationId: input.orderCancellationReference,
+              causationId: input.operationReference,
+              actor: { type: "System" },
+              payload: {
+                kitchenTicketReference: ticketReference,
+                orderReference: input.orderReference,
+                orderBatchReference: input.orderBatchReference,
+                readyItemCount: remainingLines.length,
+                itemCount: remainingLines.length,
+                readyAt: input.cancelledAt,
+              },
+              redactionClassification: "indirect_identifier",
+              replayMetadata: { replaySafe: true },
+            }),
+          );
 
     await tx.query("SAVEPOINT kitchen_batch_cancellation", []);
     try {
@@ -475,7 +628,10 @@ export function createPostgresKitchenBatchCancellation(options: {
         afterSummary: {
           ticketVersion: finalTicketVersion.toString(10),
           status: "Cancelled",
+          scope: target.kind === "Batch" ? "Batch" : "Items",
           workItemCount: plan.length,
+          remainingOrderItemCount: remainingLines.length,
+          orderReady,
           operationReference: input.operationReference,
           orderCancellationReference: input.orderCancellationReference,
           evidenceDigest,
@@ -489,6 +645,7 @@ export function createPostgresKitchenBatchCancellation(options: {
         retentionPolicyVersion: kitchenWorkLifecycleAuditRetentionPolicyVersion,
       });
       await appendEventInTransaction(tx, event);
+      if (orderReadyEvent !== null) await appendEventInTransaction(tx, orderReadyEvent);
       await tx.query("RELEASE SAVEPOINT kitchen_batch_cancellation", []);
     } catch {
       await tx.query("ROLLBACK TO SAVEPOINT kitchen_batch_cancellation", []);
@@ -503,16 +660,96 @@ export function createPostgresKitchenBatchCancellation(options: {
     });
   }
 
+  async function run(work: () => Promise<KitchenBatchCancellationResult>) {
+    try {
+      return await work();
+    } catch (error) {
+      if (error instanceof KitchenBatchCancellationError) throw error;
+      return unavailable();
+    }
+  }
+
   return Object.freeze({
+    /** Cancels every work item of the batch that an earlier item cancellation did not remove. */
     async cancel(tx: ConsumerTransaction, input: CancelInput) {
-      try {
-        return await cancel(tx, input);
-      } catch (error) {
-        if (error instanceof KitchenBatchCancellationError) throw error;
-        return unavailable();
-      }
+      return run(() => execute(tx, input, { kind: "Batch" }));
+    },
+    /**
+     * Cancels every work item of the selected order lines; the rest of the ticket stays active.
+     * Emits KitchenOrderReady in the same transaction when every remaining line is already ready.
+     */
+    async cancelItems(tx: ConsumerTransaction, input: CancelItemsInput) {
+      return run(async () => {
+        const orderItemReferences = guarded(() =>
+          parseOrderItemReferences(input.orderItemReferences),
+        );
+        return execute(tx, input, { kind: "Items", orderItemReferences });
+      });
     },
   });
+}
+
+/** Per order line kitchen state of a store's batches (at most 100 batch references). A line is
+ * Started when any of its work items left Queued/Held or recorded a Start; Cancelled when all of
+ * its work items were cancelled by staff. */
+export async function listStoreKitchenOrderItemStates(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderBatchReferences: readonly string[],
+): Promise<ReadonlyMap<string, KitchenOrderItemCancellationState>> {
+  const brand = guarded(() => parseKitchenTicketReference(scope.brandReference));
+  const store = guarded(() => parseKitchenTicketReference(scope.storeReference));
+  if (!Array.isArray(orderBatchReferences) || orderBatchReferences.length > 100)
+    return unavailable();
+  const batches = guarded(() =>
+    [...new Set(orderBatchReferences)].map((value) => parseKitchenTicketReference(value)),
+  );
+  if (batches.length === 0) return new Map();
+  try {
+    const result = await tx.query(
+      "SELECT w.order_item_id,w.status,EXISTS (SELECT 1 FROM rms_kitchen.kitchen_work_lifecycle_operation o " +
+        "WHERE o.brand_id=w.brand_id AND o.store_id=w.store_id AND o.kitchen_ticket_id=w.kitchen_ticket_id " +
+        "AND o.kitchen_work_item_id=w.kitchen_work_item_id AND o.action_code='KITCHEN_WORK_ITEM_STARTED') AS started " +
+        "FROM rms_kitchen.kitchen_ticket t JOIN rms_kitchen.kitchen_work_item w ON w.brand_id=t.brand_id " +
+        "AND w.store_id=t.store_id AND w.kitchen_ticket_id=t.kitchen_ticket_id " +
+        "WHERE t.brand_id=$1 AND t.store_id=$2 AND t.order_batch_id=ANY($3::uuid[]) " +
+        "ORDER BY w.order_item_id,w.kitchen_work_item_id LIMIT 10001",
+      [brand, store, batches],
+    );
+    if (result.rows.length > 10_000) return unavailable();
+    const states = new Map<string, { started: boolean; cancelled: number; total: number }>();
+    for (const row of result.rows) {
+      const line = parseKitchenTicketReference(row.order_item_id);
+      const status = String(row.status);
+      if (
+        !["Queued", "Held", "In Progress", "Completed", "Cancelled"].includes(status) ||
+        typeof row.started !== "boolean"
+      )
+        return unavailable();
+      const prior = states.get(line) ?? { started: false, cancelled: 0, total: 0 };
+      states.set(line, {
+        started:
+          prior.started ||
+          row.started ||
+          (status !== "Queued" && status !== "Held" && status !== "Cancelled"),
+        cancelled: prior.cancelled + (status === "Cancelled" ? 1 : 0),
+        total: prior.total + 1,
+      });
+    }
+    const output = new Map<string, KitchenOrderItemCancellationState>();
+    for (const [line, state] of states) {
+      // Staff cancel every work item of a line together; a partly cancelled line is not written.
+      if (state.cancelled > 0 && (state.cancelled !== state.total || state.started))
+        return unavailable();
+      output.set(
+        line,
+        state.cancelled > 0 ? "Cancelled" : state.started ? "Started" : "NotStarted",
+      );
+    }
+    return output;
+  } catch {
+    return unavailable();
+  }
 }
 
 /** Batches (of at most 100 order batch references) where any kitchen work item has started. */

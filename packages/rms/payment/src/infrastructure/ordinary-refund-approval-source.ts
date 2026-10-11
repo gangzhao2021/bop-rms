@@ -2,6 +2,7 @@ import type { ConsumerTransaction } from "@bop/eventing";
 import { createOrdinaryRefundIndependentApproval } from "../application/ordinary-refund-approval.js";
 import { exactPaymentObject, parsePaymentInstant } from "../application/payment-intent-creation.js";
 import { parsePaymentReference } from "../application/payment-provider-adapter.js";
+import { ordinaryRefundClaimKind } from "../application/ordinary-refund-request.js";
 import { createPostgresOrdinaryRefundApprovalSubjectSource } from "./persistence/ordinary-refund-request-store.js";
 
 type SubjectOptions = Parameters<typeof createPostgresOrdinaryRefundApprovalSubjectSource>[0];
@@ -39,6 +40,9 @@ export function createPostgresOrdinaryRefundApprovalSource(
     const approverReference = String(parsePaymentReference(raw.approverReference));
     const observedAt = parsePaymentInstant(raw.observedAt);
     const persisted = await subjectSource(tx, { orderReference, requestReference, observedAt });
+    // Cancellation claims are authorized by their cancellation record, never approved.
+    if (ordinaryRefundClaimKind(persisted.request) !== "Ordinary")
+      throw new Error("ORDINARY_REFUND_APPROVAL_DENIED");
     const base = {
       tenantReference: persisted.subject.tenantReference,
       brandReference: persisted.subject.brandReference,

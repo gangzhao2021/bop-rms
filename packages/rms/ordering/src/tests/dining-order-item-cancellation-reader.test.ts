@@ -108,7 +108,9 @@ function readerFixture() {
         : [cancellation]
       : sql.includes("FROM rms_ordering.order_staff_cancellation")
         ? staff
-        : rows,
+        : sql.includes("FROM rms_ordering.order_item_staff_cancellation")
+          ? []
+          : rows,
     rowCount: 1,
   }));
   const input = {

@@ -25,6 +25,7 @@ const order = (orderType: "Pickup" | "DineIn", canCancel: boolean) => ({
       canRequestAcceptance: false,
       canCancel,
       staffCancellation: null,
+      canCancelItems: false,
     },
   ],
   canRequestAcceptance: false,

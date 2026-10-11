@@ -299,6 +299,7 @@ export {
   kitchenWorkCancelledEventType,
   type KitchenBatchCancellationErrorCode,
   type KitchenBatchCancellationResult,
+  type KitchenOrderItemCancellationState,
   type KitchenWorkCancellationRecord,
   type KitchenWorkCancelledEnvelope,
   type KitchenWorkCancelledItem,
@@ -310,6 +311,7 @@ export {
 } from "./application/kitchen-work-cancelled-event.js";
 export {
   createPostgresKitchenBatchCancellation,
+  listStoreKitchenOrderItemStates,
   listStoreStartedKitchenBatches,
 } from "./infrastructure/persistence/kitchen-work-cancellation-store.js";
 export type {

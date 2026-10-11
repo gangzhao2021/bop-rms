@@ -1248,6 +1248,23 @@
   color: var(--bop-color-text-muted);
   font-size: 0.875rem;
 }
+/* WP-2423 Q6 step 2: items the store cancelled stay listed, muted, with their refund. */
+.order-status__item--cancelled .order-status__item-name,
+.order-status__item--cancelled .order-status__item-amount {
+  color: var(--bop-color-text-muted);
+  text-decoration: line-through;
+}
+.order-status__batch li > .order-status__item-cancelled {
+  grid-column: 1 / -1;
+  color: var(--bop-color-text-default);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.order-status__item-refund {
+  margin: var(--bop-space-2) 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 0.875rem;
+}
 .order-status__total {
   display: flex;
   justify-content: space-between;

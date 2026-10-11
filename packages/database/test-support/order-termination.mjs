@@ -26,6 +26,7 @@ export async function exerciseOrderTermination({ admin, role, run, id, hash, set
   await admin.query(
     "GRANT SELECT,INSERT,UPDATE,DELETE ON rms_ordering.order_termination_record TO " + role,
   );
+  await admin.query("GRANT SELECT ON rms_ordering.order_item_staff_cancellation TO " + role);
   await admin.query("GRANT SELECT ON rms_ordering.order_fulfillment_completion_record TO " + role);
   let seq = 19000;
   let authorized = true,

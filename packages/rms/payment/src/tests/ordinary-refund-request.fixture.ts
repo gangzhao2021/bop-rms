@@ -43,3 +43,32 @@ export function ordinaryRefundRequestFixture(at = "2026-09-13T10:00:00.000Z") {
     ],
   };
 }
+
+export const cancellationClaimFixture = () => ({
+  kind: "Cancellation",
+  cancellationReference: refundRequestId(40),
+  cancellationDigest: "sha256:" + "c".repeat(64),
+});
+/** One batch payment, tip excluded: 5000 net + 500 tax. */
+export function cancellationRequestFixture(at = "2026-09-13T10:00:00.000Z") {
+  const base = ordinaryRefundRequestFixture(at);
+  const payment = base.payments[0];
+  const item = payment?.items[0];
+  if (!payment || !item) throw new Error("FIXTURE_MISSING");
+  return {
+    ...base,
+    amountMinor: 5500n,
+    payments: [
+      {
+        ...payment,
+        items: [{ ...item, components: { ...item.components, tipAmountMinor: 0n } }],
+      },
+    ],
+    claim: cancellationClaimFixture(),
+  };
+}
+
+export function must<T>(value: T | undefined): T {
+  if (value === undefined) throw new Error("FIXTURE_MISSING");
+  return value;
+}

@@ -10,7 +10,8 @@ export interface KitchenCustomerBatchStatus {
   readonly ticketReference: string;
   readonly ticketVersion: bigint;
   readonly updatedAt: string;
-  /** WP-2423 Q6: "Cancelled" when staff cancelled the whole batch before the kitchen started it. */
+  /** WP-2423 Q6: computed over the lines that are not cancelled; "Cancelled" only when staff
+   * cancelled every line of the batch before the kitchen started it. */
   readonly status: "Queued" | "InProgress" | "Ready" | "Cancelled";
   readonly items: readonly {
     readonly orderItemReference: string;
@@ -82,10 +83,10 @@ export function createPostgresKitchenCustomerStatusReader(options: {
           );
           if (items.rows.length === 0 || items.rows.length > 1000) return unavailable();
           const seen = new Set<string>();
-          const itemStates = new Map<string, { allReady: boolean; allQueued: boolean }>();
-          let allReady = true;
-          let allQueued = true;
-          let cancelledCount = 0;
+          const itemStates = new Map<
+            string,
+            { allReady: boolean; allQueued: boolean; cancelled: number; total: number }
+          >();
           for (const item of items.rows) {
             const reference = parseKitchenTicketReference(item.kitchen_work_item_id);
             const orderItemReference = parseKitchenTicketReference(item.order_item_id);
@@ -109,8 +110,6 @@ export function createPostgresKitchenCustomerStatusReader(options: {
               (item.status === "Cancelled" && item.ready_result_id !== null)
             )
               return unavailable();
-            if (item.status === "Cancelled") cancelledCount++;
-            allQueued = allQueued && item.status === "Queued";
             const ready = item.ready_result_id !== null;
             if (ready) {
               parseKitchenTicketReference(item.ready_result_id);
@@ -122,48 +121,46 @@ export function createPostgresKitchenCustomerStatusReader(options: {
               )
                 return unavailable();
             }
-            allReady = allReady && ready;
             const prior = itemStates.get(orderItemReference);
             itemStates.set(orderItemReference, {
               allReady: (prior?.allReady ?? true) && ready,
               allQueued: (prior?.allQueued ?? true) && item.status === "Queued",
+              cancelled: (prior?.cancelled ?? 0) + (item.status === "Cancelled" ? 1 : 0),
+              total: (prior?.total ?? 0) + 1,
             });
           }
-          // Staff cancel a whole batch; a partly cancelled batch is not a state Kitchen writes.
-          if (cancelledCount > 0) {
-            if (cancelledCount !== items.rows.length) return unavailable();
-            batches.push({
-              orderBatchReference,
-              ticketReference,
-              ticketVersion: BigInt(ticket.version),
-              updatedAt,
-              status: "Cancelled",
-              items: Object.freeze(
-                [...itemStates.keys()].map((orderItemReference) =>
-                  Object.freeze({ orderItemReference, status: "Cancelled" as const }),
-                ),
-              ),
+          // WP-2423 Q6: staff cancel every work item of a line together, so a line is either
+          // cancelled or active. The batch status reflects its active lines; it is Cancelled only
+          // when staff cancelled every line.
+          const lines = [...itemStates].map(([orderItemReference, state]) => {
+            if (state.cancelled > 0 && state.cancelled !== state.total) return unavailable();
+            return Object.freeze({
+              orderItemReference,
+              status:
+                state.cancelled > 0
+                  ? ("Cancelled" as const)
+                  : state.allReady
+                    ? ("Ready" as const)
+                    : state.allQueued
+                      ? ("Queued" as const)
+                      : ("InProgress" as const),
             });
-            continue;
-          }
+          });
+          const active = lines.filter((line) => line.status !== "Cancelled");
           batches.push({
             orderBatchReference,
             ticketReference,
             ticketVersion: BigInt(ticket.version),
             updatedAt,
-            status: allReady ? "Ready" : allQueued ? "Queued" : "InProgress",
-            items: Object.freeze(
-              [...itemStates].map(([orderItemReference, state]) =>
-                Object.freeze({
-                  orderItemReference,
-                  status: state.allReady
-                    ? ("Ready" as const)
-                    : state.allQueued
-                      ? ("Queued" as const)
-                      : ("InProgress" as const),
-                }),
-              ),
-            ),
+            status:
+              active.length === 0
+                ? "Cancelled"
+                : active.every((line) => line.status === "Ready")
+                  ? "Ready"
+                  : active.every((line) => line.status === "Queued")
+                    ? "Queued"
+                    : "InProgress",
+            items: Object.freeze(lines),
           });
         }
         return { ...scope, batches };

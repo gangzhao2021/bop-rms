@@ -549,6 +549,7 @@ describe("WP-2402 authoritative Order fulfillment record", () => {
             },
           ];
         else if (sql.includes("FROM rms_ordering.order_termination_record")) rows = [];
+        else if (sql.includes("FROM rms_ordering.order_item_staff_cancellation")) rows = [];
         else if (sql.startsWith("SELECT order_type"))
           rows = [{ order_type: overrides.orderType ?? "Pickup" }];
         else if (sql.startsWith("INSERT INTO rms_ordering.order_fulfillment_completion_record")) {
