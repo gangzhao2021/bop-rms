@@ -629,4 +629,10 @@ it("WP-2423 Q6 step 2: marks cancelled items, their refund and the refund total"
   expect(html).toMatch(/Cancelled items refund<\/dt><dd>−\$28\.25<\/dd>/u);
   // Without a refund check context (or a cancellation reference) no button is offered.
   expect(renderToStaticMarkup(<CurrentOrderLines lines={lines} />)).not.toContain("Check refund");
+  // A batch the store cancelled whole marks its remaining lines too.
+  const whole = renderToStaticMarkup(
+    <CurrentOrderLines lines={lines} cancelledBatches={new Set([id(90)])} />,
+  );
+  expect(whole.match(/class="order-line-cancelled"/gu)).toHaveLength(4);
+  expect(whole).toContain("Cancelled by store");
 });

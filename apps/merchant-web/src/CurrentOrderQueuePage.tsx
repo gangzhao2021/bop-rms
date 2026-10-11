@@ -74,9 +74,12 @@ export interface ItemRefundCheckContext {
 export function CurrentOrderLines({
   lines,
   refundCheck,
+  cancelledBatches,
 }: {
   readonly lines: CurrentOrderDetail["lines"];
   readonly refundCheck?: ItemRefundCheckContext | undefined;
+  /** WP-2423 Q6: batches the store cancelled as a whole; their remaining lines read as cancelled. */
+  readonly cancelledBatches?: ReadonlySet<string> | undefined;
 }) {
   const t = lines.totals;
   const cancelledRefund = cancelledItemsRefund(lines.items);
@@ -101,7 +104,11 @@ export function CurrentOrderLines({
         {lines.items.map((item) => (
           <li
             key={item.orderItemReference}
-            className={item.cancellation === null ? undefined : "order-line-cancelled"}
+            className={
+              item.cancellation === null && !cancelledBatches?.has(item.orderBatchReference)
+                ? undefined
+                : "order-line-cancelled"
+            }
           >
             <span className="order-line-quantity">{item.quantity} ×</span>
             <span className="order-line-name">
@@ -117,6 +124,11 @@ export function CurrentOrderLines({
               ) : null}
               {item.customerNote !== null ? (
                 <span className="order-line-note">Note: {item.customerNote}</span>
+              ) : null}
+              {item.cancellation === null && cancelledBatches?.has(item.orderBatchReference) ? (
+                <span className="order-line-cancellation">
+                  <strong>Cancelled by store</strong>
+                </span>
               ) : null}
               {item.cancellation !== null ? (
                 <span className="order-line-cancellation">
@@ -176,6 +188,17 @@ export function CurrentOrderLines({
   );
 }
 
+/** WP-2423 Q6: batches the store cancelled as a whole (staff cancellation of the batch). */
+export function storeCancelledBatches(view: CurrentOrderQueue): ReadonlySet<string> {
+  return new Set(
+    view.items.flatMap((order) =>
+      order.batches
+        .filter((batch) => batch.staffCancellation !== null)
+        .map((batch) => batch.orderBatchReference),
+    ),
+  );
+}
+
 /** Reads an Order's lines when its queue entry is opened. */
 function QueuedOrderLines({
   orderReference,
@@ -202,7 +225,11 @@ function QueuedOrderLines({
     return () => controller.abort();
   }, [orderReference, client]);
   return state.kind === "Ready" ? (
-    <CurrentOrderLines lines={state.detail.lines} refundCheck={refundCheck} />
+    <CurrentOrderLines
+      lines={state.detail.lines}
+      refundCheck={refundCheck}
+      cancelledBatches={storeCancelledBatches(state.detail.view)}
+    />
   ) : (
     <p className="order-lines-state" role="status">
       {state.kind === "Loading"
@@ -657,6 +684,8 @@ export function CurrentOrderQueuePage({
   const reload = (cursor: string | null) => {
     if (servingOrders.current.size > 0) return;
     restoreFocus.current = true;
+    // WP-2423 Q6: a fresh read replaces the "could not be refreshed" notice from earlier polls.
+    setStale(false);
     setState({ kind: "Loading" });
     setAfter(cursor);
     setRefresh((value) => value + 1);
@@ -815,6 +844,7 @@ export function CurrentOrderQueuePage({
                     detail !== undefined ? (
                       <CurrentOrderLines
                         lines={detail.lines}
+                        cancelledBatches={storeCancelledBatches(detail.view)}
                         refundCheck={{
                           orderReference: order.orderReference,
                           csrf,

@@ -611,4 +611,28 @@ it("WP-2423 Q6 step 2: marks items the store cancelled and where their refund is
   expect(refunded).toContain(
     "Cancelled items: $9.04 refunded to your original payment (tax included, tip not refunded).",
   );
+  // The last item cancelled turns the round into a store cancellation refunded in full, tip included:
+  // every line is marked and the item summary's tip note no longer applies.
+  const whole = render({
+    ...state,
+    view: {
+      ...view,
+      order: { ...view.order, canonicalPhase: "Cancelled" as const },
+      sources: {
+        ...view.sources,
+        itemCancellations: [{ ...cancellation, refundStatus: "Refunded" as const }],
+        staffCancellations: [
+          {
+            orderBatchReference: id(3),
+            cancelledAt: "2026-08-11T13:59:00.000Z",
+            reason: "SoldOut" as const,
+            refundStatus: "Refunded" as const,
+          },
+        ],
+      },
+    },
+  });
+  expect(whole.match(/order-status__item--cancelled/gu)).toHaveLength(3);
+  expect(whole).toContain("Your payment was refunded in full.");
+  expect(whole).not.toContain("tip not refunded");
 });

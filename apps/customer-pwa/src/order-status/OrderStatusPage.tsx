@@ -328,10 +328,20 @@ function StatusContent({
               <ul>
                 {batch.items.map((item) => {
                   const itemCancellation = cancelledItem(item.orderItemReference);
+                  // WP-2423 Q6: a round the store cancelled as a whole marks every remaining line.
+                  const batchCancelled =
+                    itemCancellation === undefined &&
+                    staffCancellations.some(
+                      (entry) => entry.orderBatchReference === batch.orderBatchReference,
+                    );
                   return (
                     <li
                       key={item.orderItemReference}
-                      className={itemCancellation ? "order-status__item--cancelled" : undefined}
+                      className={
+                        itemCancellation || batchCancelled
+                          ? "order-status__item--cancelled"
+                          : undefined
+                      }
                     >
                       <span className="order-status__item-name">
                         {item.quantity} × {item.displayName}
@@ -343,6 +353,8 @@ function StatusContent({
                         <span className="order-status__item-cancelled">
                           {itemCancellationText(itemCancellation)}
                         </span>
+                      ) : batchCancelled ? (
+                        <span className="order-status__item-cancelled">Cancelled</span>
                       ) : view.sources?.dining ? (
                         <span>
                           Served{" "}
@@ -367,7 +379,8 @@ function StatusContent({
           <span>Items total</span>
           <span>{formatMoney(total, currency)}</span>
         </p>
-        {itemRefundSummary(itemCancellations).map((line) => (
+        {/* A whole store cancellation states its own full refund; the item note would contradict it. */}
+        {(storeCancelled ? [] : itemRefundSummary(itemCancellations)).map((line) => (
           <p key={line} className="order-status__item-refund">
             {line}
           </p>
