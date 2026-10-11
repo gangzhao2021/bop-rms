@@ -434,6 +434,24 @@ export function createPostgresConfiguredCartQuoteStore(
   return createQuoteStore(runner, scope, references, parseConfiguredCartQuoteAttachment);
 }
 
+/**
+ * WP-2423 Q27: the latest Quote attached to a cart version, whichever Quote version priced it — a
+ * cart's attachments can be v1 or configured v2 (the pilot prices with v2).
+ */
+export function createPostgresAnyCartQuoteReader(
+  runner: CartQueryTransactionRunner,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+): CartQuoteReader<1 | 2> {
+  const { loadLatest } = createQuoteAccess<1 | 2>(runner, scope, (value) =>
+    value !== null &&
+    typeof value === "object" &&
+    (value as { quoteVersion?: unknown }).quoteVersion === 2
+      ? parseConfiguredCartQuoteAttachment(value)
+      : parseCartQuoteAttachment(value),
+  );
+  return Object.freeze({ loadLatest });
+}
+
 export function createPostgresConfiguredCartQuoteReader(
   runner: CartQueryTransactionRunner,
   scope: Readonly<{ brandReference: string; storeReference: string }>,

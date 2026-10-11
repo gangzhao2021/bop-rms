@@ -4,6 +4,7 @@ import { createCustomerCartViewQuery } from "../application/customer-cart-view-q
 import { CartError, parseCartAggregate, parseOrderingInstant } from "../domain/cart.js";
 import {
   parseCartQuoteAttachment,
+  parseConfiguredCartQuoteAttachment,
   type CartQuoteAttachment,
 } from "../domain/cart-quote-attachment.js";
 import type { PickupCartReadResult } from "../application/pickup-cart-read-service.js";
@@ -210,6 +211,15 @@ describe("safe Customer Cart display", () => {
     ])
       expect(json).not.toContain(value);
     expect(Object.isFrozen(result?.cart.items[0]?.configuration)).toBe(true);
+  });
+  it("WP-2423 Q27: reads a cart priced with the configured (v2) Quote", async () => {
+    const f = fixture();
+    f.loadLatest.mockResolvedValueOnce(
+      parseConfiguredCartQuoteAttachment({ ...quote(), quoteVersion: 2 }) as never,
+    );
+    const result = await f.query.read(request);
+    expect(result?.cart.quote?.quoteVersion).toBe(2);
+    expect(result?.cart.quote?.total).toEqual({ amountMinor: "9007199254740993", currency: "CAD" });
   });
   it("returns uniform absence without querying dependent owners", async () => {
     const f = fixture();

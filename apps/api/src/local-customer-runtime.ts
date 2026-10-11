@@ -63,7 +63,7 @@ import {
   createCustomerCartViewQuery,
   createPickupCartReadService,
   createPostgresPickupCartBindingReader,
-  createPostgresCartQuoteReader,
+  createPostgresAnyCartQuoteReader,
   type CartQueryTransactionRunner,
 } from "@rms/ordering";
 import { createCustomerCartReadPort } from "./customer-cart-read-composition.js";
@@ -351,7 +351,7 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
       }),
       catalog,
       stores,
-      quotes: createPostgresCartQuoteReader(options.cartTransactions, scope),
+      quotes: createPostgresAnyCartQuoteReader(options.cartTransactions, scope),
     });
     const fallback =
       options.cartRemoval === undefined

@@ -9,6 +9,7 @@ import {
 } from "../domain/cart.js";
 import {
   parseCartQuoteAttachment,
+  parseConfiguredCartQuoteAttachment,
   type CartQuoteAttachment,
 } from "../domain/cart-quote-attachment.js";
 import type { DiningCartReadResult, DiningCartViewer } from "./dining-cart-read-service.js";
@@ -73,7 +74,7 @@ export interface CustomerCartViewPorts {
       readonly cartReference: string;
       readonly cartVersion: number;
       readonly observedAt: string;
-    }): Promise<CartQuoteAttachment | null>;
+    }): Promise<CartQuoteAttachment<1 | 2> | null>;
   };
 }
 export interface CustomerDiningCartViewPorts {
@@ -301,7 +302,13 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
             });
           }),
         );
-        const quote = quoteResult === null ? null : parseCartQuoteAttachment(quoteResult);
+        // WP-2423 Q27: a cart priced with the configured Quote carries a v2 attachment.
+        const quote =
+          quoteResult === null
+            ? null
+            : quoteResult.quoteVersion === 2
+              ? parseConfiguredCartQuoteAttachment(quoteResult)
+              : parseCartQuoteAttachment(quoteResult);
         if (
           quote !== null &&
           (quote.brandReference !== cart.brandReference ||
