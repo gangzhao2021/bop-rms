@@ -59,7 +59,8 @@ export function createPostgresOrderSubmittedHistorySource(options: {
         "SELECT r.revision_id,r.version,r.expected_version,r.previous_revision_id,r.initial_submission_id,r.kind,r.occurred_at," +
           "EXISTS (SELECT 1 FROM rms_ordering.order_acceptance_record a WHERE a.brand_id=r.brand_id AND a.store_id=r.store_id AND a.order_id=r.order_id AND a.acceptance_id=r.revision_id AND a.expected_order_version=r.expected_version AND a.accepted_order_version=r.version AND a.accepted_at=r.occurred_at) AS acceptance_bound," +
           "EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation c WHERE c.brand_id=r.brand_id AND c.store_id=r.store_id AND c.order_id=r.order_id AND c.cancellation_id=r.revision_id AND c.order_type='DineIn' AND c.expected_source_checkpoint=r.previous_revision_id AND c.expected_order_version=r.expected_version AND c.cancelled_order_version=r.version AND c.cancelled_at=r.occurred_at) AS staff_cancellation_bound," +
-          "EXISTS (SELECT 1 FROM rms_ordering.order_item_staff_cancellation c WHERE c.brand_id=r.brand_id AND c.store_id=r.store_id AND c.order_id=r.order_id AND c.cancellation_id=r.revision_id AND c.expected_source_checkpoint=r.previous_revision_id AND c.expected_order_version=r.expected_version AND c.cancelled_order_version=r.version AND c.cancelled_at=r.occurred_at) AS item_cancellation_bound " +
+          "EXISTS (SELECT 1 FROM rms_ordering.order_item_staff_cancellation c WHERE c.brand_id=r.brand_id AND c.store_id=r.store_id AND c.order_id=r.order_id AND c.cancellation_id=r.revision_id AND c.expected_source_checkpoint=r.previous_revision_id AND c.expected_order_version=r.expected_version AND c.cancelled_order_version=r.version AND c.cancelled_at=r.occurred_at) AS item_cancellation_bound," +
+          "EXISTS (SELECT 1 FROM rms_ordering.order_batch_checkout_cancellation c WHERE c.brand_id=r.brand_id AND c.store_id=r.store_id AND c.order_id=r.order_id AND c.cancellation_id=r.revision_id AND c.expected_source_checkpoint=r.previous_revision_id AND c.expected_order_version=r.expected_version AND c.cancelled_order_version=r.version AND c.cancelled_at=r.occurred_at) AS checkout_cancellation_bound " +
           "FROM rms_ordering.order_revision r WHERE r.brand_id=$1 AND r.store_id=$2 AND r.order_id=$3 AND r.version<=$4 ORDER BY r.version LIMIT 10002",
         [brand, store, event.aggregateId, input.sourceVersion],
       );
@@ -136,6 +137,11 @@ export function createPostgresOrderSubmittedHistorySource(options: {
         // WP-2423 Q6: a staff-cancelled Batch stays in the Order history; later Batches may follow.
         if (revision.kind === "StaffBatchCancellation") {
           if (found.rows[index + 1]?.staff_cancellation_bound !== true) return fail();
+          continue;
+        }
+        // WP-2423 Q6: an unpaid Batch the System cancelled stays in the history too.
+        if (revision.kind === "BatchCancellation") {
+          if (found.rows[index + 1]?.checkout_cancellation_bound !== true) return fail();
           continue;
         }
         // WP-2423 Q6 step 2a: cancelled item lines stay in the history of their Batch.

@@ -146,3 +146,21 @@ it("reauthorizes after assembling exact history", async () => {
   f.authorize.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
   await expect(f.load()).rejects.toThrow();
 });
+it("WP-2423 Q6: keeps a System-cancelled unpaid Batch in history only when its cancellation record matches", async () => {
+  const f = setup();
+  const revision = f.revisions[1] as Record<string, unknown> | undefined;
+  if (!revision) throw new Error("fixture missing");
+  Object.assign(revision, {
+    kind: "BatchCancellation",
+    acceptance_bound: false,
+    checkout_cancellation_bound: true,
+  });
+  expect(((await f.load()) as { batches: unknown[] }).batches).toHaveLength(2);
+  revision.checkout_cancellation_bound = false;
+  await expect(setupWith(revision)).rejects.toThrow();
+  function setupWith(changed: Record<string, unknown>) {
+    const g = setup();
+    Object.assign(g.revisions[1] as Record<string, unknown>, changed);
+    return g.load();
+  }
+});
