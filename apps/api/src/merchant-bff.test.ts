@@ -863,6 +863,7 @@ it("WP-2423: reads one order's detail with its lines and hides other Stores' ord
         canRequestAcceptance: true,
         canCancel: false,
         staffCancellation: null,
+        paymentDue: null,
       },
     ],
     currentPhase: "Submitted",
@@ -904,6 +905,19 @@ it("WP-2423: reads one order's detail with its lines and hides other Stores' ord
   queue.mockResolvedValueOnce({ items: [], nextAfterOrderReference: null, lines: null } as never);
   const missing = await request(root, "/merchant/orders/detail?order=" + order, { headers });
   expect(missing.status).toBe(404);
+  // WP-2423: an unpaid round's failed payment and its automatic cancellation time reach staff.
+  const due = { status: "Failed", cancelsAt: "2026-10-08T21:30:30.000Z" };
+  const batch = item.batches[0];
+  queue.mockResolvedValueOnce({
+    items: [{ ...item, batches: [{ ...batch, paymentDue: due }] }],
+    nextAfterOrderReference: null,
+    lines,
+  } as never);
+  const warned = await request(root, "/merchant/orders/detail?order=" + order, { headers });
+  expect(((await warned.json()) as { order: typeof item }).order.batches[0]).toEqual({
+    ...batch,
+    paymentDue: due,
+  });
 });
 
 it("protects price management transport and sanitizes command failures", async () => {

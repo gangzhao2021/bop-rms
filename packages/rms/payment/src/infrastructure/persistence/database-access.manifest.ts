@@ -428,6 +428,15 @@ const databaseAccessManifestInput = {
       readPattern: "public-query-contract",
     },
     {
+      id: "payment-status-store.read.payment_intent",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "payment_intent" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source: "packages/rms/payment/src/infrastructure/persistence/payment-status-store.ts",
+      readPattern: "owner-repository",
+    },
+    {
       id: "payment-refund-status-store.write",
       operation: "write",
       mechanism: "repository",

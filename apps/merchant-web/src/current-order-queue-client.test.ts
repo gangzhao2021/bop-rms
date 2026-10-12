@@ -536,3 +536,55 @@ it("WP-2423 Q6 step 2: reads item cancellation capability and cancelled lines", 
       parseCurrentOrderQueue({ items: [item], nextAfterOrderReference: null }),
     ).toThrow();
 });
+it("WP-2423: reads an unpaid dine-in round's payment due and refuses malformed or contradictory values", () => {
+  const batch = row().batches[0];
+  const failed = { status: "Failed", cancelsAt: "2026-09-14T00:30:00.000Z" };
+  const dining = (paymentDue: unknown, overrides: Record<string, unknown> = {}) => ({
+    ...row(),
+    orderType: "DineIn",
+    currentPhase: "Accepted",
+    batches: [
+      batch,
+      {
+        ...batch,
+        orderBatchReference: id(91),
+        sequence: 2,
+        acceptanceStatus: "NotAccepted",
+        paymentDue,
+        ...overrides,
+      },
+    ],
+  });
+  const parse = (item: unknown) =>
+    parseCurrentOrderQueue({ items: [item], nextAfterOrderReference: null }).items[0]?.batches[1]
+      ?.paymentDue;
+  expect(parse(dining(failed))).toEqual(failed);
+  expect(parse(dining({ status: "Awaiting", cancelsAt: null }))).toEqual({
+    status: "Awaiting",
+    cancelsAt: null,
+  });
+  expect(parse(dining(null))).toBeNull();
+  // Older servers without the key read as nothing due.
+  expect(
+    parseCurrentOrderQueue({ items: [row()], nextAfterOrderReference: null }).items[0]?.batches[0]
+      ?.paymentDue,
+  ).toBeNull();
+  for (const invalid of [
+    dining(undefined),
+    dining({ status: "Failed", cancelsAt: null }),
+    dining({ status: "Awaiting", cancelsAt: failed.cancelsAt }),
+    dining({ status: "Pending", cancelsAt: null }),
+    dining({ ...failed, extra: true }),
+    dining({ status: "Failed", cancelsAt: "2026-09-14T00:30:00Z" }),
+    // The deadline cannot precede the order.
+    dining({ status: "Failed", cancelsAt: "2026-09-13T23:59:00.000Z" }),
+    // Only an unpaid, not accepted, not cancelled dine-in round has a payment due.
+    { ...dining(failed), orderType: "Pickup" },
+    dining(failed, { acceptanceStatus: "Accepted" }),
+    dining(failed, { acceptanceStatus: "Cancelled" }),
+    dining(failed, { canRequestAcceptance: true }),
+  ])
+    expect(() =>
+      parseCurrentOrderQueue({ items: [invalid], nextAfterOrderReference: null }),
+    ).toThrow();
+});

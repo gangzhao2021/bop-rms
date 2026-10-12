@@ -75,14 +75,20 @@ export function CurrentOrderLines({
   lines,
   refundCheck,
   cancelledBatches,
+  unpaidCancelledBatches,
 }: {
   readonly lines: CurrentOrderDetail["lines"];
   readonly refundCheck?: ItemRefundCheckContext | undefined;
   /** WP-2423 Q6: batches the store cancelled as a whole; their remaining lines read as cancelled. */
   readonly cancelledBatches?: ReadonlySet<string> | undefined;
+  /** WP-2423: rounds cancelled automatically because their payment failed; never owed. */
+  readonly unpaidCancelledBatches?: ReadonlySet<string> | undefined;
 }) {
   const t = lines.totals;
   const cancelledRefund = cancelledItemsRefund(lines.items);
+  const unpaid = unpaidCancelledTotal(lines, unpaidCancelledBatches);
+  const unpaidLine = (item: CurrentOrderDetail["lines"]["items"][number]) =>
+    item.cancellation === null && unpaidCancelledBatches?.has(item.orderBatchReference) === true;
   // One "Check refund" per pending cancellation, on its first line.
   const checkReferences = new Set<string>();
   const checkLines = new Map<string, string>();
@@ -105,7 +111,9 @@ export function CurrentOrderLines({
           <li
             key={item.orderItemReference}
             className={
-              item.cancellation === null && !cancelledBatches?.has(item.orderBatchReference)
+              item.cancellation === null &&
+              !cancelledBatches?.has(item.orderBatchReference) &&
+              !unpaidLine(item)
                 ? undefined
                 : "order-line-cancelled"
             }
@@ -128,6 +136,10 @@ export function CurrentOrderLines({
               {item.cancellation === null && cancelledBatches?.has(item.orderBatchReference) ? (
                 <span className="order-line-cancellation">
                   <strong>Cancelled by store</strong>
+                </span>
+              ) : unpaidLine(item) ? (
+                <span className="order-line-cancellation">
+                  <strong>Cancelled · not paid</strong>
                 </span>
               ) : null}
               {item.cancellation !== null ? (
@@ -176,6 +188,18 @@ export function CurrentOrderLines({
           <dd>{orderMoney(t.total)}</dd>
         </div>
       </dl>
+      {unpaid !== null ? (
+        <dl className="order-lines-totals order-lines-cancelled-refund">
+          <div>
+            <dt>Cancelled unpaid rounds</dt>
+            <dd>−{orderMoney(unpaid.cancelled)}</dd>
+          </div>
+          <div>
+            <dt>Total after cancelled rounds</dt>
+            <dd>{orderMoney(unpaid.remaining)}</dd>
+          </div>
+        </dl>
+      ) : null}
       {cancelledRefund !== null ? (
         <dl className="order-lines-totals order-lines-cancelled-refund">
           <div>
@@ -186,6 +210,74 @@ export function CurrentOrderLines({
       ) : null}
     </section>
   );
+}
+
+/**
+ * WP-2423: what the rounds cancelled automatically for a failed payment came to, and the order total
+ * without them (null when there are none). Minor units only; lines already cancelled one by one keep
+ * their own refund line.
+ */
+export function unpaidCancelledTotal(
+  lines: CurrentOrderDetail["lines"],
+  batches: ReadonlySet<string> | undefined,
+) {
+  if (batches === undefined || batches.size === 0) return null;
+  const currencyCode = lines.totals.total.currencyCode;
+  const cancelled = lines.items.filter(
+    (item) => item.cancellation === null && batches.has(item.orderBatchReference),
+  );
+  if (cancelled.length === 0 || cancelled.some((item) => item.total.currencyCode !== currencyCode))
+    return null;
+  const amount = cancelled.reduce((sum, item) => sum + BigInt(item.total.amountMinor), 0n);
+  return Object.freeze({
+    cancelled: Object.freeze({ amountMinor: amount.toString(), currencyCode }),
+    remaining: Object.freeze({
+      amountMinor: (BigInt(lines.totals.total.amountMinor) - amount).toString(),
+      currencyCode,
+    }),
+  });
+}
+
+/** WP-2423: rounds the System cancelled because their payment failed (not a store cancellation). */
+export function unpaidCancelledBatches(view: CurrentOrderQueue): ReadonlySet<string> {
+  return new Set(
+    view.items.flatMap((order) =>
+      order.batches
+        .filter(
+          (batch) => batch.acceptanceStatus === "Cancelled" && batch.staffCancellation === null,
+        )
+        .map((batch) => batch.orderBatchReference),
+    ),
+  );
+}
+
+/** Staff-facing words for an order's type and the channel it came in through (never codes). */
+export const orderTypeLabel = { DineIn: "Dine-in", Pickup: "Pickup" } as const;
+export function orderChannelLabel(channel: string): string {
+  return channel === "Qr"
+    ? "QR code"
+    : channel === "Web"
+      ? "Website"
+      : channel === "Pos"
+        ? "Point of sale"
+        : channel === "Api"
+          ? "Partner integration"
+          : "Other";
+}
+
+/**
+ * WP-2423: an unpaid dine-in round. A failed payment is cancelled automatically at its payment
+ * deadline; staff are told when, in Store time, before it happens.
+ */
+export function paymentDueText(
+  due: NonNullable<CurrentOrderQueue["items"][number]["batches"][number]["paymentDue"]>,
+  timeZone: string | undefined,
+  now?: number,
+): string {
+  if (due.status === "Awaiting" || due.cancelsAt === null) return "Awaiting payment";
+  return now !== undefined && Date.parse(due.cancelsAt) <= now
+    ? "Payment failed · being cancelled automatically"
+    : `Payment failed · cancelled automatically at ${storeTime(due.cancelsAt, timeZone)}`;
 }
 
 /** WP-2423 Q6: batches the store cancelled as a whole (staff cancellation of the batch). */
@@ -229,6 +321,7 @@ function QueuedOrderLines({
       lines={state.detail.lines}
       refundCheck={refundCheck}
       cancelledBatches={storeCancelledBatches(state.detail.view)}
+      unpaidCancelledBatches={unpaidCancelledBatches(state.detail.view)}
     />
   ) : (
     <p className="order-lines-state" role="status">
@@ -351,7 +444,7 @@ export function CurrentOrderQueueRows({
                 </span>
               </h2>
               <span>
-                {order.orderType === "DineIn" ? "Dine-in" : "Pickup"} · {order.sourceChannel}
+                {orderTypeLabel[order.orderType]} · {orderChannelLabel(order.sourceChannel)}
               </span>
             </span>
             <span
@@ -401,6 +494,18 @@ export function CurrentOrderQueueRows({
                 </span>
               ) : null}
               {now === undefined ? null : <AcceptanceDeadline order={order} now={now} />}
+              {order.batches.map((batch) =>
+                batch.paymentDue === null ? null : (
+                  <span
+                    key={batch.orderBatchReference}
+                    className="order-accept-by"
+                    data-tier={batch.paymentDue.status === "Failed" ? "urgent" : "warning"}
+                  >
+                    {order.batches.length > 1 ? `Batch ${batch.sequence}: ` : ""}
+                    {paymentDueText(batch.paymentDue, timeZone, now)}
+                  </span>
+                ),
+              )}
             </span>
             <time
               className="order-workbench-time"
@@ -414,11 +519,11 @@ export function CurrentOrderQueueRows({
             <dl>
               <div>
                 <dt>Order type</dt>
-                <dd>{order.orderType}</dd>
+                <dd>{orderTypeLabel[order.orderType]}</dd>
               </div>
               <div>
                 <dt>Channel</dt>
-                <dd>{order.sourceChannel}</dd>
+                <dd>{orderChannelLabel(order.sourceChannel)}</dd>
               </div>
               <div>
                 <dt>Submitted</dt>
@@ -471,12 +576,28 @@ export function CurrentOrderQueueRows({
                         : "The payment, including any tip, is being refunded in full."}
                     </span>
                   </p>
+                ) : batch.acceptanceStatus === "Cancelled" ? (
+                  // WP-2423: cancelled automatically because its payment failed (no store refund).
+                  <p className="order-workbench-closed" role="note">
+                    Batch cancelled · not paid. Its payment didn&apos;t go through, so it was
+                    cancelled automatically when the payment time ended. Nothing was charged for it.
+                  </p>
+                ) : batch.paymentDue !== null ? (
+                  <p className="order-workbench-closed" role="note">
+                    <span
+                      className="order-accept-by"
+                      data-tier={batch.paymentDue.status === "Failed" ? "urgent" : "warning"}
+                    >
+                      {paymentDueText(batch.paymentDue, timeZone, now)}
+                    </span>
+                    {batch.paymentDue.status === "Failed"
+                      ? " Don't prepare it; it will not be charged. If the guest still wants these items, they can order them again."
+                      : " Not accepted yet: the guest has not paid for this round."}
+                  </p>
                 ) : (
                   <p>
-                    {batch.acceptanceStatus === "Cancelled"
-                      ? "Batch cancelled"
-                      : "Acceptance: " +
-                        (batch.acceptanceStatus === "Accepted" ? "Accepted" : "Not accepted")}
+                    {"Acceptance: " +
+                      (batch.acceptanceStatus === "Accepted" ? "Accepted" : "Not accepted")}
                   </p>
                 )}
                 {action?.(order, batch)}
@@ -791,10 +912,10 @@ export function CurrentOrderQueuePage({
                   onChange={(event) => setChannelFilter(event.target.value)}
                 >
                   <option value="All">All channels</option>
-                  <option value="Api">API</option>
-                  <option value="Pos">POS</option>
-                  <option value="Qr">QR</option>
-                  <option value="Web">Web</option>
+                  <option value="Api">Partner integration</option>
+                  <option value="Pos">Point of sale</option>
+                  <option value="Qr">QR code</option>
+                  <option value="Web">Website</option>
                 </select>
               </label>
               <label>
@@ -845,6 +966,7 @@ export function CurrentOrderQueuePage({
                       <CurrentOrderLines
                         lines={detail.lines}
                         cancelledBatches={storeCancelledBatches(detail.view)}
+                        unpaidCancelledBatches={unpaidCancelledBatches(detail.view)}
                         refundCheck={{
                           orderReference: order.orderReference,
                           csrf,

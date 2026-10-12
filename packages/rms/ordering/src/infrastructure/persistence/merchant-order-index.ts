@@ -325,9 +325,12 @@ export async function listStorePaidOrderBatches(
   orderReferences: readonly string[],
 ): Promise<{
   readonly paidOrders: ReadonlySet<string>;
+  /** WP-2423: every batch whose payment Ordering recorded (awaiting acceptance or disposed). */
+  readonly paidBatches: ReadonlySet<string>;
   readonly awaitingAcceptance: ReadonlySet<string>;
 }> {
-  if (orderReferences.length === 0) return { paidOrders: new Set(), awaitingAcceptance: new Set() };
+  if (orderReferences.length === 0)
+    return { paidOrders: new Set(), paidBatches: new Set(), awaitingAcceptance: new Set() };
   if (orderReferences.length > 100) throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
   const orders = orderReferences.map((reference) => parseOrderingReference(reference));
   await transaction.query(
@@ -346,6 +349,7 @@ export async function listStorePaidOrderBatches(
     )
   ).rows as readonly { order_id: unknown; order_batch_id: unknown; awaiting: unknown }[];
   const paidOrders = new Set<string>(),
+    paidBatches = new Set<string>(),
     awaitingAcceptance = new Set<string>();
   for (const row of rows) {
     const order = parseOrderingReference(row.order_id),
@@ -353,9 +357,10 @@ export async function listStorePaidOrderBatches(
     if (typeof row.awaiting !== "boolean" || !orders.includes(order))
       throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
     paidOrders.add(order);
+    paidBatches.add(batch);
     if (row.awaiting) awaitingAcceptance.add(batch);
   }
-  return { paidOrders, awaitingAcceptance };
+  return { paidOrders, paidBatches, awaitingAcceptance };
 }
 
 /**

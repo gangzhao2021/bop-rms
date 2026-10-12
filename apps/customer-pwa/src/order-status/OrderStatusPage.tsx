@@ -14,7 +14,7 @@ import type {
 import { PickupCodePanel } from "../pickup-code/PickupCodePanel.js";
 import type { PickupCodeController } from "../pickup-code/pickup-code-controller.js";
 import { CustomerPage, type CustomerStoreContext } from "../journey/CustomerPage.js";
-import { formatMoney } from "../journey/format.js";
+import { formatClockTime, formatMoney } from "../journey/format.js";
 
 /** How often an active order re-reads its status when no live connection is available. */
 export const orderStatusPollIntervalMs = 15_000;
@@ -99,13 +99,27 @@ export function isOrderSettled(view: OrderStatusView): boolean {
   );
 }
 
+/**
+ * WP-2423: dine-in rounds that will never reach the kitchen because their payment didn't go through
+ * (already cancelled, or failed and about to be cancelled automatically).
+ */
+export function unpaidRounds(view: OrderStatusView): ReadonlySet<string> {
+  return new Set([
+    ...(view.sources?.unpaidCancellations?.map((entry) => entry.orderBatchReference) ?? []),
+    ...(view.sources?.batchPayments
+      ?.filter((entry) => entry.cancelsAt !== null)
+      .map((entry) => entry.orderBatchReference) ?? []),
+  ]);
+}
+
 function kitchenStatus(view: OrderStatusView): "Ready" | "Preparing" | "Queued" | "Unknown" {
   const kitchen = view.sources?.kitchen;
   if (!kitchen) return "Unknown";
-  // WP-2423 Q6: a round the store cancelled is not waiting for the kitchen.
-  const cancelled = new Set(
-    view.sources?.staffCancellations?.map((entry) => entry.orderBatchReference) ?? [],
-  );
+  // WP-2423 Q6: a round the store cancelled is not waiting for the kitchen, nor is an unpaid one.
+  const cancelled = new Set([
+    ...(view.sources?.staffCancellations?.map((entry) => entry.orderBatchReference) ?? []),
+    ...unpaidRounds(view),
+  ]);
   const active = kitchen.batches.filter(
     (batch) => batch.status !== "Cancelled" && !cancelled.has(batch.orderBatchReference),
   );
@@ -129,13 +143,22 @@ function StatusContent({
     view.order.orderType === "Pickup" && view.order.fulfillmentStatus === "Completed";
   const notCollected =
     view.order.orderType === "Pickup" && !complete && Boolean(view.sources?.pickup?.notCollectedAt);
-  const unpaidCancelled =
+  const unpaidPickupCancelled =
     view.order.orderType === "Pickup" && Boolean(view.sources?.unpaidCancellation?.cancelledAt);
   const storeCancelled = staffCancelledOrder(view);
   const staffCancellations = view.sources?.staffCancellations ?? [];
   const itemCancellations = view.sources?.itemCancellations ?? [];
   const cancelledItem = (orderItemReference: string) =>
     itemCancellations.find((entry) => entry.orderItemReferences.includes(orderItemReference));
+  // WP-2423: rounds cancelled because their payment didn't go through, and failed ones about to be.
+  const unpaidCancelled = new Set(
+    view.sources?.unpaidCancellations?.map((entry) => entry.orderBatchReference) ?? [],
+  );
+  const notPaid = unpaidRounds(view);
+  const failedPayment = (orderBatchReference: string) =>
+    view.sources?.batchPayments?.find(
+      (entry) => entry.orderBatchReference === orderBatchReference && entry.cancelsAt !== null,
+    )?.cancelsAt ?? null;
   const kitchen = view.sources?.kitchen;
   const kitchenLabel = kitchenStatus(view);
   const diningItems = view.order.orderType === "DineIn" ? view.sources?.dining?.items : undefined;
@@ -146,7 +169,7 @@ function StatusContent({
         (batch) =>
           !staffCancellations.some(
             (entry) => entry.orderBatchReference === batch.orderBatchReference,
-          ),
+          ) && !notPaid.has(batch.orderBatchReference),
       )
       .every((batch) =>
         batch.items.every(
@@ -164,7 +187,7 @@ function StatusContent({
   const someServed = diningItems?.some((item) => item.servedQuantity > 0) === true;
   const [progressHeading, progressMessage] = storeCancelled
     ? ["Order cancelled by the store", staffCancellationReasonText[storeCancelled.reason]]
-    : unpaidCancelled
+    : unpaidPickupCancelled
       ? [
           "Order cancelled",
           "Payment wasn't completed within 30 minutes, so this order was cancelled. If a payment still goes through, it will be refunded automatically.",
@@ -208,13 +231,15 @@ function StatusContent({
           formatMoney(paid.amount.amountMinor, paid.amount.currencyCode)
         : paid?.amount
           ? `Payment received ${formatMoney(paid.amount.amountMinor, paid.amount.currencyCode)}`
-          : unpaidCancelled
+          : unpaidPickupCancelled
             ? "Not paid"
             : payments.some((payment) => payment.status === "Failed")
               ? "Payment attempt failed"
               : "Payment pending";
   const multipleBatches = view.order.batches.length > 1;
+  // WP-2423: a round cancelled because its payment didn't go through was never charged.
   const total = view.order.batches
+    .filter((batch) => !unpaidCancelled.has(batch.orderBatchReference))
     .flatMap((batch) => batch.items)
     .reduce((sum, item) => sum + item.lineTotal.amountMinor, 0n);
   const currency = view.order.batches[0]?.items[0]?.lineTotal.currencyCode ?? "CAD";
@@ -257,7 +282,7 @@ function StatusContent({
       {view.order.orderType === "Pickup" &&
       !complete &&
       !notCollected &&
-      !unpaidCancelled &&
+      !unpaidPickupCancelled &&
       !storeCancelled ? (
         <PickupCodePanel
           orderReference={view.order.orderReference}
@@ -306,7 +331,22 @@ function StatusContent({
               className="order-status__card order-status__batch"
             >
               {multipleBatches ? <h3>Round {index + 1}</h3> : null}
-              {batchCancellation ? (
+              {unpaidCancelled.has(batch.orderBatchReference) ? (
+                <p className="order-status__batch-cancelled">
+                  {multipleBatches
+                    ? "This round was cancelled because its payment didn't go through. You were not charged for it."
+                    : "This order was cancelled because its payment didn't go through. You were not charged for it."}
+                </p>
+              ) : failedPayment(batch.orderBatchReference) !== null ? (
+                <p className="order-status__warning" role="status">
+                  {multipleBatches
+                    ? "Payment for this round didn't go through. "
+                    : "Payment for your order didn't go through. "}
+                  It will be cancelled at{" "}
+                  {formatClockTime(failedPayment(batch.orderBatchReference) ?? "")}. Ask a staff
+                  member if you need help.
+                </p>
+              ) : batchCancellation ? (
                 <p className="order-status__batch-cancelled">
                   {multipleBatches
                     ? "This round was cancelled by the store. "
@@ -331,9 +371,10 @@ function StatusContent({
                   // WP-2423 Q6: a round the store cancelled as a whole marks every remaining line.
                   const batchCancelled =
                     itemCancellation === undefined &&
-                    staffCancellations.some(
-                      (entry) => entry.orderBatchReference === batch.orderBatchReference,
-                    );
+                    (unpaidCancelled.has(batch.orderBatchReference) ||
+                      staffCancellations.some(
+                        (entry) => entry.orderBatchReference === batch.orderBatchReference,
+                      ));
                   return (
                     <li
                       key={item.orderItemReference}
@@ -379,6 +420,11 @@ function StatusContent({
           <span>Items total</span>
           <span>{formatMoney(total, currency)}</span>
         </p>
+        {unpaidCancelled.size > 0 ? (
+          <p className="order-status__item-refund">
+            Cancelled rounds that weren&apos;t paid are not included.
+          </p>
+        ) : null}
         {/* A whole store cancellation states its own full refund; the item note would contradict it. */}
         {(storeCancelled ? [] : itemRefundSummary(itemCancellations)).map((line) => (
           <p key={line} className="order-status__item-refund">

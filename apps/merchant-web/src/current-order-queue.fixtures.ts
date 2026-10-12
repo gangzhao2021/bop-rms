@@ -42,6 +42,8 @@ function row(
           refundStatus: "Pending" | "Refunded";
         },
         canCancelItems: false,
+        /** WP-2423: an unpaid dine-in round (null: nothing due). */
+        paymentDue: null as null | { status: "Failed" | "Awaiting"; cancelsAt: string | null },
       },
     ],
     canRequestAcceptance: awaiting,

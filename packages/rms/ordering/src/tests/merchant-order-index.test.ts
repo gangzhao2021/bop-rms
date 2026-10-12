@@ -259,6 +259,7 @@ it("WP-2423 Q1: reads recorded payments and batches awaiting acceptance for the 
   const result = await listStorePaidOrderBatches(tx, scope, [id(3), id(4), id(5)]);
   expect([...result.paidOrders]).toEqual([id(3), id(4)]);
   expect([...result.awaitingAcceptance]).toEqual([id(13)]);
+  expect([...result.paidBatches]).toEqual([id(13), id(14)]);
   expect(query.mock.calls[1]?.[0]).toContain("order_payment_acceptance_wait");
   expect(query.mock.calls[1]?.[1]).toEqual([
     scope.brandReference,
@@ -275,6 +276,7 @@ it("WP-2423 Q1: reads recorded payments and batches awaiting acceptance for the 
   );
   expect(await listStorePaidOrderBatches(tx, scope, [])).toEqual({
     paidOrders: new Set(),
+    paidBatches: new Set(),
     awaitingAcceptance: new Set(),
   });
 });

@@ -264,3 +264,64 @@ export function createPostgresPaymentStatusStore(options: {
     },
   });
 }
+
+/**
+ * WP-2423: the latest active terminal payment outcome of each order batch of the given Orders
+ * (a batch with no terminal outcome is absent: its payment is still open). Read only; the caller
+ * authorizes the Orders and owns the transaction.
+ */
+export async function listStoreOrderBatchPaymentOutcomes(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReferences: readonly string[],
+): Promise<
+  readonly {
+    readonly orderReference: string;
+    readonly orderBatchReference: string;
+    readonly status: "Succeeded" | "Failed";
+  }[]
+> {
+  if (orderReferences.length > 100) return unavailable();
+  const brand = parsePaymentReference(scope.brandReference),
+    store = parsePaymentReference(scope.storeReference),
+    orders = orderReferences.map((reference) => parsePaymentReference(reference));
+  if (orders.length === 0) return Object.freeze([]);
+  try {
+    await transaction.query(
+      "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+      [brand, store],
+    );
+    const found = await transaction.query(
+      "SELECT DISTINCT ON (i.order_batch_id) i.order_id::text AS order_id,i.order_batch_id::text AS order_batch_id,p.terminal_status " +
+        "FROM rms_payment.payment_intent i JOIN rms_payment.payment_status_projection p ON p.brand_id=i.brand_id " +
+        "AND p.store_id=i.store_id AND p.payment_intent_id=i.payment_intent_id AND p.order_id=i.order_id AND p.is_active " +
+        "WHERE i.brand_id=$1 AND i.store_id=$2 AND i.order_id=ANY($3::uuid[]) " +
+        "ORDER BY i.order_batch_id,p.terminal_occurred_at DESC,p.payment_intent_id DESC LIMIT 10001",
+      [brand, store, orders],
+    );
+    if (!Array.isArray(found.rows) || found.rows.length > 10000) return unavailable();
+    const seen = new Set<string>();
+    return Object.freeze(
+      found.rows.map((row: Record<string, unknown>) => {
+        if (Object.keys(row).length !== 3) return unavailable();
+        const orderReference = parsePaymentReference(row.order_id),
+          orderBatchReference = parsePaymentReference(row.order_batch_id);
+        if (
+          !orders.includes(orderReference) ||
+          seen.has(orderBatchReference) ||
+          (row.terminal_status !== "Succeeded" && row.terminal_status !== "Failed")
+        )
+          return unavailable();
+        seen.add(orderBatchReference);
+        return Object.freeze({
+          orderReference,
+          orderBatchReference,
+          status: row.terminal_status as "Succeeded" | "Failed",
+        });
+      }),
+    );
+  } catch (error) {
+    if (error instanceof PaymentStatusProjectionError) throw error;
+    return unavailable();
+  }
+}

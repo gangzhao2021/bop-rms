@@ -3,7 +3,8 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { describe, expect, it } from "vitest";
 import { OrderStatusPage, isOrderSettled } from "./OrderStatusPage.js";
 import type { OrderStatusController } from "./order-status-controller.js";
-import type { OrderStatusState } from "./types.js";
+import type { OrderStatusState, OrderStatusView } from "./types.js";
+import { formatClockTime } from "../journey/format.js";
 
 const id = (n: number) => `018f7a00-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 
@@ -635,4 +636,97 @@ it("WP-2423 Q6 step 2: marks items the store cancelled and where their refund is
   expect(whole.match(/order-status__item--cancelled/gu)).toHaveLength(3);
   expect(whole).toContain("Your payment was refunded in full.");
   expect(whole).not.toContain("tip not refunded");
+});
+
+describe("WP-2423: a dine-in round whose payment didn't go through", () => {
+  function diningView(sources: Record<string, unknown>) {
+    const state = readyState();
+    if (state.status !== "ready") throw new Error("fixture");
+    const first = state.view.order.batches[0];
+    if (!first) throw new Error("fixture");
+    const item = (n: number) => ({
+      orderItemReference: id(n),
+      displayName: "Synthetic dish " + n,
+      quantity: 1,
+      lineTotal: { amountMinor: 1130n, currencyCode: "CAD" },
+    });
+    const view = {
+      ...state.view,
+      order: {
+        ...state.view.order,
+        orderType: "DineIn" as const,
+        canonicalPhase: "Accepted" as const,
+        batches: [
+          { ...first, items: [item(40)] },
+          { ...first, orderBatchReference: id(30), items: [item(41)] },
+        ],
+      },
+      sources: {
+        checkedAt: "2026-08-11T14:00:00.000Z",
+        kitchen: {
+          batches: [
+            {
+              orderBatchReference: id(3),
+              status: "Ready" as const,
+              updatedAt: "2026-08-11T13:57:00.000Z",
+            },
+          ],
+        },
+        payments: [
+          {
+            status: "Succeeded" as const,
+            occurredAt: "2026-08-11T13:56:00.000Z",
+            amount: { amountMinor: 1130n, currencyCode: "CAD" },
+            freshnessStatus: "Fresh" as const,
+          },
+        ],
+        ...sources,
+      },
+    } as OrderStatusView;
+    return { state, view };
+  }
+
+  it("says before the deadline that the round will be cancelled, and when", () => {
+    const { state, view } = diningView({
+      batchPayments: [
+        { orderBatchReference: id(3), status: "Succeeded", cancelsAt: null },
+        { orderBatchReference: id(30), status: "Failed", cancelsAt: "2026-08-11T14:25:00.000Z" },
+      ],
+    });
+    const html = render({ ...state, view });
+    expect(html).toContain(
+      `Payment for this round didn&#x27;t go through. It will be cancelled at ${formatClockTime(
+        "2026-08-11T14:25:00.000Z",
+      )}. Ask a staff member if you need help.`,
+    );
+    // Only the failed round carries the note; the paid round's kitchen state is not hidden by it.
+    expect(html.match(/didn&#x27;t go through/gu)).toHaveLength(1);
+    expect(html).toContain("Kitchen preparation complete");
+    expect(html).not.toContain("order-status__item--cancelled");
+  });
+
+  it("marks an auto-cancelled round, says it was not charged, and leaves it out of the total", () => {
+    const { state, view } = diningView({
+      batchPayments: [
+        { orderBatchReference: id(3), status: "Succeeded", cancelsAt: null },
+        { orderBatchReference: id(30), status: "Failed", cancelsAt: null },
+      ],
+      unpaidCancellations: [
+        { orderBatchReference: id(30), cancelledAt: "2026-08-11T13:59:00.000Z" },
+      ],
+    });
+    const html = render({ ...state, view });
+    expect(html).toContain(
+      "This round was cancelled because its payment didn&#x27;t go through. You were not charged for it.",
+    );
+    expect(html.match(/class="order-status__item--cancelled"/gu)).toHaveLength(1);
+    expect(html).toContain("Synthetic dish 41");
+    // Items total agrees with the payment received.
+    expect(html).toMatch(/Items total<\/span><span>\$11\.30<\/span>/u);
+    expect(html).toContain("Payment received $11.30");
+    expect(html).toContain("Cancelled rounds that weren&#x27;t paid are not included.");
+    expect(html).not.toContain("It will be cancelled at");
+    expect(html).not.toContain("cancelled by the store");
+    expect(isOrderSettled(view)).toBe(false);
+  });
 });

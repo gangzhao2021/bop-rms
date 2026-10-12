@@ -77,7 +77,10 @@ export { createPostgresPaymentTerminalStore } from "./infrastructure/persistence
 
 export { createPostgresPaymentProviderObservationStore } from "./infrastructure/persistence/payment-provider-observation-store.js";
 
-export { createPostgresPaymentStatusStore } from "./infrastructure/persistence/payment-status-store.js";
+export {
+  createPostgresPaymentStatusStore,
+  listStoreOrderBatchPaymentOutcomes,
+} from "./infrastructure/persistence/payment-status-store.js";
 
 export {
   createPaymentStatusEventConsumerService,

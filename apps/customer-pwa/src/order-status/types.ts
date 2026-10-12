@@ -33,6 +33,22 @@ export interface OrderStatusSources {
   readonly staffCancellations?: readonly StaffCancellation[];
   /** WP-2423 Q6 step 2: single items the Store cancelled after payment, before the kitchen started. */
   readonly itemCancellations?: readonly ItemCancellation[];
+  /** WP-2423: each dine-in round's payment; a failed one is cancelled automatically at cancelsAt. */
+  readonly batchPayments?: readonly BatchPayment[];
+  /** WP-2423: dine-in rounds cancelled because their payment didn't go through (never charged). */
+  readonly unpaidCancellations?: readonly UnpaidBatchCancellation[];
+}
+
+export interface BatchPayment {
+  readonly orderBatchReference: string;
+  readonly status: "Succeeded" | "Failed" | "Awaiting";
+  /** When a round whose payment failed is cancelled automatically (null once cancelled or paid). */
+  readonly cancelsAt: string | null;
+}
+
+export interface UnpaidBatchCancellation {
+  readonly orderBatchReference: string;
+  readonly cancelledAt: string;
 }
 
 export type StaffCancellationReason =

@@ -1522,6 +1522,10 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
               canRequestAcceptance: batch.canRequestAcceptance,
               canCancel: batch.canCancel,
               canCancelItems: batch.canCancelItems,
+              paymentDue:
+                batch.paymentDue === null
+                  ? null
+                  : { status: batch.paymentDue.status, cancelsAt: batch.paymentDue.cancelsAt },
               staffCancellation:
                 batch.staffCancellation === null
                   ? null
@@ -1585,6 +1589,10 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
               canRequestAcceptance: batch.canRequestAcceptance,
               canCancel: batch.canCancel,
               canCancelItems: batch.canCancelItems,
+              paymentDue:
+                batch.paymentDue === null
+                  ? null
+                  : { status: batch.paymentDue.status, cancelsAt: batch.paymentDue.cancelsAt },
               staffCancellation:
                 batch.staffCancellation === null
                   ? null

@@ -166,6 +166,12 @@ function parseSources(
     ...(value !== null && typeof value === "object" && Object.hasOwn(value, "itemCancellations")
       ? ["itemCancellations"]
       : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "batchPayments")
+      ? ["batchPayments"]
+      : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "unpaidCancellations")
+      ? ["unpaidCancellations"]
+      : []),
   ]);
   const checkedAt = parseInstant(raw.checkedAt);
   if (Date.parse(checkedAt) < Date.parse(submittedAt)) return invalid();
@@ -394,6 +400,71 @@ function parseSources(
             cancelledAt: sourceInstant(exact(raw.unpaidCancellation, ["cancelledAt"]).cancelledAt),
           });
   }
+  // WP-2423: dine-in rounds cancelled because their payment failed (present only when non-empty).
+  let unpaidCancellations: OrderStatusSources["unpaidCancellations"];
+  if (Object.hasOwn(raw, "unpaidCancellations")) {
+    if (
+      orderType !== "DineIn" ||
+      !Array.isArray(raw.unpaidCancellations) ||
+      raw.unpaidCancellations.length < 1 ||
+      raw.unpaidCancellations.length > batches.length
+    )
+      return invalid();
+    const seen = new Set<string>();
+    unpaidCancellations = Object.freeze(
+      raw.unpaidCancellations.map((value: unknown) => {
+        const entry = exact(value, ["orderBatchReference", "cancelledAt"]);
+        const orderBatchReference = parseReference(entry.orderBatchReference);
+        if (
+          !batches.some((batch) => batch.orderBatchReference === orderBatchReference) ||
+          seen.has(orderBatchReference) ||
+          staffCancelled.has(orderBatchReference)
+        )
+          return invalid();
+        seen.add(orderBatchReference);
+        return Object.freeze({
+          orderBatchReference,
+          cancelledAt: sourceInstant(entry.cancelledAt),
+        });
+      }),
+    );
+  }
+  // WP-2423: each dine-in round's payment; a failed, not yet cancelled round has its cancel time.
+  let batchPayments: OrderStatusSources["batchPayments"];
+  if (Object.hasOwn(raw, "batchPayments")) {
+    if (
+      orderType !== "DineIn" ||
+      !Array.isArray(raw.batchPayments) ||
+      raw.batchPayments.length < 1 ||
+      raw.batchPayments.length > batches.length
+    )
+      return invalid();
+    const cancelled = new Set(unpaidCancellations?.map((entry) => entry.orderBatchReference));
+    const seen = new Set<string>();
+    batchPayments = Object.freeze(
+      raw.batchPayments.map((value: unknown) => {
+        const entry = exact(value, ["orderBatchReference", "status", "cancelsAt"]);
+        const orderBatchReference = parseReference(entry.orderBatchReference);
+        const cancelsAt = entry.cancelsAt === null ? null : parseInstant(entry.cancelsAt);
+        if (
+          !batches.some((batch) => batch.orderBatchReference === orderBatchReference) ||
+          seen.has(orderBatchReference) ||
+          !["Succeeded", "Failed", "Awaiting"].includes(String(entry.status)) ||
+          (cancelsAt !== null &&
+            (entry.status !== "Failed" ||
+              cancelled.has(orderBatchReference) ||
+              Date.parse(cancelsAt) <= Date.parse(submittedAt)))
+        )
+          return invalid();
+        seen.add(orderBatchReference);
+        return Object.freeze({
+          orderBatchReference,
+          status: entry.status as "Succeeded" | "Failed" | "Awaiting",
+          cancelsAt,
+        });
+      }),
+    );
+  }
   return Object.freeze({
     checkedAt,
     kitchen,
@@ -403,6 +474,8 @@ function parseSources(
     ...(unpaidCancellation === undefined ? {} : { unpaidCancellation }),
     ...(staffCancellations === undefined ? {} : { staffCancellations }),
     ...(itemCancellations === undefined ? {} : { itemCancellations }),
+    ...(batchPayments === undefined ? {} : { batchPayments }),
+    ...(unpaidCancellations === undefined ? {} : { unpaidCancellations }),
   });
 }
 

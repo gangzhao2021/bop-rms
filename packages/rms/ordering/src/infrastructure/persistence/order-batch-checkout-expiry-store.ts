@@ -21,6 +21,11 @@ import {
 const fail = (): never => {
   throw new Error("ORDER_BATCH_CHECKOUT_EXPIRY_STORE_UNAVAILABLE");
 };
+/**
+ * WP-2423: how long a dine-in round's payment may stay unresolved after its capacity link was
+ * created. The expiry candidates scan and the payment deadline read both use this one value.
+ */
+export const diningCheckoutPaymentWindowMinutes = 30;
 const columns = {
   recordReference: "record_id",
   tenantReference: "tenant_id",
@@ -301,7 +306,7 @@ export function createPostgresDiningCheckoutExpiryCandidates(options: {
             AND a.submission_id=b.submission_id AND a.payment_operation_id=l.payment_operation_id
             AND a.cart_id=b.source_cart_id AND a.cart_version=b.source_cart_version AND a.quote_id=b.quote_id
           WHERE b.brand_id=$1 AND b.store_id=$2 AND l.link_json->>'owner'='Dining'
-            AND l.created_at<=$3::timestamptz-interval '30 minutes' AND b.submitted_at<=$3::timestamptz
+            AND l.created_at<=$3::timestamptz-interval '${diningCheckoutPaymentWindowMinutes} minutes' AND b.submitted_at<=$3::timestamptz
             AND a.allocated_at<=$3::timestamptz AND ($4::uuid IS NULL OR b.order_batch_id>$4::uuid)
             AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_batch_checkout_expiry e
               WHERE e.brand_id=b.brand_id AND e.store_id=b.store_id AND e.order_batch_id=b.order_batch_id
@@ -663,4 +668,119 @@ export function createPostgresDiningBatchCancellationCandidates(options: {
       }
     },
   });
+}
+
+interface StoreScope {
+  readonly brandReference: string;
+  readonly storeReference: string;
+}
+const orderList = (orderReferences: readonly string[]) => {
+  if (orderReferences.length > 100) return fail();
+  return orderReferences.map((reference) => parseOrderingReference(reference));
+};
+const storeContext = (transaction: ConsumerTransaction, scope: StoreScope) =>
+  transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [parseOrderingReference(scope.brandReference), parseOrderingReference(scope.storeReference)],
+  );
+
+/**
+ * WP-2423: when each Dining-owned round of the given Orders stops waiting for payment (its capacity
+ * link plus the dining payment window). A round whose payment failed is cancelled automatically
+ * once this passes; staff and the customer are told the time before it happens. Read only; the
+ * caller authorizes and owns the transaction.
+ */
+export async function listStoreDiningBatchPaymentDeadlines(
+  transaction: ConsumerTransaction,
+  scope: StoreScope,
+  orderReferences: readonly string[],
+): Promise<
+  readonly {
+    readonly orderReference: string;
+    readonly orderBatchReference: string;
+    readonly paymentDeadline: string;
+  }[]
+> {
+  const orders = orderList(orderReferences);
+  if (orders.length === 0) return Object.freeze([]);
+  await storeContext(transaction, scope);
+  const found = await transaction.query(
+    `SELECT l.order_id::text AS "orderReference",l.order_batch_id::text AS "orderBatchReference",
+      to_char((l.created_at+interval '${diningCheckoutPaymentWindowMinutes} minutes') AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "paymentDeadline"
+    FROM rms_ordering.order_capacity_link l
+    WHERE l.brand_id=$1 AND l.store_id=$2 AND l.order_id=ANY($3::uuid[]) AND l.link_json->>'owner'='Dining'
+    ORDER BY l.order_batch_id LIMIT 10001`,
+    [
+      parseOrderingReference(scope.brandReference),
+      parseOrderingReference(scope.storeReference),
+      orders,
+    ],
+  );
+  if (!Array.isArray(found.rows) || found.rows.length > 10000) return fail();
+  const seen = new Set<string>();
+  return Object.freeze(
+    found.rows.map((value) => {
+      const row = readClosedRecord(value, [
+        "orderReference",
+        "orderBatchReference",
+        "paymentDeadline",
+      ]);
+      const orderReference = parseOrderingReference(row.orderReference),
+        orderBatchReference = parseOrderingReference(row.orderBatchReference);
+      if (!orders.includes(orderReference) || seen.has(orderBatchReference)) return fail();
+      seen.add(orderBatchReference);
+      return Object.freeze({
+        orderReference,
+        orderBatchReference,
+        paymentDeadline: parseOrderingInstant(row.paymentDeadline),
+      });
+    }),
+  );
+}
+
+/**
+ * WP-2423: dine-in rounds of the given Orders the System cancelled because their payment failed
+ * and the payment window ended (never charged). Read only; the caller authorizes.
+ */
+export async function listStoreUnpaidBatchCancellations(
+  transaction: ConsumerTransaction,
+  scope: StoreScope,
+  orderReferences: readonly string[],
+): Promise<
+  readonly {
+    readonly orderReference: string;
+    readonly orderBatchReference: string;
+    readonly cancelledAt: string;
+  }[]
+> {
+  const orders = orderList(orderReferences);
+  if (orders.length === 0) return Object.freeze([]);
+  await storeContext(transaction, scope);
+  const found = await transaction.query(
+    `SELECT c.order_id::text AS "orderReference",c.order_batch_id::text AS "orderBatchReference",c.cancelled_at AS "cancelledAt"
+    FROM rms_ordering.order_batch_checkout_cancellation c
+    WHERE c.brand_id=$1 AND c.store_id=$2 AND c.order_id=ANY($3::uuid[])
+    ORDER BY c.order_batch_id LIMIT 10001`,
+    [
+      parseOrderingReference(scope.brandReference),
+      parseOrderingReference(scope.storeReference),
+      orders,
+    ],
+  );
+  if (!Array.isArray(found.rows) || found.rows.length > 10000) return fail();
+  const seen = new Set<string>();
+  return Object.freeze(
+    found.rows.map((value) => {
+      const row = readClosedRecord(value, ["orderReference", "orderBatchReference", "cancelledAt"]);
+      const orderReference = parseOrderingReference(row.orderReference),
+        orderBatchReference = parseOrderingReference(row.orderBatchReference);
+      if (!orders.includes(orderReference) || seen.has(orderBatchReference)) return fail();
+      seen.add(orderBatchReference);
+      return Object.freeze({
+        orderReference,
+        orderBatchReference,
+        cancelledAt: instant(row.cancelledAt),
+      });
+    }),
+  );
 }

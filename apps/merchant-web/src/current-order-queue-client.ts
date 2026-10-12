@@ -61,6 +61,20 @@ function parseStaffCancellation(value: unknown, submittedAt: string) {
     refundStatus: raw.refundStatus as "Pending" | "Refunded",
   });
 }
+/**
+ * WP-2423: an unpaid dine-in round. When its payment failed it is cancelled automatically at
+ * cancelsAt; the key is optional so older servers without it read as nothing due.
+ */
+function parsePaymentDue(value: unknown, submittedAt: string) {
+  if (value === null || value === undefined) return null;
+  const raw = exact(value, ["status", "cancelsAt"]);
+  if (raw.status === "Awaiting" && raw.cancelsAt === null)
+    return Object.freeze({ status: "Awaiting" as const, cancelsAt: null });
+  if (raw.status !== "Failed") return fail();
+  const cancelsAt = instant(raw.cancelsAt);
+  if (cancelsAt <= submittedAt) return fail();
+  return Object.freeze({ status: "Failed" as const, cancelsAt });
+}
 export function parseCurrentOrderQueue(value: unknown, after: string | null = null) {
   const raw = exact(value, ["items", "nextAfterOrderReference"]);
   if (!Array.isArray(raw.items) || raw.items.length > 50) return fail();
@@ -146,6 +160,8 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
     const seenBatches = new Set<string>();
     let previousSequence = 0;
     const batches = item.batches.map((value) => {
+      const withPaymentDue =
+        value !== null && typeof value === "object" && Object.hasOwn(value, "paymentDue");
       const batch = exact(value, [
         "orderBatchReference",
         "sequence",
@@ -154,10 +170,21 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         "canCancel",
         "staffCancellation",
         "canCancelItems",
+        ...(withPaymentDue ? ["paymentDue"] : []),
       ]);
       const orderBatchReference = reference(batch.orderBatchReference);
       const staffCancellation = parseStaffCancellation(batch.staffCancellation, submittedAt);
+      if (withPaymentDue && batch.paymentDue === undefined) return fail();
+      const paymentDue = parsePaymentDue(batch.paymentDue, submittedAt);
       if (
+        // WP-2423: only an unpaid, not accepted, not cancelled dine-in round has a payment due.
+        (paymentDue !== null &&
+          (item.orderType !== "DineIn" ||
+            batch.acceptanceStatus !== "NotAccepted" ||
+            staffCancellation !== null ||
+            batch.canRequestAcceptance !== false ||
+            batch.canCancel !== false ||
+            batch.canCancelItems !== false)) ||
         (item.awaitingPayment === true && batch.canRequestAcceptance !== false) ||
         typeof batch.sequence !== "number" ||
         !Number.isSafeInteger(batch.sequence) ||
@@ -217,6 +244,8 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         staffCancellation,
         /** WP-2423 Q6 step 2: at least one item of this batch can be cancelled on its own now. */
         canCancelItems: batch.canCancelItems,
+        /** WP-2423: this dine-in round is unpaid; when its payment failed, when it is cancelled. */
+        paymentDue,
       });
     });
     if (

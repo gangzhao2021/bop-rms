@@ -1,6 +1,6 @@
 import { createDiningOrderDeliveryProgress } from "./dining-order-delivery-progress.js";
 import { createPostgresKitchenCustomerStatusReader } from "@rms/kitchen";
-import { createPostgresPaymentStatusStore } from "@rms/payment";
+import { createPostgresPaymentStatusStore, listStoreOrderBatchPaymentOutcomes } from "@rms/payment";
 import { loadPickupNotCollected } from "@rms/fulfillment";
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
@@ -15,6 +15,8 @@ import {
   createOrderStatusQueryService,
   createPostgresStaffItemCancellationReader,
   createPostgresStaffOrderCancellationReader,
+  listStoreDiningBatchPaymentDeadlines,
+  listStoreUnpaidBatchCancellations,
   loadPickupPaymentWindowClosure,
   createPostgresOrderStatusProjectionStore,
   OrderStatusProjectionError,
@@ -24,6 +26,11 @@ import {
 import type { CustomerCheckoutSessionAuthorizationOptions } from "./customer-checkout-session-authorization.js";
 import { readStaffCancellationRefundStatus } from "./merchant-order-staff-cancellation.js";
 import { readItemCancellationRefundStatus } from "./merchant-order-item-staff-cancellation.js";
+import {
+  resolveCustomerBatchPayments,
+  type BatchPaymentOutcome,
+  type CustomerBatchPayment,
+} from "./dining-batch-payment-due.js";
 
 /** WP-2423 Q6: customer-safe reason categories; staff identity and internal codes stay private. */
 const customerCancellationReasons = Object.freeze({
@@ -274,6 +281,44 @@ export function createCustomerOrderStatusRead(
                   currencyCode: record.currencyCode,
                 },
               });
+          // WP-2423: a dine-in round whose payment failed is cancelled automatically when its payment
+          // window ends; the customer is told when before it happens, and that it was not charged.
+          let batchPayments: readonly CustomerBatchPayment[] = [];
+          const unpaidCancellations: { orderBatchReference: string; cancelledAt: string }[] = [];
+          if (result.order.orderType === "DineIn" && (await stillAuthorized())) {
+            for (const entry of await listStoreUnpaidBatchCancellations(
+              transaction,
+              options.scope,
+              [orderReference],
+            ))
+              unpaidCancellations.push({
+                orderBatchReference: entry.orderBatchReference,
+                cancelledAt: entry.cancelledAt,
+              });
+            const deadlines = new Map<string, string>();
+            for (const entry of await listStoreDiningBatchPaymentDeadlines(
+              transaction,
+              options.scope,
+              [orderReference],
+            ))
+              deadlines.set(entry.orderBatchReference, entry.paymentDeadline);
+            const outcomes = new Map<string, BatchPaymentOutcome>();
+            if (await stillAuthorized())
+              for (const entry of await listStoreOrderBatchPaymentOutcomes(
+                transaction,
+                options.scope,
+                [orderReference],
+              ))
+                outcomes.set(entry.orderBatchReference, entry.status);
+            batchPayments = resolveCustomerBatchPayments({
+              batchReferences: result.order.batches.map((batch) =>
+                String(batch.orderBatchReference),
+              ),
+              deadlines,
+              outcomes,
+              cancelled: new Set(unpaidCancellations.map((entry) => entry.orderBatchReference)),
+            });
+          }
           if (!(await stillAuthorized()))
             throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
           const checkedAt = now();
@@ -303,6 +348,8 @@ export function createCustomerOrderStatusRead(
                   }),
               ...(staffCancellations.length === 0 ? {} : { staffCancellations }),
               ...(itemCancellations.length === 0 ? {} : { itemCancellations }),
+              ...(batchPayments.length === 0 ? {} : { batchPayments }),
+              ...(unpaidCancellations.length === 0 ? {} : { unpaidCancellations }),
             },
           };
         });

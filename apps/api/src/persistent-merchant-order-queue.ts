@@ -3,6 +3,7 @@ import {
   createPostgresStaffItemCancellationReader,
   createPostgresStaffOrderCancellationReader,
   listStoreConfirmedOrderBatches,
+  listStoreDiningBatchPaymentDeadlines,
   listStorePaidOrderBatches,
   listStoreUnfulfillablePaidOrders,
   loadMerchantOrderLines,
@@ -13,6 +14,7 @@ import {
   listStorePickupAcceptanceDeadlines,
   listStoreUncollectedPickupOrders,
 } from "@rms/fulfillment";
+import { listStoreOrderBatchPaymentOutcomes } from "@rms/payment";
 import { createPostgresCurrentBrowserSessionSource } from "@bop/identity";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { createMerchantOrderQueueRead } from "./merchant-order-queue-read.js";
@@ -23,6 +25,10 @@ import {
 } from "./merchant-order-staff-cancellation.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { readItemCancellationRefundStatus } from "./merchant-order-item-staff-cancellation.js";
+import {
+  resolveMerchantBatchPaymentDue,
+  type BatchPaymentOutcome,
+} from "./dining-batch-payment-due.js";
 
 /** Read-only merchant intent; session identity and selected scope are resolved inside its transaction. */
 export function createPersistentMerchantOrderQueue(options: {
@@ -165,12 +171,38 @@ export function createPersistentMerchantOrderQueue(options: {
       // for acceptance; an Order with no recorded payment is still awaiting the customer's payment.
       const payments =
         ownerScope === null || result.items.length === 0
-          ? { paidOrders: new Set<string>(), awaitingAcceptance: new Set<string>() }
+          ? {
+              paidOrders: new Set<string>(),
+              paidBatches: new Set<string>(),
+              awaitingAcceptance: new Set<string>(),
+            }
           : await listStorePaidOrderBatches(
               businessTransaction,
               ownerScope,
               result.items.map((item) => item.orderReference),
             );
+      // WP-2423: an unpaid dine-in round is cancelled automatically once its payment window ends if
+      // its payment failed; staff see that, and when, before it happens (Ordering's deadline and
+      // Payment's latest outcome per batch).
+      const diningOrders = result.items
+        .filter((item) => item.orderType === "DineIn")
+        .map((item) => item.orderReference);
+      const paymentDeadlines = new Map<string, string>();
+      const paymentOutcomes = new Map<string, BatchPaymentOutcome>();
+      if (ownerScope !== null && diningOrders.length > 0) {
+        for (const entry of await listStoreDiningBatchPaymentDeadlines(
+          businessTransaction,
+          ownerScope,
+          diningOrders,
+        ))
+          paymentDeadlines.set(entry.orderBatchReference, entry.paymentDeadline);
+        for (const entry of await listStoreOrderBatchPaymentOutcomes(
+          businessTransaction,
+          ownerScope,
+          diningOrders,
+        ))
+          paymentOutcomes.set(entry.orderBatchReference, entry.status);
+      }
       // WP-2423 Q1: when a paid pickup Order not yet accepted stops being acceptable (Fulfillment's
       // capacity expiry); staff are warned before it lapses and Payment refunds it.
       const waiting = result.items.filter(
@@ -394,6 +426,18 @@ export function createPersistentMerchantOrderQueue(options: {
                             String(item.currentPhase),
                           )),
                     staffCancellation: cancellations.get(batch.orderBatchReference) ?? null,
+                    paymentDue: resolveMerchantBatchPaymentDue({
+                      orderType: item.orderType,
+                      open:
+                        closed === null &&
+                        ["Submitted", "Accepted", "InProgress", "Ready"].includes(
+                          String(item.currentPhase),
+                        ),
+                      batch,
+                      paidBatches: payments.paidBatches,
+                      deadlines: paymentDeadlines,
+                      outcomes: paymentOutcomes,
+                    }),
                     canCancelItems:
                       openBatches.has(batch.orderBatchReference) &&
                       [...cancellableLines.values()].includes(batch.orderBatchReference),

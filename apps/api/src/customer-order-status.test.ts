@@ -253,3 +253,31 @@ it("WP-2423 Q6 step 2a: serializes item cancellations with refund amount; a fail
   ]);
   expect(JSON.stringify(body)).not.toContain("private");
 });
+it("WP-2423 Q6: serializes unpaid dine-in rounds and their automatic cancellation", async () => {
+  const f = await setup();
+  const failed = {
+    orderBatchReference: "0190fa01-0000-7000-8000-000000000002",
+    status: "Failed",
+    cancelsAt: "2026-09-12T12:30:00.000Z",
+  };
+  const cancelled = {
+    orderBatchReference: "0190fa01-0000-7000-8000-000000000004",
+    cancelledAt: "2026-09-12T11:50:00.000Z",
+  };
+  f.read.mockResolvedValue({
+    ...f.result,
+    sources: {
+      checkedAt: "2026-09-12T12:00:00.000Z",
+      kitchen: null,
+      payments: null,
+      batchPayments: [{ ...failed, actorReference: "private" }],
+      unpaidCancellations: [{ ...cancelled, operationReference: "private" }],
+    },
+  });
+  const body = (await (await f.send()).json()) as {
+    status: { sources: Record<string, unknown> };
+  };
+  expect(body.status.sources.batchPayments).toEqual([failed]);
+  expect(body.status.sources.unpaidCancellations).toEqual([cancelled]);
+  expect(JSON.stringify(body)).not.toContain("private");
+});

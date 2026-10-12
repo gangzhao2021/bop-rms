@@ -214,6 +214,25 @@ export class CustomerOrderStatusHandler {
                           },
                         })),
                       }),
+                  // WP-2423 Q6: dine-in rounds whose payment failed (with when they are cancelled)
+                  // and rounds cancelled because their payment did not go through.
+                  ...(sources.batchPayments === undefined
+                    ? {}
+                    : {
+                        batchPayments: sources.batchPayments.map((payment) => ({
+                          orderBatchReference: payment.orderBatchReference,
+                          status: payment.status,
+                          cancelsAt: payment.cancelsAt,
+                        })),
+                      }),
+                  ...(sources.unpaidCancellations === undefined
+                    ? {}
+                    : {
+                        unpaidCancellations: sources.unpaidCancellations.map((cancellation) => ({
+                          orderBatchReference: cancellation.orderBatchReference,
+                          cancelledAt: cancellation.cancelledAt,
+                        })),
+                      }),
                 },
               };
         response.status(200).json({ schemaVersion: 1, status: { ...status, ...publicSources } });

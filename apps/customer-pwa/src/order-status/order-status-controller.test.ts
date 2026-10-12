@@ -643,3 +643,93 @@ it("ignores callbacks from a subscription disposed before remount", async () => 
   controller.dispose();
   expect(closed).toBe(2);
 });
+
+describe("WP-2423: dine-in round payments and unpaid cancellations", () => {
+  function dining(extra: Record<string, unknown>, orderType = "DineIn") {
+    const base = view();
+    const first = base.order.batches[0];
+    return {
+      ...base,
+      order: {
+        ...base.order,
+        orderType,
+        batches: [first, { ...first, orderBatchReference: id(30) }],
+      },
+      sources: {
+        checkedAt: "2026-08-11T14:00:00.000Z",
+        kitchen: null,
+        payments: [],
+        ...extra,
+      },
+    };
+  }
+  const paid = { orderBatchReference: id(3), status: "Succeeded", cancelsAt: null };
+  const failed = {
+    orderBatchReference: id(30),
+    status: "Failed",
+    cancelsAt: "2026-08-11T14:25:00.000Z",
+  };
+  const cancellation = { orderBatchReference: id(30), cancelledAt: "2026-08-11T13:59:00.000Z" };
+
+  it("admits each round's payment, a future cancel time for a failed round, and its cancellation", () => {
+    const before = parseOrderStatusView(dining({ batchPayments: [paid, failed] }), id(1));
+    // The cancel time is announced ahead, so it may be after the read.
+    expect(before.sources?.batchPayments).toEqual([paid, failed]);
+    expect(before.sources).not.toHaveProperty("unpaidCancellations");
+    const after = parseOrderStatusView(
+      dining({
+        batchPayments: [paid, { ...failed, cancelsAt: null }],
+        unpaidCancellations: [cancellation],
+      }),
+      id(1),
+    );
+    expect(after.sources?.unpaidCancellations).toEqual([cancellation]);
+    expect(Object.isFrozen(after.sources?.unpaidCancellations?.[0])).toBe(true);
+    expect(
+      parseOrderStatusView(
+        dining({ batchPayments: [{ ...paid, orderBatchReference: id(30), status: "Awaiting" }] }),
+        id(1),
+      ).sources?.batchPayments?.[0]?.status,
+    ).toBe("Awaiting");
+  });
+
+  it("rejects malformed, foreign, duplicate, contradictory or Pickup round payment facts", () => {
+    for (const extra of [
+      { batchPayments: [] },
+      { batchPayments: [paid, paid] },
+      { batchPayments: [{ ...paid, orderBatchReference: id(99) }] },
+      { batchPayments: [{ ...paid, status: "Pending" }] },
+      { batchPayments: [{ ...paid, cancelsAt: failed.cancelsAt }] },
+      { batchPayments: [{ ...failed, cancelsAt: "2026-08-11 14:25" }] },
+      { batchPayments: [{ ...failed, cancelsAt: "2026-08-11T13:00:00.000Z" }] },
+      { batchPayments: [{ ...failed, amount: 1 }] },
+      { batchPayments: null },
+      // A cancelled round no longer has a time it will be cancelled at.
+      { batchPayments: [failed], unpaidCancellations: [cancellation] },
+      { unpaidCancellations: [] },
+      { unpaidCancellations: [cancellation, cancellation] },
+      { unpaidCancellations: [{ ...cancellation, orderBatchReference: id(99) }] },
+      { unpaidCancellations: [{ ...cancellation, cancelledAt: "2026-08-11T14:01:00.000Z" }] },
+      { unpaidCancellations: [{ ...cancellation, reason: "PaymentFailed" }] },
+      // A round is cancelled either by the store or for non-payment, never both.
+      {
+        unpaidCancellations: [cancellation],
+        staffCancellations: [
+          {
+            orderBatchReference: id(30),
+            cancelledAt: "2026-08-11T13:58:00.000Z",
+            reason: "SoldOut",
+            refundStatus: "Pending",
+          },
+        ],
+      },
+    ])
+      expect(() => parseOrderStatusView(dining(extra), id(1)), JSON.stringify(extra)).toThrow();
+    expect(() =>
+      parseOrderStatusView(dining({ batchPayments: [paid] }, "Pickup"), id(1)),
+    ).toThrow();
+    expect(() =>
+      parseOrderStatusView(dining({ unpaidCancellations: [cancellation] }, "Pickup"), id(1)),
+    ).toThrow();
+  });
+});

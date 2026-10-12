@@ -9,6 +9,12 @@ import {
   filterCurrentOrderItems,
   acceptanceWindow,
   awaitingBatchReferences,
+  orderChannelLabel,
+  orderTypeLabel,
+  paymentDueText,
+  storeCancelledBatches,
+  unpaidCancelledBatches,
+  unpaidCancelledTotal,
 } from "./CurrentOrderQueuePage.js";
 import { parseCurrentOrderDetail, parseCurrentOrderQueue } from "./current-order-queue-client.js";
 it("renders actual Accepted version and visibly unresolved state without fabricated summaries", () => {
@@ -635,4 +641,185 @@ it("WP-2423 Q6 step 2: marks cancelled items, their refund and the refund total"
   );
   expect(whole.match(/class="order-line-cancelled"/gu)).toHaveLength(4);
   expect(whole).toContain("Cancelled by store");
+});
+const unpaidId = (n: number) => `01909968-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
+it("WP-2423: warns staff before an unpaid dine-in round is cancelled and says so in plain words", () => {
+  const base = {
+    orderBatchReference: unpaidId(90),
+    sequence: 1,
+    acceptanceStatus: "Accepted",
+    canRequestAcceptance: false,
+    canCancel: false,
+    staffCancellation: null,
+    canCancelItems: false,
+    paymentDue: null,
+  };
+  const order = (second: Record<string, unknown>) => ({
+    orderReference: unpaidId(1),
+    orderNumber: "ORD-1007",
+    orderType: "DineIn",
+    sourceChannel: "Qr",
+    submittedAt: "2026-09-14T00:00:00.000Z",
+    observedAt: "2026-09-14T00:10:00.000Z",
+    initialBatchReference: unpaidId(90),
+    batches: [base, { ...base, orderBatchReference: unpaidId(91), sequence: 2, ...second }],
+    canRequestAcceptance: false,
+    unfulfillable: null,
+    pickupNotCollected: false,
+    acceptBy: null,
+    awaitingPayment: false,
+    currentPhase: "Accepted",
+    currentVersion: 3,
+  });
+  const render = (second: Record<string, unknown>, now = Date.parse("2026-09-14T00:10:00.000Z")) =>
+    renderToStaticMarkup(
+      <CurrentOrderQueueRows
+        view={parseCurrentOrderQueue({ items: [order(second)], nextAfterOrderReference: null })}
+        timeZone="America/Toronto"
+        now={now}
+      />,
+    );
+  const failed = render({
+    acceptanceStatus: "NotAccepted",
+    paymentDue: { status: "Failed", cancelsAt: "2026-09-14T00:30:00.000Z" },
+  });
+  // In the summary row and in the round itself, as a warning, with the Store-local time.
+  expect(failed).toContain("Batch 2: Payment failed · cancelled automatically at 20:30");
+  expect(failed).toMatch(
+    /<p class="order-workbench-closed" role="note"><span class="order-accept-by" data-tier="urgent">Payment failed · cancelled automatically at 20:30<\/span>/u,
+  );
+  expect(failed).toContain("Don&#x27;t prepare it; it will not be charged.");
+  expect(failed).not.toContain("Acceptance: Not accepted");
+  // Plain words, never internal codes.
+  expect(failed).toContain("<dt>Order type</dt><dd>Dine-in</dd>");
+  expect(failed).toContain("<dt>Channel</dt><dd>QR code</dd>");
+  expect(failed).toContain("Dine-in · QR code");
+  expect(failed).not.toMatch(/>DineIn<|>Qr</u);
+  // Once the time has passed the round reads as being cancelled.
+  expect(
+    render(
+      {
+        acceptanceStatus: "NotAccepted",
+        paymentDue: { status: "Failed", cancelsAt: "2026-09-14T00:30:00.000Z" },
+      },
+      Date.parse("2026-09-14T00:31:00.000Z"),
+    ),
+  ).toContain("Payment failed · being cancelled automatically");
+  const awaiting = render({
+    acceptanceStatus: "NotAccepted",
+    paymentDue: { status: "Awaiting", cancelsAt: null },
+  });
+  expect(awaiting).toContain('data-tier="warning">Batch 2: Awaiting payment');
+  expect(awaiting).toContain("the guest has not paid for this round");
+  // After the System cancelled it: not paid, nothing charged; not mistaken for a store cancellation.
+  const cancelled = render({ acceptanceStatus: "Cancelled" });
+  expect(cancelled).toContain("Batch cancelled · not paid.");
+  expect(cancelled).toContain("Nothing was charged for it.");
+  expect(cancelled).not.toContain("Payment failed");
+  expect(cancelled).toContain("1 cancelled");
+});
+it("WP-2423: lines of a round cancelled for a failed payment are marked and not owed", () => {
+  const line = (n: number, batch: number, amount: string) => ({
+    orderItemReference: unpaidId(200 + n),
+    orderBatchReference: unpaidId(batch),
+    name: "Synthetic dish " + n,
+    options: [],
+    quantity: 1,
+    customerNote: null,
+    unitPrice: { amountMinor: "1000", currencyCode: "CAD" },
+    subtotal: { amountMinor: "1000", currencyCode: "CAD" },
+    discount: { amountMinor: "0", currencyCode: "CAD" },
+    tax: { amountMinor: "130", currencyCode: "CAD" },
+    fee: { amountMinor: "0", currencyCode: "CAD" },
+    total: { amountMinor: amount, currencyCode: "CAD" },
+    canCancel: false,
+    cancellation: null,
+  });
+  const batch = {
+    orderBatchReference: unpaidId(90),
+    sequence: 1,
+    acceptanceStatus: "Accepted",
+    canRequestAcceptance: false,
+    canCancel: false,
+    staffCancellation: null,
+    canCancelItems: false,
+    paymentDue: null,
+  };
+  const detail = parseCurrentOrderDetail(
+    {
+      screenId: "OPS-ORDER-DETAIL",
+      order: {
+        orderReference: unpaidId(1),
+        orderNumber: "ORD-1007",
+        orderType: "DineIn",
+        sourceChannel: "Qr",
+        submittedAt: "2026-09-14T00:00:00.000Z",
+        observedAt: "2026-09-14T00:40:00.000Z",
+        initialBatchReference: unpaidId(90),
+        batches: [
+          batch,
+          {
+            ...batch,
+            orderBatchReference: unpaidId(91),
+            sequence: 2,
+            acceptanceStatus: "Cancelled",
+          },
+        ],
+        canRequestAcceptance: false,
+        unfulfillable: null,
+        pickupNotCollected: false,
+        acceptBy: null,
+        awaitingPayment: false,
+        currentPhase: "Accepted",
+        currentVersion: 4,
+      },
+      lines: {
+        items: [line(1, 90, "1130"), line(2, 91, "1130")],
+        totals: {
+          subtotal: { amountMinor: "2000", currencyCode: "CAD" },
+          discount: { amountMinor: "0", currencyCode: "CAD" },
+          tax: { amountMinor: "260", currencyCode: "CAD" },
+          fee: { amountMinor: "0", currencyCode: "CAD" },
+          total: { amountMinor: "2260", currencyCode: "CAD" },
+        },
+      },
+    },
+    unpaidId(1),
+  );
+  const unpaid = unpaidCancelledBatches(detail.view);
+  expect([...unpaid]).toEqual([unpaidId(91)]);
+  expect(storeCancelledBatches(detail.view).size).toBe(0);
+  const html = renderToStaticMarkup(
+    <CurrentOrderLines
+      lines={detail.lines}
+      cancelledBatches={storeCancelledBatches(detail.view)}
+      unpaidCancelledBatches={unpaid}
+    />,
+  );
+  expect(html.match(/class="order-line-cancelled"/gu)).toHaveLength(1);
+  expect(html).toContain("Cancelled · not paid");
+  expect(html).not.toContain("Cancelled by store");
+  // The original total stays; the cancelled unpaid round is taken off beside it.
+  expect(html).toMatch(/<dt>Total<\/dt><dd>\$22\.60<\/dd>/u);
+  expect(html).toMatch(/Cancelled unpaid rounds<\/dt><dd>−\$11\.30<\/dd>/u);
+  expect(html).toMatch(/Total after cancelled rounds<\/dt><dd>\$11\.30<\/dd>/u);
+  expect(unpaidCancelledTotal(detail.lines, new Set())).toBeNull();
+  // Without unpaid cancelled rounds nothing extra is shown.
+  expect(renderToStaticMarkup(<CurrentOrderLines lines={detail.lines} />)).not.toContain(
+    "Cancelled unpaid rounds",
+  );
+});
+it("WP-2423: words an unpaid round's payment state for staff", () => {
+  expect(paymentDueText({ status: "Awaiting", cancelsAt: null }, "UTC")).toBe("Awaiting payment");
+  expect(paymentDueText({ status: "Failed", cancelsAt: "2026-09-14T00:30:00.000Z" }, "UTC")).toBe(
+    "Payment failed · cancelled automatically at 00:30",
+  );
+  expect(orderTypeLabel.DineIn).toBe("Dine-in");
+  expect(["Qr", "Web", "Pos", "Api", "Kiosk"].map(orderChannelLabel)).toEqual([
+    "QR code",
+    "Website",
+    "Point of sale",
+    "Partner integration",
+    "Other",
+  ]);
 });
