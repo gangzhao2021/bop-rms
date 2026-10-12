@@ -58,6 +58,8 @@ export const cartErrorCodes = [
   "CART_UNAVAILABLE",
   "CART_PERMISSION_DENIED",
   "CART_REPLACEMENT_FORBIDDEN",
+  /** WP-2423: a checkout on the previous table Cart may still create an order or charge; retry later. */
+  "CART_REPLACEMENT_CHECKOUT_PENDING",
   "CART_VERSION_CONFLICT",
   "CART_IDEMPOTENCY_CONFLICT",
   "CART_ITEM_NOT_FOUND",

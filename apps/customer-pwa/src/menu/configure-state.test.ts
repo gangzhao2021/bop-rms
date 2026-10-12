@@ -460,3 +460,41 @@ describe("WP-2423: continuing past a timed-out table cart", () => {
     expect(g.controller.getState().status).toBe("expired");
   });
 });
+
+it("WP-2423: waits once for the table's last order, then says it is still being processed", async () => {
+  const calls: string[] = [];
+  const waits: number[] = [];
+  let creates = 0;
+  const client: CustomerCartClient = {
+    async loadCurrent() {
+      calls.push("load");
+      return null;
+    },
+    async createCart() {
+      calls.push("create");
+      creates += 1;
+      throw new CartClientError("cart_order_processing", { retryAfterSeconds: 10 });
+    },
+    async addItem() {
+      throw new Error("unused");
+    },
+    async updateItem() {
+      throw new Error("unused");
+    },
+    async removeItem() {
+      throw new Error("unused");
+    },
+  };
+  let n = 60;
+  const controller = createConfigureController({
+    client,
+    keyFactory: () => id(n++),
+    wait: async (ms) => {
+      waits.push(ms);
+    },
+  });
+  await controller.submit(id(3), { quantity: 1, customerNote: null, optionSelections: [] });
+  expect(waits).toEqual([10000]);
+  expect(creates).toBe(2);
+  expect(controller.getState()).toMatchObject({ status: "order-processing", canRetry: false });
+});

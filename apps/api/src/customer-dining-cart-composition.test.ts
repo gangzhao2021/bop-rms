@@ -633,6 +633,14 @@ describe("WP-2423: continuing past a timed-out table Cart", () => {
     racing.replace.mockRejectedValueOnce(new CartError("CART_LIFECYCLE_UNAVAILABLE"));
     expect((await racing.port.createCart(input())).status).toBe("RetryLater");
   });
+  it("says the table's last order is still being processed while a checkout may still charge", async () => {
+    const f = continued();
+    f.replace.mockRejectedValueOnce(new CartError("CART_REPLACEMENT_CHECKOUT_PENDING"));
+    expect(await f.port.createCart(input())).toEqual({
+      status: "OrderProcessing",
+      retryAfterSeconds: 10,
+    });
+  });
   it("keeps refusing an Abandoned Cart, a removed participant and other failures", async () => {
     const abandoned = continued(previousCart("Abandoned"));
     expect(await abandoned.port.createCart(input())).toEqual({ status: "LifecycleAbandoned" });

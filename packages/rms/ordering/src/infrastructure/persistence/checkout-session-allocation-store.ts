@@ -397,3 +397,42 @@ export function createPostgresGuestCheckoutRecovery(options: {
     },
   });
 }
+
+/**
+ * WP-2423: whether this allocation's submission already produced its order batch (from exactly
+ * this Cart version and quote). Once it has, later acceptance and payment handling belong to the
+ * Order, not the Cart. Read only on the caller's transaction; the caller authorizes.
+ */
+export async function loadCheckoutAllocationSubmittedBatch(
+  transaction: CartQueryTransaction,
+  value: unknown,
+): Promise<boolean> {
+  try {
+    const allocation = parseCheckoutSessionAllocation(value);
+    await transaction.query(
+      "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+      [allocation.brandReference, allocation.storeReference],
+    );
+    const found = rows(
+      await transaction.query(
+        `SELECT count(*)::int AS batches FROM rms_ordering.order_batch
+         WHERE brand_id=$1 AND store_id=$2 AND submission_id=$3 AND source_cart_id=$4
+           AND source_cart_version=$5 AND quote_id=$6`,
+        [
+          allocation.brandReference,
+          allocation.storeReference,
+          allocation.submissionReference,
+          allocation.cartReference,
+          allocation.cartVersion,
+          allocation.quoteReference,
+        ],
+      ),
+    );
+    const batches = found.length === 1 ? readClosedRecord(found[0], ["batches"]).batches : null;
+    if (batches !== 0 && batches !== 1) return fail();
+    return batches === 1;
+  } catch (error) {
+    if (error instanceof CheckoutSessionServiceError) throw error;
+    return fail();
+  }
+}

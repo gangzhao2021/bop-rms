@@ -93,6 +93,8 @@ export type CustomerCartPortResult =
   | { readonly status: "RateLimited"; readonly retryAfterSeconds: number }
   /** WP-2423: briefly unavailable (for example a table Cart expiry still being recorded). */
   | { readonly status: "RetryLater"; readonly retryAfterSeconds: number }
+  /** WP-2423: the table's last checkout is still being processed; retry shortly. */
+  | { readonly status: "OrderProcessing"; readonly retryAfterSeconds: number }
   | { readonly status: "Unavailable" };
 
 export interface CustomerCartReplacementPort {
@@ -158,7 +160,11 @@ type ErrorCode =
   | "cart_replacement_unavailable"
   | "cart_abandoned"
   | "cart_rate_limited"
+  | "cart_order_processing"
   | "cart_service_unavailable";
+
+/** WP-2423: how long a guest waits before retrying while the table's last checkout settles. */
+export const TABLE_ORDER_PROCESSING_RETRY_SECONDS = 10;
 
 const errors = Object.freeze({
   cart_request_invalid: { status: 400, messageKey: "customer.cart.request_invalid" },
@@ -175,6 +181,8 @@ const errors = Object.freeze({
   },
   cart_abandoned: { status: 409, messageKey: "customer.cart.abandoned" },
   cart_rate_limited: { status: 429, messageKey: "customer.cart.rate_limited" },
+  // WP-2423: the table's last checkout may still create an order or charge; retry shortly.
+  cart_order_processing: { status: 409, messageKey: "customer.cart.order_processing" },
   cart_service_unavailable: { status: 503, messageKey: "customer.cart.service_unavailable" },
 } as const);
 
@@ -481,6 +489,11 @@ function handleResult(response: Response, result: CustomerCartPortResult, create
     }
     return;
   }
+  if (result.status === "OrderProcessing") {
+    response.setHeader("Retry-After", String(positive(result.retryAfterSeconds, 60)));
+    sendError(response, "cart_order_processing");
+    return;
+  }
   if (result.status === "RetryLater") {
     response.setHeader("Retry-After", String(positive(result.retryAfterSeconds, 60)));
     sendError(response, "cart_service_unavailable");
@@ -652,7 +665,10 @@ export class CustomerCartHandler {
           CART_IDEMPOTENCY_CONFLICT: "cart_idempotency_conflict",
           CART_LIFECYCLE_UNAVAILABLE: "cart_replacement_unavailable",
           CART_EXPIRED: "cart_expired",
+          CART_REPLACEMENT_CHECKOUT_PENDING: "cart_order_processing",
         } as const;
+        if (error instanceof CartError && error.code === "CART_REPLACEMENT_CHECKOUT_PENDING")
+          response.setHeader("Retry-After", String(TABLE_ORDER_PROCESSING_RETRY_SECONDS));
         sendError(
           response,
           error instanceof CartError && error.code in mapping

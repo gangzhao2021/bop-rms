@@ -30,7 +30,7 @@ function fixture() {
       allocatedAt: initial.createdAt,
     });
   const history = vi.fn(async () => [allocation(2), allocation(3)]),
-    observe = vi.fn(async () => ({ status: "Confirmed" as "Confirmed" | "Unresolved" })),
+    observe = vi.fn(async () => ({ status: "Settled" as "Settled" | "Pending" })),
     authorize = vi.fn(async () => true),
     now = vi.fn(() => at as string);
   const gate = createDiningCartReplacementSettlementGate({
@@ -54,11 +54,26 @@ it("checks every allocation on the supplied transaction and reauthorizes", async
   expect(f.observe).toHaveBeenNthCalledWith(2, f.tx, f.allocation(3));
   expect(f.authorize).toHaveBeenCalledTimes(2);
 });
-it("does not substitute another completed attempt for one unresolved allocation", async () => {
+it("does not substitute another settled attempt for one pending allocation (retry later)", async () => {
   const f = fixture();
   f.observe
-    .mockResolvedValueOnce({ status: "Confirmed" })
-    .mockResolvedValueOnce({ status: "Unresolved" });
+    .mockResolvedValueOnce({ status: "Settled" })
+    .mockResolvedValueOnce({ status: "Pending" });
+  // WP-2423: still blocked, but as a distinct retry-later refusal, after every allocation is checked.
+  await expect(f.gate.clear(f.tx, f.cart, f.at)).rejects.toMatchObject({
+    code: "CART_REPLACEMENT_CHECKOUT_PENDING",
+  });
+  expect(f.observe).toHaveBeenCalledTimes(2);
+  expect(f.authorize).toHaveBeenCalledTimes(2);
+  // Reauthorization loss still refuses outright rather than reporting pending.
+  const g = fixture();
+  g.observe.mockResolvedValue({ status: "Pending" });
+  g.authorize.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+  expect(await g.gate.clear(g.tx, g.cart, g.at)).toBe(false);
+});
+it("refuses an unknown observation status", async () => {
+  const f = fixture();
+  f.observe.mockResolvedValueOnce({ status: "Confirmed" } as never);
   expect(await f.gate.clear(f.tx, f.cart, f.at)).toBe(false);
 });
 it("empty allocation history has no allocated checkout to resolve", async () => {

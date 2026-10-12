@@ -280,3 +280,54 @@ export function createPostgresCheckoutSessionStore(
     },
   });
 }
+
+/**
+ * WP-2423: until when this allocation's checkout session may still be used to submit (its checkout
+ * validation deadline), or null when no such session exists. Read only on the caller's transaction;
+ * the caller authorizes. After the deadline the session can no longer produce an order or charge.
+ */
+export async function loadCheckoutSessionDeadline(
+  transaction: CartQueryTransaction,
+  value: {
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly checkoutSessionReference: string;
+    readonly cartReference: string;
+    readonly submissionReference: string;
+    readonly paymentOperationReference: string;
+  },
+): Promise<string | null> {
+  try {
+    const brand = parseOrderingReference(value.brandReference),
+      store = parseOrderingReference(value.storeReference),
+      reference = parseOrderingReference(value.checkoutSessionReference);
+    await transaction.query(
+      "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+      [brand, store],
+    );
+    const found = rows(
+      await transaction.query(
+        "SELECT snapshot_json FROM rms_ordering.checkout_session_record WHERE brand_id=$1 AND store_id=$2 AND checkout_session_id=$3",
+        [brand, store, reference],
+      ),
+    );
+    if (found.length > 1) return fail();
+    if (found.length === 0) return null;
+    const session = parseCheckoutSession(
+      readClosedRecord(found[0], ["snapshot_json"]).snapshot_json,
+    );
+    if (
+      session.checkoutSessionReference !== reference ||
+      session.validation.brandReference !== brand ||
+      session.validation.storeReference !== store ||
+      session.validation.cartReference !== parseOrderingReference(value.cartReference) ||
+      session.submissionReference !== parseOrderingReference(value.submissionReference) ||
+      session.paymentOperationReference !== parseOrderingReference(value.paymentOperationReference)
+    )
+      return fail();
+    return parseOrderingInstant(session.validation.validUntil);
+  } catch (error) {
+    if (error instanceof CheckoutSessionServiceError) throw error;
+    return fail();
+  }
+}

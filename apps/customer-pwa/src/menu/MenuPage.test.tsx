@@ -359,6 +359,18 @@ describe("WP-2423: a table cart that timed out", () => {
     );
     expect(render({ status: "added", cart: added })).not.toContain("earlier cart timed out");
   });
+  it("says the table's last order is still being processed instead of a dropped connection", () => {
+    const html = render({
+      status: "order-processing",
+      issueCodes: [],
+      retryAfterSeconds: 10,
+      canRetry: false,
+    });
+    expect(html).toContain(
+      "Your table’s last order is still being processed. Try again in a moment.",
+    );
+    expect(html).not.toContain("connection dropped");
+  });
   it("no longer sends the guest to staff when the cart could not be restarted", () => {
     const html = render({
       status: "expired",

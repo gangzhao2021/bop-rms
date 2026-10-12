@@ -156,6 +156,7 @@ export function createCustomerDiningCartReplacement(options: CustomerDiningCartR
             "CART_IDEMPOTENCY_CONFLICT",
             "CART_LIFECYCLE_UNAVAILABLE",
             "CART_EXPIRED",
+            "CART_REPLACEMENT_CHECKOUT_PENDING",
           ].includes(error.code)
         )
           throw error;

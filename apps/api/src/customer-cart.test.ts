@@ -292,6 +292,7 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
     [{ status: "RateLimited", retryAfterSeconds: 7 }, 429, "cart_rate_limited"],
     // WP-2423: briefly unavailable (table Cart expiry still being recorded) with a retry hint.
     [{ status: "RetryLater", retryAfterSeconds: 5 }, 503, "cart_service_unavailable"],
+    [{ status: "OrderProcessing", retryAfterSeconds: 10 }, 409, "cart_order_processing"],
   ] as const)("maps safe application outcome %o", async (result, status, errorCode) => {
     port.result = result;
     const response = await request("/bff/customer/cart", { headers: headers() });
@@ -299,6 +300,8 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
     expect(await response.json()).toMatchObject({ error: { code: errorCode } });
     if (status === 429) expect(response.headers.get("retry-after")).toBe("7");
     if (status === 503) expect(response.headers.get("retry-after")).toBe("5");
+    if (errorCode === "cart_order_processing")
+      expect(response.headers.get("retry-after")).toBe("10");
   });
 
   it("maps a thrown or malformed dependency result to safe unavailable", async () => {
@@ -398,6 +401,17 @@ describe("WP-2402 explicit Dining Cart replacement transport", () => {
     const response = await request(path, mutation());
     expect(response.status).toBe(status);
     expect(JSON.stringify(await response.json())).not.toContain(guest);
+  });
+  it("WP-2423: a replacement held back by the table's last checkout asks to retry shortly", async () => {
+    replacement = {
+      replace: async () => {
+        throw new CartError("CART_REPLACEMENT_CHECKOUT_PENDING");
+      },
+    };
+    const response = await request(path, mutation());
+    expect(response.status).toBe(409);
+    expect(response.headers.get("retry-after")).toBe("10");
+    expect(await response.json()).toMatchObject({ error: { code: "cart_order_processing" } });
   });
   it.each([
     { ...receipt, guestSessionReference: id(40) },

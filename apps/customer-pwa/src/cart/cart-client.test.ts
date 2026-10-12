@@ -237,6 +237,7 @@ describe("uncertain Cart response transport", () => {
     [409, "cart_expired"],
     [409, "cart_abandoned"],
     [429, "cart_rate_limited"],
+    [409, "cart_order_processing"],
   ])("retains matching %s/%s rejection semantics", async (status, code) => {
     setCustomerCartCsrfCredential("c".repeat(43));
     vi.stubGlobal(

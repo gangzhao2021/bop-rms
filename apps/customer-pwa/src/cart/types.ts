@@ -77,6 +77,8 @@ export type CartErrorCode =
   | "cart_expired"
   | "cart_abandoned"
   | "cart_rate_limited"
+  /** WP-2423: the table's last order is still being processed; retry shortly. */
+  | "cart_order_processing"
   | "cart_service_unavailable"
   | "quote_operation_expired"
   | "network_unknown";

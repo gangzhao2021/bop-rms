@@ -262,6 +262,7 @@ describe("WP-1205 in-memory Cart state", () => {
     ["cart_not_found", "not-found"],
     ["cart_selection_invalid", "validation"],
     ["cart_rate_limited", "rate-limited"],
+    ["cart_order_processing", "order-processing"],
     ["cart_expired", "expired"],
     ["cart_abandoned", "abandoned"],
     ["cart_service_unavailable", "unavailable"],

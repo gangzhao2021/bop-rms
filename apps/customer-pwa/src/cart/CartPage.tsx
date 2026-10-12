@@ -232,6 +232,10 @@ function ErrorState({
         : "This cart cannot accept more items. Ask staff for help continuing your order.",
     ],
     abandoned: ["Cart closed", "This cart was abandoned and cannot be changed."],
+    "order-processing": [
+      "Order still processing",
+      "Your table’s last order is still being processed. Try again in a moment.",
+    ],
     "command-failed": [
       "Outcome not confirmed",
       "The connection dropped before we could confirm your change.",

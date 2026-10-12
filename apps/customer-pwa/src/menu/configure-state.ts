@@ -17,6 +17,7 @@ export type ConfigureState =
         | "conflict"
         | "validation"
         | "rate-limited"
+        | "order-processing"
         | "expired"
         | "abandoned"
         | "unavailable"
@@ -101,13 +102,15 @@ export function createConfigureController({
             ? "validation"
             : parsed.code === "cart_rate_limited"
               ? "rate-limited"
-              : parsed.code === "cart_expired"
-                ? "expired"
-                : parsed.code === "cart_abandoned"
-                  ? "abandoned"
-                  : parsed.code === "network_unknown"
-                    ? "outcome-unknown"
-                    : "unavailable";
+              : parsed.code === "cart_order_processing"
+                ? "order-processing"
+                : parsed.code === "cart_expired"
+                  ? "expired"
+                  : parsed.code === "cart_abandoned"
+                    ? "abandoned"
+                    : parsed.code === "network_unknown"
+                      ? "outcome-unknown"
+                      : "unavailable";
     publish({
       status,
       issueCodes: parsed.issueCodes,
@@ -146,7 +149,7 @@ export function createConfigureController({
           if (
             plan.retried === true ||
             !(error instanceof CartClientError) ||
-            error.code !== "cart_service_unavailable" ||
+            (error.code !== "cart_service_unavailable" && error.code !== "cart_order_processing") ||
             error.retryAfterSeconds === null ||
             error.retryAfterSeconds > MAX_AUTOMATIC_RETRY_SECONDS
           )

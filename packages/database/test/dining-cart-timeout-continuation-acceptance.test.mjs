@@ -25,6 +25,7 @@ import {
 import { fenceDiningCartReplacement } from "../../../apps/api/src/dining-cart-replacement-authorization.ts";
 import { createDiningCartReplacementSettlement } from "../../../apps/api/src/dining-cart-replacement-settlement.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
+import { orderWriteFixture } from "../../rms/ordering/src/tests/order-creation-store.fixture.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 
 const { Client } = pg;
@@ -511,6 +512,171 @@ it("replaces a timed-out table Cart for any current participant, once, and keeps
         (error) => error instanceof CartError && error.code === "CART_REPLACEMENT_FORBIDDEN",
       );
       assert.equal((await replacements(S3)).length, 0);
+
+      // WP-2423 settlement: checkouts on the timed-out Cart that can no longer create an order or a
+      // charge do not hold the table back; one that still could makes the guest retry shortly.
+      const evidence = JSON.parse(
+        JSON.stringify(
+          orderWriteFixture({ at: time(-minutes(140)), dineIn: true }).request
+            .checkoutValidationEvidence,
+        ),
+      );
+      const allocatedAt = time(-minutes(140));
+      const seedCheckout = async (n, cart, kind) => {
+        const ref = (k) => id(n * 10 + k);
+        const guestSession = id(800 + n);
+        const validatedAt = kind === "open" ? time(-minutes(2)) : allocatedAt;
+        const validUntil = kind === "open" ? time(minutes(30)) : time(-minutes(120));
+        const createdAt = kind === "open" ? time(-minutes(1)) : allocatedAt;
+        await admin.query(
+          "INSERT INTO rms_ordering.checkout_session_allocation (brand_id,store_id,create_operation_id,guest_session_id,cart_id,cart_version,quote_id,quote_version,checkout_session_id,submission_id,payment_operation_id,allocated_at) VALUES ($1,$2,$3,$4,$5,2,$6,1,$7,$8,$9,$10)",
+          [brand, store, ref(1), guestSession, cart, ref(2), ref(3), ref(4), ref(5), createdAt],
+        );
+        const session = {
+          schemaVersion: 1,
+          checkoutSessionReference: ref(3),
+          createOperationReference: ref(1),
+          submissionReference: ref(4),
+          paymentOperationReference: ref(5),
+          validation: {
+            ...evidence,
+            guestSessionReference: guestSession,
+            brandReference: brand,
+            storeReference: store,
+            cartReference: cart,
+            cartVersion: 2,
+            quoteReference: ref(2),
+            orderType: "DineIn",
+            sourceChannel: "Qr",
+            catalogLines: evidence.catalogLines.map((line) => ({ ...line, validatedAt })),
+            fulfillment: {
+              ...evidence.fulfillment,
+              brandReference: brand,
+              storeReference: store,
+              cartReference: cart,
+              cartVersion: 2,
+              quoteReference: ref(2),
+              orderType: "DineIn",
+              sourceChannel: "Qr",
+              checkedAt: validatedAt,
+              validUntil,
+            },
+            validatedAt,
+            validUntil,
+          },
+          createdAt,
+        };
+        await admin.query(
+          "INSERT INTO rms_ordering.checkout_session_record (brand_id,store_id,checkout_session_id,create_operation_id,submission_id,payment_operation_id,guest_session_id,cart_id,snapshot_json,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10)",
+          [
+            brand,
+            store,
+            ref(3),
+            ref(1),
+            ref(4),
+            ref(5),
+            guestSession,
+            cart,
+            JSON.stringify(session),
+            createdAt,
+          ],
+        );
+        if (kind === "paid" || kind === "failed") {
+          const submittedAt = time(-minutes(139));
+          await admin.query(
+            "INSERT INTO rms_ordering.order_submission_record (submission_id,brand_id,store_id,order_id,guest_session_id,intent_digest,source_cart_id,source_cart_version,quote_id,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,2,$8,$9)",
+            [
+              ref(4),
+              brand,
+              store,
+              ref(6),
+              guestSession,
+              "sha256:" + "b".repeat(64),
+              cart,
+              ref(2),
+              submittedAt,
+            ],
+          );
+          await admin.query(
+            "INSERT INTO rms_ordering.order_batch (order_batch_id,brand_id,store_id,order_id,submission_id,source_cart_id,source_cart_version,checkout_validation_id,quote_id,submitted_by_actor_id,submitted_at) VALUES ($1,$2,$3,$4,$5,$6,2,$7,$8,$9,$10)",
+            [ref(7), brand, store, ref(6), ref(4), cart, ref(8), ref(2), guestSession, submittedAt],
+          );
+        }
+        if (kind === "inflight") {
+          const intentAt = time(-minutes(10));
+          await admin.query(
+            "INSERT INTO rms_payment.payment_intent (payment_intent_id,brand_id,store_id,payment_operation_id,order_id,order_batch_id,submission_id,guest_session_id,source_cart_id,source_cart_version,quote_id,preparation_id,capacity_allocation_id,intent_digest,preparation_source_digest,order_allocation_minor,tip_minor,total_minor,currency_code,payment_method,capture_mode,aggregate_version,creation_status,prepared_at,capacity_expires_at,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,2,$10,$11,$12,$13,$13,1130,0,1130,'CAD','OnlineCard','Automatic',1,'ProviderCreatePending',$14,$15,$14)",
+            [
+              ref(9),
+              brand,
+              store,
+              ref(5),
+              ref(6),
+              ref(7),
+              ref(4),
+              guestSession,
+              cart,
+              ref(2),
+              id(n * 10 + 100),
+              id(n * 10 + 101),
+              "sha256:" + "d".repeat(64),
+              intentAt,
+              new Date(Date.parse(intentAt) + minutes(30)).toISOString(),
+            ],
+          );
+          await admin.query(
+            "INSERT INTO rms_payment.payment_attempt (payment_attempt_id,brand_id,store_id,payment_intent_id,attempt_number,provider,provider_environment,provider_idempotency_digest,created_at) VALUES ($1,$2,$3,$4,1,'Stripe','Test',$5,$6)",
+            [id(n * 10 + 102), brand, store, ref(9), "sha256:" + "e".repeat(64), intentAt],
+          );
+          await admin.query(
+            "INSERT INTO rms_payment.payment_intent_operation_record (payment_operation_id,brand_id,store_id,payment_intent_id,guest_session_id,intent_digest,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+            [ref(5), brand, store, ref(9), guestSession, "sha256:" + "d".repeat(64), intentAt],
+          );
+        }
+      };
+      const [H5, H6, H7] = [52, 62, 72].map(id);
+      await admin.query("SET session_replication_role = replica");
+      let S5, S6, S7;
+      try {
+        S5 = await seedSession(50, "Active", H5, [[H5, "Active"]]);
+        S6 = await seedSession(60, "Active", H6, [[H6, "Active"]]);
+        S7 = await seedSession(70, "Active", H7, [[H7, "Active"]]);
+        await seedCart(id(500), S5, "Expired", 0);
+        await seedCart(id(600), S6, "Expired", 0);
+        await seedCart(id(700), S7, "Expired", 0);
+        // S5: a paid submitted round, a failed-payment round and an abandoned intent-less attempt.
+        await seedCheckout(51, id(500), "paid");
+        await seedCheckout(52, id(500), "failed");
+        await seedCheckout(53, id(500), "expired");
+        // S6: a payment intent with no outcome and no order yet. S7: a checkout still usable.
+        await seedCheckout(61, id(600), "inflight");
+        await seedCheckout(71, id(700), "open");
+      } finally {
+        await admin.query("SET session_replication_role = origin");
+      }
+      const settledReplace = await create(guest(8, S5, H5), 8001);
+      assert.ok(["Applied", "Current"].includes(settledReplace.status), settledReplace.status);
+      assert.equal((await replacements(S5)).length, 1);
+      for (const [n, session, host, previous] of [
+        [9, S6, H6, id(600)],
+        [10, S7, H7, id(700)],
+      ]) {
+        const cred = guest(n, session, host);
+        assert.deepEqual(await create(cred, 9000 + n), {
+          status: "OrderProcessing",
+          retryAfterSeconds: 10,
+        });
+        await assert.rejects(
+          replaceAs(cred, {
+            operationReference: id(9100 + n),
+            previousCartReference: previous,
+            expectedCartVersion: 3,
+          }),
+          (error) =>
+            error instanceof CartError && error.code === "CART_REPLACEMENT_CHECKOUT_PENDING",
+        );
+        assert.equal((await replacements(session)).length, 0);
+      }
     } finally {
       await admin.end();
     }

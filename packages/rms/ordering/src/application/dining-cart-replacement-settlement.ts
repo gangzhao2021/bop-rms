@@ -12,6 +12,9 @@ import {
 /** Allocated checkout clearance only. The caller must retain Cart/current Dining
  * fences and establish that all possible submissions use this allocation history.
  * Does not close a Dining session, release resources or authorize replacement.
+ * WP-2423: an allocation is Settled once it can no longer create an order or a charge from this
+ * Cart (decided by the caller's owner observation). Any Pending allocation refuses replacement
+ * with CART_REPLACEMENT_CHECKOUT_PENDING (retry later); owner failures stay unavailable.
  */
 export function createDiningCartReplacementSettlementGate<Transaction>(options: {
   readonly scope: { readonly brandReference: string; readonly storeReference: string };
@@ -28,7 +31,7 @@ export function createDiningCartReplacementSettlementGate<Transaction>(options: 
   observe(
     transaction: Transaction,
     allocation: CheckoutSessionAllocation,
-  ): Promise<{ readonly status: "Confirmed" | "Unresolved" }>;
+  ): Promise<{ readonly status: "Settled" | "Pending" }>;
 }) {
   const scope = Object.freeze({
     brandReference: parseOrderingReference(options.scope.brandReference),
@@ -37,6 +40,7 @@ export function createDiningCartReplacementSettlementGate<Transaction>(options: 
   const { now, authorize, history, observe } = options;
   return Object.freeze({
     async clear(transaction: Transaction, value: unknown, observedAt: string): Promise<boolean> {
+      let pending = false;
       try {
         const cart = parseCartAggregate(value);
         let previous = parseOrderingInstant(observedAt);
@@ -79,14 +83,18 @@ export function createDiningCartReplacementSettlementGate<Transaction>(options: 
           )
             return false;
           operations.add(allocation.createOperationReference);
-          if ((await observe(transaction, allocation)).status !== "Confirmed") return false;
+          const observed = (await observe(transaction, allocation)).status;
+          if (observed === "Pending") pending = true;
+          else if (observed !== "Settled") return false;
         }
         if ((await authorize(transaction)) !== true) return false;
         tick();
-        return true;
       } catch {
         throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
       }
+      // Every allocation was observed; one that may still create an order or charge waits.
+      if (pending) throw new CartError("CART_REPLACEMENT_CHECKOUT_PENDING");
+      return true;
     },
   });
 }

@@ -763,6 +763,7 @@ function ConfigureStatus({
     expired:
       "Your table’s cart timed out and a new one couldn’t be started just now. Wait a moment, then add the item again.",
     abandoned: "This cart is closed and cannot accept another item.",
+    "order-processing": "Your table’s last order is still being processed. Try again in a moment.",
     unavailable: "We couldn’t add this right now. Please try again.",
     "outcome-unknown": "The connection dropped before we could confirm. Retry to check.",
   } as const;

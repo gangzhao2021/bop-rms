@@ -385,3 +385,30 @@ it("WP-2423: a dine-in cart that timed out during a change points back to the me
   expect(html).not.toContain("Ask staff for help continuing your order.");
   expect(html).toContain("Return to menu");
 });
+
+it("WP-2423: a replacement held back by the table's last order says so, not a dropped connection", () => {
+  const current = cart();
+  const state: CartState = {
+    status: "order-processing",
+    cart: {
+      ...current,
+      cart: {
+        ...current.cart,
+        orderType: "DineIn",
+        lifecycle: { ...current.cart.lifecycle, status: "Expired" },
+      },
+    },
+    issueCodes: [],
+    retryAfterSeconds: 10,
+    canRetrySameOperation: false,
+  };
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <CartPage controller={{ ...controller(state), replaceExpiredCart: async () => undefined }} />
+    </MemoryRouter>,
+  );
+  expect(html).toContain(
+    "Your table’s last order is still being processed. Try again in a moment.",
+  );
+  expect(html).not.toContain("The connection dropped");
+});

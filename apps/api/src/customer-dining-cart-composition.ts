@@ -40,10 +40,11 @@ import {
   createCustomerCartReadPort,
   type CustomerCartDisplayQuery,
 } from "./customer-cart-read-composition.js";
-import type {
-  CustomerCartPort,
-  CustomerCartPortResult,
-  CustomerCartReplacementPort,
+import {
+  TABLE_ORDER_PROCESSING_RETRY_SECONDS,
+  type CustomerCartPort,
+  type CustomerCartPortResult,
+  type CustomerCartReplacementPort,
 } from "./customer-cart.js";
 
 /** WP-2423: cart warning on the one response that replaced a timed-out table Cart holding items. */
@@ -80,6 +81,7 @@ export function continuationOperationReference(
   return `${d.slice(0, 8)}-${d.slice(8, 12)}-7${d.slice(13, 16)}-8${d.slice(17, 20)}-${d.slice(20, 32)}`;
 }
 class RetryLater extends Error {}
+class OrderProcessing extends Error {}
 
 const unavailable = Object.freeze({ status: "Unavailable" } as const);
 function scope(value: unknown) {
@@ -90,6 +92,8 @@ function scope(value: unknown) {
   });
 }
 function failure(error: unknown): CustomerCartPortResult {
+  if (error instanceof OrderProcessing)
+    return { status: "OrderProcessing", retryAfterSeconds: TABLE_ORDER_PROCESSING_RETRY_SECONDS };
   if (error instanceof RetryLater)
     return { status: "RetryLater", retryAfterSeconds: TABLE_CART_EXPIRY_RETRY_SECONDS };
   if (!(error instanceof CartError)) return unavailable;
@@ -167,6 +171,9 @@ export function createCustomerDiningCartPort(options: {
           } catch (replaceError) {
             if (!(replaceError instanceof CartError)) throw replaceError;
             if (replaceError.code === "CART_LIFECYCLE_UNAVAILABLE") throw new RetryLater();
+            // The table's last checkout may still create an order or charge: wait for it.
+            if (replaceError.code === "CART_REPLACEMENT_CHECKOUT_PENDING")
+              throw new OrderProcessing();
             // Another guest replaced it first; the next selection finds the successor.
             if (replaceError.code !== "CART_VERSION_CONFLICT") throw replaceError;
           }
