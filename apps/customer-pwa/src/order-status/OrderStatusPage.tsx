@@ -99,6 +99,11 @@ export function isOrderSettled(view: OrderStatusView): boolean {
   );
 }
 
+/** A sentence ending after a time that may already end with a period ("9:46 p.m."). */
+function sentenceEnd(text: string) {
+  return text.endsWith(".") ? text : text + ".";
+}
+
 /**
  * WP-2423: dine-in rounds that will never reach the kitchen because their payment didn't go through
  * (already cancelled, or failed and about to be cancelled automatically).
@@ -237,9 +242,9 @@ function StatusContent({
               ? "Payment attempt failed"
               : "Payment pending";
   const multipleBatches = view.order.batches.length > 1;
-  // WP-2423: a round cancelled because its payment didn't go through was never charged.
+  // WP-2423: a round whose payment didn't go through is never charged (cancelled, or about to be).
   const total = view.order.batches
-    .filter((batch) => !unpaidCancelled.has(batch.orderBatchReference))
+    .filter((batch) => !notPaid.has(batch.orderBatchReference))
     .flatMap((batch) => batch.items)
     .reduce((sum, item) => sum + item.lineTotal.amountMinor, 0n);
   const currency = view.order.batches[0]?.items[0]?.lineTotal.currencyCode ?? "CAD";
@@ -343,8 +348,8 @@ function StatusContent({
                     ? "Payment for this round didn't go through. "
                     : "Payment for your order didn't go through. "}
                   It will be cancelled at{" "}
-                  {formatClockTime(failedPayment(batch.orderBatchReference) ?? "")}. Ask a staff
-                  member if you need help.
+                  {sentenceEnd(formatClockTime(failedPayment(batch.orderBatchReference) ?? ""))} Ask
+                  a staff member if you need help.
                 </p>
               ) : batchCancellation ? (
                 <p className="order-status__batch-cancelled">
@@ -396,6 +401,8 @@ function StatusContent({
                         </span>
                       ) : batchCancelled ? (
                         <span className="order-status__item-cancelled">Cancelled</span>
+                      ) : notPaid.has(batch.orderBatchReference) ? (
+                        <span className="order-status__item-cancelled">Not paid</span>
                       ) : view.sources?.dining ? (
                         <span>
                           Served{" "}
@@ -420,9 +427,9 @@ function StatusContent({
           <span>Items total</span>
           <span>{formatMoney(total, currency)}</span>
         </p>
-        {unpaidCancelled.size > 0 ? (
+        {notPaid.size > 0 ? (
           <p className="order-status__item-refund">
-            Cancelled rounds that weren&apos;t paid are not included.
+            Rounds that weren&apos;t paid are not included.
           </p>
         ) : null}
         {/* A whole store cancellation states its own full refund; the item note would contradict it. */}

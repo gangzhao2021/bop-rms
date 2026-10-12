@@ -694,11 +694,19 @@ describe("WP-2423: a dine-in round whose payment didn't go through", () => {
       ],
     });
     const html = render({ ...state, view });
+    const at = formatClockTime("2026-08-11T14:25:00.000Z");
+    // One sentence end, even when the time itself ends with a period ("9:46 p.m.").
     expect(html).toContain(
-      `Payment for this round didn&#x27;t go through. It will be cancelled at ${formatClockTime(
-        "2026-08-11T14:25:00.000Z",
-      )}. Ask a staff member if you need help.`,
+      `Payment for this round didn&#x27;t go through. It will be cancelled at ${at}${
+        at.endsWith(".") ? "" : "."
+      } Ask a staff member if you need help.`,
     );
+    expect(html).not.toContain("..");
+    // The unpaid round is not waiting to be served and is not counted as owed.
+    expect(html).toContain("Not paid");
+    expect(html).not.toContain("Served 0 of 1");
+    expect(html).toMatch(/Items total<\/span><span>\$11\.30<\/span>/u);
+    expect(html).toContain("Rounds that weren&#x27;t paid are not included.");
     // Only the failed round carries the note; the paid round's kitchen state is not hidden by it.
     expect(html.match(/didn&#x27;t go through/gu)).toHaveLength(1);
     expect(html).toContain("Kitchen preparation complete");
@@ -724,7 +732,7 @@ describe("WP-2423: a dine-in round whose payment didn't go through", () => {
     // Items total agrees with the payment received.
     expect(html).toMatch(/Items total<\/span><span>\$11\.30<\/span>/u);
     expect(html).toContain("Payment received $11.30");
-    expect(html).toContain("Cancelled rounds that weren&#x27;t paid are not included.");
+    expect(html).toContain("Rounds that weren&#x27;t paid are not included.");
     expect(html).not.toContain("It will be cancelled at");
     expect(html).not.toContain("cancelled by the store");
     expect(isOrderSettled(view)).toBe(false);
