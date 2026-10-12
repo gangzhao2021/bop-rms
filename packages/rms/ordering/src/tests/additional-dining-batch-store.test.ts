@@ -495,3 +495,15 @@ it("does not emit another Outbox event on exact replay", async () => {
   expect((await f.append()).status).toBe("Existing");
   expect(f.calls.some(({ sql }) => sql.includes("platform_eventing.outbox_event"))).toBe(false);
 });
+it("WP-2423 Q6: the table may order again after a round was cancelled, never after the Order ended", async () => {
+  for (const kind of ["BatchCancellation", "StaffBatchCancellation", "StaffItemCancellation"]) {
+    const f = fixture();
+    f.parent.kind = kind;
+    expect((await f.append()).status).toBe("Created");
+  }
+  for (const kind of ["Termination", "Fulfillment"]) {
+    const f = fixture();
+    f.parent.kind = kind;
+    await expect(f.append()).rejects.toThrow();
+  }
+});

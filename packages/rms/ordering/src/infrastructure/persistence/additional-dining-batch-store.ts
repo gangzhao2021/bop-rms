@@ -150,11 +150,13 @@ export function createPostgresAdditionalDiningBatchStore(options: {
         row.version !== snapshot.expectedOrderVersion ||
         row.batch_count !== snapshot.batchSequence - 1 ||
         typeof row.kind !== "string" ||
-        // WP-2423 Q6: after staff cancel one Batch the guest may still order at the table.
+        // WP-2423 Q6: after staff cancel one Batch, or the System cancels an unpaid one, the guest
+        // may still order at the table. Termination and Fulfillment end the Order.
         ![
           "Initial",
           "AdditionalBatch",
           "Acceptance",
+          "BatchCancellation",
           "StaffBatchCancellation",
           "StaffItemCancellation",
         ].includes(row.kind) ||
