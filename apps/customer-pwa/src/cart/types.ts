@@ -105,3 +105,16 @@ export class CartClientError extends Error {
     this.retryAfterSeconds = details.retryAfterSeconds ?? null;
   }
 }
+
+/**
+ * WP-2423: what a guest is told while the table's last order is still being processed. A time is
+ * promised only when the wait is time-bounded (the server sent how long it lasts at most).
+ */
+export function orderProcessingMessage(retryAfterSeconds: number | null): string {
+  const base = "Your table’s last order is still being processed.";
+  if (retryAfterSeconds === null)
+    return `${base} Please try again shortly. If this keeps happening, ask a staff member.`;
+  if (retryAfterSeconds <= 60) return `${base} Try again in a moment.`;
+  const minutes = Math.ceil(retryAfterSeconds / 60);
+  return `${base} Try again in about ${minutes} minute${minutes === 1 ? "" : "s"}.`;
+}

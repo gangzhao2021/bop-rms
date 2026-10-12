@@ -3,11 +3,13 @@ const m = vi.hoisted(() => ({
   submitted: vi.fn(),
   deadline: vi.fn(),
   payment: vi.fn(),
+  cart: vi.fn(),
 }));
 vi.mock("@rms/ordering", async (original) => ({
   ...(await original<typeof import("@rms/ordering")>()),
   loadCheckoutAllocationSubmittedBatch: m.submitted,
   loadCheckoutSessionDeadline: m.deadline,
+  createPostgresCartQueryStore: () => ({ load: m.cart }),
 }));
 vi.mock("./checkout-allocation-payment-observation.js", () => ({
   createCheckoutAllocationPaymentObservation: () => ({ resolve: m.payment }),
@@ -48,6 +50,7 @@ beforeEach(() => {
   m.submitted.mockResolvedValue(false);
   m.deadline.mockResolvedValue("2026-10-11T22:30:00.000Z");
   m.payment.mockResolvedValue({ status: "Unresolved", reason: "IntentUnavailable" });
+  m.cart.mockResolvedValue({ cartReference: id(5), lifecycle: { status: "Expired" } });
 });
 it("WP-2423: a submitted order batch settles the checkout whatever its payment state", async () => {
   m.submitted.mockResolvedValue(true);
@@ -68,6 +71,7 @@ it("WP-2423: a terminal failed payment settles it; a success whose order is not 
   expect(await observation.resolve(tx, allocation)).toEqual({
     status: "Pending",
     reason: "AwaitingOrderProcessing",
+    until: null,
   });
 });
 it("WP-2423: a payment without terminal outcome is in flight and waits", async () => {
@@ -75,6 +79,7 @@ it("WP-2423: a payment without terminal outcome is in flight and waits", async (
   expect(await observation.resolve(tx, allocation)).toEqual({
     status: "Pending",
     reason: "PaymentInFlight",
+    until: null,
   });
   expect(m.deadline).not.toHaveBeenCalled();
 });
@@ -88,13 +93,36 @@ it("WP-2423: an intent-less checkout settles only after its checkout session dea
   expect(await observation.resolve(tx, allocation)).toEqual({
     status: "Pending",
     reason: "CheckoutOpen",
+    until: "2026-10-11T23:10:00.000Z",
   });
   // Exactly at the deadline it can no longer be used.
   m.deadline.mockResolvedValue(at);
   expect((await observation.resolve(tx, allocation)).status).toBe("Settled");
-  // No session record is not proof of expiry.
+});
+it("WP-2423: an allocation that never became a checkout session cannot start on a terminal cart", async () => {
   m.deadline.mockResolvedValue(null);
+  for (const status of ["Expired", "Abandoned"]) {
+    m.cart.mockResolvedValue({ cartReference: id(5), lifecycle: { status } });
+    expect(await observation.resolve(tx, allocation)).toEqual({
+      status: "Settled",
+      reason: "CheckoutNeverStarted",
+    });
+  }
+  // On a cart that is still Active it could still become a session: keep waiting (no known end).
+  m.cart.mockResolvedValue({ cartReference: id(5), lifecycle: { status: "Active" } });
+  expect(await observation.resolve(tx, allocation)).toEqual({
+    status: "Pending",
+    reason: "CheckoutOpen",
+    until: null,
+  });
+  // A missing or different cart is not evidence.
+  m.cart.mockResolvedValue(null);
+  await expect(observation.resolve(tx, allocation)).rejects.toThrow();
+  // A payment intent without a session is still judged by its payment, never by the cart.
+  m.payment.mockResolvedValue({ status: "Unresolved", reason: "TerminalUnavailable" });
+  m.cart.mockClear();
   expect((await observation.resolve(tx, allocation)).status).toBe("Pending");
+  expect(m.cart).not.toHaveBeenCalled();
 });
 it("WP-2423: refuses foreign scope, lost authority and owner failures rather than settling", async () => {
   await expect(

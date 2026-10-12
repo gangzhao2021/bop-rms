@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CustomerCartClient } from "./cart-client.js";
 import { createCartStateController } from "./cart-state.js";
-import { CartClientError, type CartView } from "./types.js";
+import { CartClientError, orderProcessingMessage, type CartView } from "./types.js";
 
 const id = (n: number) => `018f5300-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 
@@ -517,3 +517,19 @@ it.each([false, true])(
     } else expect(calls).toEqual([id(20), id(20)]);
   },
 );
+
+describe("WP-2423: the wait for the table's last order", () => {
+  it("promises a time only when the wait is time-bounded", () => {
+    expect(orderProcessingMessage(10)).toBe(
+      "Your table’s last order is still being processed. Try again in a moment.",
+    );
+    expect(orderProcessingMessage(125)).toBe(
+      "Your table’s last order is still being processed. Try again in about 3 minutes.",
+    );
+    expect(orderProcessingMessage(60 * 1 + 0)).toContain("Try again in a moment.");
+    expect(orderProcessingMessage(61)).toContain("about 2 minutes");
+    expect(orderProcessingMessage(null)).toBe(
+      "Your table’s last order is still being processed. Please try again shortly. If this keeps happening, ask a staff member.",
+    );
+  });
+});

@@ -93,6 +93,19 @@ export class CartError extends Error {
   }
 }
 
+/**
+ * WP-2423: replacement of a timed-out table Cart waits for a checkout on it that may still create an
+ * order or a charge. pendingUntil is when the last time-bounded wait ends, or null when the wait
+ * has no known end (for example a payment without outcome).
+ */
+export class CartReplacementPendingError extends CartError {
+  readonly pendingUntil: string | null;
+  constructor(pendingUntil: string | null) {
+    super("CART_REPLACEMENT_CHECKOUT_PENDING");
+    this.pendingUntil = pendingUntil;
+  }
+}
+
 const uuidV7Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const instantPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const hashPattern = /^sha256:[0-9a-f]{64}$/u;

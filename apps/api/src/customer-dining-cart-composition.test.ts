@@ -1,7 +1,12 @@
 import { createServer, type Server } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createGuestSession, type GuestSessionService } from "@bop/identity";
-import { CartError, parseOrderingReference, type CustomerCartDisplayView } from "@rms/ordering";
+import {
+  CartError,
+  CartReplacementPendingError,
+  parseOrderingReference,
+  type CustomerCartDisplayView,
+} from "@rms/ordering";
 import { createApp } from "./app.js";
 import { CustomerCartHandler, type CustomerCartPort } from "./customer-cart.js";
 import {
@@ -636,9 +641,29 @@ describe("WP-2423: continuing past a timed-out table Cart", () => {
   it("says the table's last order is still being processed while a checkout may still charge", async () => {
     const f = continued();
     f.replace.mockRejectedValueOnce(new CartError("CART_REPLACEMENT_CHECKOUT_PENDING"));
+    // No known end: no time is promised.
     expect(await f.port.createCart(input())).toEqual({
       status: "OrderProcessing",
-      retryAfterSeconds: 10,
+      retryAfterSeconds: null,
+    });
+    // A time-bounded wait reports the actual remaining time.
+    const g = createCustomerDiningCartPort({
+      selection: { select: f.select },
+      query: { read: f.read },
+      now: () => at(),
+      continuation: {
+        previous: async () => previousCart("Expired"),
+        replacement: {
+          replace: async () => {
+            throw new CartReplacementPendingError(at(125));
+          },
+        },
+      },
+    });
+    f.select.mockRejectedValueOnce(new CartError("CART_EXPIRED"));
+    expect(await g.createCart(input())).toEqual({
+      status: "OrderProcessing",
+      retryAfterSeconds: 125,
     });
   });
   it("keeps refusing an Abandoned Cart, a removed participant and other failures", async () => {

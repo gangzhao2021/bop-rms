@@ -1,6 +1,7 @@
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
   createDiningCartReplacementSettlementGate,
+  createPostgresCartQueryStore,
   createPostgresCheckoutAllocationHistory,
   loadCheckoutAllocationSubmittedBatch,
   loadCheckoutSessionDeadline,
@@ -14,14 +15,16 @@ const unavailable = (): never => {
 };
 
 /** Why an allocation on a timed-out table Cart does or does not hold back its replacement. */
+type SettledReason =
+  "OrderSubmitted" | "PaymentFailed" | "CheckoutExpired" | "CheckoutNeverStarted";
+type PendingReason = "PaymentInFlight" | "AwaitingOrderProcessing" | "CheckoutOpen";
 export type CheckoutReplacementObservation =
-  | {
-      readonly status: "Settled";
-      readonly reason: "OrderSubmitted" | "PaymentFailed" | "CheckoutExpired";
-    }
+  | { readonly status: "Settled"; readonly reason: SettledReason }
   | {
       readonly status: "Pending";
-      readonly reason: "PaymentInFlight" | "AwaitingOrderProcessing" | "CheckoutOpen";
+      readonly reason: PendingReason;
+      /** When this wait ends at the latest; null when it has no known end. */
+      readonly until: string | null;
     };
 
 /**
@@ -29,18 +32,20 @@ export type CheckoutReplacementObservation =
  * longer create an order or a charge from that Cart, read through owner facts only:
  * - its order batch was submitted (Ordering): acceptance/payment from then on belong to the Order;
  * - its payment reached a terminal Failed outcome (Payment);
- * - no payment intent exists and its checkout session's deadline has passed (Ordering).
- * Anything else (open checkout session, payment without terminal outcome, a successful payment
- * whose order is not processed yet) is Pending: replacement waits and the guest retries later.
+ * - no payment intent exists and its checkout session's deadline has passed (Ordering);
+ * - no payment intent and no checkout session exist and the Cart is terminal (Ordering): creating
+ *   a checkout session requires the source Cart to be Active at the allocated version, and a
+ *   terminal (Expired/Abandoned) Cart never becomes Active again, so it can never start.
+ * Anything else is Pending: an open checkout session until its deadline; a payment without
+ * terminal outcome or a successful payment whose order is not processed yet with no known end.
  */
 export function createCheckoutAllocationReplacementObservation(
   options: Parameters<typeof createCheckoutAllocationPaymentObservation>[0],
 ) {
   const payment = createCheckoutAllocationPaymentObservation(options);
-  const settled = (reason: "OrderSubmitted" | "PaymentFailed" | "CheckoutExpired") =>
-    Object.freeze({ status: "Settled" as const, reason });
-  const pending = (reason: "PaymentInFlight" | "AwaitingOrderProcessing" | "CheckoutOpen") =>
-    Object.freeze({ status: "Pending" as const, reason });
+  const settled = (reason: SettledReason) => Object.freeze({ status: "Settled" as const, reason });
+  const pending = (reason: PendingReason, until: string | null = null) =>
+    Object.freeze({ status: "Pending" as const, reason, until });
   return Object.freeze({
     async resolve(
       transaction: ConsumerTransaction,
@@ -72,11 +77,26 @@ export function createCheckoutAllocationReplacementObservation(
           );
         if (observed.reason !== "IntentUnavailable") return finish(pending("PaymentInFlight"));
         const deadline = await loadCheckoutSessionDeadline(transaction, allocation);
+        if (deadline === null) {
+          const cart = await createPostgresCartQueryStore(
+            { run: (work) => work(transaction) },
+            {
+              brandReference: allocation.brandReference,
+              storeReference: allocation.storeReference,
+            },
+          ).load(allocation.cartReference);
+          if (cart === null || cart.cartReference !== allocation.cartReference)
+            return unavailable();
+          const status = cart.lifecycle?.status ?? null;
+          return finish(
+            status === "Expired" || status === "Abandoned"
+              ? settled("CheckoutNeverStarted")
+              : pending("CheckoutOpen"),
+          );
+        }
         const at = parseOrderingInstant(options.now());
         return finish(
-          deadline !== null && at >= deadline
-            ? settled("CheckoutExpired")
-            : pending("CheckoutOpen"),
+          at >= deadline ? settled("CheckoutExpired") : pending("CheckoutOpen", deadline),
         );
       } catch {
         return unavailable();
@@ -107,7 +127,9 @@ export function createDiningCartReplacementSettlement(
       }).loadForReplacement(transaction, input),
     observe: async (transaction, allocation) => {
       const observed = await observer.resolve(transaction, allocation);
-      return { status: observed.status };
+      return observed.status === "Settled"
+        ? { status: "Settled" as const }
+        : { status: "Pending" as const, until: observed.until };
     },
   });
 }

@@ -1,4 +1,4 @@
-import { CartError } from "@rms/ordering";
+import { CartError, CartReplacementPendingError } from "@rms/ordering";
 import { createServer, type Server } from "node:http";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
@@ -293,6 +293,7 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
     // WP-2423: briefly unavailable (table Cart expiry still being recorded) with a retry hint.
     [{ status: "RetryLater", retryAfterSeconds: 5 }, 503, "cart_service_unavailable"],
     [{ status: "OrderProcessing", retryAfterSeconds: 10 }, 409, "cart_order_processing"],
+    [{ status: "OrderProcessing", retryAfterSeconds: null }, 409, "cart_order_processing"],
   ] as const)("maps safe application outcome %o", async (result, status, errorCode) => {
     port.result = result;
     const response = await request("/bff/customer/cart", { headers: headers() });
@@ -301,7 +302,9 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
     if (status === 429) expect(response.headers.get("retry-after")).toBe("7");
     if (status === 503) expect(response.headers.get("retry-after")).toBe("5");
     if (errorCode === "cart_order_processing")
-      expect(response.headers.get("retry-after")).toBe("10");
+      expect(response.headers.get("retry-after")).toBe(
+        "retryAfterSeconds" in result && result.retryAfterSeconds !== null ? "10" : null,
+      );
   });
 
   it("maps a thrown or malformed dependency result to safe unavailable", async () => {
@@ -405,13 +408,24 @@ describe("WP-2402 explicit Dining Cart replacement transport", () => {
   it("WP-2423: a replacement held back by the table's last checkout asks to retry shortly", async () => {
     replacement = {
       replace: async () => {
-        throw new CartError("CART_REPLACEMENT_CHECKOUT_PENDING");
+        throw new CartReplacementPendingError(new Date(Date.parse(at) + 90_500).toISOString());
       },
     };
     const response = await request(path, mutation());
     expect(response.status).toBe(409);
-    expect(response.headers.get("retry-after")).toBe("10");
+    // The actual remaining time of the bounded wait, rounded up.
+    expect(response.headers.get("retry-after")).toBe("91");
     expect(await response.json()).toMatchObject({ error: { code: "cart_order_processing" } });
+    // A wait with no known end promises no time.
+    replacement = {
+      replace: async () => {
+        throw new CartReplacementPendingError(null);
+      },
+    };
+    const unbounded = await request(path, mutation());
+    expect(unbounded.status).toBe(409);
+    expect(unbounded.headers.get("retry-after")).toBeNull();
+    await unbounded.text();
   });
   it.each([
     { ...receipt, guestSessionReference: id(40) },

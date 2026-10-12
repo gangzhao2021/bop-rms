@@ -1,5 +1,6 @@
 import {
   CartError,
+  CartReplacementPendingError,
   parseCartAggregate,
   parseOrderingInstant,
   parseOrderingReference,
@@ -31,7 +32,11 @@ export function createDiningCartReplacementSettlementGate<Transaction>(options: 
   observe(
     transaction: Transaction,
     allocation: CheckoutSessionAllocation,
-  ): Promise<{ readonly status: "Settled" | "Pending" }>;
+  ): Promise<
+    | { readonly status: "Settled" }
+    /** until: when this wait ends at the latest, or null when it has no known end. */
+    | { readonly status: "Pending"; readonly until: string | null }
+  >;
 }) {
   const scope = Object.freeze({
     brandReference: parseOrderingReference(options.scope.brandReference),
@@ -41,6 +46,8 @@ export function createDiningCartReplacementSettlementGate<Transaction>(options: 
   return Object.freeze({
     async clear(transaction: Transaction, value: unknown, observedAt: string): Promise<boolean> {
       let pending = false;
+      let until: string | null = null,
+        unbounded = false;
       try {
         const cart = parseCartAggregate(value);
         let previous = parseOrderingInstant(observedAt);
@@ -83,9 +90,15 @@ export function createDiningCartReplacementSettlementGate<Transaction>(options: 
           )
             return false;
           operations.add(allocation.createOperationReference);
-          const observed = (await observe(transaction, allocation)).status;
-          if (observed === "Pending") pending = true;
-          else if (observed !== "Settled") return false;
+          const observed = await observe(transaction, allocation);
+          if (observed.status === "Pending") {
+            pending = true;
+            if (observed.until === null) unbounded = true;
+            else {
+              const end = parseOrderingInstant(observed.until);
+              if (until === null || end > until) until = end;
+            }
+          } else if (observed.status !== "Settled") return false;
         }
         if ((await authorize(transaction)) !== true) return false;
         tick();
@@ -93,7 +106,7 @@ export function createDiningCartReplacementSettlementGate<Transaction>(options: 
         throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
       }
       // Every allocation was observed; one that may still create an order or charge waits.
-      if (pending) throw new CartError("CART_REPLACEMENT_CHECKOUT_PENDING");
+      if (pending) throw new CartReplacementPendingError(unbounded ? null : until);
       return true;
     },
   });

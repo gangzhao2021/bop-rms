@@ -532,6 +532,8 @@ it("replaces a timed-out table Cart for any current participant, once, and keeps
           "INSERT INTO rms_ordering.checkout_session_allocation (brand_id,store_id,create_operation_id,guest_session_id,cart_id,cart_version,quote_id,quote_version,checkout_session_id,submission_id,payment_operation_id,allocated_at) VALUES ($1,$2,$3,$4,$5,2,$6,1,$7,$8,$9,$10)",
           [brand, store, ref(1), guestSession, cart, ref(2), ref(3), ref(4), ref(5), createdAt],
         );
+        // An allocation that never became a checkout session (failure between the two steps).
+        if (kind === "orphan") return;
         const session = {
           schemaVersion: 1,
           checkoutSessionReference: ref(3),
@@ -648,6 +650,7 @@ it("replaces a timed-out table Cart for any current participant, once, and keeps
         await seedCheckout(51, id(500), "paid");
         await seedCheckout(52, id(500), "failed");
         await seedCheckout(53, id(500), "expired");
+        await seedCheckout(54, id(500), "orphan");
         // S6: a payment intent with no outcome and no order yet. S7: a checkout still usable.
         await seedCheckout(61, id(600), "inflight");
         await seedCheckout(71, id(700), "open");
@@ -657,15 +660,21 @@ it("replaces a timed-out table Cart for any current participant, once, and keeps
       const settledReplace = await create(guest(8, S5, H5), 8001);
       assert.ok(["Applied", "Current"].includes(settledReplace.status), settledReplace.status);
       assert.equal((await replacements(S5)).length, 1);
-      for (const [n, session, host, previous] of [
-        [9, S6, H6, id(600)],
-        [10, S7, H7, id(700)],
+      for (const [n, session, host, previous, until] of [
+        // A payment without outcome has no known end: no time is promised.
+        [9, S6, H6, id(600), null],
+        // An open checkout session waits until its own deadline at most.
+        [10, S7, H7, id(700), time(minutes(30))],
       ]) {
         const cred = guest(n, session, host);
-        assert.deepEqual(await create(cred, 9000 + n), {
-          status: "OrderProcessing",
-          retryAfterSeconds: 10,
-        });
+        const result = await create(cred, 9000 + n);
+        assert.equal(result.status, "OrderProcessing");
+        if (until === null) assert.equal(result.retryAfterSeconds, null);
+        else
+          assert.ok(
+            result.retryAfterSeconds > 1500 && result.retryAfterSeconds <= 1800,
+            String(result.retryAfterSeconds),
+          );
         await assert.rejects(
           replaceAs(cred, {
             operationReference: id(9100 + n),
@@ -673,7 +682,9 @@ it("replaces a timed-out table Cart for any current participant, once, and keeps
             expectedCartVersion: 3,
           }),
           (error) =>
-            error instanceof CartError && error.code === "CART_REPLACEMENT_CHECKOUT_PENDING",
+            error instanceof CartError &&
+            error.code === "CART_REPLACEMENT_CHECKOUT_PENDING" &&
+            error.pendingUntil === until,
         );
         assert.equal((await replacements(session)).length, 0);
       }

@@ -30,7 +30,11 @@ function fixture() {
       allocatedAt: initial.createdAt,
     });
   const history = vi.fn(async () => [allocation(2), allocation(3)]),
-    observe = vi.fn(async () => ({ status: "Settled" as "Settled" | "Pending" })),
+    observe = vi.fn(
+      async (): Promise<{ status: "Settled" } | { status: "Pending"; until: string | null }> => ({
+        status: "Settled",
+      }),
+    ),
     authorize = vi.fn(async () => true),
     now = vi.fn(() => at as string);
   const gate = createDiningCartReplacementSettlementGate({
@@ -58,7 +62,7 @@ it("does not substitute another settled attempt for one pending allocation (retr
   const f = fixture();
   f.observe
     .mockResolvedValueOnce({ status: "Settled" })
-    .mockResolvedValueOnce({ status: "Pending" });
+    .mockResolvedValueOnce({ status: "Pending", until: null });
   // WP-2423: still blocked, but as a distinct retry-later refusal, after every allocation is checked.
   await expect(f.gate.clear(f.tx, f.cart, f.at)).rejects.toMatchObject({
     code: "CART_REPLACEMENT_CHECKOUT_PENDING",
@@ -67,7 +71,7 @@ it("does not substitute another settled attempt for one pending allocation (retr
   expect(f.authorize).toHaveBeenCalledTimes(2);
   // Reauthorization loss still refuses outright rather than reporting pending.
   const g = fixture();
-  g.observe.mockResolvedValue({ status: "Pending" });
+  g.observe.mockResolvedValue({ status: "Pending", until: null });
   g.authorize.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
   expect(await g.gate.clear(g.tx, g.cart, g.at)).toBe(false);
 });
@@ -123,4 +127,20 @@ it("bounds owner failures and rejects clock rollback", async () => {
   await expect(g.gate.clear(g.tx, g.cart, g.at)).rejects.toMatchObject({
     code: "CART_DEPENDENCY_UNAVAILABLE",
   });
+});
+
+it("WP-2423: reports when a time-bounded wait ends, and no end when any wait is unbounded", async () => {
+  const f = fixture();
+  f.observe
+    .mockResolvedValueOnce({ status: "Pending", until: "2026-09-14T12:10:00.000Z" })
+    .mockResolvedValueOnce({ status: "Pending", until: "2026-09-14T12:20:00.000Z" });
+  await expect(f.gate.clear(f.tx, f.cart, f.at)).rejects.toMatchObject({
+    code: "CART_REPLACEMENT_CHECKOUT_PENDING",
+    pendingUntil: "2026-09-14T12:20:00.000Z",
+  });
+  const g = fixture();
+  g.observe
+    .mockResolvedValueOnce({ status: "Pending", until: "2026-09-14T12:10:00.000Z" })
+    .mockResolvedValueOnce({ status: "Pending", until: null });
+  await expect(g.gate.clear(g.tx, g.cart, g.at)).rejects.toMatchObject({ pendingUntil: null });
 });

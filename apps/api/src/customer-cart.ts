@@ -1,4 +1,4 @@
-import { CartError } from "@rms/ordering";
+import { CartError, CartReplacementPendingError } from "@rms/ordering";
 import type { Request, RequestHandler, Response } from "express";
 
 const uuidV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -94,7 +94,11 @@ export type CustomerCartPortResult =
   /** WP-2423: briefly unavailable (for example a table Cart expiry still being recorded). */
   | { readonly status: "RetryLater"; readonly retryAfterSeconds: number }
   /** WP-2423: the table's last checkout is still being processed; retry shortly. */
-  | { readonly status: "OrderProcessing"; readonly retryAfterSeconds: number }
+  | {
+      readonly status: "OrderProcessing";
+      /** Seconds until the wait ends when it is time-bounded; null when it has no known end. */
+      readonly retryAfterSeconds: number | null;
+    }
   | { readonly status: "Unavailable" };
 
 export interface CustomerCartReplacementPort {
@@ -163,8 +167,16 @@ type ErrorCode =
   | "cart_order_processing"
   | "cart_service_unavailable";
 
-/** WP-2423: how long a guest waits before retrying while the table's last checkout settles. */
-export const TABLE_ORDER_PROCESSING_RETRY_SECONDS = 10;
+/**
+ * WP-2423: seconds until a time-bounded wait for the table's last checkout ends (at least 1, at
+ * most an hour), or null when the wait has no known end, so the guest is never promised a time.
+ */
+export function orderProcessingRetrySeconds(pendingUntil: string | null, now: string) {
+  if (pendingUntil === null) return null;
+  const remaining = Date.parse(pendingUntil) - Date.parse(now);
+  if (!Number.isFinite(remaining)) return null;
+  return Math.min(3600, Math.max(1, Math.ceil(remaining / 1000)));
+}
 
 const errors = Object.freeze({
   cart_request_invalid: { status: 400, messageKey: "customer.cart.request_invalid" },
@@ -490,7 +502,8 @@ function handleResult(response: Response, result: CustomerCartPortResult, create
     return;
   }
   if (result.status === "OrderProcessing") {
-    response.setHeader("Retry-After", String(positive(result.retryAfterSeconds, 60)));
+    if (result.retryAfterSeconds !== null)
+      response.setHeader("Retry-After", String(positive(result.retryAfterSeconds, 3600)));
     sendError(response, "cart_order_processing");
     return;
   }
@@ -667,8 +680,10 @@ export class CustomerCartHandler {
           CART_EXPIRED: "cart_expired",
           CART_REPLACEMENT_CHECKOUT_PENDING: "cart_order_processing",
         } as const;
-        if (error instanceof CartError && error.code === "CART_REPLACEMENT_CHECKOUT_PENDING")
-          response.setHeader("Retry-After", String(TABLE_ORDER_PROCESSING_RETRY_SECONDS));
+        if (error instanceof CartReplacementPendingError) {
+          const seconds = orderProcessingRetrySeconds(error.pendingUntil, this.#now());
+          if (seconds !== null) response.setHeader("Retry-After", String(seconds));
+        }
         sendError(
           response,
           error instanceof CartError && error.code in mapping

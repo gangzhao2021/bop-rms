@@ -14,6 +14,7 @@ import {
 } from "@bop/identity";
 import {
   CartError,
+  CartReplacementPendingError,
   createCustomerDiningCartViewQuery,
   createDiningCartReadService,
   createDiningCartSelectionService,
@@ -41,7 +42,7 @@ import {
   type CustomerCartDisplayQuery,
 } from "./customer-cart-read-composition.js";
 import {
-  TABLE_ORDER_PROCESSING_RETRY_SECONDS,
+  orderProcessingRetrySeconds,
   type CustomerCartPort,
   type CustomerCartPortResult,
   type CustomerCartReplacementPort,
@@ -81,7 +82,11 @@ export function continuationOperationReference(
   return `${d.slice(0, 8)}-${d.slice(8, 12)}-7${d.slice(13, 16)}-8${d.slice(17, 20)}-${d.slice(20, 32)}`;
 }
 class RetryLater extends Error {}
-class OrderProcessing extends Error {}
+class OrderProcessing extends Error {
+  constructor(readonly retryAfterSeconds: number | null) {
+    super("table order processing");
+  }
+}
 
 const unavailable = Object.freeze({ status: "Unavailable" } as const);
 function scope(value: unknown) {
@@ -93,7 +98,7 @@ function scope(value: unknown) {
 }
 function failure(error: unknown): CustomerCartPortResult {
   if (error instanceof OrderProcessing)
-    return { status: "OrderProcessing", retryAfterSeconds: TABLE_ORDER_PROCESSING_RETRY_SECONDS };
+    return { status: "OrderProcessing", retryAfterSeconds: error.retryAfterSeconds };
   if (error instanceof RetryLater)
     return { status: "RetryLater", retryAfterSeconds: TABLE_CART_EXPIRY_RETRY_SECONDS };
   if (!(error instanceof CartError)) return unavailable;
@@ -125,6 +130,8 @@ export function createCustomerDiningCartPort(options: {
   };
   /** WP-2423: continue past a timed-out table Cart through the owner replacement command. */
   readonly continuation?: DiningCartContinuation;
+  /** Clock for retry hints (defaults to the system clock). */
+  readonly now?: () => string;
 }): CustomerCartPort {
   /**
    * Select the table Cart; when it timed out (recorded Expired), replace it through the owner
@@ -173,7 +180,14 @@ export function createCustomerDiningCartPort(options: {
             if (replaceError.code === "CART_LIFECYCLE_UNAVAILABLE") throw new RetryLater();
             // The table's last checkout may still create an order or charge: wait for it.
             if (replaceError.code === "CART_REPLACEMENT_CHECKOUT_PENDING")
-              throw new OrderProcessing();
+              throw new OrderProcessing(
+                orderProcessingRetrySeconds(
+                  replaceError instanceof CartReplacementPendingError
+                    ? replaceError.pendingUntil
+                    : null,
+                  (options.now ?? (() => new Date().toISOString()))(),
+                ),
+              );
             // Another guest replaced it first; the next selection finds the successor.
             if (replaceError.code !== "CART_VERSION_CONFLICT") throw replaceError;
           }
@@ -334,6 +348,7 @@ export function createCustomerDiningCartComposition(
   const succession = createPostgresDiningCartSuccessionSource(options.cartTransactions, fixedScope);
   return createCustomerDiningCartPort({
     query,
+    now,
     ...(replacement === undefined
       ? {}
       : {
