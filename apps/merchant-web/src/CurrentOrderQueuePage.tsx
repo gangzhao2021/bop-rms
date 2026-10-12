@@ -76,6 +76,7 @@ export function CurrentOrderLines({
   refundCheck,
   cancelledBatches,
   unpaidCancelledBatches,
+  failedPaymentBatches,
 }: {
   readonly lines: CurrentOrderDetail["lines"];
   readonly refundCheck?: ItemRefundCheckContext | undefined;
@@ -83,6 +84,8 @@ export function CurrentOrderLines({
   readonly cancelledBatches?: ReadonlySet<string> | undefined;
   /** WP-2423: rounds cancelled automatically because their payment failed; never owed. */
   readonly unpaidCancelledBatches?: ReadonlySet<string> | undefined;
+  /** WP-2423: rounds whose payment failed and that are about to be cancelled automatically. */
+  readonly failedPaymentBatches?: ReadonlySet<string> | undefined;
 }) {
   const t = lines.totals;
   const cancelledRefund = cancelledItemsRefund(lines.items);
@@ -140,6 +143,11 @@ export function CurrentOrderLines({
               ) : unpaidLine(item) ? (
                 <span className="order-line-cancellation">
                   <strong>Cancelled · not paid</strong>
+                </span>
+              ) : item.cancellation === null &&
+                failedPaymentBatches?.has(item.orderBatchReference) === true ? (
+                <span className="order-line-cancellation">
+                  <strong>Payment failed · don't prepare</strong>
                 </span>
               ) : null}
               {item.cancellation !== null ? (
@@ -238,6 +246,17 @@ export function unpaidCancelledTotal(
   });
 }
 
+/** WP-2423: unpaid rounds whose payment failed and that are not cancelled yet. */
+export function failedPaymentBatches(view: CurrentOrderQueue): ReadonlySet<string> {
+  return new Set(
+    view.items.flatMap((order) =>
+      order.batches
+        .filter((batch) => batch.paymentDue?.status === "Failed")
+        .map((batch) => batch.orderBatchReference),
+    ),
+  );
+}
+
 /** WP-2423: rounds the System cancelled because their payment failed (not a store cancellation). */
 export function unpaidCancelledBatches(view: CurrentOrderQueue): ReadonlySet<string> {
   return new Set(
@@ -277,7 +296,7 @@ export function paymentDueText(
   if (due.status === "Awaiting" || due.cancelsAt === null) return "Awaiting payment";
   return now !== undefined && Date.parse(due.cancelsAt) <= now
     ? "Payment failed · being cancelled automatically"
-    : `Payment failed · cancelled automatically at ${storeTime(due.cancelsAt, timeZone)}`;
+    : `Payment failed · will be cancelled automatically at ${storeTime(due.cancelsAt, timeZone)}`;
 }
 
 /** WP-2423 Q6: batches the store cancelled as a whole (staff cancellation of the batch). */
@@ -322,6 +341,7 @@ function QueuedOrderLines({
       refundCheck={refundCheck}
       cancelledBatches={storeCancelledBatches(state.detail.view)}
       unpaidCancelledBatches={unpaidCancelledBatches(state.detail.view)}
+      failedPaymentBatches={failedPaymentBatches(state.detail.view)}
     />
   ) : (
     <p className="order-lines-state" role="status">
@@ -967,6 +987,7 @@ export function CurrentOrderQueuePage({
                         lines={detail.lines}
                         cancelledBatches={storeCancelledBatches(detail.view)}
                         unpaidCancelledBatches={unpaidCancelledBatches(detail.view)}
+                        failedPaymentBatches={failedPaymentBatches(detail.view)}
                         refundCheck={{
                           orderReference: order.orderReference,
                           csrf,

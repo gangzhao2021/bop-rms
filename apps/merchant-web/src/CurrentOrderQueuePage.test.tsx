@@ -641,6 +641,11 @@ it("WP-2423 Q6 step 2: marks cancelled items, their refund and the refund total"
   );
   expect(whole.match(/class="order-line-cancelled"/gu)).toHaveLength(4);
   expect(whole).toContain("Cancelled by store");
+  // A round whose payment failed is not cancelled yet: its lines say not to prepare it.
+  const failed = renderToStaticMarkup(
+    <CurrentOrderLines lines={lines} failedPaymentBatches={new Set([id(90)])} />,
+  );
+  expect(failed.match(/Payment failed · don&#x27;t prepare/gu)).toHaveLength(1);
 });
 const unpaidId = (n: number) => `01909968-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 it("WP-2423: warns staff before an unpaid dine-in round is cancelled and says so in plain words", () => {
@@ -684,9 +689,9 @@ it("WP-2423: warns staff before an unpaid dine-in round is cancelled and says so
     paymentDue: { status: "Failed", cancelsAt: "2026-09-14T00:30:00.000Z" },
   });
   // In the summary row and in the round itself, as a warning, with the Store-local time.
-  expect(failed).toContain("Batch 2: Payment failed · cancelled automatically at 20:30");
+  expect(failed).toContain("Batch 2: Payment failed · will be cancelled automatically at 20:30");
   expect(failed).toMatch(
-    /<p class="order-workbench-closed" role="note"><span class="order-accept-by" data-tier="urgent">Payment failed · cancelled automatically at 20:30<\/span>/u,
+    /<p class="order-workbench-closed" role="note"><span class="order-accept-by" data-tier="urgent">Payment failed · will be cancelled automatically at 20:30<\/span>/u,
   );
   expect(failed).toContain("Don&#x27;t prepare it; it will not be charged.");
   expect(failed).not.toContain("Acceptance: Not accepted");
@@ -812,7 +817,7 @@ it("WP-2423: lines of a round cancelled for a failed payment are marked and not 
 it("WP-2423: words an unpaid round's payment state for staff", () => {
   expect(paymentDueText({ status: "Awaiting", cancelsAt: null }, "UTC")).toBe("Awaiting payment");
   expect(paymentDueText({ status: "Failed", cancelsAt: "2026-09-14T00:30:00.000Z" }, "UTC")).toBe(
-    "Payment failed · cancelled automatically at 00:30",
+    "Payment failed · will be cancelled automatically at 00:30",
   );
   expect(orderTypeLabel.DineIn).toBe("Dine-in");
   expect(["Qr", "Web", "Pos", "Api", "Kiosk"].map(orderChannelLabel)).toEqual([
