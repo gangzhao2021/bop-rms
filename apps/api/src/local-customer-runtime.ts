@@ -390,6 +390,8 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
       catalog,
       stores,
       now,
+      // WP-2423: a timed-out table Cart is replaced through the owner command, not a dead end.
+      ...(options.cartReplacement === undefined ? {} : { replacement: options.cartReplacement }),
     };
     const diningPort =
       options.catalogDiningCart !== undefined

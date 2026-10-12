@@ -2,6 +2,8 @@ import { beforeEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   resolve: vi.fn(),
   host: vi.fn(),
+  participant: vi.fn(),
+  cart: vi.fn(),
   transactions: [] as unknown[],
 }));
 vi.mock("@bop/identity", async (original) => ({
@@ -25,6 +27,25 @@ vi.mock("@rms/dining", async (original) => ({
       runner.run((tx) => {
         mocks.transactions.push(tx);
         return mocks.host();
+      }),
+  }),
+  createPostgresDiningParticipantFence: (runner: {
+    run(action: (tx: unknown) => unknown): unknown;
+  }) => ({
+    readCurrent: async () =>
+      runner.run((tx) => {
+        mocks.transactions.push(tx);
+        return mocks.participant();
+      }),
+  }),
+}));
+vi.mock("@rms/ordering", async (original) => ({
+  ...(await original<typeof import("@rms/ordering")>()),
+  createPostgresCartQueryStore: (runner: { run(action: (tx: unknown) => unknown): unknown }) => ({
+    load: async () =>
+      runner.run((tx) => {
+        mocks.transactions.push(tx);
+        return mocks.cart();
       }),
   }),
 }));
@@ -115,11 +136,16 @@ beforeEach(() => {
   mocks.transactions.length = 0;
   mocks.resolve.mockResolvedValue(record());
   mocks.host.mockResolvedValue({});
+  mocks.participant.mockResolvedValue({});
+  mocks.cart.mockResolvedValue(previousCart("Abandoned"));
 });
+function previousCart(status: "Active" | "Abandoned" | "Expired", session = id(5)) {
+  return { diningSessionReference: session, lifecycle: { status } };
+}
 it("uses actual credential/CSRF service and same transaction for Guest then Host", async () => {
   const f = fixture();
   expect(await f.authorize(f.tx, command)).toBe(true);
-  expect(mocks.transactions).toEqual([f.tx, f.tx]);
+  expect(mocks.transactions).toEqual([f.tx, f.tx, f.tx]);
   expect(f.validate).toHaveBeenCalledTimes(2);
   expect(f.tx.query).not.toHaveBeenCalled();
 });
@@ -178,4 +204,39 @@ it("does not label a failed Host dependency as permission refusal", async () => 
   const f = fixture();
   mocks.host.mockRejectedValue(new Error("private"));
   expect(await f.authorize(f.tx, command)).toBe(false);
+});
+
+it("WP-2423: lets any current participant replace an Expired cart, and only the Host an Abandoned one", async () => {
+  mocks.cart.mockResolvedValue(previousCart("Expired"));
+  mocks.host.mockResolvedValue(null);
+  const f = fixture();
+  expect(await f.authorize(f.tx, command)).toBe(true);
+  expect(mocks.participant).toHaveBeenCalledTimes(1);
+  expect(mocks.host).not.toHaveBeenCalled();
+  // A former or removed participant is refused.
+  mocks.participant.mockResolvedValue(null);
+  await expect(f.authorize(f.tx, command)).rejects.toMatchObject({
+    code: "CART_REPLACEMENT_FORBIDDEN",
+  });
+  // Abandoned stays Host-only: the participant fence is never consulted.
+  mocks.participant.mockClear();
+  mocks.participant.mockResolvedValue({});
+  mocks.cart.mockResolvedValue(previousCart("Abandoned"));
+  await expect(f.authorize(f.tx, command)).rejects.toMatchObject({
+    code: "CART_REPLACEMENT_FORBIDDEN",
+  });
+  expect(mocks.participant).not.toHaveBeenCalled();
+});
+it("WP-2423: an expiry not yet recorded is retryable, and another session's cart is refused", async () => {
+  const f = fixture();
+  mocks.cart.mockResolvedValue(previousCart("Active"));
+  await expect(f.authorize(f.tx, command)).rejects.toMatchObject({
+    code: "CART_LIFECYCLE_UNAVAILABLE",
+  });
+  mocks.cart.mockResolvedValue(previousCart("Expired", id(99)));
+  expect(await f.authorize(f.tx, command)).toBe(false);
+  mocks.cart.mockResolvedValue(null);
+  expect(await f.authorize(f.tx, command)).toBe(false);
+  expect(mocks.participant).not.toHaveBeenCalled();
+  expect(mocks.host).not.toHaveBeenCalled();
 });

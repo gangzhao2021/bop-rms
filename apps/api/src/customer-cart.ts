@@ -91,6 +91,8 @@ export type CustomerCartPortResult =
   | { readonly status: "SelectionInvalid"; readonly issueCodes: readonly string[] }
   | { readonly status: "LifecycleExpired" | "LifecycleAbandoned" }
   | { readonly status: "RateLimited"; readonly retryAfterSeconds: number }
+  /** WP-2423: briefly unavailable (for example a table Cart expiry still being recorded). */
+  | { readonly status: "RetryLater"; readonly retryAfterSeconds: number }
   | { readonly status: "Unavailable" };
 
 export interface CustomerCartReplacementPort {
@@ -477,6 +479,11 @@ function handleResult(response: Response, result: CustomerCartPortResult, create
     } catch {
       sendError(response, "cart_service_unavailable");
     }
+    return;
+  }
+  if (result.status === "RetryLater") {
+    response.setHeader("Retry-After", String(positive(result.retryAfterSeconds, 60)));
+    sendError(response, "cart_service_unavailable");
     return;
   }
   if (result.status === "RateLimited") {

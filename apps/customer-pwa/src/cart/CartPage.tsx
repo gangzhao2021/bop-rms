@@ -209,7 +209,7 @@ function ErrorState({
   const messages = {
     "replacement-forbidden": [
       "Cart replacement not permitted",
-      "Ask the table host or staff to help you continue ordering.",
+      "This session isn’t part of the table any more, or only the person who started the table can restart this cart. Scan the table QR code again or ask staff for help.",
     ],
     "session-expired": [
       "Session expired",
@@ -227,7 +227,9 @@ function ErrorState({
     ],
     expired: [
       "Cart expired",
-      "This cart cannot accept more items. Ask staff for help continuing your order.",
+      state.cart?.cart.orderType === "DineIn"
+        ? "This cart timed out. Return to the menu and add an item; your table continues with a new cart."
+        : "This cart cannot accept more items. Ask staff for help continuing your order.",
     ],
     abandoned: ["Cart closed", "This cart was abandoned and cannot be changed."],
     "command-failed": [
@@ -329,8 +331,9 @@ function CartContent({
           {cart.cart.orderType === "DineIn" && controller.replaceExpiredCart !== undefined ? (
             <>
               <p>
-                The table host can start an empty cart to continue ordering. Previous items will not
-                be copied.
+                {cart.cart.lifecycle.status === "Expired"
+                  ? "Anyone at your table can start an empty cart to keep ordering. Items that weren’t ordered are not copied."
+                  : "The person who started the table can start an empty cart to continue ordering. Previous items will not be copied."}
               </p>
               <button
                 type="button"

@@ -120,3 +120,85 @@ export function createPostgresDiningCartReadStore(
     },
   });
 }
+
+const selectUnreplaced = `SELECT cart_id AS "cartReference", aggregate_version AS "aggregateVersion"
+FROM rms_ordering.cart AS candidate
+WHERE brand_id = $1 AND store_id = $2 AND dining_session_id = $3
+  AND order_type = 'DineIn' AND source_channel IN ('Qr', 'Web')
+  AND NOT EXISTS (
+    SELECT 1 FROM rms_ordering.dining_cart_replacement AS replacement
+    WHERE replacement.brand_id = candidate.brand_id
+      AND replacement.store_id = candidate.store_id
+      AND replacement.dining_session_id = candidate.dining_session_id
+      AND replacement.previous_cart_id = candidate.cart_id
+  )
+ORDER BY cart_id LIMIT 2`;
+
+/**
+ * WP-2423: the Session's one unreplaced table Cart whatever its lifecycle, so a guest whose table
+ * Cart timed out can continue through the owner replacement command. Observation only: it grants
+ * nothing; the replacement re-authorizes, fences and re-checks the version. No item content.
+ */
+export function createPostgresDiningCartSuccessionSource(
+  runner: CartQueryTransactionRunner,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+) {
+  let brand: string;
+  let store: string;
+  try {
+    const captured = readClosedRecord(scope, ["brandReference", "storeReference"]);
+    brand = parseOrderingReference(captured.brandReference);
+    store = parseOrderingReference(captured.storeReference);
+  } catch {
+    throw new CartError("CART_INPUT_INVALID");
+  }
+  return Object.freeze({
+    async previous(value: unknown): Promise<null | {
+      readonly cartReference: string;
+      readonly cartVersion: number;
+      readonly lifecycleStatus: "Active" | "Abandoned" | "Expired";
+      /** Lines still in the Cart: never ordered (a submitted round clears the Cart). */
+      readonly itemCount: number;
+    }> {
+      let diningSessionReference: string;
+      try {
+        const input = readClosedRecord(value, ["diningSessionReference"]);
+        diningSessionReference = parseOrderingReference(input.diningSessionReference);
+      } catch {
+        throw new CartError("CART_INPUT_INVALID");
+      }
+      try {
+        return await runner.run(async (transaction) => {
+          await transaction.query(
+            "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
+            [brand, store],
+          );
+          const first = header(
+            await transaction.query(selectUnreplaced, [brand, store, diningSessionReference]),
+          );
+          if (first === null) return null;
+          const cart = await createPostgresCartQueryStore(
+            { run: async (action) => action(transaction) },
+            { brandReference: brand, storeReference: store },
+          ).load(first.cartReference);
+          if (
+            cart === null ||
+            cart.aggregateVersion !== first.aggregateVersion ||
+            cart.orderType !== "DineIn" ||
+            cart.diningSessionReference !== diningSessionReference ||
+            cart.lifecycle === null
+          )
+            return unavailable();
+          return Object.freeze({
+            cartReference: cart.cartReference,
+            cartVersion: cart.aggregateVersion,
+            lifecycleStatus: cart.lifecycle.status,
+            itemCount: cart.items.length,
+          });
+        });
+      } catch {
+        return unavailable();
+      }
+    },
+  });
+}

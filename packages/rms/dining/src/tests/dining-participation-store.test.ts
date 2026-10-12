@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createPostgresDiningParticipationStore,
   createPostgresDiningHostParticipationFence,
+  createPostgresDiningParticipantFence,
   type DiningTableTransactionRunner,
 } from "../index.js";
 const id = (n: number) => `01902280-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -196,7 +197,9 @@ describe("WP-2280 coherent current participation storage", () => {
   });
 });
 
-function fencedFixture(change: { moved?: boolean; missing?: boolean; nonHost?: boolean } = {}) {
+function fencedFixture(
+  change: { moved?: boolean; missing?: boolean; nonHost?: boolean; participant?: boolean } = {},
+) {
   const query = vi.fn<(sql: string, values: readonly unknown[]) => Promise<unknown>>(
     async (sql) => {
       if (sql.startsWith("SELECT set_config")) return { rows: [] };
@@ -219,7 +222,13 @@ function fencedFixture(change: { moved?: boolean; missing?: boolean; nonHost?: b
       return action({ query });
     },
   };
-  return { query, run, store: createPostgresDiningHostParticipationFence(runner, scope) };
+  return {
+    query,
+    run,
+    store: (change.participant === true
+      ? createPostgresDiningParticipantFence
+      : createPostgresDiningHostParticipationFence)(runner, scope),
+  };
 }
 it("retains table then session then participant locks before returning the current Host", async () => {
   const f = fencedFixture();
@@ -251,4 +260,21 @@ it("does not invent a table for missing Session", async () => {
   const f = fencedFixture({ missing: true });
   expect(await f.store.readCurrent(input() as never)).toBeNull();
   expect(f.query.mock.calls.some(([sql]) => sql.includes("FOR UPDATE"))).toBe(false);
+});
+
+it("WP-2423: the participant fence takes the same locks and accepts any current active participant", async () => {
+  const f = fencedFixture({ participant: true, nonHost: true });
+  const result = await f.store.readCurrent(input() as never);
+  expect(result?.participant.participantReference).toBe(id(6));
+  expect(result?.session.hostParticipantReference).toBe(id(99));
+  const locked = f.query.mock.calls.filter(([sql]) => sql.includes("FOR UPDATE"));
+  expect(locked.map(([sql]) => sql.split(" FROM ")[1]?.split(" WHERE ")[0])).toEqual([
+    "rms_dining.dining_table",
+    "rms_dining.dining_session",
+    "rms_dining.dining_participant",
+  ]);
+  // A concurrent move is still refused.
+  expect(
+    await fencedFixture({ participant: true, moved: true }).store.readCurrent(input() as never),
+  ).toBeNull();
 });

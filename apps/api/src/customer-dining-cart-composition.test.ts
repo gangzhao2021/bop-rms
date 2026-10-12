@@ -5,6 +5,9 @@ import { CartError, parseOrderingReference, type CustomerCartDisplayView } from 
 import { createApp } from "./app.js";
 import { CustomerCartHandler, type CustomerCartPort } from "./customer-cart.js";
 import {
+  EARLIER_CART_ITEMS_CLEARED,
+  TABLE_CART_EXPIRY_RETRY_SECONDS,
+  continuationOperationReference,
   createCustomerCartChannelPort,
   createCustomerDiningCartComposition,
   createCustomerDiningCartPort,
@@ -554,5 +557,102 @@ describe("opt-in Dining Cart item API", () => {
       status: "VersionConflict",
       currentVersion: 2,
     });
+  });
+});
+
+describe("WP-2423: continuing past a timed-out table Cart", () => {
+  const previousCart = (lifecycleStatus: "Active" | "Abandoned" | "Expired", itemCount = 2) => ({
+    cartReference: id(20),
+    cartVersion: 7,
+    lifecycleStatus,
+    itemCount,
+  });
+  function continued(previous: ReturnType<typeof previousCart> | null = previousCart("Expired")) {
+    const f = fixture();
+    const replace = vi.fn(async (): Promise<unknown> => ({}));
+    const prior = vi.fn(async () => previous);
+    f.select.mockRejectedValueOnce(new CartError("CART_EXPIRED"));
+    const port = createCustomerDiningCartPort({
+      selection: { select: f.select },
+      query: { read: f.read },
+      continuation: { previous: prior, replacement: { replace } },
+    });
+    return { ...f, replace, prior, port };
+  }
+  it("replaces an Expired table Cart through the owner command and selects the successor", async () => {
+    const f = continued();
+    const result = await f.port.createCart(input());
+    expect(result.status).toBe("Applied");
+    expect(f.replace).toHaveBeenCalledTimes(1);
+    expect(f.replace).toHaveBeenCalledWith({
+      sessionCredential: credential,
+      csrfCredential: csrf,
+      operationReference: continuationOperationReference(id(10), id(20)),
+      previousCartReference: id(20),
+      expectedCartVersion: 7,
+    });
+    // Deterministic per selection operation: a replay reuses the same replacement operation.
+    expect(continuationOperationReference(id(10), id(20))).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/u,
+    );
+    expect(continuationOperationReference(id(10), id(20))).not.toBe(
+      continuationOperationReference(id(11), id(20)),
+    );
+    expect(f.select).toHaveBeenCalledTimes(2);
+    expect(f.select.mock.calls[0]).toEqual(f.select.mock.calls[1]);
+    // The guest is told once that unordered items were cleared.
+    expect(result.status === "Applied" && result.view.cart.warnings).toEqual([
+      EARLIER_CART_ITEMS_CLEARED,
+    ]);
+  });
+  it("says nothing when the timed-out Cart was empty", async () => {
+    const f = continued(previousCart("Expired", 0));
+    const result = await f.port.createCart(input());
+    expect(result.status === "Applied" && result.view.cart.warnings).toEqual([]);
+  });
+  it("re-selects when another guest replaced it first (one successor)", async () => {
+    const f = continued();
+    f.replace.mockRejectedValueOnce(new CartError("CART_VERSION_CONFLICT"));
+    const result = await f.port.createCart(input());
+    expect(result.status).toBe("Applied");
+    expect(result.status === "Applied" && result.view.cart.warnings).toEqual([]);
+    expect(f.replace).toHaveBeenCalledTimes(1);
+    // Already replaced: nothing left to observe, the selection finds the successor.
+    const g = continued(null);
+    expect((await g.port.createCart(input())).status).toBe("Applied");
+    expect(g.replace).not.toHaveBeenCalled();
+  });
+  it("asks the guest to retry shortly while the expiry is still being recorded", async () => {
+    const due = continued(previousCart("Active"));
+    expect(await due.port.createCart(input())).toEqual({
+      status: "RetryLater",
+      retryAfterSeconds: TABLE_CART_EXPIRY_RETRY_SECONDS,
+    });
+    expect(due.replace).not.toHaveBeenCalled();
+    const racing = continued();
+    racing.replace.mockRejectedValueOnce(new CartError("CART_LIFECYCLE_UNAVAILABLE"));
+    expect((await racing.port.createCart(input())).status).toBe("RetryLater");
+  });
+  it("keeps refusing an Abandoned Cart, a removed participant and other failures", async () => {
+    const abandoned = continued(previousCart("Abandoned"));
+    expect(await abandoned.port.createCart(input())).toEqual({ status: "LifecycleAbandoned" });
+    expect(abandoned.replace).not.toHaveBeenCalled();
+    const removed = continued();
+    removed.replace.mockRejectedValueOnce(new CartError("CART_REPLACEMENT_FORBIDDEN"));
+    expect(await removed.port.createCart(input())).toEqual({ status: "SessionExpired" });
+    const broken = continued();
+    broken.replace.mockRejectedValueOnce(new CartError("CART_DEPENDENCY_UNAVAILABLE"));
+    expect(await broken.port.createCart(input())).toEqual({ status: "Unavailable" });
+    // Only CART_EXPIRED continues; an Abandoned selection never observes or replaces.
+    const f = continued();
+    f.select.mockReset();
+    f.select.mockRejectedValue(new CartError("CART_ABANDONED"));
+    expect(await f.port.createCart(input())).toEqual({ status: "LifecycleAbandoned" });
+    expect(f.prior).not.toHaveBeenCalled();
+  });
+  it("without the replacement port an expired Cart is reported as before", async () => {
+    const f = fixture();
+    f.select.mockRejectedValue(new CartError("CART_EXPIRED"));
+    expect(await f.port.createCart(input())).toEqual({ status: "LifecycleExpired" });
   });
 });

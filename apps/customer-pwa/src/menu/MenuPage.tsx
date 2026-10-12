@@ -742,6 +742,12 @@ function ConfigureStatus({
     return (
       <div className="configure-status configure-status--success" role="status">
         <p>Added to your cart.</p>
+        {state.earlierCartCleared === true ? (
+          <p>
+            Your table&apos;s earlier cart timed out, so items that hadn&apos;t been ordered were
+            cleared. Orders already placed are not affected.
+          </p>
+        ) : null}
         <Link className="menu-action" to="/cart">
           View cart
         </Link>
@@ -755,7 +761,7 @@ function ConfigureStatus({
     validation: "This item can’t be ordered as selected. Review your choices.",
     "rate-limited": `Please wait${"retryAfterSeconds" in state && state.retryAfterSeconds !== null ? ` ${state.retryAfterSeconds} seconds` : ""} before trying again.`,
     expired:
-      "This cart expired and cannot accept more items. Ask staff for help continuing your order.",
+      "Your table’s cart timed out and a new one couldn’t be started just now. Wait a moment, then add the item again.",
     abandoned: "This cart is closed and cannot accept another item.",
     unavailable: "We couldn’t add this right now. Please try again.",
     "outcome-unknown": "The connection dropped before we could confirm. Retry to check.",

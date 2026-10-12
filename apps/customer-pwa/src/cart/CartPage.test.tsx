@@ -308,13 +308,16 @@ it("shows terminal Dining continuation with offline and unknown-outcome guards",
       </MemoryRouter>,
     );
     expect(html).toContain("Start an empty cart");
-    expect(html).toContain("Previous items will not be copied");
+    // WP-2423: anyone at the table may continue past a timed-out cart.
+    expect(html).toContain("Anyone at your table can start an empty cart to keep ordering.");
+    expect(html).toContain("Items that weren’t ordered are not copied.");
+    expect(html).not.toContain("table host");
     if (status !== "ready")
       expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Start an empty cart/);
   }
 });
 
-it("shows Host/staff guidance without retry for a known replacement refusal", () => {
+it("shows rescan/staff guidance without retry for a known replacement refusal", () => {
   const current = cart();
   const state: CartState = {
     status: "replacement-forbidden",
@@ -335,8 +338,50 @@ it("shows Host/staff guidance without retry for a known replacement refusal", ()
       <CartPage controller={{ ...controller(state), replaceExpiredCart: async () => undefined }} />
     </MemoryRouter>,
   );
-  expect(html).toContain("Ask the table host or staff");
+  expect(html).toContain("Scan the table QR code again or ask staff for help.");
   expect(html).not.toContain("Retry the same operation");
   expect(html).not.toContain("Outcome not confirmed");
   expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Start an empty cart/);
+});
+
+it("WP-2423: an Abandoned dine-in cart stays with the person who started the table", () => {
+  const terminal: CartView = {
+    ...cart(),
+    cart: {
+      ...cart().cart,
+      orderType: "DineIn",
+      lifecycle: { ...cart().cart.lifecycle, status: "Abandoned" },
+    },
+  };
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <CartPage
+        controller={{
+          ...controller({ status: "ready", cart: terminal }),
+          replaceExpiredCart: async () => undefined,
+        }}
+      />
+    </MemoryRouter>,
+  );
+  expect(html).toContain("Cart closed");
+  expect(html).toContain("The person who started the table can start an empty cart");
+});
+
+it("WP-2423: a dine-in cart that timed out during a change points back to the menu", () => {
+  const current = cart();
+  const state: CartState = {
+    status: "expired",
+    cart: { ...current, cart: { ...current.cart, orderType: "DineIn" } },
+    issueCodes: [],
+    retryAfterSeconds: null,
+    canRetrySameOperation: false,
+  };
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <CartPage controller={controller(state)} />
+    </MemoryRouter>,
+  );
+  expect(html).toContain("your table continues with a new cart");
+  expect(html).not.toContain("Ask staff for help continuing your order.");
+  expect(html).toContain("Return to menu");
 });

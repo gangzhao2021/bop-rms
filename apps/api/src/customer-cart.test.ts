@@ -290,12 +290,15 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
       "cart_selection_invalid",
     ],
     [{ status: "RateLimited", retryAfterSeconds: 7 }, 429, "cart_rate_limited"],
+    // WP-2423: briefly unavailable (table Cart expiry still being recorded) with a retry hint.
+    [{ status: "RetryLater", retryAfterSeconds: 5 }, 503, "cart_service_unavailable"],
   ] as const)("maps safe application outcome %o", async (result, status, errorCode) => {
     port.result = result;
     const response = await request("/bff/customer/cart", { headers: headers() });
     expect(response.status).toBe(status);
     expect(await response.json()).toMatchObject({ error: { code: errorCode } });
     if (status === 429) expect(response.headers.get("retry-after")).toBe("7");
+    if (status === 503) expect(response.headers.get("retry-after")).toBe("5");
   });
 
   it("maps a thrown or malformed dependency result to safe unavailable", async () => {

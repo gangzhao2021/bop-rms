@@ -4,7 +4,12 @@ import { CartClientError, type CartItemDraft, type CartView } from "../cart/type
 export type ConfigureState =
   | Readonly<{ status: "idle" }>
   | Readonly<{ status: "pending"; stage: "locate" | "create" | "add" }>
-  | Readonly<{ status: "added"; cart: CartView }>
+  | Readonly<{
+      status: "added";
+      cart: CartView;
+      /** WP-2423: the table's earlier cart timed out and its unordered items were cleared. */
+      earlierCartCleared?: boolean;
+    }>
   | Readonly<{ status: "offline"; canRetry: boolean }>
   | Readonly<{
       status:
@@ -29,7 +34,16 @@ interface AddPlan {
   stage: "locate" | "create" | "add";
   cart: CartView | null;
   outcomeUnknown: boolean;
+  /** WP-2423: automatic continuations already used (short retry, fresh start after a timeout). */
+  retried?: boolean;
+  restarted?: boolean;
+  earlierCartCleared?: boolean;
 }
+
+/** WP-2423: cart warning set once when the table's timed-out cart held unordered items. */
+export const EARLIER_CART_ITEMS_CLEARED = "EARLIER_CART_ITEMS_CLEARED";
+/** WP-2423: longest server-requested pause before the one automatic retry of cart creation. */
+const MAX_AUTOMATIC_RETRY_SECONDS = 10;
 
 export interface ConfigureController {
   getState(): ConfigureState;
@@ -56,9 +70,15 @@ function uuidV7(): string {
 export function createConfigureController({
   client,
   keyFactory = uuidV7,
+  wait = (milliseconds: number) =>
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, milliseconds);
+    }),
 }: {
   readonly client: CustomerCartClient;
   readonly keyFactory?: () => string;
+  /** Pause used before an automatic retry (tests inject an immediate one). */
+  readonly wait?: (milliseconds: number) => Promise<void>;
 }): ConfigureController {
   let state: ConfigureState = { status: "idle" };
   let online = typeof navigator === "undefined" || navigator.onLine !== false;
@@ -116,9 +136,32 @@ export function createConfigureController({
       }
       if (plan.stage === "create") {
         publish({ status: "pending", stage: "create" });
-        plan.cart = await client.createCart({
-          operationReference: plan.createOperationReference,
-        });
+        try {
+          plan.cart = await client.createCart({
+            operationReference: plan.createOperationReference,
+          });
+        } catch (error) {
+          // WP-2423: the table's timed-out cart is still being closed; the server asks for a short
+          // pause. Retry the same operation once (nothing was created), then report as usual.
+          if (
+            plan.retried === true ||
+            !(error instanceof CartClientError) ||
+            error.code !== "cart_service_unavailable" ||
+            error.retryAfterSeconds === null ||
+            error.retryAfterSeconds > MAX_AUTOMATIC_RETRY_SECONDS
+          )
+            throw error;
+          plan.retried = true;
+          await wait(error.retryAfterSeconds * 1000);
+          if (!online) {
+            publish({ status: "offline", canRetry: true });
+            return;
+          }
+          plan.cart = await client.createCart({
+            operationReference: plan.createOperationReference,
+          });
+        }
+        plan.earlierCartCleared ||= plan.cart.cart.warnings.includes(EARLIER_CART_ITEMS_CLEARED);
         plan.cart = Object.freeze({ ...plan.cart, cart: Object.freeze({ ...plan.cart.cart }) });
         plan.stage = "add";
         plan.outcomeUnknown = false;
@@ -142,10 +185,33 @@ export function createConfigureController({
       )
         throw new CartClientError("network_unknown");
       pending = null;
-      publish({ status: "added", cart: result });
+      publish(
+        plan.earlierCartCleared === true
+          ? { status: "added", cart: result, earlierCartCleared: true }
+          : { status: "added", cart: result },
+      );
     } catch (error) {
       let parsed =
         error instanceof CartClientError ? error : new CartClientError("network_unknown");
+      // WP-2423: the table cart timed out between finding it and adding. Start once more from
+      // the current cart with new operations; the server continues with a fresh table cart.
+      if (
+        parsed.code === "cart_expired" &&
+        plan.stage === "add" &&
+        plan.restarted !== true &&
+        !plan.outcomeUnknown
+      ) {
+        await execute({
+          ...plan,
+          createOperationReference: keyFactory(),
+          addOperationReference: keyFactory(),
+          stage: "locate",
+          cart: null,
+          outcomeUnknown: false,
+          restarted: true,
+        });
+        return;
+      }
       plan.outcomeUnknown ||= parsed.code === "network_unknown";
       if (plan.outcomeUnknown) parsed = new CartClientError("network_unknown");
       else pending = null;

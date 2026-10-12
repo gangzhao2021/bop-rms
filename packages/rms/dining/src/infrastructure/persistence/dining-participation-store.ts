@@ -40,7 +40,7 @@ export function createPostgresDiningParticipationStore(
   runner: DiningTableTransactionRunner,
   scopeInput: DiningTableStoreScope,
 ): DiningCartParticipationOptions["repository"] {
-  return createParticipationStore(runner, scopeInput, false);
+  return createParticipationStore(runner, scopeInput, "None");
 }
 
 /** Borrow the caller's write transaction and retain these locks until its commit.
@@ -51,13 +51,24 @@ export function createPostgresDiningHostParticipationFence(
   runner: DiningTableTransactionRunner,
   scopeInput: DiningTableStoreScope,
 ): DiningCartParticipationOptions["repository"] {
-  return createParticipationStore(runner, scopeInput, true);
+  return createParticipationStore(runner, scopeInput, "Host");
+}
+
+/** WP-2423: like the Host fence, but proves only that this participant is a current active member
+ * of the active Session (any participant, not just the Host). Same locks and lock order; borrow the
+ * caller's write transaction and retain them until its commit. Never Guest identity or CSRF.
+ */
+export function createPostgresDiningParticipantFence(
+  runner: DiningTableTransactionRunner,
+  scopeInput: DiningTableStoreScope,
+): DiningCartParticipationOptions["repository"] {
+  return createParticipationStore(runner, scopeInput, "Participant");
 }
 
 function createParticipationStore(
   runner: DiningTableTransactionRunner,
   scopeInput: DiningTableStoreScope,
-  fenceHost: boolean,
+  fence: "None" | "Host" | "Participant",
 ): DiningCartParticipationOptions["repository"] {
   const scope = closed(scopeInput, ["tenantReference", "brandReference", "storeReference"]);
   const tenant = parseDiningReference(scope.tenantReference);
@@ -93,7 +104,7 @@ function createParticipationStore(
             [brand, store],
           );
           let lockedTable: string | null = null;
-          if (fenceHost) {
+          if (fence !== "None") {
             // Observe only to choose the table lock; this is not authority.
             const located = rows(
               await tx.query(
@@ -156,9 +167,8 @@ function createParticipationStore(
           )
             return sessionDependency();
           if (
-            (fenceHost &&
-              (session.hostParticipantReference !== input.participant ||
-                session.tableReference !== lockedTable)) ||
+            (fence === "Host" && session.hostParticipantReference !== input.participant) ||
+            (fence !== "None" && session.tableReference !== lockedTable) ||
             session.phase !== "Active" ||
             participant.status !== "Active" ||
             currentTable.tableReference !== session.tableReference ||

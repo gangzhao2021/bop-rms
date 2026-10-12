@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { createPostgresCatalogSelectionService } from "@rms/catalog";
 import {
   createCustomerCartSelectionInventory,
@@ -22,6 +23,7 @@ import {
   createPostgresCartItemCommandStore,
   createPostgresDiningCartReadStore,
   createPostgresDiningCartSelectionStore,
+  createPostgresDiningCartSuccessionSource,
   parseDiningCartSelectionReceipt,
   parseOrderingInstant,
   parseOrderingReference,
@@ -38,7 +40,46 @@ import {
   createCustomerCartReadPort,
   type CustomerCartDisplayQuery,
 } from "./customer-cart-read-composition.js";
-import type { CustomerCartPort, CustomerCartPortResult } from "./customer-cart.js";
+import type {
+  CustomerCartPort,
+  CustomerCartPortResult,
+  CustomerCartReplacementPort,
+} from "./customer-cart.js";
+
+/** WP-2423: cart warning on the one response that replaced a timed-out table Cart holding items. */
+export const EARLIER_CART_ITEMS_CLEARED = "EARLIER_CART_ITEMS_CLEARED";
+/** WP-2423: how long a guest waits before retrying while the expiry is still being recorded. */
+export const TABLE_CART_EXPIRY_RETRY_SECONDS = 5;
+/** WP-2423: the table Cart a selection found expired (observation only, grants nothing). */
+export interface DiningCartContinuation {
+  previous(input: {
+    readonly sessionCredential: string;
+    readonly csrfCredential: string;
+  }): Promise<null | {
+    readonly cartReference: string;
+    readonly cartVersion: number;
+    readonly lifecycleStatus: "Active" | "Abandoned" | "Expired";
+    readonly itemCount: number;
+  }>;
+  readonly replacement: CustomerCartReplacementPort;
+}
+/** Deterministic replacement operation for one selection operation and one previous Cart (UUIDv7 form). */
+export function continuationOperationReference(
+  selectionOperationReference: string,
+  previousCartReference: string,
+): string {
+  const d = createHash("sha256")
+    .update(
+      JSON.stringify([
+        "dining-cart-timeout-continuation-v1",
+        selectionOperationReference,
+        previousCartReference,
+      ]),
+    )
+    .digest("hex");
+  return `${d.slice(0, 8)}-${d.slice(8, 12)}-7${d.slice(13, 16)}-8${d.slice(17, 20)}-${d.slice(20, 32)}`;
+}
+class RetryLater extends Error {}
 
 const unavailable = Object.freeze({ status: "Unavailable" } as const);
 function scope(value: unknown) {
@@ -49,6 +90,8 @@ function scope(value: unknown) {
   });
 }
 function failure(error: unknown): CustomerCartPortResult {
+  if (error instanceof RetryLater)
+    return { status: "RetryLater", retryAfterSeconds: TABLE_CART_EXPIRY_RETRY_SECONDS };
   if (!(error instanceof CartError)) return unavailable;
   switch (error.code) {
     case "CART_PERMISSION_DENIED":
@@ -59,6 +102,9 @@ function failure(error: unknown): CustomerCartPortResult {
       return { status: "LifecycleExpired" };
     case "CART_ABANDONED":
       return { status: "LifecycleAbandoned" };
+    // WP-2423: no longer an active participant of this table (left or removed): enter again.
+    case "CART_REPLACEMENT_FORBIDDEN":
+      return { status: "SessionExpired" };
     default:
       return unavailable;
   }
@@ -73,7 +119,68 @@ export function createCustomerDiningCartPort(options: {
       readonly operationReference: string;
     }): Promise<unknown>;
   };
+  /** WP-2423: continue past a timed-out table Cart through the owner replacement command. */
+  readonly continuation?: DiningCartContinuation;
 }): CustomerCartPort {
+  /**
+   * Select the table Cart; when it timed out (recorded Expired), replace it through the owner
+   * command (same authorization/fences/audit, never copies items) and select the successor.
+   * A concurrent guest's replacement wins cleanly: our version conflict just re-selects.
+   */
+  const selectOrContinue = async (command: {
+    readonly sessionCredential: string;
+    readonly csrfCredential: string;
+    readonly operationReference: string;
+  }) => {
+    try {
+      return { result: await options.selection.select(command), cleared: false };
+    } catch (error) {
+      const continuation = options.continuation;
+      if (
+        continuation === undefined ||
+        !(error instanceof CartError) ||
+        error.code !== "CART_EXPIRED"
+      )
+        throw error;
+      let cleared = false;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const previous = await continuation.previous({
+          sessionCredential: command.sessionCredential,
+          csrfCredential: command.csrfCredential,
+        });
+        if (previous !== null) {
+          // Due but not yet recorded by the expiry owner: retry shortly. Abandoned keeps refusing.
+          if (previous.lifecycleStatus === "Active") throw new RetryLater();
+          if (previous.lifecycleStatus === "Abandoned") throw new CartError("CART_ABANDONED");
+          try {
+            await continuation.replacement.replace({
+              sessionCredential: command.sessionCredential,
+              csrfCredential: command.csrfCredential,
+              operationReference: continuationOperationReference(
+                command.operationReference,
+                previous.cartReference,
+              ),
+              previousCartReference: previous.cartReference,
+              expectedCartVersion: previous.cartVersion,
+            });
+            cleared = previous.itemCount > 0;
+          } catch (replaceError) {
+            if (!(replaceError instanceof CartError)) throw replaceError;
+            if (replaceError.code === "CART_LIFECYCLE_UNAVAILABLE") throw new RetryLater();
+            // Another guest replaced it first; the next selection finds the successor.
+            if (replaceError.code !== "CART_VERSION_CONFLICT") throw replaceError;
+          }
+        }
+        try {
+          return { result: await options.selection.select(command), cleared };
+        } catch (retryError) {
+          if (!(retryError instanceof CartError) || retryError.code !== "CART_EXPIRED")
+            throw retryError;
+        }
+      }
+      throw new RetryLater();
+    }
+  };
   const base = Object.freeze<CustomerCartPort>({
     ...createCustomerCartReadPort(options.query),
     async createCart(
@@ -85,6 +192,7 @@ export function createCustomerDiningCartPort(options: {
         readonly operationReference: string;
       };
       let receipt;
+      let cleared: boolean;
       try {
         const raw = readClosedRecord(input, [
           "guestCredential",
@@ -98,7 +206,9 @@ export function createCustomerDiningCartPort(options: {
           csrfCredential: parseGuestRawCredential(raw.csrfCredential),
           operationReference: parseOrderingReference(raw.operationReference),
         });
-        receipt = parseDiningCartSelectionReceipt(await options.selection.select(command));
+        const selected = await selectOrContinue(command);
+        cleared = selected.cleared;
+        receipt = parseDiningCartSelectionReceipt(selected.result);
         if (receipt.operationReference !== command.operationReference) return unavailable;
       } catch (error) {
         return failure(error);
@@ -120,7 +230,18 @@ export function createCustomerDiningCartPort(options: {
           view.cart.version < receipt.cartVersion
         )
           return unavailable;
-        return { status: receipt.action === "Create" ? "Applied" : "Current", view };
+        return {
+          status: receipt.action === "Create" ? "Applied" : "Current",
+          view: cleared
+            ? Object.freeze({
+                ...view,
+                cart: Object.freeze({
+                  ...view.cart,
+                  warnings: Object.freeze([...view.cart.warnings, EARLIER_CART_ITEMS_CLEARED]),
+                }),
+              })
+            : view,
+        };
       } catch {
         return unavailable;
       }
@@ -169,6 +290,8 @@ export interface CustomerDiningCartCompositionOptions {
   readonly catalog: CustomerDiningCartViewPorts["catalog"];
   readonly stores: CustomerDiningCartViewPorts["stores"];
   readonly now: () => string;
+  /** WP-2423: owner replacement used to continue past a timed-out table Cart (omitted: refused). */
+  readonly replacement?: CustomerCartReplacementPort;
   readonly items?: {
     readonly writeTransactions: CartItemWriteTransactionRunner;
     readonly references: DiningCartItemOptions["references"];
@@ -200,8 +323,36 @@ export function createCustomerDiningCartComposition(
     catalog: options.catalog,
     stores: options.stores,
   });
+  const replacement = options.replacement;
+  const succession = createPostgresDiningCartSuccessionSource(options.cartTransactions, fixedScope);
   return createCustomerDiningCartPort({
     query,
+    ...(replacement === undefined
+      ? {}
+      : {
+          continuation: {
+            replacement,
+            async previous(input) {
+              // Current Guest + CSRF first; the replacement re-authorizes and fences everything.
+              const session = await sessions.authorize({
+                sessionCredential: input.sessionCredential,
+                csrfCredential: input.csrfCredential,
+                observedAt: parseOrderingInstant(now()),
+              });
+              if (
+                String(session.brandReference) !== fixedScope.brandReference ||
+                String(session.storeReference) !== fixedScope.storeReference ||
+                session.channel !== "DineIn" ||
+                session.diningState !== "DiningBound" ||
+                session.diningSessionReference === null
+              )
+                throw new CartError("CART_PERMISSION_DENIED");
+              return succession.previous({
+                diningSessionReference: String(session.diningSessionReference),
+              });
+            },
+          },
+        }),
     ...(itemOptions === undefined
       ? {}
       : {

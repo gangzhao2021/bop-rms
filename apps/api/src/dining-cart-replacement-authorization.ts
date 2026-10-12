@@ -1,4 +1,4 @@
-import { CartError } from "@rms/ordering";
+import { CartError, createPostgresCartQueryStore } from "@rms/ordering";
 import {
   GuestSessionService,
   createPostgresFencedGuestSessionEntryStore,
@@ -9,6 +9,7 @@ import {
 } from "@bop/identity";
 import {
   createPostgresDiningHostParticipationFence,
+  createPostgresDiningParticipantFence,
   parseDiningReference,
   parseDiningInstant,
 } from "@rms/dining";
@@ -16,6 +17,9 @@ import type { DiningCartReplacementOptions, CartQueryTransaction } from "@rms/or
 
 /** Guest -> Dining -> Cart lock order. Current binding must be supplied through
  * owner ports on this same transaction. No client references establish authority.
+ * WP-2423 (coordinator decision 2026-10-11): any current active participant may replace a table
+ * Cart whose expiry is recorded (Expired); an Abandoned Cart stays Host-only. The previous Cart's
+ * lifecycle is read without a lock (terminal states never change) before the Dining fence.
  */
 export function createDiningCartReplacementAuthorization(options: {
   readonly scope: {
@@ -77,14 +81,7 @@ export function createDiningCartReplacementAuthorization(options: {
         return false;
       const observedAt = parseDiningInstant(now());
       if (String(observedAt) < String(started)) return false;
-      const host = await createPostgresDiningHostParticipationFence(runner, scope).readCurrent({
-        brandReference: scope.brandReference,
-        storeReference: scope.storeReference,
-        diningSessionReference: parseDiningReference(command.diningSessionReference),
-        participantReference: parseDiningReference(command.participantReference),
-        observedAt,
-      });
-      if (host === null) throw new CartError("CART_REPLACEMENT_FORBIDDEN");
+      if (!(await fenceDiningCartReplacement(runner, scope, command, observedAt))) return false;
       const finished = parseCanonicalInstant(now());
       if (String(finished) < String(observedAt)) return false;
       assertGuestSessionUsable(session, finished);
@@ -94,8 +91,57 @@ export function createDiningCartReplacementAuthorization(options: {
       assertGuestSessionUsable(session, checked);
       return true;
     } catch (error) {
-      if (error instanceof CartError && error.code === "CART_REPLACEMENT_FORBIDDEN") throw error;
+      if (
+        error instanceof CartError &&
+        (error.code === "CART_REPLACEMENT_FORBIDDEN" || error.code === "CART_LIFECYCLE_UNAVAILABLE")
+      )
+        throw error;
       return false;
     }
   };
+}
+
+/**
+ * The Dining/Cart half of replacement authority (after current Guest identity is proven), on the
+ * caller's write transaction: the previous Cart must belong to this Session; Expired (recorded)
+ * needs a current active participant, Abandoned the current Host; anything else is not yet
+ * replaceable (CART_LIFECYCLE_UNAVAILABLE). Refusal is CART_REPLACEMENT_FORBIDDEN.
+ */
+export async function fenceDiningCartReplacement(
+  runner: { run<T>(work: (tx: CartQueryTransaction) => Promise<T>): Promise<T> },
+  scope: { tenantReference: string; brandReference: string; storeReference: string },
+  command: {
+    readonly diningSessionReference: string;
+    readonly participantReference: string;
+    readonly previousCartReference: string;
+  },
+  observedAt: string,
+): Promise<boolean> {
+  const previous = await createPostgresCartQueryStore(runner, {
+    brandReference: scope.brandReference,
+    storeReference: scope.storeReference,
+  }).load(command.previousCartReference);
+  if (previous === null || previous.diningSessionReference !== command.diningSessionReference)
+    return false;
+  const status = previous.lifecycle?.status ?? null;
+  // An expiry not yet recorded by its owner command is not replaceable yet; callers retry.
+  if (status !== "Expired" && status !== "Abandoned")
+    throw new CartError("CART_LIFECYCLE_UNAVAILABLE");
+  const fence =
+    status === "Expired"
+      ? createPostgresDiningParticipantFence
+      : createPostgresDiningHostParticipationFence;
+  const current = await fence(runner, {
+    tenantReference: parseDiningReference(scope.tenantReference),
+    brandReference: parseDiningReference(scope.brandReference),
+    storeReference: parseDiningReference(scope.storeReference),
+  }).readCurrent({
+    brandReference: parseDiningReference(scope.brandReference),
+    storeReference: parseDiningReference(scope.storeReference),
+    diningSessionReference: parseDiningReference(command.diningSessionReference),
+    participantReference: parseDiningReference(command.participantReference),
+    observedAt: parseDiningInstant(observedAt),
+  });
+  if (current === null) throw new CartError("CART_REPLACEMENT_FORBIDDEN");
+  return true;
 }

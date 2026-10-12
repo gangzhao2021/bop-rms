@@ -316,3 +316,57 @@ it("renders the published default quantity and hides inactive conditional groups
   expect(html).toContain('value="2"');
   expect(html).not.toContain("Conditional extra");
 });
+
+describe("WP-2423: a table cart that timed out", () => {
+  const render = (state: ReturnType<ConfigureController["getState"]>) =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <SellableConfigurator
+          sellable={sellable}
+          controller={{
+            getState: () => state,
+            retry: vi.fn(),
+            setOnline: vi.fn(),
+            submit: vi.fn(),
+            subscribe: () => () => undefined,
+          }}
+        />
+      </MemoryRouter>,
+    );
+  const added = {
+    schemaVersion: 1 as const,
+    cart: {
+      cartReference: "018f7600-0000-7000-8000-000000000001",
+      version: 2,
+      orderType: "DineIn" as const,
+      serviceMode: "DineIn",
+      context: { brandName: "Synthetic Brand", storeName: "Synthetic Store" },
+      lifecycle: {
+        status: "Active" as const,
+        idleExpiresAt: "2026-08-12T00:00:00.000Z",
+        absoluteExpiresAt: "2026-08-13T00:00:00.000Z",
+      },
+      items: [],
+      quote: null,
+      warnings: [],
+    },
+  };
+  it("says once that unordered items from the earlier cart were cleared", () => {
+    const html = render({ status: "added", cart: added, earlierCartCleared: true });
+    expect(html).toContain("Added to your cart.");
+    expect(html).toContain(
+      "Your table&#x27;s earlier cart timed out, so items that hadn&#x27;t been ordered were",
+    );
+    expect(render({ status: "added", cart: added })).not.toContain("earlier cart timed out");
+  });
+  it("no longer sends the guest to staff when the cart could not be restarted", () => {
+    const html = render({
+      status: "expired",
+      issueCodes: [],
+      retryAfterSeconds: null,
+      canRetry: false,
+    });
+    expect(html).toContain("Wait a moment, then add the item again.");
+    expect(html).not.toContain("Ask staff for help continuing your order.");
+  });
+});

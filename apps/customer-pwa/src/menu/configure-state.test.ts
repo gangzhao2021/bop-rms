@@ -343,3 +343,120 @@ it.each(["locate", "create"] as const)(
     expect(creates).toBe(1);
   },
 );
+
+describe("WP-2423: continuing past a timed-out table cart", () => {
+  const draft = { quantity: 1, customerNote: null, optionSelections: [] };
+  function client(script: {
+    current?: CartView | null;
+    create: (() => CartView | Error)[];
+    add: (() => Error | null)[];
+  }) {
+    const calls: { name: string; key?: string }[] = [];
+    let current = script.current ?? null;
+    const waits: number[] = [];
+    const value: CustomerCartClient = {
+      async loadCurrent() {
+        calls.push({ name: "load" });
+        return current;
+      },
+      async createCart(input) {
+        calls.push({ name: "create", key: input.operationReference });
+        const next = script.create.shift()?.() ?? cart(1);
+        if (next instanceof Error) throw next;
+        current = next;
+        return next;
+      },
+      async addItem(input) {
+        calls.push({ name: "add", key: input.operationReference });
+        const failure = script.add.shift()?.() ?? null;
+        if (failure !== null) throw failure;
+        current = cart(input.cart.cart.version + 1, [addedItem]);
+        return current;
+      },
+      async updateItem() {
+        throw new Error("unused");
+      },
+      async removeItem() {
+        throw new Error("unused");
+      },
+    };
+    let n = 30;
+    const controller = createConfigureController({
+      client: value,
+      keyFactory: () => id(n++),
+      wait: async (ms) => {
+        waits.push(ms);
+      },
+    });
+    return { calls, controller, waits };
+  }
+  it("tells the guest once when the earlier table cart's unordered items were cleared", async () => {
+    const replaced = cart(1);
+    const f = client({
+      create: [
+        () => ({
+          ...replaced,
+          cart: { ...replaced.cart, warnings: ["EARLIER_CART_ITEMS_CLEARED"] },
+        }),
+      ],
+      add: [],
+    });
+    await f.controller.submit(id(3), draft);
+    expect(f.controller.getState()).toMatchObject({ status: "added", earlierCartCleared: true });
+    const g = client({ create: [], add: [] });
+    await g.controller.submit(id(3), draft);
+    const state = g.controller.getState();
+    expect(state.status).toBe("added");
+    expect("earlierCartCleared" in state).toBe(false);
+  });
+  it("retries cart creation once after the server's short pause, with the same operation", async () => {
+    const f = client({
+      create: [
+        () => new CartClientError("cart_service_unavailable", { retryAfterSeconds: 5 }),
+        () => cart(1),
+      ],
+      add: [],
+    });
+    await f.controller.submit(id(3), draft);
+    expect(f.waits).toEqual([5000]);
+    const creates = f.calls.filter((call) => call.name === "create");
+    expect(creates).toHaveLength(2);
+    expect(creates[0]?.key).toBe(creates[1]?.key);
+    expect(f.controller.getState().status).toBe("added");
+    // A second refusal is reported, not retried forever.
+    const g = client({
+      create: [
+        () => new CartClientError("cart_service_unavailable", { retryAfterSeconds: 5 }),
+        () => new CartClientError("cart_service_unavailable", { retryAfterSeconds: 5 }),
+      ],
+      add: [],
+    });
+    await g.controller.submit(id(3), draft);
+    expect(g.waits).toHaveLength(1);
+    expect(g.controller.getState().status).toBe("unavailable");
+    // Without a retry hint nothing is retried automatically.
+    const h = client({ create: [() => new CartClientError("cart_service_unavailable")], add: [] });
+    await h.controller.submit(id(3), draft);
+    expect(h.waits).toEqual([]);
+  });
+  it("starts again once with new operations when the cart times out right before the add", async () => {
+    const f = client({
+      current: cart(4),
+      create: [],
+      add: [() => new CartClientError("cart_expired")],
+    });
+    await f.controller.submit(id(3), draft);
+    expect(f.calls.map((call) => call.name)).toEqual(["load", "add", "load", "add"]);
+    const adds = f.calls.filter((call) => call.name === "add");
+    expect(adds[0]?.key).not.toBe(adds[1]?.key);
+    expect(f.controller.getState().status).toBe("added");
+    // A second timeout is reported with the plain-language expired state.
+    const g = client({
+      current: cart(4),
+      create: [],
+      add: [() => new CartClientError("cart_expired"), () => new CartClientError("cart_expired")],
+    });
+    await g.controller.submit(id(3), draft);
+    expect(g.controller.getState().status).toBe("expired");
+  });
+});
