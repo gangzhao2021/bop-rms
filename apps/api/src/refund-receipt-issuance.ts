@@ -11,6 +11,7 @@ import {
 } from "@rms/ordering";
 import { createPostgresPaymentReceiptCoverageSource } from "@rms/payment";
 import type { createOriginalReceiptIssuance } from "./original-receipt-issuance.js";
+import { receiptChargedOrder } from "./receipt-charged-order.js";
 type Original = Parameters<typeof createOriginalReceiptIssuance>[0];
 type Request = Parameters<ReturnType<typeof createOriginalReceiptIssuance>>[1];
 const encode = (value: unknown) =>
@@ -89,7 +90,12 @@ export function createRefundReceiptIssuance(options: {
           return true;
         };
         await authorize();
-        const order = await orderSource(transaction, request);
+        // WP-2423 Q5: rounds cancelled because their payment failed were never charged.
+        const order = await receiptChargedOrder(
+          transaction,
+          scope,
+          await orderSource(transaction, request),
+        );
         const financial = await createPostgresPaymentReceiptCoverageSource({
           scope: options.scope,
           authorize,

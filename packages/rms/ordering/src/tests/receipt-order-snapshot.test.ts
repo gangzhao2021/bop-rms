@@ -1,6 +1,9 @@
 import { createOriginalReceiptSnapshotFromCurrentOrder } from "../application/original-receipt-snapshot.js";
 import { describe, expect, it } from "vitest";
-import { parseReceiptOrderSnapshot } from "../domain/receipt-order-snapshot.js";
+import {
+  excludeUnchargedReceiptBatches,
+  parseReceiptOrderSnapshot,
+} from "../domain/receipt-order-snapshot.js";
 import { orderWriteFixture } from "./order-creation-store.fixture.js";
 const id = (n: number) => "0190ed09-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 function fixture() {
@@ -109,5 +112,28 @@ describe("complete receipt Order snapshot", () => {
     ];
     for (const value of invalid)
       expect(() => parseReceiptOrderSnapshot(value)).toThrow("DIGITAL_RECEIPT_INPUT_INVALID");
+  });
+});
+describe("receipt Order without uncharged rounds", () => {
+  it("leaves a round cancelled for an unpaid payment off the receipt Order and keeps paid rounds", () => {
+    const order = parseReceiptOrderSnapshot(fixture());
+    const charged = excludeUnchargedReceiptBatches(order, [id(1)]);
+    expect(charged.batches.map((batch) => batch.orderBatchReference)).toEqual([
+      order.batches[0]?.orderBatchReference,
+    ]);
+    expect(charged.items).toHaveLength(order.items.length - 1);
+    expect(charged.items.every((item) => item.snapshot.orderBatchReference !== id(1))).toBe(true);
+    expect(Object.isFrozen(charged.items)).toBe(true);
+    expect(excludeUnchargedReceiptBatches(order, [])).toBe(order);
+    expect(excludeUnchargedReceiptBatches(order, [id(99)]).items).toHaveLength(order.items.length);
+  });
+  it("refuses a receipt Order with no charged round", () => {
+    const order = parseReceiptOrderSnapshot(fixture());
+    expect(() =>
+      excludeUnchargedReceiptBatches(
+        order,
+        order.batches.map((batch) => batch.orderBatchReference),
+      ),
+    ).toThrow();
   });
 });

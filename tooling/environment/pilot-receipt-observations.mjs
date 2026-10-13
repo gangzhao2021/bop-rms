@@ -1,5 +1,8 @@
 import process from "node:process";
-import { createPostgresReceiptOrderSource } from "../../packages/rms/ordering/src/index.ts";
+import {
+  createPostgresReceiptOrderSource,
+  listStoreUnpaidBatchCancellations,
+} from "../../packages/rms/ordering/src/index.ts";
 import {
   createPostgresCapturedBatchPaymentSource,
   createPostgresPaymentProviderObservationStore,
@@ -54,7 +57,14 @@ export async function refreshInternalOrderReceiptObservations(
       authorize: allowed,
     });
     const plans = [];
+    // WP-2423 Q5: a round cancelled because its payment failed was never charged; skip it.
+    const uncharged = new Set(
+      (await listStoreUnpaidBatchCancellations(transaction, resources.scope, [orderReference])).map(
+        (entry) => entry.orderBatchReference,
+      ),
+    );
     for (const batch of order.batches) {
+      if (uncharged.has(batch.orderBatchReference)) continue;
       const paid = await batchSource.load(transaction, {
         orderReference: order.orderReference,
         orderBatchReference: batch.orderBatchReference,

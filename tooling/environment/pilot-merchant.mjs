@@ -468,17 +468,24 @@ export async function createInternalMerchant(
     authentication: service,
     resolveRefundConfiguration: refundConfiguration,
   });
-  const ordinaryRefundReconciliation = createInternalRefundReconciliation({
-    resources,
-    persistence,
-    authentication: service,
-  });
-  const ordinaryRefundSend = createInternalRefundSend({
-    resources,
-    persistence,
-    authentication: service,
-    resolveRefundConfiguration: refundConfiguration,
-  });
+  // WP-2423 Q5: the result check and receipt issuance log their real failure code (no payload).
+  const ordinaryRefundReconciliation = logUnexpected(
+    "INTERNAL_REFUND_RECONCILIATION_UNAVAILABLE",
+    createInternalRefundReconciliation({
+      resources,
+      persistence,
+      authentication: service,
+    }),
+  );
+  const ordinaryRefundSend = logUnexpected(
+    "INTERNAL_REFUND_SEND_UNAVAILABLE",
+    createInternalRefundSend({
+      resources,
+      persistence,
+      authentication: service,
+      resolveRefundConfiguration: refundConfiguration,
+    }),
+  );
   // WP-2423 Q6 step 2a: staff cancel item lines before the kitchen starts them. The Cancellation
   // refund claim is dispatched after commit through the ordinary refund journal (simulated
   // Provider, TEST-ONLY); the last remaining lines go through the whole cancellation above.

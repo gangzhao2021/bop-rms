@@ -444,6 +444,10 @@ for (const recovery of ["retry", "history"] as const)
             ? "confirmed CAD 11.30; pending CAD 0.00"
             : "confirmed CAD 0.00; pending CAD 11.30",
         );
+        // WP-2423 Q5: the set-aside note appears only while an amount is still pending.
+        await expect(
+          status.getByText("A pending amount stays set aside", { exact: false }),
+        ).toHaveCount(phase === "Confirmed" ? 0 : 1);
         await expect(page.getByRole("button", { name: "Prepare refund execution" })).toHaveCount(0);
         await expect(page.getByRole("button", { name: "Send refund", exact: true })).toHaveCount(0);
         expect(preparations).toHaveLength(2);

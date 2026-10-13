@@ -413,6 +413,15 @@ for (const pending of [false, true])
         pending ? "Sent — result pending" : "Refunded",
       );
       await expect(page.getByRole("group", { name: "Refund selection" })).toHaveCount(0);
+      // Someone who cannot record a request follows refunds without request wording.
+      await expect(
+        page.getByRole("heading", { name: "Refund requests", exact: true }),
+      ).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Request a refund" })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Load refundable items" })).toHaveCount(0);
+      await expect(
+        page.getByText("Select items from the paid batches", { exact: false }),
+      ).toHaveCount(0);
       // The /refund route shows the same state, never the item and reason form.
       await page.goto("/app/operations/payments/" + id(31) + "/refund");
       await expect(

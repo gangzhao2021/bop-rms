@@ -10,6 +10,7 @@ import {
   type OriginalReceiptSources,
 } from "@rms/ordering";
 import { createPostgresPaymentReceiptCoverageSource } from "@rms/payment";
+import { receiptChargedOrder } from "./receipt-charged-order.js";
 
 type PaymentOptions = Parameters<typeof createPostgresPaymentReceiptCoverageSource>[0];
 interface Scope {
@@ -68,7 +69,12 @@ export function createReceiptIssuanceSources(options: {
         return true;
       };
       await authorize();
-      const order = parseReceiptOrderSnapshot(await options.order(tx, request));
+      // WP-2423 Q5: rounds cancelled because their payment failed were never charged.
+      const order = await receiptChargedOrder(
+        tx,
+        scope,
+        parseReceiptOrderSnapshot(await options.order(tx, request)),
+      );
       if (
         order.orderReference !== request.orderReference ||
         order.brandReference !== scope.brandReference ||

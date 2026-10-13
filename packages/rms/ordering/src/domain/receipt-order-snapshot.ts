@@ -124,3 +124,26 @@ export function parseReceiptOrderSnapshot(value: unknown) {
   }
 }
 export type ReceiptOrderSnapshot = ReturnType<typeof parseReceiptOrderSnapshot>;
+
+/**
+ * WP-2423 Q5: the receipt view of an Order without its rounds the System cancelled because their
+ * payment failed (never charged). Such a round never appears on, or blocks, a receipt; every other
+ * round (including a paid round later cancelled by staff and refunded) stays. At least one round
+ * must remain.
+ */
+export function excludeUnchargedReceiptBatches(
+  order: ReceiptOrderSnapshot,
+  unchargedBatchReferences: readonly string[],
+): ReceiptOrderSnapshot {
+  const excluded = new Set(unchargedBatchReferences);
+  if (excluded.size === 0) return order;
+  const batches = order.batches.filter((batch) => !excluded.has(batch.orderBatchReference));
+  if (batches.length === 0) return fail();
+  return Object.freeze({
+    ...order,
+    batches: Object.freeze(batches),
+    items: Object.freeze(
+      order.items.filter((item) => !excluded.has(item.snapshot.orderBatchReference)),
+    ),
+  });
+}

@@ -183,7 +183,6 @@ export function createPostgresPaymentReceiptCoverageSource(options: {
             return unavailable();
           const intent = record.intent,
             preparation = intent.preparation;
-          if (!expected.has(preparation.orderBatchReference)) return unavailable();
           const fact = await terminal.read(intent.paymentIntentReference);
           if (
             !fact ||
@@ -192,6 +191,10 @@ export function createPostgresPaymentReceiptCoverageSource(options: {
             fact.recordedAt > request.observedAt
           )
             return unavailable();
+          // WP-2423 Q5: a round left off the receipt (cancelled because its payment failed) may
+          // only have payments whose durable terminal outcome is Failed: nothing was charged.
+          const outsideReceipt = !expected.has(preparation.orderBatchReference);
+          if (outsideReceipt && fact.outcome !== "Failed") return unavailable();
           const observations = await transaction.query(
             "SELECT provider_observation_id,normalized_status,provider_intent_reference,provider_transaction_reference," +
               "requested_minor::text,authorized_minor::text,captured_minor::text,refunded_minor::text,currency_code," +
@@ -207,6 +210,7 @@ export function createPostgresPaymentReceiptCoverageSource(options: {
             ],
           );
           const latest = observations.rows[0];
+          if (outsideReceipt && !latest) continue;
           if (!latest || latest.currency_code !== "CAD") return unavailable();
           const instant = (value: unknown) =>
             parsePaymentInstant(value instanceof Date ? value.toISOString() : value);

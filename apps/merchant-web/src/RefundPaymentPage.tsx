@@ -372,9 +372,12 @@ function RecordedRequestStatus({
               </li>
             ))}
           </ul>
-          <p>
-            Pending amounts remain reserved. Approval and refund receipt availability are separate.
-          </p>
+          {result.payments.some((payment) => BigInt(payment.pendingMinor) > 0n) ? (
+            <p>
+              A pending amount stays set aside until its refund finishes, so it cannot be requested
+              again. The refund receipt is ready once the refund is confirmed.
+            </p>
+          ) : null}
         </section>
       ) : null}
     </div>
@@ -425,6 +428,8 @@ function RefundWizard({
     return () => window.removeEventListener("beforeunload", warn);
   }, [state]);
   const locked = state !== "Idle" || preparing.size > 0;
+  // WP-2423 Q5: someone who cannot record a new request here only follows recorded ones.
+  const requestable = blockedMessage === null && items?.canRequest !== false;
   const verificationCurrent = () =>
     verifiedUntil !== null && Date.parse(verifiedUntil) > Date.now();
   const clearPreview = () => {
@@ -604,17 +609,21 @@ function RefundWizard({
   };
   return (
     <section aria-labelledby="refund-heading" data-screen-id="PAY-REFUND-WIZARD">
-      <h2 id="refund-heading">Request a refund</h2>
-      <p>
-        Select items from the paid batches of this order. The server checks remaining quantity and
-        balance when calculating and submitting.
-      </p>
+      <h2 id="refund-heading">{requestable ? "Request a refund" : "Refund requests"}</h2>
+      {requestable ? (
+        <p>
+          Select items from the paid batches of this order. The server checks remaining quantity and
+          balance when calculating and submitting.
+        </p>
+      ) : null}
       <button disabled={state === "Busy" || preparing.size > 0} onClick={() => void load()}>
         {state === "Unknown"
           ? "Check recorded requests"
-          : state === "Recorded"
+          : state === "Recorded" || (!requestable && items !== null)
             ? "Refresh recorded requests"
-            : "Load refundable items"}
+            : requestable
+              ? "Load refundable items"
+              : "Show refund requests"}
       </button>
       {items ? (
         <section aria-label="Recorded refund requests">
@@ -678,7 +687,7 @@ function RefundWizard({
           )}
         </section>
       ) : null}
-      {blockedMessage !== null || items?.canRequest === false ? (
+      {!requestable ? (
         <div role="status">
           {blockedMessage ?? (
             <p>

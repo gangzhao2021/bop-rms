@@ -34,6 +34,10 @@ import { standardRefundRoleMapping } from "../../../tooling/environment/pilot-re
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { seedOrdinaryRefundStorePublication } from "../test-support/ordinary-refund-store-publication.mjs";
 import { seedStaffItemCancellationQuote } from "../test-support/staff-item-cancellation-pricing.mjs";
+import { exerciseReceiptTemplate } from "../test-support/receipt-template.mjs";
+import { createOriginalReceiptIssuance } from "../../../apps/api/src/original-receipt-issuance.ts";
+import { createRefundReceiptIssuance } from "../../../apps/api/src/refund-receipt-issuance.ts";
+import { createPostgresReceiptOrderSource } from "../../rms/ordering/src/index.ts";
 
 // Only the browser-session lookup is a test double: the cookie names which synthetic staff member
 // is signed in at the selected Store. Membership, roles, permissions, MFA enrollment and step-ups,
@@ -571,6 +575,7 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
       const first = await seedOrder(1000);
       const second = await seedOrder(2000);
       const third = await seedOrder(3000);
+      const fourth = await seedOrder(4000);
       const { businessDate: businessDatePort, storeOptions } =
         await seedOrdinaryRefundStorePublication({ client: admin, scope, firstCapturedAt: paidAt });
 
@@ -1381,7 +1386,314 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
         /append-only ordinary refund decline or note/u,
       );
 
-      // ── 11. RLS: another Store's scope sees no step-ups or approvals.
+      // ── 11. A dine-in order whose second round was cancelled because its payment failed (never
+      // charged): the original receipt and the refund receipt cover the paid round only, and the
+      // failed round neither appears on nor blocks them.
+      {
+        const b = 4900,
+          round = {
+            batch: id(b + 1),
+            submission: id(b + 2),
+            cart: id(b + 3),
+            quote: id(b + 4),
+            cartLine: id(b + 5),
+            item: id(b + 6),
+            intent: id(b + 7),
+            attempt: id(b + 8),
+            paymentOperation: id(b + 9),
+            webhook: id(b + 10),
+            transaction: id(b + 11),
+            event: id(b + 12),
+            observation: id(b + 13),
+          };
+        const roundAt = time(-minutes(30)),
+          failedAt = time(-minutes(29));
+        const { snapshots } = await seedStaffItemCancellationQuote({
+          runner: ownerRunner,
+          scope,
+          orderBatchReference: round.batch,
+          quoteReference: round.quote,
+          cartReference: round.cart,
+          cartVersion: 1,
+          inputDigest: hash(["quote-input", b]),
+          quotedAt: time(-minutes(31)),
+          capturedAt: time(-minutes(31)),
+          addedAt: time(-minutes(32)),
+          actorReference: fourth.guest,
+          nextReference: fresh,
+          lines: [
+            {
+              ...LINES[1],
+              cartLineReference: round.cartLine,
+              orderItemReference: round.item,
+              sellableReference: id(601),
+              priceEntryReference: id(b + 20),
+            },
+          ],
+        });
+        const snap = typeof snapshots[0] === "string" ? JSON.parse(snapshots[0]) : snapshots[0];
+        // Owner facts of the failed, cancelled round (seeded as the owners record them).
+        await admin.query("SET session_replication_role = replica");
+        try {
+          await admin.query(
+            "INSERT INTO rms_ordering.order_batch (order_batch_id,brand_id,store_id,order_id,submission_id,source_cart_id,source_cart_version,checkout_validation_id,quote_id,submitted_by_actor_id,submitted_at) VALUES ($1,$2,$3,$4,$5,$6,1,$7,$8,$9,$10)",
+            [
+              round.batch,
+              brand,
+              store,
+              fourth.order,
+              round.submission,
+              round.cart,
+              id(b + 21),
+              round.quote,
+              fourth.guest,
+              roundAt,
+            ],
+          );
+          await admin.query(
+            "INSERT INTO rms_ordering.order_item (order_item_id,brand_id,store_id,order_id,order_batch_id,source_cart_line_id,quantity,catalog_snapshot_digest,quote_input_digest,transaction_snapshot_json,snapshot_captured_at,ordinal) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,1)",
+            [
+              round.item,
+              brand,
+              store,
+              fourth.order,
+              round.batch,
+              round.cartLine,
+              LINES[1].quantity,
+              snap.catalog.snapshotDigest,
+              snap.pricing.quoteInputDigest,
+              snapshots[0],
+              snap.snapshotCapturedAt,
+            ],
+          );
+          await admin.query(
+            "INSERT INTO rms_payment.payment_intent (payment_intent_id,brand_id,store_id,payment_operation_id,order_id,order_batch_id,submission_id,guest_session_id,source_cart_id,source_cart_version,quote_id,preparation_id,capacity_allocation_id,intent_digest,preparation_source_digest,order_allocation_minor,tip_minor,total_minor,currency_code,payment_method,capture_mode,aggregate_version,creation_status,prepared_at,capacity_expires_at,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,1,$10,$11,$12,$13,$14,2260,0,2260,'CAD','OnlineCard','Automatic',1,'ProviderCreatePending',$15,$16,$15)",
+            [
+              round.intent,
+              brand,
+              store,
+              round.paymentOperation,
+              fourth.order,
+              round.batch,
+              round.submission,
+              fourth.guest,
+              round.cart,
+              round.quote,
+              id(b + 22),
+              id(b + 23),
+              hash(["payment-intent", b]),
+              hash(["preparation", b]),
+              roundAt,
+              time(0),
+            ],
+          );
+          await admin.query(
+            "INSERT INTO rms_payment.payment_attempt (payment_attempt_id,brand_id,store_id,payment_intent_id,attempt_number,provider,provider_environment,provider_idempotency_digest,created_at) VALUES ($1,$2,$3,$4,1,'Stripe','Test',$5,$6)",
+            [round.attempt, brand, store, round.intent, hash(["idempotency", b]), roundAt],
+          );
+          await admin.query(
+            "INSERT INTO rms_payment.payment_intent_operation_record (payment_operation_id,brand_id,store_id,payment_intent_id,guest_session_id,intent_digest,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+            [
+              round.paymentOperation,
+              brand,
+              store,
+              round.intent,
+              fourth.guest,
+              hash(["payment-intent", b]),
+              roundAt,
+            ],
+          );
+          await admin.query(
+            "INSERT INTO rms_payment.payment_provider_observation (provider_observation_id,brand_id,store_id,payment_intent_id,payment_attempt_id,observation_kind,normalized_status,provider_intent_reference,provider_transaction_reference,requested_minor,authorized_minor,captured_minor,refunded_minor,currency_code,evidence_digest,provider_observed_at,recorded_at) VALUES ($1,$2,$3,$4,$5,'Snapshot','Failed',$6,NULL,2260,0,0,0,'CAD',$7,$8,$8)",
+            [
+              round.observation,
+              brand,
+              store,
+              round.intent,
+              round.attempt,
+              "pi_SYNTHETICQ5" + b,
+              hash(["observation", b]),
+              failedAt,
+            ],
+          );
+          await admin.query(
+            "INSERT INTO rms_payment.provider_webhook_record (webhook_receipt_id,brand_id,store_id,provider,provider_environment,provider_account_id,provider_event_id,provider_event_type,provider_created_at,received_at,signature_timestamp,evidence_digest,accepted_at,raw_evidence_expires_at,dedupe_expires_at) VALUES ($1,$2,$3,'Stripe','Test',$4,$5,'payment_intent.payment_failed',$6,$6,$6,$7,$6,$6::timestamptz+interval '30 days',$6::timestamptz+interval '90 days')",
+            [
+              round.webhook,
+              brand,
+              store,
+              provider,
+              "evt_SYNTHETICQ5" + String(b).padStart(8, "0"),
+              failedAt,
+              hash(["webhook", b]),
+            ],
+          );
+          await admin.query(
+            "INSERT INTO rms_payment.payment_terminal_fact (payment_transaction_id,brand_id,store_id,payment_intent_id,payment_attempt_id,order_id,webhook_receipt_id,provider_event_id,provider_account_id,provider_environment,provider_intent_reference,provider_observation_id,authoritative_source,terminal_outcome,amount_minor,currency_code,failure_reason,retry_disposition,occurred_at,recorded_at,evidence_digest,event_id,causation_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'Test',$10,$14,'VerifiedWebhook','Failed',NULL,NULL,'Declined','NewOperation',$11,$11,$12,$13,$7)",
+            [
+              round.transaction,
+              brand,
+              store,
+              round.intent,
+              round.attempt,
+              fourth.order,
+              round.webhook,
+              "evt_SYNTHETICQ5" + String(b).padStart(8, "0"),
+              provider,
+              "pi_SYNTHETICQ5" + b,
+              failedAt,
+              hash(["terminal", b]),
+              round.event,
+              round.observation,
+            ],
+          );
+          await admin.query(
+            "INSERT INTO rms_ordering.order_batch_checkout_cancellation (cancellation_id,operation_id,tenant_id,brand_id,store_id,order_id,order_batch_id,submission_id,payment_operation_id,expiry_record_id,expiry_evidence_digest,expected_order_version,cancelled_order_version,expected_source_checkpoint,workflow_version_id,transition_id,order_item_ids,cancelled_at,phase,reason_code) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,3,4,$12,$13,$14,$15,$16,'Cancelled','CHECKOUT_DEADLINE_REACHED')",
+            [
+              id(b + 30),
+              id(b + 31),
+              tenant,
+              brand,
+              store,
+              fourth.order,
+              round.batch,
+              round.submission,
+              round.paymentOperation,
+              id(b + 32),
+              hash(["expiry", b]),
+              id(b + 33),
+              id(b + 34),
+              id(b + 35),
+              [round.item],
+              time(-minutes(5)),
+            ],
+          );
+        } finally {
+          await admin.query("SET session_replication_role = origin");
+        }
+        // Receipt issuer, Store identity and published template (synthetic legal facts).
+        const at = new Date().toISOString();
+        await admin.query(
+          "INSERT INTO bop_operating_entity.operating_entity(operating_entity_id,kind,legal_name,trade_name,jurisdiction_code,registration_reference,tax_registration_reference,billing_identity_reference,settlement_reference,evidence_reference,lifecycle,version,created_at,updated_at) VALUES($1,'LegalEntity','Synthetic Q5 issuer','Synthetic Q5 Kitchen','CA-ON',$2,$3,$4,$5,$6,'Active',1,$7,$7)",
+          [
+            id(b + 40),
+            id(b + 41),
+            id(b + 42),
+            id(b + 43),
+            id(b + 44),
+            id(b + 45),
+            time(-minutes(120)),
+          ],
+        );
+        await admin.query(
+          "INSERT INTO bop_operating_entity.store_operating_entity_assignment(assignment_id,brand_id,store_id,operating_entity_id,business_function,lifecycle,effective_from,effective_until,version,created_at,updated_at) VALUES($1,$2,$3,$4,'SalesReceiptIssuer','Active',$5,NULL,1,$5,$5)",
+          [id(b + 46), brand, store, id(b + 40), time(-minutes(120))],
+        );
+        await admin.query(
+          "INSERT INTO bop_tenant.brand(brand_id,code,display_name,default_locale,currency_code,lifecycle,version,created_at,updated_at) VALUES($1,'SYNTHETIC_Q5','Synthetic Q5 Brand','en-CA','CAD','Active',1,$2,$2) ON CONFLICT (brand_id) DO NOTHING",
+          [brand, time(-minutes(180))],
+        );
+        await admin.query(
+          "INSERT INTO bop_tenant.store(store_id,brand_id,code,display_name,time_zone,locale,currency_code,lifecycle,version,created_at,updated_at) VALUES($1,$2,'SYNTHETIC_Q5','Synthetic Q5 Store','America/Toronto','en-CA','CAD','Active',1,$3,$3) ON CONFLICT (store_id) DO NOTHING",
+          [store, brand, time(-minutes(180))],
+        );
+        const templateSource = await exerciseReceiptTemplate({
+          admin,
+          runner: transactions(),
+          role,
+          scope: { brandReference: brand, storeReference: store },
+          at: time(-minutes(60)),
+          tenantReference: tenant,
+        });
+        const paymentScope = { ...scope, providerAccountReference: provider, environment: "Test" };
+        const receiptAudit = (actionReason) => async (record, operationReference) => ({
+          auditId: fresh(),
+          brandId: brand,
+          storeId: store,
+          actor: { type: "System" },
+          actionCode: "DIGITAL_RECEIPT_APPEND",
+          targetType: "DigitalReceipt",
+          targetId: record.recordReference,
+          reasonCode: actionReason,
+          correlationId: operationReference,
+          occurredAt: record.recordedAt,
+          sourceChannel: "PAYMENT_RECONCILIATION",
+          dataClassification: "Restricted",
+          retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+          retentionPolicyVersion: 1,
+        });
+        const original = createOriginalReceiptIssuance({
+          sources: {
+            scope: paymentScope,
+            authorize: async () => true,
+            order: (tx, request) =>
+              createPostgresReceiptOrderSource({
+                brandReference: brand,
+                storeReference: store,
+                authorize: async () => true,
+              })(tx, request),
+            template: (tx) => templateSource(tx),
+          },
+          authorize: async () => true,
+          identities: () => ({
+            recordReference: fresh(),
+            receiptReference: fresh(),
+            operationReference: fresh(),
+          }),
+          audit: receiptAudit("SYNTHETIC_RECEIPT_RETRIEVAL"),
+        });
+        const issuedOriginal = await transactions().run((tx) =>
+          original(tx, { orderReference: fourth.order, observedAt: at, freshAfter: paidAt }),
+        );
+        assert.equal(issuedOriginal.status, "Created");
+        const originalLines = issuedOriginal.record.snapshot.lines;
+        assert.equal(originalLines.length, fourth.batch.items.length);
+        assert.equal(issuedOriginal.record.snapshot.total.amountMinor, CAPTURED_MINOR);
+        // Refund round 1 through the escalated approval (above CAD 100), then the refund receipt.
+        const roundOneRequest = fullRefund(fourth, fresh(), fresh());
+        assert.equal(
+          (await request({ ...session("requester"), command: roundOneRequest })).approvalRequired,
+          true,
+        );
+        assert.equal((await verify("requester", codeFor(requester, 1))).status, "Verified");
+        assert.equal(
+          (await verify("approver", codeFor(approver, 1), "RefundApproval")).status,
+          "Verified",
+        );
+        const roundOneApproved = await approve({
+          ...session("approver"),
+          command: {
+            orderReference: fourth.order,
+            requestReference: roundOneRequest.requestReference,
+            approvalReference: fresh(),
+          },
+        });
+        assert.deepEqual(
+          roundOneApproved.payments.map((p) => p.state),
+          ["SendRecorded"],
+        );
+        const refundReceipt = await transactions().run((tx) =>
+          createRefundReceiptIssuance({
+            scope: paymentScope,
+            authorize: async () => true,
+            authorizeSources: async () => true,
+            authorizeOrder: async () => true,
+            identities: () => ({ recordReference: fresh(), operationReference: fresh() }),
+            audit: receiptAudit("PAYMENT_REFUND_STATUS_CHANGED"),
+          })(tx, {
+            orderReference: fourth.order,
+            observedAt: new Date().toISOString(),
+            freshAfter: paidAt,
+          }),
+        );
+        assert.equal(refundReceipt.status, "Created");
+        assert.equal(refundReceipt.record.kind, "Refund");
+        assert.equal(refundReceipt.record.snapshot.paymentStatus, "Refunded");
+        assert.equal(refundReceipt.record.snapshot.refundedTotal.amountMinor, CAPTURED_MINOR);
+        assert.deepEqual(refundReceipt.record.snapshot.lines, originalLines);
+      }
+
+      // ── 12. RLS: another Store's scope sees no step-ups or approvals.
       const isolated = await transactions().run(async (tx) => {
         await tx.query(
           "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
