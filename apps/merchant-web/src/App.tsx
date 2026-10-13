@@ -136,10 +136,6 @@ const ReservationDetailPage = lazyPage(
 const ReservationListPage = lazyPage(() => import("./ReservationPages.js"), "ReservationListPage");
 const WaitlistBoardPage = lazyPage(() => import("./WaitlistPages.js"), "WaitlistBoardPage");
 const CapacityPolicyPage = lazyPage(() => import("./CapacityPolicyPage.js"), "CapacityPolicyPage");
-const StaffOrderEntryPage = lazyPage(
-  () => import("./StaffOrderEntryPage.js"),
-  "StaffOrderEntryPage",
-);
 const StockOverviewPage = lazyPage(() => import("./InventoryPages.js"), "StockOverviewPage");
 const InventoryItemStockHistoryPage = lazyPage(
   () => import("./InventoryMovementPages.js"),
@@ -917,7 +913,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         <Route path="/operations/delivery" element={<DeliveryDispatchPage />} />
         <Route path="/operations/delivery/:id" element={<DeliveryDetailPage />} />
         <Route path="/operations/delivery/exceptions" element={<DeliveryExceptionPage />} />
-        <Route path="/operations/order-entry" element={<StaffOrderEntryPage />} />
+        {/* WP-2423 Q7: /operations/order-entry stays unrouted until staff ordering has a backend and payment path. */}
         <Route path="/operations/inventory" element={<StockOverviewPage />} />
         <Route
           path="/operations/inventory/counts"
