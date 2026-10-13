@@ -3,7 +3,7 @@ import { useEffect, type ReactNode } from "react";
 import { Link } from "react-router";
 
 export type CustomerJourneyStep =
-  "entry" | "menu" | "cart" | "checkout" | "payment" | "order" | "receipt" | "other";
+  "entry" | "menu" | "cart" | "checkout" | "payment" | "order" | "receipt" | "table" | "other";
 
 export interface CustomerStoreContext {
   readonly storeName: string;
@@ -46,6 +46,10 @@ export function CustomerPage({
     ...(orderReference === undefined
       ? []
       : [{ step: "order" as const, label: "Order", href: `/orders/${orderReference}` }]),
+    // WP-2423 Q8: a dine-in guest can always see what the whole table has ordered.
+    ...(store?.serviceMode === "DineIn" || step === "table"
+      ? [{ step: "table" as const, label: "Your table", href: "/dine-in/session" }]
+      : []),
   ];
   return (
     <AppFrame

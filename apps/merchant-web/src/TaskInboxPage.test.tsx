@@ -40,7 +40,7 @@ function screen(state: Parameters<typeof TaskInboxScreen>[0]["state"], online = 
 it("renders returned owner fields and keeps unsupported Task actions disabled", () => {
   const html = screen({ kind: "Ready", view: view() });
   for (const value of [
-    "TASK-INBOX",
+    "Tasks",
     "Synthetic Store",
     "DINING UNPAID BATCH EXCEPTION",
     "CRITICAL",

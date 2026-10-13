@@ -144,10 +144,10 @@ export function SupplyItemListPage({
   const view = state.view;
   const items = [...view.items, ...pages];
   return (
-    <AppFrame title="Inventory items" description="INV-ITEM-LIST">
+    <AppFrame title="Inventory items" description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">INV-ITEM-LIST</p>
+          <p className="bop-eyebrow">Inventory items</p>
           <h2>Inventory items</h2>
           <p>
             Ingredients and supplies the Brand stocks. Source as of{" "}
@@ -285,10 +285,10 @@ export function SupplyItemDetailPage({
       if (result) reload();
     });
   return (
-    <AppFrame title={item.name} description="INV-ITEM-DETAIL">
+    <AppFrame title={item.name} description="Inventory item">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">INV-ITEM-DETAIL</p>
+          <p className="bop-eyebrow">Inventory item</p>
           <h2>{item.name}</h2>
           <p>
             {item.internalCode} · {item.itemType} · <strong>{item.lifecycle}</strong> · version{" "}
@@ -578,11 +578,13 @@ export function SupplyItemFormPage({
   return (
     <AppFrame
       title={mode === "Create" ? "Create inventory item" : "Edit inventory item"}
-      description={mode === "Create" ? "INV-ITEM-CREATE" : "INV-ITEM-EDIT"}
+      description={mode === "Create" ? "New inventory item" : "Edit inventory item"}
     >
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">{mode === "Create" ? "INV-ITEM-CREATE" : "INV-ITEM-EDIT"}</p>
+          <p className="bop-eyebrow">
+            {mode === "Create" ? "New inventory item" : "Edit inventory item"}
+          </p>
           <h2>{mode === "Create" ? "Create inventory item" : "Edit inventory item"}</h2>
           <p>
             Quantities are never edited here; stock changes only through receipts, counts and waste.

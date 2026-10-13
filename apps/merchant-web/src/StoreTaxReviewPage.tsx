@@ -148,10 +148,10 @@ export function StoreTaxReviewPage({
   };
   const problems = view.products.filter((product) => product.status !== "Covered");
   return (
-    <AppFrame title="Tax review" description="TAX-STORE-REVIEW">
+    <AppFrame title="Tax review" description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">TAX-STORE-REVIEW · Store</p>
+          <p className="bop-eyebrow">Tax review · Store</p>
           <h2>Tax review</h2>
           <p>
             The tax this Store charges on each product for pickup and dine-in. Rates change only

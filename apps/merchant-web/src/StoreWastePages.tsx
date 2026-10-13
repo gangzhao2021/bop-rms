@@ -90,10 +90,10 @@ export function StoreWasteListPage({
   const itemName = (reference: string) =>
     view.items.find((item) => item.itemReference === reference)?.name ?? "Item";
   return (
-    <AppFrame title="Waste" description="INV-WASTE-RECORD">
+    <AppFrame title="Waste" description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">INV-WASTE-RECORD</p>
+          <p className="bop-eyebrow">Waste</p>
           <h2>Waste</h2>
           <p>
             Record waste when it happens; it leaves stock at once. Records worth CAD{" "}
@@ -276,10 +276,10 @@ export function StoreWasteFormPage({
     }
   };
   return (
-    <AppFrame title="Record waste" description="INV-WASTE-WIZARD">
+    <AppFrame title="Record waste" description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">INV-WASTE-WIZARD</p>
+          <p className="bop-eyebrow">Record waste</p>
           <h2>Record waste</h2>
           <p>What was thrown away, where, and why. It leaves stock as soon as you record it.</p>
         </div>
@@ -463,10 +463,10 @@ export function StoreWasteDetailPage({
   const mayReview =
     view.permissions.mayReview && record.review === null && record.recordedBy !== view.viewer;
   return (
-    <AppFrame title="Waste record" description="INV-WASTE-DETAIL">
+    <AppFrame title="Waste record" description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">INV-WASTE-DETAIL · {statusOf(record)}</p>
+          <p className="bop-eyebrow">Waste record · {statusOf(record)}</p>
           <h2>Waste recorded {record.recordedAt}</h2>
           <p>
             By {person(record.recordedBy)} · value CAD {centsText(record.valueMinor)}

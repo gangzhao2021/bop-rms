@@ -109,7 +109,7 @@ export function StoreListScreen({ view }: { readonly view: StoreListView }) {
     <AppFrame title="Stores" description="Permission-trimmed Store configuration">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">STORE-LIST</p>
+          <p className="bop-eyebrow">Stores</p>
           <h2>Authorized Stores</h2>
           <p className="bop-muted">
             {view.projection.freshness} · as of {view.projection.asOfUtc}
@@ -192,10 +192,7 @@ export function StoreListScreen({ view }: { readonly view: StoreListView }) {
 
 export function StoreDetailScreen({ view }: { readonly view: StoreDetailView }) {
   return (
-    <AppFrame
-      title={view.name}
-      description={`STORE-DETAIL · ${view.lifecycle} · version ${view.version}`}
-    >
+    <AppFrame title={view.name} description={`Store · ${view.lifecycle}`}>
       <header className="screen-heading">
         <div>
           <h2>Store detail</h2>
@@ -234,13 +231,10 @@ export function StoreDetailScreen({ view }: { readonly view: StoreDetailView }) 
 export function StoreHoursServiceScreen({ view }: { readonly view: StoreHoursServiceView }) {
   const weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
   return (
-    <AppFrame
-      title={`${view.name} hours & service`}
-      description={`STORE-HOURS-SERVICE · Expected Version ${view.version}`}
-    >
+    <AppFrame title={`${view.name} hours & service`} description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">STORE-HOURS-SERVICE</p>
+          <p className="bop-eyebrow">Hours & ordering</p>
           <h2>Hours and service configuration</h2>
           <p>
             {view.configurationSource} · effective {view.effectiveFrom}
@@ -297,10 +291,7 @@ export function StoreHoursServiceScreen({ view }: { readonly view: StoreHoursSer
 
 export function StoreSetupScreen({ view }: { readonly view: StoreSetupView }) {
   return (
-    <AppFrame
-      title={`${view.name} setup`}
-      description={`STORE-SETUP · Expected Version ${view.version}`}
-    >
+    <AppFrame title={`${view.name} setup`} description="">
       <header className="screen-heading">
         <div>
           <h2>Store setup</h2>
@@ -345,7 +336,7 @@ export function StoreListPage({
   return state.kind === "Found" ? (
     <StoreListScreen view={state.view} />
   ) : (
-    <AppFrame title="Stores" description="STORE-LIST">
+    <AppFrame title="Stores" description="">
       <StoreAdminStatePanel state={state.kind} />
     </AppFrame>
   );
@@ -379,14 +370,14 @@ export function StoreDetailPage({
   const state = useLoad(load, route ?? "invalid");
   if (route === null)
     return (
-      <AppFrame title="Store" description="STORE-DETAIL">
+      <AppFrame title="Store" description="">
         <StoreAdminStatePanel state="NotFound" />
       </AppFrame>
     );
   return state.kind === "Found" ? (
     <StoreDetailScreen view={state.view} />
   ) : (
-    <AppFrame title="Store" description="STORE-DETAIL">
+    <AppFrame title="Store" description="">
       <StoreAdminStatePanel state={state.kind} />
     </AppFrame>
   );
@@ -412,14 +403,14 @@ export function StoreSetupPage({
   const state = useLoad(load, route ?? "invalid");
   if (route === null)
     return (
-      <AppFrame title="Store setup" description="STORE-SETUP">
+      <AppFrame title="Store setup" description="">
         <StoreAdminStatePanel state="NotFound" />
       </AppFrame>
     );
   return state.kind === "Found" ? (
     <StoreSetupScreen view={state.view} />
   ) : (
-    <AppFrame title="Store setup" description="STORE-SETUP">
+    <AppFrame title="Store setup" description="">
       <StoreAdminStatePanel state={state.kind} />
     </AppFrame>
   );
@@ -445,14 +436,14 @@ export function StoreHoursServicePage({
   const state = useLoad(load, route ?? "invalid");
   if (route === null)
     return (
-      <AppFrame title="Hours & service" description="STORE-HOURS-SERVICE">
+      <AppFrame title="Hours & service" description="Hours & ordering">
         <StoreAdminStatePanel state="NotFound" />
       </AppFrame>
     );
   return state.kind === "Found" ? (
     <StoreHoursServiceScreen view={state.view} />
   ) : (
-    <AppFrame title="Hours & service" description="STORE-HOURS-SERVICE">
+    <AppFrame title="Hours & service" description="Hours & ordering">
       <StoreAdminStatePanel state={state.kind} />
     </AppFrame>
   );

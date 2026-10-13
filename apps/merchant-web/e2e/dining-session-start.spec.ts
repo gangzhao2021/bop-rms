@@ -31,6 +31,12 @@ test("@production staff starts a table and recovers a lost entry code without du
               href: "/operations/orders",
               permission: "ordering.operate",
             },
+            {
+              screenId: "DIN-FLOOR-BOARD",
+              label: "Tables",
+              href: "/operations/dining",
+              permission: "dining.operate",
+            },
           ],
         },
       },
@@ -161,19 +167,22 @@ test("@production staff starts a table and recovers a lost entry code without du
   });
   await page.goto("/operations/dining");
   await expect(page.getByRole("heading", { name: "OPERATIONS", level: 1 })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Dining", level: 2 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Tables", level: 2 })).toBeVisible();
   expect(
     await page
       .locator(".bop-shell__header")
       .evaluate((header) => getComputedStyle(header).backgroundColor),
   ).toBe("rgb(23, 23, 23)");
-  await expect(page.getByRole("complementary", { name: "Dining data availability" })).toContainText(
-    "Party, Order, payment, reservation, waitlist and attention details are not available",
+  // WP-2423 Q8: the board is in the navigation; staff never see internal screen codes.
+  const primary = page.getByRole("navigation", { name: "Primary" });
+  await expect(primary.getByRole("link")).toHaveCount(2);
+  await expect(primary.getByRole("link", { name: "Tables" })).toHaveAttribute(
+    "aria-current",
+    "page",
   );
-  await expect(page.getByRole("navigation", { name: "Primary" })).toHaveText("Orders");
-  await expect(page.getByRole("navigation", { name: "Primary" }).getByRole("link")).toHaveCount(1);
+  await expect(page.getByText(/DIN-FLOOR-BOARD|TemporarilyBlocked|projection/u)).toHaveCount(0);
   await expect(page.locator('section[aria-label="MAIN area"]')).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Tables and sessions" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Find a table" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Select T1", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Select T2", exact: true })).toBeVisible();
   const elapsedTile = page
@@ -222,7 +231,7 @@ test("@production staff starts a table and recovers a lost entry code without du
   await page.getByLabel("Table", { exact: true }).fill("");
   await page.getByRole("combobox", { name: "Area", exact: true }).selectOption("All");
   await page.getByRole("button", { name: "Select T1", exact: true }).click();
-  await page.getByLabel("Block reason code").fill("MAINTENANCE");
+  await page.getByRole("combobox", { name: /^Reason/u }).selectOption("CLEANING");
   await page.getByRole("button", { name: "Mark table unavailable" }).click();
   await expect(
     page.getByText("The result is unknown. Retry the same table request", { exact: false }),
@@ -231,10 +240,10 @@ test("@production staff starts a table and recovers a lost entry code without du
   await expect(page.getByText("Table marked temporarily unavailable.")).toBeVisible();
   await page.getByRole("button", { name: "Mark table available" }).click();
   await expect(page.getByText("Table marked available.")).toBeVisible();
-  const reasonField = page.getByLabel("Block reason code");
+  const reasonField = page.getByRole("combobox", { name: /^Reason/u });
   await expect(reasonField).toBeVisible();
   await expect(
-    page.getByText("Required; use uppercase letters, numbers, underscores or hyphens."),
+    page.getByText("Required. Guests can't be seated here until you mark it available."),
   ).toBeVisible();
   expect(await reasonField.getAttribute("aria-describedby")).toBe("dining-table-reason-help");
   expect((await reasonField.boundingBox())?.height).toBeGreaterThanOrEqual(44);

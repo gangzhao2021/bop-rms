@@ -15,8 +15,13 @@ import {
   parsePaymentTipSelection,
 } from "../../rms/payment/src/index.ts";
 
-export async function seedAdditionalDiningGuest({ client, runner, f, dining, at }) {
-  const id = (n) => "01909992-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+/**
+ * `second` (WP-2423 Q8) seeds another participant's Guest session at the same table: its own
+ * references and session, no tip selection (it pays for no round here).
+ */
+export async function seedAdditionalDiningGuest({ client, runner, f, dining, at, second = null }) {
+  const id = (n) =>
+    (second?.idPrefix ?? "01909992-0000-7000-8000-") + n.toString(16).padStart(12, "0");
   const credentials = createGuestSessionCredentialProvider(new Uint8Array(32).fill(9));
   const sessionCredential = credentials.generateCredential("Session");
   const csrfCredential = credentials.generateCredential("Csrf");
@@ -59,7 +64,7 @@ export async function seedAdditionalDiningGuest({ client, runner, f, dining, at 
   const bound = createGuestSessionRecord({
     session: {
       ...base,
-      sessionReference: f.request.record.guestSessionReference,
+      sessionReference: second?.sessionReference ?? f.request.record.guestSessionReference,
       diningState: "DiningBound",
       diningSessionReference: dining.session.diningSessionReference,
       diningParticipantReference: dining.participant.participantReference,
@@ -140,6 +145,14 @@ export async function seedAdditionalDiningGuest({ client, runner, f, dining, at 
     }),
     "persisted Dining binding must resolve",
   );
+  const identity = {
+    scope: f.scope,
+    now: () => new Date().toISOString(),
+    session: { credentials, binding: { validate: async () => "Current" } },
+    contexts: { resolve: async () => context },
+    dining: {},
+  };
+  if (second !== null) return { sessionCredential, csrfCredential, identity };
   const b = f.request.record.order.batches[0];
   const selection = parsePaymentTipSelection({
     selectionReference: id(10),
@@ -177,12 +190,6 @@ export async function seedAdditionalDiningGuest({ client, runner, f, dining, at 
     csrfCredential,
     wrongCsrf: parentCsrf,
     tipSelectionReference: selection.selectionReference,
-    identity: {
-      scope: f.scope,
-      now: () => new Date().toISOString(),
-      session: { credentials, binding: { validate: async () => "Current" } },
-      contexts: { resolve: async () => context },
-      dining: {},
-    },
+    identity,
   };
 }

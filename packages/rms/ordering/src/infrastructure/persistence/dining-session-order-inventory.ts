@@ -250,3 +250,52 @@ export function createPostgresOrderAmendmentPosition(options: {
     },
   });
 }
+
+/**
+ * WP-2423 Q8: which rounds of a dining session's Order the asking guest submitted. Only a yes/no
+ * per round leaves this module, never another guest's session reference, so the table view can say
+ * "You" or "Another guest" without exposing who. Read only; the caller authorizes the guest as a
+ * current participant of this dining session and owns the transaction.
+ */
+export async function listDiningOrderBatchAuthorship(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  input: {
+    readonly orderReference: string;
+    readonly diningSessionReference: string;
+    readonly guestSessionReference: string;
+  },
+): Promise<ReadonlyMap<string, boolean>> {
+  const fail = (): never => {
+    throw new Error("DINING_ORDER_AUTHORSHIP_UNAVAILABLE");
+  };
+  try {
+    const brand = parseOrderingReference(scope.brandReference),
+      store = parseOrderingReference(scope.storeReference),
+      order = parseOrderingReference(input.orderReference),
+      session = parseOrderingReference(input.diningSessionReference),
+      guest = parseOrderingReference(input.guestSessionReference);
+    await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+      brand,
+      store,
+    ]);
+    const found = await tx.query<{ order_batch_id: unknown; submitted_by_guest: unknown }>(
+      "SELECT b.order_batch_id::text AS order_batch_id,(b.submitted_by_actor_id=$5) AS submitted_by_guest " +
+        "FROM rms_ordering.order_batch b JOIN rms_ordering.order_header h " +
+        "ON h.brand_id=b.brand_id AND h.store_id=b.store_id AND h.order_id=b.order_id " +
+        "WHERE b.brand_id=$1 AND b.store_id=$2 AND b.order_id=$3 AND h.dining_session_id=$4 " +
+        "AND h.order_type='DineIn' ORDER BY b.order_batch_id LIMIT 1001",
+      [brand, store, order, session, guest],
+    );
+    if (!Array.isArray(found.rows) || found.rows.length > 1000) return fail();
+    const authorship = new Map<string, boolean>();
+    for (const row of found.rows) {
+      const batch = parseOrderingReference(row.order_batch_id);
+      if (authorship.has(batch) || typeof row.submitted_by_guest !== "boolean") return fail();
+      authorship.set(batch, row.submitted_by_guest);
+    }
+    return authorship;
+  } catch {
+    return fail();
+  }
+}

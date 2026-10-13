@@ -27,6 +27,8 @@ import type { PlatformTemplateAdministrationHttpOptions } from "./platform-templ
 import { createCustomerReceiptRead } from "./customer-receipt-read.js";
 import { CustomerReceiptHandler } from "./customer-receipt.js";
 import { createCustomerOrderStatusRead } from "./customer-order-status-read.js";
+import { createCustomerDiningSessionRead } from "./customer-dining-session-read.js";
+import { CustomerDiningSessionHandler } from "./customer-dining-session.js";
 import { CustomerOrderStatusHandler } from "./customer-order-status.js";
 import {
   createCustomerPaymentResultHandler,
@@ -356,6 +358,11 @@ export function createApiServerRuntime({
           customerOrderStatus: new CustomerOrderStatusHandler({
             allowedOrigin: customerOrderStatus.allowedOrigin,
             port: createCustomerOrderStatusRead(customerOrderStatus),
+          }),
+          // WP-2423 Q8: the table view composes the same owner reads under the same configuration.
+          customerDiningSession: new CustomerDiningSessionHandler({
+            allowedOrigin: customerOrderStatus.allowedOrigin,
+            port: createCustomerDiningSessionRead(customerOrderStatus),
           }),
         }),
     ...(customerPaymentResult === undefined

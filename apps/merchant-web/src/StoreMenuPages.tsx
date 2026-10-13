@@ -262,10 +262,10 @@ function MenuBuilder({
   const mayApproveHere =
     view.permissions.mayApprove && view.submittedBy !== null && view.submittedBy !== view.viewer;
   return (
-    <AppFrame title={menu.name} description="CAT-MENU-BUILDER">
+    <AppFrame title={menu.name} description="Menu">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">CAT-MENU-BUILDER · Brand</p>
+          <p className="bop-eyebrow">Menu · Brand</p>
           <h2>{menu.name}</h2>
           <p>
             {stageText[stage]} · {menu.channelCodes.join(", ")} · {menu.orderTypeCodes.join(", ")}

@@ -1316,7 +1316,11 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                 csrf={state.csrf}
                 storeLabel={state.workspace.selectedScope.storeLabel}
                 navigation={state.workspace.navigation.map((item) => (
-                  <a key={item.screenId} href={item.href}>
+                  <a
+                    key={item.screenId}
+                    href={item.href}
+                    aria-current={item.screenId === "DIN-FLOOR-BOARD" ? "page" : undefined}
+                  >
                     {item.label}
                   </a>
                 ))}

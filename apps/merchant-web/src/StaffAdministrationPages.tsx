@@ -303,10 +303,10 @@ function Page({
   const view = state.view;
   const detail = screenId === "IAM-USER-DETAIL";
   return (
-    <AppFrame title={detail ? "Staff member" : "Staff"} description={`${view.screenId}`}>
+    <AppFrame title={detail ? "Staff member" : "Staff"} description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">{view.screenId}</p>
+          <p className="bop-eyebrow">{detail ? "Staff member" : "Staff"}</p>
           <h2>Store staff and roles</h2>
           <p>
             Source as of <SourceTime instant={view.sourceAsOf} />

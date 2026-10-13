@@ -2,6 +2,7 @@ import { customerSessionBootstrapRoute } from "./customer-session-bootstrap.js";
 import { customerPickupCodeRoute } from "./customer-pickup-code.js";
 import { customerReceiptRoute } from "./customer-receipt.js";
 import { customerOrderStatusRoute } from "./customer-order-status.js";
+import { customerDiningSessionRoute } from "./customer-dining-session.js";
 import { customerPaymentResultRoute } from "./customer-payment-result.js";
 import { customerPaymentHandoffRoute } from "./customer-payment-handoff.js";
 import { customerPaymentIntentRoute } from "./customer-payment-intent.js";
@@ -51,6 +52,7 @@ export const apiRouteTemplates = Object.freeze([
   customerCheckoutSessionRoute,
   customerOrderSubmissionRoute,
   customerOrderStatusRoute,
+  customerDiningSessionRoute,
   customerCheckoutDetailsRoute,
   customerCheckoutDetailsCurrentRoute,
   customerCheckoutPolicyRoute,

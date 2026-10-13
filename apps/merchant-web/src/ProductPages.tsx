@@ -97,10 +97,10 @@ export function ProductListPage({
   if (state.kind !== "Found") return <Failure code={state.kind} />;
   const view: ProductListView = state.view;
   return (
-    <AppFrame title="Products" description="CAT-PRODUCT-LIST">
+    <AppFrame title="Products" description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">CAT-PRODUCT-LIST · Brand</p>
+          <p className="bop-eyebrow">Products · Brand</p>
           <h2>Products</h2>
           <p>
             Products and their sizes are shared by every Store of the Brand. A size is what a
@@ -361,13 +361,11 @@ function ProductEditor({
   return (
     <AppFrame
       title={product ? product.name : "New product"}
-      description={product ? "CAT-PRODUCT-EDIT" : "CAT-PRODUCT-CREATE"}
+      description={product ? "Edit product" : "New product"}
     >
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">
-            {product ? "CAT-PRODUCT-EDIT" : "CAT-PRODUCT-CREATE"} · Brand
-          </p>
+          <p className="bop-eyebrow">{product ? "Edit product" : "New product"} · Brand</p>
           <h2>{product ? product.name : "New product"}</h2>
           <p>
             {product

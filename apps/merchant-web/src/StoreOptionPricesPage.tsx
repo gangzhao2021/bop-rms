@@ -166,10 +166,10 @@ export function StoreOptionPricesPage({
   };
 
   return (
-    <AppFrame title="Option prices" description="PRICE-OPTION-LIST">
+    <AppFrame title="Option prices" description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">PRICE-OPTION-LIST · Brand</p>
+          <p className="bop-eyebrow">Option prices · Brand</p>
           <h2>Option prices</h2>
           <p>
             What each option adds to a product's price, for every size, pickup and dine-in. Enter 0

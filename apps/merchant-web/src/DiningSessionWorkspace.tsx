@@ -11,6 +11,16 @@ type Operation = ReturnType<ReturnType<typeof createDiningSessionClient>["prepar
 type AvailabilityOperation = ReturnType<
   ReturnType<typeof createDiningSessionClient>["prepareAvailability"]
 >;
+/** WP-2423 Q8: staff pick a plain reason; the stored reason stays a stable code. */
+const tableBlockReasons = [
+  ["CLEANING", "Being cleaned"],
+  ["RESERVED", "Reserved"],
+  ["OUT_OF_SERVICE", "Out of service"],
+  ["AREA_CLOSED", "Section closed"],
+] as const;
+const stateLabel = (state: string) =>
+  state === "TemporarilyBlocked" ? "Temporarily unavailable" : state;
+
 export function DiningSessionWorkspace({
   csrf,
   storeLabel,
@@ -252,8 +262,7 @@ export function DiningSessionWorkspace({
       <div className="dining-workspace">
         <header className="screen-heading dining-floor-heading">
           <div>
-            <h2>Dining</h2>
-            <p className="bop-eyebrow">DIN-FLOOR-BOARD · FLOOR</p>
+            <h2>Tables</h2>
             <p className="dining-store-label">{storeLabel}</p>
           </div>
           <div className="dining-floor-toolbar">
@@ -267,16 +276,12 @@ export function DiningSessionWorkspace({
             ) : null}
           </div>
         </header>
-        <aside className="dining-projection-limits" aria-label="Dining data availability">
-          <strong>Table and current-session data</strong>
-          <p>
-            Party, Order, payment, reservation, waitlist and attention details are not available
-            from this source.
-          </p>
-        </aside>
         <section className="dining-table-browser" aria-labelledby="dining-table-browser-title">
-          <h3 id="dining-table-browser-title">Tables and sessions</h3>
-          <p>Search and filters use fields in the current table projection.</p>
+          <h3 id="dining-table-browser-title">Find a table</h3>
+          <p>
+            Start a session when a party sits down and give them the table code. Their orders and
+            payments are on the Orders page.
+          </p>
           <div className="dining-floor-filters" role="search">
             <label>
               Table
@@ -305,8 +310,8 @@ export function DiningSessionWorkspace({
                 onChange={(event) => setStateFilter(event.currentTarget.value)}
               >
                 <option>All</option>
-                <option>Available</option>
-                <option>TemporarilyBlocked</option>
+                <option value="Available">Available</option>
+                <option value="TemporarilyBlocked">Temporarily unavailable</option>
               </select>
             </label>
           </div>
@@ -341,11 +346,7 @@ export function DiningSessionWorkspace({
                         >
                           <div className="dining-table-tile__identity">
                             <h4>{table.stableLabel}</h4>
-                            <span>
-                              {table.operationalState === "TemporarilyBlocked"
-                                ? "Temporarily blocked"
-                                : table.operationalState}
-                            </span>
+                            <span>{stateLabel(table.operationalState)}</span>
                           </div>
                           <hr className="dining-table-tile__divider" />
                           <p className="dining-table-tile__capacity">Seats {table.capacity}</p>
@@ -387,7 +388,7 @@ export function DiningSessionWorkspace({
             {selected ? (
               <>
                 <p className="bop-eyebrow">
-                  {selected.areaCode} · {selected.operationalState}
+                  {selected.areaCode} · {stateLabel(selected.operationalState)}
                 </p>
                 <h3>Table {selected.stableLabel}</h3>
                 <dl>
@@ -404,10 +405,6 @@ export function DiningSessionWorkspace({
                           : `Linked · ${selected.elapsedMinutes} min elapsed`
                         : "None"}
                     </dd>
-                  </div>
-                  <div>
-                    <dt>Lifecycle</dt>
-                    <dd>{selected.lifecycle}</dd>
                   </div>
                 </dl>
                 <section aria-label="Dining session action">
@@ -455,22 +452,26 @@ export function DiningSessionWorkspace({
                 </section>
                 {canOperateTables ? (
                   <section aria-label="Table availability action">
-                    <p>Change availability using the current Store permission.</p>
+                    <p>Mark a table unavailable while it can&apos;t be seated.</p>
                     {selected.operationalState === "Available" ? (
                       <>
                         <label className="dining-table-reason">
-                          Block reason code
-                          <input
+                          Reason
+                          <select
                             value={blockReasonCode}
-                            maxLength={64}
-                            pattern="[A-Z][A-Z0-9_-]{0,63}"
-                            autoComplete="off"
                             aria-describedby="dining-table-reason-help"
                             disabled={locked}
                             onChange={(event) => setBlockReasonCode(event.target.value)}
-                          />
+                          >
+                            <option value="">Choose a reason</option>
+                            {tableBlockReasons.map(([code, label]) => (
+                              <option key={code} value={code}>
+                                {label}
+                              </option>
+                            ))}
+                          </select>
                           <small id="dining-table-reason-help">
-                            Required; use uppercase letters, numbers, underscores or hyphens.
+                            Required. Guests can&apos;t be seated here until you mark it available.
                           </small>
                         </label>
                         <button

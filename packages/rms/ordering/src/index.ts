@@ -336,6 +336,7 @@ export { createDiningCartReplacementSettlementGate } from "./application/dining-
 export {
   createPostgresDiningSessionOrderInventory,
   createPostgresOrderAmendmentPosition,
+  listDiningOrderBatchAuthorship,
 } from "./infrastructure/persistence/dining-session-order-inventory.js";
 
 export { evaluateOrderClosureEligibility } from "./domain/order-closure-eligibility.js";

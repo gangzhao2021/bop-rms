@@ -441,10 +441,10 @@ export function OpeningCountPage({
     }
   };
   return (
-    <AppFrame title="Opening count" description="INV-OPENING-COUNT">
+    <AppFrame title="Opening count" description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">INV-OPENING-COUNT</p>
+          <p className="bop-eyebrow">Opening count</p>
           <h2>Opening stock count</h2>
           <p>
             Count what the Store holds before it opens. Posting turns the count into the Store's

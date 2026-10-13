@@ -373,10 +373,10 @@ export function StoreOptionRecipesPage({
       row.change.reviews.length < 2,
   );
   return (
-    <AppFrame title="Option recipes" description="RECIPE-OPTION-LIST">
+    <AppFrame title="Option recipes" description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">RECIPE-OPTION-LIST · Brand</p>
+          <p className="bop-eyebrow">Option recipes · Brand</p>
           <h2>Option recipes</h2>
           <p>
             What choosing an option does to each size's recipe — for stock, cost, kitchen and the

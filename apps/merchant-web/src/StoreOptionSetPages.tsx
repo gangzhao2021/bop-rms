@@ -77,10 +77,10 @@ export function StoreOptionSetListPage({
   const view: OptionSetListView = state.view;
   const current = view.optionSets.filter((set) => !set.archived);
   return (
-    <AppFrame title="Options" description="CAT-OPTIONSET-LIST">
+    <AppFrame title="Options" description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">CAT-OPTIONSET-LIST · Brand</p>
+          <p className="bop-eyebrow">Options · Brand</p>
           <h2>Options</h2>
           <p>
             Choices customers make on an item, such as milk or an extra shot. Add a set to a product
@@ -311,12 +311,10 @@ function OptionSetEditor({
     });
   const title = set ? set.name : "New option set";
   return (
-    <AppFrame title={title} description={set ? "CAT-OPTIONSET-EDIT" : "CAT-OPTIONSET-CREATE"}>
+    <AppFrame title={title} description={set ? "Edit option set" : "New option set"}>
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">
-            {set ? "CAT-OPTIONSET-EDIT" : "CAT-OPTIONSET-CREATE"} · Brand
-          </p>
+          <p className="bop-eyebrow">{set ? "Edit option set" : "New option set"} · Brand</p>
           <h2>{title}</h2>
           <p>
             {set

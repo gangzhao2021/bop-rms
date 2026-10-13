@@ -182,10 +182,10 @@ export function StoreAvailabilityPage({
     return buttons;
   };
   return (
-    <AppFrame title="Item availability" description="CAT-AVAILABILITY">
+    <AppFrame title="Item availability" description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">CAT-AVAILABILITY · Store</p>
+          <p className="bop-eyebrow">Item availability · Store</p>
           <h2>Item availability</h2>
           <p>
             Customers can order an item on a published menu only where it is offered and not sold

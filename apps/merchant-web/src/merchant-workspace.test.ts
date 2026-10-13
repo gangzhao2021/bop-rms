@@ -284,6 +284,23 @@ it("admits Tax navigation only at its exact permission and canonical route", () 
     );
 });
 
+it("WP-2423 Q8: admits the dining tables board only at its route and dining permission", () => {
+  const entry = {
+    screenId: "DIN-FLOOR-BOARD",
+    label: "Tables",
+    href: "/operations/dining",
+    permission: "dining.operate",
+  };
+  expect(parseMerchantWorkspace({ ...workspace, navigation: [entry] }).navigation).toEqual([entry]);
+  for (const wrong of [
+    { ...entry, permission: "ordering.operate" },
+    { ...entry, href: "/operations/dining?table=1" },
+  ])
+    expect(() => parseMerchantWorkspace({ ...workspace, navigation: [wrong] })).toThrow(
+      "MERCHANT_WORKSPACE_INVALID",
+    );
+});
+
 it("WP-2423 Q4: anchors Hours & ordering to the selected Store at its read permission", () => {
   const item = {
     screenId: "STORE-HOURS-SERVICE",

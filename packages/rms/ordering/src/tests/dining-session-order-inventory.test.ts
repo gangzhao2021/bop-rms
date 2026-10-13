@@ -1,5 +1,8 @@
 import { expect, it, vi } from "vitest";
-import { createPostgresDiningSessionOrderInventory } from "../infrastructure/persistence/dining-session-order-inventory.js";
+import {
+  createPostgresDiningSessionOrderInventory,
+  listDiningOrderBatchAuthorship,
+} from "../infrastructure/persistence/dining-session-order-inventory.js";
 const id = (n: number) => "0190fac0-0000-7000-8000-" + String(n).padStart(12, "0");
 const at = "2026-09-20T00:00:00.000Z",
   scope = { brandReference: id(1), storeReference: id(2) },
@@ -63,4 +66,46 @@ it("does not silently truncate oversized batches", async () => {
     Array.from({ length: 1001 }, (_, i) => batch(i + 5, i === 0 ? "Initial" : "Additional")),
   );
   await expect(f.source.load({ query: f.query }, input)).rejects.toThrow();
+});
+it("WP-2423 Q8: tells only whether each round was the asking guest's", async () => {
+  const query = vi
+    .fn()
+    .mockResolvedValueOnce({ rows: [] })
+    .mockResolvedValueOnce({
+      rows: [
+        { order_batch_id: id(5), submitted_by_guest: true },
+        { order_batch_id: id(6), submitted_by_guest: false },
+      ],
+    });
+  const input = {
+    orderReference: id(4),
+    diningSessionReference: id(3),
+    guestSessionReference: id(9),
+  };
+  const result = await listDiningOrderBatchAuthorship({ query } as never, scope, input);
+  expect([...result]).toEqual([
+    [id(5), true],
+    [id(6), false],
+  ]);
+  // Scoped to the Store, the Order and the guest's own dining session.
+  expect(query.mock.calls[1]?.[1]).toEqual([id(1), id(2), id(4), id(3), id(9)]);
+  expect(String(query.mock.calls[1]?.[0])).toContain("h.dining_session_id=$4");
+  for (const rows of [
+    [{ order_batch_id: id(5), submitted_by_guest: "yes" }],
+    [
+      { order_batch_id: id(5), submitted_by_guest: true },
+      { order_batch_id: id(5), submitted_by_guest: true },
+    ],
+  ]) {
+    const failing = vi.fn().mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows });
+    await expect(
+      listDiningOrderBatchAuthorship({ query: failing } as never, scope, input),
+    ).rejects.toThrow("DINING_ORDER_AUTHORSHIP_UNAVAILABLE");
+  }
+  await expect(
+    listDiningOrderBatchAuthorship({ query } as never, scope, {
+      ...input,
+      guestSessionReference: "x",
+    }),
+  ).rejects.toThrow("DINING_ORDER_AUTHORSHIP_UNAVAILABLE");
 });

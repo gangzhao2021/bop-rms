@@ -22,6 +22,15 @@ export interface OrderStatusQueryPorts {
       orderReference: OrderingReference;
       observedAt: OrderingInstant;
     }): Promise<{ guestSession: GuestSession } | null>;
+    /**
+     * WP-2423 Q8: a current participant of the dine-in session this Order belongs to (any guest at
+     * the table, not only the one who started the Order). The adapter proves the Order is the
+     * guest's own dining session's Order; absent means the read is refused.
+     */
+    authorizeDiningParticipant?(input: {
+      orderReference: OrderingReference;
+      observedAt: OrderingInstant;
+    }): Promise<{ guestSession: GuestSession } | null>;
     authorizeMerchant(input: {
       brandReference: OrderingReference;
       storeReference: OrderingReference;

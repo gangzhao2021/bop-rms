@@ -127,10 +127,10 @@ export function AllergenListPage({
   const view: AllergenListView = state.view;
   const missing = view.items.filter((item) => item.status !== "Current").length;
   return (
-    <AppFrame title="Allergens" description="CMP-ALLERGEN-REVIEW">
+    <AppFrame title="Allergens" description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">CMP-ALLERGEN-REVIEW · Brand</p>
+          <p className="bop-eyebrow">Allergens · Brand</p>
           <h2>Allergens</h2>
           <p>
             Every ingredient used in a recipe needs an allergen declaration taken from its supplier
@@ -346,10 +346,10 @@ function AllergenItem({
     validUntil > view.sourceAsOf.slice(0, 10) &&
     confirmed;
   return (
-    <AppFrame title={item.name} description="CMP-ALLERGEN-REVIEW">
+    <AppFrame title={item.name} description="Allergens">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">CMP-ALLERGEN-REVIEW · Ingredient</p>
+          <p className="bop-eyebrow">Allergens · Ingredient</p>
           <h2>{item.name}</h2>
           <p>
             {item.internalCode} · {statusText[item.status]}

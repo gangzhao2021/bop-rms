@@ -122,10 +122,10 @@ export function StockCountListPage({
     }
   };
   return (
-    <AppFrame title="Stock counts" description="INV-COUNT-LIST">
+    <AppFrame title="Stock counts" description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">INV-COUNT-LIST</p>
+          <p className="bop-eyebrow">Stock counts</p>
           <h2>Stock counts</h2>
           <p>
             Count one storage location at a time, ideally while the Store is closed. Counters count
@@ -316,10 +316,10 @@ export function StockCountWorkbenchPage({
   };
   const counted = count.lines.filter((line) => line.countedQuantity !== null).length;
   return (
-    <AppFrame title={`Count · ${location}`} description="INV-COUNT-WORKBENCH">
+    <AppFrame title={`Count · ${location}`} description="Stock count">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">INV-COUNT-WORKBENCH · {count.countType}</p>
+          <p className="bop-eyebrow">Stock count · {count.countType}</p>
           <h2>Count · {location}</h2>
           <p>
             {statusText[count.status]} · counted by {person(count.assigneeReference)} · {counted} of{" "}

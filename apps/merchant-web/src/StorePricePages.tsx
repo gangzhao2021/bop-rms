@@ -140,10 +140,10 @@ export function StorePriceListPage({
     .trim()
     .toUpperCase();
   return (
-    <AppFrame title="Prices" description="PRICE-BOOK-LIST">
+    <AppFrame title="Prices" description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">PRICE-BOOK-LIST · Brand</p>
+          <p className="bop-eyebrow">Prices · Brand</p>
           <h2>Prices</h2>
           <p>
             A price book holds a price for each size. A published book never changes: to change
@@ -342,10 +342,10 @@ function PriceBookEditor({
   const highlight = new Set([...view.uncovered, ...(message?.sellables ?? [])]);
   const authorIsViewer = view.draftAuthor !== null && view.draftAuthor === view.viewer;
   return (
-    <AppFrame title={book.stableCode} description="PRICE-BOOK-EDITOR">
+    <AppFrame title={book.stableCode} description="Price book">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">PRICE-BOOK-EDITOR · Brand</p>
+          <p className="bop-eyebrow">Price book · Brand</p>
           <h2>{book.stableCode}</h2>
           <p>
             {lifecycleText[book.lifecycle] ?? book.lifecycle} · version {book.aggregateVersion}

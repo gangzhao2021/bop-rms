@@ -28,6 +28,7 @@ import {
 import { createCustomerAdditionalDiningSubmissionStore } from "../../../apps/api/src/customer-additional-dining-submission-store.ts";
 import { createDiningCheckoutExpiryDispatcher } from "../../../apps/api/src/dining-checkout-expiry-dispatcher.ts";
 import { createCustomerOrderStatusRead } from "../../../apps/api/src/customer-order-status-read.ts";
+import { createCustomerDiningSessionRead } from "../../../apps/api/src/customer-dining-session-read.ts";
 import { createInternalBatchCancellationDispatcher } from "../../../tooling/environment/pilot-batch-cancellation-dispatcher.mjs";
 import { applyWorkflowRelease } from "../../../tooling/environment/workflow-release-install.mjs";
 import { createPersistentMerchantOrderQueue } from "../../../apps/api/src/persistent-merchant-order-queue.ts";
@@ -286,6 +287,16 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
           link: { paymentOperationReference: id(0x100) },
         },
         at: time(-minutes(140)),
+      });
+      // WP-2423 Q8: participant P's own Guest session at the same table (actual owners). P orders
+      // nothing in this journey and reads the table view as "another guest".
+      const tableGuestP = await seedAdditionalDiningGuest({
+        client: admin,
+        runner: ownerRunner,
+        f: R1.f,
+        dining: { ...dining, participant: dining.guest },
+        at: time(-minutes(139)),
+        second: { idPrefix: "01909993-0000-7000-8000-", sessionReference: id(0x602) },
       });
 
       // Inventory: one tracked item, 100 KG received; recipe for the menu item; Workflow.
@@ -630,6 +641,52 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       assert.equal(await cancellation.runOnce(), 0);
 
       // ── 3. The customer's order status: round 2 shown as cancelled because unpaid.
+      const guestBinding = (transaction) => ({
+        validate: async (session, observedAt) => {
+          const evidence = await createDiningGuestBindingQuery({
+            scope,
+            now: () => observedAt,
+            repository: createPostgresDiningGuestBindingStore(
+              { run: (work) => work(transaction) },
+              ownerScope,
+            ),
+          }).resolve({
+            purpose: "GuestSessionBinding",
+            diningSessionReference: session.diningSessionReference,
+            participantReference: session.diningParticipantReference,
+            tableReference: dining.table.tableReference,
+          });
+          return evidence ? "Current" : "Unavailable";
+        },
+      });
+      // WP-2423 Q8: the table view (CUST-DINE-IN-SESSION) as the pilot composes it from the same
+      // order-status configuration, under the restricted API role.
+      const tableRead = createCustomerDiningSessionRead({
+        scope,
+        transactions: transactions(api),
+        credentials: guest.identity.session.credentials,
+        diningScope: ownerScope,
+        paymentScope,
+        itemRefundScope: {
+          tenantReference: tenant,
+          providerAccountReference: provider,
+          environment: "Test",
+        },
+        now,
+        binding: guestBinding,
+      });
+      const tableOf = (who) =>
+        tableRead.read({
+          sessionCredential: who.sessionCredential,
+          csrfCredential: who.csrfCredential,
+        });
+      const roundsOf = (view) =>
+        view.rounds.map((round) => [
+          round.roundNumber,
+          round.orderedBy,
+          round.status,
+          round.payment,
+        ]);
       const statusRead = createCustomerOrderStatusRead({
         scope,
         transactions: transactions(api),
@@ -686,6 +743,57 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         .flatMap((batch) => batch.items)
         .reduce((sum, item) => sum + item.lineTotal.amountMinor, 0n);
       assert.equal(customerTotal, roundTotal);
+
+      // ── 3a. WP-2423 Q8: the table view after round 2's automatic cancellation. The Host sees both
+      // rounds as theirs; participant P sees the same rounds as another guest's. Nothing is due.
+      const hostTable = await tableOf(guest);
+      assert.equal(hostTable.tableLabel, "SYNTHETIC-JOURNEY");
+      assert.equal(hostTable.orderNumber, status.order.orderNumber);
+      assert.deepEqual(roundsOf(hostTable), [
+        [1, "You", "Queued", "Paid"],
+        [2, "You", "NotPaidCancelled", "NotCharged"],
+      ]);
+      assert.ok(hostTable.rounds[1].items.every((item) => item.cancelled));
+      assert.deepEqual(hostTable.summary, {
+        paid: { amountMinor: roundTotal, currencyCode: "CAD" },
+        refunded: { amountMinor: 0n, currencyCode: "CAD" },
+        refundPending: { amountMinor: 0n, currencyCode: "CAD" },
+        due: { amountMinor: 0n, currencyCode: "CAD" },
+      });
+      const otherTable = await tableOf(tableGuestP);
+      assert.deepEqual(
+        roundsOf(otherTable),
+        roundsOf(hostTable).map(([n, , st, pay]) => [n, "AnotherGuest", st, pay]),
+      );
+      assert.deepEqual(otherTable.summary, hostTable.summary);
+      // No guest, participant or session reference leaves the composition.
+      const tableJson = JSON.stringify(otherTable, (_k, v) =>
+        typeof v === "bigint" ? String(v) : v,
+      );
+      for (const reference of [
+        guestSession,
+        id(0x602),
+        participantP,
+        dining.session.diningSessionReference,
+        orderReference,
+      ])
+        assert.ok(!tableJson.includes(reference), reference);
+      // The guest never names a session or table, and a stale CSRF is refused.
+      await assert.rejects(
+        tableRead.read({
+          sessionCredential: guest.sessionCredential,
+          csrfCredential: guest.csrfCredential,
+          diningSessionReference: dining.session.diningSessionReference,
+        }),
+        { code: "ORDER_STATUS_INPUT_INVALID" },
+      );
+      await assert.rejects(
+        tableRead.read({
+          sessionCredential: guest.sessionCredential,
+          csrfCredential: guest.wrongCsrf,
+        }),
+        { code: "ORDER_STATUS_PERMISSION_DENIED" },
+      );
 
       // ── 3b. The merchant order queue (persistent composition, real encrypted staff session).
       const queueSession = await seedMerchantAcceptanceSession({
@@ -1020,6 +1128,24 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         projected.snapshot.batches.map((b) => b.orderBatchReference),
         [R1.batch.orderBatchReference, R2.batch.orderBatchReference, R3.batch.orderBatchReference],
       );
+      // ── 4d. WP-2423 Q8: round 3 on the table view for both guests; the table has paid twice.
+      const hostAfter3 = await tableOf(guest);
+      assert.deepEqual(roundsOf(hostAfter3), [
+        [1, "You", "Queued", "Paid"],
+        [2, "You", "NotPaidCancelled", "NotCharged"],
+        [3, "You", "Queued", "Paid"],
+      ]);
+      assert.equal(hostAfter3.summary.paid.amountMinor, 2n * roundTotal);
+      assert.equal(hostAfter3.summary.due.amountMinor, 0n);
+      assert.deepEqual(
+        roundsOf(await tableOf(tableGuestP)).map(([n, who]) => [n, who]),
+        [
+          [1, "AnotherGuest"],
+          [2, "AnotherGuest"],
+          [3, "AnotherGuest"],
+        ],
+      );
+
       // No consumer failure, retry or dead letter for any OrderSubmitted event of the Order.
       assert.deepEqual(
         await one(
@@ -1579,6 +1705,21 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       const position3 = await positionOf(pay3);
       assert.equal(position3.confirmedMinor, 0n);
       assert.equal(position3.pendingMinor, 0n);
+      // WP-2423 Q8: the table view shows the confirmed refund once, for every guest at the table.
+      const afterRefund = await tableOf(tableGuestP);
+      assert.deepEqual(afterRefund.summary, {
+        paid: { amountMinor: 2n * roundTotal, currencyCode: "CAD" },
+        refunded: { amountMinor: roundTotal, currencyCode: "CAD" },
+        refundPending: { amountMinor: 0n, currencyCode: "CAD" },
+        due: { amountMinor: 0n, currencyCode: "CAD" },
+      });
+      // A guest who has left the table no longer reads it; the Host still does.
+      await admin.query(
+        "UPDATE rms_dining.dining_participant SET status='Left',version=2,participant_snapshot=participant_snapshot||jsonb_build_object('status','Left','version',2,'leftAt',$2::text) WHERE participant_id=$1",
+        [participantP, now()],
+      );
+      await assert.rejects(tableOf(tableGuestP), { code: "ORDER_STATUS_PERMISSION_DENIED" });
+      assert.equal((await tableOf(guest)).rounds.length, 3);
 
       const refundReceipt = await transactions(api).run((tx) =>
         createRefundReceiptIssuance({

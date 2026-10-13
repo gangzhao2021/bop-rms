@@ -196,6 +196,13 @@ export async function createInternalMerchant(
           href: "/operations/pickup",
           permission: "fulfillment.operate",
         },
+        // WP-2423 Q8: dine-in tables — start a session, give the table its join code, hand over.
+        {
+          screenId: "DIN-FLOOR-BOARD",
+          label: "Tables",
+          href: "/operations/dining",
+          permission: "dining.operate",
+        },
         // WP-2423 P1: day-end settlement for the Store Manager (Section 88 PAY-RECONCILIATION).
         {
           screenId: "PAY-RECONCILIATION",

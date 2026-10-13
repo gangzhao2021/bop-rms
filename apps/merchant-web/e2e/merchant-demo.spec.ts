@@ -10,12 +10,12 @@ const WORK_ITEM_REFERENCE = "018f0f58-767a-7f3b-a1d0-000000000401";
 const routes = [
   // Pilot pages no longer print Screen IDs; the identity is the page's own heading.
   { path: "/app", identity: "Training Store" },
-  { path: "/app/organization/stores", identity: "STORE-LIST" },
-  { path: `/app/organization/stores/${STORE_REFERENCE}`, identity: "STORE-DETAIL" },
-  { path: `/app/organization/stores/${STORE_REFERENCE}/setup`, identity: "STORE-SETUP" },
+  { path: "/app/organization/stores", identity: "Permission-trimmed Store configuration" },
+  { path: `/app/organization/stores/${STORE_REFERENCE}`, identity: "Store · Draft" },
+  { path: `/app/organization/stores/${STORE_REFERENCE}/setup`, identity: "Store setup" },
   {
     path: `/app/organization/stores/${STORE_REFERENCE}/service`,
-    identity: "STORE-HOURS-SERVICE",
+    identity: "Hours & ordering",
   },
   { path: "/app/commerce/menus", identity: "Menus are unavailable" },
   { path: `/app/commerce/menus/${MENU_REFERENCE}/edit`, identity: "Synthetic Brand" },

@@ -54,7 +54,7 @@ export function ComplianceAllergenReview({
     <main className="page-shell">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">CMP-ALLERGEN-REVIEW · Food Safety</p>
+          <p className="bop-eyebrow">Allergens · Food Safety</p>
           <h1>Allergen Control Review</h1>
           <p>
             Source as of <SourceTime instant={view.sourceAsOf} /> · {view.completeness} ·{" "}
@@ -154,7 +154,7 @@ export function ComplianceIncident({ view }: { readonly view: ComplianceIncident
     <main className="page-shell">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">CMP-INCIDENT · Restricted Food Safety</p>
+          <p className="bop-eyebrow">Food safety incident · Restricted Food Safety</p>
           <h1>Food Safety Incident</h1>
           <p>
             Source as of <SourceTime instant={view.sourceAsOf} /> · {view.completeness} ·{" "}

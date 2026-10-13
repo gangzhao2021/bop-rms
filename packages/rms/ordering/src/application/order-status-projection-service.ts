@@ -211,6 +211,49 @@ export function createOrderStatusQueryService(ports: OrderStatusQueryPorts) {
         return fail("ORDER_STATUS_PERMISSION_DENIED");
       return customerView(parsed);
     },
+    /**
+     * WP-2423 Q8: the table's shared view of its dine-in Order for any current participant of that
+     * dining session. Same customer-safe fields as getCustomer; the Order must be dine-in and in the
+     * participant's Brand and Store.
+     */
+    async getDiningParticipant(value: unknown) {
+      const raw = exact(value, ["orderReference", "observedAt"]);
+      let orderReference, observedAt;
+      try {
+        orderReference = parseOrderingReference(raw.orderReference);
+        observedAt = parseOrderingInstant(raw.observedAt);
+      } catch {
+        return fail("ORDER_STATUS_INPUT_INVALID");
+      }
+      const authorize = ports.authorization.authorizeDiningParticipant;
+      if (authorize === undefined) return fail("ORDER_STATUS_PERMISSION_DENIED");
+      const authorized = await authorize({ orderReference, observedAt }).catch(dependency);
+      if (!authorized) return fail("ORDER_STATUS_PERMISSION_DENIED");
+      let guest;
+      try {
+        guest = assertGuestSessionUsable(createGuestSession(authorized.guestSession), observedAt);
+      } catch {
+        return fail("ORDER_STATUS_PERMISSION_DENIED");
+      }
+      if (
+        guest.channel !== "DineIn" ||
+        guest.diningState !== "DiningBound" ||
+        guest.diningSessionReference === null ||
+        guest.diningParticipantReference === null
+      )
+        return fail("ORDER_STATUS_PERMISSION_DENIED");
+      const projection = await ports.projections.load(orderReference).catch(dependency);
+      if (!projection) return fail("ORDER_STATUS_NOT_FOUND");
+      const parsed = parseDependencyProjection(projection);
+      if (
+        parsed.snapshot.orderReference !== orderReference ||
+        parsed.snapshot.orderType !== "DineIn" ||
+        parsed.snapshot.brandReference !== parseOrderingReference(guest.brandReference) ||
+        parsed.snapshot.storeReference !== parseOrderingReference(guest.storeReference)
+      )
+        return fail("ORDER_STATUS_PERMISSION_DENIED");
+      return customerView(parsed);
+    },
     async listMerchant(value: unknown) {
       const raw = exact(value, [
         "brandReference",

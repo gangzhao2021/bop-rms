@@ -1272,6 +1272,44 @@
   font-variant-numeric: tabular-nums;
   font-weight: 700;
 }
+/* ---------- WP-2423 Q8: dine-in table (CUST-DINE-IN-SESSION) ---------- */
+.dining-session__summary dl {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.dining-session__summary > p:last-child {
+  margin: var(--bop-space-3) 0 0;
+  font-size: 0.875rem;
+}
+.dining-session__round-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--bop-space-2) var(--bop-space-3);
+  margin: var(--bop-space-2) 0;
+}
+.dining-session__round-facts div {
+  display: grid;
+  align-content: start;
+  gap: 0.125rem;
+  min-width: 0;
+}
+.dining-session__round-facts dt {
+  color: var(--bop-color-text-muted);
+  font-size: 0.75rem;
+}
+.dining-session__round-facts dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.dining-session .menu-help {
+  margin-top: var(--bop-space-4);
+}
+@media (max-width: 24rem) {
+  .dining-session__round-facts,
+  .dining-session__summary dl {
+    grid-template-columns: 1fr;
+  }
+}
 .order-status__actions {
   display: flex;
   flex-wrap: wrap;

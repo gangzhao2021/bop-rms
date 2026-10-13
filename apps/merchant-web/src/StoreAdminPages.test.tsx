@@ -24,7 +24,7 @@ describe("Store administration Section 88 screens", () => {
       </MemoryRouter>,
     );
     for (const value of [
-      "STORE-LIST",
+      "Stores",
       "TRAINING_01",
       "Training Store",
       "America/Toronto",
@@ -55,7 +55,8 @@ describe("Store administration Section 88 screens", () => {
         <StoreSetupScreen view={parseStoreSetupView(setupView())} />
       </MemoryRouter>,
     );
-    expect(html).toContain("Expected Version 3");
+    // Staff never see internal screen codes or version counters.
+    expect(html).not.toMatch(/STORE-SETUP|Expected Version/u);
     expect(html).toContain("Evidence gate:");
     expect(html).toContain("TaxPaymentReferences");
     expect(html).toContain("Save draft");
@@ -88,7 +89,7 @@ describe("Store administration Section 88 screens", () => {
       </MemoryRouter>,
     );
     for (const value of [
-      "STORE-HOURS-SERVICE",
+      "Hours &amp; ordering",
       "StoreOverride",
       "Business Day Start",
       "04:00:00 local",

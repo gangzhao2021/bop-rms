@@ -372,10 +372,10 @@ export function StockLocationListPage({
     );
   const view = state.view;
   return (
-    <AppFrame title="Stock locations" description="INV-LOCATION-LIST">
+    <AppFrame title="Stock locations" description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">INV-LOCATION-LIST</p>
+          <p className="bop-eyebrow">Stock locations</p>
           <h2>Stock locations</h2>
           <p>
             Where this Store keeps its stock. Source as of <SourceTime instant={view.sourceAsOf} />

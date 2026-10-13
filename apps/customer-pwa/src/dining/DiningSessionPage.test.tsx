@@ -1,29 +1,199 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
-import { DiningSessionPage } from "./DiningSessionPage.js";
+import {
+  DiningSessionPage,
+  DiningSessionScreen,
+  isDiningSessionActive,
+  type DiningSessionState,
+} from "./DiningSessionPage.js";
+import type { DiningRound, DiningSessionView } from "./dining-session-client.js";
+import { formatClockTime } from "../journey/format.js";
+import { CustomerPage } from "../journey/CustomerPage.js";
 
-describe("CUST-DINE-IN-SESSION", () => {
-  it("shows the registered data groups as unavailable without inventing session facts", () => {
+const cad = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+const at = "2026-10-13T18:00:00.000Z";
+function round(overrides: Partial<DiningRound> = {}): DiningRound {
+  return {
+    roundNumber: 1,
+    orderedBy: "You",
+    submittedAt: at,
+    status: "Preparing",
+    payment: "Paid",
+    cancelsAt: null,
+    storeCancellationReason: null,
+    items: [
+      {
+        displayName: "Ramen",
+        quantity: 2,
+        servedQuantity: 1,
+        cancelled: false,
+        lineTotal: cad("3000"),
+      },
+    ],
+    itemsTotal: cad("3000"),
+    ...overrides,
+  };
+}
+function view(overrides: Partial<DiningSessionView> = {}): DiningSessionView {
+  return {
+    tableLabel: "12",
+    orderNumber: "1042",
+    checkedAt: at,
+    rounds: [
+      round(),
+      round({
+        roundNumber: 2,
+        orderedBy: "AnotherGuest",
+        status: "AwaitingPayment",
+        payment: "Awaiting",
+        items: [
+          {
+            displayName: "Gyoza",
+            quantity: 1,
+            servedQuantity: 0,
+            cancelled: false,
+            lineTotal: cad("900"),
+          },
+        ],
+        itemsTotal: cad("900"),
+      }),
+    ],
+    summary: { paid: cad("3450"), refunded: cad("0"), refundPending: cad("0"), due: cad("900") },
+    ...overrides,
+  };
+}
+const store = { storeName: "Synthetic Noodle Bar", serviceMode: "DineIn" as const };
+function render(state: DiningSessionState) {
+  return renderToStaticMarkup(
+    <MemoryRouter initialEntries={["/dine-in/session"]}>
+      <DiningSessionScreen state={state} store={store} onRefresh={() => undefined} />
+    </MemoryRouter>,
+  );
+}
+
+describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
+  it("shows the table, each round with who ordered it, its status and payment, and the table total", () => {
+    const html = render({ status: "ready", view: view(), refreshing: false });
+    expect(html).toContain("Your table · 12");
+    expect(html).toContain("Order 1042");
+    expect(html).toContain("Round 1 · Ordered by you");
+    expect(html).toContain("Round 2 · Ordered by another guest");
+    expect(html).toContain("Being prepared");
+    expect(html).toContain("Waiting for payment");
+    expect(html).toContain("Not paid yet");
+    expect(html).toContain("Served 1 of 2");
+    expect(html).toContain("2 × Ramen");
+    expect(html).toContain("$30.00");
+    expect(html).toContain("Paid so far");
+    expect(html).toContain("$34.50");
+    expect(html).toContain("$9.00");
+    expect(html).toContain("The kitchen starts this round once it is paid.");
+    expect(html).toContain('aria-current="page">Your table');
+    expect(html).toContain("Refresh now");
+    expect(html).toContain('href="/menu"');
+  });
+
+  it("explains cancelled, failed and refunded rounds in plain words", () => {
+    const html = render({
+      status: "ready",
+      refreshing: false,
+      view: view({
+        rounds: [
+          round({
+            status: "StoreCancelled",
+            payment: "Refunded",
+            storeCancellationReason: "SoldOut",
+          }),
+          round({
+            roundNumber: 2,
+            status: "PaymentFailed",
+            payment: "Failed",
+            cancelsAt: "2026-10-13T18:40:00.000Z",
+          }),
+          round({ roundNumber: 3, status: "NotPaidCancelled", payment: "NotCharged" }),
+          round({ roundNumber: 4, status: "Served", payment: "Paid" }),
+        ],
+        summary: {
+          paid: cad("3450"),
+          refunded: cad("3450"),
+          refundPending: cad("452"),
+          due: cad("0"),
+        },
+      }),
+    });
+    expect(html).toContain("Cancelled by the store");
+    expect(html).toContain("An item you ordered sold out.");
+    expect(html).toContain("The payment was refunded.");
+    expect(html).toContain("On hold until paid");
+    expect(html).toContain("Payment failed");
+    expect(html).toContain(
+      `This round will be cancelled at ${formatClockTime("2026-10-13T18:40:00.000Z")}`,
+    );
+    expect(html).toContain("No one was charged for it.");
+    expect(html).toContain("Refund on its way");
+    expect(html).toContain("$4.52");
+    expect(html).toContain("Nothing");
+    expect(html).toContain("Served");
+  });
+
+  it("never shows names, contact details, internal codes or references", () => {
+    const html = render({ status: "ready", view: view(), refreshing: false });
+    expect(html).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}/u);
+    expect(html).not.toMatch(
+      /AnotherGuest|AwaitingPayment|PaymentFailed|NotPaidCancelled|StoreCancelled|RefundPending|SoldOut|@|phone|email/iu,
+    );
+  });
+
+  it("tells a guest who has not joined how to join, and offers retry when the table can't load", () => {
+    const notJoined = render({ status: "not-joined" });
+    expect(notJoined).toContain("Join your table first");
+    expect(notJoined).toContain("Ask a staff member for your table");
+    expect(notJoined).not.toContain("Round");
+    const failed = render({ status: "unavailable", view: null, offline: false });
+    expect(failed).toContain("We couldn’t load your table");
+    expect(failed).toContain("Try again");
+    const stale = render({ status: "unavailable", view: view(), offline: true });
+    expect(stale).toContain("You’re offline");
+    expect(stale).toContain("Showing what was loaded before.");
+    expect(stale).toContain("Round 1 · Ordered by you");
+  });
+
+  it("shows an empty table plainly and only keeps polling while something is in progress", () => {
+    const empty = view({ rounds: [], summary: null, orderNumber: null });
+    const html = render({ status: "ready", view: empty, refreshing: false });
+    expect(html).toContain("No one at this table has ordered yet");
+    expect(html).not.toContain("Table total");
+    expect(isDiningSessionActive(empty)).toBe(true);
+    expect(isDiningSessionActive(view())).toBe(true);
+    expect(
+      isDiningSessionActive(
+        view({ rounds: [round({ status: "Served" }), round({ status: "NotPaidCancelled" })] }),
+      ),
+    ).toBe(false);
+  });
+
+  it("starts in a loading state before the table is read", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter initialEntries={["/dine-in/session"]}>
-        <DiningSessionPage />
+        <DiningSessionPage store={store} client={{ load: async () => view() }} />
       </MemoryRouter>,
     );
+    expect(html).toContain("Loading your table");
+    expect(html).not.toContain("unavailable");
+  });
 
-    expect(html).toContain("Your dining session");
-    expect(html).toContain('role="alert"');
-    expect(html).toContain("Session details are unavailable");
-    expect(html).toContain("Table / session");
-    expect(html).toContain("Active Order batches");
-    expect(html).toContain("Shared payable summary");
-    expect(html).toContain("Service / allergen notices");
-    expect(html).toContain("Table / session · unavailable");
-    expect(html).toContain("Active Order batches · unavailable");
-    expect(html).toContain("Shared payable summary · unavailable");
-    expect(html).toContain("Service / allergen notices · unavailable");
-    expect(html).toContain('href="/"');
-    expect(html).toContain("Return to entry");
-    expect(html).not.toMatch(/\b(?:Order 1001|CAD \d|Table T-\d|\d+ participants?)\b/u);
+  it("is linked from the journey header for dine-in guests only", () => {
+    const page = (serviceMode: "DineIn" | "Pickup") =>
+      renderToStaticMarkup(
+        <MemoryRouter>
+          <CustomerPage step="menu" store={{ storeName: "Synthetic", serviceMode }}>
+            <p>Menu</p>
+          </CustomerPage>
+        </MemoryRouter>,
+      );
+    expect(page("DineIn")).toContain('href="/dine-in/session"');
+    expect(page("DineIn")).toContain(">Your table</a>");
+    expect(page("Pickup")).not.toContain("/dine-in/session");
   });
 });

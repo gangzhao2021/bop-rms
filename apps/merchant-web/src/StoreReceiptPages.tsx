@@ -78,10 +78,10 @@ export function StoreReceiptListPage({
   if (state.kind !== "Found") return <Failure code={state.kind} />;
   const view = state.view;
   return (
-    <AppFrame title="Receiving" description="INV-RECEIPT-LIST">
+    <AppFrame title="Receiving" description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">INV-RECEIPT-LIST</p>
+          <p className="bop-eyebrow">Receiving</p>
           <h2>Receiving</h2>
           <p>
             Goods received at this Store. Source as of <SourceTime instant={view.sourceAsOf} />
@@ -232,10 +232,10 @@ export function StoreReceiptFormPage({
     }
   };
   return (
-    <AppFrame title="Receive goods" description="INV-GOODS-RECEIPT">
+    <AppFrame title="Receive goods" description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">INV-GOODS-RECEIPT · Store direct</p>
+          <p className="bop-eyebrow">Receive goods · Store direct</p>
           <h2>Receive goods</h2>
           <p>
             Record what arrived. Only accepted quantities enter stock; rejected and damaged
@@ -469,10 +469,10 @@ export function StoreReceiptDetailPage({
     }
   };
   return (
-    <AppFrame title="Receipt" description="INV-RECEIPT-DETAIL">
+    <AppFrame title="Receipt" description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">INV-RECEIPT-DETAIL</p>
+          <p className="bop-eyebrow">Receipt</p>
           <h2>
             {receipt.supplierName} {receipt.supplierDocument ? `· ${receipt.supplierDocument}` : ""}
           </h2>

@@ -114,6 +114,8 @@ export {
 } from "./infrastructure/persistence/payment-compensation-evidence-source.js";
 
 export { createPostgresPaymentCompensationRefundPositionSource } from "./infrastructure/persistence/payment-compensation-refund-position-source.js";
+// WP-2423 Q8: a captured payment's ordinary refund position (read only), as receipts compose it.
+export { createPostgresOrdinaryRefundPositionSource } from "./infrastructure/ordinary-refund-position-source.js";
 
 export { createPostgresPaymentCompensationSource } from "./infrastructure/persistence/payment-compensation-source.js";
 

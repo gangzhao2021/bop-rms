@@ -54,6 +54,31 @@ export interface StaffOrderCancellationResult {
   readonly refundStatus: StaffOrderRefundStatus;
 }
 
+/** WP-2423 Q8: how much of a staff-cancelled batch's capture is refunded and still pending. */
+export async function readStaffCancellationRefundPosition(
+  transaction: ConsumerTransaction,
+  scope: { brandReference: string; storeReference: string },
+  record: Pick<
+    StaffOrderCancellationRecord,
+    "orderReference" | "paymentTransactionReference" | "paymentAttemptReference"
+  >,
+  authorize: () => Promise<boolean>,
+): Promise<{ readonly confirmedMinor: bigint; readonly pendingMinor: bigint }> {
+  const position = await createPostgresPaymentCompensationRefundPositionSource({
+    scope,
+    authorize: async (tx, input) =>
+      tx === transaction &&
+      input.orderReference === String(record.orderReference) &&
+      input.paymentAttemptReference === String(record.paymentAttemptReference) &&
+      (await authorize()),
+  })(transaction, {
+    orderReference: String(record.orderReference),
+    paymentTransactionReference: String(record.paymentTransactionReference),
+    paymentAttemptReference: String(record.paymentAttemptReference),
+  });
+  return { confirmedMinor: position.confirmedMinor, pendingMinor: position.pendingMinor };
+}
+
 /**
  * WP-2423 Q6: refund status of a staff cancellation from Payment's compensation-owned amounts for
  * its payment attempt. Refunded only once a Provider-confirmed refund fact exists and nothing is
@@ -68,18 +93,7 @@ export async function readStaffCancellationRefundStatus(
   >,
   authorize: () => Promise<boolean>,
 ): Promise<StaffOrderRefundStatus> {
-  const position = await createPostgresPaymentCompensationRefundPositionSource({
-    scope,
-    authorize: async (tx, input) =>
-      tx === transaction &&
-      input.orderReference === String(record.orderReference) &&
-      input.paymentAttemptReference === String(record.paymentAttemptReference) &&
-      (await authorize()),
-  })(transaction, {
-    orderReference: String(record.orderReference),
-    paymentTransactionReference: String(record.paymentTransactionReference),
-    paymentAttemptReference: String(record.paymentAttemptReference),
-  });
+  const position = await readStaffCancellationRefundPosition(transaction, scope, record, authorize);
   return position.confirmedMinor > 0n && position.pendingMinor === 0n ? "Refunded" : "Pending";
 }
 

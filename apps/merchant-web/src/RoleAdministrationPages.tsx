@@ -341,11 +341,17 @@ function Screen({
   return (
     <AppFrame
       title={editor ? "Role editor" : "Roles"}
-      description={`${view.screenId} · ${view.freshness} · ${view.completeness}`}
+      description={[
+        editor ? "Edit a role and its permissions" : "Roles and permissions",
+        view.freshness === "Stale" ? "may be out of date" : null,
+        view.completeness === "Partial" ? "some roles not shown" : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")}
     >
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">{view.screenId}</p>
+          <p className="bop-eyebrow">{editor ? "Role editor" : "Roles"}</p>
           <h2>Role and permission governance</h2>
           <p>
             Source as of <SourceTime instant={view.sourceAsOf} />

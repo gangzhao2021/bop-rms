@@ -586,6 +586,12 @@ export function OrderStatusPage({
           </button>
         </section>
       ) : null}
+      {view?.order.orderType === "DineIn" ? (
+        // WP-2423 Q8: every round at the table, including other guests', and what is still due.
+        <Link className="order-status__receipt" to="/dine-in/session">
+          See everything your table ordered
+        </Link>
+      ) : null}
       {view ? (
         <Link className="order-status__receipt" to={`/orders/${view.order.orderReference}/receipt`}>
           View receipt and support

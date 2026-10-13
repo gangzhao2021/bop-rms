@@ -153,11 +153,11 @@ export function TaskInboxScreen({
   const view = state.kind === "Ready" || state.kind === "Offline" ? state.view : null;
   const readOnly = state.kind !== "Ready";
   return (
-    <AppFrame title="Tasks" description="TASK-INBOX">
+    <AppFrame title="Tasks" description="">
       <section className="task-inbox" aria-labelledby="task-inbox-heading">
         <header className="task-inbox-heading">
           <div>
-            <p className="bop-eyebrow">TASK-INBOX · AUTHORIZED WORK QUEUE</p>
+            <p className="bop-eyebrow">Tasks</p>
             <h2 id="task-inbox-heading">{view?.storeLabel ?? "Task Inbox"}</h2>
             <p>
               Task and source facts are scoped to the current Store; internal references are hidden.

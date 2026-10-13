@@ -104,10 +104,10 @@ export function RecipeListPage({
   if (state.kind !== "Found") return <Failure code={state.kind} />;
   const view: RecipeListView = state.view;
   return (
-    <AppFrame title="Recipes" description="RECIPE-LIST">
+    <AppFrame title="Recipes" description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">RECIPE-LIST · Brand</p>
+          <p className="bop-eyebrow">Recipes · Brand</p>
           <h2>Recipes</h2>
           <p>
             Recipes are shared by every Store of the Brand. A recipe is published after an
@@ -968,10 +968,10 @@ function RecipeEditor({
       ? view.recipes.find((recipe) => recipe.recipeReference === revisionOf)
       : undefined;
     return (
-      <AppFrame title="New recipe" description="RECIPE-EDITOR">
+      <AppFrame title="New recipe" description="Recipe">
         <header className="screen-heading">
           <div>
-            <p className="bop-eyebrow">RECIPE-EDITOR · {base ? "Revision" : "New"}</p>
+            <p className="bop-eyebrow">Recipe · {base ? "Revision" : "New"}</p>
             <h2>{base ? `Revise ${base.name}` : "New recipe"}</h2>
             <p>
               {base
@@ -1016,11 +1016,11 @@ function RecipeEditor({
       (review) => review.subject === subject && review.decision === "Approved" && review.current,
     ).length === 2;
   return (
-    <AppFrame title={recipe.name} description="RECIPE-EDITOR">
+    <AppFrame title={recipe.name} description="Recipe">
       <header className="screen-heading">
         <div>
           <p className="bop-eyebrow">
-            RECIPE-EDITOR · {recipe.code}
+            Recipe · {recipe.code}
             {recipe.familyRevision > 1 ? ` · revision ${recipe.familyRevision}` : ""}
           </p>
           <h2>{recipe.name}</h2>

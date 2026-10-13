@@ -3596,6 +3596,26 @@ it("admits canonical Product navigation without treating a parsed candidate as a
     ).toThrow("MERCHANT_WORKSPACE_DENIED");
 });
 
+it("WP-2423 Q8: admits the dining tables board only at its route and dining permission", () => {
+  const item = {
+    screenId: "DIN-FLOOR-BOARD",
+    label: "Tables",
+    href: "/operations/dining",
+    permission: "dining.operate",
+  };
+  expect(parseMerchantWorkspaceSnapshot({ ...workspace, navigation: [item] }).navigation).toEqual([
+    item,
+  ]);
+  for (const change of [
+    { href: "/operations/tables" },
+    { permission: "ordering.operate" },
+    { permission: "dining.table.read" },
+  ])
+    expect(() =>
+      parseMerchantWorkspaceSnapshot({ ...workspace, navigation: [{ ...item, ...change }] }),
+    ).toThrow("MERCHANT_WORKSPACE_DENIED");
+});
+
 it("bounds complete Draft JSON separately and preserves legacy, other route and origin refusal", async () => {
   // Parser/transport only: this synthetic command port deliberately refuses every
   // candidate, so reaching it cannot be mistaken for full source admission.

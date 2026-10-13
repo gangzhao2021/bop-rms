@@ -242,6 +242,9 @@ it("shows partial Dining serving without claiming collection or full payment", (
   });
   expect(html).toContain("Served 1 of 2");
   expect(html).not.toContain("Order collected");
+  // WP-2423 Q8: a dine-in order leads to the whole table's rounds.
+  expect(html).toContain('href="/dine-in/session"');
+  expect(html).toContain("See everything your table ordered");
 });
 
 it.each([
