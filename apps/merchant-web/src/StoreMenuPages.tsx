@@ -4,6 +4,7 @@ import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { newOperationReference } from "./RoleAdministrationPages.js";
+import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
 import {
   MenuPageError,
   menuStage,
@@ -43,6 +44,9 @@ const copy: Record<MenuErrorCode | "Loading", string> = {
     "The menu is not valid. Each section needs a distinct name, and an item may appear once per section.",
   Offline: "Offline. Nothing was confirmed; retry sends the same request again.",
   Unavailable: "Menus are unavailable.",
+  SoleOperatorNotInEffect:
+    "Someone else now holds menu approval, so they must approve this version. Refresh to see who.",
+  NeedsReverification: "Confirm it is you with your authenticator code, then approve again.",
 };
 const stageText = {
   Editing: "Draft — being edited",
@@ -145,13 +149,16 @@ export function StoreMenuListPage({
 
 export function StoreMenuBuilderPage({
   client = unavailableMenuClient,
+  csrf,
 }: {
   readonly client?: MenuClient;
+  /** For the second-factor check of a sole operator's own approval. */
+  readonly csrf?: string;
 }) {
   const params = useParams();
   const reference = parseMenuRouteReference(params.id);
   if (reference === null) return <Failure code="NotFound" />;
-  return <MenuBuilder key={reference} client={client} menuReference={reference} />;
+  return <MenuBuilder key={reference} client={client} menuReference={reference} csrf={csrf} />;
 }
 
 interface EditableSection {
@@ -166,9 +173,11 @@ let sectionKey = 0;
 function MenuBuilder({
   client,
   menuReference,
+  csrf,
 }: {
   readonly client: MenuClient;
   readonly menuReference: string;
+  readonly csrf: string | undefined;
 }) {
   const { state, reload } = useMenuView(client, menuReference, parseMenuBuilderView);
   const [name, setName] = useState("");
@@ -525,6 +534,37 @@ function MenuBuilder({
             >
               {pending?.action === "Approve" ? "Retry approve" : "Approve"}
             </button>
+          ) : view.submittedBy === view.viewer && view.permissions.mayApprove ? (
+            <SoleOperatorSelfApproval
+              gate={view.soleOperator}
+              csrf={csrf}
+              what="this menu version"
+              permissionName="menu approval"
+              busy={busy}
+              actionLabel={pending?.action === "Approve" ? "Retry approve" : "Approve on my own"}
+              summary={
+                <p>
+                  {menu.name} · {menu.sections.length} section
+                  {menu.sections.length === 1 ? "" : "s"},{" "}
+                  {menu.sections.reduce((count, section) => count + section.items.length, 0)} items.
+                  Once approved it can be published to customers.
+                </p>
+              }
+              onApprove={() =>
+                void send(
+                  {
+                    action: "Approve",
+                    operationReference: newOperationReference(),
+                    menuReference: menu.menuReference,
+                    menuVersionReference: menu.versionReference,
+                    expectedVersion: publication.lifecycleVersion,
+                    snapshotDigest: publication.snapshotDigest,
+                    approvalMode: "SoleOperator",
+                  },
+                  "Approved.",
+                )
+              }
+            />
           ) : (
             <p>
               {view.submittedBy === view.viewer

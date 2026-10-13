@@ -5837,6 +5837,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
     AllergenUndeclared: 409,
     LineInvalid: 422,
     Invalid: 400,
+    SoleOperatorNotInEffect: 409,
+    NeedsReverification: 409,
   } as const;
   const recipeFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof MerchantRecipeError)) {
@@ -5979,6 +5981,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
     AlreadyAssigned: 409,
     Lifecycle: 409,
     Invalid: 400,
+    SoleOperatorNotInEffect: 409,
+    NeedsReverification: 409,
   } as const;
   const priceFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof MerchantPriceError)) {
@@ -6048,6 +6052,9 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
     Conflict: 409,
     RegistryMissing: 409,
     Invalid: 400,
+    ApprovalRequired: 403,
+    SoleOperatorNotInEffect: 409,
+    NeedsReverification: 409,
   } as const;
   const allergenFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof MerchantAllergenError)) {
@@ -6122,6 +6129,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
     ApprovalRequired: 403,
     Lifecycle: 409,
     Invalid: 400,
+    SoleOperatorNotInEffect: 409,
+    NeedsReverification: 409,
   } as const;
   const menuFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof MerchantMenuError)) {

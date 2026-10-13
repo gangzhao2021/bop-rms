@@ -95,3 +95,23 @@ export async function confirmActiveBrandMembers(
     scope.actorReferences.length > 0 && scope.actorReferences.every((actor) => active.has(actor))
   );
 }
+
+/** WP-2423 Q19: of the given Actors, those holding an Active Brand Membership at the instant. */
+export async function activeBrandMemberActors(
+  tx: StoreMemberScopeTransaction,
+  scope: {
+    readonly brandReference: string;
+    readonly actorReferences: readonly string[];
+    readonly at: string;
+  },
+): Promise<readonly string[]> {
+  if (scope.actorReferences.length === 0) return Object.freeze([]);
+  await tx.query("SELECT set_config('bop.brand_id',$1,true)", [scope.brandReference]);
+  const result = await tx.query(
+    `SELECT DISTINCT m.actor_id::text actor FROM bop_membership.membership m
+     WHERE m.brand_id=$1 AND m.actor_id=ANY($2::uuid[]) AND m.lifecycle='Active'
+       AND m.effective_from<=$3::timestamptz AND (m.effective_until IS NULL OR m.effective_until>$3::timestamptz)`,
+    [scope.brandReference, [...scope.actorReferences], scope.at],
+  );
+  return Object.freeze(result.rows.map((row) => String(row.actor)).sort());
+}

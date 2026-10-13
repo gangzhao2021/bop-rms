@@ -3,6 +3,8 @@ import {
   allergenDeclarationSources,
   createAllergenRegistryVersion,
   currentAllergenRegistry,
+  pendingAllergenRegistryProposal,
+  recordAllergenRegistryProposal,
   listCurrentIngredientDeclarations,
   listIngredientDeclarationHistory,
   recordIngredientAllergenDeclaration,
@@ -13,6 +15,11 @@ import type { MerchantBffService } from "./merchant-bff.js";
 import { derivedReference } from "./merchant-products.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
+import {
+  merchantBrandSoleOperatorGate,
+  MerchantSoleOperatorGateError,
+  requireMerchantBrandSoleOperator,
+} from "./merchant-sole-operator.js";
 
 /**
  * WP-2423 / DEC-ALLERGEN-DECLARATIONS: CMP-ALLERGEN-REVIEW for the selected Store's Brand. Reading needs
@@ -24,7 +31,16 @@ import { retryTransactionConflict } from "./transaction-conflict-retry.js";
  */
 export class MerchantAllergenError extends Error {
   constructor(
-    readonly code: "PermissionDenied" | "NotFound" | "Conflict" | "RegistryMissing" | "Invalid",
+    readonly code:
+      | "PermissionDenied"
+      | "NotFound"
+      | "Conflict"
+      | "RegistryMissing"
+      | "Invalid"
+      /** WP-2423 Q19: the person who recorded the roster cannot approve it. */
+      | "ApprovalRequired"
+      | "SoleOperatorNotInEffect"
+      | "NeedsReverification",
   ) {
     super(code);
     this.name = "MerchantAllergenError";
@@ -69,9 +85,17 @@ export const canadaPriorityAllergensTest = Object.freeze({
 
 export type AllergenCommandBody =
   | {
-      readonly action: "ApproveRegistry";
+      /** WP-2423 Q19: one person records the roster to approve. */
+      readonly action: "RecordRegistry";
       readonly operationReference: string;
       readonly template: "CA_PRIORITY_TEST";
+    }
+  | {
+      /** Another person approves the recorded roster (or its recorder alone as sole operator). */
+      readonly action: "ApproveRegistry";
+      readonly operationReference: string;
+      readonly proposalReference: string;
+      readonly approvalMode?: "SoleOperator";
     }
   | {
       readonly action: "Declare";
@@ -92,14 +116,31 @@ export function parseAllergenCommandBody(value: unknown): AllergenCommandBody {
   if (r === null || typeof r !== "object" || Array.isArray(r)) return fail("Invalid");
   const keys = Object.keys(r).sort().join(",");
   if (
-    r.action === "ApproveRegistry" &&
+    r.action === "RecordRegistry" &&
     keys === "action,operationReference,template" &&
     r.template === "CA_PRIORITY_TEST"
   )
     return {
-      action: "ApproveRegistry",
+      action: "RecordRegistry",
       operationReference: ref(r.operationReference),
       template: "CA_PRIORITY_TEST",
+    };
+  if (r.action === "ApproveRegistry" && keys === "action,operationReference,proposalReference")
+    return {
+      action: "ApproveRegistry",
+      operationReference: ref(r.operationReference),
+      proposalReference: ref(r.proposalReference),
+    };
+  if (
+    r.action === "ApproveRegistry" &&
+    keys === "action,approvalMode,operationReference,proposalReference" &&
+    r.approvalMode === "SoleOperator"
+  )
+    return {
+      action: "ApproveRegistry",
+      operationReference: ref(r.operationReference),
+      proposalReference: ref(r.proposalReference),
+      approvalMode: "SoleOperator",
     };
   if (
     r.action === "Declare" &&
@@ -150,6 +191,7 @@ const declarationErrors: Record<AllergenDeclarationError["code"], MerchantAllerg
   ALLERGEN_REGISTRY_UNAVAILABLE: "RegistryMissing",
   ALLERGEN_DECLARATION_INVALID: "Invalid",
   ALLERGEN_IDEMPOTENCY_CONFLICT: "Conflict",
+  ALLERGEN_INDEPENDENT_APPROVAL_REQUIRED: "ApprovalRequired",
 };
 
 /** The last local date a declaration is valid on (its validity ends at the next local midnight). */
@@ -250,11 +292,42 @@ export function createMerchantAllergens(options: {
             declaration: d,
           };
         });
+        // WP-2423 Q19: a roster recorded and waiting for another person's approval; its recorder
+        // sees whether they may approve it alone as sole operator, and why not.
+        const proposal = await pendingAllergenRegistryProposal(reads(tx), s.owner);
+        const gate =
+          proposal !== null &&
+          proposal.recorderReference === s.actor &&
+          s.permissions.mayManageRegistry
+            ? await merchantBrandSoleOperatorGate(tx as never, {
+                ...s.owner,
+                actorReference: s.actor,
+                permissionCode: "catalog.allergen_registry.manage",
+                observedAt: at,
+                allowed: async () => s.permissions.mayManageRegistry,
+              })
+            : null;
         const base = {
           sourceAsOf: at,
           viewer: s.actor,
           permissions: s.permissions,
           locale: options.locale,
+          registryProposal:
+            proposal === null
+              ? null
+              : {
+                  proposalReference: proposal.proposalReference,
+                  recordedAt: proposal.recordedAt,
+                  recordedByYou: proposal.recorderReference === s.actor,
+                },
+          soleOperator:
+            gate === null
+              ? null
+              : {
+                  status: gate.status,
+                  otherApprovers: gate.otherApprovers,
+                  verifiedUntil: gate.verifiedUntil,
+                },
           registry,
           registryTemplate: {
             template: "CA_PRIORITY_TEST" as const,
@@ -292,15 +365,15 @@ export function createMerchantAllergens(options: {
         const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
         const at = options.persistence.now();
         try {
-          if (body.action === "ApproveRegistry") {
-            if (!s.permissions.mayManageRegistry) fail("PermissionDenied");
-            // Allergens keep their identity across registry versions.
+          // The roster content for a target registry version: allergens keep their identity
+          // across registry versions; new ones derive from the target version.
+          const rosterFor = async (registryVersionReference: string) => {
             const existing = await currentAllergenRegistry(reads(tx), s.owner);
             const idOf = (code: string) =>
               existing?.entries.find((entry) => entry.code === code)?.allergenReference ??
-              derivedReference(body.operationReference, "allergen:" + code);
-            const result = await createAllergenRegistryVersion(reads(tx), s.owner, {
-              registryVersionReference: derivedReference(body.operationReference, "registry"),
+              derivedReference(registryVersionReference, "allergen:" + code);
+            return {
+              registryVersionReference,
               jurisdictionCode: canadaPriorityAllergensTest.jurisdictionCode,
               policyDocument: canadaPriorityAllergensTest.policyDocument,
               entries: canadaPriorityAllergensTest.entries.map(([code, en, fr]) => ({
@@ -308,9 +381,59 @@ export function createMerchantAllergens(options: {
                 code,
                 localizedNames: { "en-CA": en, "fr-CA": fr },
               })),
+            };
+          };
+          if (body.action === "RecordRegistry") {
+            if (!s.permissions.mayManageRegistry) fail("PermissionDenied");
+            const result = await recordAllergenRegistryProposal(reads(tx), s.owner, {
+              ...(await rosterFor(derivedReference(body.operationReference, "registry"))),
+              proposalReference: derivedReference(body.operationReference, "proposal"),
               actorReference: s.actor,
               at,
               auditReference: derivedReference(body.operationReference, "audit"),
+            });
+            return { status: result.status, proposalReference: result.proposalReference };
+          }
+          if (body.action === "ApproveRegistry") {
+            if (!s.permissions.mayManageRegistry) fail("PermissionDenied");
+            const pending = await pendingAllergenRegistryProposal(reads(tx), s.owner);
+            const replayed = (
+              await (
+                tx as unknown as {
+                  query(sql: string, values: readonly unknown[]): Promise<{ rows: unknown[] }>;
+                }
+              ).query(
+                "SELECT registry_version_id::text version FROM rms_catalog.allergen_registry_proposal WHERE brand_id=$1 AND proposal_id=$2",
+                [s.owner.brandReference, body.proposalReference],
+              )
+            ).rows[0] as { version: string } | undefined;
+            if (replayed === undefined) return fail("NotFound");
+            if (pending !== null && pending.proposalReference !== body.proposalReference)
+              return fail("Conflict");
+            // WP-2423 Q19: the recorder approves alone only as an in-effect, re-verified sole operator.
+            const soleOperator =
+              body.approvalMode === "SoleOperator" && pending !== null
+                ? {
+                    approverMfaAt: (
+                      await requireMerchantBrandSoleOperator(tx as never, {
+                        ...s.owner,
+                        actorReference: s.actor,
+                        permissionCode: "catalog.allergen_registry.manage",
+                        observedAt: at,
+                        allowed: async () => s.permissions.mayManageRegistry,
+                      })
+                    ).actorMfaAt,
+                  }
+                : undefined;
+            const result = await createAllergenRegistryVersion(reads(tx), s.owner, {
+              ...(await rosterFor(replayed.version)),
+              actorReference: s.actor,
+              at,
+              auditReference: derivedReference(body.operationReference, "audit"),
+              proposal: {
+                proposalReference: body.proposalReference,
+                ...(soleOperator === undefined ? {} : { soleOperator }),
+              },
             });
             return {
               status: result.status,
@@ -352,6 +475,10 @@ export function createMerchantAllergens(options: {
           return { status: result.status, declaration: result.declaration };
         } catch (error) {
           if (error instanceof AllergenDeclarationError) return fail(declarationErrors[error.code]);
+          if (error instanceof MerchantSoleOperatorGateError)
+            return fail(
+              error.code === "NotInEffect" ? "SoleOperatorNotInEffect" : "NeedsReverification",
+            );
           throw error;
         }
       }),

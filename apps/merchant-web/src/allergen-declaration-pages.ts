@@ -1,3 +1,4 @@
+import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
 /** WP-2423 / DEC-ALLERGEN-DECLARATIONS: CMP-ALLERGEN-REVIEW view contract and same-origin client. */
 export type AllergenErrorCode =
   | "PermissionDenied"
@@ -5,6 +6,9 @@ export type AllergenErrorCode =
   | "Conflict"
   | "RegistryMissing"
   | "Invalid"
+  | "ApprovalRequired"
+  | "SoleOperatorNotInEffect"
+  | "NeedsReverification"
   | "Offline"
   | "Unavailable";
 export class AllergenPageError extends Error {
@@ -64,6 +68,14 @@ interface AllergenViewBase {
     readonly mayManageRegistry: boolean;
   };
   readonly registry: AllergenRegistryView | null;
+  /** WP-2423 Q19: a list recorded by someone and waiting for another person's approval. */
+  readonly registryProposal: {
+    readonly proposalReference: string;
+    readonly recordedAt: string;
+    readonly recordedByYou: boolean;
+  } | null;
+  /** WP-2423 Q19: for its recorder: may they approve it alone as sole operator, and why not. */
+  readonly soleOperator: SoleOperatorGateView | null;
   readonly registryTemplate: {
     readonly template: "CA_PRIORITY_TEST";
     readonly jurisdictionCode: string;
@@ -83,9 +95,15 @@ export interface AllergenItemView extends AllergenViewBase {
 }
 export type AllergenCommand =
   | {
-      readonly action: "ApproveRegistry";
+      readonly action: "RecordRegistry";
       readonly operationReference: string;
       readonly template: "CA_PRIORITY_TEST";
+    }
+  | {
+      readonly action: "ApproveRegistry";
+      readonly operationReference: string;
+      readonly proposalReference: string;
+      readonly approvalMode?: "SoleOperator";
     }
   | {
       readonly action: "Declare";
@@ -122,7 +140,11 @@ export function parseAllergenListView(value: unknown): AllergenListView {
   const r = object(value);
   if (!base(r) || r.screenId !== "CMP-ALLERGEN-REVIEW" || !Array.isArray(r.items))
     throw new Error("ALLERGEN_PAGE_INVALID");
-  return r as unknown as AllergenListView;
+  return {
+    ...r,
+    registryProposal: r.registryProposal ?? null,
+    soleOperator: parseSoleOperatorGate(r.soleOperator),
+  } as unknown as AllergenListView;
 }
 export function parseAllergenItemView(value: unknown): AllergenItemView {
   const r = object(value);
@@ -185,6 +207,9 @@ const codes = new Set<AllergenErrorCode>([
   "Conflict",
   "RegistryMissing",
   "Invalid",
+  "ApprovalRequired",
+  "SoleOperatorNotInEffect",
+  "NeedsReverification",
 ]);
 export function createAllergenClient(csrf: string, fetcher: typeof fetch = fetch): AllergenClient {
   const post = async (path: string, body: unknown) => {

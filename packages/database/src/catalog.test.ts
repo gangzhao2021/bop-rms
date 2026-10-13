@@ -675,6 +675,10 @@ describe("migration catalog", () => {
       "2000_030_create_ordinary_refund_decline",
       "2000_031_create_brand_sole_operator_setting",
       "2000_032_alter_ordinary_refund_approval_mode",
+      "2000_033_create_price_book_sole_operator_approval",
+      "2000_034_create_menu_sole_operator_approval",
+      "2000_035_alter_recipe_review_mode",
+      "2000_036_create_allergen_registry_proposal",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

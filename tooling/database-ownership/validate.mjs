@@ -1072,6 +1072,17 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "bop_tenant" &&
           module.manifest.ownedDatabase?.tables?.includes("brand_sole_operator_setting") &&
           moduleRelative === "src/infrastructure/persistence/sole-operator-setting-store.ts";
+        // WP-2423 Q19 step 2: sole-operator approval marks (price book publication, menu approval).
+        const acceptedPriceBookSoleOperatorAsset =
+          module.packageName === "@rms/pricing" &&
+          module.manifest.ownedDatabase?.schema === "rms_pricing" &&
+          module.manifest.ownedDatabase?.tables?.includes("price_book_sole_operator_approval") &&
+          moduleRelative === "src/infrastructure/persistence/price-book-sole-operator-store.ts";
+        const acceptedMenuSoleOperatorAsset =
+          module.packageName === "@rms/catalog" &&
+          module.manifest.ownedDatabase?.schema === "rms_catalog" &&
+          module.manifest.ownedDatabase?.tables?.includes("menu_sole_operator_approval") &&
+          moduleRelative === "src/infrastructure/persistence/menu-sole-operator-store.ts";
         const acceptedBrowserSessionStoreAsset =
           module.packageName === "@bop/identity" &&
           module.manifest.ownedDatabase?.schema === "bop_identity" &&
@@ -3282,6 +3293,8 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedTenantStoreReferenceAsset &&
           !acceptedMerchantOrganizationAsset &&
           !acceptedBrandSoleOperatorSettingAsset &&
+          !acceptedPriceBookSoleOperatorAsset &&
+          !acceptedMenuSoleOperatorAsset &&
           !acceptedBrandLifecycleAsset &&
           !acceptedBrandConfigurationAuthoringAsset &&
           !acceptedPlatformBrandTemplateAsset &&

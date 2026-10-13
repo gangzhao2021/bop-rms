@@ -19,6 +19,10 @@ import { derivedReference } from "./merchant-products.js";
 import { createPriceBookDraftAuthorSource } from "./price-book-draft-author-source.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
+import {
+  merchantBrandSoleOperatorGate,
+  MerchantSoleOperatorGateError,
+} from "./merchant-sole-operator.js";
 
 /**
  * WP-2423 / DEC-PRICE-STORE-ASSIGNMENT: PRICE-BOOK-LIST / PRICE-BOOK-EDITOR. Brand price books are drafted
@@ -40,7 +44,11 @@ export class MerchantPriceError extends Error {
       | "NotPublished"
       | "AlreadyAssigned"
       | "Lifecycle"
-      | "Invalid",
+      | "Invalid"
+      /** WP-2423 Q19: the author asked to publish alone, but sole operator is not in effect. */
+      | "SoleOperatorNotInEffect"
+      /** WP-2423 Q19: publishing alone needs a second-factor check in the last 15 minutes. */
+      | "NeedsReverification",
     readonly sellableReferences: readonly string[] = [],
   ) {
     super(code);
@@ -85,6 +93,8 @@ export type PriceCommandBody =
       readonly operationReference: string;
       readonly priceBookReference: string;
       readonly expectedAggregateVersion: number;
+      /** WP-2423 Q19: the author publishes alone as sole operator (explicitly confirmed). */
+      readonly approvalMode?: "SoleOperator";
     }
   | {
       readonly action: "AssignToStore";
@@ -138,6 +148,18 @@ export function parsePriceCommandBody(value: unknown): PriceCommandBody {
       operationReference: ref(r.operationReference),
       priceBookReference: ref(r.priceBookReference),
       expectedAggregateVersion: version(r.expectedAggregateVersion),
+    };
+  if (
+    r.action === "Publish" &&
+    keys === "action,approvalMode,expectedAggregateVersion,operationReference,priceBookReference" &&
+    r.approvalMode === "SoleOperator"
+  )
+    return {
+      action: "Publish",
+      operationReference: ref(r.operationReference),
+      priceBookReference: ref(r.priceBookReference),
+      expectedAggregateVersion: version(r.expectedAggregateVersion),
+      approvalMode: "SoleOperator",
     };
   if (r.action === "AssignToStore" && keys === "action,operationReference,priceBookReference")
     return {
@@ -228,6 +250,7 @@ export function createMerchantPrices(options: {
       timeZone: scope.selectedStoreTimeZone,
       actor: String(scope.actorReference),
       permissions,
+      mayApproveNow: async () => await may("pricing.price-book.approve"),
     };
   }
   type Owner = Awaited<ReturnType<typeof scopeFor>>["owner"];
@@ -345,11 +368,36 @@ export function createMerchantPrices(options: {
                   repository: () => repository(tx, s.owner),
                 }).load(tx as never, snapshot.priceBookReference)
               : null;
+          // WP-2423 Q19: the author who may approve sees whether they may publish alone and why.
+          const gate =
+            author !== null && String(author.actorReference) === s.actor && s.permissions.mayApprove
+              ? await merchantBrandSoleOperatorGate(tx as never, {
+                  tenantReference: s.owner.tenantReference,
+                  brandReference: s.owner.brandReference,
+                  storeReference: s.owner.storeReference,
+                  actorReference: s.actor,
+                  permissionCode: "pricing.price-book.approve",
+                  observedAt: at,
+                  allowed: s.mayApproveNow,
+                })
+              : null;
+          await reads(tx).query(
+            "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)",
+            [s.owner.brandReference],
+          );
           return {
             screenId: "PRICE-BOOK-EDITOR" as const,
             ...base,
             book: bookView(snapshot),
             draftAuthor: author?.actorReference ?? null,
+            soleOperator:
+              gate === null
+                ? null
+                : {
+                    status: gate.status,
+                    otherApprovers: gate.otherApprovers,
+                    verifiedUntil: gate.verifiedUntil,
+                  },
             uncovered:
               snapshot.lifecycle === "Archived" ? [] : await uncovered(tx, s.owner, snapshot, at),
           };
@@ -532,6 +580,9 @@ export function createMerchantPrices(options: {
           csrf: input.csrf,
           action: prepared.action,
           input: prepared.transport,
+          ...(body.action === "Publish" && body.approvalMode === "SoleOperator"
+            ? { approvalMode: "SoleOperator" as const }
+            : {}),
         });
         return {
           status: result.status,
@@ -542,6 +593,10 @@ export function createMerchantPrices(options: {
       } catch (error) {
         if (error instanceof PriceBookWorkflowError)
           return fail(workflowErrors[error.code] ?? "Invalid");
+        if (error instanceof MerchantSoleOperatorGateError)
+          return fail(
+            error.code === "NotInEffect" ? "SoleOperatorNotInEffect" : "NeedsReverification",
+          );
         throw error;
       }
     }

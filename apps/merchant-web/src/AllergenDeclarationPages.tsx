@@ -3,6 +3,7 @@ import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { newOperationReference } from "./RoleAdministrationPages.js";
+import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
 import {
   AllergenPageError,
   allergenName,
@@ -31,6 +32,11 @@ const copy: Record<AllergenErrorCode | "Loading", string> = {
   RegistryMissing: "Approve the Brand allergen list before declaring ingredients.",
   Invalid:
     "The declaration is not valid. Choose where it comes from, name the document and give a future valid-until date.",
+  ApprovalRequired:
+    "You recorded this list: someone else holding allergen list approval approves it.",
+  SoleOperatorNotInEffect:
+    "Someone else now holds allergen list approval, so they must approve this list. Refresh to see who.",
+  NeedsReverification: "Confirm it is you with your authenticator code, then approve again.",
   Offline: "Offline. Nothing was confirmed; retry sends the same request again.",
   Unavailable: "Allergens are unavailable.",
 };
@@ -109,8 +115,11 @@ function useCommand(client: AllergenClient, onDone: () => void) {
 
 export function AllergenListPage({
   client = unavailableAllergenClient,
+  csrf,
 }: {
   readonly client?: AllergenClient;
+  /** For the second-factor check of a sole operator's own approval. */
+  readonly csrf?: string;
 }) {
   const { state, reload } = useAllergenView(client, null, parseAllergenListView);
   const { send, busy, pending, message } = useCommand(client, reload);
@@ -161,7 +170,54 @@ export function AllergenListPage({
               {view.registryTemplate.allergens.map((a) => a.name).join(", ")}.
             </p>
             <p>{view.registryTemplate.policyDocument}</p>
-            {view.permissions.mayManageRegistry ? (
+            {/* WP-2423 Q19: one person records the list, another approves it. */}
+            {!view.permissions.mayManageRegistry ? (
+              <p>Someone holding allergen list approval must record and approve it.</p>
+            ) : view.registryProposal === null ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  void send(
+                    {
+                      action: "RecordRegistry",
+                      operationReference: newOperationReference(),
+                      template: "CA_PRIORITY_TEST",
+                    },
+                    "Allergen list recorded. Someone else holding allergen list approval approves it.",
+                  )
+                }
+              >
+                {pending ? "Retry" : "Record this allergen list for approval"}
+              </button>
+            ) : view.registryProposal.recordedByYou ? (
+              <SoleOperatorSelfApproval
+                gate={view.soleOperator}
+                csrf={csrf}
+                what="this allergen list"
+                permissionName="allergen list approval"
+                busy={busy}
+                actionLabel={pending ? "Retry" : "Approve this list on my own"}
+                summary={
+                  <p>
+                    {view.registryTemplate.jurisdictionCode} list of{" "}
+                    {view.registryTemplate.allergens.length} allergens, recorded by you{" "}
+                    <SourceTime instant={view.registryProposal.recordedAt} />.
+                  </p>
+                }
+                onApprove={() =>
+                  void send(
+                    {
+                      action: "ApproveRegistry",
+                      operationReference: newOperationReference(),
+                      proposalReference: view.registryProposal?.proposalReference ?? "",
+                      approvalMode: "SoleOperator",
+                    },
+                    "Allergen list approved.",
+                  )
+                }
+              />
+            ) : (
               <button
                 type="button"
                 disabled={busy}
@@ -170,16 +226,14 @@ export function AllergenListPage({
                     {
                       action: "ApproveRegistry",
                       operationReference: newOperationReference(),
-                      template: "CA_PRIORITY_TEST",
+                      proposalReference: view.registryProposal?.proposalReference ?? "",
                     },
                     "Allergen list approved.",
                   )
                 }
               >
-                {pending ? "Retry" : "Approve this allergen list"}
+                {pending ? "Retry" : "Approve the recorded allergen list"}
               </button>
-            ) : (
-              <p>Someone holding allergen list approval must approve it.</p>
             )}
           </>
         )}

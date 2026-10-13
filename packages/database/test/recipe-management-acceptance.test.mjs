@@ -1374,6 +1374,11 @@ async function prove(context) {
       assert.equal(menuFaultHits, 2);
       assert.deepEqual(await creationCounts(), afterHttp);
       menuFault = false;
+      // WP-2423 Q19: the submitter cannot approve their own review on the server; nothing changes.
+      menuActor = id(3);
+      assert.equal((await post(approvalBody)).status, 403);
+      assert.deepEqual(await creationCounts(), afterHttp);
+      menuActor = id(14001);
       const approved = await post(approvalBody);
       assert.equal(approved.status, 200);
       assert.equal(approved.body.state, "Approved");

@@ -19,7 +19,9 @@ export type AllergenDeclarationErrorCode =
   | "ALLERGEN_REGISTRY_INVALID"
   | "ALLERGEN_REGISTRY_UNAVAILABLE"
   | "ALLERGEN_DECLARATION_INVALID"
-  | "ALLERGEN_IDEMPOTENCY_CONFLICT";
+  | "ALLERGEN_IDEMPOTENCY_CONFLICT"
+  /** WP-2423 Q19: the person who recorded the roster cannot approve it (unless sole operator). */
+  | "ALLERGEN_INDEPENDENT_APPROVAL_REQUIRED";
 export class AllergenDeclarationError extends Error {
   constructor(readonly code: AllergenDeclarationErrorCode) {
     super(code);
@@ -132,6 +134,13 @@ export async function createAllergenRegistryVersion(
     readonly actorReference: string;
     readonly at: string;
     readonly auditReference: string;
+    /** WP-2423 Q19: approval of a recorded roster (two-person rule). The recorder approves only
+     * alone as sole operator (`soleOperator`, read by the caller in this transaction). Absent:
+     * a registry seeded without a recorder (history and test fixtures). */
+    readonly proposal?: {
+      readonly proposalReference: string;
+      readonly soleOperator?: { readonly approverMfaAt: string };
+    };
   },
 ): Promise<{ readonly status: "Applied" | "AlreadyApplied"; readonly registry: AllergenRegistry }> {
   const brand = parseCatalogReference(scope.brandReference);
@@ -176,9 +185,43 @@ export async function createAllergenRegistryVersion(
     if (current === null) return fail("ALLERGEN_REGISTRY_UNAVAILABLE");
     return { status: "AlreadyApplied", registry: current };
   }
+  // Two-person rule: the recorded roster (exact content) is approved by someone else, or by its
+  // recorder alone as sole operator; the mark is never used for someone else's roster.
+  let recorder: string | null = null;
+  const sole = input.proposal?.soleOperator !== undefined;
+  if (input.proposal !== undefined) {
+    const proposal = (
+      await tx.query(
+        "SELECT registry_version_id::text version,jurisdiction_code,policy_document_digest,recorder_actor_id::text recorder FROM rms_catalog.allergen_registry_proposal WHERE brand_id=$1 AND proposal_id=$2",
+        [brand, parseCatalogReference(input.proposal.proposalReference)],
+      )
+    ).rows[0];
+    if (
+      proposal === undefined ||
+      proposal.version !== version ||
+      proposal.jurisdiction_code !== jurisdiction ||
+      proposal.policy_document_digest !== policyDigest
+    )
+      return fail("ALLERGEN_REGISTRY_UNAVAILABLE");
+    recorder = String(proposal.recorder);
+    if (recorder === input.actorReference && !sole)
+      return fail("ALLERGEN_INDEPENDENT_APPROVAL_REQUIRED");
+    if (recorder !== input.actorReference && sole) return fail("ALLERGEN_REGISTRY_INVALID");
+  }
   await tx.query(
-    "INSERT INTO rms_catalog.allergen_registry_version(registry_version_id,brand_id,jurisdiction_code,policy_document_digest,reviewed_at,reviewer_actor_id,status) VALUES($1,$2,$3,$4,$5,$6,'Approved')",
-    [version, brand, jurisdiction, policyDigest, input.at, input.actorReference],
+    "INSERT INTO rms_catalog.allergen_registry_version(registry_version_id,brand_id,jurisdiction_code,policy_document_digest,reviewed_at,reviewer_actor_id,status,proposal_id,recorder_actor_id,approval_mode,approver_mfa_at) VALUES($1,$2,$3,$4,$5,$6,'Approved',$7,$8,$9,$10)",
+    [
+      version,
+      brand,
+      jurisdiction,
+      policyDigest,
+      input.at,
+      input.actorReference,
+      input.proposal === undefined ? null : parseCatalogReference(input.proposal.proposalReference),
+      recorder,
+      sole ? "SoleOperator" : "Independent",
+      input.proposal?.soleOperator?.approverMfaAt ?? null,
+    ],
   );
   for (const entry of entries)
     await tx.query(
@@ -196,12 +239,127 @@ export async function createAllergenRegistryVersion(
       operation: version,
       at: input.at,
       auditReference: input.auditReference,
-      afterSummary: { jurisdictionCode: jurisdiction, entries: entries.length },
+      afterSummary: {
+        jurisdictionCode: jurisdiction,
+        entries: entries.length,
+        ...(sole ? { approvalMode: "SoleOperator" } : {}),
+      },
     }),
   );
   const current = await currentAllergenRegistry(tx, { brandReference: brand });
   if (current?.registryVersionReference !== version) return fail("ALLERGEN_REGISTRY_UNAVAILABLE");
   return { status: "Applied", registry: current };
+}
+
+/**
+ * WP-2423 Q19: one person records the roster to be approved (its exact content, bound by digest)
+ * as the target registry version. Idempotent per proposal reference; append-only with Audit.
+ */
+export async function recordAllergenRegistryProposal(
+  tx: Tx,
+  scope: { readonly brandReference: string },
+  input: {
+    readonly proposalReference: string;
+    readonly registryVersionReference: string;
+    readonly jurisdictionCode: string;
+    readonly policyDocument: string;
+    readonly entries: readonly {
+      readonly allergenReference: string;
+      readonly code: string;
+      readonly localizedNames: Readonly<Record<string, string>>;
+    }[];
+    readonly actorReference: string;
+    readonly at: string;
+    readonly auditReference: string;
+  },
+): Promise<{ readonly status: "Applied" | "AlreadyApplied"; readonly proposalReference: string }> {
+  const brand = parseCatalogReference(scope.brandReference);
+  const proposal = parseCatalogReference(input.proposalReference);
+  const version = parseCatalogReference(input.registryVersionReference);
+  const jurisdiction = parseCatalogCode(input.jurisdictionCode);
+  const entries = input.entries.map((entry) => ({
+    allergenReference: parseCatalogReference(entry.allergenReference),
+    code: parseCatalogCode(entry.code),
+    localizedNames: entry.localizedNames,
+  }));
+  if (entries.length < 1 || entries.length > 64 || input.policyDocument.trim().length < 1)
+    return fail("ALLERGEN_REGISTRY_INVALID");
+  const policyDigest = digest({ jurisdiction, policy: input.policyDocument.trim(), entries });
+  await brandScope(tx, brand);
+  const prior = (
+    await tx.query(
+      "SELECT registry_version_id::text version,policy_document_digest,recorder_actor_id::text recorder FROM rms_catalog.allergen_registry_proposal WHERE brand_id=$1 AND proposal_id=$2",
+      [brand, proposal],
+    )
+  ).rows[0];
+  if (prior !== undefined) {
+    if (
+      prior.version !== version ||
+      prior.policy_document_digest !== policyDigest ||
+      prior.recorder !== input.actorReference
+    )
+      return fail("ALLERGEN_IDEMPOTENCY_CONFLICT");
+    return { status: "AlreadyApplied", proposalReference: proposal };
+  }
+  await tx.query(
+    "INSERT INTO rms_catalog.allergen_registry_proposal(proposal_id,brand_id,registry_version_id,jurisdiction_code,policy_document_digest,recorder_actor_id,recorded_at,audit_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",
+    [
+      proposal,
+      brand,
+      version,
+      jurisdiction,
+      policyDigest,
+      input.actorReference,
+      input.at,
+      input.auditReference,
+    ],
+  );
+  await appendAuditRecordInTransaction(
+    tx,
+    audit({
+      brand,
+      actor: input.actorReference,
+      actionCode: "CATALOG_ALLERGEN_REGISTRY_RECORD",
+      targetType: "CatalogAllergenRegistry",
+      targetId: version,
+      operation: proposal,
+      at: input.at,
+      auditReference: input.auditReference,
+      afterSummary: { jurisdictionCode: jurisdiction, entries: entries.length },
+    }),
+  );
+  return { status: "Applied", proposalReference: proposal };
+}
+/** WP-2423 Q19: the latest recorded roster not yet approved, if any. */
+export async function pendingAllergenRegistryProposal(
+  tx: Tx,
+  scope: { readonly brandReference: string },
+): Promise<{
+  readonly proposalReference: string;
+  readonly registryVersionReference: string;
+  readonly recorderReference: string;
+  readonly recordedAt: string;
+} | null> {
+  const brand = parseCatalogReference(scope.brandReference);
+  await brandScope(tx, brand);
+  const row = (
+    await tx.query(
+      `SELECT p.proposal_id::text proposal,p.registry_version_id::text version,p.recorder_actor_id::text recorder,
+        ${iso("p.recorded_at")} recorded_at
+       FROM rms_catalog.allergen_registry_proposal p
+       WHERE p.brand_id=$1 AND NOT EXISTS (SELECT 1 FROM rms_catalog.allergen_registry_version v
+         WHERE v.brand_id=p.brand_id AND v.proposal_id=p.proposal_id)
+       ORDER BY p.recorded_at DESC,p.proposal_id DESC LIMIT 1`,
+      [brand],
+    )
+  ).rows[0];
+  if (row === undefined) return null;
+  return Object.freeze({
+    proposalReference: String(row.proposal),
+    registryVersionReference: String(row.version),
+    recorderReference: String(row.recorder),
+    recordedAt: String(row.recorded_at),
+  });
 }
 
 export const allergenDeclarationSources = [

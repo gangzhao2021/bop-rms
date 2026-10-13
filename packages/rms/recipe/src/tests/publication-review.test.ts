@@ -164,4 +164,28 @@ describe("Recipe publication evidence", () => {
         expect.objectContaining({ code: "RECIPE_INPUT_INVALID" }),
       );
   });
+  it("WP-2423 Q19: accepts the author giving both reviews only when both are marked SoleOperator", () => {
+    const author = evidence.draftAuthorActorReference;
+    const sole = {
+      ...evidence,
+      reviews: evidence.reviews.map((review) => ({
+        ...review,
+        reviewerActorReference: author,
+        reviewMode: "SoleOperator" as const,
+      })),
+    };
+    expect(parseRecipePublicationEvidence(sole, target)).toEqual(sole);
+    const [first, second] = sole.reviews;
+    if (!first || !second) throw new Error("fixture");
+    const { reviewMode: _dropped, ...unmarked } = second;
+    void _dropped;
+    for (const reviews of [
+      [first, unmarked],
+      [first, { ...second, reviewMode: "Independent" }],
+      [{ ...first, reviewerActorReference: evidence.reviews[0]?.reviewerActorReference }, unmarked],
+    ])
+      expect(() => parseRecipePublicationEvidence({ ...evidence, reviews }, target)).toThrowError(
+        expect.objectContaining({ code: "RECIPE_INPUT_INVALID" }),
+      );
+  });
 });

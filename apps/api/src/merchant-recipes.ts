@@ -1,4 +1,9 @@
 import {
+  merchantBrandSoleOperatorGate,
+  MerchantSoleOperatorGateError,
+  requireMerchantBrandSoleOperator,
+} from "./merchant-sole-operator.js";
+import {
   confirmActiveBrandMembers,
   listStoreMembers,
   type MemberDirectoryTransaction,
@@ -48,7 +53,11 @@ export class MerchantRecipeError extends Error {
       | "InUse"
       | "AllergenUndeclared"
       | "LineInvalid"
-      | "Invalid",
+      | "Invalid"
+      /** WP-2423 Q19: reviewing alone needs sole operator in effect for the reviewer. */
+      | "SoleOperatorNotInEffect"
+      /** WP-2423 Q19: reviewing alone needs a second-factor check in the last 15 minutes. */
+      | "NeedsReverification",
     readonly line: number | null = null,
   ) {
     super(code);
@@ -82,6 +91,8 @@ export type RecipeCommandBody =
       readonly kind: "Cost" | "FoodSafety";
       readonly decision: "Approved" | "Rejected";
       readonly comment: string | null;
+      /** WP-2423 Q19: the sole operator reviews alone (own recipe, or both kinds). */
+      readonly approvalMode?: "SoleOperator";
     }
   | {
       readonly action: "Publish" | "Archive";
@@ -127,9 +138,13 @@ export function parseRecipeCommandBody(value: unknown): RecipeCommandBody {
         draft: r.draft,
       };
     case "Review": {
+      const withMode = Object.hasOwn(r, "approvalMode");
       if (
+        (withMode && r.approvalMode !== "SoleOperator") ||
         keys !==
-          "action,comment,decision,kind,operationReference,recipeReference,subject,versionReference" ||
+          (withMode
+            ? "action,approvalMode,comment,decision,kind,operationReference,recipeReference,subject,versionReference"
+            : "action,comment,decision,kind,operationReference,recipeReference,subject,versionReference") ||
         (r.subject !== "Recipe" && r.subject !== "Preparation") ||
         (r.kind !== "Cost" && r.kind !== "FoodSafety") ||
         (r.decision !== "Approved" && r.decision !== "Rejected")
@@ -156,6 +171,7 @@ export function parseRecipeCommandBody(value: unknown): RecipeCommandBody {
         kind: r.kind,
         decision: r.decision,
         comment,
+        ...(withMode ? { approvalMode: "SoleOperator" as const } : {}),
       };
     }
     case "Publish":
@@ -211,6 +227,7 @@ const authoringErrors: Record<RecipeAuthoringError["code"], MerchantRecipeError[
   RECIPE_AUTHORING_LIFECYCLE: "Lifecycle",
   RECIPE_AUTHORING_IN_USE: "InUse",
   RECIPE_AUTHORING_ALLERGEN_UNDECLARED: "AllergenUndeclared",
+  RECIPE_AUTHORING_SOLE_OPERATOR_NOT_IN_EFFECT: "SoleOperatorNotInEffect",
 };
 
 export function createMerchantRecipes(options: {
@@ -375,11 +392,32 @@ export function createMerchantRecipes(options: {
         if (input.recipeReference !== null) {
           const detail = await loadRecipe(rtx, scope, input.recipeReference, at);
           if (detail === null) return fail("NotFound");
+          // WP-2423 Q19: a reviewer who would review their own recipe, or give the second kind,
+          // sees whether they may do it alone as sole operator and why not.
+          const gate = permissions.mayReview
+            ? await merchantBrandSoleOperatorGate(tx as never, {
+                tenantReference: scope.tenantReference,
+                brandReference: scope.brandReference,
+                storeReference: scope.storeReference,
+                actorReference: scope.actorReference,
+                permissionCode: "recipe.approve",
+                observedAt: at,
+                allowed: async () => await scope.may("recipe.approve"),
+              })
+            : null;
           return {
             screenId: "RECIPE-EDITOR" as const,
             sourceAsOf: at,
             permissions,
             viewer: scope.actorReference,
+            soleOperator:
+              gate === null
+                ? null
+                : {
+                    status: gate.status,
+                    otherApprovers: gate.otherApprovers,
+                    verifiedUntil: gate.verifiedUntil,
+                  },
             choices,
             recipe: {
               ...detail,
@@ -459,6 +497,19 @@ export function createMerchantRecipes(options: {
             actorReferences: actors,
             at,
           }));
+        // WP-2423 Q19: is sole operator in effect for this actor now (recipe review permission)?
+        const soleGate = (actor: string) =>
+          merchantBrandSoleOperatorGate(tx as never, {
+            tenantReference: scope.tenantReference,
+            brandReference: scope.brandReference,
+            storeReference: scope.storeReference,
+            actorReference: actor,
+            permissionCode: "recipe.approve",
+            observedAt: at,
+            allowed: async () => await scope.may(action),
+          });
+        const soleOperatorEffective = async (actor: string) =>
+          (await soleGate(actor)).status === "Effective";
         try {
           switch (body.action) {
             case "SaveDraft": {
@@ -481,7 +532,23 @@ export function createMerchantRecipes(options: {
                 auditReference: options.references.next(),
               });
             }
-            case "Review":
+            case "Review": {
+              const soleOperator =
+                body.approvalMode === "SoleOperator"
+                  ? {
+                      reviewerMfaAt: (
+                        await requireMerchantBrandSoleOperator(tx as never, {
+                          tenantReference: scope.tenantReference,
+                          brandReference: scope.brandReference,
+                          storeReference: scope.storeReference,
+                          actorReference: scope.actorReference,
+                          permissionCode: "recipe.approve",
+                          observedAt: at,
+                          allowed: async () => await scope.may(action),
+                        })
+                      ).actorMfaAt,
+                    }
+                  : undefined;
               return await recordRecipeReview(rtx, scope, {
                 ...writer,
                 reviewReference: body.operationReference,
@@ -492,7 +559,9 @@ export function createMerchantRecipes(options: {
                 decision: body.decision,
                 comment: body.comment,
                 auditReference: options.references.next(),
+                ...(soleOperator === undefined ? {} : { soleOperator }),
               });
+            }
             case "Publish":
               return await publishRecipe(rtx, scope, {
                 ...writer,
@@ -501,6 +570,7 @@ export function createMerchantRecipes(options: {
                 expectedAggregateVersion: body.expectedAggregateVersion,
                 facts: (await facts(tx, scope)).recipeFacts,
                 reviewersAuthorized,
+                soleOperatorEffective,
                 auditReference: options.references.next(),
               });
             case "PublishKitchen":
@@ -509,6 +579,7 @@ export function createMerchantRecipes(options: {
                 operationReference: body.operationReference,
                 recipeReference: body.recipeReference,
                 reviewersAuthorized,
+                soleOperatorEffective,
                 auditReference: options.references.next(),
               });
             case "BindSku": {
@@ -545,6 +616,10 @@ export function createMerchantRecipes(options: {
         } catch (error) {
           if (error instanceof RecipeAuthoringError)
             return fail(authoringErrors[error.code], error.line);
+          if (error instanceof MerchantSoleOperatorGateError)
+            return fail(
+              error.code === "NotInEffect" ? "SoleOperatorNotInEffect" : "NeedsReverification",
+            );
           throw error;
         }
       }),

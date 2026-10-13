@@ -3,6 +3,7 @@ import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./RoleAdministrationPages.js";
+import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
 import {
   PricePageError,
   dollarsToMinor,
@@ -35,6 +36,9 @@ const copy: Record<PriceErrorCode | "Loading", string> = {
   AlreadyAssigned: "This Store already uses this price book.",
   Lifecycle: "This step is not possible in the price book's current state.",
   Invalid: "The prices are not valid. Enter amounts like 4.50 (up to 99,999.99).",
+  SoleOperatorNotInEffect:
+    "Someone else now holds price approval, so they must publish this. Refresh to see who.",
+  NeedsReverification: "Confirm it is you with your authenticator code, then publish again.",
   Offline: "Offline. Nothing was confirmed; retry sends the same request again.",
   Unavailable: "Prices are unavailable.",
 };
@@ -259,21 +263,28 @@ export function StorePriceListPage({
 
 export function StorePriceEditorPage({
   client = unavailablePriceClient,
+  csrf,
 }: {
   readonly client?: PriceClient;
+  /** For the second-factor check of a sole operator's own publication. */
+  readonly csrf?: string;
 }) {
   const params = useParams();
   const reference = parsePriceRouteReference(params.id);
   if (reference === null) return <Failure code="NotFound" />;
-  return <PriceBookEditor key={reference} client={client} priceBookReference={reference} />;
+  return (
+    <PriceBookEditor key={reference} client={client} priceBookReference={reference} csrf={csrf} />
+  );
 }
 
 function PriceBookEditor({
   client,
   priceBookReference,
+  csrf,
 }: {
   readonly client: PriceClient;
   readonly priceBookReference: string;
+  readonly csrf: string | undefined;
 }) {
   const { state, reload } = usePriceView(client, priceBookReference, parsePriceBookEditorView);
   const [amounts, setAmounts] = useState<Record<string, string>>({});
@@ -469,12 +480,34 @@ function PriceBookEditor({
             >
               {pending?.action === "Publish" ? "Retry publish" : "Publish"}
             </button>
+          ) : view.permissions.mayApprove && authorIsViewer ? (
+            <SoleOperatorSelfApproval
+              gate={view.soleOperator}
+              csrf={csrf}
+              what="these prices"
+              permissionName="price approval"
+              busy={busy || changed || book.prices.length === 0}
+              actionLabel={pending?.action === "Publish" ? "Retry publish" : "Publish on my own"}
+              summary={
+                <p>
+                  {book.stableCode}: {book.prices.length} price
+                  {book.prices.length === 1 ? "" : "s"} in {view.currencyCode}, fixed for good once
+                  published.
+                </p>
+              }
+              onApprove={() => {
+                setMessage(null);
+                void send({
+                  action: "Publish",
+                  operationReference: newOperationReference(),
+                  priceBookReference: book.priceBookReference,
+                  expectedAggregateVersion: book.aggregateVersion,
+                  approvalMode: "SoleOperator",
+                });
+              }}
+            />
           ) : (
-            <p>
-              {authorIsViewer
-                ? "You last changed this draft: someone else must publish it."
-                : "You do not hold price approval."}
-            </p>
+            <p>You do not hold price approval.</p>
           )}
           {view.permissions.mayEdit ? (
             <button

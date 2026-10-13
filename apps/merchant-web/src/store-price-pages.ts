@@ -1,3 +1,4 @@
+import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
 /** WP-2423 / DEC-PRICE-STORE-ASSIGNMENT: PRICE-BOOK-LIST / PRICE-BOOK-EDITOR view contract and client. */
 export type PriceErrorCode =
   | "PermissionDenied"
@@ -10,6 +11,8 @@ export type PriceErrorCode =
   | "AlreadyAssigned"
   | "Lifecycle"
   | "Invalid"
+  | "SoleOperatorNotInEffect"
+  | "NeedsReverification"
   | "Offline"
   | "Unavailable";
 export class PricePageError extends Error {
@@ -82,6 +85,8 @@ export interface PriceBookEditorView extends PriceViewBase {
     readonly otherEntries: number;
   };
   readonly draftAuthor: string | null;
+  /** WP-2423 Q19: present for an author who may approve: may they publish alone, and why not. */
+  readonly soleOperator: SoleOperatorGateView | null;
   readonly uncovered: readonly string[];
 }
 export type PriceCommand =
@@ -106,6 +111,8 @@ export type PriceCommand =
       readonly operationReference: string;
       readonly priceBookReference: string;
       readonly expectedAggregateVersion: number;
+      /** WP-2423 Q19: the author publishes alone as sole operator. */
+      readonly approvalMode?: "SoleOperator";
     }
   | {
       readonly action: "AssignToStore";
@@ -147,7 +154,10 @@ export function parsePriceBookEditorView(value: unknown): PriceBookEditorView {
     !Array.isArray(r.uncovered)
   )
     throw new Error("PRICE_PAGE_INVALID");
-  return r as unknown as PriceBookEditorView;
+  return {
+    ...r,
+    soleOperator: parseSoleOperatorGate(r.soleOperator),
+  } as unknown as PriceBookEditorView;
 }
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 export const parsePriceRouteReference = (value: string | undefined): string | null =>
@@ -182,6 +192,8 @@ const codes = new Set<PriceErrorCode>([
   "AlreadyAssigned",
   "Lifecycle",
   "Invalid",
+  "SoleOperatorNotInEffect",
+  "NeedsReverification",
 ]);
 export function createPriceClient(csrf: string, fetcher: typeof fetch = fetch): PriceClient {
   const post = async (path: string, body: unknown) => {

@@ -7,6 +7,15 @@ const databaseAccessManifestInput = {
   },
   tables: [
     {
+      // WP-2423 Q19: sole-operator approval mark (append-only).
+      table: "price_book_sole_operator_approval",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "tax_config_publication_candidate",
       classification: "configuration-version",
       writeOwner: { kind: "module", id: "@rms/pricing" },
@@ -1014,6 +1023,26 @@ const databaseAccessManifestInput = {
       readPattern: null,
       source:
         "packages/rms/pricing/src/infrastructure/persistence/store-price-book-assignment-store.ts",
+    },
+    {
+      id: "price-book-sole-operator-approval.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "price_book_sole_operator_approval" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/price-book-sole-operator-store.ts",
+    },
+    {
+      id: "price-book-sole-operator-approval.write",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "price_book_sole_operator_approval" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/price-book-sole-operator-store.ts",
     },
   ],
 } as const;

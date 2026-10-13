@@ -14,7 +14,8 @@ export type DeclineReason = (typeof declineReasons)[number];
  * member, the Store's refunds awaiting an Owner/Finance approval, and the in-person approval that
  * sends the refund. The six-digit code is sent once and never kept, logged or shown again.
  */
-export type StepUpPurpose = "RefundRequest" | "RefundApproval" | "SoleOperatorSetting";
+export type StepUpPurpose =
+  "RefundRequest" | "RefundApproval" | "SoleOperatorSetting" | "SoleOperatorApproval";
 export type StepUpFailure =
   "CodeRejected" | "CodeAlreadyUsed" | "TooManyAttempts" | "NotSetUp" | "Denied" | "Unavailable";
 export class StepUpError extends Error {

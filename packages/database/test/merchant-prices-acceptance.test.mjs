@@ -9,6 +9,7 @@ import { listProductVersionTaxClassifications } from "../../rms/catalog/src/inde
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { syntheticMerchantBrandScope } from "../test-support/merchant-brand-scope.mjs";
 import { productApiGrants } from "../test-support/merchant-api-grants.mjs";
+import { soleOperatorReadGrants } from "../test-support/sole-operator-brand-gate.mjs";
 
 const { Client } = pg;
 const id = (n) => "01909a1c-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -73,7 +74,8 @@ it("drafts, independently publishes and assigns price books that cover the Store
       await admin.query(
         "CREATE ROLE " + role + " NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
       );
-      for (const sql of [...productApiGrants, ...priceApiGrants])
+      // WP-2423 Q19: the editor tells the draft's author whether they may publish alone.
+      for (const sql of [...productApiGrants, ...priceApiGrants, ...soleOperatorReadGrants])
         await admin.query(sql.replaceAll("ROLE_", role));
 
       const persistence = {

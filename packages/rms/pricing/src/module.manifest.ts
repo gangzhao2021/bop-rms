@@ -66,6 +66,7 @@ const moduleManifestInput =
     ownedDatabase: {
       schema: "rms_pricing",
       tables: [
+        "price_book_sole_operator_approval",
         "configuration_reference_generation",
         "tax_configuration",
         "tax_reference_generation",

@@ -44,6 +44,10 @@ export function createMenuReviewApprovalSource(options: {
         operationReference: string;
         expectedVersion: number;
         observedAt: string;
+        /** WP-2423 Q19: the submitter approves alone as sole operator (explicitly asked). The
+         * callback checks, in this transaction, that sole operator is in effect for them and that
+         * their second factor is recent, and throws otherwise. */
+        soleOperator?: () => Promise<unknown>;
       },
     ) {
       try {
@@ -101,6 +105,16 @@ export function createMenuReviewApprovalSource(options: {
           !head.validationEvidence
         )
           return fail("CATALOG_VERSION_CONFLICT");
+        // WP-2423 Q19: another person approves what someone submitted for review, except the
+        // submitter alone as an in-effect, re-verified sole operator; the sole-operator path is
+        // never used for someone else's submission.
+        const submitter = head.audit.actor.type === "User" ? head.audit.actor.reference : null;
+        if (submitter === null) return fail("CATALOG_INDEPENDENT_APPROVAL_REQUIRED");
+        if (submitter === actor) {
+          if (input.soleOperator === undefined)
+            return fail("CATALOG_INDEPENDENT_APPROVAL_REQUIRED");
+          await input.soleOperator();
+        } else if (input.soleOperator !== undefined) return fail("CATALOG_INPUT_INVALID");
         const validation = head.validationEvidence;
         if (
           validation.checkedAt > at ||
@@ -168,6 +182,8 @@ export function createMenuReviewApprovalSource(options: {
         return next;
       } catch (error) {
         if (error instanceof CatalogError) throw error;
+        // The sole-operator check names why it refused (not in effect, verify again).
+        if (error instanceof Error && error.name === "MerchantSoleOperatorGateError") throw error;
         return fail();
       }
     },

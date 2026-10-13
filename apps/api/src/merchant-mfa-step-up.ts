@@ -19,6 +19,8 @@ const purposes = {
   RefundApproval: "PAYMENT_REFUND_APPROVAL",
   // WP-2423 Q19: turning the Brand's sole-operator setting on or off.
   SoleOperatorSetting: "ORGANIZATION_SOLE_OPERATOR_SETTING",
+  // WP-2423 Q19 step 2: approving one's own work alone at a Brand gate (sole operator).
+  SoleOperatorApproval: "ORGANIZATION_SOLE_OPERATOR_APPROVAL",
 } as const;
 export class MerchantStepUpError extends Error {
   constructor(readonly code: "Denied" | "NotSetUp") {
@@ -48,7 +50,8 @@ export function createMerchantMfaStepUp(options: {
     if (
       raw.purpose !== "RefundRequest" &&
       raw.purpose !== "RefundApproval" &&
-      raw.purpose !== "SoleOperatorSetting"
+      raw.purpose !== "SoleOperatorSetting" &&
+      raw.purpose !== "SoleOperatorApproval"
     )
       throw new MerchantStepUpError("Denied");
     const purposeCode = purposes[raw.purpose];

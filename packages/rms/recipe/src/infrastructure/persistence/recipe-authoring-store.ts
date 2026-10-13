@@ -100,6 +100,8 @@ export interface RecipeReviewView {
   readonly reviewedAt: string;
   /** False when the content changed after the review (never for an immutable version). */
   readonly current: boolean;
+  /** WP-2423 Q19: given by the sole operator alone (own recipe, or both kinds). */
+  readonly reviewMode: "Independent" | "SoleOperator";
 }
 export interface RecipeDetailView extends RecipeSummaryView {
   readonly snapshot: RecipeSnapshot;
@@ -301,7 +303,7 @@ async function reviewsOf(
 ): Promise<(RecipeReviewView & { readonly digest: string })[]> {
   return (
     await tx.query(
-      `SELECT review_id::text id,subject,review_kind,decision,reviewer_actor_id::text reviewer,comment,reviewed_at,subject_digest
+      `SELECT review_id::text id,subject,review_kind,decision,reviewer_actor_id::text reviewer,comment,reviewed_at,subject_digest,review_mode
        FROM rms_recipe.recipe_authoring_review WHERE brand_id=$1 AND recipe_version_id=$2 ORDER BY reviewed_at`,
       [brand, version],
     )
@@ -315,6 +317,8 @@ async function reviewsOf(
     reviewedAt: iso(row.reviewed_at),
     digest: String(row.subject_digest),
     current: true,
+    reviewMode:
+      row.review_mode === "SoleOperator" ? ("SoleOperator" as const) : ("Independent" as const),
   }));
 }
 
@@ -653,6 +657,10 @@ export async function recordRecipeReview(
     readonly decision: "Approved" | "Rejected";
     readonly comment: string | null;
     readonly auditReference: string;
+    /** WP-2423 Q19: the reviewer acts alone as sole operator. The caller has read, in this
+     * transaction, that sole operator is in effect for them; `reviewerMfaAt` is their second
+     * factor (the database requires it within 15 minutes before the review). */
+    readonly soleOperator?: { readonly reviewerMfaAt: string };
   },
 ) {
   await tx.query(scopeSql, [scope.brandReference, ""]);
@@ -691,24 +699,27 @@ export async function recordRecipeReview(
       return fail("RECIPE_AUTHORING_LIFECYCLE");
     digest = content.contentDigest;
   }
-  if (input.actorReference === current.author)
-    return fail("RECIPE_AUTHORING_REVIEWER_NOT_INDEPENDENT");
   const existing = await reviewsOf(tx, brand, s.versionReference);
-  if (
-    existing.some(
-      (review) =>
-        review.subject === input.subject &&
-        (review.kind === input.kind || review.reviewerReference === input.actorReference),
-    )
-  )
-    return fail(
-      existing.some((review) => review.subject === input.subject && review.kind === input.kind)
-        ? "RECIPE_AUTHORING_CONFLICT"
-        : "RECIPE_AUTHORING_REVIEWER_NOT_INDEPENDENT",
-    );
+  if (existing.some((review) => review.subject === input.subject && review.kind === input.kind))
+    return fail("RECIPE_AUTHORING_CONFLICT");
+  // Another person reviews, and two people give the two kinds — except the sole operator alone
+  // (WP-2423 Q19), whose earlier review of the other kind must then be marked too. The mark is
+  // only accepted where it waives one of these rules.
+  const ownRecipe = input.actorReference === current.author;
+  const otherKind = existing.find(
+    (review) =>
+      review.subject === input.subject && review.reviewerReference === input.actorReference,
+  );
+  const sole = input.soleOperator !== undefined;
+  if (!sole && (ownRecipe || otherKind !== undefined))
+    return fail("RECIPE_AUTHORING_REVIEWER_NOT_INDEPENDENT");
+  if (sole && !ownRecipe && otherKind === undefined) return fail("RECIPE_AUTHORING_INVALID");
+  if (sole && otherKind !== undefined && otherKind.reviewMode !== "SoleOperator")
+    return fail("RECIPE_AUTHORING_REVIEWER_NOT_INDEPENDENT");
   await tx.query(
     `INSERT INTO rms_recipe.recipe_authoring_review(review_id,recipe_version_id,recipe_id,brand_id,subject,subject_digest,review_kind,
-       decision,reviewer_actor_id,author_actor_id,comment,reviewed_at,audit_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+       decision,reviewer_actor_id,author_actor_id,comment,reviewed_at,audit_id,review_mode,reviewer_mfa_at)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
     [
       input.reviewReference,
       s.versionReference,
@@ -723,6 +734,8 @@ export async function recordRecipeReview(
       input.comment,
       input.at,
       input.auditReference,
+      sole ? "SoleOperator" : "Independent",
+      input.soleOperator?.reviewerMfaAt ?? null,
     ],
   );
   await appendBrandAudit(
@@ -742,6 +755,7 @@ export async function recordRecipeReview(
         reviewKind: input.kind,
         decision: input.decision,
         version: s.versionNumber,
+        ...(sole ? { approvalMode: "SoleOperator" } : {}),
       },
     }),
   );
@@ -757,6 +771,7 @@ async function approvedReviews(
   digest: string,
   author: string,
   reviewersAuthorized: (actors: readonly string[]) => Promise<boolean>,
+  soleOperatorEffective?: (actor: string) => Promise<boolean>,
 ) {
   const reviews = (await reviewsOf(tx, brand, version)).filter(
     (review) => review.subject === subject,
@@ -770,11 +785,23 @@ async function approvedReviews(
     safety.decision !== "Approved" ||
     cost.digest !== digest ||
     safety.digest !== digest ||
-    cost.reviewerReference === safety.reviewerReference ||
-    [cost, safety].some((review) => review.reviewerReference === author) ||
+    (cost.reviewerReference === safety.reviewerReference &&
+      (cost.reviewMode !== "SoleOperator" || safety.reviewMode !== "SoleOperator")) ||
+    [cost, safety].some(
+      (review) => review.reviewerReference === author && review.reviewMode !== "SoleOperator",
+    ) ||
     !(await reviewersAuthorized([cost.reviewerReference, safety.reviewerReference]))
   )
     return fail("RECIPE_AUTHORING_REVIEW_REQUIRED");
+  // WP-2423 Q19: a review given alone as sole operator counts only while it is still in effect
+  // for that reviewer (read now, in the publishing transaction).
+  for (const review of [cost, safety])
+    if (
+      review.reviewMode === "SoleOperator" &&
+      (soleOperatorEffective === undefined ||
+        !(await soleOperatorEffective(review.reviewerReference)))
+    )
+      return fail("RECIPE_AUTHORING_SOLE_OPERATOR_NOT_IN_EFFECT");
   return [cost, safety];
 }
 /** A copy of a version with fresh row references, as the next lifecycle state. */
@@ -853,6 +880,8 @@ export async function publishRecipe(
     readonly expectedAggregateVersion: number;
     readonly facts: RecipeDraftFacts;
     readonly reviewersAuthorized: (actors: readonly string[]) => Promise<boolean>;
+    /** WP-2423 Q19: whether sole operator is still in effect for a reviewer who reviewed alone. */
+    readonly soleOperatorEffective?: (actor: string) => Promise<boolean>;
     readonly auditReference: string;
   },
 ) {
@@ -898,6 +927,7 @@ export async function publishRecipe(
     recipeReviewDigest(s, current.name, stripped(current.presentation)),
     current.author,
     input.reviewersAuthorized,
+    input.soleOperatorEffective,
   );
   const published = nextVersion(s, "Published", input.at, input.nextReference);
   await commitVersion(tx, brand, {
@@ -919,6 +949,7 @@ export async function publishRecipe(
         evidenceDigest: review.digest,
         reviewedAt: review.reviewedAt,
         decision: "Approved" as const,
+        ...(review.reviewMode === "SoleOperator" ? { reviewMode: "SoleOperator" as const } : {}),
       })),
     },
     writer: input,
@@ -946,6 +977,8 @@ export async function publishRecipePreparation(
     readonly operationReference: string;
     readonly recipeReference: string;
     readonly reviewersAuthorized: (actors: readonly string[]) => Promise<boolean>;
+    /** WP-2423 Q19: whether sole operator is still in effect for a reviewer who reviewed alone. */
+    readonly soleOperatorEffective?: (actor: string) => Promise<boolean>;
     readonly auditReference: string;
   },
 ) {
@@ -974,6 +1007,7 @@ export async function publishRecipePreparation(
     content.contentDigest,
     current.author,
     input.reviewersAuthorized,
+    input.soleOperatorEffective,
   );
   const record = {
     operationReference: input.operationReference,
@@ -997,6 +1031,7 @@ export async function publishRecipePreparation(
         evidenceDigest: review.digest,
         reviewedAt: review.reviewedAt,
         decision: "Approved",
+        ...(review.reviewMode === "SoleOperator" ? { reviewMode: "SoleOperator" as const } : {}),
       })),
     },
   };

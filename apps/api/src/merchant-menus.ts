@@ -1,3 +1,7 @@
+import {
+  merchantBrandSoleOperatorGate,
+  MerchantSoleOperatorGateError,
+} from "./merchant-sole-operator.js";
 import { createHash } from "node:crypto";
 import { loadOutboxEnvelope, type ConsumerTransaction } from "@bop/eventing";
 import {
@@ -55,7 +59,11 @@ export class MerchantMenuError extends Error {
       | "OptionRecipeMissing"
       | "ApprovalRequired"
       | "Lifecycle"
-      | "Invalid",
+      | "Invalid"
+      /** WP-2423 Q19: the submitter asked to approve alone, but sole operator is not in effect. */
+      | "SoleOperatorNotInEffect"
+      /** WP-2423 Q19: approving alone needs a second-factor check in the last 15 minutes. */
+      | "NeedsReverification",
   ) {
     super(code);
     this.name = "MerchantMenuError";
@@ -112,6 +120,8 @@ export type MenuCommandBody =
       readonly menuVersionReference: string;
       readonly expectedVersion: number;
       readonly snapshotDigest: string;
+      /** WP-2423 Q19: the submitter approves alone as sole operator (Approve only). */
+      readonly approvalMode?: "SoleOperator";
     }
   | {
       readonly action: "Rebuild";
@@ -205,6 +215,21 @@ export function parseMenuCommandBody(value: unknown): MenuCommandBody {
       snapshotDigest: digestOf(r.snapshotDigest),
     };
   if (
+    r.action === "Approve" &&
+    r.approvalMode === "SoleOperator" &&
+    keys ===
+      "action,approvalMode,expectedVersion,menuReference,menuVersionReference,operationReference,snapshotDigest"
+  )
+    return {
+      action: "Approve",
+      operationReference: ref(r.operationReference),
+      menuReference: ref(r.menuReference),
+      menuVersionReference: ref(r.menuVersionReference),
+      expectedVersion: version(r.expectedVersion),
+      snapshotDigest: digestOf(r.snapshotDigest),
+      approvalMode: "SoleOperator",
+    };
+  if (
     r.action === "Rebuild" &&
     keys === "action,menuReference,operationReference,publishOperationReference"
   )
@@ -225,6 +250,7 @@ const catalogErrors: Partial<Record<CatalogError["code"], MerchantMenuError["cod
   CATALOG_INPUT_INVALID: "Invalid",
   CATALOG_UNAVAILABLE: "NotFound",
   CATALOG_CODE_CONFLICT: "Invalid",
+  CATALOG_INDEPENDENT_APPROVAL_REQUIRED: "ApprovalRequired",
 };
 
 export function createMerchantMenus(options: {
@@ -377,6 +403,20 @@ export function createMerchantMenus(options: {
                   [s.owner.brandReference, summary.currentVersionReference],
                 )
               ).rows[0]?.actor ?? null);
+        // WP-2423 Q19: the submitter who may approve sees whether they may approve alone and why.
+        const gate =
+          submitter === s.actor && s.permissions.mayApprove
+            ? await merchantBrandSoleOperatorGate(tx as never, {
+                tenantReference: s.owner.tenantReference,
+                brandReference: s.owner.brandReference,
+                storeReference: s.owner.storeReference,
+                actorReference: s.actor,
+                permissionCode: "catalog.menu.approve",
+                observedAt: options.persistence.now(),
+                allowed: async () => (await s.decision("catalog.menu.approve"))?.effect === "Allow",
+              })
+            : null;
+        await brandScope(tx, s.owner.brandReference);
         return {
           screenId: "CAT-MENU-BUILDER" as const,
           ...base,
@@ -384,6 +424,14 @@ export function createMerchantMenus(options: {
           publication: summary.publication,
           latestRelease: summary.latestRelease,
           submittedBy: typeof submitter === "string" ? submitter : null,
+          soleOperator:
+            gate === null
+              ? null
+              : {
+                  status: gate.status,
+                  otherApprovers: gate.otherApprovers,
+                  verifiedUntil: gate.verifiedUntil,
+                },
           sellables: await sellables(tx, s),
           allergenRegistry: (await currentAllergenRegistry(ptx(tx) as never, s.owner)) !== null,
         };
@@ -538,6 +586,9 @@ export function createMerchantMenus(options: {
           sessionCookie: input.sessionCookie,
           csrf: input.csrf,
           command: commandBody,
+          ...(body.action === "Approve" && body.approvalMode === "SoleOperator"
+            ? { approvalMode: "SoleOperator" as const }
+            : {}),
         });
         if (body.action === "Publish")
           return {
@@ -715,6 +766,10 @@ export function createMerchantMenus(options: {
       );
     } catch (error) {
       if (error instanceof MerchantMenuError) throw error;
+      if (error instanceof MerchantSoleOperatorGateError)
+        return fail(
+          error.code === "NotInEffect" ? "SoleOperatorNotInEffect" : "NeedsReverification",
+        );
       if (error instanceof CatalogError) {
         if (error.code === "CATALOG_LIFECYCLE_CONFLICT" && body.action === "SaveDraft")
           return fail("Frozen");

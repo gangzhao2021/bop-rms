@@ -1,3 +1,4 @@
+import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
 /** WP-2423 / DEC-MENU-REVISION: CAT-MENU-LIST / CAT-MENU-BUILDER view contract and same-origin client. */
 export type MenuErrorCode =
   | "PermissionDenied"
@@ -12,6 +13,8 @@ export type MenuErrorCode =
   | "ApprovalRequired"
   | "Lifecycle"
   | "Invalid"
+  | "SoleOperatorNotInEffect"
+  | "NeedsReverification"
   | "Offline"
   | "Unavailable";
 export class MenuPageError extends Error {
@@ -91,6 +94,8 @@ export interface MenuBuilderView extends MenuViewBase {
   readonly publication: MenuPublicationStatus | null;
   readonly latestRelease: MenuReleaseSummary | null;
   readonly submittedBy: string | null;
+  /** WP-2423 Q19: present for a submitter who may approve: may they approve alone, and why not. */
+  readonly soleOperator: SoleOperatorGateView | null;
   readonly sellables: readonly MenuSellable[];
   readonly allergenRegistry: boolean;
 }
@@ -127,6 +132,8 @@ export type MenuCommand =
       readonly menuVersionReference: string;
       readonly expectedVersion: number;
       readonly snapshotDigest: string;
+      /** WP-2423 Q19: the submitter approves alone as sole operator (Approve only). */
+      readonly approvalMode?: "SoleOperator";
     }
   | {
       readonly action: "Rebuild";
@@ -159,7 +166,10 @@ export function parseMenuBuilderView(value: unknown): MenuBuilderView {
     !Array.isArray(r.sellables)
   )
     throw new Error("MENU_PAGE_INVALID");
-  return r as unknown as MenuBuilderView;
+  return {
+    ...r,
+    soleOperator: parseSoleOperatorGate(r.soleOperator),
+  } as unknown as MenuBuilderView;
 }
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 export const parseMenuRouteReference = (value: string | undefined): string | null =>
@@ -202,6 +212,8 @@ const codes = new Set<MenuErrorCode>([
   "ApprovalRequired",
   "Lifecycle",
   "Invalid",
+  "SoleOperatorNotInEffect",
+  "NeedsReverification",
 ]);
 export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): MenuClient {
   const post = async (path: string, body: unknown) => {

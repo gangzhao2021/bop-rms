@@ -27,6 +27,8 @@ export const allergenApiGrants = [
   "GRANT USAGE ON TYPE platform_helpers.uuid_v7 TO ROLE_",
   "GRANT EXECUTE ON FUNCTION platform_helpers.is_uuid_v7(uuid),platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO ROLE_",
   "GRANT SELECT,INSERT ON rms_catalog.allergen_registry_version,rms_catalog.allergen_registry_entry,rms_catalog.allergen_source_evidence,rms_catalog.allergen_source_assertion TO ROLE_",
+  // WP-2423 Q19: the roster is recorded by one person and approved by another.
+  "GRANT SELECT,INSERT ON rms_catalog.allergen_registry_proposal TO ROLE_",
   // Menu review locks these sources in SHARE mode (MAINTAIN: lock without changing data).
   "GRANT MAINTAIN ON rms_catalog.allergen_registry_version,rms_catalog.allergen_registry_entry,rms_catalog.allergen_source_evidence,rms_catalog.allergen_source_assertion TO ROLE_",
   "GRANT SELECT ON rms_inventory.inventory_item,rms_inventory.inventory_item_version,rms_inventory.inventory_item_operation,rms_inventory.stock_movement TO ROLE_",
@@ -50,7 +52,7 @@ it("approves the allergen list, records declarations and makes recipes carry the
     let operation = 0x7000;
     const op = () => "019a0000-0000-7000-8000-" + (++operation).toString(16).padStart(12, "0");
     const scope = { tenantReference: id(1), brandReference: id(2), storeReference: id(3) };
-    const [owner, cook, reader] = [id(4), id(5), id(6)];
+    const [owner, cook, reader, approver] = [id(4), id(5), id(6), id(8)];
     const run = (asRole) => async (work) => {
       await admin.query("BEGIN");
       try {
@@ -91,6 +93,7 @@ it("approves the allergen list, records declarations and makes recipes carry the
             "catalog.allergen_registry.manage",
           ],
           [cook]: ["catalog.allergen.read", "catalog.allergen.declare"],
+          [approver]: ["catalog.allergen.read", "catalog.allergen_registry.manage"],
           [reader]: ["catalog.allergen.read"],
         },
       });
@@ -134,20 +137,41 @@ it("approves the allergen list, records declarations and makes recipes carry the
       brandScope.as(cook);
       await rejects(
         command({
-          action: "ApproveRegistry",
+          action: "RecordRegistry",
           operationReference: op(),
           template: "CA_PRIORITY_TEST",
         }),
         "PermissionDenied",
       );
+      // WP-2423 Q19: the owner records the list; they cannot approve it themself (server and
+      // database two-person rule); another roster manager approves it.
       brandScope.as(owner);
-      const approve = {
-        action: "ApproveRegistry",
+      const record = {
+        action: "RecordRegistry",
         operationReference: op(),
         template: "CA_PRIORITY_TEST",
       };
+      const recorded = await command(record);
+      assert.equal(recorded.status, "Applied");
+      assert.equal((await command(record)).status, "AlreadyApplied");
+      const approve = {
+        action: "ApproveRegistry",
+        operationReference: op(),
+        proposalReference: recorded.proposalReference,
+      };
+      await rejects(command(approve), "ApprovalRequired");
+      brandScope.as(approver);
+      assert.equal(
+        (await allergens.query({ ...session, itemReference: null })).registryProposal.recordedByYou,
+        false,
+      );
       assert.equal((await command(approve)).status, "Applied");
       assert.equal((await command(approve)).status, "AlreadyApplied");
+      assert.equal(
+        (await allergens.query({ ...session, itemReference: null })).registryProposal,
+        null,
+      );
+      brandScope.as(owner);
       const listed = await allergens.query({ ...session, itemReference: null });
       assert.equal(listed.registry.entries.length, 12);
       const allergen = (code) =>
@@ -351,11 +375,26 @@ it("approves the allergen list, records declarations and makes recipes carry the
       assert.deepEqual(reviewFacts.evidence.map((e) => e.assertions.length).sort(), [0, 1]);
       // A new list version: the old declarations no longer speak for it.
       brandScope.as(owner);
-      await command({
-        action: "ApproveRegistry",
+      const rerecorded = await command({
+        action: "RecordRegistry",
         operationReference: op(),
         template: "CA_PRIORITY_TEST",
       });
+      // The database refuses the recorder approving their own roster unmarked.
+      await assert.rejects(
+        admin.query(
+          "INSERT INTO rms_catalog.allergen_registry_version (registry_version_id,brand_id,jurisdiction_code,policy_document_digest,reviewed_at,reviewer_actor_id,status,proposal_id,recorder_actor_id) SELECT registry_version_id,brand_id,jurisdiction_code,policy_document_digest,now(),recorder_actor_id,'Approved',proposal_id,recorder_actor_id FROM rms_catalog.allergen_registry_proposal WHERE proposal_id=$1",
+          [rerecorded.proposalReference],
+        ),
+        /allergen_registry_version_independent/u,
+      );
+      brandScope.as(approver);
+      await command({
+        action: "ApproveRegistry",
+        operationReference: op(),
+        proposalReference: rerecorded.proposalReference,
+      });
+      brandScope.as(owner);
       const relisted = await allergens.query({ ...session, itemReference: null });
       assert.notEqual(
         relisted.registry.registryVersionReference,
@@ -398,13 +437,22 @@ it("approves the allergen list, records declarations and makes recipes carry the
           "SELECT action_code,actor_reference FROM platform_audit.audit_record WHERE action_code LIKE 'CATALOG_ALLERGEN_%' ORDER BY occurred_at",
         )
       ).rows.map(
-        (row) => row.action_code + ":" + (row.actor_reference === owner ? "owner" : "cook"),
+        (row) =>
+          row.action_code +
+          ":" +
+          (row.actor_reference === owner
+            ? "owner"
+            : row.actor_reference === approver
+              ? "approver"
+              : "cook"),
       );
       assert.deepEqual(audits, [
-        "CATALOG_ALLERGEN_REGISTRY_APPROVE:owner",
+        "CATALOG_ALLERGEN_REGISTRY_RECORD:owner",
+        "CATALOG_ALLERGEN_REGISTRY_APPROVE:approver",
         "CATALOG_ALLERGEN_DECLARE:cook",
         "CATALOG_ALLERGEN_DECLARE:cook",
-        "CATALOG_ALLERGEN_REGISTRY_APPROVE:owner",
+        "CATALOG_ALLERGEN_REGISTRY_RECORD:owner",
+        "CATALOG_ALLERGEN_REGISTRY_APPROVE:approver",
       ]);
     } finally {
       await admin.query("RESET ROLE").catch(() => undefined);

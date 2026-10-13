@@ -1,3 +1,4 @@
+import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
@@ -36,6 +37,9 @@ const copy: Record<RecipeErrorCode | "Loading", string> = {
     "Publishing needs an approved Cost review and an approved Food safety review of exactly this version, by two different reviewers who are not the author and still hold reviewer permission.",
   ReviewerNotIndependent:
     "A reviewer cannot be the author, and one person cannot give both reviews.",
+  SoleOperatorNotInEffect:
+    "Someone else now also holds recipe review, so another person must review. Refresh to see who.",
+  NeedsReverification: "Confirm it is you with your authenticator code, then review again.",
   Lifecycle: "This step is not possible in the recipe's current state.",
   InUse:
     "The recipe is used by a SKU or by another recipe. Move those to another recipe first (Store-specific assignments can be removed in their Store).",
@@ -683,11 +687,13 @@ function ReviewPanel({
   subject,
   busy,
   run,
+  csrf,
 }: {
   readonly view: RecipeEditorView;
   readonly subject: "Recipe" | "Preparation";
   readonly busy: boolean;
   readonly run: (command: RecipeCommand) => void;
+  readonly csrf: string | undefined;
 }) {
   const recipe = view.recipe;
   const reviews = recipe.reviews.filter((review) => review.subject === subject);
@@ -747,6 +753,49 @@ function ReviewPanel({
               </span>
             ))}
         </div>
+      ) : view.permissions.mayReview &&
+        (isAuthor || reviewedHere) &&
+        (["Cost", "FoodSafety"] as const).some(
+          (kind) => !reviews.some((review) => review.kind === kind),
+        ) ? (
+        // WP-2423 Q19: the sole operator may give the remaining review(s) alone.
+        (() => {
+          const kind =
+            (["Cost", "FoodSafety"] as const).find(
+              (item) => !reviews.some((review) => review.kind === item),
+            ) ?? "Cost";
+          return (
+            <SoleOperatorSelfApproval
+              key={kind}
+              gate={view.soleOperator}
+              csrf={csrf}
+              what={`the ${kindText[kind].toLowerCase()} of this version`}
+              permissionName="recipe review"
+              busy={busy}
+              actionLabel={`Approve ${kindText[kind].toLowerCase()} on my own`}
+              summary={
+                <p>
+                  {recipe.name} ({recipe.code}) — {kindText[kind].toLowerCase()} review
+                  {subject === "Preparation" ? " of the kitchen steps" : ""}.
+                  {isAuthor ? " You wrote this version." : " You gave the other review."}
+                </p>
+              }
+              onApprove={() =>
+                run({
+                  action: "Review",
+                  operationReference: newOperationReference(),
+                  recipeReference: recipe.recipeReference,
+                  versionReference: recipe.versionReference,
+                  subject,
+                  kind,
+                  decision: "Approved",
+                  comment: null,
+                  approvalMode: "SoleOperator",
+                })
+              }
+            />
+          );
+        })()
       ) : isAuthor ? (
         <p>You wrote this version; two other reviewers decide.</p>
       ) : null}
@@ -841,13 +890,23 @@ function Bindings({
 }
 
 /** One editor instance per route: a new recipe, a revision of one, or an existing recipe. */
-export function RecipeEditorPage(props: { readonly client?: RecipeClient }) {
+export function RecipeEditorPage(props: {
+  readonly client?: RecipeClient;
+  /** For the second-factor check of a sole operator's own review. */
+  readonly csrf?: string;
+}) {
   const params = useParams();
   const [search] = useSearchParams();
   return <RecipeEditor key={`${params.id ?? ""}?${search.toString()}`} {...props} />;
 }
 
-function RecipeEditor({ client = unavailableRecipeClient }: { readonly client?: RecipeClient }) {
+function RecipeEditor({
+  client = unavailableRecipeClient,
+  csrf,
+}: {
+  readonly client?: RecipeClient;
+  readonly csrf?: string;
+}) {
   const params = useParams();
   const [search] = useSearchParams();
   const navigate = useNavigate();
@@ -1022,6 +1081,7 @@ function RecipeEditor({ client = unavailableRecipeClient }: { readonly client?: 
             subject="Recipe"
             busy={busy}
             run={(command) => void run(command)}
+            csrf={csrf}
           />
           {view.permissions.mayPublish ? (
             <button
@@ -1056,6 +1116,7 @@ function RecipeEditor({ client = unavailableRecipeClient }: { readonly client?: 
                 subject="Preparation"
                 busy={busy}
                 run={(command) => void run(command)}
+                csrf={csrf}
               />
               {view.permissions.mayPublish ? (
                 <button

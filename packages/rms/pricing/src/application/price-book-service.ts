@@ -91,6 +91,7 @@ async function authorize(
   audit: AppendAuditRecordInput;
   approvalAllowed: boolean;
   draftAuthor: PricingReference | null;
+  soleOperatorApproval: boolean;
 }> {
   const evidence = await ports.authorization
     .authorize({ action, operationReference, priceBookReference, observedAt: at })
@@ -116,6 +117,13 @@ async function authorize(
       audit.occurredAt !== at
     )
       throw new Error("denied");
+    const soleOperatorApproval = evidence.soleOperatorApproval === true;
+    // WP-2423 Q19: a sole-operator publication says so in its Audit; any other carries no summary.
+    if (
+      soleOperatorApproval !==
+      (JSON.stringify(audit.afterSummary) === JSON.stringify({ approvalMode: "SoleOperator" }))
+    )
+      throw new Error("denied");
     const approvalAllowed =
       evidence.approvalPermission?.effect === "Allow" &&
       evidence.approvalPermission.action === "pricing.price-book.approve" &&
@@ -129,6 +137,7 @@ async function authorize(
         evidence.draftAuthorActorReference === null
           ? null
           : parsePricingReference(evidence.draftAuthorActorReference),
+      soleOperatorApproval,
     };
   } catch {
     throw new PriceBookWorkflowError("PRICE_BOOK_PERMISSION_DENIED");
@@ -276,9 +285,14 @@ export function createPriceBookService(ports: PriceBookPorts) {
     const auth = await authorize(ports, action, operationReference, reference, requestedAt);
     if (auth.brand !== current.brandReference)
       throw new PriceBookWorkflowError("PRICE_BOOK_PERMISSION_DENIED");
+    // Another person approves, except the author alone under an in-effect sole operator
+    // (WP-2423 Q19); the sole-operator mark is never accepted for someone else's draft.
     if (
-      requireApproval &&
-      (!auth.approvalAllowed || auth.draftAuthor === null || auth.draftAuthor === auth.actor)
+      (auth.soleOperatorApproval && (!requireApproval || auth.draftAuthor !== auth.actor)) ||
+      (requireApproval &&
+        (!auth.approvalAllowed ||
+          auth.draftAuthor === null ||
+          (auth.draftAuthor === auth.actor && !auth.soleOperatorApproval)))
     )
       throw new PriceBookWorkflowError("PRICE_BOOK_APPROVAL_REQUIRED");
     if (action === "Publish" && publicationContent(candidate) !== publicationContent(current))

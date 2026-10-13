@@ -7,6 +7,24 @@ const databaseAccessManifestInput = {
   },
   tables: [
     {
+      // WP-2423 Q19: sole-operator approval mark (append-only).
+      table: "allergen_registry_proposal",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/catalog" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      // WP-2423 Q19: sole-operator approval mark (append-only).
+      table: "menu_sole_operator_approval",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/catalog" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "brand_catalog_source",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/catalog" },
@@ -4360,6 +4378,42 @@ const databaseAccessManifestInput = {
       },
       source:
         "packages/rms/catalog/src/infrastructure/persistence/availability-reference-source-store.ts",
+    },
+    {
+      id: "menu-sole-operator-approval.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "menu_sole_operator_approval" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/menu-sole-operator-store.ts",
+    },
+    {
+      id: "menu-sole-operator-approval.write",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "menu_sole_operator_approval" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/menu-sole-operator-store.ts",
+    },
+    {
+      id: "allergen-registry-proposal.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "allergen_registry_proposal" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/allergen-declaration-store.ts",
+    },
+    {
+      id: "allergen-registry-proposal.write",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "allergen_registry_proposal" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/allergen-declaration-store.ts",
     },
   ],
 } as const;

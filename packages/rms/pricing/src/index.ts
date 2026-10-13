@@ -84,3 +84,5 @@ export * from "./infrastructure/persistence/tax-config-candidate-store.js";
 export * from "./contracts/tax-config-candidate-fixture-comparison.js";
 export * from "./infrastructure/persistence/store-tax-classification-store.js";
 export * from "./infrastructure/persistence/store-price-book-assignment-store.js";
+// WP-2423 Q19 (DEC-SOLE-OPERATOR-APPROVAL): mark of a sole-operator price book publication.
+export * from "./infrastructure/persistence/price-book-sole-operator-store.js";

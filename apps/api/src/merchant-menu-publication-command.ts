@@ -15,11 +15,14 @@ import {
   parseCatalogHash,
   parseCatalogInstant,
   parseCatalogReference,
+  recordMenuSoleOperatorApproval,
   validateMenuEffectivePeriod,
   type MenuPublicationCommand,
   type ProductLifecycleTransaction,
 } from "@rms/catalog";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
+import type { ConsumerTransaction } from "@bop/eventing";
+import { requireMerchantBrandSoleOperator } from "./merchant-sole-operator.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 
@@ -147,13 +150,26 @@ export function createMerchantMenuPublicationCommand(options: {
   resolveScope?: ReturnType<typeof createMerchantBrandScope>;
 }) {
   const resolveScope = options.resolveScope ?? createMerchantBrandScope(options.merchant);
-  return async (request: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
+  return async (request: {
+    sessionCookie: unknown;
+    csrf: unknown;
+    command: unknown;
+    /** WP-2423 Q19: the submitter approves alone as sole operator (explicitly confirmed). */
+    approvalMode?: "SoleOperator";
+  }) => {
     const session = await options.authentication.authorize({
       sessionCookie: request.sessionCookie,
       csrf: request.csrf,
     });
     const review = decodeReview(request.command);
     const publication = review === null ? decode(request.command) : null;
+    const sole = request.approvalMode === "SoleOperator";
+    if (
+      (request.approvalMode !== undefined && !sole) ||
+      (sole && publication?.action !== "Approve")
+    )
+      return fail("CATALOG_INPUT_INVALID");
+    let soleOperatorMfaAt: string | null = null;
     return options.merchant.transactions.run(async (identityTransaction) => {
       const transaction: ProductLifecycleTransaction = {
         async query<Row = Record<string, unknown>>(sql: string, values: readonly unknown[]) {
@@ -332,6 +348,28 @@ export function createMerchantMenuPublicationCommand(options: {
             operationReference: command.operationReference,
             expectedVersion: command.expectedVersion,
             observedAt: command.requestedAt,
+            ...(sole
+              ? {
+                  soleOperator: async () => {
+                    soleOperatorMfaAt = (
+                      await requireMerchantBrandSoleOperator(tx as unknown as ConsumerTransaction, {
+                        tenantReference: String(scope.tenantReference),
+                        brandReference: String(brand),
+                        storeReference: String(scope.selectedStoreReference),
+                        actorReference: String(scope.actorReference),
+                        permissionCode: "catalog.menu.approve",
+                        observedAt: String(command.requestedAt),
+                        allowed: async () =>
+                          (await permission()) !== null && (await publishingApprovalAllowed()),
+                      })
+                    ).actorMfaAt;
+                    await tx.query(
+                      "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)",
+                      [brand],
+                    );
+                  },
+                }
+              : {}),
           });
         }
         const currentEvidence = await createPostgresMenuPublicationEvidenceSource({
@@ -411,12 +449,46 @@ export function createMerchantMenuPublicationCommand(options: {
                 dataClassification: "Internal",
                 retentionPolicyCode: "CONFIGURATION_AUDIT",
                 retentionPolicyVersion: 1,
+                // WP-2423 Q19: the submitter's own approval as sole operator says so.
+                ...(sole && input.action === "Approve"
+                  ? { afterSummary: { approvalMode: "SoleOperator" } }
+                  : {}),
               },
             };
           },
         },
       });
       const result = await service.execute(command);
+      if (sole && options.reviewApproval) {
+        // A replayed approval keeps its original mark; a fresh one is marked here.
+        const approvalEvidence = options.reviewApproval.reference(
+          "Approval",
+          command.operationReference,
+        );
+        const existing = (
+          await transaction.query<{ n: number }>(
+            "SELECT count(*)::int n FROM rms_catalog.menu_sole_operator_approval WHERE brand_id=$1 AND operation_id=$2",
+            [brand, command.operationReference],
+          )
+        ).rows[0]?.n;
+        if (soleOperatorMfaAt === null && existing !== 1)
+          return fail("CATALOG_INDEPENDENT_APPROVAL_REQUIRED");
+        if (soleOperatorMfaAt !== null)
+          await recordMenuSoleOperatorApproval(transaction, {
+            brandReference: String(brand),
+            approvalEvidenceReference: approvalEvidence,
+            operationReference: command.operationReference,
+            menuReference: command.menuReference,
+            menuVersionReference: command.menuVersionReference,
+            lifecycleReference: String(result.record.lifecycle.lifecycleId),
+            actorReference: String(scope.actorReference),
+            actorMfaAt: soleOperatorMfaAt,
+            approvedAt: String(command.requestedAt),
+            auditReference: String(
+              parseCatalogReference(options.reference("Audit", command.operationReference)),
+            ),
+          });
+      }
       if (
         !(await permission()) ||
         (requestedAction === "Approve" &&

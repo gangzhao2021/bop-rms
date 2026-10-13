@@ -1,3 +1,4 @@
+import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
 /** WP-2423 / DEC-RECIPE-AUTHORING: RECIPE-LIST / RECIPE-EDITOR view contract and same-origin client. */
 export type RecipeErrorCode =
   | "PermissionDenied"
@@ -11,6 +12,8 @@ export type RecipeErrorCode =
   | "AllergenUndeclared"
   | "LineInvalid"
   | "Invalid"
+  | "SoleOperatorNotInEffect"
+  | "NeedsReverification"
   | "Offline"
   | "Unavailable";
 export class RecipePageError extends Error {
@@ -78,6 +81,8 @@ export interface RecipeReview {
   readonly comment: string | null;
   readonly reviewedAt: string;
   readonly current: boolean;
+  /** WP-2423 Q19: given alone by the sole operator. */
+  readonly reviewMode?: "Independent" | "SoleOperator";
 }
 /** WP-2423 / DEC-ALLERGEN-DECLARATIONS: an ingredient's declaration as offered for new versions. */
 export interface IngredientAllergenStatus {
@@ -159,6 +164,8 @@ export interface RecipeListView extends RecipeViewBase {
 export interface RecipeEditorView extends RecipeViewBase {
   readonly screenId: "RECIPE-EDITOR";
   readonly recipe: RecipeDetail;
+  /** WP-2423 Q19: for a reviewer: may they review alone as sole operator, and why not. */
+  readonly soleOperator: SoleOperatorGateView | null;
 }
 export type RecipeCommand =
   | {
@@ -178,6 +185,8 @@ export type RecipeCommand =
       readonly kind: "Cost" | "FoodSafety";
       readonly decision: "Approved" | "Rejected";
       readonly comment: string | null;
+      /** WP-2423 Q19: the sole operator reviews alone (own recipe, or both kinds). */
+      readonly approvalMode?: "SoleOperator";
     }
   | {
       readonly action: "Publish" | "Archive";
@@ -236,7 +245,10 @@ export function parseRecipeEditorView(value: unknown): RecipeEditorView {
     !Array.isArray(recipe.reviews)
   )
     return invalid();
-  return r as unknown as RecipeEditorView;
+  return {
+    ...r,
+    soleOperator: parseSoleOperatorGate(r.soleOperator),
+  } as unknown as RecipeEditorView;
 }
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 export function parseRecipeRouteReference(value: unknown): string {
@@ -309,6 +321,8 @@ const codes = new Set<RecipeErrorCode>([
   "AllergenUndeclared",
   "LineInvalid",
   "Invalid",
+  "SoleOperatorNotInEffect",
+  "NeedsReverification",
 ]);
 export function createRecipeClient(csrf: string, fetcher: typeof fetch = fetch): RecipeClient {
   const post = async (path: string, body: unknown) => {

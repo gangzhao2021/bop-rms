@@ -11,6 +11,8 @@ export const catalogErrorCodes = [
   "CATALOG_CODE_CONFLICT",
   "CATALOG_LIFECYCLE_CONFLICT",
   "CATALOG_DEPENDENCY_UNAVAILABLE",
+  // WP-2423 Q19: the person who submitted a menu for review cannot approve it (unless sole operator).
+  "CATALOG_INDEPENDENT_APPROVAL_REQUIRED",
 ] as const;
 export type CatalogErrorCode = (typeof catalogErrorCodes)[number];
 

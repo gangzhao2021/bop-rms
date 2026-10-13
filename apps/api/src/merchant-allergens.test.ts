@@ -15,14 +15,42 @@ const declare = (change: Record<string, unknown> = {}) => ({
   ...change,
 });
 describe("WP-2423 allergen command body", () => {
-  it("accepts approving the TEST list and a declaration", () => {
+  it("accepts recording and approving the TEST list and a declaration", () => {
+    expect(
+      parseAllergenCommandBody({
+        action: "RecordRegistry",
+        operationReference: id(1),
+        template: "CA_PRIORITY_TEST",
+      }).action,
+    ).toBe("RecordRegistry");
     expect(
       parseAllergenCommandBody({
         action: "ApproveRegistry",
         operationReference: id(1),
-        template: "CA_PRIORITY_TEST",
-      }).action,
-    ).toBe("ApproveRegistry");
+        proposalReference: id(2),
+      }),
+    ).toEqual({ action: "ApproveRegistry", operationReference: id(1), proposalReference: id(2) });
+    expect(
+      parseAllergenCommandBody({
+        action: "ApproveRegistry",
+        operationReference: id(1),
+        proposalReference: id(2),
+        approvalMode: "SoleOperator",
+      }),
+    ).toMatchObject({ approvalMode: "SoleOperator" });
+    // WP-2423 Q19: the one-step approval of the template is gone (two-person rule).
+    for (const body of [
+      { action: "ApproveRegistry", operationReference: id(1), template: "CA_PRIORITY_TEST" },
+      {
+        action: "ApproveRegistry",
+        operationReference: id(1),
+        proposalReference: id(2),
+        approvalMode: "Independent",
+      },
+    ])
+      expect(() => parseAllergenCommandBody(body)).toThrow(
+        expect.objectContaining({ code: "Invalid" }),
+      );
     expect(parseAllergenCommandBody(declare())).toMatchObject({
       documentReference: "Dairy spec 2026-09",
       note: null,

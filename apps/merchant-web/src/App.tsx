@@ -752,6 +752,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
               <StoreMenuBuilderPage
                 key={state.workspace.selectedScope.storeReference + state.csrf}
                 client={createMenuClient(state.csrf)}
+                csrf={state.csrf}
               />
             ) : (
               <StoreMenuBuilderPage />
@@ -832,6 +833,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
               <StorePriceEditorPage
                 key={state.workspace.selectedScope.storeReference + state.csrf}
                 client={createPriceClient(state.csrf)}
+                csrf={state.csrf}
               />
             ) : (
               <StorePriceEditorPage />
@@ -878,6 +880,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
               <RecipeEditorPage
                 key={state.workspace.selectedScope.storeReference + state.csrf}
                 client={createRecipeClient(state.csrf)}
+                csrf={state.csrf}
               />
             ) : (
               <RecipeEditorPage />
@@ -1160,6 +1163,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
               <AllergenListPage
                 key={state.workspace.selectedScope.storeReference + state.csrf}
                 client={createAllergenClient(state.csrf)}
+                csrf={state.csrf}
               />
             ) : (
               <AllergenListPage />

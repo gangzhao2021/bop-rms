@@ -11,6 +11,7 @@ import {
   createPriceBookSnapshot,
   parsePricingReference,
   PriceBookWorkflowError,
+  recordPriceBookSoleOperatorApproval,
   type CurrencyMetadataSnapshot,
   type PriceBookAction,
   type PriceBookSnapshot,
@@ -18,6 +19,7 @@ import {
 } from "@rms/pricing";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import { createPriceBookDraftAuthorSource } from "./price-book-draft-author-source.js";
+import { requireMerchantBrandSoleOperator } from "./merchant-sole-operator.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 
@@ -65,6 +67,8 @@ export interface MerchantPriceBookCommandRequest {
   csrf: unknown;
   action: PriceBookAction;
   input: unknown;
+  /** WP-2423 Q19: the draft's author publishes it alone as sole operator (explicitly confirmed). */
+  approvalMode?: "SoleOperator";
 }
 
 export function createMerchantPriceBookCommands(options: {
@@ -87,6 +91,9 @@ export function createMerchantPriceBookCommands(options: {
       csrf: request.csrf,
     });
     if (!Object.hasOwn(methods, request.action)) return fail("PRICE_BOOK_INPUT_INVALID");
+    const sole = request.approvalMode === "SoleOperator";
+    if ((request.approvalMode !== undefined && !sole) || (sole && request.action !== "Publish"))
+      return fail("PRICE_BOOK_INPUT_INVALID");
     const decoded = transport
       ? parseMerchantPriceBookTransport(request.action, request.input)
       : null;
@@ -215,6 +222,32 @@ export function createMerchantPriceBookCommands(options: {
       if (!candidate) return fail("PRICE_BOOK_INPUT_INVALID");
       const contexts =
         request.action === "Publish" && prior === null ? await checkCoverage(candidate) : [];
+      // WP-2423 Q19: the author's own publication only while sole operator is in effect for them,
+      // read in this transaction, with a second factor at most 15 minutes old.
+      let soleOperatorMfaAt: string | null = null;
+      if (sole && prior === null) {
+        const approver = await permission("pricing.price-book.approve");
+        await brandScope();
+        const provenance = await author.load(transaction, book);
+        if (
+          approver === null ||
+          provenance === null ||
+          String(provenance.actorReference) !== String(scope.actorReference)
+        )
+          return fail("PRICE_BOOK_APPROVAL_REQUIRED");
+        soleOperatorMfaAt = (
+          await requireMerchantBrandSoleOperator(transaction, {
+            tenantReference: String(scope.tenantReference),
+            brandReference: brand,
+            storeReference: String(scope.selectedStoreReference),
+            actorReference: String(scope.actorReference),
+            permissionCode: "pricing.price-book.approve",
+            observedAt: String(raw.requestedAt),
+            allowed: async () => (await permission("pricing.price-book.approve")) !== null,
+          })
+        ).actorMfaAt;
+        await brandScope();
+      }
       const service = createPriceBookService({
         repository,
         references: {
@@ -238,6 +271,7 @@ export function createMerchantPriceBookCommands(options: {
               permission: manage,
               approvalPermission: approval,
               draftAuthorActorReference: provenance?.actorReference ?? null,
+              ...(soleOperatorMfaAt === null ? {} : { soleOperatorApproval: true }),
               audit: {
                 auditId: parsePricingReference(options.auditReference(input.operationReference)),
                 brandId: brand,
@@ -252,14 +286,30 @@ export function createMerchantPriceBookCommands(options: {
                 dataClassification: "Internal",
                 retentionPolicyCode: "CONFIGURATION_AUDIT",
                 retentionPolicyVersion: 1,
+                ...(soleOperatorMfaAt === null
+                  ? {}
+                  : { afterSummary: { approvalMode: "SoleOperator" } }),
               },
             };
           },
         },
       });
-      return service[methods[request.action]](
+      const result = await service[methods[request.action]](
         request.action === "Publish" ? { ...raw, coverageContexts: contexts } : raw,
       );
+      if (soleOperatorMfaAt !== null && result.status === "Applied") {
+        await recordPriceBookSoleOperatorApproval(transaction, {
+          brandReference: brand,
+          priceBookReference: book,
+          operationReference: operation,
+          actorReference: String(scope.actorReference),
+          actorMfaAt: soleOperatorMfaAt,
+          approvedAt: String(raw.requestedAt),
+          auditReference: parsePricingReference(options.auditReference(operation)),
+        });
+        await brandScope();
+      }
+      return result;
     });
   };
   return Object.freeze({

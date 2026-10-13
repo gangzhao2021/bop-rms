@@ -21,7 +21,14 @@ export type SoleOperatorSettingReason =
 /** The brand-internal approval permissions a sole operator may satisfy alone. Each gate is added
  * here when its own owner implements the sole-operator path; any other code is refused. */
 export const soleOperatorApprovalPermissionCodes: ReadonlySet<string> = new Set([
+  // Store gate: escalated ordinary refund approval.
   "payment.refund.approve",
+  // Brand gates (WP-2423 Q19 step 2), exactly as each gate checks them: the price book gate
+  // still checks the legacy hyphenated code; menu review approval; recipe review; allergen roster.
+  "pricing.price-book.approve",
+  "catalog.menu.approve",
+  "recipe.approve",
+  "catalog.allergen_registry.manage",
 ]);
 
 export class SoleOperatorApprovalError extends Error {

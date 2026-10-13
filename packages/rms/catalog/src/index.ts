@@ -430,3 +430,5 @@ export { createPostgresMenuDraftStore } from "./infrastructure/persistence/menu-
 
 export * from "./infrastructure/persistence/allergen-declaration-store.js";
 export * from "./infrastructure/persistence/menu-admin-read-store.js";
+// WP-2423 Q19 (DEC-SOLE-OPERATOR-APPROVAL): mark of a sole-operator menu approval.
+export * from "./infrastructure/persistence/menu-sole-operator-store.js";
