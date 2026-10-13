@@ -85,6 +85,7 @@ it("binds actual captured payment and returns distinct confirmed and pending ref
     capturedAmountMinor: "2260",
     confirmedRefundMinor: "100",
     pendingRefundMinor: "1130",
+    canRequest: true,
   });
   expect(d.position.mock.calls[0]?.[1]).toEqual({
     orderReference: id(9),
@@ -107,13 +108,14 @@ it.each([null, { ...terminal, outcome: "Failed" }])(
       capturedAmountMinor: null,
       confirmedRefundMinor: null,
       pendingRefundMinor: null,
+      canRequest: true,
     });
     expect(d.position).not.toHaveBeenCalled();
   },
 );
 it("denies non-manager read before payment lookup", async () => {
   const f = setup();
-  d.workforce.mockResolvedValue({ decision: { effect: "Allow" }, activeRoleCodes: ["owner"] });
+  d.workforce.mockResolvedValue({ decision: { effect: "Allow" }, activeRoleCodes: ["kitchen"] });
   await expect(f.operation(f.input)).rejects.toThrow();
   expect(d.binding).not.toHaveBeenCalled();
 });

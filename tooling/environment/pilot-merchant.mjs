@@ -1,3 +1,4 @@
+import console from "node:console";
 import { createMerchantTaxConfigAuthoring } from "../../apps/api/dist/merchant-tax-config-authoring.js";
 import { createMerchantReceiptTemplatePublished } from "../../apps/api/dist/merchant-receipt-template-published.js";
 import { createMerchantReceiptTemplateLifecycle } from "../../apps/api/dist/merchant-receipt-template-lifecycle.js";
@@ -586,6 +587,12 @@ export async function createInternalMerchant(
       resolveConfiguration: escalatedRefundConfiguration,
       prepare: ordinaryRefund,
       send: ordinaryRefundSend,
+      // WP-2423 Q5: answer once approved and prepared; send, confirm the result and issue the
+      // refund receipt in the background (the browser follows progress; retry is the same approval).
+      reconcile: ordinaryRefundReconciliation,
+      sendInBackground: true,
+      onBackgroundFailure: () =>
+        console.error(JSON.stringify({ event: "INTERNAL_REFUND_APPROVAL_SEND_INCOMPLETE" })),
       retentionPolicyCode: "FINANCIAL_COMPLIANCE",
       retentionPolicyVersion: 1,
     }),

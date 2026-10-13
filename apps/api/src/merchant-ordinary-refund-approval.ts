@@ -120,6 +120,13 @@ export function createMerchantOrdinaryRefundApproval(options: {
   }>;
   prepare: Command;
   send: Command;
+  /** WP-2423 Q5: after the send, confirm the Provider result and issue the refund receipt
+   * (the same command as "Check refund result and receipt"). */
+  reconcile?: Command;
+  /** Answer once the approval and preparation are recorded and send in the background; the
+   * browser follows progress. A background failure leaves the same approval to retry. */
+  sendInBackground?: boolean;
+  onBackgroundFailure?(): void;
   retentionPolicyCode: string;
   retentionPolicyVersion: number;
 }) {
@@ -281,56 +288,106 @@ export function createMerchantOrdinaryRefundApproval(options: {
       if (!(await current.allowed())) throw new MerchantRefundApprovalError("Denied");
       return { replayed: false, payments };
     }
-    // Send at once, one payment at a time, with identities fixed by the approval reference.
-    const results = [];
-    for (const paymentAttemptReference of approved.payments) {
-      const operationReference = approvalDerivedReference(
+    // One payment at a time, with identities fixed by the approval reference.
+    const legs = approved.payments.map((paymentAttemptReference) => ({
+      paymentAttemptReference,
+      operationReference: approvalDerivedReference(
         approvalReference,
         "operation:" + paymentAttemptReference,
-      );
-      let state: "SendRecorded" | "ResultUnknown";
-      try {
-        await options.prepare({
+      ),
+    }));
+    const prepareLeg = (leg: (typeof legs)[number]) =>
+      options.prepare({
+        sessionCookie: input.sessionCookie,
+        csrf: input.csrf,
+        command: {
+          orderReference,
+          requestReference,
+          paymentAttemptReference: leg.paymentAttemptReference,
+          operationReference: leg.operationReference,
+          auditReference: approvalDerivedReference(
+            approvalReference,
+            "operation-audit:" + leg.paymentAttemptReference,
+          ),
+          approvalReference,
+        },
+      });
+    const sendLeg = async (leg: (typeof legs)[number]) => {
+      await options.send({
+        sessionCookie: input.sessionCookie,
+        csrf: input.csrf,
+        command: {
+          operationReference: leg.operationReference,
+          orderReference,
+          requestReference,
+          dispatchReference: approvalDerivedReference(
+            approvalReference,
+            "dispatch:" + leg.paymentAttemptReference,
+          ),
+          auditReference: approvalDerivedReference(
+            approvalReference,
+            "dispatch-audit:" + leg.paymentAttemptReference,
+          ),
+          approvalReference,
+        },
+      });
+      if (options.reconcile)
+        await options.reconcile({
           sessionCookie: input.sessionCookie,
           csrf: input.csrf,
           command: {
             orderReference,
-            requestReference,
-            paymentAttemptReference,
-            operationReference,
-            auditReference: approvalDerivedReference(
+            operationReference: leg.operationReference,
+            observationReference: approvalDerivedReference(
               approvalReference,
-              "operation-audit:" + paymentAttemptReference,
-            ),
-            approvalReference,
-          },
-        });
-        await options.send({
-          sessionCookie: input.sessionCookie,
-          csrf: input.csrf,
-          command: {
-            operationReference,
-            orderReference,
-            requestReference,
-            dispatchReference: approvalDerivedReference(
-              approvalReference,
-              "dispatch:" + paymentAttemptReference,
+              "observation:" + leg.paymentAttemptReference,
             ),
             auditReference: approvalDerivedReference(
               approvalReference,
-              "dispatch-audit:" + paymentAttemptReference,
+              "observation-audit:" + leg.paymentAttemptReference,
             ),
-            approvalReference,
           },
         });
-        state = "SendRecorded";
-      } catch {
-        // A send may have reached the Provider; only the same approval retry or a result check
-        // may follow. Never report that nothing happened.
-        state = "ResultUnknown";
+    };
+    const results: {
+      paymentAttemptReference: string;
+      operationReference: string;
+      state: "SendRecorded" | "Sending" | "ResultUnknown";
+    }[] = [];
+    if (options.sendInBackground === true) {
+      const prepared: (typeof legs)[number][] = [];
+      for (const leg of legs) {
+        try {
+          await prepareLeg(leg);
+          prepared.push(leg);
+          results.push(Object.freeze({ ...leg, state: "Sending" as const }));
+        } catch {
+          results.push(Object.freeze({ ...leg, state: "ResultUnknown" as const }));
+        }
       }
-      results.push(Object.freeze({ paymentAttemptReference, operationReference, state }));
-    }
+      void (async () => {
+        for (const leg of prepared)
+          try {
+            await sendLeg(leg);
+          } catch {
+            // Dispatch is journaled before Provider I/O; the same approval retry recovers it.
+            options.onBackgroundFailure?.();
+          }
+      })();
+    } else
+      for (const leg of legs) {
+        let state: "SendRecorded" | "ResultUnknown";
+        try {
+          await prepareLeg(leg);
+          await sendLeg(leg);
+          state = "SendRecorded";
+        } catch {
+          // A send may have reached the Provider; only the same approval retry or a result check
+          // may follow. Never report that nothing happened.
+          state = "ResultUnknown";
+        }
+        results.push(Object.freeze({ ...leg, state }));
+      }
     return Object.freeze({
       status: "Approved" as const,
       approvalReference,

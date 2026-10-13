@@ -31,7 +31,41 @@ test("@production owner verifies and approves a refund above CAD 100 once", asyn
     approverName: null,
     canApprove: true,
   };
-  let listed = [entry];
+  // A second card waiting for the same owner: one verification must serve both.
+  const second = {
+    ...entry,
+    orderReference: id(11),
+    orderNumber: "A-0044",
+    requestReference: id(12),
+    paymentIntentReferences: [id(13)],
+  };
+  let listed = [entry, second];
+  let refunded = false;
+  await page.route("**/merchant/payments/refunds/items", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(1),
+        orderNumber: "A-0042",
+        canRequest: false,
+        claimVersion: 1,
+        items: [],
+        recentRequests: [
+          {
+            requestReference: id(2),
+            operationReference: id(6),
+            claimVersion: 1,
+            requestedAt: entry.requestedAt,
+            reasonCode: "WRONG_ITEM",
+            currencyCode: "CAD",
+            amountMinor: "12500",
+            decline: null,
+            progress: refunded ? "Refunded" : "Sending",
+          },
+        ],
+      },
+    }),
+  );
   const stepUps: string[] = [],
     approvals: string[] = [];
   await page.route("**/merchant/session", (route) =>
@@ -98,9 +132,7 @@ test("@production owner verifies and approves a refund above CAD 100 once", asyn
         status: "Approved",
         approvalReference: JSON.parse(approvals[0] ?? "{}").approvalReference,
         replayed: false,
-        payments: [
-          { paymentAttemptReference: id(4), operationReference: id(5), state: "SendRecorded" },
-        ],
+        payments: [{ paymentAttemptReference: id(4), operationReference: id(5), state: "Sending" }],
       },
     });
   });
@@ -138,8 +170,26 @@ test("@production owner verifies and approves a refund above CAD 100 once", asyn
 
   await approve.click();
   await expect(card.getByRole("alert")).toContainText("Mia must confirm it is them again");
+  // The other card uses the same person's verification at once.
+  const secondCard = page.getByRole("listitem").filter({ hasText: "Order A-0044" });
+  await expect(secondCard.getByRole("button", { name: "Verify to approve" })).toHaveCount(0);
+  await expect(
+    secondCard.getByRole("button", { name: "Approve and refund CAD 125.00" }),
+  ).toBeEnabled();
+  // Each card's code field has its own id (labels stay associated).
+  const ids = await page
+    .locator('input[name="one-time-code"]')
+    .evaluateAll((inputs) => inputs.map((input) => input.id));
+  expect(new Set(ids).size).toBe(ids.length);
+  expect(ids.length).toBeGreaterThan(1);
   await approve.click();
-  await expect(card).toContainText("Approved and sent to the customer's original payment method.");
+  await expect(card).toContainText(
+    "Approved. Refund sent to the payment provider — result pending",
+  );
+  refunded = true;
+  await expect(card).toContainText("Refunded to the customer's original payment method.", {
+    timeout: 15_000,
+  });
   expect(approvals).toHaveLength(2);
   expect(approvals[1]).toBe(approvals[0]);
   expect(JSON.parse(approvals[0] ?? "{}")).toMatchObject({

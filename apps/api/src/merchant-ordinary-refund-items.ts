@@ -3,12 +3,14 @@ import { MemberDirectoryError, loadStoreMember } from "@bop/membership";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { readClosedRecord, parseOpaqueUuidV7 } from "@bop/identity";
 import {
+  createPostgresOrdinaryRefundRequestStatusSource,
   createPostgresOrdinaryRefundRequestContextSource,
   createPostgresCapturedBatchPaymentSource,
   createOrdinaryRefundRoleResolver,
 } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { createMerchantWorkforcePermissionSource } from "./merchant-workforce-authority-source.js";
+import { refundReadAccess } from "./merchant-refund-read-authority.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 interface Scope {
@@ -44,7 +46,8 @@ export function createMerchantOrdinaryRefundItems(options: {
       const current = await resolve(
         transaction,
         input.sessionCookie,
-        "payment.refund.request",
+        // WP-2423 Q5: workspace access here; refundReadAccess decides who may read refunds.
+        "merchant.access",
         authenticated.sessionReference,
       );
       if (!(await current.allowed())) return deny();
@@ -83,6 +86,7 @@ export function createMerchantOrdinaryRefundItems(options: {
         }),
       });
       const role = createOrdinaryRefundRoleResolver(configuration.roleMapping);
+      const viewer = { canRequest: false as boolean };
       const authorize = async (
         _tx: ConsumerTransaction,
         query: Scope & { orderReference: string; actorReference: string; observedAt: string },
@@ -97,16 +101,19 @@ export function createMerchantOrdinaryRefundItems(options: {
           !(await current.allowed())
         )
           return false;
-        const authority = await workforce(businessTransaction, {
-          ...scope,
-          actorReference: String(current.actorReference),
-          observedAt: current.context.resolvedAt,
-          permissionCode: "payment.refund.request",
-        });
-        return (
-          authority.decision.effect === "Allow" &&
-          role("payment.refund.request", authority.activeRoleCodes) === "Manager"
+        // WP-2423 Q5: Owners/Finance read refunds too; only a Manager records requests.
+        const access = await refundReadAccess(
+          workforce,
+          businessTransaction,
+          {
+            ...scope,
+            actorReference: String(current.actorReference),
+            observedAt: String(current.context.resolvedAt),
+          },
+          role,
         );
+        viewer.canRequest = access.canRequest;
+        return access.canRead;
       };
       const allowed = () =>
         authorize(businessTransaction, {
@@ -216,9 +223,39 @@ export function createMerchantOrdinaryRefundItems(options: {
             }),
           );
       }
+      // WP-2423 Q5: each recent request's progress from committed Payment facts, so staff see
+      // Recorded / Sending / Refunded without a separate status check.
+      const status = createPostgresOrdinaryRefundRequestStatusSource({
+        scope,
+        providerAccountReference: configuration.providerAccountReference,
+        environment: configuration.environment,
+        authorize: () => allowed(),
+      });
+      const progress = new Map<string, "Recorded" | "Sending" | "Refunded" | "Declined">();
+      for (const request of recent) {
+        if (declines.has(request.requestReference)) {
+          progress.set(request.requestReference, "Declined");
+          continue;
+        }
+        const current = await status(businessTransaction, {
+          orderReference,
+          operationReference: String(request.operationReference),
+          observedAt,
+        });
+        const states = current.payments.map((payment) => payment.state);
+        progress.set(
+          request.requestReference,
+          states.every((state) => state === "Confirmed")
+            ? "Refunded"
+            : states.every((state) => state === "NotDispatched")
+              ? "Recorded"
+              : "Sending",
+        );
+      }
       if (!(await allowed())) return deny();
       return Object.freeze({
         orderReference,
+        canRequest: viewer.canRequest,
         orderNumber: order.orderNumber,
         claimVersion: context.history.length,
         items: Object.freeze(items),
@@ -233,6 +270,7 @@ export function createMerchantOrdinaryRefundItems(options: {
               currencyCode: request.currencyCode,
               amountMinor: request.amountMinor.toString(),
               decline: declines.get(request.requestReference) ?? null,
+              progress: progress.get(request.requestReference) ?? "Recorded",
             }),
           ),
         ),

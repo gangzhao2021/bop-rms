@@ -135,6 +135,7 @@ it("binds item queries to order and denies selectable units on uncaptured batche
     data = {
       orderReference: id(1),
       orderNumber: "12",
+      canRequest: true,
       claimVersion: 1,
       recentRequests: [
         {
@@ -146,6 +147,7 @@ it("binds item queries to order and denies selectable units on uncaptured batche
           currencyCode: "CAD",
           amountMinor: "1130",
           decline: null,
+          progress: "Recorded",
         },
       ],
       items: [item],
@@ -172,6 +174,7 @@ const context = {
   capturedAmountMinor: "2260",
   confirmedRefundMinor: "0",
   pendingRefundMinor: "1130",
+  canRequest: true,
 };
 it("payment context preserves separate capture, confirmed and pending amounts", async () => {
   const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response(context));
@@ -215,10 +218,12 @@ it("rejects missing, duplicate or inconsistent persisted request history", async
     currencyCode: "CAD",
     amountMinor: "1130",
     decline: null,
+    progress: "Recorded",
   };
   const data = {
     orderReference: id(1),
     orderNumber: "12",
+    canRequest: true,
     claimVersion: 1,
     items: [],
     recentRequests: [entry],
@@ -335,11 +340,13 @@ it("WP-2423 Q5: shows a declined request and sends an Other note only with that 
       declinerName: "Sam",
       declinedByYou: false,
     },
+    progress: "Declined",
   };
   const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(
     response({
       orderReference: id(1),
       orderNumber: "12",
+      canRequest: true,
       claimVersion: 1,
       recentRequests: [entry],
       items: [],
@@ -359,4 +366,38 @@ it("WP-2423 Q5: shows a declined request and sends an Other note only with that 
     reasonCode: "OTHER",
     note: "Customer left early",
   });
+});
+
+it("WP-2423 Q5: reads each request's progress and who may record requests", async () => {
+  const base = {
+    requestReference: id(40),
+    operationReference: id(41),
+    claimVersion: 1,
+    requestedAt: "2026-09-20T12:00:00.000Z",
+    reasonCode: "WRONG_ITEM",
+    currencyCode: "CAD",
+    amountMinor: "1130",
+    decline: null,
+  };
+  const items = (entry: unknown, canRequest: unknown = false) =>
+    response({
+      orderReference: id(1),
+      orderNumber: "12",
+      canRequest,
+      claimVersion: 1,
+      recentRequests: [entry],
+      items: [],
+    });
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(items({ ...base, progress: "Refunded" }))
+    .mockResolvedValueOnce(items({ ...base, progress: "Declined" }))
+    .mockResolvedValueOnce(items({ ...base, progress: "Done" }))
+    .mockResolvedValueOnce(items({ ...base, progress: "Sending" }, "yes"));
+  const client = createOrdinaryRefundClient(fetcher);
+  const read = await client.items(id(1), csrf);
+  expect(read.canRequest).toBe(false);
+  expect(read.recentRequests[0]?.progress).toBe("Refunded");
+  for (let i = 0; i < 3; i++)
+    await expect(client.items(id(1), csrf)).rejects.toMatchObject({ code: "Unavailable" });
 });

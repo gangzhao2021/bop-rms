@@ -7,6 +7,7 @@ const d = vi.hoisted(() => ({
   order: vi.fn(),
   capture: vi.fn(),
   member: vi.fn(),
+  status: vi.fn(),
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => d.resolve }));
 vi.mock("./merchant-workforce-authority-source.js", () => ({
@@ -22,6 +23,7 @@ vi.mock("@rms/payment", async (original) => ({
       return { occupying: value.history, declines: new Map(), ...value };
     },
   createPostgresCapturedBatchPaymentSource: () => ({ load: d.capture }),
+  createPostgresOrdinaryRefundRequestStatusSource: () => d.status,
 }));
 vi.mock("@bop/membership", async (original) => ({
   ...(await original<object>()),
@@ -68,6 +70,7 @@ function setup() {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  d.status.mockResolvedValue({ payments: [{ state: "Confirmed" }] });
   d.workforce.mockResolvedValue({ decision: { effect: "Allow" }, activeRoleCodes: ["manager"] });
   d.context.mockResolvedValue({
     existing: null,
@@ -118,6 +121,7 @@ it("returns paid unclaimed units and current claim version without private facts
   const f = setup();
   expect(await f.operation(f.input)).toEqual({
     orderReference: id(8),
+    canRequest: true,
     orderNumber: "12",
     claimVersion: 1,
     recentRequests: [
@@ -130,6 +134,7 @@ it("returns paid unclaimed units and current claim version without private facts
         currencyCode: "CAD",
         amountMinor: "1130",
         decline: null,
+        progress: "Refunded",
       },
     ],
     items: [
@@ -153,12 +158,7 @@ it("returns paid unclaimed units and current claim version without private facts
       },
     ],
   });
-  expect(d.resolve).toHaveBeenCalledWith(
-    f.tx,
-    f.input.sessionCookie,
-    "payment.refund.request",
-    id(5),
-  );
+  expect(d.resolve).toHaveBeenCalledWith(f.tx, f.input.sessionCookie, "merchant.access", id(5));
   expect(d.context.mock.calls[0]?.[1]).toEqual({
     orderReference: id(8),
     operationReference: id(7),
@@ -174,7 +174,7 @@ it.each(["actorReference", "observedAt", "storeReference"])("rejects injected %s
 });
 it("rejects non-Manager role before reading financial information", async () => {
   const f = setup();
-  d.workforce.mockResolvedValue({ decision: { effect: "Allow" }, activeRoleCodes: ["owner"] });
+  d.workforce.mockResolvedValue({ decision: { effect: "Allow" }, activeRoleCodes: ["kitchen"] });
   await expect(f.operation(f.input)).rejects.toThrow();
   expect(d.context).not.toHaveBeenCalled();
 });
@@ -258,4 +258,16 @@ it("WP-2423 Q5: a declined request frees its units and shows who declined, when 
     declinerName: "Sam",
     declinedByYou: true,
   });
+});
+
+it("WP-2423 Q5: an Owner reads refunds (progress included) but may not record a request", async () => {
+  const f = setup();
+  d.workforce.mockImplementation(async (_tx, query: { permissionCode: string }) => ({
+    decision: { effect: "Allow" },
+    activeRoleCodes: query.permissionCode === "payment.refund.approve" ? ["owner"] : ["owner"],
+  }));
+  d.status.mockResolvedValueOnce({ payments: [{ state: "NeedsReconciliation" }] });
+  const result = await f.operation(f.input);
+  expect(result.canRequest).toBe(false);
+  expect(result.recentRequests[0]?.progress).toBe("Sending");
 });

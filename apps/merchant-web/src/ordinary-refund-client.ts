@@ -246,8 +246,10 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
             "capturedAmountMinor",
             "confirmedRefundMinor",
             "pendingRefundMinor",
+            "canRequest",
           ],
         );
+        if (typeof data.canRequest !== "boolean") return fail();
         if (
           data.paymentIntentReference !== paymentIntentReference ||
           typeof data.observedAt !== "string" ||
@@ -292,6 +294,8 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
           capturedAmountMinor,
           confirmedRefundMinor,
           pendingRefundMinor,
+          /** WP-2423 Q5: only a Store Manager records refund requests. */
+          canRequest: data.canRequest,
         });
       }, false);
     },
@@ -415,8 +419,16 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
             200,
             signal,
           ),
-          ["orderReference", "orderNumber", "claimVersion", "items", "recentRequests"],
+          [
+            "orderReference",
+            "orderNumber",
+            "canRequest",
+            "claimVersion",
+            "items",
+            "recentRequests",
+          ],
         );
+        if (typeof data.canRequest !== "boolean") return fail();
         if (
           data.orderReference !== orderReference ||
           !Array.isArray(data.items) ||
@@ -472,7 +484,13 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
             "currencyCode",
             "amountMinor",
             "decline",
+            "progress",
           ]);
+          if (
+            !["Recorded", "Sending", "Refunded", "Declined"].includes(String(entry.progress)) ||
+            (entry.progress === "Declined") !== (entry.decline !== null)
+          )
+            return fail();
           const decline =
             entry.decline === null
               ? null
@@ -519,6 +537,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
             currencyCode: "CAD" as const,
             amountMinor: money(entry.amountMinor),
             decline,
+            progress: entry.progress as "Recorded" | "Sending" | "Refunded" | "Declined",
           });
         });
         if (
@@ -531,6 +550,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
         return Object.freeze({
           recentRequests: Object.freeze(recentRequests),
           orderReference,
+          canRequest: data.canRequest,
           orderNumber: label(data.orderNumber),
           claimVersion: count(data.claimVersion, 0, 1000),
           items: Object.freeze(items),

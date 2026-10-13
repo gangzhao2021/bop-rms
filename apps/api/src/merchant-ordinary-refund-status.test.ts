@@ -71,7 +71,7 @@ it("queries exact request status under current Manager permission", async () => 
 });
 it("denies current non-Manager requester before querying status", async () => {
   const f = setup();
-  d.workforce.mockResolvedValue({ decision: { effect: "Allow" }, activeRoleCodes: ["owner"] });
+  d.workforce.mockResolvedValue({ decision: { effect: "Allow" }, activeRoleCodes: ["kitchen"] });
   await expect(f.operation(f.input)).rejects.toThrow();
   expect(d.status).not.toHaveBeenCalled();
 });

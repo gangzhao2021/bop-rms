@@ -4702,6 +4702,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           capturedAmountMinor: result.capturedAmountMinor,
           confirmedRefundMinor: result.confirmedRefundMinor,
           pendingRefundMinor: result.pendingRefundMinor,
+          canRequest: result.canRequest,
         }),
       )
       .catch(() => denied(response));
@@ -4729,6 +4730,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         response.json({
           orderReference: result.orderReference,
           orderNumber: result.orderNumber,
+          canRequest: result.canRequest,
           claimVersion: result.claimVersion,
           recentRequests: result.recentRequests.map((entry) => ({
             requestReference: entry.requestReference,
@@ -4747,6 +4749,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
                     declinerName: entry.decline.declinerName,
                     declinedByYou: entry.decline.declinedByYou,
                   },
+            progress: entry.progress,
           })),
           items: result.items.map((item) => ({
             orderBatchReference: item.orderBatchReference,

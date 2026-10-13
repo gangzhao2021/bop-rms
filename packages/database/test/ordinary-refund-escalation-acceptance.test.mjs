@@ -2,6 +2,7 @@ import { canonicalizeRfc8785, sha256Hex } from "../../bop/audit/src/index.ts";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { URL } from "node:url";
 import pg from "pg";
 import { it, vi } from "vitest";
@@ -992,6 +993,22 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
       assert.deepEqual(await counts(), before);
       assert.deepEqual((await approvals({ sessionCookie: "approver" })).entries, []);
 
+      // The Owner reads the payment's refunds (not as a requester); progress reads "Refunded".
+      const ownerView = await items({
+        ...session("approver"),
+        query: { orderReference: first.order },
+      });
+      assert.equal(ownerView.canRequest, false);
+      assert.deepEqual(
+        ownerView.recentRequests.map((r) => [r.requestReference, r.progress]),
+        [[firstRequest.requestReference, "Refunded"]],
+      );
+      assert.equal(
+        (await items({ ...session("requester"), query: { orderReference: first.order } }))
+          .canRequest,
+        true,
+      );
+
       // ── 8. Another Manager's request with no recent verification: approval names the requester,
       // a step-up older than 15 minutes does not count, and nobody approves their own request.
       const secondRequest = fullRefund(second, fresh(), fresh());
@@ -1255,6 +1272,42 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
         }),
         { code: "SamePerson" },
       );
+      // ── 10b. Approval answers at once and sends in the background (pilot composition); the
+      // refund then completes without the approver waiting on the Provider.
+      const background = createMerchantOrdinaryRefundApproval({
+        persistence,
+        authentication,
+        resolveConfiguration: escalatedConfiguration,
+        prepare,
+        send,
+        sendInBackground: true,
+        retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+        retentionPolicyVersion: 1,
+      });
+      const sendsBeforeBackground = providerSends;
+      const queuedApproval = await background({
+        ...session("approver"),
+        command: {
+          orderReference: third.order,
+          requestReference: otherRequest.requestReference,
+          approvalReference: fresh(),
+        },
+      });
+      assert.deepEqual(
+        queuedApproval.payments.map((p) => p.state),
+        ["Sending"],
+      );
+      const observed = async () =>
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM rms_payment.ordinary_refund_observation WHERE request_id=$1",
+            [otherRequest.requestReference],
+          )
+        ).rows[0].n;
+      for (let i = 0; i < 100 && (await observed()) === 0; i++) await delay(200);
+      assert.equal(await observed(), 1);
+      assert.equal(providerSends, sendsBeforeBackground + 1);
+
       // The decline and note records are append-only.
       await assert.rejects(
         admin.query("DELETE FROM rms_payment.ordinary_refund_decline"),

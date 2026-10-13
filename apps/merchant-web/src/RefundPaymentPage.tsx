@@ -37,6 +37,32 @@ const errorMessage = (error: unknown) =>
     : error instanceof OrdinaryRefundClientError && error.code === "Conflict"
       ? "The payment or refund selection changed. Refresh before trying again."
       : "Unable to refresh this information. Check your connection and try again.";
+/** WP-2423 Q5: what is left of the captured amount after confirmed and pending refunds. */
+function refundableMinor(context: Context): bigint {
+  if (
+    context.capturedAmountMinor === null ||
+    context.confirmedRefundMinor === null ||
+    context.pendingRefundMinor === null
+  )
+    return 0n;
+  return (
+    BigInt(context.capturedAmountMinor) -
+    BigInt(context.confirmedRefundMinor) -
+    BigInt(context.pendingRefundMinor)
+  );
+}
+/** Payment state in staff language, including refunds already made. */
+function paymentStateLabel(context: Context): string {
+  if (context.paymentState !== "Captured")
+    return context.paymentState === "Failed" ? "Failed" : "Not confirmed yet";
+  const captured = BigInt(context.capturedAmountMinor ?? "0"),
+    confirmed = BigInt(context.confirmedRefundMinor ?? "0"),
+    pending = BigInt(context.pendingRefundMinor ?? "0");
+  if (confirmed >= captured && captured > 0n) return "Refunded";
+  if (confirmed > 0n) return pending > 0n ? "Partly refunded, refund pending" : "Partly refunded";
+  if (pending > 0n) return "Paid, refund pending";
+  return "Paid";
+}
 export function OrderPaymentLinks({
   orderReference,
   csrf,
@@ -585,7 +611,13 @@ function RefundWizard({
                     " · Waiting for owner approval"
                   ) : approvals.get(entry.requestReference)?.state === "Approved" ? (
                     " · Approved, sending not finished"
-                  ) : null}
+                  ) : entry.progress === "Refunded" ? (
+                    " · Refunded"
+                  ) : entry.progress === "Sending" ? (
+                    " · Sent — result pending"
+                  ) : (
+                    " · Recorded, not sent yet"
+                  )}
                   {entry.decline !== null ? null : (
                     <RecordedRequestStatus
                       approval={approvals.get(entry.requestReference) ?? null}
@@ -610,90 +642,97 @@ function RefundWizard({
           )}
         </section>
       ) : null}
-      <fieldset disabled={locked}>
-        <legend>Refund selection</legend>
-        {items?.items.map((item, index) =>
-          // WP-2423 Q5: a line that was never charged (e.g. a round cancelled before payment)
-          // cannot be refunded; it is summarized below instead of offered as a quantity.
-          !item.paymentCaptured ? null : (
-            <div className="form-field" key={item.orderItemReference}>
-              <label htmlFor={"refund-quantity-" + index}>
-                {item.label} · line {index + 1} ({item.unclaimedQuantity} unclaimed of{" "}
-                {item.quantity})
+      {items?.canRequest === false ? (
+        <p>
+          Only a store manager records refund requests. You can follow these refunds here and
+          approve or decline them on the <Link to="/app/approvals">Approvals</Link> page.
+        </p>
+      ) : (
+        <fieldset disabled={locked}>
+          <legend>Refund selection</legend>
+          {items?.items.map((item, index) =>
+            // WP-2423 Q5: a line that was never charged (e.g. a round cancelled before payment)
+            // cannot be refunded; it is summarized below instead of offered as a quantity.
+            !item.paymentCaptured ? null : (
+              <div className="form-field" key={item.orderItemReference}>
+                <label htmlFor={"refund-quantity-" + index}>
+                  {item.label} · line {index + 1} ({item.unclaimedQuantity} unclaimed of{" "}
+                  {item.quantity})
+                </label>
+                <input
+                  id={"refund-quantity-" + index}
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  max={item.unclaimedQuantity}
+                  step={1}
+                  value={quantities[item.orderItemReference] ?? 0}
+                  disabled={!item.paymentCaptured || item.unclaimedQuantity === 0}
+                  onChange={(event) => {
+                    const quantity = Number(event.target.value);
+                    if (
+                      Number.isSafeInteger(quantity) &&
+                      quantity >= 0 &&
+                      quantity <= item.unclaimedQuantity
+                    ) {
+                      setQuantities((prior) => ({ ...prior, [item.orderItemReference]: quantity }));
+                      clearPreview();
+                    }
+                  }}
+                />
+              </div>
+            ),
+          )}
+          {items && items.items.some((item) => !item.paymentCaptured) ? (
+            <p>
+              Not charged, so not refundable:{" "}
+              {items.items
+                .filter((item) => !item.paymentCaptured)
+                .map((item) => item.label)
+                .join(", ")}
+              .
+            </p>
+          ) : null}
+          {items?.items.length === 0 ? <p>No items are available.</p> : null}
+          <label htmlFor="refund-reason">Reason</label>
+          <select
+            id="refund-reason"
+            value={reason}
+            onChange={(event) => {
+              setReason(event.target.value);
+              clearPreview();
+            }}
+          >
+            <option value="">Select a reason</option>
+            {refundReasonCodes.map((code) => (
+              <option key={code} value={code}>
+                {refundReasonLabel[code]}
+              </option>
+            ))}
+          </select>
+          {reason === "OTHER" ? (
+            <>
+              <label htmlFor="refund-note">
+                Note for the approver (required, up to 200 characters)
               </label>
-              <input
-                id={"refund-quantity-" + index}
-                type="number"
-                inputMode="numeric"
-                min={0}
-                max={item.unclaimedQuantity}
-                step={1}
-                value={quantities[item.orderItemReference] ?? 0}
-                disabled={!item.paymentCaptured || item.unclaimedQuantity === 0}
+              <textarea
+                id="refund-note"
+                maxLength={200}
+                required
+                value={note}
                 onChange={(event) => {
-                  const quantity = Number(event.target.value);
-                  if (
-                    Number.isSafeInteger(quantity) &&
-                    quantity >= 0 &&
-                    quantity <= item.unclaimedQuantity
-                  ) {
-                    setQuantities((prior) => ({ ...prior, [item.orderItemReference]: quantity }));
-                    clearPreview();
-                  }
+                  setNote(event.target.value);
+                  clearPreview();
                 }}
               />
-            </div>
-          ),
-        )}
-        {items && items.items.some((item) => !item.paymentCaptured) ? (
-          <p>
-            Not charged, so not refundable:{" "}
-            {items.items
-              .filter((item) => !item.paymentCaptured)
-              .map((item) => item.label)
-              .join(", ")}
-            .
-          </p>
-        ) : null}
-        {items?.items.length === 0 ? <p>No items are available.</p> : null}
-        <label htmlFor="refund-reason">Reason</label>
-        <select
-          id="refund-reason"
-          value={reason}
-          onChange={(event) => {
-            setReason(event.target.value);
-            clearPreview();
-          }}
-        >
-          <option value="">Select a reason</option>
-          {refundReasonCodes.map((code) => (
-            <option key={code} value={code}>
-              {refundReasonLabel[code]}
-            </option>
-          ))}
-        </select>
-        {reason === "OTHER" ? (
-          <>
-            <label htmlFor="refund-note">
-              Note for the approver (required, up to 200 characters)
-            </label>
-            <textarea
-              id="refund-note"
-              maxLength={200}
-              required
-              value={note}
-              onChange={(event) => {
-                setNote(event.target.value);
-                clearPreview();
-              }}
-            />
-            <p>Describe what happened. Do not include card numbers or health details.</p>
-          </>
-        ) : null}
-        <button disabled={!items} onClick={() => void calculate()}>
-          Calculate refund
-        </button>
-      </fieldset>
+              <p>Describe what happened. Do not include card numbers or health details.</p>
+            </>
+          ) : null}
+          <button disabled={!items} onClick={() => void calculate()}>
+            Calculate refund
+          </button>
+        </fieldset>
+      )}
       {preview ? (
         <section aria-label="Refund calculation">
           <h3>Confirm refund amount</h3>
@@ -814,7 +853,7 @@ function PaymentFinancialSummary({
       {context ? (
         <section aria-label="Payment financial summary" data-screen-id="PAY-PAYMENT-DETAIL">
           <h2>Payment financial summary</h2>
-          <p>Payment state: {context.paymentState}</p>
+          <p>Payment state: {paymentStateLabel(context)}</p>
           <dl>
             <div>
               <dt>Captured</dt>
@@ -880,21 +919,26 @@ function PaymentContent({
       ) : (
         <>
           <PaymentFinancialSummary initial={context} csrf={csrf} revision={financialRevision} />
-          {context.paymentState === "Captured" ? (
-            wizard ? (
-              <RefundWizard
-                onFinancialChange={refreshFinancial}
-                key={context.orderReference}
-                orderReference={context.orderReference}
-                csrf={csrf}
-              />
-            ) : (
-              <Link to={"/app/operations/payments/" + paymentIntentReference + "/refund"}>
-                Start refund request
-              </Link>
-            )
-          ) : (
+          {context.paymentState === "Captured" && wizard ? (
+            <RefundWizard
+              onFinancialChange={refreshFinancial}
+              key={context.orderReference}
+              orderReference={context.orderReference}
+              csrf={csrf}
+            />
+          ) : context.paymentState !== "Captured" ? (
             <p>A captured payment is required before starting a refund request.</p>
+          ) : refundableMinor(context) <= 0n ? (
+            <p>Nothing is left to refund on this payment.</p>
+          ) : !context.canRequest ? (
+            <p>
+              Only a store manager records refund requests. Refunds that need your approval are on
+              the <Link to="/app/approvals">Approvals</Link> page.
+            </p>
+          ) : (
+            <Link to={"/app/operations/payments/" + paymentIntentReference + "/refund"}>
+              Start refund request
+            </Link>
           )}
         </>
       )}

@@ -2605,6 +2605,7 @@ it("protects refund items transport and strips private nested data", async () =>
   };
   const query = vi.fn<NonNullable<MerchantBffRouterOptions["ordinaryRefundItems"]>>(async () => ({
     orderReference: id(1),
+    canRequest: true,
     orderNumber: "12",
     claimVersion: 1,
     recentRequests: [
@@ -2622,6 +2623,7 @@ it("protects refund items transport and strips private nested data", async () =>
           declinerName: "Owner",
           declinedByYou: false,
         },
+        progress: "Declined" as const,
       },
     ],
     items: [{ ...item, customerNote: "private" }],
@@ -2650,6 +2652,7 @@ it("protects refund items transport and strips private nested data", async () =>
   expect(await result.json()).toEqual({
     orderReference: id(1),
     orderNumber: "12",
+    canRequest: true,
     claimVersion: 1,
     recentRequests: [
       {
@@ -2666,6 +2669,7 @@ it("protects refund items transport and strips private nested data", async () =>
           declinerName: "Owner",
           declinedByYou: false,
         },
+        progress: "Declined" as const,
       },
     ],
     items: [item],
@@ -2800,6 +2804,7 @@ it("protects refund payment context and preserves unknown amounts", async () => 
     capturedAmountMinor: null,
     confirmedRefundMinor: null,
     pendingRefundMinor: null,
+    canRequest: false,
   };
   const query = vi.fn<NonNullable<MerchantBffRouterOptions["refundPaymentContext"]>>(async () => ({
     ...data,

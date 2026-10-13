@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   createRefundApprovalClient,
   StepUpError,
@@ -36,6 +36,7 @@ export function StepUpVerification({
   onVerified,
   label,
   fetcher,
+  loadServerStatus = true,
 }: {
   readonly purpose: StepUpPurpose;
   readonly csrf: string;
@@ -44,6 +45,8 @@ export function StepUpVerification({
   readonly onVerified: (validUntil: string) => void;
   readonly label: string;
   readonly fetcher?: typeof fetch | undefined;
+  /** Read the server's current verification on first display (off when the page shares it). */
+  readonly loadServerStatus?: boolean;
 }) {
   const client = useRef(createRefundApprovalClient(fetcher ?? fetch));
   const dialog = useRef<HTMLDialogElement>(null);
@@ -56,7 +59,7 @@ export function StepUpVerification({
   useEffect(() => () => pending.current?.abort(), []);
   // Start from the server's own record, so every page shows the same verification.
   useEffect(() => {
-    if (verifiedUntil !== null) return;
+    if (verifiedUntil !== null || !loadServerStatus) return;
     const controller = new AbortController();
     void client.current
       .stepUpStatus(controller.signal)
@@ -102,7 +105,8 @@ export function StepUpVerification({
       if (!controller.signal.aborted) setBusy(false);
     }
   };
-  const titleId = "step-up-" + purpose;
+  // Unique per instance: several cards on one page each label their own code field.
+  const titleId = "step-up-" + useId().replace(/[^A-Za-z0-9_-]/gu, "");
   return (
     <div className="step-up-verification">
       <p role="status">

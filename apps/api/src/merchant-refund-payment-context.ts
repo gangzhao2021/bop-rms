@@ -8,6 +8,7 @@ import {
 } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { createMerchantWorkforcePermissionSource } from "./merchant-workforce-authority-source.js";
+import { refundReadAccess } from "./merchant-refund-read-authority.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 interface Scope {
@@ -43,7 +44,8 @@ export function createMerchantRefundPaymentContext(options: {
       const current = await resolve(
         transaction,
         input.sessionCookie,
-        "payment.refund.request",
+        // WP-2423 Q5: workspace access here; refundReadAccess decides who may read refunds.
+        "merchant.access",
         authenticated.sessionReference,
       );
       if (!(await current.allowed())) return deny();
@@ -82,18 +84,22 @@ export function createMerchantRefundPaymentContext(options: {
         }),
       });
       const role = createOrdinaryRefundRoleResolver(configuration.roleMapping);
+      const viewer = { canRequest: false as boolean };
       const allowed = async () => {
         if (!(await current.allowed())) return false;
-        const authority = await workforce(businessTransaction, {
-          ...scope,
-          actorReference: String(current.actorReference),
-          observedAt: current.context.resolvedAt,
-          permissionCode: "payment.refund.request",
-        });
-        return (
-          authority.decision.effect === "Allow" &&
-          role("payment.refund.request", authority.activeRoleCodes) === "Manager"
+        // WP-2423 Q5: Owners/Finance read refunds too; only a Manager records requests.
+        const access = await refundReadAccess(
+          workforce,
+          businessTransaction,
+          {
+            ...scope,
+            actorReference: String(current.actorReference),
+            observedAt: String(current.context.resolvedAt),
+          },
+          role,
         );
+        viewer.canRequest = access.canRequest;
+        return access.canRead;
       };
       if (!(await allowed())) return deny();
       const observedAt = String(current.context.resolvedAt);
@@ -127,6 +133,7 @@ export function createMerchantRefundPaymentContext(options: {
           capturedAmountMinor: null,
           confirmedRefundMinor: null,
           pendingRefundMinor: null,
+          canRequest: viewer.canRequest,
         });
       }
       if (
@@ -160,6 +167,8 @@ export function createMerchantRefundPaymentContext(options: {
         capturedAmountMinor: terminal.amount.amountMinor.toString(),
         confirmedRefundMinor: position.confirmedMinor.toString(),
         pendingRefundMinor: position.pendingMinor.toString(),
+        // WP-2423 Q5: only a Manager records a refund request; Owners/Finance read and approve.
+        canRequest: viewer.canRequest,
       });
     });
   };

@@ -50,6 +50,7 @@ for (const recovery of ["retry", "history"] as const)
       currencyCode: string;
       amountMinor: string;
       decline: null;
+      progress: "Recorded";
     } | null = null;
     await page.route("**/merchant/session", (route) =>
       route.fulfill({
@@ -129,6 +130,7 @@ for (const recovery of ["retry", "history"] as const)
           capturedAmountMinor: "2260",
           confirmedRefundMinor: recoveredPhase === "Confirmed" ? "1130" : "0",
           pendingRefundMinor: persisted && recoveredPhase !== "Confirmed" ? "1130" : "0",
+          canRequest: true,
         },
       }),
     );
@@ -138,6 +140,7 @@ for (const recovery of ["retry", "history"] as const)
         json: {
           orderReference: id(1),
           orderNumber: "ORD-1",
+          canRequest: true,
           claimVersion: persisted ? 1 : 0,
           recentRequests: persisted ? [persisted] : [],
           items: [
@@ -259,6 +262,7 @@ for (const recovery of ["retry", "history"] as const)
         currencyCode: "CAD",
         amountMinor: "1130",
         decline: null,
+        progress: "Recorded",
       };
       if (requests.length === 1) return route.abort("failed");
       return route.fulfill({
@@ -355,6 +359,10 @@ for (const recovery of ["retry", "history"] as const)
     await expect(page.getByRole("button", { name: "Record refund request" })).toBeDisabled();
     await expect(page.getByRole("region", { name: "Recorded refund requests" })).toContainText(
       "Request 1: CAD 11.30",
+    );
+    // WP-2423 Q5: each recorded request shows where it stands without a separate check.
+    await expect(page.getByRole("region", { name: "Recorded refund requests" })).toContainText(
+      "Recorded, not sent yet",
     );
     await expect(page.getByRole("spinbutton", { name: /Latte/ })).toHaveAttribute("max", "1");
     await page.getByRole("button", { name: "Check execution status for request 1" }).click();

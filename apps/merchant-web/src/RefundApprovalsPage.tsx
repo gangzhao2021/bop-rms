@@ -17,12 +17,21 @@ import {
   formatCad,
 } from "./refund-reasons.js";
 import { serviceOperationReference } from "./service-control-client.js";
+import { createOrdinaryRefundClient } from "./ordinary-refund-client.js";
+
+const pollIntervalMs = 3000,
+  pollLimit = 40;
 
 type View = Awaited<ReturnType<ReturnType<typeof createRefundApprovalClient>["approvals"]>>;
 type Outcome =
   | { readonly kind: "Idle" }
   | { readonly kind: "Busy" }
-  | { readonly kind: "Sent"; readonly unknown: boolean }
+  | {
+      readonly kind: "Sent";
+      readonly unknown: boolean;
+      /** Follows the refund after approval: sent to the Provider, then refunded. */
+      readonly progress: "Sending" | "Refunded" | "StillPending";
+    }
   | { readonly kind: "Declined"; readonly declinedAt: string }
   | { readonly kind: "Failed"; readonly message: string; readonly retry: boolean };
 
@@ -33,15 +42,16 @@ const person = (entry: RefundApprovalEntry) =>
 function ApprovalCard({
   entry,
   csrf,
-  approverVerifiedUntil,
-  onApproverVerified,
+  viewerVerifiedUntil,
+  onViewerVerified,
   onChanged,
   fetcher,
 }: {
   readonly entry: RefundApprovalEntry;
   readonly csrf: string;
-  readonly approverVerifiedUntil: string | null;
-  readonly onApproverVerified: (validUntil: string) => void;
+  /** The signed-in member's own verification, shared by every card (it belongs to the person). */
+  readonly viewerVerifiedUntil: string | null;
+  readonly onViewerVerified: (validUntil: string) => void;
   readonly onChanged: () => void;
   readonly fetcher?: typeof fetch | undefined;
 }) {
@@ -50,9 +60,37 @@ function ApprovalCard({
   const approvalReference = useRef(entry.approvalReference ?? serviceOperationReference());
   const pending = useRef<AbortController | null>(null);
   const [outcome, setOutcome] = useState<Outcome>({ kind: "Idle" });
-  const [requesterVerifiedUntil, setRequesterVerifiedUntil] = useState(
-    entry.requesterVerifiedUntil,
-  );
+  const requesterVerifiedUntil = entry.requestedByYou
+    ? viewerVerifiedUntil
+    : entry.requesterVerifiedUntil;
+  const approverVerifiedUntil = viewerVerifiedUntil;
+  const refunds = useRef(createOrdinaryRefundClient(fetcher ?? fetch));
+  const polling = useRef<AbortController | null>(null);
+  useEffect(() => () => polling.current?.abort(), []);
+  /** After approval: read the request's progress until it is refunded (or give up quietly). */
+  const follow = async () => {
+    polling.current?.abort();
+    const controller = new AbortController();
+    polling.current = controller;
+    for (let attempt = 0; attempt < pollLimit; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+      if (controller.signal.aborted) return;
+      try {
+        const current = await refunds.current.items(entry.orderReference, csrf, controller.signal);
+        const request = current.recentRequests.find(
+          (value) => value.requestReference === entry.requestReference,
+        );
+        if (request?.progress === "Refunded") {
+          setOutcome({ kind: "Sent", unknown: false, progress: "Refunded" });
+          return;
+        }
+      } catch {
+        // Keep following; a read failure says nothing about the refund itself.
+      }
+    }
+    if (!controller.signal.aborted)
+      setOutcome({ kind: "Sent", unknown: false, progress: "StillPending" });
+  };
   useEffect(() => () => pending.current?.abort(), []);
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => event.preventDefault();
@@ -123,10 +161,9 @@ function ApprovalCard({
         controller.signal,
       );
       if (controller.signal.aborted) return;
-      setOutcome({
-        kind: "Sent",
-        unknown: result.payments.some((payment) => payment.state === "ResultUnknown"),
-      });
+      const unknown = result.payments.some((payment) => payment.state === "ResultUnknown");
+      setOutcome({ kind: "Sent", unknown, progress: "Sending" });
+      if (!unknown) void follow();
     } catch (error) {
       if (controller.signal.aborted) return;
       const code = error instanceof RefundApprovalClientError ? error.code : "OutcomeUnknown";
@@ -231,8 +268,9 @@ function ApprovalCard({
         <StepUpVerification
           purpose="RefundRequest"
           csrf={csrf}
-          verifiedUntil={requesterVerifiedUntil}
-          onVerified={setRequesterVerifiedUntil}
+          verifiedUntil={viewerVerifiedUntil}
+          onVerified={onViewerVerified}
+          loadServerStatus={false}
           label="Verify for the owner's approval"
           fetcher={fetcher}
         />
@@ -244,8 +282,9 @@ function ApprovalCard({
           <StepUpVerification
             purpose="RefundApproval"
             csrf={csrf}
-            verifiedUntil={approverVerifiedUntil}
-            onVerified={onApproverVerified}
+            verifiedUntil={viewerVerifiedUntil}
+            onVerified={onViewerVerified}
+            loadServerStatus={false}
             label="Verify to approve"
             fetcher={fetcher}
           />
@@ -256,7 +295,7 @@ function ApprovalCard({
             onClick={() => void approve()}
           >
             {busy
-              ? "Approving and sending…"
+              ? "Approving…"
               : outcome.kind === "Sent"
                 ? "Retry sending the same refund"
                 : outcome.kind === "Failed" && outcome.retry
@@ -321,8 +360,12 @@ function ApprovalCard({
         <div role="status">
           <p>
             {outcome.unknown
-              ? "Approved, but the payment provider's answer was not received. Retry sending: the same refund is reused and the customer is never refunded twice."
-              : "Approved and sent to the customer's original payment method. The provider's result is recorded automatically and shown on the order's payment page."}
+              ? "Approved, but sending was not confirmed. Retry sending: the same refund is reused and the customer is never refunded twice."
+              : outcome.progress === "Refunded"
+                ? "Refunded to the customer's original payment method."
+                : outcome.progress === "StillPending"
+                  ? "Approved. The payment provider has not confirmed the refund yet; its result is recorded automatically. Refresh to check again."
+                  : "Approved. Refund sent to the payment provider — result pending."}
           </p>
           <button type="button" onClick={onChanged}>
             Refresh list
@@ -351,7 +394,18 @@ export function RefundApprovalsPage({
   const [view, setView] = useState<View | null>(null);
   const [state, setState] = useState<"Loading" | "Ready" | "Denied" | "Unavailable">("Loading");
   const [refresh, setRefresh] = useState(0);
-  const [approverVerifiedUntil, setApproverVerifiedUntil] = useState<string | null>(null);
+  // The signed-in member's verification, read once from the server and shared by every card.
+  const [viewerVerifiedUntil, setViewerVerifiedUntil] = useState<string | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    void client.current
+      .stepUpStatus(controller.signal)
+      .then((until) => {
+        if (!controller.signal.aborted) setViewerVerifiedUntil(until);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [refresh]);
   const reload = useCallback(() => setRefresh((value) => value + 1), []);
   useEffect(() => {
     const controller = new AbortController();
@@ -417,8 +471,8 @@ export function RefundApprovalsPage({
                   key={entry.requestReference + ":" + (entry.approvalReference ?? "")}
                   entry={entry}
                   csrf={csrf}
-                  approverVerifiedUntil={approverVerifiedUntil}
-                  onApproverVerified={setApproverVerifiedUntil}
+                  viewerVerifiedUntil={viewerVerifiedUntil}
+                  onViewerVerified={setViewerVerifiedUntil}
                   onChanged={reload}
                   fetcher={fetcher}
                 />

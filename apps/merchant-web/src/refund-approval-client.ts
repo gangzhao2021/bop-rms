@@ -363,7 +363,11 @@ export function createRefundApprovalClient(fetcher: typeof fetch = fetch) {
                   "operationReference",
                   "state",
                 ]);
-                if (payment.state !== "SendRecorded" && payment.state !== "ResultUnknown")
+                if (
+                  payment.state !== "SendRecorded" &&
+                  payment.state !== "Sending" &&
+                  payment.state !== "ResultUnknown"
+                )
                   return invalid();
                 return Object.freeze({
                   paymentAttemptReference: ref(payment.paymentAttemptReference),

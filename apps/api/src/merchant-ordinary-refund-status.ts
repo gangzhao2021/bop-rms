@@ -6,6 +6,7 @@ import {
 } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { createMerchantWorkforcePermissionSource } from "./merchant-workforce-authority-source.js";
+import { refundReadAccess } from "./merchant-refund-read-authority.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 interface Scope {
@@ -42,7 +43,8 @@ export function createMerchantOrdinaryRefundStatus(options: {
       const current = await resolve(
         transaction,
         input.sessionCookie,
-        "payment.refund.request",
+        // WP-2423 Q5: workspace access here; refundReadAccess decides who may read refunds.
+        "merchant.access",
         authenticated.sessionReference,
       );
       if (!(await current.allowed())) return deny();
@@ -95,16 +97,18 @@ export function createMerchantOrdinaryRefundStatus(options: {
           !(await current.allowed())
         )
           return false;
-        const authority = await workforce(businessTransaction, {
-          ...scope,
-          actorReference: String(current.actorReference),
-          observedAt: current.context.resolvedAt,
-          permissionCode: "payment.refund.request",
-        });
-        return (
-          authority.decision.effect === "Allow" &&
-          role("payment.refund.request", authority.activeRoleCodes) === "Manager"
+        // WP-2423 Q5: Owners/Finance read refunds too; only a Manager records requests.
+        const access = await refundReadAccess(
+          workforce,
+          businessTransaction,
+          {
+            ...scope,
+            actorReference: String(current.actorReference),
+            observedAt: String(current.context.resolvedAt),
+          },
+          role,
         );
+        return access.canRead;
       };
       const allowed = () =>
         authorize(businessTransaction, {
