@@ -10,7 +10,7 @@ import { parseCanonicalInstant } from "@bop/tenant";
 import {
   CartError,
   createConfiguredCustomerQuoteService,
-  parseConfiguredCartQuoteAttachment,
+  parseCartQuoteAttachmentOfVersion,
   createPickupCartQuoteService,
   createDiningCartQuoteService,
   createDiningCartQuoteExpiryService,
@@ -22,7 +22,6 @@ import {
   createPostgresCartQueryStore,
   createPostgresCartQuoteStore,
   createPostgresPickupCartBindingReader,
-  parseCartQuoteAttachment,
   parseOrderingReference,
   type CartQueryTransactionRunner,
   type PickupCartQuoteOptions,
@@ -82,10 +81,7 @@ function receipt(
 ) {
   const raw = closed(value, ["status", "attachment"]);
   if (raw.status !== "Attached" && raw.status !== "AlreadyAttached") throw new Error();
-  const result =
-    version === 2
-      ? parseConfiguredCartQuoteAttachment(raw.attachment)
-      : parseCartQuoteAttachment(raw.attachment);
+  const result = parseCartQuoteAttachmentOfVersion(raw.attachment, version);
   if (
     result.cartReference !== command.cartReference ||
     result.cartVersion !== command.expectedCartVersion ||

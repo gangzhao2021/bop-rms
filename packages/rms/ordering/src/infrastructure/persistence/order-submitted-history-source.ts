@@ -5,6 +5,8 @@ import type { OrderSubmittedEventConsumerPorts } from "../../application/ports/o
 import { parseOrderSubmittedEnvelope } from "../../application/order-submitted-event.js";
 import { parseOrderingReference, parseOrderingInstant } from "../../domain/cart.js";
 import { resolveOrderRevisionChain } from "../../domain/order-revision-chain.js";
+import { persistedOrderRevisionKindPolicy } from "../../domain/order-revision-kind.js";
+import { orderRevisionOperationBoundSql } from "./order-revision-binding.js";
 import {
   decodeAdditionalDiningBatchSnapshot,
   encodeAdditionalDiningBatchSnapshot,
@@ -57,10 +59,11 @@ export function createPostgresOrderSubmittedHistorySource(options: {
       ]);
       const found = await tx.query(
         "SELECT r.revision_id,r.version,r.expected_version,r.previous_revision_id,r.initial_submission_id,r.kind,r.occurred_at," +
-          "EXISTS (SELECT 1 FROM rms_ordering.order_acceptance_record a WHERE a.brand_id=r.brand_id AND a.store_id=r.store_id AND a.order_id=r.order_id AND a.acceptance_id=r.revision_id AND a.expected_order_version=r.expected_version AND a.accepted_order_version=r.version AND a.accepted_at=r.occurred_at) AS acceptance_bound," +
-          "EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation c WHERE c.brand_id=r.brand_id AND c.store_id=r.store_id AND c.order_id=r.order_id AND c.cancellation_id=r.revision_id AND c.order_type='DineIn' AND c.expected_source_checkpoint=r.previous_revision_id AND c.expected_order_version=r.expected_version AND c.cancelled_order_version=r.version AND c.cancelled_at=r.occurred_at) AS staff_cancellation_bound," +
-          "EXISTS (SELECT 1 FROM rms_ordering.order_item_staff_cancellation c WHERE c.brand_id=r.brand_id AND c.store_id=r.store_id AND c.order_id=r.order_id AND c.cancellation_id=r.revision_id AND c.expected_source_checkpoint=r.previous_revision_id AND c.expected_order_version=r.expected_version AND c.cancelled_order_version=r.version AND c.cancelled_at=r.occurred_at) AS item_cancellation_bound," +
-          "EXISTS (SELECT 1 FROM rms_ordering.order_batch_checkout_cancellation c WHERE c.brand_id=r.brand_id AND c.store_id=r.store_id AND c.order_id=r.order_id AND c.cancellation_id=r.revision_id AND c.expected_source_checkpoint=r.previous_revision_id AND c.expected_order_version=r.expected_version AND c.cancelled_order_version=r.version AND c.cancelled_at=r.occurred_at) AS checkout_cancellation_bound " +
+          // Bind every revision that keeps the Order open between Batches (acceptance, cancellations).
+          // Root and AdditionalBatch revisions are checked against their records below instead.
+          orderRevisionOperationBoundSql(
+            (policy) => !policy.root && !policy.terminal && !policy.addsAdditionalBatch,
+          ) +
           "FROM rms_ordering.order_revision r WHERE r.brand_id=$1 AND r.store_id=$2 AND r.order_id=$3 AND r.version<=$4 ORDER BY r.version LIMIT 10002",
         [brand, store, event.aggregateId, input.sourceVersion],
       );
@@ -68,7 +71,7 @@ export function createPostgresOrderSubmittedHistorySource(options: {
       const root = found.rows[0];
       if (
         !root ||
-        root.kind !== "Initial" ||
+        persistedOrderRevisionKindPolicy(root.kind)?.root !== true ||
         root.version !== 1 ||
         root.revision_id !== root.initial_submission_id ||
         root.expected_version !== 0 ||
@@ -130,26 +133,14 @@ export function createPostgresOrderSubmittedHistorySource(options: {
       for (let index = 0; index < revisions.length; index++) {
         const revision = revisions[index];
         if (!revision) return fail();
-        if (revision.kind === "Acceptance") {
-          if (found.rows[index + 1]?.acceptance_bound !== true) return fail();
+        const policy = persistedOrderRevisionKindPolicy(revision.kind);
+        if (!policy || policy.root || policy.terminal) return fail();
+        // WP-2423 Q6: accepted, staff-cancelled and System-cancelled Batches and cancelled item
+        // lines stay in the Order history; later Batches may follow. Each is bound to its record.
+        if (!policy.addsAdditionalBatch) {
+          if (found.rows[index + 1]?.operation_bound !== true) return fail();
           continue;
         }
-        // WP-2423 Q6: a staff-cancelled Batch stays in the Order history; later Batches may follow.
-        if (revision.kind === "StaffBatchCancellation") {
-          if (found.rows[index + 1]?.staff_cancellation_bound !== true) return fail();
-          continue;
-        }
-        // WP-2423 Q6: an unpaid Batch the System cancelled stays in the history too.
-        if (revision.kind === "BatchCancellation") {
-          if (found.rows[index + 1]?.checkout_cancellation_bound !== true) return fail();
-          continue;
-        }
-        // WP-2423 Q6 step 2a: cancelled item lines stay in the history of their Batch.
-        if (revision.kind === "StaffItemCancellation") {
-          if (found.rows[index + 1]?.item_cancellation_bound !== true) return fail();
-          continue;
-        }
-        if (revision.kind !== "AdditionalBatch") return fail();
         const saved = additional[batchIndex++];
         if (
           !saved ||
@@ -203,12 +194,13 @@ export function createPostgresOrderSubmittedHistorySource(options: {
         orderNumber: original.orderNumberAllocation.orderNumber,
         orderType: "DineIn",
         sourceChannel: original.order.sourceChannel,
-        // This exact reader rejects revisions outside Initial/Acceptance/AdditionalBatch and
-        // bound StaffBatchCancellation/StaffItemCancellation (the status projection shows staff
-        // cancellations separately).
+        // This exact reader rejects terminal revisions and any revision not bound to its owner
+        // record (the status projection shows staff cancellations separately).
         // Each Acceptance above is bound to its persisted owner record; adding an
         // unpaid Batch must not erase that accepted progress (DEC-PILOT-BATCH-PHASE-01).
-        canonicalPhase: revisions.some((revision) => revision.kind === "Acceptance")
+        canonicalPhase: revisions.some(
+          (revision) => persistedOrderRevisionKindPolicy(revision.kind)?.recordsAcceptance === true,
+        )
           ? "Accepted"
           : "Submitted",
         closureStatus: "Open",

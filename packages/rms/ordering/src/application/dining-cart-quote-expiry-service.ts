@@ -19,10 +19,7 @@ import {
   type CartAggregate,
   type OrderingInstant,
 } from "../domain/cart.js";
-import {
-  parseCartQuoteAttachment,
-  parseConfiguredCartQuoteAttachment,
-} from "../domain/cart-quote-attachment.js";
+import { parseCartQuoteAttachmentOfVersion } from "../domain/cart-quote-attachment.js";
 import {
   parseCartQuoteExpiryRecord,
   sameCartQuoteExpiryIntent,
@@ -275,10 +272,10 @@ export function createDiningCartQuoteExpiryService(options: DiningCartQuoteExpir
             return unavailable();
           resolved = Object.freeze({ status: "Expired", record: saved });
         } else if (status.status === "AlreadyAttached") {
-          const saved =
-            options.quoteVersion === 2
-              ? parseConfiguredCartQuoteAttachment(status.attachment)
-              : parseCartQuoteAttachment(status.attachment);
+          const saved = parseCartQuoteAttachmentOfVersion(
+            status.attachment,
+            options.quoteVersion ?? 1,
+          );
           for (const field of [
             "brandReference",
             "storeReference",

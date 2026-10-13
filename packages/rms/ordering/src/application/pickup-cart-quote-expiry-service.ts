@@ -26,8 +26,7 @@ import {
   type OrderingInstant,
 } from "../domain/cart.js";
 import {
-  parseCartQuoteAttachment,
-  parseConfiguredCartQuoteAttachment,
+  parseCartQuoteAttachmentOfVersion,
   type CartQuoteAttachment,
 } from "../domain/cart-quote-attachment.js";
 import {
@@ -255,10 +254,10 @@ export function createPickupCartQuoteExpiryService(options: PickupCartQuoteExpir
             return unavailable();
           resolved = Object.freeze({ status: "Expired", record: saved });
         } else if (status.status === "AlreadyAttached") {
-          const saved =
-            options.quoteVersion === 2
-              ? parseConfiguredCartQuoteAttachment(status.attachment)
-              : parseCartQuoteAttachment(status.attachment);
+          const saved = parseCartQuoteAttachmentOfVersion(
+            status.attachment,
+            options.quoteVersion ?? 1,
+          );
           for (const field of [
             "brandReference",
             "storeReference",

@@ -5,6 +5,7 @@ import {
   parseOrderingInstant,
   parseOrderingReference,
 } from "../domain/cart.js";
+// Version-specific on purpose: this service attaches v1 dining Quotes; v2 is configured-cart-quote-service.
 import { parseCartQuoteAttachment } from "../domain/cart-quote-attachment.js";
 import { assertCartLifecycleActive } from "../domain/cart-lifecycle.js";
 import { createCartQuoteAttachmentService } from "./cart-quote-attachment-service.js";

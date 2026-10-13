@@ -13,8 +13,7 @@ import {
   assertOrderCapacityLinkMatches,
   createCapacityLinkedOrderCreationService,
   parseCartAggregate,
-  parseCartQuoteAttachment,
-  parseConfiguredCartQuoteAttachment,
+  parseCartQuoteAttachmentOfVersion,
   parseOrderingInstant,
   parseOrderingReference,
   CheckoutValidationError,
@@ -122,10 +121,7 @@ function createVersionedCustomerDiningOrderSubmissionComposition<V extends 1 | 2
         ]);
         if (cartValue === null || quoteValue === null) return unavailable();
         const cart = parseCartAggregate(cartValue),
-          quote =
-            quoteVersion === 2
-              ? parseConfiguredCartQuoteAttachment(quoteValue)
-              : parseCartQuoteAttachment(quoteValue);
+          quote = parseCartQuoteAttachmentOfVersion(quoteValue, quoteVersion);
         if (
           cart.cartReference !== cartReference ||
           cart.aggregateVersion !== expectedCartVersion ||

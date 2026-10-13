@@ -3069,6 +3069,24 @@ async function scanUnsupported(root, module, diagnostics) {
             "order_fulfillment_completion_record",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/order-revision-position.ts";
+        // WP-2423: the single owner-record binding (SQL EXISTS per revision kind policy) shared by
+        // the revision position, preparation and submitted-history readers.
+        const acceptedOrderRevisionBindingAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          [
+            "order_batch",
+            "order_revision",
+            "order_submission_record",
+            "additional_dining_batch_record",
+            "order_acceptance_record",
+            "order_termination_record",
+            "order_fulfillment_completion_record",
+            "order_batch_checkout_cancellation",
+            "order_staff_cancellation",
+            "order_item_staff_cancellation",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/order-revision-binding.ts";
         const acceptedOrderCancellationRequestAsset =
           module.packageName === "@rms/ordering" &&
           module.manifest.ownedDatabase?.schema === "rms_ordering" &&
@@ -3468,6 +3486,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedBatchCheckoutExpiryAsset &&
           !acceptedOrderClosurePositionAsset &&
           !acceptedOrderRevisionPositionAsset &&
+          !acceptedOrderRevisionBindingAsset &&
           !acceptedOrderCancellationRequestAsset &&
           !acceptedDiningSessionOrderInventoryAsset &&
           !acceptedDiningSessionOrderLookupAsset &&

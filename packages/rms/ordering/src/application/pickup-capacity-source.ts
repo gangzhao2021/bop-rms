@@ -3,10 +3,7 @@ import {
   parseOrderingReference,
   parseOrderingInstant,
 } from "../domain/cart.js";
-import {
-  parseCartQuoteAttachment,
-  parseConfiguredCartQuoteAttachment,
-} from "../domain/cart-quote-attachment.js";
+import { parseCartQuoteAttachmentOfVersion } from "../domain/cart-quote-attachment.js";
 import { assertCartLifecycleActive } from "../domain/cart-lifecycle.js";
 import { CheckoutValidationError } from "../domain/checkout-validation.js";
 function fail(): never {
@@ -48,10 +45,7 @@ function resolveVersionedPickupCapacityCartSource(value: unknown, quoteVersion: 
       "observedAt",
     ]);
     const cart = parseCartAggregate(raw.cart),
-      quote =
-        quoteVersion === 2
-          ? parseConfiguredCartQuoteAttachment(raw.quote)
-          : parseCartQuoteAttachment(raw.quote);
+      quote = parseCartQuoteAttachmentOfVersion(raw.quote, quoteVersion);
     const guest = parseOrderingReference(raw.guestSessionReference),
       brand = parseOrderingReference(raw.brandReference),
       store = parseOrderingReference(raw.storeReference),

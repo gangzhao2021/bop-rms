@@ -1,4 +1,9 @@
 import { resolveOrderRevisionChain } from "../../domain/order-revision-chain.js";
+import {
+  isTerminalOrderRevisionKind,
+  persistedOrderRevisionKindPolicy,
+} from "../../domain/order-revision-kind.js";
+import { orderRevisionOperationBoundSql } from "./order-revision-binding.js";
 import { decodeOrderFulfillmentCompletionRecord } from "../../application/order-fulfillment-completion-record.js";
 import { parseOrderInitialExecution } from "../../application/order-initial-execution.js";
 import { appendAuditRecordInTransaction, validateAuditRecord } from "@bop/audit";
@@ -462,28 +467,27 @@ async function multiBatchPreparationVersion(
     await tx.query(
       "SELECT r.revision_id,r.version,r.expected_version,r.previous_revision_id,r.initial_submission_id,r.kind,r.occurred_at," +
         "(SELECT c.phase FROM rms_ordering.order_batch_checkout_cancellation c WHERE c.brand_id=r.brand_id AND c.store_id=r.store_id AND c.order_id=r.order_id AND c.cancellation_id=r.revision_id) AS cancellation_phase," +
-        "CASE r.kind WHEN 'Initial' THEN EXISTS (SELECT 1 FROM rms_ordering.order_submission_record s JOIN rms_ordering.order_batch b ON b.submission_id=s.submission_id AND b.brand_id=s.brand_id AND b.store_id=s.store_id AND b.order_id=s.order_id WHERE s.brand_id=r.brand_id AND s.store_id=r.store_id AND s.order_id=r.order_id AND s.submission_id=r.revision_id AND s.submission_kind='Initial' AND b.submitted_at=r.occurred_at) " +
-        "WHEN 'Acceptance' THEN EXISTS (SELECT 1 FROM rms_ordering.order_acceptance_record a WHERE a.brand_id=r.brand_id AND a.store_id=r.store_id AND a.order_id=r.order_id AND a.acceptance_id=r.revision_id AND a.expected_order_version=r.expected_version AND a.accepted_order_version=r.version AND a.accepted_at=r.occurred_at) " +
-        "WHEN 'BatchCancellation' THEN EXISTS (SELECT 1 FROM rms_ordering.order_batch_checkout_cancellation c WHERE c.brand_id=r.brand_id AND c.store_id=r.store_id AND c.order_id=r.order_id AND c.cancellation_id=r.revision_id AND c.expected_source_checkpoint=r.previous_revision_id AND c.expected_order_version=r.expected_version AND c.cancelled_order_version=r.version AND c.cancelled_at=r.occurred_at) " +
-        "WHEN 'StaffBatchCancellation' THEN EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation c WHERE c.brand_id=r.brand_id AND c.store_id=r.store_id AND c.order_id=r.order_id AND c.cancellation_id=r.revision_id AND c.order_type='DineIn' AND c.expected_source_checkpoint=r.previous_revision_id AND c.expected_order_version=r.expected_version AND c.cancelled_order_version=r.version AND c.cancelled_at=r.occurred_at) " +
-        "WHEN 'StaffItemCancellation' THEN EXISTS (SELECT 1 FROM rms_ordering.order_item_staff_cancellation c WHERE c.brand_id=r.brand_id AND c.store_id=r.store_id AND c.order_id=r.order_id AND c.cancellation_id=r.revision_id AND c.expected_source_checkpoint=r.previous_revision_id AND c.expected_order_version=r.expected_version AND c.cancelled_order_version=r.version AND c.cancelled_at=r.occurred_at) " +
-        "WHEN 'AdditionalBatch' THEN EXISTS (SELECT 1 FROM rms_ordering.additional_dining_batch_record a JOIN rms_ordering.order_batch b ON b.order_batch_id=a.order_batch_id AND b.brand_id=a.brand_id AND b.store_id=a.store_id AND b.order_id=a.order_id AND b.submission_id=a.submission_id WHERE a.brand_id=r.brand_id AND a.store_id=r.store_id AND a.order_id=r.order_id AND a.submission_id=r.revision_id AND b.submitted_at=r.occurred_at AND a.batch_sequence=(SELECT count(*)+1 FROM rms_ordering.order_revision p WHERE p.brand_id=r.brand_id AND p.store_id=r.store_id AND p.order_id=r.order_id AND p.kind='AdditionalBatch' AND p.version<=r.version)) ELSE false END AS operation_bound " +
+        // Terminal kinds return null below before the bound check, so only non-terminal kinds bind.
+        orderRevisionOperationBoundSql((policy) => !policy.terminal) +
         "FROM rms_ordering.order_revision r WHERE r.brand_id=$1 AND r.store_id=$2 AND r.order_id=$3 ORDER BY r.version LIMIT 10002",
       values,
     )
   ).rows;
   // A terminal revision never grants another checkout. Unsupported states fail closed.
-  if (rows.some((row) => row.kind === "Termination" || row.kind === "Fulfillment")) return null;
+  if (rows.some((row) => isTerminalOrderRevisionKind(row.kind))) return null;
   const root = rows[0];
   if (
     !root ||
-    root.kind !== "Initial" ||
+    persistedOrderRevisionKindPolicy(root.kind)?.root !== true ||
     root.version !== 1 ||
     root.revision_id !== root.initial_submission_id ||
     root.expected_version !== 0 ||
     root.previous_revision_id !== null ||
     rows.some((row) => row.operation_bound !== true) ||
-    rows.filter((row) => row.kind === "AdditionalBatch").length + 1 !== batchCount
+    rows.filter((row) => persistedOrderRevisionKindPolicy(row.kind)?.addsAdditionalBatch === true)
+      .length +
+      1 !==
+      batchCount
   )
     return fail(true);
   const time = (value: unknown) =>
@@ -506,8 +510,11 @@ async function multiBatchPreparationVersion(
   // Cancellation phase belongs to one Batch. Only a fully bound cancellation
   // for every persisted Batch makes the whole Order unavailable here.
   const allCancelled =
-    rows.filter((row) => row.kind === "BatchCancellation" && row.cancellation_phase === "Cancelled")
-      .length === batchCount;
+    rows.filter(
+      (row) =>
+        persistedOrderRevisionKindPolicy(row.kind)?.cancellation === "UnpaidBatch" &&
+        row.cancellation_phase === "Cancelled",
+    ).length === batchCount;
   if (allCancelled && !includeCancelled) return null;
   return {
     version: chain.version,
@@ -515,10 +522,13 @@ async function multiBatchPreparationVersion(
     allCancelled,
     // WP-2423 Q6: a staff-cancelled Batch keeps the dine-in Order open (paid and accepted before);
     // its history is resolved here, never by the initial-window reader.
-    staffCancelled: rows.some(
-      (row) => row.kind === "StaffBatchCancellation" || row.kind === "StaffItemCancellation",
-    ),
-    canonicalPhase: rows.some((row) => row.kind === "Acceptance")
+    staffCancelled: rows.some((row) => {
+      const cancellation = persistedOrderRevisionKindPolicy(row.kind)?.cancellation;
+      return cancellation === "StaffBatch" || cancellation === "StaffItems";
+    }),
+    canonicalPhase: rows.some(
+      (row) => persistedOrderRevisionKindPolicy(row.kind)?.recordsAcceptance === true,
+    )
       ? ("Accepted" as const)
       : ("Submitted" as const),
   };

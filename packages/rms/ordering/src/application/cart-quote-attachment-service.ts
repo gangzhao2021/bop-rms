@@ -1,6 +1,7 @@
 import { validateAuditRecord, type AppendAuditRecordInput } from "@bop/audit";
 import { assertGuestSessionUsable, createGuestSession, type GuestSession } from "@bop/identity";
 import type { PriceQuoteSnapshot } from "@rms/pricing";
+// Version-specific on purpose: this service writes and replays v1 (pickup) Quote attachments only.
 import {
   parseCartQuoteAttachment,
   type CartQuoteAttachment,

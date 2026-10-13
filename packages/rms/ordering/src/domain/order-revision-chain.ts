@@ -1,5 +1,9 @@
 import { readClosedRecord } from "@bop/identity";
 import { parseOrderingReference, parseOrderingInstant } from "./cart.js";
+import {
+  isChainedOrderRevisionKind,
+  type ChainedOrderRevisionKind,
+} from "./order-revision-kind.js";
 
 export class OrderRevisionChainError extends Error {
   readonly code = "ORDER_REVISION_CHAIN_INVALID";
@@ -33,16 +37,8 @@ export function parseOrderRevision(value: unknown) {
       next = version(raw.version);
     if (
       next !== expectedVersion + 1 ||
-      typeof raw.kind !== "string" ||
-      ![
-        "AdditionalBatch",
-        "Acceptance",
-        "Termination",
-        "Fulfillment",
-        "BatchCancellation",
-        "StaffBatchCancellation",
-        "StaffItemCancellation",
-      ].includes(raw.kind)
+      // Every kind except the root (Initial) may follow in the chain; see ORDER_REVISION_KIND_POLICY.
+      !isChainedOrderRevisionKind(raw.kind)
     )
       return invalid();
     const revisionReference = parseOrderingReference(raw.revisionReference);
@@ -57,14 +53,7 @@ export function parseOrderRevision(value: unknown) {
       expectedVersion,
       version: next,
       occurredAt: parseOrderingInstant(raw.occurredAt),
-      kind: raw.kind as
-        | "AdditionalBatch"
-        | "Acceptance"
-        | "Termination"
-        | "Fulfillment"
-        | "BatchCancellation"
-        | "StaffBatchCancellation"
-        | "StaffItemCancellation",
+      kind: raw.kind as ChainedOrderRevisionKind,
     });
   } catch {
     return invalid();

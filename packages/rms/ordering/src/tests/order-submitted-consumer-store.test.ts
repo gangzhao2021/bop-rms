@@ -53,7 +53,7 @@ function setup(failPointer = false, freshness: "Fresh" | "Stale" = "Fresh") {
       initial_submission_id: f.previous.submissionReference,
       kind: "Initial",
       occurred_at: f.previous.submittedAt,
-      acceptance_bound: false,
+      operation_bound: false,
     },
     {
       revision_id: f.previous.sourceCheckpoint,
@@ -63,7 +63,7 @@ function setup(failPointer = false, freshness: "Fresh" | "Stale" = "Fresh") {
       initial_submission_id: null,
       kind: "Acceptance",
       occurred_at: f.previous.submittedAt,
-      acceptance_bound: true,
+      operation_bound: true,
     },
     {
       revision_id: f.additional.batch.submissionReference,
@@ -73,7 +73,7 @@ function setup(failPointer = false, freshness: "Fresh" | "Stale" = "Fresh") {
       initial_submission_id: null,
       kind: "AdditionalBatch",
       occurred_at: event.occurredAt,
-      acceptance_bound: false,
+      operation_bound: false,
     },
   ];
   const latest = {

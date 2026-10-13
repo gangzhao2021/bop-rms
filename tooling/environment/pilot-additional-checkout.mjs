@@ -5,8 +5,7 @@ import {
 import {
   createPostgresDiningOrderPreparationSource,
   parseCartAggregate,
-  parseCartQuoteAttachment,
-  parseConfiguredCartQuoteAttachment,
+  parseAnyCartQuoteAttachment,
 } from "../../packages/rms/ordering/src/index.ts";
 import { createPersistentAdditionalDiningPreparation } from "../../apps/api/dist/customer-additional-dining-preparation.js";
 import { createInternalDiningParent } from "./pilot-dining-parent.mjs";
@@ -50,10 +49,7 @@ export function createInternalAdditionalCheckout(resources, entry, preparation) 
         quoteValue = await checkout.repository.loadQuote(allocation.cartReference),
         // WP-2423: configured (version 2) quotes since 2026-10-08; a version-1 parse refused every
         // additional round with 503.
-        quote =
-          quoteValue?.quoteVersion === 2
-            ? parseConfiguredCartQuoteAttachment(quoteValue)
-            : parseCartQuoteAttachment(quoteValue);
+        quote = parseAnyCartQuoteAttachment(quoteValue);
       if (
         cart.diningSessionReference === null ||
         cart.cartReference !== allocation.cartReference ||

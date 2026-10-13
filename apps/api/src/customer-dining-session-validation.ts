@@ -4,8 +4,7 @@ import {
   createCheckoutValidationService,
   parseOrderingReference,
   parseCartAggregate,
-  parseCartQuoteAttachment,
-  parseConfiguredCartQuoteAttachment,
+  parseCartQuoteAttachmentOfVersion,
   createConfiguredCheckoutValidationService,
   parseCheckoutSessionAllocation,
   CheckoutValidationError,
@@ -108,10 +107,7 @@ function create<V extends 1 | 2>(
       const quoteValue = await options.checkout.repository.loadQuote(
         parseOrderingReference(allocation.cartReference),
       );
-      const quote =
-        quoteVersion === 2
-          ? parseConfiguredCartQuoteAttachment(quoteValue)
-          : parseCartQuoteAttachment(quoteValue);
+      const quote = parseCartQuoteAttachmentOfVersion(quoteValue, quoteVersion);
       if (
         cart.cartReference !== allocation.cartReference ||
         cart.aggregateVersion !== allocation.cartVersion ||

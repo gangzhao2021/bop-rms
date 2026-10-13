@@ -279,6 +279,7 @@ export * from "./domain/additional-dining-batch.js";
 export * from "./domain/dining-cart-continuation.js";
 
 export * from "./domain/order-revision-chain.js";
+export * from "./domain/order-revision-kind.js";
 export * from "./domain/additional-dining-batch-codec.js";
 export * from "./infrastructure/persistence/additional-dining-batch-store.js";
 

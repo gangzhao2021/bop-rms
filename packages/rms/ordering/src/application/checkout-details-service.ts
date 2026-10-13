@@ -11,10 +11,7 @@ import {
   parseOrderingReference,
 } from "../domain/cart.js";
 import { assertCartLifecycleActive } from "../domain/cart-lifecycle.js";
-import {
-  parseCartQuoteAttachment,
-  parseConfiguredCartQuoteAttachment,
-} from "../domain/cart-quote-attachment.js";
+import { parseCartQuoteAttachmentOfVersion } from "../domain/cart-quote-attachment.js";
 import {
   parseCheckoutDetailsSnapshot,
   CheckoutDetailsError,
@@ -223,10 +220,7 @@ export function createCheckoutDetailsService(ports: CheckoutDetailsPorts) {
         currentCart(cart);
         async function checkQuote() {
           const value = await ports.repository.loadQuote(cartReference);
-          const quote =
-            desired.quoteVersion === 2
-              ? parseConfiguredCartQuoteAttachment(value)
-              : parseCartQuoteAttachment(value);
+          const quote = parseCartQuoteAttachmentOfVersion(value, desired.quoteVersion);
           if (
             quote.brandReference !== desired.brandReference ||
             quote.storeReference !== desired.storeReference ||

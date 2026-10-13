@@ -25,6 +25,7 @@ import { assertCartLifecycleActive } from "../../domain/cart-lifecycle.js";
 import { createHash } from "node:crypto";
 import { appendEventInTransaction, type ConsumerTransaction } from "@bop/eventing";
 import { parseOrderingReference, parseOrderingInstant } from "../../domain/cart.js";
+import { persistedOrderRevisionKindPolicy } from "../../domain/order-revision-kind.js";
 import {
   parseAdditionalDiningBatchSnapshot,
   type AdditionalDiningBatchSnapshot,
@@ -149,17 +150,9 @@ export function createPostgresAdditionalDiningBatchStore(options: {
         instant(row.created_at) !== snapshot.originalOrderCreatedAt ||
         row.version !== snapshot.expectedOrderVersion ||
         row.batch_count !== snapshot.batchSequence - 1 ||
-        typeof row.kind !== "string" ||
         // WP-2423 Q6: after staff cancel one Batch, or the System cancels an unpaid one, the guest
-        // may still order at the table. Termination and Fulfillment end the Order.
-        ![
-          "Initial",
-          "AdditionalBatch",
-          "Acceptance",
-          "BatchCancellation",
-          "StaffBatchCancellation",
-          "StaffItemCancellation",
-        ].includes(row.kind) ||
+        // may still order at the table; terminal revisions end the Order (ORDER_REVISION_KIND_POLICY).
+        persistedOrderRevisionKindPolicy(row.kind)?.continuesDiningOrder !== true ||
         instant(row.occurred_at) > batch.submittedAt
       )
         return fail();

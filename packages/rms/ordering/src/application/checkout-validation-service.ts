@@ -1,8 +1,7 @@
 import { assertGuestSessionUsable, createGuestSession } from "@bop/identity";
 import type { CatalogSelectionAccepted } from "@rms/catalog";
 import {
-  parseCartQuoteAttachment,
-  parseConfiguredCartQuoteAttachment,
+  parseCartQuoteAttachmentOfVersion,
   type CartQuoteAttachment,
 } from "../domain/cart-quote-attachment.js";
 import {
@@ -353,10 +352,7 @@ export function createVersionedCheckoutValidationService<V extends 1 | 2>(
       if (loadedQuote === null) return fail("CHECKOUT_QUOTE_MISSING");
       let quote: CartQuoteAttachment<1 | 2>;
       try {
-        quote =
-          quoteVersion === 2
-            ? parseConfiguredCartQuoteAttachment(loadedQuote)
-            : parseCartQuoteAttachment(loadedQuote);
+        quote = parseCartQuoteAttachmentOfVersion(loadedQuote, quoteVersion);
       } catch {
         return fail("CHECKOUT_DEPENDENCY_UNAVAILABLE");
       }

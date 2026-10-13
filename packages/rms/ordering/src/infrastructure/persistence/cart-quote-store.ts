@@ -8,6 +8,7 @@ import {
   parseOrderingReference,
 } from "../../domain/cart.js";
 import {
+  parseAnyCartQuoteAttachment,
   parseCartQuoteAttachment,
   parseConfiguredCartQuoteAttachment,
   type CartQuoteAttachment,
@@ -418,6 +419,8 @@ function createQuoteStore<V extends 1 | 2>(
   });
 }
 
+// Version-specific stores on purpose: each writer persists exactly one Quote version; readers that
+// accept either use createPostgresAnyCartQuoteReader (parseAnyCartQuoteAttachment).
 export function createPostgresCartQuoteStore(
   runner: CartQueryTransactionRunner,
   scope: Readonly<{ brandReference: string; storeReference: string }>,
@@ -442,13 +445,7 @@ export function createPostgresAnyCartQuoteReader(
   runner: CartQueryTransactionRunner,
   scope: Readonly<{ brandReference: string; storeReference: string }>,
 ): CartQuoteReader<1 | 2> {
-  const { loadLatest } = createQuoteAccess<1 | 2>(runner, scope, (value) =>
-    value !== null &&
-    typeof value === "object" &&
-    (value as { quoteVersion?: unknown }).quoteVersion === 2
-      ? parseConfiguredCartQuoteAttachment(value)
-      : parseCartQuoteAttachment(value),
-  );
+  const { loadLatest } = createQuoteAccess<1 | 2>(runner, scope, parseAnyCartQuoteAttachment);
   return Object.freeze({ loadLatest });
 }
 

@@ -19,6 +19,7 @@ import {
   parseOrderingHash,
   type CartAggregate,
 } from "../domain/cart.js";
+// Version-specific on purpose: this service attaches configured (v2) Quotes only.
 import {
   parseConfiguredCartQuoteAttachment,
   type CartQuoteAttachment,

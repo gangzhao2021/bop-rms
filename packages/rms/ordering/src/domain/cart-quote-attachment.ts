@@ -237,3 +237,45 @@ export function parseCartQuoteAttachment(value: unknown): CartQuoteAttachment {
 export function parseConfiguredCartQuoteAttachment(value: unknown): CartQuoteAttachment<2> {
   return parseAttachment(value, 2);
 }
+
+export const CART_QUOTE_VERSIONS = [1, 2] as const;
+export type CartQuoteVersion = (typeof CART_QUOTE_VERSIONS)[number];
+
+export function isCartQuoteVersion(value: unknown): value is CartQuoteVersion {
+  return (CART_QUOTE_VERSIONS as readonly unknown[]).includes(value);
+}
+
+/**
+ * Parses an attachment that must be exactly the caller's configured Quote version (the pricing
+ * path the caller runs). Exhaustive: a new Quote version fails compilation here.
+ */
+export function parseCartQuoteAttachmentOfVersion<V extends CartQuoteVersion>(
+  value: unknown,
+  version: V,
+): CartQuoteAttachment<V> {
+  const selected: CartQuoteVersion = version;
+  switch (selected) {
+    case 1:
+      return parseCartQuoteAttachment(value) as CartQuoteAttachment<V>;
+    case 2:
+      return parseConfiguredCartQuoteAttachment(value) as CartQuoteAttachment<V>;
+    default: {
+      const unhandled: never = selected;
+      return unhandled;
+    }
+  }
+}
+
+/**
+ * WP-2423: parses a stored attachment whichever Quote version priced it (a cart's attachments can
+ * be v1 or configured v2). Use this wherever the reader does not itself fix the Quote version.
+ */
+export function parseAnyCartQuoteAttachment(value: unknown): CartQuoteAttachment<CartQuoteVersion> {
+  const version =
+    value !== null && typeof value === "object"
+      ? (value as { quoteVersion?: unknown }).quoteVersion
+      : undefined;
+  return isCartQuoteVersion(version)
+    ? parseCartQuoteAttachmentOfVersion(value, version)
+    : invalid();
+}

@@ -43,7 +43,7 @@ function setup() {
       initial_submission_id: f.previous.submissionReference,
       kind: "Initial",
       occurred_at: f.previous.submittedAt,
-      acceptance_bound: false,
+      operation_bound: false,
     },
     {
       revision_id: f.previous.sourceCheckpoint,
@@ -53,7 +53,7 @@ function setup() {
       initial_submission_id: null,
       kind: "Acceptance",
       occurred_at: f.previous.submittedAt,
-      acceptance_bound: true,
+      operation_bound: true,
     },
     {
       revision_id: f.additional.batch.submissionReference,
@@ -63,7 +63,7 @@ function setup() {
       initial_submission_id: null,
       kind: "AdditionalBatch",
       occurred_at: event.occurredAt,
-      acceptance_bound: false,
+      operation_bound: false,
     },
   ];
   const calls: { sql: string; values: readonly unknown[] }[] = [];
@@ -133,7 +133,7 @@ it("rejects Acceptance revision without matching acceptance history", async () =
   const f = setup();
   const acceptance = f.revisions[1];
   if (!acceptance) throw new Error("fixture missing");
-  acceptance.acceptance_bound = false;
+  acceptance.operation_bound = false;
   await expect(f.load()).rejects.toThrow();
 });
 it("returns no source while initial immutable history is unavailable", async () => {
@@ -152,11 +152,10 @@ it("WP-2423 Q6: keeps a System-cancelled unpaid Batch in history only when its c
   if (!revision) throw new Error("fixture missing");
   Object.assign(revision, {
     kind: "BatchCancellation",
-    acceptance_bound: false,
-    checkout_cancellation_bound: true,
+    operation_bound: true,
   });
   expect(((await f.load()) as { batches: unknown[] }).batches).toHaveLength(2);
-  revision.checkout_cancellation_bound = false;
+  revision.operation_bound = false;
   await expect(setupWith(revision)).rejects.toThrow();
   function setupWith(changed: Record<string, unknown>) {
     const g = setup();

@@ -8,8 +8,7 @@ import {
   parseOrderingReference,
 } from "../domain/cart.js";
 import {
-  parseCartQuoteAttachment,
-  parseConfiguredCartQuoteAttachment,
+  parseAnyCartQuoteAttachment,
   type CartQuoteAttachment,
 } from "../domain/cart-quote-attachment.js";
 import type { DiningCartReadResult, DiningCartViewer } from "./dining-cart-read-service.js";
@@ -303,12 +302,7 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
           }),
         );
         // WP-2423 Q27: a cart priced with the configured Quote carries a v2 attachment.
-        const quote =
-          quoteResult === null
-            ? null
-            : quoteResult.quoteVersion === 2
-              ? parseConfiguredCartQuoteAttachment(quoteResult)
-              : parseCartQuoteAttachment(quoteResult);
+        const quote = quoteResult === null ? null : parseAnyCartQuoteAttachment(quoteResult);
         if (
           quote !== null &&
           (quote.brandReference !== cart.brandReference ||
