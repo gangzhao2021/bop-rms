@@ -6,6 +6,7 @@ import type {
   PricingReference,
 } from "@rms/pricing";
 import type { Request, RequestHandler, Response } from "express";
+import { checkoutHoldRetrySeconds } from "./customer-checkout-hold.js";
 
 const uuidV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const instant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
@@ -43,6 +44,8 @@ export type QuoteCartResult =
   | { readonly status: "VersionConflict" }
   | { readonly status: "IdempotencyConflict" }
   | { readonly status: "InvalidConfiguration" }
+  /** DEC-DINING-ANY-PARTICIPANT-SUBMIT: another guest at the table is checking out this Cart. */
+  | { readonly status: "CheckoutInProgress"; readonly heldUntil: string }
   | { readonly status: "Unavailable" };
 
 export interface CustomerQuotePort {
@@ -55,6 +58,7 @@ type ErrorCode =
   | "quote_version_conflict"
   | "quote_idempotency_conflict"
   | "quote_configuration_invalid"
+  | "cart_checkout_in_progress"
   | "quote_service_unavailable";
 
 const errors = Object.freeze({
@@ -63,6 +67,7 @@ const errors = Object.freeze({
   quote_version_conflict: { status: 409, messageKey: "customer.quote.version_conflict" },
   quote_idempotency_conflict: { status: 409, messageKey: "customer.quote.idempotency_conflict" },
   quote_configuration_invalid: { status: 422, messageKey: "customer.quote.configuration_invalid" },
+  cart_checkout_in_progress: { status: 409, messageKey: "customer.cart.checkout_in_progress" },
   quote_service_unavailable: { status: 503, messageKey: "customer.quote.service_unavailable" },
 } as const);
 
@@ -263,6 +268,14 @@ export class CustomerQuoteHandler {
         } catch {
           sendError(response, "quote_service_unavailable");
         }
+        return;
+      }
+      if (result.status === "CheckoutInProgress") {
+        response.setHeader(
+          "Retry-After",
+          String(checkoutHoldRetrySeconds(result.heldUntil, this.#now())),
+        );
+        sendError(response, "cart_checkout_in_progress");
         return;
       }
       const mapping = {

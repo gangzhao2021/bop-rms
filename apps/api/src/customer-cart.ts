@@ -1,4 +1,5 @@
 import { CartError, CartReplacementPendingError } from "@rms/ordering";
+import { checkoutHoldRetrySeconds } from "./customer-checkout-hold.js";
 import type { Request, RequestHandler, Response } from "express";
 
 const uuidV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -99,6 +100,9 @@ export type CustomerCartPortResult =
       /** Seconds until the wait ends when it is time-bounded; null when it has no known end. */
       readonly retryAfterSeconds: number | null;
     }
+  /** DEC-DINING-ANY-PARTICIPANT-SUBMIT: another guest at the table is checking out this Cart
+   * version until heldUntil; nothing was changed. */
+  | { readonly status: "CheckoutInProgress"; readonly heldUntil: string }
   | { readonly status: "Unavailable" };
 
 export interface CustomerCartReplacementPort {
@@ -165,6 +169,7 @@ type ErrorCode =
   | "cart_abandoned"
   | "cart_rate_limited"
   | "cart_order_processing"
+  | "cart_checkout_in_progress"
   | "cart_service_unavailable";
 
 /**
@@ -195,6 +200,8 @@ const errors = Object.freeze({
   cart_rate_limited: { status: 429, messageKey: "customer.cart.rate_limited" },
   // WP-2423: the table's last checkout may still create an order or charge; retry shortly.
   cart_order_processing: { status: 409, messageKey: "customer.cart.order_processing" },
+  // DEC-DINING-ANY-PARTICIPANT-SUBMIT: another guest at the table is paying for this Cart.
+  cart_checkout_in_progress: { status: 409, messageKey: "customer.cart.checkout_in_progress" },
   cart_service_unavailable: { status: 503, messageKey: "customer.cart.service_unavailable" },
 } as const);
 
@@ -489,7 +496,12 @@ function sendError(
   });
 }
 
-function handleResult(response: Response, result: CustomerCartPortResult, created = false): void {
+function handleResult(
+  response: Response,
+  result: CustomerCartPortResult,
+  created: boolean,
+  now: () => string,
+): void {
   if (result.status === "Found" || result.status === "Applied" || result.status === "Current") {
     try {
       const view = publicView(result.view);
@@ -499,6 +511,11 @@ function handleResult(response: Response, result: CustomerCartPortResult, create
     } catch {
       sendError(response, "cart_service_unavailable");
     }
+    return;
+  }
+  if (result.status === "CheckoutInProgress") {
+    response.setHeader("Retry-After", String(checkoutHoldRetrySeconds(result.heldUntil, now())));
+    sendError(response, "cart_checkout_in_progress");
     return;
   }
   if (result.status === "OrderProcessing") {
@@ -542,10 +559,11 @@ function handleResult(response: Response, result: CustomerCartPortResult, create
 async function invoke(
   response: Response,
   operation: Promise<CustomerCartPortResult>,
-  created = false,
+  created: boolean,
+  now: () => string,
 ): Promise<void> {
   try {
-    handleResult(response, await operation, created);
+    handleResult(response, await operation, created, now);
   } catch {
     sendError(response, "cart_service_unavailable");
   }
@@ -568,6 +586,11 @@ export class CustomerCartHandler {
   readonly #now: () => string;
   readonly #port: CustomerCartPort;
   readonly #replacement: CustomerCartReplacementPort | undefined;
+  readonly #invoke = (
+    response: Response,
+    operation: Promise<CustomerCartPortResult>,
+    created = false,
+  ) => invoke(response, operation, created, this.#now);
 
   constructor({
     allowedOrigin,
@@ -615,7 +638,7 @@ export class CustomerCartHandler {
       try {
         const input = this.#mutation(request);
         body(request, []);
-        await invoke(response, this.#port.createCart(input), true);
+        await this.#invoke(response, this.#port.createCart(input), true);
       } catch (error) {
         this.#requestError(response, error);
       }
@@ -699,7 +722,7 @@ export class CustomerCartHandler {
       responseControls(response);
       try {
         sameOriginRead(request);
-        await invoke(response, this.#port.getCurrentCart(this.#context(request)));
+        await this.#invoke(response, this.#port.getCurrentCart(this.#context(request)));
       } catch (error) {
         this.#requestError(response, error);
       }
@@ -711,7 +734,7 @@ export class CustomerCartHandler {
       responseControls(response);
       try {
         sameOriginRead(request);
-        await invoke(
+        await this.#invoke(
           response,
           this.#port.getCart({
             ...this.#context(request),
@@ -734,7 +757,7 @@ export class CustomerCartHandler {
           "optionSelections",
           "customerNote",
         ]);
-        await invoke(
+        await this.#invoke(
           response,
           this.#port.addItem({
             ...this.#mutation(request),
@@ -757,7 +780,7 @@ export class CustomerCartHandler {
       responseControls(response);
       try {
         const raw = body(request, ["quantity", "optionSelections", "customerNote"]);
-        await invoke(
+        await this.#invoke(
           response,
           this.#port.updateItem({
             ...this.#mutation(request),
@@ -779,7 +802,7 @@ export class CustomerCartHandler {
     return async (request, response) => {
       responseControls(response);
       try {
-        await invoke(
+        await this.#invoke(
           response,
           this.#port.removeItem({
             ...this.#mutation(request),

@@ -5,6 +5,7 @@ import {
   type GuestSessionServiceOptions,
 } from "@bop/identity";
 import {
+  CartCheckoutInProgressError,
   CartError,
   createPickupCartRemovalService,
   createPostgresPickupCartBindingReader,
@@ -47,6 +48,8 @@ export function createCustomerCartRemovalPort(options: {
       cartReference: input.cartReference,
     });
   const failure = async (error: unknown, input: RemovalInput): Promise<CustomerCartPortResult> => {
+    if (error instanceof CartCheckoutInProgressError)
+      return { status: "CheckoutInProgress", heldUntil: error.heldUntil };
     if (!(error instanceof CartError)) return unavailable;
     switch (error.code) {
       case "CART_PERMISSION_DENIED":

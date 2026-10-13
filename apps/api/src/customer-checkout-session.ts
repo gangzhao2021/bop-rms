@@ -5,6 +5,7 @@ import {
   type CheckoutSessionRequest,
 } from "@rms/ordering";
 import type { Request, RequestHandler, Response } from "express";
+import { checkoutHoldRetrySeconds } from "./customer-checkout-hold.js";
 
 export const customerCheckoutSessionReadRoute = "/api/v1/checkout-sessions/:checkout_session_id";
 export const customerCheckoutSessionRoute = "/api/v1/carts/:cart_id/checkout-sessions";
@@ -23,7 +24,22 @@ function protect(response: Response) {
   response.setHeader("Cache-Control", "no-store");
   response.setHeader("Referrer-Policy", "no-referrer");
 }
-function reject(response: Response, status: number, explicit?: "store_closed") {
+function reject(
+  response: Response,
+  status: number,
+  explicit?: "store_closed" | "checkout_in_progress",
+) {
+  if (explicit === "checkout_in_progress") {
+    // DEC-DINING-ANY-PARTICIPANT-SUBMIT: same code as the Cart and quote refusals.
+    response.status(409).json({
+      schemaVersion: 1,
+      error: {
+        code: "cart_checkout_in_progress",
+        messageKey: "customer.cart.checkout_in_progress",
+      },
+    });
+    return;
+  }
   const code =
     explicit ??
     (status === 400
@@ -86,8 +102,15 @@ function parse(request: Request, origin: string, quoteVersion: 1 | 2): CheckoutS
 export class CustomerCheckoutSessionHandler {
   readonly #port: CustomerCheckoutSessionPort;
   readonly #origin: string;
-  constructor(options: { port: CustomerCheckoutSessionPort; allowedOrigin: string }) {
+  readonly #now: () => number;
+  constructor(options: {
+    port: CustomerCheckoutSessionPort;
+    allowedOrigin: string;
+    /** Clock for the Retry-After of a held Cart (defaults to the system clock). */
+    now?: () => number;
+  }) {
     this.#port = options.port;
+    this.#now = options.now ?? Date.now;
     this.#origin = new URL(options.allowedOrigin).origin;
   }
   handler(): RequestHandler {
@@ -113,9 +136,22 @@ export class CustomerCheckoutSessionHandler {
                   INTENT_CONFLICT: 409,
                   DEPENDENCY_UNAVAILABLE: 503,
                   STORE_CLOSED: 409,
+                  CHECKOUT_IN_PROGRESS: 409,
                 } as const
               )[error.code]
             : 503;
+        if (error instanceof CheckoutSessionServiceError && error.code === "CHECKOUT_IN_PROGRESS") {
+          response.setHeader(
+            "Retry-After",
+            String(
+              error.heldUntil === null
+                ? 60
+                : checkoutHoldRetrySeconds(error.heldUntil, new Date(this.#now()).toISOString()),
+            ),
+          );
+          reject(response, 409, "checkout_in_progress");
+          return;
+        }
         // WP-2423 Q4: say plainly that the Store is not taking orders; nothing was charged.
         reject(
           response,
@@ -212,6 +248,7 @@ export class CustomerCheckoutSessionReadHandler {
                   INTENT_CONFLICT: 409,
                   DEPENDENCY_UNAVAILABLE: 503,
                   STORE_CLOSED: 409,
+                  CHECKOUT_IN_PROGRESS: 409,
                 } as const
               )[error.code]
             : 503,

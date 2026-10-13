@@ -3,7 +3,7 @@ import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 import { CartPage } from "./CartPage.js";
 import type { CartState, CartStateController } from "./cart-state.js";
-import type { CartView } from "./types.js";
+import { checkoutInProgressMessage, type CartView } from "./types.js";
 
 const id = (n: number) => `018f5300-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 
@@ -411,4 +411,35 @@ it("WP-2423: a replacement held back by the table's last order says so, not a dr
     "Your table’s last order is still being processed. Try again in a moment.",
   );
   expect(html).not.toContain("The connection dropped");
+});
+
+it("WP-2423: says another guest at the table is checking out, with the wait", () => {
+  const state: CartState = {
+    status: "checkout-in-progress",
+    cart: cart(),
+    issueCodes: [],
+    retryAfterSeconds: 90,
+    canRetrySameOperation: false,
+  };
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <CartPage controller={controller(state)} />
+    </MemoryRouter>,
+  );
+  expect(html).toContain("Another guest is checking out");
+  expect(html).toContain(
+    "Another guest at your table is paying for this order. Try again in about 2 minutes.",
+  );
+  expect(html).toContain("Refresh cart");
+  expect(html).not.toContain("checkout_in_progress");
+});
+
+it("WP-2423: words the checkout-in-progress wait like the order-processing one", () => {
+  const base = "Another guest at your table is paying for this order.";
+  expect(checkoutInProgressMessage(null)).toBe(`${base} Try again shortly.`);
+  expect(checkoutInProgressMessage(1)).toBe(`${base} Try again in a moment.`);
+  expect(checkoutInProgressMessage(60)).toBe(`${base} Try again in a moment.`);
+  expect(checkoutInProgressMessage(61)).toBe(`${base} Try again in about 2 minutes.`);
+  expect(checkoutInProgressMessage(3600)).toBe(`${base} Try again in about 60 minutes.`);
+  expect(checkoutInProgressMessage(120)).toBe(`${base} Try again in about 2 minutes.`);
 });

@@ -6,7 +6,9 @@ import {
   type GuestSession,
 } from "@bop/identity";
 import {
+  assertDiningCartNotHeld,
   CartError,
+  type DiningCartCheckoutHoldPort,
   parseCartAggregate,
   parseOrderingInstant,
   parseOrderingReference,
@@ -31,6 +33,9 @@ export type ConfiguredCustomerQuoteOptions = Omit<ConfiguredCartQuotePorts, "aut
     | {
         readonly orderType: "DineIn";
         readonly participation: DiningCartAuthorityPorts["participation"];
+        /** DEC-DINING-ANY-PARTICIPANT-SUBMIT: refuse to re-price a Cart version that another
+         * participant is checking out (a new quote would silently invalidate that checkout). */
+        readonly checkoutHold?: DiningCartCheckoutHoldPort;
       }
   );
 function denied(): never {
@@ -164,6 +169,19 @@ export function createConfiguredCustomerQuoteService(options: ConfiguredCustomer
           authorization: {
             async authorize(input) {
               const guestSession = await currentGuest();
+              if (
+                options.orderType === "DineIn" &&
+                firstDining !== undefined &&
+                typeof raw.expectedCartVersion === "number" &&
+                Number.isSafeInteger(raw.expectedCartVersion)
+              )
+                await assertDiningCartNotHeld(options.checkoutHold, {
+                  diningSessionReference: String(firstDining.participation.diningSessionReference),
+                  participantReference: String(firstDining.participation.participantReference),
+                  cartReference,
+                  cartVersion: raw.expectedCartVersion,
+                  observedAt: input.observedAt,
+                });
               return {
                 guestSession,
                 audit: options.audit({

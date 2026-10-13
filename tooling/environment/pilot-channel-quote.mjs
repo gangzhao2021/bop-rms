@@ -43,6 +43,7 @@ export async function createInternalChannelQuote(
     ...(await createConfiguredQuote(resources, "DineIn")),
     orderType: "DineIn",
     participation: diningCart.catalogDiningCart.participation,
+    checkoutHold: diningCart.catalogDiningCart.checkoutHold,
   });
   return { configuredCartQuote: { pickup, dining } };
 }

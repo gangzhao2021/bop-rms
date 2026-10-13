@@ -6,6 +6,9 @@ import {
   assertDiningCheckoutCommitmentUsable,
   parseDiningCheckoutCommitment,
   assertDiningCheckoutPreparedForOrdering,
+  DiningCheckoutHeldError,
+  diningCheckoutHeldUntil,
+  isDiningCheckoutHeld,
 } from "../domain/dining-checkout-commitment.js";
 
 const id = (n: number) => "01900000-0000-7000-8000-" + n.toString().padStart(12, "0");
@@ -276,4 +279,36 @@ it("requires the exact current Prepared window before Ordering", () => {
       requested,
     ),
   ).toThrow(expect.objectContaining({ code: "DINING_CHECKOUT_CONTEXT_CHANGED" }));
+});
+
+describe("DEC-DINING-ANY-PARTICIPANT-SUBMIT checkout hold of a Cart version", () => {
+  it("holds while Prepared, until the preparation deadline only", () => {
+    const f = fixture();
+    const prepared = prepareDiningCheckoutCommitment(f.input, f.context);
+    expect(diningCheckoutHeldUntil(prepared, at)).toBe("2026-09-10T12:05:00.000Z");
+    expect(diningCheckoutHeldUntil(prepared, "2026-09-10T12:04:59.999Z")).toBe(
+      "2026-09-10T12:05:00.000Z",
+    );
+    expect(diningCheckoutHeldUntil(prepared, "2026-09-10T12:05:00.000Z")).toBeNull();
+  });
+  it("holds while PaymentPending until the capacity deadline, never once Expired", () => {
+    const f = fixture();
+    const prepared = prepareDiningCheckoutCommitment(f.input, f.context);
+    const pending = sealDiningCheckoutCommitment(prepared, f.context, f.link, requested, requested);
+    expect(diningCheckoutHeldUntil(pending, requested)).toBe(deadline);
+    expect(diningCheckoutHeldUntil(pending, deadline)).toBeNull();
+    const expired = expireDiningCheckoutCommitment(pending, deadline);
+    expect(diningCheckoutHeldUntil(expired, requested)).toBeNull();
+  });
+  it("recognizes the refusal from another copy of the module by its shape only", () => {
+    expect(isDiningCheckoutHeld(new DiningCheckoutHeldError(at as never))).toBe(true);
+    const copy = Object.assign(new Error("held"), { code: "DINING_CHECKOUT_HELD", heldUntil: at });
+    expect(isDiningCheckoutHeld(copy)).toBe(true);
+    expect(isDiningCheckoutHeld({ code: "DINING_CHECKOUT_HELD", heldUntil: at })).toBe(false);
+    expect(
+      isDiningCheckoutHeld(
+        Object.assign(new Error(), { code: "DINING_CHECKOUT_HELD", heldUntil: "soon" }),
+      ),
+    ).toBe(false);
+  });
 });

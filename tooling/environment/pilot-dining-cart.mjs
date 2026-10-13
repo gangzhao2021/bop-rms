@@ -2,6 +2,7 @@ import {
   createDiningCartParticipationQuery,
   createPostgresDiningParticipationStore,
 } from "../../packages/rms/dining/src/index.ts";
+import { createCustomerDiningCheckoutHold } from "../../apps/api/dist/customer-checkout-hold.js";
 export function createInternalDiningCart(resources, items, { createCart }) {
   const scope = {
     tenantReference: resources.publicProfile.binding.tenantReference,
@@ -16,6 +17,8 @@ export function createInternalDiningCart(resources, items, { createCart }) {
         repository: createPostgresDiningParticipationStore(resources.transactions, scope),
         now: resources.now,
       }),
+      // DEC-DINING-ANY-PARTICIPANT-SUBMIT: edits and quotes wait while another guest pays.
+      checkoutHold: createCustomerDiningCheckoutHold(resources.transactions, scope),
       selectionTransactions: resources.transactions,
       selection: {
         sourceChannel: "Qr",

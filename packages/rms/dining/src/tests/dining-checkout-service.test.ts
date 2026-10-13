@@ -17,6 +17,7 @@ import {
 import {
   parseDiningCheckoutCommitment,
   type DiningCheckoutCommitment,
+  DiningCheckoutHeldError,
 } from "../domain/dining-checkout-commitment.js";
 const id = (n: number) => "01902402-0000-7000-8000-" + n.toString().padStart(12, "0");
 const at = "2026-09-10T12:00:00.000Z";
@@ -613,4 +614,15 @@ it("denies current payment after revocation during the owner read", async () => 
     return value;
   };
   await expect(f.service().authorizePayment(f.input)).rejects.toThrow();
+});
+
+it("DEC-DINING-ANY-PARTICIPANT-SUBMIT: passes on another participant's hold of the Cart version", async () => {
+  const f = fixture();
+  f.options.repository.append = async () => {
+    throw new DiningCheckoutHeldError("2026-08-02T12:20:00.000Z" as never);
+  };
+  await expect(f.service().prepare(f.input)).rejects.toMatchObject({
+    code: "DINING_CHECKOUT_HELD",
+    heldUntil: "2026-08-02T12:20:00.000Z",
+  });
 });

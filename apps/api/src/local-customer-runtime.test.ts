@@ -379,6 +379,7 @@ describe("scoped local Customer runtime", () => {
     });
     const configuration: NonNullable<LocalCustomerRuntimeOptions["diningCart"]> = {
       participation: { resolve: vi.fn(async () => null) },
+      checkoutHold: { read: vi.fn(async () => null) },
       selectionTransactions: { run: write },
       selection: {
         sourceChannel: "Qr",
@@ -1130,6 +1131,7 @@ describe("configured Catalog/Inventory runtime assembly", () => {
     };
     const dining: NonNullable<LocalCustomerRuntimeOptions["catalogDiningCart"]> = {
       ...selection,
+      checkoutHold: { read: vi.fn(async () => null) },
       catalogScope: { ...selection.catalogScope, orderTypeCode: "DINE_IN" },
       items,
       participation: { resolve: async () => null },

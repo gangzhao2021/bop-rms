@@ -245,6 +245,39 @@ describe("WP-1703 Checkout state", () => {
     });
   });
 
+  it.each([
+    ["cart_checkout_in_progress", "checkout-in-progress"],
+    ["cart_order_processing", "order-processing"],
+  ] as const)(
+    "WP-2423: shows %s with its wait and prices again with a new operation on retry",
+    async (code, status) => {
+      const keys: string[] = [];
+      let fail = true;
+      const client: CheckoutClient = {
+        loadCart: async () => cart,
+        async quote(_cart, key) {
+          keys.push(key);
+          if (fail) throw new CartClientError(code, { retryAfterSeconds: 30 });
+          return quote;
+        },
+      };
+      let n = 9;
+      const controller = createCheckoutController(client, () => id(n++));
+      await controller.load();
+      await controller.quote();
+      expect(controller.getState()).toEqual({
+        status,
+        cart,
+        retryAfterSeconds: 30,
+        canRetry: true,
+      });
+      fail = false;
+      await controller.retry();
+      expect(keys).toEqual([id(9), id(10)]);
+      expect(controller.getState()).toEqual({ status: "ready", cart, quote });
+    },
+  );
+
   it("never calls or auto-replays Quote while offline", async () => {
     let calls = 0;
     const client: CheckoutClient = {
@@ -394,6 +427,35 @@ describe("bounded foreground Quote responses", () => {
     await expect(client().quote(cart, id(9))).rejects.toMatchObject({ code: mapped });
   });
   it.each([
+    ["cart_checkout_in_progress", "120", 120],
+    ["cart_checkout_in_progress", null, null],
+    ["cart_order_processing", "45", 45],
+    ["cart_order_processing", "7200", null],
+  ] as const)(
+    "WP-2423: maps %s (Retry-After %s) to a definitive refusal with its wait",
+    async (code, header, seconds) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(
+          async () =>
+            new Response(
+              JSON.stringify({
+                schemaVersion: 1,
+                error: { code, messageKey: "customer.cart.synthetic" },
+              }),
+              { status: 409, headers: header === null ? {} : { "retry-after": header } },
+            ),
+        ),
+      );
+      setCustomerCsrfCredential(original);
+      await expect(client().quote(cart, id(9))).rejects.toMatchObject({
+        code,
+        retryAfterSeconds: seconds,
+      });
+    },
+  );
+  it.each([
+    ["cart_checkout_in_progress", 503],
     ["quote_version_conflict", 503],
     ["quote_configuration_invalid", 400],
     ["quote_service_unavailable", 503],

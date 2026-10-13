@@ -6,7 +6,12 @@ import {
   type CartState,
   type CartStateController,
 } from "./cart-state.js";
-import { orderProcessingMessage, type CartItemView, type CartView } from "./types.js";
+import {
+  checkoutInProgressMessage,
+  orderProcessingMessage,
+  type CartItemView,
+  type CartView,
+} from "./types.js";
 import { formatCartMoney } from "./format-money.js";
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import { formatMinutesUntil } from "../journey/format.js";
@@ -233,6 +238,10 @@ function ErrorState({
     ],
     abandoned: ["Cart closed", "This cart was abandoned and cannot be changed."],
     "order-processing": ["Order still processing", orderProcessingMessage(state.retryAfterSeconds)],
+    "checkout-in-progress": [
+      "Another guest is checking out",
+      checkoutInProgressMessage(state.retryAfterSeconds),
+    ],
     "command-failed": [
       "Outcome not confirmed",
       "The connection dropped before we could confirm your change.",

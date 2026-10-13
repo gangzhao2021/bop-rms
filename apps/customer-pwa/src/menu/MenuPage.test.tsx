@@ -371,6 +371,18 @@ describe("WP-2423: a table cart that timed out", () => {
     );
     expect(html).not.toContain("connection dropped");
   });
+  it("says another guest at the table is checking out instead of a generic failure", () => {
+    const html = render({
+      status: "checkout-in-progress",
+      issueCodes: [],
+      retryAfterSeconds: 30,
+      canRetry: false,
+    });
+    expect(html).toContain(
+      "Another guest at your table is paying for this order. Try again in a moment.",
+    );
+    expect(html).not.toContain("We couldn’t add this right now.");
+  });
   it("no longer sends the guest to staff when the cart could not be restarted", () => {
     const html = render({
       status: "expired",

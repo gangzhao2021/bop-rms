@@ -92,6 +92,8 @@ function failure(error: unknown): Failure {
       INTENT_CONFLICT: "order_idempotency_conflict",
       DEPENDENCY_UNAVAILABLE: "order_service_unavailable",
       STORE_CLOSED: "order_store_closed",
+      // Not raised by submission (only by checkout preparation); a changed Cart if it ever is.
+      CHECKOUT_IN_PROGRESS: "order_version_conflict",
     } as const;
     return codes[error.code];
   }

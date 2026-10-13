@@ -15,6 +15,7 @@ export type CartState =
         | "validation"
         | "rate-limited"
         | "order-processing"
+        | "checkout-in-progress"
         | "expired"
         | "abandoned"
         | "command-failed"
@@ -129,13 +130,15 @@ export function createCartStateController({
                   ? "rate-limited"
                   : parsed.code === "cart_order_processing"
                     ? "order-processing"
-                    : parsed.code === "cart_expired"
-                      ? "expired"
-                      : parsed.code === "cart_abandoned"
-                        ? "abandoned"
-                        : parsed.code === "network_unknown"
-                          ? "command-failed"
-                          : "unavailable";
+                    : parsed.code === "cart_checkout_in_progress"
+                      ? "checkout-in-progress"
+                      : parsed.code === "cart_expired"
+                        ? "expired"
+                        : parsed.code === "cart_abandoned"
+                          ? "abandoned"
+                          : parsed.code === "network_unknown"
+                            ? "command-failed"
+                            : "unavailable";
     publish({
       status,
       cart,

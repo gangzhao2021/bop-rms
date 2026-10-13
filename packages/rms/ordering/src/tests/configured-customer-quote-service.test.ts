@@ -7,7 +7,7 @@ import {
 } from "../application/configured-customer-quote-service.js";
 import type { ConfiguredCartQuotePorts } from "../application/configured-cart-quote-service.js";
 import type { CartQuoteAttachment } from "../domain/cart-quote-attachment.js";
-import { parseCartAggregate } from "../domain/cart.js";
+import { CartCheckoutInProgressError, parseCartAggregate } from "../domain/cart.js";
 import { fixture, id } from "./configured-cart-quote.fixture.js";
 
 function setup(dining = false) {
@@ -70,6 +70,9 @@ function setup(dining = false) {
     observedAt: f.observedAt,
   };
   const participation = { resolve: vi.fn(async (): Promise<unknown> => originalParticipation) };
+  const checkoutHold = {
+    read: vi.fn(async (): Promise<{ heldUntil: string } | null> => null),
+  };
   let saved: CartQuoteAttachment<2> | null = null;
   const attach = vi.fn<ConfiguredCartQuotePorts["repository"]["attach"]>(async (input) => {
     saved = input.attachment;
@@ -82,7 +85,7 @@ function setup(dining = false) {
     sessions: { authorize },
     now: () => f.observedAt,
     ...(dining
-      ? { orderType: "DineIn" as const, participation }
+      ? { orderType: "DineIn" as const, participation, checkoutHold }
       : { orderType: "Pickup" as const, binding }),
     pricing,
     catalog,
@@ -116,12 +119,44 @@ function setup(dining = false) {
     authorize,
     binding,
     participation,
+    checkoutHold,
     originalParticipation,
     pricing,
     catalog,
     attach,
   };
 }
+describe("DEC-DINING-ANY-PARTICIPANT-SUBMIT table Cart held by another guest's checkout", () => {
+  it("refuses to price the held version, before Pricing, with when the hold ends", async () => {
+    const s = setup(true);
+    s.checkoutHold.read.mockResolvedValue({ heldUntil: "2026-08-02T16:20:00.000Z" });
+    const refused = s.service.attach(s.command);
+    await expect(refused).rejects.toBeInstanceOf(CartCheckoutInProgressError);
+    await expect(refused).rejects.toMatchObject({
+      code: "CART_CHECKOUT_IN_PROGRESS",
+      heldUntil: "2026-08-02T16:20:00.000Z",
+    });
+    expect(s.checkoutHold.read).toHaveBeenCalledWith({
+      diningSessionReference: id(67),
+      participantReference: id(68),
+      cartReference: s.f.cart.cartReference,
+      cartVersion: s.f.cart.aggregateVersion,
+      observedAt: s.f.observedAt,
+    });
+    expect(s.pricing.quoteCart).not.toHaveBeenCalled();
+    expect(s.attach).not.toHaveBeenCalled();
+  });
+  it("prices normally once nothing holds the version, and an unreadable hold is unavailable", async () => {
+    const s = setup(true);
+    expect((await s.service.attach(s.command)).status).toBe("Attached");
+    const t = setup(true);
+    t.checkoutHold.read.mockRejectedValue(new Error("synthetic"));
+    await expect(t.service.attach(t.command)).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(t.attach).not.toHaveBeenCalled();
+  });
+});
 describe("configured credential-bound customer entry", () => {
   it.each([false, true])(
     "requires CSRF and preserves original history for Dining=%s",

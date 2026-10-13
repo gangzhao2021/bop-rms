@@ -60,6 +60,8 @@ export const cartErrorCodes = [
   "CART_REPLACEMENT_FORBIDDEN",
   /** WP-2423: a checkout on the previous table Cart may still create an order or charge; retry later. */
   "CART_REPLACEMENT_CHECKOUT_PENDING",
+  /** DEC-DINING-ANY-PARTICIPANT-SUBMIT: another guest's checkout holds this table Cart version. */
+  "CART_CHECKOUT_IN_PROGRESS",
   "CART_VERSION_CONFLICT",
   "CART_IDEMPOTENCY_CONFLICT",
   "CART_ITEM_NOT_FOUND",
@@ -104,6 +106,48 @@ export class CartReplacementPendingError extends CartError {
     super("CART_REPLACEMENT_CHECKOUT_PENDING");
     this.pendingUntil = pendingUntil;
   }
+}
+
+/**
+ * DEC-DINING-ANY-PARTICIPANT-SUBMIT: another participant at the table is checking out this exact
+ * Cart version until heldUntil. Nothing was changed; the guest may try again after it.
+ */
+export class CartCheckoutInProgressError extends CartError {
+  readonly heldUntil: string;
+  constructor(heldUntil: string) {
+    super("CART_CHECKOUT_IN_PROGRESS");
+    this.heldUntil = heldUntil;
+  }
+}
+
+/** Owner-supplied current read (Dining) of another participant's checkout hold on a Cart version. */
+export interface DiningCartCheckoutHoldPort {
+  read(input: {
+    readonly diningSessionReference: string;
+    readonly cartReference: string;
+    readonly cartVersion: number;
+    readonly participantReference: string;
+    readonly observedAt: string;
+  }): Promise<Readonly<{ heldUntil: string }> | null>;
+}
+
+/** Throws CartCheckoutInProgressError when another participant's checkout holds the version. */
+export async function assertDiningCartNotHeld(
+  hold: DiningCartCheckoutHoldPort | undefined,
+  input: Parameters<DiningCartCheckoutHoldPort["read"]>[0],
+): Promise<void> {
+  if (hold === undefined) return;
+  let held: Readonly<{ heldUntil: string }> | null;
+  try {
+    held = await hold.read(Object.freeze({ ...input }));
+  } catch {
+    throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+  }
+  if (held === null) return;
+  const heldUntil = held.heldUntil;
+  if (typeof heldUntil !== "string" || !instantPattern.test(heldUntil))
+    throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+  throw new CartCheckoutInProgressError(heldUntil);
 }
 
 const uuidV7Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;

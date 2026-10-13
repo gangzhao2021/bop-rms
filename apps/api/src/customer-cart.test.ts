@@ -294,6 +294,12 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
     [{ status: "RetryLater", retryAfterSeconds: 5 }, 503, "cart_service_unavailable"],
     [{ status: "OrderProcessing", retryAfterSeconds: 10 }, 409, "cart_order_processing"],
     [{ status: "OrderProcessing", retryAfterSeconds: null }, 409, "cart_order_processing"],
+    // DEC-DINING-ANY-PARTICIPANT-SUBMIT: another guest is paying; wait until their hold ends.
+    [
+      { status: "CheckoutInProgress", heldUntil: "2026-08-02T20:04:30.000Z" },
+      409,
+      "cart_checkout_in_progress",
+    ],
   ] as const)("maps safe application outcome %o", async (result, status, errorCode) => {
     port.result = result;
     const response = await request("/bff/customer/cart", { headers: headers() });
@@ -301,6 +307,8 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
     expect(await response.json()).toMatchObject({ error: { code: errorCode } });
     if (status === 429) expect(response.headers.get("retry-after")).toBe("7");
     if (status === 503) expect(response.headers.get("retry-after")).toBe("5");
+    if (errorCode === "cart_checkout_in_progress")
+      expect(response.headers.get("retry-after")).toBe("270");
     if (errorCode === "cart_order_processing")
       expect(response.headers.get("retry-after")).toBe(
         "retryAfterSeconds" in result && result.retryAfterSeconds !== null ? "10" : null,

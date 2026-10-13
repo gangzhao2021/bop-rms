@@ -140,3 +140,23 @@ it("offers explicit new pricing only after a confirmed expired operation", () =>
   expect(html).not.toContain("Retry pricing");
   expect(html).not.toContain("checkout-totals");
 });
+
+it.each([
+  [
+    "checkout-in-progress",
+    "Another guest is checking out",
+    "Another guest at your table is paying for this order. Try again in about 3 minutes.",
+  ],
+  [
+    "order-processing",
+    "Order still processing",
+    "Your table’s last order is still being processed. Try again in about 3 minutes.",
+  ],
+] as const)("WP-2423: explains %s pricing refusals and offers a retry", (status, title, text) => {
+  const html = render({ status, cart, retryAfterSeconds: 150, canRetry: true });
+  expect(html).toContain(title);
+  expect(html).toContain(text);
+  expect(html).toContain("Try again</button>");
+  expect(html).not.toContain("We couldn’t price your order just now");
+  expect(html).not.toContain("cart_");
+});

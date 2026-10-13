@@ -12,6 +12,12 @@ export type CheckoutSessionState =
   | {
       readonly status: "unknown" | "denied" | "conflict" | "invalid" | "offline" | "store_closed";
       readonly canRetry: boolean;
+    }
+  | {
+      /** WP-2423: another guest at the table is checking out this cart; nothing was created. */
+      readonly status: "checkout_in_progress";
+      readonly canRetry: boolean;
+      readonly retryAfterSeconds: number | null;
     };
 export function createCheckoutSessionController(
   client: {
@@ -49,11 +55,26 @@ export function createCheckoutSessionController(
         if (!attempt.current()) publish({ status: "denied", canRetry: false });
         else publish(online ? { status: "ready", session } : { status: "offline", canRetry: true });
       } catch (error) {
+        if (
+          attempt.current() &&
+          online &&
+          error instanceof CheckoutSessionClientError &&
+          error.code === "checkout_in_progress"
+        ) {
+          // Nothing was created under this operation; the retry after the wait is a new one.
+          if (plan === attempt) plan = { ...attempt, key: keyFactory() };
+          publish({
+            status: "checkout_in_progress",
+            canRetry: true,
+            retryAfterSeconds: error.retryAfterSeconds,
+          });
+          return;
+        }
         const code = !attempt.current()
           ? "denied"
           : !online
             ? "offline"
-            : error instanceof CheckoutSessionClientError
+            : error instanceof CheckoutSessionClientError && error.code !== "checkout_in_progress"
               ? error.code
               : "unknown";
         publish({

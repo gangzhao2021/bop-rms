@@ -57,7 +57,11 @@ export class CheckoutSessionServiceError extends Error {
       | "INTENT_CONFLICT"
       | "DEPENDENCY_UNAVAILABLE"
       /** WP-2423 Q4: the Store is not taking this kind of order now (closed or paused). */
-      | "STORE_CLOSED",
+      | "STORE_CLOSED"
+      /** DEC-DINING-ANY-PARTICIPANT-SUBMIT: another guest at the table is checking out this Cart
+       * version until heldUntil; nothing was created. */
+      | "CHECKOUT_IN_PROGRESS",
+    readonly heldUntil: string | null = null,
   ) {
     super("checkout session is unavailable");
     this.name = "CheckoutSessionServiceError";

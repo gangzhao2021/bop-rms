@@ -7,7 +7,12 @@ import type {
   CartItemOperationAction,
   CartItemOperationRecord,
 } from "../application/ports/cart-item-command-ports.js";
-import { CartError, parseCartAggregate, type CartAggregate } from "../domain/cart.js";
+import {
+  CartCheckoutInProgressError,
+  CartError,
+  parseCartAggregate,
+  type CartAggregate,
+} from "../domain/cart.js";
 function required<T>(value: T | undefined): T {
   if (value === undefined) throw new Error("missing synthetic fixture");
   return value;
@@ -157,6 +162,9 @@ function setup() {
       }) as unknown,
   );
   const historyRead = vi.fn(async (ref: string) => history.get(ref) ?? null);
+  const checkoutHold = {
+    read: vi.fn(async (): Promise<{ heldUntil: string } | null> => null),
+  };
   const load = vi.fn(async () => current);
   const commit = vi.fn(
     async (value: { record: CartItemOperationRecord; expectedAggregateVersion: number }) => {
@@ -191,6 +199,7 @@ function setup() {
     scope: { brandReference: ids.brand, storeReference: ids.store },
     sessions: { authorize },
     participation: { resolve: participation },
+    checkoutHold,
     repository: (scope) => {
       expect(scope).toEqual({
         brandReference: ids.brand,
@@ -216,6 +225,7 @@ function setup() {
     generate,
     authorize,
     participation,
+    checkoutHold,
     historyRead,
     load,
     commit,
@@ -225,6 +235,30 @@ function setup() {
     current: () => current,
   };
 }
+
+describe("DEC-DINING-ANY-PARTICIPANT-SUBMIT edits while another guest checks out", () => {
+  it("refuses to change the held Cart version, before any Cart access", async () => {
+    const f = setup();
+    f.checkoutHold.read.mockResolvedValue({ heldUntil: "2026-08-02T14:20:00.000Z" });
+    const refused = f.service.add(input);
+    await expect(refused).rejects.toBeInstanceOf(CartCheckoutInProgressError);
+    await expect(refused).rejects.toMatchObject({ heldUntil: "2026-08-02T14:20:00.000Z" });
+    expect(f.checkoutHold.read).toHaveBeenCalledWith({
+      diningSessionReference: ids.diningSession,
+      participantReference: ids.participant,
+      cartReference: ids.cart,
+      cartVersion: 1,
+      observedAt: requestedAt,
+    });
+    expect(f.load).not.toHaveBeenCalled();
+    expect(f.commit).not.toHaveBeenCalled();
+  });
+  it("edits normally once the hold has ended", async () => {
+    const f = setup();
+    expect((await f.service.add(input)).status).toBeDefined();
+    expect(f.commit).toHaveBeenCalledOnce();
+  });
+});
 
 describe("current-authorized Dining item commands", () => {
   it("adds, updates and removes only the participant's item with immutable attribution", async () => {

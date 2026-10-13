@@ -348,3 +348,53 @@ export function assertDiningCheckoutPreparedForOrdering(
     return commitment;
   });
 }
+
+/** DEC-DINING-ANY-PARTICIPANT-SUBMIT: another participant holds this Cart version for checkout
+ * until `heldUntil`. Nothing was changed; the caller may try again after it.
+ */
+export class DiningCheckoutHeldError extends Error {
+  readonly code = "DINING_CHECKOUT_HELD" as const;
+  constructor(readonly heldUntil: DiningInstant) {
+    super("another participant is checking out this cart");
+    this.name = "DiningCheckoutHeldError";
+  }
+}
+
+/**
+ * Until when this commitment holds its Cart version for checkout, or null once it no longer does:
+ * Prepared until its preparation deadline, PaymentPending until its capacity deadline; Expired
+ * (or past the deadline) never holds. Submission also moves the Cart to a new version, so a
+ * completed or failed submission stops holding the version other guests now see.
+ */
+export function diningCheckoutHeldUntil(
+  value: unknown,
+  observedAtValue: unknown,
+): DiningInstant | null {
+  return protect(() => {
+    const commitment = parseDiningCheckoutCommitment(value),
+      observedAt = parseDiningInstant(observedAtValue);
+    const deadline =
+      commitment.state === "Prepared"
+        ? commitment.preparationValidUntil
+        : commitment.state === "PaymentPending"
+          ? commitment.capacityExpiresAt
+          : null;
+    return deadline !== null && time(observedAt) < time(deadline) ? deadline : null;
+  });
+}
+
+/** Recognize a hold refusal by its shape too, so it survives a second copy of this module
+ * (the pilot composes owner stores from sources and the API from its build). */
+export function isDiningCheckoutHeld(error: unknown): error is DiningCheckoutHeldError {
+  if (error instanceof DiningCheckoutHeldError) return true;
+  if (!(error instanceof Error)) return false;
+  const code = Object.getOwnPropertyDescriptor(error, "code")?.value;
+  const heldUntil = Object.getOwnPropertyDescriptor(error, "heldUntil")?.value;
+  if (code !== "DINING_CHECKOUT_HELD" || typeof heldUntil !== "string") return false;
+  try {
+    parseDiningInstant(heldUntil);
+    return true;
+  } catch {
+    return false;
+  }
+}

@@ -47,6 +47,13 @@ function codes(value: unknown): readonly string[] {
     throw new Error("invalid");
   return Object.freeze([...value]);
 }
+/** WP-2423: the server's bounded wait in seconds (1..3600), when it sent one. */
+export function retryAfterSeconds(response: Response): number | null {
+  const header = response.headers.get("retry-after");
+  if (header === null || !/^[1-9][0-9]{0,3}$/u.test(header)) return null;
+  const seconds = Number(header);
+  return seconds <= 3600 ? seconds : null;
+}
 function parseQuote(value: unknown, expectedCartVersion: number): CheckoutQuote {
   const root = exact(value, ["schemaVersion", "quote"]);
   const raw = exact(root.quote, [
@@ -277,14 +284,21 @@ export function createCheckoutClient(cartClient: CustomerCartClient): CheckoutCl
           quote_idempotency_conflict: [409, "cart_idempotency_conflict"],
           quote_configuration_invalid: [422, "cart_selection_invalid"],
           quote_request_invalid: [400, "cart_request_invalid"],
+          cart_order_processing: [409, "cart_order_processing"],
+          cart_checkout_in_progress: [409, "cart_checkout_in_progress"],
         } as const;
         const contract = Object.hasOwn(known, String(error.code))
           ? known[error.code as keyof typeof known]
           : undefined;
+        if (contract === undefined || response.status !== contract[0])
+          throw new CartClientError("network_unknown");
+        const seconds = retryAfterSeconds(response);
         throw new CartClientError(
-          contract !== undefined && response.status === contract[0]
-            ? contract[1]
-            : "network_unknown",
+          contract[1],
+          seconds === null ||
+            (contract[1] !== "cart_order_processing" && contract[1] !== "cart_checkout_in_progress")
+            ? {}
+            : { retryAfterSeconds: seconds },
         );
       } catch (error) {
         if (!contextCurrent()) throw new CartClientError("network_unknown");
@@ -363,6 +377,19 @@ export function createCheckoutController(
   };
   const fail = (error: unknown, current: CartView | null) => {
     const parsed = error instanceof CartClientError ? error.code : "cart_service_unavailable";
+    if (
+      online &&
+      current !== null &&
+      (parsed === "cart_order_processing" || parsed === "cart_checkout_in_progress")
+    ) {
+      publish({
+        status: parsed === "cart_order_processing" ? "order-processing" : "checkout-in-progress",
+        cart: current,
+        retryAfterSeconds: (error as CartClientError).retryAfterSeconds,
+        canRetry: true,
+      });
+      return;
+    }
     publish({
       status: !online
         ? "offline"
@@ -537,7 +564,14 @@ export function createCheckoutController(
       }
     },
     quote,
-    retry: () => (plan === null ? Promise.resolve() : quote()),
+    // WP-2423: a refused price (order processing, another guest checking out) changed nothing,
+    // so retrying prices the same cart again with a new operation.
+    retry: () =>
+      plan !== null ||
+      state.status === "order-processing" ||
+      state.status === "checkout-in-progress"
+        ? quote()
+        : Promise.resolve(),
     setOnline(value: boolean) {
       if (online === value) return;
       online = value;

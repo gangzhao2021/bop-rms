@@ -238,6 +238,7 @@ describe("uncertain Cart response transport", () => {
     [409, "cart_abandoned"],
     [429, "cart_rate_limited"],
     [409, "cart_order_processing"],
+    [409, "cart_checkout_in_progress"],
   ])("retains matching %s/%s rejection semantics", async (status, code) => {
     setCustomerCartCsrfCredential("c".repeat(43));
     vi.stubGlobal(
@@ -250,6 +251,28 @@ describe("uncertain Cart response transport", () => {
       createBrowserCustomerCartClient().createCart({ operationReference: id(20) }),
     ).rejects.toMatchObject({ code });
   });
+});
+
+it("WP-2423: carries the wait while another guest at the table is checking out", async () => {
+  setCustomerCartCsrfCredential("c".repeat(43));
+  const body = JSON.stringify({
+    schemaVersion: 1,
+    error: { code: "cart_checkout_in_progress", messageKey: "customer.cart.checkout_in_progress" },
+  });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(body, { status: 409, headers: { "retry-after": "90" } })),
+  );
+  await expect(
+    createBrowserCustomerCartClient().createCart({ operationReference: id(20) }),
+  ).rejects.toMatchObject({ code: "cart_checkout_in_progress", retryAfterSeconds: 90 });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(body, { status: 409 })),
+  );
+  await expect(
+    createBrowserCustomerCartClient().createCart({ operationReference: id(20) }),
+  ).rejects.toMatchObject({ code: "cart_checkout_in_progress", retryAfterSeconds: null });
 });
 
 describe("complete Cart response bounds", () => {

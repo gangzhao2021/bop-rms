@@ -36,4 +36,14 @@ export type CheckoutState =
         | "outcome-unknown";
       cart: CartView | null;
       canRetry: boolean;
+    }>
+  | Readonly<{
+      /**
+       * WP-2423: pricing was refused and nothing changed — the table's last order is still being
+       * processed, or another guest at the table is checking out this cart. Retry after the wait.
+       */
+      status: "order-processing" | "checkout-in-progress";
+      cart: CartView;
+      retryAfterSeconds: number | null;
+      canRetry: boolean;
     }>;

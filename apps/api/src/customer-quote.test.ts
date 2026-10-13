@@ -248,6 +248,22 @@ describe("WP-1103/1104 Customer Quote API", () => {
     }
   });
 
+  it("DEC-DINING-ANY-PARTICIPANT-SUBMIT: says another guest is checking out, with the wait", async () => {
+    const service = new Port();
+    const port = await listen(service);
+    service.result = { status: "CheckoutInProgress", heldUntil: "2026-08-02T16:00:45.500Z" };
+    const response = await post(port);
+    expect(response.status).toBe(409);
+    expect(response.headers.get("retry-after")).toBe("46");
+    expect(await response.json()).toEqual({
+      schemaVersion: 1,
+      error: {
+        code: "cart_checkout_in_progress",
+        messageKey: "customer.cart.checkout_in_progress",
+      },
+    });
+  });
+
   it("fails closed on thrown or declared service unavailability", async () => {
     const service = new Port();
     const port = await listen(service);

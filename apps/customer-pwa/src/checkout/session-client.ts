@@ -2,7 +2,7 @@ import {
   captureCustomerCsrfContext,
   getCustomerCsrfCredential,
 } from "../session/customer-transaction-context.js";
-import { requestCheckoutMutation } from "./checkout-client.js";
+import { requestCheckoutMutation, retryAfterSeconds } from "./checkout-client.js";
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 export interface CheckoutSessionSelection {
   readonly cartReference: string;
@@ -15,7 +15,12 @@ export interface CheckoutSessionView extends CheckoutSessionSelection {
   readonly createdAt: string;
 }
 export class CheckoutSessionClientError extends Error {
-  constructor(readonly code: "invalid" | "denied" | "conflict" | "store_closed" | "unknown") {
+  constructor(
+    readonly code:
+      "invalid" | "denied" | "conflict" | "store_closed" | "checkout_in_progress" | "unknown",
+    /** WP-2423: the server's bounded wait before retrying, when it sent one. */
+    readonly retryAfterSeconds: number | null = null,
+  ) {
     super("Checkout session unavailable.");
     this.name = "CheckoutSessionClientError";
   }
@@ -80,6 +85,9 @@ export function createCheckoutSessionClient() {
         current,
       );
       if (!current()) throw new CheckoutSessionClientError("unknown");
+      // WP-2423: another guest at the table is checking out this cart; nothing was created.
+      if (response.status === 409 && errorCode(payload) === "cart_checkout_in_progress")
+        throw new CheckoutSessionClientError("checkout_in_progress", retryAfterSeconds(response));
       if (![200, 201].includes(response.status))
         throw new CheckoutSessionClientError(
           response.status === 404

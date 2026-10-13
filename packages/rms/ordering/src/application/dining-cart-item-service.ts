@@ -1,7 +1,10 @@
 import { validateAuditRecord } from "@bop/audit";
 import { parseGuestRawCredential, readClosedRecord } from "@bop/identity";
 import {
+  assertDiningCartNotHeld,
+  CartCheckoutInProgressError,
   CartError,
+  type DiningCartCheckoutHoldPort,
   parseCartAggregate,
   parseCartOptionSelection,
   parseCustomerNote,
@@ -28,6 +31,9 @@ export interface DiningCartItemOptions {
   readonly scope: DiningCartAuthorityPorts["scope"];
   readonly sessions: PickupCartRemovalOptions["sessions"];
   readonly participation: DiningCartAuthorityPorts["participation"];
+  /** DEC-DINING-ANY-PARTICIPANT-SUBMIT: refuse edits to a Cart version another participant is
+   * checking out (an edit would silently invalidate that checkout). */
+  readonly checkoutHold?: DiningCartCheckoutHoldPort;
   readonly now: () => string;
   readonly catalog: CartItemCommandPorts["catalog"];
   readonly references: CartItemCommandPorts["references"];
@@ -208,6 +214,13 @@ export function createDiningCartItemService(options: DiningCartItemOptions) {
           guestSessionReference: String(first.session.sessionReference),
           cartReference: raw.cartReference,
         });
+        await assertDiningCartNotHeld(options.checkoutHold, {
+          diningSessionReference: String(first.participation.diningSessionReference),
+          participantReference: String(first.participation.participantReference),
+          cartReference: raw.cartReference,
+          cartVersion: raw.expectedAggregateVersion,
+          observedAt: first.observedAt,
+        });
         const repository = options.repository(bound);
         function owned(value: unknown) {
           let cart;
@@ -374,6 +387,7 @@ export function createDiningCartItemService(options: DiningCartItemOptions) {
       return result.value;
     } catch (error) {
       if (guardFailure !== null) throw guardFailure;
+      if (error instanceof CartCheckoutInProgressError) throw error;
       if (error instanceof CartError) throw new CartError(error.code);
       return unavailable();
     }

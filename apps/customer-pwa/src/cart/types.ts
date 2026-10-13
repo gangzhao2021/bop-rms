@@ -79,6 +79,8 @@ export type CartErrorCode =
   | "cart_rate_limited"
   /** WP-2423: the table's last order is still being processed; retry shortly. */
   | "cart_order_processing"
+  /** WP-2423: another guest at the table is checking out this cart; nothing was changed. */
+  | "cart_checkout_in_progress"
   | "cart_service_unavailable"
   | "quote_operation_expired"
   | "network_unknown";
@@ -114,6 +116,18 @@ export function orderProcessingMessage(retryAfterSeconds: number | null): string
   const base = "Your table’s last order is still being processed.";
   if (retryAfterSeconds === null)
     return `${base} Please try again shortly. If this keeps happening, ask a staff member.`;
+  if (retryAfterSeconds <= 60) return `${base} Try again in a moment.`;
+  const minutes = Math.ceil(retryAfterSeconds / 60);
+  return `${base} Try again in about ${minutes} minute${minutes === 1 ? "" : "s"}.`;
+}
+
+/**
+ * WP-2423 (DEC-DINING-ANY-PARTICIPANT-SUBMIT item 2): what a guest is told while another guest at
+ * the same table is checking out this cart. Nothing was changed; they can try again after the wait.
+ */
+export function checkoutInProgressMessage(retryAfterSeconds: number | null): string {
+  const base = "Another guest at your table is paying for this order.";
+  if (retryAfterSeconds === null) return `${base} Try again shortly.`;
   if (retryAfterSeconds <= 60) return `${base} Try again in a moment.`;
   const minutes = Math.ceil(retryAfterSeconds / 60);
   return `${base} Try again in about ${minutes} minute${minutes === 1 ? "" : "s"}.`;

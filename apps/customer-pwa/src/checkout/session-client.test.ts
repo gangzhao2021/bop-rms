@@ -90,3 +90,23 @@ it("WP-2423 Q4: tells a closed Store apart from an ordinary conflict", async () 
   await expect(client.create(selected, id(4))).rejects.toMatchObject({ code: "store_closed" });
   await expect(client.create(selected, id(4))).rejects.toMatchObject({ code: "conflict" });
 });
+it("WP-2423: tells another guest's checkout apart from a conflict and keeps the wait", async () => {
+  const body = {
+    schemaVersion: 1,
+    error: { code: "cart_checkout_in_progress", messageKey: "customer.cart.checkout_in_progress" },
+  };
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json(body, { status: 409, headers: { "retry-after": "300" } }))
+    .mockResolvedValueOnce(Response.json(body, { status: 409 }));
+  vi.stubGlobal("fetch", fetch);
+  const client = createCheckoutSessionClient();
+  await expect(client.create(selected, id(4))).rejects.toMatchObject({
+    code: "checkout_in_progress",
+    retryAfterSeconds: 300,
+  });
+  await expect(client.create(selected, id(4))).rejects.toMatchObject({
+    code: "checkout_in_progress",
+    retryAfterSeconds: null,
+  });
+});

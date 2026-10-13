@@ -66,3 +66,23 @@ it("WP-2423 Q4: lets a customer retry the same checkout once the Store reopens",
     [selected, id(5)],
   ]);
 });
+it("WP-2423: waits out another guest's checkout and retries with a new operation", async () => {
+  const create = vi
+    .fn()
+    .mockRejectedValueOnce(new CheckoutSessionClientError("checkout_in_progress", 90))
+    .mockResolvedValue(session);
+  let n = 6;
+  const c = createCheckoutSessionController({ create }, () => id(n++));
+  await c.start(selected);
+  expect(c.getState()).toEqual({
+    status: "checkout_in_progress",
+    canRetry: true,
+    retryAfterSeconds: 90,
+  });
+  await c.retry();
+  expect(c.getState()).toEqual({ status: "ready", session });
+  expect(create.mock.calls).toEqual([
+    [selected, id(6)],
+    [selected, id(7)],
+  ]);
+});

@@ -9,6 +9,7 @@ import {
   createPostgresConfiguredCartQuoteStore,
   createPostgresPickupCartBindingReader,
   type ConfiguredCustomerQuoteOptions,
+  type DiningCartCheckoutHoldPort,
 } from "@rms/ordering";
 import { createPostgresCatalogOrderSnapshotSource } from "@rms/catalog";
 import {
@@ -60,6 +61,9 @@ export type CustomerConfiguredQuoteCompositionOptions = {
         ConfiguredCustomerQuoteOptions,
         { orderType: "DineIn" }
       >["participation"];
+      /** DEC-DINING-ANY-PARTICIPANT-SUBMIT: Dining's current hold of the table Cart version by
+       * another participant's checkout; required for a table's Cart. */
+      readonly checkoutHold: DiningCartCheckoutHoldPort;
     }
 );
 
@@ -91,7 +95,11 @@ export function createCustomerConfiguredQuoteComposition(
           orderType: "Pickup" as const,
           binding: createPostgresPickupCartBindingReader(options.cartTransactions, scope),
         }
-      : { orderType: "DineIn" as const, participation: options.participation }),
+      : {
+          orderType: "DineIn" as const,
+          participation: options.participation,
+          checkoutHold: options.checkoutHold,
+        }),
     catalog: createPostgresCatalogOrderSnapshotSource(
       options.catalogTransactions,
       { ...options.catalogScope, ...scope, orderType: options.orderType },

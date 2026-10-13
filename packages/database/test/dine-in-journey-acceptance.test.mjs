@@ -9,6 +9,7 @@ import {
   createDiningCartParticipationQuery,
   createDiningGuestBindingQuery,
   createPostgresDiningCheckoutCommitmentStore,
+  createPostgresDiningCheckoutHoldSource,
   createPostgresDiningGuestBindingStore,
   createPostgresDiningParticipationStore,
 } from "../../rms/dining/src/index.ts";
@@ -1078,6 +1079,56 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         paymentOperationReference: pay3.paymentOperation,
         participant: dining.guest,
       });
+      // DEC-DINING-ANY-PARTICIPANT-SUBMIT: P's checkout now holds this Cart version. Dining's public
+      // hold read (pilot API grants) tells the Host until when, and tells P nothing is in the way.
+      const holdSource = createPostgresDiningCheckoutHoldSource(transactions(api), ownerScope);
+      const holdOf = (participantReference, cartVersion, observedAt = now()) =>
+        holdSource.read({
+          diningSessionReference: dining.session.diningSessionReference,
+          cartReference: R3.batch.sourceCartReference,
+          cartVersion,
+          participantReference,
+          observedAt,
+        });
+      const heldUntil3 = R3.f.request.checkoutValidationEvidence.fulfillment.validUntil;
+      assert.deepEqual(await holdOf(dining.host.participantReference, R3.batch.sourceCartVersion), {
+        heldUntil: heldUntil3,
+      });
+      assert.equal(await holdOf(participantP, R3.batch.sourceCartVersion), null);
+      // The hold ends by itself at the checkout's deadline: no stale lock.
+      assert.equal(
+        await holdOf(dining.host.participantReference, R3.batch.sourceCartVersion, heldUntil3),
+        null,
+      );
+      // The Host's own checkout of the same Cart version is refused by Dining (nothing written);
+      // P's checkout is untouched.
+      const hostAttempt = journeyRound({
+        at: R3.f.request.checkoutValidationEvidence.fulfillment.checkedAt,
+        prefix: "01a00004",
+      });
+      await assert.rejects(
+        dining.prepare(
+          {
+            ...hostAttempt,
+            batch: {
+              ...hostAttempt.batch,
+              sourceCartReference: R3.batch.sourceCartReference,
+              sourceCartVersion: R3.batch.sourceCartVersion,
+            },
+          },
+          { paymentOperationReference: id(0x3201) },
+        ),
+        { code: "DINING_CHECKOUT_HELD", heldUntil: heldUntil3 },
+      );
+      assert.equal(
+        (
+          await one(
+            "SELECT count(*)::int AS n FROM rms_dining.dining_checkout_commitment WHERE submission_id=$1",
+            [hostAttempt.batch.submissionReference],
+          )
+        )[0].n,
+        0,
+      );
       const evidence3 = R3.evidence(link3),
         items3 = R3.items(evidence3);
       await seedJourneyCheckout(admin, {
@@ -1136,6 +1187,11 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       );
       const submitted3 = await submit(snapshot3, link3, evidence3);
       assert.equal(submitted3.status, "Created");
+      // Once P's round is submitted the Cart moves to a new version that nobody holds.
+      assert.equal(
+        await holdOf(dining.host.participantReference, R3.batch.sourceCartVersion + 1),
+        null,
+      );
       // Round 3 reserves the same stock round 2 had reserved (round 2's was returned).
       assert.equal(await stockReserved(stock.accountReference), reservedRound2);
       assert.deepEqual(await cartState(R3cart), {

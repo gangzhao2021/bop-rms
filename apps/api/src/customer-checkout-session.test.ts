@@ -194,6 +194,24 @@ it("WP-2423 Q4: says the Store is not taking orders instead of a generic conflic
     },
   });
 });
+it("DEC-DINING-ANY-PARTICIPANT-SUBMIT: says another guest is checking out, with the wait", async () => {
+  const f = await setup();
+  f.create.mockRejectedValue(
+    new CheckoutSessionServiceError(
+      "CHECKOUT_IN_PROGRESS",
+      new Date(Date.now() + 125_000).toISOString(),
+    ),
+  );
+  const response = await f.send();
+  expect(response.status).toBe(409);
+  const wait = Number(response.headers.get("retry-after"));
+  expect(wait).toBeGreaterThanOrEqual(120);
+  expect(wait).toBeLessThanOrEqual(126);
+  expect(await response.json()).toEqual({
+    schemaVersion: 1,
+    error: { code: "cart_checkout_in_progress", messageKey: "customer.cart.checkout_in_progress" },
+  });
+});
 it("rejects foreign operation and malformed owner results", async () => {
   const f = await setup();
   for (const session of [

@@ -10,7 +10,11 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import type { FormEvent } from "react";
 import { Link, useParams } from "react-router";
 import { createBrowserCustomerCartClient } from "../cart/cart-client.js";
-import { orderProcessingMessage, type CartItemDraft } from "../cart/types.js";
+import {
+  checkoutInProgressMessage,
+  orderProcessingMessage,
+  type CartItemDraft,
+} from "../cart/types.js";
 import {
   createConfigureController,
   type ConfigureController,
@@ -764,6 +768,9 @@ function ConfigureStatus({
       "Your table’s cart timed out and a new one couldn’t be started just now. Wait a moment, then add the item again.",
     abandoned: "This cart is closed and cannot accept another item.",
     "order-processing": orderProcessingMessage(
+      "retryAfterSeconds" in state ? state.retryAfterSeconds : null,
+    ),
+    "checkout-in-progress": checkoutInProgressMessage(
       "retryAfterSeconds" in state ? state.retryAfterSeconds : null,
     ),
     unavailable: "We couldn’t add this right now. Please try again.",

@@ -10,6 +10,7 @@ import {
   readClosedRecord,
 } from "@bop/identity";
 import {
+  CartCheckoutInProgressError,
   CartError,
   createPickupCartItemService,
   createPostgresCartQueryStore,
@@ -89,6 +90,8 @@ export function createCustomerCartItemPort(options: {
       cartReference: input.cartReference,
     });
   async function failure(error: unknown, input: Add | Update): Promise<CustomerCartPortResult> {
+    if (error instanceof CartCheckoutInProgressError)
+      return { status: "CheckoutInProgress", heldUntil: error.heldUntil };
     if (!(error instanceof CartError)) return unavailable;
     switch (error.code) {
       case "CART_PERMISSION_DENIED":

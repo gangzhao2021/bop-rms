@@ -1,4 +1,9 @@
-import { assertDiningCheckoutCommitmentUsable } from "../../domain/dining-checkout-commitment.js";
+import {
+  assertDiningCheckoutCommitmentUsable,
+  DiningCheckoutHeldError,
+  diningCheckoutHeldUntil,
+  isDiningCheckoutHeld,
+} from "../../domain/dining-checkout-commitment.js";
 import { appendAuditRecordInTransaction, validateAuditRecord } from "@bop/audit";
 import {
   DiningCheckoutCommitmentError,
@@ -69,9 +74,60 @@ function rows(value: unknown, limit = 1): readonly unknown[] {
   return result;
 }
 function normalize(error: unknown): never {
-  if (error instanceof DiningCheckoutStoreError || error instanceof DiningCheckoutCommitmentError)
+  if (
+    error instanceof DiningCheckoutStoreError ||
+    error instanceof DiningCheckoutCommitmentError ||
+    isDiningCheckoutHeld(error)
+  )
     throw error;
   return fail();
+}
+/**
+ * DEC-DINING-ANY-PARTICIPANT-SUBMIT: the latest deadline among other participants' commitments
+ * that still hold this exact Cart version for checkout, or null. Each commitment is read at its
+ * latest version; the caller supplies scope context and any locks it needs.
+ */
+async function heldUntil(
+  tx: DiningTableTransaction,
+  ids: Readonly<{ tenant: string; brand: string; store: string }>,
+  input: Readonly<{
+    diningSessionReference: string;
+    cartReference: string;
+    cartVersion: number;
+    participantReference: string;
+    observedAt: string;
+  }>,
+): Promise<string | null> {
+  const found = rows(
+    await tx.query(
+      "SELECT DISTINCT ON (commitment_id) record_json AS record FROM rms_dining.dining_checkout_commitment WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND session_id=$4 AND record_json->>'cartReference'=$5 AND record_json->'cartVersion'=to_jsonb($6::bigint) ORDER BY commitment_id,version DESC LIMIT 101",
+      [
+        ids.tenant,
+        ids.brand,
+        ids.store,
+        input.diningSessionReference,
+        input.cartReference,
+        input.cartVersion,
+      ],
+    ),
+    100,
+  );
+  let latest: string | null = null;
+  for (const value of found) {
+    const record = parseDiningCheckoutCommitment(closed(value, ["record"]).record);
+    if (
+      record.brandReference !== ids.brand ||
+      record.storeReference !== ids.store ||
+      record.diningSessionReference !== input.diningSessionReference ||
+      record.cartReference !== input.cartReference ||
+      record.cartVersion !== input.cartVersion
+    )
+      return fail();
+    if (record.participantReference === input.participantReference) continue;
+    const until = diningCheckoutHeldUntil(record, input.observedAt);
+    if (until !== null && (latest === null || until > latest)) latest = until;
+  }
+  return latest;
 }
 const same = (left: DiningCheckoutCommitment, right: DiningCheckoutCommitment) =>
   JSON.stringify(left) === JSON.stringify(right);
@@ -373,6 +429,20 @@ export function createPostgresDiningCheckoutCommitmentStore(
             if (record.state === "Prepared") {
               if (latest !== undefined || record.preparedAt > observedAt)
                 return fail("DINING_CHECKOUT_STORE_CONFLICT");
+              // One checkout of a table Cart version at a time: the table and Session rows are
+              // locked above, so a concurrent preparation by another participant waits and sees it.
+              const held = await heldUntil(
+                tx,
+                { tenant, brand, store },
+                {
+                  diningSessionReference: record.diningSessionReference,
+                  cartReference: record.cartReference,
+                  cartVersion: record.cartVersion,
+                  participantReference: record.participantReference,
+                  observedAt,
+                },
+              );
+              if (held !== null) throw new DiningCheckoutHeldError(parseDiningInstant(held));
               result = prepareDiningCheckoutCommitment(preparation(record), context);
             } else {
               if (latest === undefined || latest.state !== "Prepared")
@@ -424,6 +494,59 @@ export function createPostgresDiningCheckoutCommitmentStore(
             version: expectedVersion + 1,
           });
         });
+      } catch (error) {
+        return normalize(error);
+      }
+    },
+  });
+}
+
+/**
+ * DEC-DINING-ANY-PARTICIPANT-SUBMIT public read: whether another participant's checkout currently
+ * holds this table Cart version, and until when. Advisory for Cart edits and quotes (the
+ * commitment preparation re-checks under its locks). Grants nothing and reads only Dining facts.
+ */
+export function createPostgresDiningCheckoutHoldSource(
+  runner: DiningTableTransactionRunner,
+  scopeInput: DiningTableStoreScope,
+) {
+  const scope = closed(scopeInput, ["tenantReference", "brandReference", "storeReference"]);
+  const ids = Object.freeze({
+    tenant: parseDiningReference(scope.tenantReference),
+    brand: parseDiningReference(scope.brandReference),
+    store: parseDiningReference(scope.storeReference),
+  });
+  return Object.freeze({
+    async read(value: unknown): Promise<Readonly<{ heldUntil: string }> | null> {
+      try {
+        const raw = closed(captureSessionData(value), [
+          "diningSessionReference",
+          "cartReference",
+          "cartVersion",
+          "participantReference",
+          "observedAt",
+        ]);
+        if (
+          typeof raw.cartVersion !== "number" ||
+          !Number.isSafeInteger(raw.cartVersion) ||
+          raw.cartVersion < 1
+        )
+          return fail("DINING_CHECKOUT_STORE_INVALID");
+        const input = Object.freeze({
+          diningSessionReference: parseDiningReference(raw.diningSessionReference),
+          cartReference: parseDiningReference(raw.cartReference),
+          cartVersion: raw.cartVersion,
+          participantReference: parseDiningReference(raw.participantReference),
+          observedAt: parseDiningInstant(raw.observedAt),
+        });
+        const held = await runner.run(async (tx) => {
+          await tx.query(
+            "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+            [ids.brand, ids.store],
+          );
+          return heldUntil(tx, ids, input);
+        });
+        return held === null ? null : Object.freeze({ heldUntil: held });
       } catch (error) {
         return normalize(error);
       }

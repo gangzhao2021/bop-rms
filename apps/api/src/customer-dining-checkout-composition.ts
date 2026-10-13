@@ -14,6 +14,7 @@ import {
   createDiningCheckoutService,
   createDiningCheckoutClockService,
   type DiningCheckoutClockOptions,
+  isDiningCheckoutHeld,
   DiningCheckoutServiceError,
   parseDiningReference,
   parseDiningCheckoutCommitment,
@@ -23,6 +24,7 @@ import {
   createCustomerDiningSessionBinding,
   type CustomerDiningBindingCompositionOptions,
 } from "./customer-dining-binding-composition.js";
+import { rethrowCheckoutHeld } from "./customer-checkout-hold.js";
 
 export interface CustomerDiningCheckoutCompositionOptions {
   readonly scope: CustomerDiningBindingCompositionOptions["scope"];
@@ -170,6 +172,8 @@ export function createCustomerDiningCheckoutComposition(
         : owner.prepare(command));
     } catch (error) {
       if (error instanceof DiningCheckoutServiceError) throw error;
+      // Another participant's checkout holds this Cart version: refuse distinctly, not "unavailable".
+      if (isDiningCheckoutHeld(error)) rethrowCheckoutHeld(error);
       return unavailable();
     }
   }
@@ -305,6 +309,8 @@ export function createCustomerDiningSubmissionPreparation(
       }
     } catch (error) {
       if (error instanceof DiningCheckoutServiceError) throw error;
+      // Another participant's checkout holds this Cart version: refuse distinctly, not "unavailable".
+      if (isDiningCheckoutHeld(error)) rethrowCheckoutHeld(error);
       return unavailable();
     }
   }

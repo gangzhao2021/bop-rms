@@ -328,6 +328,7 @@ describe("request-local CSRF composition", () => {
     const port = createCustomerDiningCartComposition({
       scope: { brandReference: id(2), storeReference: id(3) },
       sessions: { resolve: async () => guest(), authorize },
+      checkoutHold: { read: async () => null },
       participation: { resolve: async () => null },
       cartTransactions: { run },
       selectionTransactions: { run },

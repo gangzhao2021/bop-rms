@@ -8,6 +8,7 @@ import {
 } from "@bop/identity";
 import { parseCanonicalInstant } from "@bop/tenant";
 import {
+  CartCheckoutInProgressError,
   CartError,
   createConfiguredCustomerQuoteService,
   parseCartQuoteAttachmentOfVersion,
@@ -133,6 +134,8 @@ function matchesQuote(
   );
 }
 function initialFailure(error: unknown): QuoteCartResult {
+  if (error instanceof CartCheckoutInProgressError)
+    return { status: "CheckoutInProgress", heldUntil: error.heldUntil };
   if (!(error instanceof CartError)) return unavailable;
   switch (error.code) {
     case "CART_PERMISSION_DENIED":

@@ -10,6 +10,7 @@ import {
   parseDiningCheckoutCommitment,
   assertDiningCheckoutPreparedForOrdering,
   assertDiningCheckoutCommitmentUsable,
+  isDiningCheckoutHeld,
   prepareDiningCheckoutCommitment,
   type DiningCheckoutCommitment,
 } from "../domain/dining-checkout-commitment.js";
@@ -329,7 +330,8 @@ export function createDiningCheckoutService(options: DiningCheckoutServiceOption
       await authorize();
       return await resultForPurpose({ status: saved.status, record: result });
     } catch (error) {
-      if (error instanceof DiningCheckoutServiceError) throw error;
+      // Another participant's checkout holds this Cart version: say so, nothing was written.
+      if (error instanceof DiningCheckoutServiceError || isDiningCheckoutHeld(error)) throw error;
       return fail("DINING_CHECKOUT_DEPENDENCY_UNAVAILABLE");
     }
   }

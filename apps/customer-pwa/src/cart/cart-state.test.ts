@@ -263,6 +263,7 @@ describe("WP-1205 in-memory Cart state", () => {
     ["cart_selection_invalid", "validation"],
     ["cart_rate_limited", "rate-limited"],
     ["cart_order_processing", "order-processing"],
+    ["cart_checkout_in_progress", "checkout-in-progress"],
     ["cart_expired", "expired"],
     ["cart_abandoned", "abandoned"],
     ["cart_service_unavailable", "unavailable"],
@@ -278,6 +279,22 @@ describe("WP-1205 in-memory Cart state", () => {
       customerNote: null,
     });
     expect(state.controller.getState()).toMatchObject({ status: expected });
+  });
+
+  it("WP-2423: keeps the wait and offers no replay while another guest is checking out", async () => {
+    const state = fixture();
+    await state.controller.load();
+    state.failUpdate(new CartClientError("cart_checkout_in_progress", { retryAfterSeconds: 90 }));
+    await state.controller.updateItem(id(2), {
+      quantity: 2,
+      optionSelections: [],
+      customerNote: null,
+    });
+    expect(state.controller.getState()).toMatchObject({
+      status: "checkout-in-progress",
+      retryAfterSeconds: 90,
+      canRetrySameOperation: false,
+    });
   });
 });
 

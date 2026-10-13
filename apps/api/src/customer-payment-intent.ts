@@ -106,6 +106,7 @@ function failure(error: unknown) {
         INTENT_CONFLICT: 409,
         DEPENDENCY_UNAVAILABLE: 503,
         STORE_CLOSED: 409,
+        CHECKOUT_IN_PROGRESS: 409,
       } as const
     )[error.code];
   if (error instanceof PaymentTipSelectionError)

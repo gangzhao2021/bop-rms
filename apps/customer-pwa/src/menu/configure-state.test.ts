@@ -498,3 +498,18 @@ it("WP-2423: waits once for the table's last order, then says it is still being 
   expect(creates).toBe(2);
   expect(controller.getState()).toMatchObject({ status: "order-processing", canRetry: false });
 });
+
+it("WP-2423: does not auto-retry while another guest is checking out, and allows a new add", async () => {
+  const state = fixture(cart(3));
+  state.failAdd(new CartClientError("cart_checkout_in_progress", { retryAfterSeconds: 45 }));
+  await state.controller.submit(id(3), draft);
+  expect(state.controller.getState()).toMatchObject({
+    status: "checkout-in-progress",
+    retryAfterSeconds: 45,
+    canRetry: false,
+  });
+  expect(state.calls.filter((call) => call.name === "add")).toHaveLength(1);
+  state.failAdd(null);
+  await state.controller.submit(id(3), draft);
+  expect(state.controller.getState()).toMatchObject({ status: "added" });
+});

@@ -16,6 +16,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Link, useNavigate } from "react-router";
 import { createBrowserCustomerCartClient } from "../cart/cart-client.js";
 import { formatCartMoney } from "../cart/format-money.js";
+import { checkoutInProgressMessage, orderProcessingMessage } from "../cart/types.js";
 import { describeConfiguration } from "../cart/CartPage.js";
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import { formatMinutesUntil, formatMoney, percentOfMinor } from "../journey/format.js";
@@ -379,6 +380,27 @@ export function CheckoutPage({
           </button>
         </section>
       ) : null}
+      {state.status === "order-processing" || state.status === "checkout-in-progress" ? (
+        <section role="alert" className="checkout-attention">
+          <h2>
+            {state.status === "order-processing"
+              ? "Order still processing"
+              : "Another guest is checking out"}
+          </h2>
+          <p>
+            {state.status === "order-processing"
+              ? orderProcessingMessage(state.retryAfterSeconds)
+              : checkoutInProgressMessage(state.retryAfterSeconds)}
+          </p>
+          <button
+            disabled={detailsLocked || sessionState.status !== "idle"}
+            type="button"
+            onClick={() => void controller.retry()}
+          >
+            Try again
+          </button>
+        </section>
+      ) : null}
       {["offline", "session-expired", "outcome-unknown"].includes(state.status) ? (
         <section role="alert" className="checkout-attention">
           <h2>Checkout needs attention</h2>
@@ -482,9 +504,11 @@ export function CheckoutPage({
           <p role="alert">
             {sessionState.status === "store_closed"
               ? "The store isn’t taking orders right now, so you haven’t been charged. Try again when the store reopens, or ask staff."
-              : sessionState.canRetry
-                ? "We could not confirm checkout. Retry to recover the same checkout."
-                : "Checkout is unavailable. Review your cart and scan the QR code again if needed."}
+              : sessionState.status === "checkout_in_progress"
+                ? checkoutInProgressMessage(sessionState.retryAfterSeconds)
+                : sessionState.canRetry
+                  ? "We could not confirm checkout. Retry to recover the same checkout."
+                  : "Checkout is unavailable. Review your cart and scan the QR code again if needed."}
           </p>
         ) : null}
         {"canRetry" in sessionState && sessionState.canRetry ? (

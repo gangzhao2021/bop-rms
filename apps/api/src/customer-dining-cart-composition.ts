@@ -13,6 +13,7 @@ import {
   type GuestSessionService,
 } from "@bop/identity";
 import {
+  CartCheckoutInProgressError,
   CartError,
   CartReplacementPendingError,
   createCustomerDiningCartViewQuery,
@@ -34,6 +35,7 @@ import {
   type DiningCartSelectionStoreOptions,
   type DiningCartItemOptions,
   type CartItemWriteTransactionRunner,
+  type DiningCartCheckoutHoldPort,
 } from "@rms/ordering";
 import { createCustomerCartItemPort } from "./customer-cart-item-composition.js";
 import { createCustomerCartRemovalPort } from "./customer-cart-removal-composition.js";
@@ -101,6 +103,8 @@ function failure(error: unknown): CustomerCartPortResult {
     return { status: "OrderProcessing", retryAfterSeconds: error.retryAfterSeconds };
   if (error instanceof RetryLater)
     return { status: "RetryLater", retryAfterSeconds: TABLE_CART_EXPIRY_RETRY_SECONDS };
+  if (error instanceof CartCheckoutInProgressError)
+    return { status: "CheckoutInProgress", heldUntil: error.heldUntil };
   if (!(error instanceof CartError)) return unavailable;
   switch (error.code) {
     case "CART_PERMISSION_DENIED":
@@ -305,6 +309,9 @@ export interface CustomerDiningCartCompositionOptions {
   readonly scope: { readonly brandReference: string; readonly storeReference: string };
   readonly sessions: Pick<GuestSessionService, "resolve" | "authorize">;
   readonly participation: DiningCartReadPorts["participation"];
+  /** DEC-DINING-ANY-PARTICIPANT-SUBMIT: Dining's current hold of the table Cart version by
+   * another participant's checkout; edits to a held version are refused. */
+  readonly checkoutHold: DiningCartCheckoutHoldPort;
   readonly cartTransactions: CartQueryTransactionRunner;
   readonly selectionTransactions: CartQueryTransactionRunner;
   readonly selection: Omit<DiningCartSelectionStoreOptions, "scope" | "now">;
@@ -382,6 +389,7 @@ export function createCustomerDiningCartComposition(
             scope: fixedScope,
             sessions,
             participation,
+            checkoutHold: options.checkoutHold,
             now,
             references: itemOptions.references,
             catalog: itemOptions.catalog,
