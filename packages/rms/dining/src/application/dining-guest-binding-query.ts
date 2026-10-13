@@ -77,8 +77,12 @@ function closed(value: unknown, keys: readonly string[]): Record<string, unknown
   return result;
 }
 
+type BindingPurpose =
+  "GuestSessionBinding" | "DiningHostSubmission" | "DiningParticipantSubmission";
+
 /** Current binding facts only. Identity must authenticate its exact Session; this grants no Cart write authority. */
-function createBindingQuery(options: DiningGuestBindingOptions, hostSubmission: boolean) {
+function createBindingQuery(options: DiningGuestBindingOptions, purpose: BindingPurpose) {
+  const submission = purpose !== "GuestSessionBinding";
   const scope = closed(options.scope, ["brandReference", "storeReference"]);
   const brandReference = parseDiningReference(scope.brandReference);
   const storeReference = parseDiningReference(scope.storeReference);
@@ -94,8 +98,7 @@ function createBindingQuery(options: DiningGuestBindingOptions, hostSubmission: 
           "participantReference",
           "tableReference",
         ]);
-        if (raw.purpose !== (hostSubmission ? "DiningHostSubmission" : "GuestSessionBinding"))
-          return invalid();
+        if (raw.purpose !== purpose) return invalid();
         diningSessionReference = parseDiningReference(raw.diningSessionReference);
         participantReference = parseDiningReference(raw.participantReference);
         tableReference = parseDiningReference(raw.tableReference);
@@ -157,9 +160,9 @@ function createBindingQuery(options: DiningGuestBindingOptions, hostSubmission: 
           admission.tableAssignmentVersion !== session.tableAssignmentVersion ||
           admission.issuedAt !== participant.joinedAt ||
           admission.consumedAt < admission.issuedAt ||
-          (hostSubmission &&
-            (session.phase !== "Active" ||
-              session.hostParticipantReference !== participantReference)) ||
+          (submission && session.phase !== "Active") ||
+          (purpose === "DiningHostSubmission" &&
+            session.hostParticipantReference !== participantReference) ||
           participant.status !== "Active" ||
           table.tableState !== "Eligible" ||
           session.startedAt > table.observedAt ||
@@ -189,7 +192,7 @@ function createBindingQuery(options: DiningGuestBindingOptions, hostSubmission: 
 
 /** Current guest binding facts; deliberately permits Closing for history access. */
 export function createDiningGuestBindingQuery(options: DiningGuestBindingOptions) {
-  return createBindingQuery(options, false);
+  return createBindingQuery(options, "GuestSessionBinding");
 }
 
 /** Current Active-session Host facts for a new Batch. Identity must independently
@@ -197,5 +200,14 @@ export function createDiningGuestBindingQuery(options: DiningGuestBindingOptions
  * This query does not prove current Order, Cart, Inventory or Payment eligibility.
  */
 export function createDiningHostSubmissionQuery(options: DiningGuestBindingOptions) {
-  return createBindingQuery(options, true);
+  return createBindingQuery(options, "DiningHostSubmission");
+}
+
+/** DEC-DINING-ANY-PARTICIPANT-SUBMIT: current Active-session facts for any active (not left)
+ * participant submitting the table's Cart as a new Batch; the submitter owns its payment. Same
+ * Identity/fence obligations as the Host query; one checkout at a time stays with the Cart version
+ * and the Dining checkout commitment fences, not with the Host role.
+ */
+export function createDiningParticipantSubmissionQuery(options: DiningGuestBindingOptions) {
+  return createBindingQuery(options, "DiningParticipantSubmission");
 }

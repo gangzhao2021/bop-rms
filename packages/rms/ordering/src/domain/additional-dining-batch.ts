@@ -58,7 +58,7 @@ function items(value: unknown) {
   });
 }
 /** Immutable additional submission facts only. Writer must independently fence
- * current Order version, active Dining Session/Host, Checkout, Inventory and payment
+ * current Order version, active Dining Session/participant, Checkout, Inventory and payment
  * policy. Parsing this record does not authorize adding a Batch.
  */
 export function parseAdditionalDiningBatchSnapshot(value: unknown) {
@@ -143,7 +143,7 @@ export function parseAdditionalDiningBatchSnapshot(value: unknown) {
 export type AdditionalDiningBatchSnapshot = ReturnType<typeof parseAdditionalDiningBatchSnapshot>;
 
 /** Constructs new Batch facts from current checkout inputs, never a replacement Order header.
- * The transactional writer remains responsible for current parent/Host/Inventory authority.
+ * The transactional writer remains responsible for current parent/participant/Inventory authority.
  */
 export function createAdditionalDiningBatchSnapshot(input: {
   snapshot: CreateOrderItemSnapshotsInput;

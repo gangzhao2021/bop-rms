@@ -7,7 +7,7 @@ import {
 import { parseOrderingReference, createPostgresDiningOrderPreparationSource } from "@rms/ordering";
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
-  createDiningHostSubmissionQuery,
+  createDiningParticipantSubmissionQuery,
   parseDiningReference,
   parseDiningInstant,
   parseDiningSession,
@@ -21,7 +21,7 @@ import {
 export interface AdditionalDiningPreparationOptions {
   readonly preparation: CustomerDiningSubmissionPreparationOptions;
   /** Ordering public authority source: returns only a currently eligible existing
-   * Dining Order under current session/Host/closure rules. Never a cached projection.
+   * Dining Order under current session/participant/closure rules. Never a cached projection.
    * Final submission must reacquire its transaction fences and expected version.
    */
   readonly currentOrder: {
@@ -112,7 +112,9 @@ export function createCustomerAdditionalDiningPreparation(
         if (dining === null) return unavailable();
         const session = parseDiningSession(dining.session);
         let firstObservation = true;
-        const host = await createDiningHostSubmissionQuery({
+        // Any current active participant of the Active Session may submit (Owner decision
+        // DEC-DINING-ANY-PARTICIPANT-SUBMIT); the Host role is not required.
+        const submitter = await createDiningParticipantSubmissionQuery({
           scope,
           now: () => {
             if (firstObservation) {
@@ -123,12 +125,12 @@ export function createCustomerAdditionalDiningPreparation(
           },
           repository: { readCurrent: async () => dining },
         }).resolve({
-          purpose: "DiningHostSubmission",
+          purpose: "DiningParticipantSubmission",
           diningSessionReference: String(guest.diningSessionReference),
           participantReference: String(guest.diningParticipantReference),
           tableReference: session.tableReference,
         });
-        if (host === null) return unavailable();
+        if (submitter === null) return unavailable();
         const found = await options.currentOrder.resolve({
           ...scope,
           diningSessionReference: String(guest.diningSessionReference),

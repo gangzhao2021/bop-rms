@@ -18,7 +18,7 @@ export interface CustomerAdditionalDiningSubmissionStoreOptions extends Pick<
 > {
   inventory: CustomerSubmissionInventoryFinalizerOptions;
   diningSealAudit(record: DiningCheckoutCommitment): Promise<unknown>;
-  /** Current Identity/Host/Dining commitment/Checkout/Store fences, held on the
+  /** Current Identity/participant/Dining commitment/Checkout/Store fences, held on the
    * supplied transaction. Parsing historical evidence does not satisfy this port.
    */
   validateCurrent: OwnerOptions["finalize"];

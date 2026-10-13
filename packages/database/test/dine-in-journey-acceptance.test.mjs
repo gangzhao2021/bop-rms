@@ -25,6 +25,7 @@ import {
   createPostgresOrderSubmittedConsumer,
   parseAdditionalDiningBatchSnapshot,
 } from "../../rms/ordering/src/index.ts";
+import { createCustomerAdditionalDiningHistoryAuthorization } from "../../../apps/api/src/customer-additional-dining-history-authorization.ts";
 import { createCustomerAdditionalDiningSubmissionStore } from "../../../apps/api/src/customer-additional-dining-submission-store.ts";
 import { createDiningCheckoutExpiryDispatcher } from "../../../apps/api/src/dining-checkout-expiry-dispatcher.ts";
 import { createCustomerOrderStatusRead } from "../../../apps/api/src/customer-order-status-read.ts";
@@ -186,13 +187,15 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
        * business worker under the rendered `api` grants (the `worker` principal holds a handful of
        * Ordering grants only), so every composition here uses that role.
        */
-      function transactions(role = api, { guc = false } = {}) {
+      function transactions(role = api, { guc = false, before = null, rollback = false } = {}) {
         return {
           async run(work) {
             const client = new Client(context.clientConfig);
             await client.connect();
             try {
               await client.query("BEGIN");
+              // Test-only: owner-side facts changed inside this transaction only (rolled back).
+              if (before !== null) await before(client);
               await client.query("SET LOCAL ROLE " + role);
               await client.query("SET LOCAL lock_timeout='10s'");
               await client.query("SET LOCAL statement_timeout='20s'");
@@ -204,7 +207,7 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
               const result = await work({
                 query: (sql, values) => client.query(sql, values === undefined ? [] : [...values]),
               });
-              await client.query("COMMIT");
+              await client.query(rollback ? "ROLLBACK" : "COMMIT");
               return result;
             } catch (error) {
               await client.query("ROLLBACK").catch(() => undefined);
@@ -288,15 +291,17 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         },
         at: time(-minutes(140)),
       });
-      // WP-2423 Q8: participant P's own Guest session at the same table (actual owners). P orders
-      // nothing in this journey and reads the table view as "another guest".
+      // WP-2423 Q8: participant P's own Guest session at the same table (actual owners). P reads
+      // the Host's rounds as "another guest"'s and (DEC-DINING-ANY-PARTICIPANT-SUBMIT) submits and
+      // pays round 3 without being the Host.
+      const guestSessionP = id(0x602);
       const tableGuestP = await seedAdditionalDiningGuest({
         client: admin,
         runner: ownerRunner,
         f: R1.f,
         dining: { ...dining, participant: dining.guest },
         at: time(-minutes(139)),
-        second: { idPrefix: "01909993-0000-7000-8000-", sessionReference: id(0x602) },
+        second: { idPrefix: "01909993-0000-7000-8000-", sessionReference: guestSessionP },
       });
 
       // Inventory: one tracked item, 100 KG received; recipe for the menu item; Workflow.
@@ -421,7 +426,7 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
           brandReference: scope.brandReference,
           storeReference: scope.storeReference,
           diningSessionReference: dining.session.diningSessionReference,
-          guestSessionReference: guestSession,
+          guestSessionReference: round.f.request.record.guestSessionReference,
           originalOrderCreatedAt: r1.createdAt,
           expectedOrderVersion,
           batchSequence,
@@ -439,7 +444,9 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       const submittedEvents = new Map();
       const submissionStore = createCustomerAdditionalDiningSubmissionStore({
         ...scope,
-        authorize: async (_tx, candidate) => candidate.guestSessionReference === guestSession,
+        // Test-only Identity stand-in: the two seated guests' Guest sessions.
+        authorize: async (_tx, candidate) =>
+          [guestSession, guestSessionP].includes(candidate.guestSessionReference),
         audit: async (candidate) => ({
           auditId: fresh(),
           brandId: scope.brandReference,
@@ -475,8 +482,23 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         inventory: {
           scope: ownerScope,
           stockSiteReference: stock.stockSiteReference,
-          workflow: inventoryWorkflow,
-          authorize: async (_tx, input) => input.actorReference === guestSession,
+          // Test-only Workflow resource gate: either seated guest may submit the table's Cart.
+          workflow: {
+            ...inventoryWorkflow,
+            gates: {
+              ...inventoryWorkflow.gates,
+              authorizeResource: async (tx, request) =>
+                inventoryWorkflow.gates.authorizeResource(tx, {
+                  ...request,
+                  actorReference:
+                    request.actorReference === guestSessionP
+                      ? guestSession
+                      : request.actorReference,
+                }),
+            },
+          },
+          authorize: async (_tx, input) =>
+            [guestSession, guestSessionP].includes(input.actorReference),
           resolveExpiryCutoff: stock.resolveExpiryCutoff,
           generateReference: fresh,
           audit: {
@@ -488,9 +510,10 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         },
         diningSealAudit: async (record) => dining.audit(record),
       });
-      /** Append one round; `clockAt` answers the writer's transaction clock (test-only). */
-      const submit = (snapshot, link, evidence, clockAt = null) =>
-        transactions(api).run(async (tx) => {
+      /** Append one round; `clockAt` answers the writer's transaction clock (test-only).
+       * `options` may change owner facts first and roll the whole attempt back (test-only). */
+      const submit = (snapshot, link, evidence, clockAt = null, options = {}) =>
+        transactions(api, options).run(async (tx) => {
           let tick = 0;
           const clocked = {
             query: (sql, values) =>
@@ -1018,9 +1041,11 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
 
       // Test-only stand-in for the cart edits (catalog add-to-cart is outside this journey): the
       // Host's round-3 lines are written onto the successor Cart by the owner, as four edits.
+      // DEC-DINING-ANY-PARTICIPANT-SUBMIT: participant P (not the Host) submits and pays round 3.
       const R3 = journeyRound({
         at: new Date(Date.now() + 1500).toISOString(),
         prefix: "01a00003",
+        submitter: guestSessionP,
       });
       assert.equal(R3.batch.sourceCartReference, R3cart);
       await admin.query(
@@ -1049,7 +1074,10 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       // ── 5b. Round 3 after the System cancellation: the actual Ordering writer at the current
       // transaction clock, expected version 4 (Initial, Acceptance, AdditionalBatch, cancellation).
       const pay3 = paymentRefs(0x3000);
-      const link3 = await dining.prepare(R3, { paymentOperationReference: pay3.paymentOperation });
+      const link3 = await dining.prepare(R3, {
+        paymentOperationReference: pay3.paymentOperation,
+        participant: dining.guest,
+      });
       const evidence3 = R3.evidence(link3),
         items3 = R3.items(evidence3);
       await seedJourneyCheckout(admin, {
@@ -1071,6 +1099,41 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         prefix: "01a10003",
       });
       while (Date.now() <= Date.parse(R3.batch.submittedAt) + 50) await delay(50);
+      // Test-only: mark a participant as having left the table inside the attempt's own
+      // transaction (owner write, then the restricted role), and roll the attempt back.
+      const leaves = (participant) => async (client) => {
+        await client.query(
+          "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+          [scope.brandReference, scope.storeReference],
+        );
+        const left = await client.query(
+          "UPDATE rms_dining.dining_participant SET status='Left',version=2,participant_snapshot=participant_snapshot||jsonb_build_object('status','Left','version',2,'leftAt',$2::text) WHERE participant_id=$1",
+          [participant, now()],
+        );
+        assert.equal(left.rowCount, 1);
+      };
+      const reservedBefore3 = await stockReserved(stock.accountReference);
+      // A guest who has left the table can no longer submit what they started: the Dining gate
+      // refuses it under the pilot API grants and nothing is written.
+      await assert.rejects(
+        submit(snapshot3, link3, evidence3, null, {
+          before: leaves(participantP),
+          rollback: true,
+        }),
+      );
+      // The Host leaving does not stop the rest of the table: P's submission goes through (the
+      // attempt is rolled back so the journey continues with the Host still seated).
+      const withoutHost = await submit(snapshot3, link3, evidence3, null, {
+        before: leaves(dining.host.participantReference),
+        rollback: true,
+      });
+      assert.equal(withoutHost.status, "Created");
+      assert.equal(await stockReserved(stock.accountReference), reservedBefore3);
+      assert.equal(
+        (await commitment(R3.batch.submissionReference)).state,
+        "Prepared",
+        "rolled-back attempts leave the commitment unsealed",
+      );
       const submitted3 = await submit(snapshot3, link3, evidence3);
       assert.equal(submitted3.status, "Created");
       // Round 3 reserves the same stock round 2 had reserved (round 2's was returned).
@@ -1089,6 +1152,21 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         ["Initial", "Acceptance", "AdditionalBatch", "BatchCancellation", "AdditionalBatch"],
       );
       const sealed3 = await commitment(R3.batch.submissionReference);
+      // The seal and the payment belong to the submitter P, not the Host.
+      assert.equal(sealed3.state, "PaymentPending");
+      assert.equal(sealed3.participantReference, participantP);
+      assert.equal(sealed3.guestSessionReference, guestSessionP);
+      // The payment claim's history authority (the actual composition, pilot API grants) admits P
+      // for round 3 and refuses the Host, who did not submit it.
+      const historyOf = (who) =>
+        transactions(api).run((tx) =>
+          createCustomerAdditionalDiningHistoryAuthorization(
+            { scope: ownerScope, identity: () => who.identity },
+            { sessionCredential: who.sessionCredential, csrfCredential: who.csrfCredential },
+          )(tx, { ...scope, submissionReference: R3.batch.submissionReference }),
+        );
+      assert.equal(await historyOf(tableGuestP), true);
+      assert.equal(await historyOf(guest), false);
       await delay(1100);
       const paid3At = new Date(Date.parse(sealed3.paymentRequestedAt) + 500).toISOString();
       await seedJourneyPayment(admin, {
@@ -1133,7 +1211,7 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       assert.deepEqual(roundsOf(hostAfter3), [
         [1, "You", "Queued", "Paid"],
         [2, "You", "NotPaidCancelled", "NotCharged"],
-        [3, "You", "Queued", "Paid"],
+        [3, "AnotherGuest", "Queued", "Paid"],
       ]);
       assert.equal(hostAfter3.summary.paid.amountMinor, 2n * roundTotal);
       assert.equal(hostAfter3.summary.due.amountMinor, 0n);
@@ -1142,7 +1220,7 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         [
           [1, "AnotherGuest"],
           [2, "AnotherGuest"],
-          [3, "AnotherGuest"],
+          [3, "You"],
         ],
       );
 

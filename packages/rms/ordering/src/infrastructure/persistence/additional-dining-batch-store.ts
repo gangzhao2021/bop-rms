@@ -40,7 +40,7 @@ import {
 } from "../../domain/order-item-snapshot-codec.js";
 
 /** Internal persistence boundary for composition; not wired to a request.
- * Final composition must hold Identity/Dining Host, Checkout, Cart, Inventory
+ * Final composition must hold Identity/Dining participant, Checkout, Cart, Inventory
  * and settlement fences and atomically append the approved Audit/Event contracts.
  * Schema expansion and actual database acceptance are required before activation.
  */

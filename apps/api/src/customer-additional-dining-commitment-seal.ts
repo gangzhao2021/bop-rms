@@ -31,7 +31,10 @@ export function createCustomerAdditionalDiningCommitmentSeal(
           JSON.stringify(link) ||
         String(facts.commitment.submissionReference) !==
           String(snapshot.batch.submissionReference) ||
-        facts.session.hostParticipantReference !== facts.participant.participantReference
+        // Any active participant of the Active Session may seal its own submission; the owner
+        // store holds the table, Session and participant rows (DEC-DINING-ANY-PARTICIPANT-SUBMIT).
+        facts.session.phase !== "Active" ||
+        facts.participant.status !== "Active"
       )
         throw new AdditionalDiningBatchStoreError();
       const c = facts.commitment;

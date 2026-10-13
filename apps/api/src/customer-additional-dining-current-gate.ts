@@ -42,8 +42,12 @@ export function createCustomerAdditionalDiningCurrentGate(scope: {
           { session: facts.session, participant: facts.participant },
           context.observedAt,
         );
+        // The commitment's own locked participant (table, Session, participant rows held FOR
+        // UPDATE by the owner store) must still be an active member of the Active Session; any
+        // such participant may submit, not only the Host (DEC-DINING-ANY-PARTICIPANT-SUBMIT).
         if (
-          facts.session.hostParticipantReference !== facts.participant.participantReference ||
+          facts.session.phase !== "Active" ||
+          facts.participant.status !== "Active" ||
           String(commitment.guestSessionReference) !== String(snapshot.guestSessionReference) ||
           String(commitment.diningSessionReference) !== String(snapshot.diningSessionReference) ||
           JSON.stringify(diningOrderCapacityLinkFromHistory(commitment)) !==

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createDiningGuestBindingQuery,
   createDiningHostSubmissionQuery,
+  createDiningParticipantSubmissionQuery,
   type DiningGuestBindingReadSnapshot,
 } from "../application/dining-guest-binding-query.js";
 const id = (n: number) => `018f2000-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -388,4 +389,74 @@ describe("current Dining Host submission facts", () => {
     });
     expect(f.readCurrent).not.toHaveBeenCalled();
   });
+});
+
+describe("DEC-DINING-ANY-PARTICIPANT-SUBMIT current participant submission facts", () => {
+  const submitInput = { ...input, purpose: "DiningParticipantSubmission" };
+  function participantFixture() {
+    const snapshot = { ...source() };
+    const readCurrent = vi.fn(async () => snapshot);
+    return {
+      snapshot,
+      readCurrent,
+      query: createDiningParticipantSubmissionQuery({
+        scope,
+        repository: { readCurrent },
+        now: () => at,
+      }),
+    };
+  }
+  it("accepts an ordinary (non-Host) active participant of the Active Session", async () => {
+    const f = participantFixture();
+    expect(f.snapshot.session.hostParticipantReference).not.toBe(id(4));
+    const result = await f.query.resolve(submitInput);
+    expect(result?.phase).toBe("Active");
+    expect(result?.participantReference).toBe(id(4));
+    expect(f.readCurrent).toHaveBeenCalledTimes(1);
+  });
+  it("accepts the Host too", async () => {
+    const f = participantFixture();
+    f.snapshot.session = {
+      ...f.snapshot.session,
+      hostParticipantReference: f.snapshot.participant.participantReference,
+    };
+    expect((await f.query.resolve(submitInput))?.participantReference).toBe(id(4));
+  });
+  it("accepts a participant after the Host has left (Session without a Host)", async () => {
+    const f = participantFixture();
+    f.snapshot.session = { ...f.snapshot.session, hostParticipantReference: null };
+    expect((await f.query.resolve(submitInput))?.participantReference).toBe(id(4));
+  });
+  it("refuses a participant who has left the table", async () => {
+    const f = participantFixture();
+    f.snapshot.participant = {
+      ...f.snapshot.participant,
+      status: "Left",
+      leftAt: f.snapshot.table.observedAt,
+    };
+    expect(await f.query.resolve(submitInput)).toBeNull();
+  });
+  it("refuses a Closing Session", async () => {
+    const f = participantFixture();
+    f.snapshot.session = { ...f.snapshot.session, phase: "Closing" };
+    expect(await f.query.resolve(submitInput)).toBeNull();
+  });
+  it("refuses a participant of another Session", async () => {
+    const f = participantFixture();
+    f.snapshot.participant = {
+      ...f.snapshot.participant,
+      diningSessionReference: f.snapshot.participant.participantReference,
+    };
+    expect(await f.query.resolve(submitInput)).toBeNull();
+  });
+  it.each(["GuestSessionBinding", "DiningHostSubmission"])(
+    "does not accept the %s purpose as a participant submission request",
+    async (purpose) => {
+      const f = participantFixture();
+      await expect(f.query.resolve({ ...input, purpose })).rejects.toMatchObject({
+        code: "DINING_SESSION_INPUT_INVALID",
+      });
+      expect(f.readCurrent).not.toHaveBeenCalled();
+    },
+  );
 });

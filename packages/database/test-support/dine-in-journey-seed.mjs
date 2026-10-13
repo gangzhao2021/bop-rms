@@ -26,8 +26,12 @@ import { seedStorePublication } from "./store-publication-seed.mjs";
  */
 const hash = (value) => "sha256:" + sha256Hex(canonicalizeRfc8785(value));
 
-/** One round of the shared dine-in Order, captured at `at`, with round-specific identities. */
-export function journeyRound({ at, prefix }) {
+/**
+ * One round of the shared dine-in Order, captured at `at`, with round-specific identities.
+ * `submitter` (DEC-DINING-ANY-PARTICIPANT-SUBMIT) is another seated guest's Guest session who
+ * submits and pays this round; the Cart lines keep the fixture guest as the one who added them.
+ */
+export function journeyRound({ at, prefix, submitter = null }) {
   const f = orderWriteFixture({ at, dineIn: true });
   const record = f.request.record,
     batch = record.order.batches[0],
@@ -50,6 +54,12 @@ export function journeyRound({ at, prefix }) {
     return value;
   };
   const round = remap(f);
+  if (submitter !== null) {
+    round.request.record.guestSessionReference = submitter;
+    round.request.record.order.batches[0].submittedByActorReference = submitter;
+    round.request.checkoutValidationEvidence.guestSessionReference = submitter;
+    round.snapshotInput.checkoutValidationEvidence.guestSessionReference = submitter;
+  }
   return Object.freeze({
     f: round,
     batch: round.request.record.order.batches[0],
@@ -201,8 +211,9 @@ export async function seedJourneyDining({ client, scope, round, startedAt, guest
     guest,
     table,
     audit,
-    /** Dining's checkout commitment for one round, prepared by the Host (real owner store). */
-    async prepare(target, { paymentOperationReference }) {
+    /** Dining's checkout commitment for one round, prepared by `participant` (the Host unless
+     * another seated participant submits the round) through the real owner store. */
+    async prepare(target, { paymentOperationReference, participant = host }) {
       const r = target.f.request.record,
         b = target.batch,
         e = target.f.request.checkoutValidationEvidence;
@@ -214,8 +225,8 @@ export async function seedJourneyDining({ client, scope, round, startedAt, guest
           sessionVersion: 2,
           tableReference,
           tableAssignmentVersion: 1,
-          participantReference: host.participantReference,
-          participantVersion: 1,
+          participantReference: participant.participantReference,
+          participantVersion: participant.version,
           guestSessionReference: r.guestSessionReference,
           cartReference: b.sourceCartReference,
           cartVersion: b.sourceCartVersion,
@@ -228,7 +239,7 @@ export async function seedJourneyDining({ client, scope, round, startedAt, guest
           preparedAt: e.fulfillment.checkedAt,
           preparationValidUntil: e.fulfillment.validUntil,
         },
-        { session, participant: host },
+        { session, participant },
       );
       await createPostgresDiningCheckoutCommitmentStore(ownerRunner, scope, {
         now: () => e.fulfillment.checkedAt,

@@ -73,7 +73,24 @@ it("reauthorizes existing preparation after identity revocation", async () => {
   expect(f.writes()).toBe(1);
 });
 
-it("rejects an ordinary bound participant before querying Order eligibility", async () => {
+it("prepares for an ordinary (non-Host) seated participant (DEC-DINING-ANY-PARTICIPANT-SUBMIT)", async () => {
+  const f = setup();
+  const read = f.options.preparation.dining.current.readCurrent;
+  f.options.preparation.dining.current.readCurrent = async (request) => {
+    const result = await read(request);
+    return result === null
+      ? null
+      : { ...result, session: { ...result.session, hostParticipantReference: null } };
+  };
+  const result = await f.service().prepareForOrdering(f.input);
+  expect(result.record.orderReference).toBe(id(300));
+  expect(f.writes()).toBe(1);
+});
+
+it.each([
+  ["a participant who has left the table", { status: "Left" }],
+  ["a Closing Session", { phase: "Closing" }],
+] as const)("rejects %s before querying Order eligibility", async (_name, change) => {
   const f = setup();
   const read = f.options.preparation.dining.current.readCurrent;
   let orderReads = 0;
@@ -83,9 +100,17 @@ it("rejects an ordinary bound participant before querying Order eligibility", as
   };
   f.options.preparation.dining.current.readCurrent = async (request) => {
     const result = await read(request);
-    return result === null
-      ? null
-      : { ...result, session: { ...result.session, hostParticipantReference: null } };
+    if (result === null) return null;
+    return "status" in change
+      ? {
+          ...result,
+          participant: {
+            ...result.participant,
+            status: "Left",
+            leftAt: result.table.observedAt,
+          },
+        }
+      : { ...result, session: { ...result.session, phase: "Closing" } };
   };
   await expect(f.service().prepareForOrdering(f.input)).rejects.toBeDefined();
   expect(orderReads).toBe(0);
