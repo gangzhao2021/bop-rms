@@ -2465,7 +2465,7 @@
       "column": null,
       "privilege": "SELECT",
       "principal": "api",
-      "approval": "PENDING OWNER APPROVAL (WP-2423 Q19): Brand sole-operator setting (DEC-SOLE-OPERATOR-APPROVAL)"
+      "approval": "Owner approved 2026-10-13 in session (\"批准\") (WP-2423 Q19): Brand sole-operator setting (DEC-SOLE-OPERATOR-APPROVAL)"
     },
     {
       "type": "table",
@@ -2474,7 +2474,7 @@
       "column": null,
       "privilege": "INSERT",
       "principal": "api",
-      "approval": "PENDING OWNER APPROVAL (WP-2423 Q19): Brand sole-operator setting (DEC-SOLE-OPERATOR-APPROVAL)"
+      "approval": "Owner approved 2026-10-13 in session (\"批准\") (WP-2423 Q19): Brand sole-operator setting (DEC-SOLE-OPERATOR-APPROVAL)"
     }
   ]
 }
