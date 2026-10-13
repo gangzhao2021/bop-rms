@@ -76,6 +76,8 @@ export interface SettlementView {
   };
   readonly captured: SettlementAmount | null;
   readonly refunded: SettlementAmount | null;
+  /** WP-2423 Q19: refunds the Owner approved for themself (sole operator) in the day. */
+  readonly selfApprovedRefunds: SettlementAmount | null;
   readonly reconciliation: SettlementReconciliation | null;
   readonly projectedAt: string;
 }
@@ -101,6 +103,7 @@ export function parseSettlementView(value: unknown): SettlementView {
     "window",
     "captured",
     "refunded",
+    "selfApprovedRefunds",
     "reconciliation",
     "projectedAt",
   ]);
@@ -245,6 +248,7 @@ export function parseSettlementView(value: unknown): SettlementView {
     }),
     captured: amount(raw.captured),
     refunded: amount(raw.refunded),
+    selfApprovedRefunds: amount(raw.selfApprovedRefunds),
     reconciliation,
     projectedAt: instant(raw.projectedAt),
   });

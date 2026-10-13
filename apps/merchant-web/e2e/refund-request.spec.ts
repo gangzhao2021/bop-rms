@@ -220,7 +220,12 @@ for (const recovery of ["retry", "history"] as const)
     await page.route("**/merchant/payments/refunds/approvals", (route) =>
       route.fulfill({
         headers,
-        json: { observedAt: "2026-09-20T12:01:00.000Z", canApprove: false, entries: [] },
+        json: {
+          observedAt: "2026-09-20T12:01:00.000Z",
+          canApprove: false,
+          soleOperator: null,
+          entries: [],
+        },
       }),
     );
     await page.route("**/merchant/payments/refunds/preview", (route) => {

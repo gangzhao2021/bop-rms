@@ -36,6 +36,7 @@ const entry = {
   approvedAt: null,
   approverName: null,
   canApprove: true,
+  soleOperatorApproval: false,
 };
 
 it("WP-2423 Q5: sends a step-up code once and names each refusal without echoing it", async () => {
@@ -90,12 +91,18 @@ it("WP-2423 Q5: reads the approval list strictly", async () => {
   const fetcher = vi
     .fn<typeof fetch>()
     .mockResolvedValueOnce(
-      json({ observedAt: "2026-10-12T15:01:00.000Z", canApprove: true, entries: [entry] }),
+      json({
+        observedAt: "2026-10-12T15:01:00.000Z",
+        canApprove: true,
+        soleOperator: null,
+        entries: [entry],
+      }),
     )
     .mockResolvedValueOnce(
       json({
         observedAt: "2026-10-12T15:01:00.000Z",
         canApprove: true,
+        soleOperator: null,
         entries: [{ ...entry, requesterReference: id(9) }],
       }),
     )
@@ -103,6 +110,7 @@ it("WP-2423 Q5: reads the approval list strictly", async () => {
       json({
         observedAt: "2026-10-12T15:01:00.000Z",
         canApprove: true,
+        soleOperator: null,
         entries: [{ ...entry, state: "Approved" }],
       }),
     )
@@ -208,6 +216,7 @@ it("WP-2423 Q5: declines with a listed reason and names each refusal", async () 
     json({
       observedAt: "2026-10-12T15:01:00.000Z",
       canApprove: true,
+      soleOperator: null,
       entries: [{ ...entry, reasonCode: "OTHER", note: "Customer left early" }],
     }),
   );
@@ -218,6 +227,7 @@ it("WP-2423 Q5: declines with a listed reason and names each refusal", async () 
     json({
       observedAt: "2026-10-12T15:01:00.000Z",
       canApprove: true,
+      soleOperator: null,
       entries: [{ ...entry, note: "Only for Other" }],
     }),
   );

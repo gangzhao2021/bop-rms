@@ -17,6 +17,8 @@ import type { MerchantBffService } from "./merchant-bff.js";
 const purposes = {
   RefundRequest: "PAYMENT_REFUND_REQUEST",
   RefundApproval: "PAYMENT_REFUND_APPROVAL",
+  // WP-2423 Q19: turning the Brand's sole-operator setting on or off.
+  SoleOperatorSetting: "ORGANIZATION_SOLE_OPERATOR_SETTING",
 } as const;
 export class MerchantStepUpError extends Error {
   constructor(readonly code: "Denied" | "NotSetUp") {
@@ -43,7 +45,11 @@ export function createMerchantMfaStepUp(options: {
   const record = async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
     const authenticated = await options.authentication.authorize(input);
     const raw = readClosedRecord(input.command, ["purpose", "code"]);
-    if (raw.purpose !== "RefundRequest" && raw.purpose !== "RefundApproval")
+    if (
+      raw.purpose !== "RefundRequest" &&
+      raw.purpose !== "RefundApproval" &&
+      raw.purpose !== "SoleOperatorSetting"
+    )
       throw new MerchantStepUpError("Denied");
     const purposeCode = purposes[raw.purpose];
     const stepUpReference = String(

@@ -18,6 +18,8 @@ import {
 } from "./refund-reasons.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { createOrdinaryRefundClient } from "./ordinary-refund-client.js";
+import { SoleOperatorSection } from "./SoleOperatorSection.js";
+import type { SoleOperatorStatus } from "./refund-approval-client.js";
 
 const pollIntervalMs = 3000,
   pollLimit = 40;
@@ -46,9 +48,12 @@ function ApprovalCard({
   onViewerVerified,
   onChanged,
   fetcher,
+  soleOperator,
 }: {
   readonly entry: RefundApprovalEntry;
   readonly csrf: string;
+  /** WP-2423 Q19: sole operator for the signed-in approver (null when not read). */
+  readonly soleOperator: SoleOperatorStatus | null;
   /** The signed-in member's own verification, shared by every card (it belongs to the person). */
   readonly viewerVerifiedUntil: string | null;
   readonly onViewerVerified: (validUntil: string) => void;
@@ -104,6 +109,10 @@ function ApprovalCard({
   // One decline identity per card: a retry after an unknown result reuses it.
   const declineOperation = useRef(serviceOperationReference());
   const [declineReason, setDeclineReason] = useState<DeclineReason | "">("");
+  // WP-2423 Q19: approving your own refund as sole operator needs an explicit confirmation.
+  const sole = entry.soleOperatorApproval;
+  const [confirmed, setConfirmed] = useState(false);
+  const withdrawReasons: readonly DeclineReason[] = ["ENTERED_IN_ERROR", "CUSTOMER_WITHDREW"];
   const declineRefund = async () => {
     if (pending.current || declineReason === "") return;
     const controller = new AbortController();
@@ -116,6 +125,7 @@ function ApprovalCard({
           requestReference: entry.requestReference,
           operationReference: declineOperation.current,
           reasonCode: declineReason,
+          ...(sole ? { soleOperator: true } : {}),
         },
         csrf,
         controller.signal,
@@ -158,6 +168,7 @@ function ApprovalCard({
           orderReference: entry.orderReference,
           requestReference: entry.requestReference,
           approvalReference: approvalReference.current,
+          ...(sole ? { soleOperator: true } : {}),
         },
         csrf,
         controller.signal,
@@ -180,19 +191,21 @@ function ApprovalCard({
               : party === "Approver"
                 ? "Confirm it is you with your authenticator code, then approve."
                 : `You and ${who} must both confirm with an authenticator code again, then approve.`
-            : code === "SamePerson"
-              ? "You asked for this refund. Another owner or finance member must approve it."
-              : code === "Changed" || code === "AlreadyDeclined" || code === "AlreadyPrepared"
-                ? code === "AlreadyDeclined"
-                  ? "This refund was declined. Refresh the list."
-                  : "This refund changed since it was shown. Refresh the list."
-                : code === "NotPermitted"
-                  ? "Only an owner or finance member who didn't ask for this refund can approve it."
-                  : code === "RequesterNotEligible"
-                    ? `${who} can no longer request refunds at this store. Ask a store manager to request it again.`
-                    : code === "Denied"
-                      ? "Your session has ended. Sign in again, then approve."
-                      : "Result unknown. Approve again to retry the same approval — it will not refund twice.",
+            : code === "SoleOperatorNotInEffect"
+              ? "Someone else now also holds refund approval at this store, so they must approve this refund. See Sole operator on this page."
+              : code === "SamePerson"
+                ? "You asked for this refund. Another owner or finance member must approve it."
+                : code === "Changed" || code === "AlreadyDeclined" || code === "AlreadyPrepared"
+                  ? code === "AlreadyDeclined"
+                    ? "This refund was declined. Refresh the list."
+                    : "This refund changed since it was shown. Refresh the list."
+                  : code === "NotPermitted"
+                    ? "Only an owner or finance member who didn't ask for this refund can approve it."
+                    : code === "RequesterNotEligible"
+                      ? `${who} can no longer request refunds at this store. Ask a store manager to request it again.`
+                      : code === "Denied"
+                        ? "Your session has ended. Sign in again, then approve."
+                        : "Result unknown. Approve again to retry the same approval — it will not refund twice.",
       });
     } finally {
       pending.current = null;
@@ -266,7 +279,33 @@ function ApprovalCard({
           </dd>
         </div>
       </dl>
-      {entry.requestedByYou && outcome.kind !== "Sent" ? (
+      {sole && outcome.kind !== "Sent" && outcome.kind !== "Declined" ? (
+        <div className="sole-operator-confirm">
+          <p>
+            You asked for this refund and you are the only person who can approve refunds at this
+            store (sole operator). Check it before approving it yourself: order {entry.orderNumber},{" "}
+            {formatCad(entry.amountMinor)}, {describeRefundReason(entry.reasonCode)}. It will be
+            recorded as approved by you alone and shown at day-end settlement.
+          </p>
+          <label>
+            <input
+              type="checkbox"
+              checked={confirmed}
+              disabled={busy}
+              onChange={(event) => setConfirmed(event.currentTarget.checked)}
+            />{" "}
+            I checked this refund and approve it on my own
+          </label>
+        </div>
+      ) : null}
+      {entry.requestedByYou && !sole && entry.state === "AwaitingApproval" ? (
+        <p>
+          {soleOperator === "OtherApprovers"
+            ? "Someone else holds refund approval at this store, so they must approve your request."
+            : "An owner or finance member who did not ask for this refund must approve it."}
+        </p>
+      ) : null}
+      {entry.requestedByYou && !sole && outcome.kind !== "Sent" ? (
         <StepUpVerification
           purpose="RefundRequest"
           csrf={csrf}
@@ -293,18 +332,20 @@ function ApprovalCard({
           <button
             type="button"
             data-variant="primary"
-            disabled={busy || !approverCurrent}
+            disabled={busy || !approverCurrent || (sole && !confirmed)}
             onClick={() => void approve()}
           >
             {busy
               ? "Approving…"
-              : outcome.kind === "Sent"
-                ? "Retry sending the same refund"
-                : outcome.kind === "Failed" && outcome.retry
-                  ? "Retry same approval"
-                  : entry.state === "Approved"
-                    ? "Send approved refund"
-                    : `Approve and refund ${formatCad(entry.amountMinor)}`}
+              : sole && entry.state === "AwaitingApproval" && outcome.kind === "Idle"
+                ? `Approve my own refund of ${formatCad(entry.amountMinor)}`
+                : outcome.kind === "Sent"
+                  ? "Retry sending the same refund"
+                  : outcome.kind === "Failed" && outcome.retry
+                    ? "Retry same approval"
+                    : entry.state === "Approved"
+                      ? "Send approved refund"
+                      : `Approve and refund ${formatCad(entry.amountMinor)}`}
           </button>
         </div>
       ) : null}
@@ -319,7 +360,9 @@ function ApprovalCard({
             void declineRefund();
           }}
         >
-          <label htmlFor={"decline-reason-" + entry.requestReference}>Decline reason</label>
+          <label htmlFor={"decline-reason-" + entry.requestReference}>
+            {sole ? "Withdraw reason" : "Decline reason"}
+          </label>
           <select
             id={"decline-reason-" + entry.requestReference}
             required
@@ -328,7 +371,7 @@ function ApprovalCard({
             onChange={(event) => setDeclineReason(event.currentTarget.value as DeclineReason | "")}
           >
             <option value="">Select a reason</option>
-            {declineReasons.map((code) => (
+            {(sole ? withdrawReasons : declineReasons).map((code) => (
               <option key={code} value={code}>
                 {declineReasonLabel[code]}
               </option>
@@ -339,7 +382,7 @@ function ApprovalCard({
             data-variant="destructive"
             disabled={busy || !approverCurrent || declineReason === ""}
           >
-            Decline refund
+            {sole ? "Withdraw my request" : "Decline refund"}
           </button>
         </form>
       ) : null}
@@ -477,12 +520,21 @@ export function RefundApprovalsPage({
                   onViewerVerified={setViewerVerifiedUntil}
                   onChanged={reload}
                   fetcher={fetcher}
+                  soleOperator={view.soleOperator}
                 />
               ))}
             </ul>
           </>
         ) : null}
       </section>
+      <SoleOperatorSection
+        key={refresh}
+        csrf={csrf}
+        fetcher={fetcher}
+        onChanged={reload}
+        verifiedUntil={viewerVerifiedUntil}
+        onVerified={setViewerVerifiedUntil}
+      />
     </WorkspacePage>
   );
 }

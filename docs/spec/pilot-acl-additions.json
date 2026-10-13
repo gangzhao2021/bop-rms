@@ -2457,6 +2457,24 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner approved 2026-10-12 in session (\"批准 继续\") (WP-2423 Q5): an Owner/Finance member declines an ordinary refund nothing was prepared for, releasing its occupancy (RF-D04); a refund reason \"Other\" keeps a short Confidential staff note for the approver"
+    },
+    {
+      "type": "table",
+      "schema": "bop_tenant",
+      "object": "brand_sole_operator_setting",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "PENDING OWNER APPROVAL (WP-2423 Q19): Brand sole-operator setting (DEC-SOLE-OPERATOR-APPROVAL)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_tenant",
+      "object": "brand_sole_operator_setting",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "PENDING OWNER APPROVAL (WP-2423 Q19): Brand sole-operator setting (DEC-SOLE-OPERATOR-APPROVAL)"
     }
   ]
 }

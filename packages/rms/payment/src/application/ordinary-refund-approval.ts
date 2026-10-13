@@ -42,17 +42,35 @@ function subject(value: unknown) {
     policyVersion: raw.policyVersion,
   });
 }
+/** WP-2423 Q19: the Organization `soleOperatorApproval` result for the actor and
+ * `payment.refund.approve`, read in the same transaction at the same instant. Absent = NotSet. */
+export type OrdinaryRefundSoleOperatorStatus = "Effective" | "NotSet" | "OtherApprovers";
+const authorityKeys = [
+  ...scopeKeys,
+  "actorReference",
+  "role",
+  "active",
+  "permissionCode",
+  "allowed",
+  "recentMfaAt",
+  "observedAt",
+] as const;
 function authority(value: unknown) {
-  const raw = exactPaymentObject(value, [
-    ...scopeKeys,
-    "actorReference",
-    "role",
-    "active",
-    "permissionCode",
-    "allowed",
-    "recentMfaAt",
-    "observedAt",
-  ]);
+  const withSoleOperator =
+    value !== null &&
+    typeof value === "object" &&
+    Object.prototype.hasOwnProperty.call(value, "soleOperator");
+  const raw = exactPaymentObject(
+    value,
+    withSoleOperator ? [...authorityKeys, "soleOperator"] : authorityKeys,
+  );
+  const soleOperator = withSoleOperator ? raw.soleOperator : "NotSet";
+  if (
+    soleOperator !== "Effective" &&
+    soleOperator !== "NotSet" &&
+    soleOperator !== "OtherApprovers"
+  )
+    return fail();
   const scope = parseScope(raw);
   if (
     !["Manager", "Owner", "Finance"].includes(String(raw.role)) ||
@@ -70,7 +88,16 @@ function authority(value: unknown) {
     permissionCode: raw.permissionCode,
     recentMfaAt: raw.recentMfaAt === null ? null : parsePaymentInstant(raw.recentMfaAt),
     observedAt: parsePaymentInstant(raw.observedAt),
+    soleOperator: soleOperator as OrdinaryRefundSoleOperatorStatus,
   });
+}
+/** WP-2423 Q19: how the approval satisfied the "another person" rule. Independent approvals keep
+ * their original encoding (no key); a sole-operator approval is marked explicitly. */
+export type OrdinaryRefundApprovalMode = "Independent" | "SoleOperator";
+export function ordinaryRefundApprovalModeOf(approval: {
+  readonly approvalMode?: "SoleOperator";
+}): OrdinaryRefundApprovalMode {
+  return approval.approvalMode === "SoleOperator" ? "SoleOperator" : "Independent";
 }
 function recent(mfa: string | null, at: string) {
   if (mfa === null) return false;
@@ -109,14 +136,25 @@ export function evaluateOrdinaryRefundIndependentApproval(value: unknown) {
       requesterMfaAt,
       approverMfaAt,
     } = approval;
+    // WP-2423 Q19: one Owner may be both people only for a SoleOperator approval and only while
+    // sole operator is in effect for them now; otherwise the two people must differ and the
+    // requester must be a Manager (unchanged).
+    const sole = ordinaryRefundApprovalModeOf(approval) === "SoleOperator";
+    const peopleValid = sole
+      ? requesterReference === approverReference &&
+        ["Manager", "Owner"].includes(String(requester.role)) &&
+        approver.role === "Owner" &&
+        requester.soleOperator === "Effective" &&
+        approver.soleOperator === "Effective"
+      : requesterReference !== approverReference &&
+        requester.role === "Manager" &&
+        ["Owner", "Finance"].includes(String(approver.role));
     if (
       JSON.stringify(expected) !== JSON.stringify(approvedSubject) ||
       approvedAt > observedAt ||
-      requesterReference === approverReference ||
+      !peopleValid ||
       requester.actorReference !== requesterReference ||
       approver.actorReference !== approverReference ||
-      requester.role !== "Manager" ||
-      !["Owner", "Finance"].includes(String(approver.role)) ||
       requester.permissionCode !== "payment.refund.request" ||
       approver.permissionCode !== "payment.refund.approve" ||
       !requester.active ||
@@ -145,13 +183,15 @@ export function evaluateOrdinaryRefundIndependentApproval(value: unknown) {
  * as accepted. This function itself performs no durable approval or dispatch.
  */
 export function createOrdinaryRefundIndependentApproval(value: unknown) {
-  const raw = exactPaymentObject(value, [
-    "approvalReference",
-    "subject",
-    "requester",
-    "approver",
-    "observedAt",
-  ]);
+  const withMode =
+    value !== null &&
+    typeof value === "object" &&
+    Object.prototype.hasOwnProperty.call(value, "approvalMode");
+  const keys = ["approvalReference", "subject", "requester", "approver", "observedAt"];
+  const raw = exactPaymentObject(value, withMode ? [...keys, "approvalMode"] : keys);
+  if (withMode && raw.approvalMode !== "Independent" && raw.approvalMode !== "SoleOperator")
+    throw new Error("ORDINARY_REFUND_APPROVAL_DENIED");
+  const sole = withMode && raw.approvalMode === "SoleOperator";
   const approvalReference = parsePaymentReference(raw.approvalReference);
   const approvedSubject = subject(raw.subject);
   const observedAt = parsePaymentInstant(raw.observedAt);
@@ -167,6 +207,7 @@ export function createOrdinaryRefundIndependentApproval(value: unknown) {
     approvedAt: observedAt,
     requesterMfaAt: requester.recentMfaAt,
     approverMfaAt: approver.recentMfaAt,
+    ...(sole ? { approvalMode: "SoleOperator" as const } : {}),
   });
   if (
     evaluateOrdinaryRefundIndependentApproval({
@@ -184,16 +225,26 @@ export function createOrdinaryRefundIndependentApproval(value: unknown) {
 /** Strict durable representation. Historical validity does not establish current
  * dispatch authority; use the evaluator with freshly resolved authority facts.
  */
+const approvalKeys = [
+  "approvalReference",
+  "subject",
+  "requesterReference",
+  "approverReference",
+  "approvedAt",
+  "requesterMfaAt",
+  "approverMfaAt",
+] as const;
 function parseApproval(value: unknown, requireHistoricalValidity: boolean) {
-  const raw = exactPaymentObject(value, [
-    "approvalReference",
-    "subject",
-    "requesterReference",
-    "approverReference",
-    "approvedAt",
-    "requesterMfaAt",
-    "approverMfaAt",
-  ]);
+  const withMode =
+    value !== null &&
+    typeof value === "object" &&
+    Object.prototype.hasOwnProperty.call(value, "approvalMode");
+  const raw = exactPaymentObject(
+    value,
+    withMode ? [...approvalKeys, "approvalMode"] : approvalKeys,
+  );
+  // Independent approvals are encoded without the key (unchanged history).
+  if (withMode && raw.approvalMode !== "SoleOperator") return fail();
   const approvedSubject = subject(raw.subject);
   const result = {
     approvalReference: parsePaymentReference(raw.approvalReference),
@@ -203,11 +254,12 @@ function parseApproval(value: unknown, requireHistoricalValidity: boolean) {
     approvedAt: parsePaymentInstant(raw.approvedAt),
     requesterMfaAt: parsePaymentInstant(raw.requesterMfaAt),
     approverMfaAt: parsePaymentInstant(raw.approverMfaAt),
+    ...(withMode ? { approvalMode: "SoleOperator" as const } : {}),
   };
   if (
     requireHistoricalValidity &&
     (approvedSubject.policyVersion !== ordinaryRefundPolicyVersion ||
-      result.requesterReference === result.approverReference ||
+      (result.requesterReference === result.approverReference) !== withMode ||
       !recent(result.requesterMfaAt, result.approvedAt) ||
       !recent(result.approverMfaAt, result.approvedAt))
   )
@@ -240,8 +292,12 @@ export function assertOrdinaryRefundRequester(value: unknown) {
   for (const key of [...scopeKeys, "actorReference"] as const)
     if (parsePaymentReference(expected[key]) !== current[key])
       throw new Error("ORDINARY_REFUND_REQUESTER_DENIED");
+  // WP-2423 Q19: an Owner may request only while sole operator is in effect for them.
+  const roleAllowed =
+    current.role === "Manager" ||
+    (current.role === "Owner" && current.soleOperator === "Effective");
   if (
-    current.role !== "Manager" ||
+    !roleAllowed ||
     current.active !== true ||
     current.allowed !== true ||
     current.permissionCode !== "payment.refund.request" ||

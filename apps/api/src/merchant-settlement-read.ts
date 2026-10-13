@@ -33,6 +33,9 @@ export interface MerchantSettlementView {
   /** Null when the owner source could not answer; the page says so instead of showing zero. */
   readonly captured: MerchantSettlementAmount | null;
   readonly refunded: MerchantSettlementAmount | null;
+  /** WP-2423 Q19: refunds an Owner approved for themself (sole operator) in the day, for review.
+   * Null when the source could not answer or is not composed. */
+  readonly selfApprovedRefunds: MerchantSettlementAmount | null;
   readonly reconciliation: MerchantSettlementReconciliation | null;
   readonly projectedAt: string;
 }
@@ -78,6 +81,11 @@ export function createMerchantSettlementRead(options: {
     scope: MerchantSettlementScope,
     window: MerchantSettlementWindow,
   ): Promise<MerchantSettlementReconciliation | null>;
+  selfApprovedRefunds?(
+    tx: ConsumerTransaction,
+    scope: MerchantSettlementScope,
+    window: MerchantSettlementWindow,
+  ): Promise<MerchantSettlementAmount | null>;
   now(): string;
 }) {
   return async (input: {
@@ -109,6 +117,10 @@ export function createMerchantSettlementRead(options: {
       const captured = await options.captured(tx, scope, window);
       const refunded = await options.refunded(tx, scope, window);
       const reconciliation = await options.reconciliation(tx, scope, window);
+      const selfApprovedRefunds =
+        options.selfApprovedRefunds === undefined
+          ? null
+          : await options.selfApprovedRefunds(tx, scope, window);
       const again = await options.authorize(tx, { sessionCookie: input.sessionCookie, permission });
       if (!again || !sameScope(again, scope)) return unavailable();
       return Object.freeze({
@@ -123,6 +135,7 @@ export function createMerchantSettlementRead(options: {
         }),
         captured,
         refunded,
+        selfApprovedRefunds,
         reconciliation:
           reconciliation === null
             ? null

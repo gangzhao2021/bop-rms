@@ -70,6 +70,8 @@ import { createMerchantOrdinaryRefundBusinessDate } from "../../apps/api/dist/me
 import { createPersistentMerchantOrderQueue } from "../../apps/api/dist/persistent-merchant-order-queue.js";
 import { createInternalStoreConfiguration } from "./pilot-store-configuration.mjs";
 import { createMerchantMfaStepUp } from "../../apps/api/dist/merchant-mfa-step-up.js";
+import { createMerchantRefundSoleOperatorResolver } from "../../apps/api/dist/merchant-sole-operator.js";
+import { createMerchantSoleOperator } from "../../apps/api/dist/merchant-sole-operator-setting.js";
 import { createMerchantOrdinaryRefundApproval } from "../../apps/api/dist/merchant-ordinary-refund-approval.js";
 import { createMerchantOrdinaryRefundApprovals } from "../../apps/api/dist/merchant-ordinary-refund-approvals.js";
 import { createMerchantOrdinaryRefundDecline } from "../../apps/api/dist/merchant-ordinary-refund-decline.js";
@@ -461,6 +463,7 @@ export async function createInternalMerchant(
     persistence,
     authentication: service,
     resolveConfiguration: refundConfiguration,
+    soleOperator: (...args) => refundSoleOperator(...args),
   });
   const ordinaryRefund = createInternalRefundPreparation({
     resources,
@@ -532,6 +535,7 @@ export async function createInternalMerchant(
     resolveConfiguration: refundConfiguration,
     newReference: () => resources.credentials.reference(),
     locale: "en-CA",
+    soleOperator: (...args) => refundSoleOperator(...args),
   });
   // WP-2423 Q5: the Store Business Date of the published configuration (RF-D01) for escalation.
   const refundBusinessDate = createMerchantOrdinaryRefundBusinessDate({
@@ -548,6 +552,7 @@ export async function createInternalMerchant(
     retentionPolicyCode: "FINANCIAL_COMPLIANCE",
     retentionPolicyVersion: 1,
     businessDate: refundBusinessDate,
+    soleOperator: (...args) => refundSoleOperator(...args),
   });
   // WP-2423 Q5: escalated refund approval. The requester's role, permission and MFA are read from
   // their owners for that person (Identity roster, Membership, Permission, MFA step-ups).
@@ -584,9 +589,16 @@ export async function createInternalMerchant(
           return (await refundConfiguration(t, scope)).roleMapping;
         },
         stepUp: true,
+        // WP-2423 Q19: an Owner's own request and approval need sole operator in effect now.
+        soleOperator: true,
       },
     };
   };
+  // WP-2423 Q19: lets an Owner request (and see the request form) while sole operator is in
+  // effect for them; resolved per command through the same owner reads as approval.
+  const refundSoleOperator = createMerchantRefundSoleOperatorResolver((tx, scope, authority) =>
+    escalatedRefundConfiguration(tx, scope, authority),
+  );
   const ordinaryRefundApproval = logUnexpected(
     "INTERNAL_REFUND_APPROVAL_UNAVAILABLE",
     createMerchantOrdinaryRefundApproval({
@@ -1004,6 +1016,19 @@ export async function createInternalMerchant(
       ordinaryRefundApprovals,
       ordinaryRefundDecline,
       ...(mfaStepUp === undefined ? {} : { mfaStepUp }),
+      // WP-2423 Q19 (DEC-SOLE-OPERATOR-APPROVAL): the Brand Owner turns sole operator on/off.
+      soleOperator: (() => {
+        const soleOperator = createMerchantSoleOperator({
+          persistence,
+          authentication: service,
+          resolveConfiguration: escalatedRefundConfiguration,
+          retentionPolicyCode: "SECURITY_AUDIT",
+          retentionPolicyVersion: 1,
+        });
+        return Object.assign(logUnexpected("INTERNAL_SOLE_OPERATOR_UNAVAILABLE", soleOperator), {
+          read: logUnexpected("INTERNAL_SOLE_OPERATOR_READ_UNAVAILABLE", soleOperator.read),
+        });
+      })(),
       diningJoinState,
       diningJoinRegenerate,
       diningSessionStart,

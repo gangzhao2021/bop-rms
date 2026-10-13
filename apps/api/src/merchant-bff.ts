@@ -202,6 +202,10 @@ import {
   type createMerchantOrdinaryRefundApproval,
 } from "./merchant-ordinary-refund-approval.js";
 import type { createMerchantOrdinaryRefundApprovals } from "./merchant-ordinary-refund-approvals.js";
+import {
+  type createMerchantSoleOperator,
+  MerchantSoleOperatorError,
+} from "./merchant-sole-operator-setting.js";
 import type { createMerchantOrdinaryRefundDecline } from "./merchant-ordinary-refund-decline.js";
 import type { createMerchantOrdinaryRefundProgress } from "./merchant-ordinary-refund-progress.js";
 import type { createMerchantKitchenCommand } from "./merchant-kitchen-command.js";
@@ -512,6 +516,8 @@ export interface MerchantBffRouterOptions {
   readonly ordinaryRefundProgress?: ReturnType<typeof createMerchantOrdinaryRefundProgress>;
   /** WP-2423 Q5: refunds at this Store awaiting approval or approved and not yet sent. */
   readonly ordinaryRefundApprovals?: ReturnType<typeof createMerchantOrdinaryRefundApprovals>;
+  /** WP-2423 Q19: the Brand Owner's sole-operator setting (read and turn on/off). */
+  readonly soleOperator?: ReturnType<typeof createMerchantSoleOperator>;
   readonly kitchenQuery?: ReturnType<typeof createMerchantKitchenQuery>;
   readonly kitchenCommand?: ReturnType<typeof createMerchantKitchenCommand>;
   readonly kitchenRelease?: ReturnType<typeof createMerchantKitchenRelease>;
@@ -897,6 +903,9 @@ function refundDecisionFailure(response: express.Response, error: MerchantRefund
   else if (error.code === "RequesterNotEligible")
     response.status(409).json({ error: "requester_not_eligible" });
   else if (error.code === "SamePerson") response.status(422).json({ error: "same_person" });
+  // WP-2423 Q19: self-approval asked for, but another person now holds refund approval.
+  else if (error.code === "SoleOperatorNotInEffect")
+    response.status(409).json({ error: "sole_operator_not_in_effect" });
   else if (error.code === "NeedsReverification")
     response.status(409).json({ error: "needs_reverification", party: error.party });
   else if (error.code === "AlreadyPrepared")
@@ -4510,6 +4519,80 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       });
   });
 
+  // WP-2423 Q19 (DEC-SOLE-OPERATOR-APPROVAL): the Brand Owner's sole-operator setting.
+  router.get("/organization/sole-operator", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    if (
+      request.method !== "GET" ||
+      request.body !== undefined ||
+      sessionCookie === null ||
+      Object.keys(request.query).length !== 0 ||
+      rawHeaderValues(request, "origin").length > 1 ||
+      rawHeaderValues(request, "sec-fetch-site").length !== 1
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.soleOperator) {
+      response.status(503).json({ error: "sole_operator_unavailable" });
+      return;
+    }
+    void options.soleOperator
+      .read({ sessionCookie })
+      .then((view) => response.set("Cache-Control", NO_STORE).json(view))
+      .catch((error: unknown) => {
+        if (error instanceof MerchantSoleOperatorError && error.code === "Denied") {
+          response
+            .status(403)
+            .set("Cache-Control", NO_STORE)
+            .json({ error: "brand_owner_required" });
+          return;
+        }
+        denied(response);
+      });
+  });
+  router.post("/organization/sole-operator", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    const command = options.soleOperator;
+    if (!command) {
+      response.status(503).json({ error: "sole_operator_unavailable" });
+      return;
+    }
+    void command({ sessionCookie, csrf, command: request.body })
+      .then((result) =>
+        response.set("Cache-Control", NO_STORE).json({
+          status: result.status,
+          state: result.state,
+          version: result.version,
+          recordedAt: result.recordedAt,
+        }),
+      )
+      .catch((error: unknown) => {
+        response.set("Cache-Control", NO_STORE);
+        if (!(error instanceof MerchantSoleOperatorError)) {
+          denied(response);
+          return;
+        }
+        if (error.code === "Denied") response.status(403).json({ error: "brand_owner_required" });
+        else if (error.code === "NeedsReverification")
+          response.status(409).json({ error: "needs_reverification" });
+        else if (error.code === "VersionConflict")
+          response.status(409).json({ error: "setting_changed" });
+        else if (error.code === "NoChange") response.status(409).json({ error: "no_change" });
+        else response.status(422).json({ error: "invalid_request" });
+      });
+  });
+
   // WP-2423 Q5: refunds awaiting an Owner/Finance approval at the selected Store.
   router.get("/payments/refunds/approvals", safeRead(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");
@@ -4534,6 +4617,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         response.set("Cache-Control", NO_STORE).json({
           observedAt: view.observedAt,
           canApprove: view.canApprove,
+          soleOperator: view.soleOperator,
           entries: view.entries.map((entry) => ({
             orderReference: entry.orderReference,
             orderNumber: entry.orderNumber,
@@ -4553,6 +4637,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             approvedAt: entry.approvedAt,
             approverName: entry.approverName,
             canApprove: entry.canApprove,
+            soleOperatorApproval: entry.soleOperatorApproval,
           })),
         }),
       )

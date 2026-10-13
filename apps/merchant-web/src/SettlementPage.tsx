@@ -145,6 +145,27 @@ export function SettlementReport({
           <span className="overview-count__detail">Captured minus refunded</span>
         </li>
       </ul>
+      {view.selfApprovedRefunds === null ? (
+        <p className="bop-muted" role="status">
+          Refunds approved by the owner alone could not be read.
+        </p>
+      ) : view.selfApprovedRefunds.count > 0 ? (
+        <section
+          className="store-card settlement__self-approved"
+          aria-labelledby="settlement-self-approved"
+        >
+          <header>
+            <h3 id="settlement-self-approved">Refunds the owner approved alone</h3>
+          </header>
+          <p role="status">
+            {view.selfApprovedRefunds.count} refund
+            {view.selfApprovedRefunds.count === 1 ? "" : "s"} ·{" "}
+            {formatSettlementMoney(view.selfApprovedRefunds.amountMinor)} approved by the owner
+            without a second person (sole operator) this business day. Review them against the
+            orders.
+          </p>
+        </section>
+      ) : null}
       <section
         className="store-card settlement__reconciliation"
         aria-labelledby="settlement-reconciliation"

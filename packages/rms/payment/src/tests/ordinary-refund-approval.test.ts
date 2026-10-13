@@ -220,3 +220,134 @@ it("requires a current Manager request capability without imposing non-escalated
   ])
     expect(() => check(patch)).toThrow();
 });
+
+// WP-2423 Q19 (DEC-SOLE-OPERATOR-APPROVAL): one Owner requests and approves only while sole
+// operator is in effect for them, with recent MFA; the approval is marked SoleOperator.
+function soleFixture() {
+  const f = fixture();
+  const owner = id(7);
+  return {
+    ...f,
+    approval: {
+      ...f.approval,
+      approverReference: owner,
+      approvalMode: "SoleOperator" as const,
+    },
+    requester: { ...f.requester, role: "Owner", soleOperator: "Effective" as string },
+    approver: {
+      ...f.approver,
+      actorReference: owner,
+      role: "Owner",
+      soleOperator: "Effective" as string,
+    },
+  };
+}
+it("accepts one Owner as both people only for a SoleOperator approval in effect", () => {
+  expect(evaluate(soleFixture())).toEqual({ status: "ApprovalCurrent", approvalReference: id(6) });
+  for (const status of ["NotSet", "OtherApprovers"]) {
+    const f = soleFixture();
+    f.approver.soleOperator = status;
+    expect(evaluate(f).status).toBe("NeedsReapproval");
+    const g = soleFixture();
+    g.requester.soleOperator = status;
+    expect(evaluate(g).status).toBe("NeedsReapproval");
+  }
+  const finance = soleFixture();
+  finance.approver.role = "Finance";
+  expect(evaluate(finance).status).toBe("NeedsReapproval");
+  const stale = soleFixture();
+  stale.approver.recentMfaAt = "2026-09-13T11:59:59.999Z";
+  expect(evaluate(stale).status).toBe("NeedsReapproval");
+  // Without the mode the same person is never accepted, sole operator or not.
+  const unmarked = soleFixture();
+  const independent: Record<string, unknown> = { ...unmarked.approval };
+  delete independent.approvalMode;
+  expect(evaluate({ ...unmarked, approval: independent }).status).toBe("NeedsReapproval");
+  // A SoleOperator mark with two different people is not a valid record.
+  const twoPeople = fixture();
+  expect(
+    evaluate({ ...twoPeople, approval: { ...twoPeople.approval, approvalMode: "SoleOperator" } })
+      .status,
+  ).toBe("NeedsReapproval");
+  expect(() =>
+    decodeOrdinaryRefundApproval(
+      JSON.stringify({ ...twoPeople.approval, approvalMode: "SoleOperator" }),
+    ),
+  ).toThrow();
+});
+it("creates and round-trips a SoleOperator approval and keeps independent encoding unchanged", () => {
+  const f = soleFixture();
+  const created = create({
+    approvalReference: id(6),
+    subject: f.subject,
+    requester: f.requester,
+    approver: f.approver,
+    observedAt: at,
+    approvalMode: "SoleOperator",
+  });
+  expect(created.approvalMode).toBe("SoleOperator");
+  expect(decodeOrdinaryRefundApproval(encodeOrdinaryRefundApproval(created))).toEqual(created);
+  expect(() =>
+    create({
+      approvalReference: id(6),
+      subject: f.subject,
+      requester: f.requester,
+      approver: { ...f.approver, soleOperator: "OtherApprovers" },
+      observedAt: at,
+      approvalMode: "SoleOperator",
+    }),
+  ).toThrow("ORDINARY_REFUND_APPROVAL_DENIED");
+  const g = fixture();
+  const independent = create({
+    approvalReference: id(6),
+    subject: g.subject,
+    requester: g.requester,
+    approver: g.approver,
+    observedAt: at,
+  });
+  expect(encodeOrdinaryRefundApproval(independent)).not.toContain("approvalMode");
+  expect(() =>
+    decodeOrdinaryRefundApproval(
+      JSON.stringify({
+        ...JSON.parse(encodeOrdinaryRefundApproval(independent)),
+        approvalMode: "Independent",
+      }),
+    ),
+  ).toThrow();
+});
+it("admits an Owner requester only while sole operator is in effect", () => {
+  const f = fixture();
+  const expected = {
+    tenantReference: id(1),
+    brandReference: id(2),
+    storeReference: id(3),
+    orderReference: id(4),
+    actorReference: id(7),
+  };
+  const owner = { ...f.requester, role: "Owner" };
+  expect(() =>
+    assertOrdinaryRefundRequester({ expected, observedAt: at, authority: owner }),
+  ).toThrow("ORDINARY_REFUND_REQUESTER_DENIED");
+  for (const soleOperator of ["NotSet", "OtherApprovers"])
+    expect(() =>
+      assertOrdinaryRefundRequester({
+        expected,
+        observedAt: at,
+        authority: { ...owner, soleOperator },
+      }),
+    ).toThrow("ORDINARY_REFUND_REQUESTER_DENIED");
+  expect(() =>
+    assertOrdinaryRefundRequester({
+      expected,
+      observedAt: at,
+      authority: { ...owner, soleOperator: "Effective" },
+    }),
+  ).not.toThrow();
+  expect(() =>
+    assertOrdinaryRefundRequester({
+      expected,
+      observedAt: at,
+      authority: { ...owner, soleOperator: "Unknown" },
+    }),
+  ).toThrow();
+});

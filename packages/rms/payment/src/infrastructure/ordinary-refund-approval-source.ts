@@ -27,13 +27,21 @@ export function createPostgresOrdinaryRefundApprovalSource(
 ) {
   const subjectSource = createPostgresOrdinaryRefundApprovalSubjectSource(options);
   return async (tx: ConsumerTransaction, value: unknown) => {
-    const raw = exactPaymentObject(value, [
+    const keys = [
       "orderReference",
       "requestReference",
       "approvalReference",
       "approverReference",
       "observedAt",
-    ]);
+    ];
+    // WP-2423 Q19: an explicit approvalMode "SoleOperator" asks for the one-person path.
+    const withMode =
+      value !== null &&
+      typeof value === "object" &&
+      Object.prototype.hasOwnProperty.call(value, "approvalMode");
+    const raw = exactPaymentObject(value, withMode ? [...keys, "approvalMode"] : keys);
+    if (withMode && raw.approvalMode !== "Independent" && raw.approvalMode !== "SoleOperator")
+      throw new Error("ORDINARY_REFUND_APPROVAL_DENIED");
     const orderReference = String(parsePaymentReference(raw.orderReference));
     const requestReference = String(parsePaymentReference(raw.requestReference));
     const approvalReference = String(parsePaymentReference(raw.approvalReference));
@@ -66,6 +74,7 @@ export function createPostgresOrdinaryRefundApprovalSource(
       requester,
       approver,
       observedAt,
+      ...(withMode ? { approvalMode: raw.approvalMode } : {}),
     });
     if (
       approval.requesterReference !== persisted.requesterReference ||

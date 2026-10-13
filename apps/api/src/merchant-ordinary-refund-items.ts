@@ -11,6 +11,7 @@ import {
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { createMerchantWorkforcePermissionSource } from "./merchant-workforce-authority-source.js";
 import { refundReadAccess } from "./merchant-refund-read-authority.js";
+import type { MerchantRefundSoleOperatorResolver } from "./merchant-sole-operator.js";
 import { ordinaryRefundProgress } from "./merchant-ordinary-refund-progress.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -32,6 +33,8 @@ export function createMerchantOrdinaryRefundItems(options: {
     environment: "Test" | "Live";
     roleMapping: unknown;
   }>;
+  /** WP-2423 Q19: lets an Owner start a request while sole operator is in effect for them. */
+  soleOperator?: MerchantRefundSoleOperatorResolver;
   newReference(): string;
   locale: string;
 }) {
@@ -88,6 +91,24 @@ export function createMerchantOrdinaryRefundItems(options: {
       });
       const role = createOrdinaryRefundRoleResolver(configuration.roleMapping);
       const viewer = { canRequest: false as boolean };
+      // WP-2423 Q19: read once per request (display only; the request command rechecks).
+      let soleOperatorStatus: Promise<string> | null = null;
+      const soleOperator = options.soleOperator;
+      const soleOperatorEffective =
+        soleOperator === undefined
+          ? undefined
+          : async () => {
+              soleOperatorStatus ??= soleOperator(
+                businessTransaction,
+                {
+                  ...scope,
+                  actorReference: String(current.actorReference),
+                  observedAt: String(current.context.resolvedAt),
+                },
+                { context: current.context, authorize: current.allowed },
+              );
+              return (await soleOperatorStatus) === "Effective";
+            };
       const authorize = async (
         _tx: ConsumerTransaction,
         query: Scope & { orderReference: string; actorReference: string; observedAt: string },
@@ -112,6 +133,7 @@ export function createMerchantOrdinaryRefundItems(options: {
             observedAt: String(current.context.resolvedAt),
           },
           role,
+          soleOperatorEffective,
         );
         viewer.canRequest = access.canRequest;
         return access.canRead;

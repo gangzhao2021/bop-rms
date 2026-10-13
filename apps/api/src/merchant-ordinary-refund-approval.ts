@@ -27,7 +27,9 @@ export class MerchantRefundApprovalError extends Error {
       | "Changed"
       | "AlreadyPrepared"
       | "AlreadyDeclined"
-      | "RequesterNotEligible",
+      | "RequesterNotEligible"
+      /** WP-2423 Q19: self-approval asked for, but sole operator is not in effect now. */
+      | "SoleOperatorNotInEffect",
     readonly party: RefundVerificationParty | null = null,
   ) {
     super("Refund approval was not recorded");
@@ -134,11 +136,20 @@ export function createMerchantOrdinaryRefundApproval(options: {
   const ref = (value: unknown) => String(parseOpaqueUuidV7(value, "ACTOR_REFERENCE_INVALID"));
   return async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
     const authenticated = await options.authentication.authorize(input);
-    const raw = readClosedRecord(input.command, [
-      "orderReference",
-      "requestReference",
-      "approvalReference",
-    ]);
+    // WP-2423 Q19: the Owner approving their own request confirms it explicitly with
+    // approvalMode "SoleOperator" (after seeing the summary); otherwise the two people differ.
+    const commandKeys = ["orderReference", "requestReference", "approvalReference"];
+    const withMode =
+      input.command !== null &&
+      typeof input.command === "object" &&
+      Object.prototype.hasOwnProperty.call(input.command, "approvalMode");
+    const raw = readClosedRecord(
+      input.command,
+      withMode ? [...commandKeys, "approvalMode"] : commandKeys,
+    );
+    if (withMode && raw.approvalMode !== "SoleOperator")
+      throw new MerchantRefundApprovalError("Denied");
+    const sole = withMode;
     const orderReference = ref(raw.orderReference),
       requestReference = ref(raw.requestReference),
       approvalReference = ref(raw.approvalReference);
@@ -198,8 +209,8 @@ export function createMerchantOrdinaryRefundApproval(options: {
       })(tx, { orderReference, requestReference, observedAt });
       if (ordinaryRefundClaimKind(subject.request) !== "Ordinary")
         throw new MerchantRefundApprovalError("Changed");
-      if (subject.requesterReference === actorReference)
-        throw new MerchantRefundApprovalError("SamePerson");
+      if ((subject.requesterReference === actorReference) !== sole)
+        throw new MerchantRefundApprovalError(sole ? "Changed" : "SamePerson");
       const authority = createMerchantOrdinaryRefundAuthority(configuration.workforce);
       const party = async (actor: string, permissionCode: string) =>
         authority(tx, {
@@ -226,10 +237,22 @@ export function createMerchantOrdinaryRefundApproval(options: {
           throw error;
         },
       );
-      if (requester.role !== "Manager" || !requester.allowed)
-        throw new MerchantRefundApprovalError("RequesterNotEligible");
-      if ((approver.role !== "Owner" && approver.role !== "Finance") || !approver.allowed)
-        throw new MerchantRefundApprovalError("Denied");
+      if (sole) {
+        // One Owner, both people: only while sole operator is in effect for them right now.
+        const effective = (fact: unknown) =>
+          fact !== null &&
+          typeof fact === "object" &&
+          Object.getOwnPropertyDescriptor(fact, "soleOperator")?.value === "Effective";
+        if (approver.role !== "Owner" || !approver.allowed || !requester.allowed)
+          throw new MerchantRefundApprovalError("Denied");
+        if (!effective(approver) || !effective(requester))
+          throw new MerchantRefundApprovalError("SoleOperatorNotInEffect");
+      } else {
+        if (requester.role !== "Manager" || !requester.allowed)
+          throw new MerchantRefundApprovalError("RequesterNotEligible");
+        if ((approver.role !== "Owner" && approver.role !== "Finance") || !approver.allowed)
+          throw new MerchantRefundApprovalError("Denied");
+      }
       const staleRequester = !recentEnough(requester.recentMfaAt, observedAt),
         staleApprover = !recentEnough(approver.recentMfaAt, observedAt);
       if (staleRequester || staleApprover)
@@ -245,7 +268,8 @@ export function createMerchantOrdinaryRefundApproval(options: {
       if (existing !== null) {
         if (
           existing.approval.subject.requestReference !== requestReference ||
-          existing.approval.approverReference !== actorReference
+          existing.approval.approverReference !== actorReference ||
+          (existing.approval.approvalMode === "SoleOperator") !== sole
         )
           throw new MerchantRefundApprovalError("Changed");
         return { replayed: true, payments };
@@ -257,6 +281,7 @@ export function createMerchantOrdinaryRefundApproval(options: {
         approvalReference,
         approverReference: actorReference,
         observedAt,
+        ...(sole ? { approvalMode: "SoleOperator" } : {}),
       });
       const operationReference = approvalDerivedReference(approvalReference, "approval-operation");
       const auditReference = approvalDerivedReference(approvalReference, "approval-audit");
@@ -276,6 +301,7 @@ export function createMerchantOrdinaryRefundApproval(options: {
           actionCode: "PAYMENT_ORDINARY_REFUND_APPROVED",
           targetType: "PaymentRefundApproval",
           targetId: approvalReference,
+          ...(sole ? { afterSummary: { approvalMode: "SoleOperator" } } : {}),
           reasonCode: subject.request.reasonCode,
           correlationId: operationReference,
           occurredAt: prepared.approval.approvedAt,

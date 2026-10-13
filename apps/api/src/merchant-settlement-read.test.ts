@@ -86,3 +86,32 @@ it("rejects a malformed date, a different day than requested and a changed scope
     "MERCHANT_SETTLEMENT_UNAVAILABLE",
   );
 });
+it("WP-2423 Q19: shows the day's self-approved refunds, or null when not composed", async () => {
+  const tx = { query: vi.fn() } as ConsumerTransaction;
+  const selfApproved = vi.fn(async () => ({
+    count: 2,
+    amountMinor: "23200",
+    currencyCode: "CAD" as const,
+  }));
+  const options = {
+    transactions: { run: async <T>(work: (t: ConsumerTransaction) => Promise<T>) => work(tx) },
+    authorize: async () => scope,
+    storeLabel: async () => "Synthetic Store",
+    window: async () => window,
+    captured: async () => null,
+    refunded: async () => null,
+    reconciliation: async () => null,
+    now: () => "2026-09-22T09:00:00.000Z",
+  };
+  const view = await createMerchantSettlementRead({
+    ...options,
+    selfApprovedRefunds: selfApproved,
+  })({ sessionCookie: "c", businessDate: null });
+  expect(view.selfApprovedRefunds).toEqual({ count: 2, amountMinor: "23200", currencyCode: "CAD" });
+  expect(selfApproved).toHaveBeenCalledWith(tx, scope, window);
+  const absent = await createMerchantSettlementRead(options)({
+    sessionCookie: "c",
+    businessDate: null,
+  });
+  expect(absent.selfApprovedRefunds).toBeNull();
+});

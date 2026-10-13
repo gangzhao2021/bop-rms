@@ -74,6 +74,8 @@ export function createInternalRefundSend({
             return (await configuration(tx)).roleMapping;
           },
           stepUp: true,
+          // WP-2423 Q19: an Owner's own request and approval need sole operator in effect now.
+          soleOperator: true,
         },
         store: {
           ...scope,

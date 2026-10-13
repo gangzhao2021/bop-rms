@@ -30,6 +30,7 @@ export function settlementViewFixture() {
     },
     captured: { count: 14, amountMinor: "123450", currencyCode: "CAD" },
     refunded: { count: 1, amountMinor: "1130", currencyCode: "CAD" },
+    selfApprovedRefunds: { count: 0, amountMinor: "0", currencyCode: "CAD" },
     reconciliation: {
       settlement: {
         run: {

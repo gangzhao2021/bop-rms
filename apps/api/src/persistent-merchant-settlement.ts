@@ -5,6 +5,7 @@ import {
   createPostgresOrdinaryRefundWindowSource,
   createPostgresPaymentCaptureWindowSource,
   createPostgresPaymentReconciliationDaySource,
+  createPostgresSoleOperatorRefundSummaryReader,
 } from "@rms/payment";
 import {
   createPostgresAsPublishedStorePublicationProof,
@@ -259,6 +260,23 @@ export function createPersistentMerchantSettlement(options: {
             afterRefundReference = page.nextAfterRefundReference;
           } while (afterRefundReference !== null);
           return { count, amountMinor: amountMinor.toString(), currencyCode: "CAD" as const };
+        }),
+      // WP-2423 Q19: the Owner's self-approved refunds in the day (sole operator), for review.
+      selfApprovedRefunds: (tx, scope, window) =>
+        optional(async () => {
+          const summary = await createPostgresSoleOperatorRefundSummaryReader({
+            scope: {
+              tenantReference: scope.tenantReference,
+              brandReference: scope.brandReference,
+              storeReference: scope.storeReference,
+            },
+            authorize: async (t) => guard(scope)(t),
+          })(tx, { startsAt: window.startsAt, endsAt: window.endsAt });
+          return {
+            count: summary.count,
+            amountMinor: summary.amountMinor.toString(),
+            currencyCode: summary.currencyCode,
+          };
         }),
       reconciliation: (tx, scope, window) =>
         optional(async () => {

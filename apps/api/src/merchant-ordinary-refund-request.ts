@@ -8,6 +8,7 @@ import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { createMerchantWorkforcePermissionSource } from "./merchant-workforce-authority-source.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
+import type { MerchantRefundSoleOperatorResolver } from "./merchant-sole-operator.js";
 /** WP-2423 Q5 (DEC-REFUND-ESCALATION-PILOT): the reasons staff choose from, recorded on the
  * request and its Audit. "Other" requires a short staff note, kept in Payment's Confidential note
  * record (never in Audit, logs or URLs) and shown to the approver. */
@@ -45,6 +46,9 @@ export function createMerchantOrdinaryRefundRequest(options: {
   /** WP-2423 Q5: Store Business Date (owner composition) so the result says whether an
    * Owner/Finance approval is needed and why. Absent: approval need is not reported. */
   businessDate?: Parameters<typeof createPostgresOrdinaryRefundRequestRuntime>[0]["businessDate"];
+  /** WP-2423 Q19 (DEC-SOLE-OPERATOR-APPROVAL): an Owner may request while sole operator is in
+   * effect for them; absent, only a Manager may request (unchanged). */
+  soleOperator?: MerchantRefundSoleOperatorResolver;
 }) {
   const resolve = createMerchantStoreScope(options.persistence);
   const deny = (): never => {
@@ -123,6 +127,22 @@ export function createMerchantOrdinaryRefundRequest(options: {
         }),
       });
       const role = createOrdinaryRefundRoleResolver(configuration.roleMapping);
+      // Read once per command at the command instant; preparation and approval recheck it.
+      let soleOperatorStatus: Promise<string> | null = null;
+      const soleOperator = options.soleOperator;
+      const soleOperatorEffective = async () => {
+        if (soleOperator === undefined) return false;
+        soleOperatorStatus ??= soleOperator(
+          businessTransaction,
+          {
+            ...scope,
+            actorReference: String(current.actorReference),
+            observedAt: String(current.context.resolvedAt),
+          },
+          { context: current.context, authorize: current.allowed },
+        );
+        return (await soleOperatorStatus) === "Effective";
+      };
       const authorize = async (
         _tx: ConsumerTransaction,
         query: Scope & { orderReference: string; actorReference: string; observedAt: string },
@@ -143,9 +163,10 @@ export function createMerchantOrdinaryRefundRequest(options: {
           observedAt: current.context.resolvedAt,
           permissionCode: "payment.refund.request",
         });
+        if (authority.decision.effect !== "Allow") return false;
+        const requestRole = role("payment.refund.request", authority.activeRoleCodes);
         return (
-          authority.decision.effect === "Allow" &&
-          role("payment.refund.request", authority.activeRoleCodes) === "Manager"
+          requestRole === "Manager" || (requestRole === "Owner" && (await soleOperatorEffective()))
         );
       };
       const runtime = createPostgresOrdinaryRefundRequestRuntime({

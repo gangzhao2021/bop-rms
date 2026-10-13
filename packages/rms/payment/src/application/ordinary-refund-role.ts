@@ -38,8 +38,10 @@ export function createOrdinaryRefundRoleResolver(value: unknown) {
   }
   return (permissionCode: unknown, activeRoleCodes: unknown): RefundRole | null => {
     const current = new Set(codes(activeRoleCodes).map((code) => bindings.get(code)));
+    // WP-2423 Q19: an Owner resolves as "Owner" for a request; Payment accepts an Owner's
+    // request only while sole operator is in effect for them (approval evaluation), never otherwise.
     if (permissionCode === "payment.refund.request")
-      return current.has("Manager") ? "Manager" : null;
+      return current.has("Manager") ? "Manager" : current.has("Owner") ? "Owner" : null;
     if (permissionCode === "payment.refund.approve") {
       if (current.has("Owner")) return "Owner";
       if (current.has("Finance")) return "Finance";

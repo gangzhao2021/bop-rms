@@ -3,6 +3,7 @@ import { appendAuditRecordInTransaction, validateAuditRecord } from "@bop/audit"
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
   evaluateOrdinaryRefundIndependentApproval,
+  ordinaryRefundApprovalModeOf,
   parseOrdinaryRefundApproval,
   encodeOrdinaryRefundApproval,
   decodeOrdinaryRefundApproval,
@@ -91,7 +92,15 @@ export function createPostgresOrdinaryRefundApprovalStore(options: Options) {
       )
         return fail();
       const audit = validateAuditRecord(auditValue);
+      // WP-2423 Q19: a sole-operator approval says so in its Audit; an independent one carries
+      // no summary (unchanged).
+      const mode = ordinaryRefundApprovalModeOf(approval);
+      const summaryValid =
+        mode === "SoleOperator"
+          ? JSON.stringify(audit.afterSummary) === JSON.stringify({ approvalMode: "SoleOperator" })
+          : audit.afterSummary === undefined;
       if (
+        !summaryValid ||
         audit.auditId !== auditReference ||
         audit.brandId !== subject.brandReference ||
         audit.storeId !== subject.storeReference ||
@@ -103,8 +112,7 @@ export function createPostgresOrdinaryRefundApprovalStore(options: Options) {
         audit.correlationId !== operation ||
         audit.occurredAt !== approval.approvedAt ||
         audit.dataClassification !== "Restricted" ||
-        audit.beforeSummary !== undefined ||
-        audit.afterSummary !== undefined
+        audit.beforeSummary !== undefined
       )
         return fail();
       const query = {
@@ -165,6 +173,7 @@ export function createPostgresOrdinaryRefundApprovalStore(options: Options) {
         approvalReference: approval.approvalReference,
         approverReference: approval.approverReference,
         observedAt: approval.approvedAt,
+        ...(mode === "SoleOperator" ? { approvalMode: "SoleOperator" } : {}),
       });
       if (
         current.claimVersion !== claimVersion ||
@@ -177,8 +186,8 @@ export function createPostgresOrdinaryRefundApprovalStore(options: Options) {
       try {
         const inserted = await tx.query(
           "INSERT INTO rms_payment.ordinary_refund_approval " +
-            "(tenant_id,brand_id,store_id,order_id,request_id,approval_id,operation_id,requester_id,approver_id,audit_id,claim_version,approved_at,requester_mfa_at,approver_mfa_at,claims_digest,allocation_digest,record_json) " +
-            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb)",
+            "(tenant_id,brand_id,store_id,order_id,request_id,approval_id,operation_id,requester_id,approver_id,audit_id,claim_version,approved_at,requester_mfa_at,approver_mfa_at,claims_digest,allocation_digest,record_json,approval_mode) " +
+            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,$18)",
           [
             subject.tenantReference,
             subject.brandReference,
@@ -197,6 +206,7 @@ export function createPostgresOrdinaryRefundApprovalStore(options: Options) {
             subject.claimsDigest,
             subject.allocationDigest,
             encoded,
+            mode,
           ],
         );
         if (inserted.rowCount !== 1) return fail();
@@ -434,7 +444,7 @@ export function createPostgresOrdinaryRefundDeclineStore(options: Options) {
     throw new OrdinaryRefundDeclineError(code);
   };
   return async (tx: ConsumerTransaction, value: unknown, auditPolicy: unknown) => {
-    const raw = exactPaymentObject(value, [
+    const keys = [
       "orderReference",
       "requestReference",
       "declineReference",
@@ -442,7 +452,17 @@ export function createPostgresOrdinaryRefundDeclineStore(options: Options) {
       "auditReference",
       "declinerReference",
       "reasonCode",
-    ]);
+    ];
+    // WP-2423 Q19: declineMode "SoleOperator" is an Owner withdrawing their own request while
+    // sole operator is in effect for them (entered in error or the customer withdrew).
+    const withMode =
+      value !== null &&
+      typeof value === "object" &&
+      Object.prototype.hasOwnProperty.call(value, "declineMode");
+    const raw = exactPaymentObject(value, withMode ? [...keys, "declineMode"] : keys);
+    if (withMode && raw.declineMode !== "Independent" && raw.declineMode !== "SoleOperator")
+      return denied("ORDINARY_REFUND_DECLINE_DENIED");
+    const sole = withMode && raw.declineMode === "SoleOperator";
     const policy = exactPaymentObject(auditPolicy, [
       "retentionPolicyCode",
       "retentionPolicyVersion",
@@ -458,6 +478,8 @@ export function createPostgresOrdinaryRefundDeclineStore(options: Options) {
     if (!ordinaryRefundDeclineReasons.includes(raw.reasonCode as never))
       return denied("ORDINARY_REFUND_DECLINE_DENIED");
     const reasonCode = raw.reasonCode as (typeof ordinaryRefundDeclineReasons)[number];
+    if (sole && reasonCode !== "ENTERED_IN_ERROR" && reasonCode !== "CUSTOMER_WITHDREW")
+      return denied("ORDINARY_REFUND_DECLINE_DENIED");
     const scope = {
       tenantReference: String(parsePaymentReference(options.scope.tenantReference)),
       brandReference: String(parsePaymentReference(options.scope.brandReference)),
@@ -498,7 +520,7 @@ export function createPostgresOrdinaryRefundDeclineStore(options: Options) {
     if (ordinaryRefundClaimKind(current.request) !== "Ordinary")
       return denied("ORDINARY_REFUND_DECLINE_CONFLICT");
     const prior = await tx.query(
-      "SELECT decline_id::text AS decline,request_id::text AS request,decliner_id::text AS decliner,reason_code,audit_id::text AS audit,operation_id::text AS operation,declined_at FROM rms_payment.ordinary_refund_decline WHERE brand_id=$1 AND store_id=$2 AND (operation_id=$3 OR request_id=$4)",
+      "SELECT decline_id::text AS decline,request_id::text AS request,decliner_id::text AS decliner,reason_code,audit_id::text AS audit,operation_id::text AS operation,declined_at,decline_mode FROM rms_payment.ordinary_refund_decline WHERE brand_id=$1 AND store_id=$2 AND (operation_id=$3 OR request_id=$4)",
       [scope.brandReference, scope.storeReference, ids.operationReference, ids.requestReference],
     );
     if (prior.rows.length > 1) return denied("ORDINARY_REFUND_DECLINE_CONFLICT");
@@ -507,6 +529,7 @@ export function createPostgresOrdinaryRefundDeclineStore(options: Options) {
       if (row.operation !== ids.operationReference)
         return denied("ORDINARY_REFUND_DECLINE_ALREADY_DECLINED");
       if (
+        (row.decline_mode === "SoleOperator") !== sole ||
         row.decline !== ids.declineReference ||
         row.request !== ids.requestReference ||
         row.decliner !== ids.declinerReference ||
@@ -526,8 +549,10 @@ export function createPostgresOrdinaryRefundDeclineStore(options: Options) {
       [scope.brandReference, scope.storeReference, ids.requestReference],
     );
     if (prepared.rows[0]?.n !== 0) return denied("ORDINARY_REFUND_DECLINE_ALREADY_PREPARED");
-    if (current.requesterReference === ids.declinerReference)
-      return denied("ORDINARY_REFUND_DECLINE_SAME_PERSON");
+    if ((current.requesterReference === ids.declinerReference) !== sole)
+      return denied(
+        sole ? "ORDINARY_REFUND_DECLINE_DENIED" : "ORDINARY_REFUND_DECLINE_SAME_PERSON",
+      );
     const facts = await options.authority(tx, {
       ...scope,
       orderReference: ids.orderReference,
@@ -548,6 +573,7 @@ export function createPostgresOrdinaryRefundDeclineStore(options: Options) {
       fact("active") !== true ||
       fact("allowed") !== true ||
       (fact("role") !== "Owner" && fact("role") !== "Finance") ||
+      (sole && (fact("role") !== "Owner" || fact("soleOperator") !== "Effective")) ||
       fact("observedAt") !== observedAt
     )
       return denied("ORDINARY_REFUND_DECLINE_DENIED");
@@ -564,6 +590,7 @@ export function createPostgresOrdinaryRefundDeclineStore(options: Options) {
       actionCode: "PAYMENT_ORDINARY_REFUND_DECLINED",
       targetType: "PaymentRefundDecline",
       targetId: ids.declineReference,
+      ...(sole ? { afterSummary: { declineMode: "SoleOperator" } } : {}),
       reasonCode,
       correlationId: ids.operationReference,
       occurredAt: observedAt,
@@ -575,7 +602,7 @@ export function createPostgresOrdinaryRefundDeclineStore(options: Options) {
     await tx.query("SAVEPOINT ordinary_refund_decline_append", []);
     try {
       const inserted = await tx.query(
-        "INSERT INTO rms_payment.ordinary_refund_decline (tenant_id,brand_id,store_id,order_id,request_id,decline_id,operation_id,requester_id,decliner_id,reason_code,claim_count,declined_at,decliner_mfa_at,audit_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)",
+        "INSERT INTO rms_payment.ordinary_refund_decline (tenant_id,brand_id,store_id,order_id,request_id,decline_id,operation_id,requester_id,decliner_id,reason_code,claim_count,declined_at,decliner_mfa_at,audit_id,decline_mode) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)",
         [
           scope.tenantReference,
           scope.brandReference,
@@ -591,6 +618,7 @@ export function createPostgresOrdinaryRefundDeclineStore(options: Options) {
           observedAt,
           mfaAt,
           ids.auditReference,
+          sole ? "SoleOperator" : "Independent",
         ],
       );
       if (inserted.rowCount !== 1) return denied("ORDINARY_REFUND_DECLINE_CONFLICT");
@@ -603,5 +631,64 @@ export function createPostgresOrdinaryRefundDeclineStore(options: Options) {
       throw error;
     }
     return Object.freeze({ status: "Created" as const, declinedAt: observedAt });
+  };
+}
+
+/**
+ * WP-2423 Q19 (DEC-SOLE-OPERATOR-APPROVAL): refunds an Owner approved for themself (approval mode
+ * SoleOperator) within a Business Date window, for the Owner's after-the-fact review at day close.
+ * Counts approvals (whatever the later send result) and sums their requested amounts. Read only.
+ */
+export function createPostgresSoleOperatorRefundSummaryReader(options: {
+  scope: Options["scope"];
+  authorize(
+    tx: ConsumerTransaction,
+    query: Options["scope"] & { startsAt: string; endsAt: string },
+  ): Promise<boolean>;
+}) {
+  const scope = {
+    tenantReference: String(parsePaymentReference(options.scope.tenantReference)),
+    brandReference: String(parsePaymentReference(options.scope.brandReference)),
+    storeReference: String(parsePaymentReference(options.scope.storeReference)),
+  };
+  return async (tx: ConsumerTransaction, value: unknown) => {
+    const raw = exactPaymentObject(value, ["startsAt", "endsAt"]);
+    const startsAt = parsePaymentInstant(raw.startsAt),
+      endsAt = parsePaymentInstant(raw.endsAt);
+    if (startsAt >= endsAt) return fail();
+    const authorize = async () => {
+      if ((await options.authorize(tx, { ...scope, startsAt, endsAt })) !== true) return fail();
+    };
+    await authorize();
+    await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+      scope.brandReference,
+      scope.storeReference,
+    ]);
+    const result = await tx.query(
+      "SELECT count(*)::text AS n,COALESCE(sum(r.amount_minor),0)::text AS amount " +
+        "FROM rms_payment.ordinary_refund_approval a JOIN rms_payment.ordinary_refund_request r " +
+        "ON r.brand_id=a.brand_id AND r.store_id=a.store_id AND r.request_id=a.request_id " +
+        "WHERE a.brand_id=$1 AND a.store_id=$2 AND a.tenant_id=$3 AND a.approval_mode='SoleOperator' " +
+        "AND a.approved_at>=$4 AND a.approved_at<$5",
+      [scope.brandReference, scope.storeReference, scope.tenantReference, startsAt, endsAt],
+    );
+    const row = result.rows[0];
+    if (
+      result.rows.length !== 1 ||
+      !row ||
+      typeof row.n !== "string" ||
+      typeof row.amount !== "string" ||
+      !/^(0|[1-9][0-9]{0,17})$/u.test(row.n) ||
+      !/^(0|[1-9][0-9]{0,17})$/u.test(row.amount)
+    )
+      return fail();
+    await authorize();
+    return Object.freeze({
+      count: Number(row.n),
+      amountMinor: BigInt(row.amount),
+      currencyCode: "CAD" as const,
+      startsAt,
+      endsAt,
+    });
   };
 }

@@ -20,11 +20,19 @@ export async function refundReadAccess(
     observedAt: string;
   },
   role: Role,
+  /** WP-2423 Q19: an Owner may also request while sole operator is in effect for them. */
+  soleOperatorEffective?: () => Promise<boolean>,
 ): Promise<{ readonly canRead: boolean; readonly canRequest: boolean }> {
   const request = await workforce(tx, { ...base, permissionCode: "payment.refund.request" });
+  const requestRole =
+    request.decision.effect === "Allow"
+      ? role("payment.refund.request", request.activeRoleCodes)
+      : null;
   const canRequest =
-    request.decision.effect === "Allow" &&
-    role("payment.refund.request", request.activeRoleCodes) === "Manager";
+    requestRole === "Manager" ||
+    (requestRole === "Owner" &&
+      soleOperatorEffective !== undefined &&
+      (await soleOperatorEffective()));
   if (canRequest) return Object.freeze({ canRead: true, canRequest });
   const approve = await workforce(tx, { ...base, permissionCode: "payment.refund.approve" });
   const approver = role("payment.refund.approve", approve.activeRoleCodes);

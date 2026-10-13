@@ -36,12 +36,16 @@ export function createMerchantOrdinaryRefundDecline(options: {
   const ref = (value: unknown) => String(parseOpaqueUuidV7(value, "ACTOR_REFERENCE_INVALID"));
   return async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
     const authenticated = await options.authentication.authorize(input);
-    const raw = readClosedRecord(input.command, [
-      "orderReference",
-      "requestReference",
-      "operationReference",
-      "reasonCode",
-    ]);
+    // WP-2423 Q19: declineMode "SoleOperator" is an Owner withdrawing their own request while
+    // sole operator is in effect (entered in error, or the customer withdrew).
+    const keys = ["orderReference", "requestReference", "operationReference", "reasonCode"];
+    const withMode =
+      input.command !== null &&
+      typeof input.command === "object" &&
+      Object.prototype.hasOwnProperty.call(input.command, "declineMode");
+    const raw = readClosedRecord(input.command, withMode ? [...keys, "declineMode"] : keys);
+    if (withMode && raw.declineMode !== "SoleOperator")
+      throw new MerchantRefundApprovalError("Denied");
     const orderReference = ref(raw.orderReference),
       requestReference = ref(raw.requestReference),
       operationReference = ref(raw.operationReference);
@@ -88,6 +92,7 @@ export function createMerchantOrdinaryRefundDecline(options: {
             auditReference: approvalDerivedReference(operationReference, "decline-audit"),
             declinerReference: actorReference,
             reasonCode: raw.reasonCode,
+            ...(withMode ? { declineMode: "SoleOperator" } : {}),
           },
           {
             retentionPolicyCode: options.retentionPolicyCode,

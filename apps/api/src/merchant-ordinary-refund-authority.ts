@@ -7,6 +7,7 @@ import {
 } from "@bop/identity";
 import { createOrdinaryRefundRoleResolver } from "@rms/payment";
 import { createMerchantWorkforceAuthoritySource } from "./merchant-workforce-authority-source.js";
+import { createMerchantSoleOperatorApproval } from "./merchant-sole-operator.js";
 
 type WorkforceOptions = Parameters<typeof createMerchantWorkforceAuthoritySource>[0];
 /** Composes owner facts into Payment's approval port. Scoped role mapping is
@@ -26,6 +27,10 @@ export function createMerchantOrdinaryRefundAuthority(
     /** WP-2423 Q5: recent MFA also counts the actor's latest step-up at this Store
      * (Identity owner read), not only the original enrollment verification. */
     stepUp?: boolean;
+    /** WP-2423 Q19: add the Organization `soleOperatorApproval` fact (for this actor and
+     * `payment.refund.approve` at this Store, at this instant) for an actor mapped as Owner.
+     * Payment admits an Owner's own request and approval only while it is Effective. */
+    soleOperator?: boolean;
   },
 ) {
   const workforce = createMerchantWorkforceAuthoritySource(options);
@@ -54,11 +59,46 @@ export function createMerchantOrdinaryRefundAuthority(
       storeReference: current.storeReference,
       observedAt: current.observedAt,
     });
-    const role = createOrdinaryRefundRoleResolver(mapping)(
-      current.permissionCode,
-      current.activeRoleCodes,
-    );
+    const resolver = createOrdinaryRefundRoleResolver(mapping);
+    const role = resolver(current.permissionCode, current.activeRoleCodes);
     if (role === null) throw new Error("ORDINARY_REFUND_AUTHORITY_DENIED");
+    // Only an actor mapped as Owner can be a sole operator; others are NotSet without a read.
+    const soleOperator =
+      options.soleOperator !== true
+        ? undefined
+        : resolver("payment.refund.approve", current.activeRoleCodes) !== "Owner"
+          ? ("NotSet" as const)
+          : (
+              await createMerchantSoleOperatorApproval({
+                resolveContext: options.resolveContext,
+                // The same retained actor/Store fence as the permission read.
+                authorize: async () => {
+                  const fresh = await options.resolveContext(tx, {
+                    tenantReference: current.tenantReference,
+                    brandReference: current.brandReference,
+                    storeReference: current.storeReference,
+                    actorReference: current.actorReference,
+                    observedAt: current.observedAt,
+                    permissionCode: current.permissionCode,
+                  });
+                  return (
+                    fresh.tenantReference === current.tenantReference &&
+                    fresh.context.actor.actorReference === current.actorReference &&
+                    fresh.context.actor.status === "Active" &&
+                    fresh.context.brand.brandReference === current.brandReference &&
+                    fresh.context.store?.storeReference === current.storeReference &&
+                    String(fresh.context.resolvedAt) === String(current.observedAt)
+                  );
+                },
+              })(tx, {
+                tenantReference: current.tenantReference,
+                brandReference: current.brandReference,
+                storeReference: current.storeReference,
+                permissionCode: "payment.refund.approve",
+                actorReference: current.actorReference,
+                observedAt: current.observedAt,
+              })
+            ).status;
     const latestStepUpAt =
       options.stepUp === true
         ? await createPostgresLatestWorkforceStepUpSource({
@@ -107,6 +147,7 @@ export function createMerchantOrdinaryRefundAuthority(
         latestStepUpAt,
       }),
       observedAt: current.observedAt,
+      ...(soleOperator === undefined ? {} : { soleOperator }),
     });
   };
 }

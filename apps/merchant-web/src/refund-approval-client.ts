@@ -14,7 +14,7 @@ export type DeclineReason = (typeof declineReasons)[number];
  * member, the Store's refunds awaiting an Owner/Finance approval, and the in-person approval that
  * sends the refund. The six-digit code is sent once and never kept, logged or shown again.
  */
-export type StepUpPurpose = "RefundRequest" | "RefundApproval";
+export type StepUpPurpose = "RefundRequest" | "RefundApproval" | "SoleOperatorSetting";
 export type StepUpFailure =
   "CodeRejected" | "CodeAlreadyUsed" | "TooManyAttempts" | "NotSetUp" | "Denied" | "Unavailable";
 export class StepUpError extends Error {
@@ -35,6 +35,8 @@ export type ApprovalFailure =
   | "AlreadyDeclined"
   | "NotPermitted"
   | "RequesterNotEligible"
+  /** WP-2423 Q19: self-approval asked for, but another person now holds refund approval. */
+  | "SoleOperatorNotInEffect"
   | "Unavailable"
   | "OutcomeUnknown";
 export class RefundApprovalClientError extends Error {
@@ -116,7 +118,11 @@ export interface RefundApprovalEntry {
   readonly approvedAt: string | null;
   readonly approverName: string | null;
   readonly canApprove: boolean;
+  /** WP-2423 Q19: approving this one is the Owner approving their own request (sole operator). */
+  readonly soleOperatorApproval: boolean;
 }
+/** WP-2423 Q19: whether sole operator is in effect for the signed-in approver (null: not read). */
+export type SoleOperatorStatus = "Effective" | "NotSet" | "OtherApprovers";
 
 function entry(value: unknown): RefundApprovalEntry {
   const raw = record(value, [
@@ -138,8 +144,11 @@ function entry(value: unknown): RefundApprovalEntry {
     "approvedAt",
     "approverName",
     "canApprove",
+    "soleOperatorApproval",
   ]);
   if (
+    typeof raw.soleOperatorApproval !== "boolean" ||
+    (raw.soleOperatorApproval && (!raw.requestedByYou || !raw.canApprove)) ||
     raw.currencyCode !== "CAD" ||
     (raw.state !== "AwaitingApproval" && raw.state !== "Approved") ||
     typeof raw.requestedByYou !== "boolean" ||
@@ -179,6 +188,7 @@ function entry(value: unknown): RefundApprovalEntry {
     approvedAt: nullable(raw.approvedAt, instant),
     approverName: nullable(raw.approverName, text),
     canApprove: raw.canApprove,
+    soleOperatorApproval: raw.soleOperatorApproval,
   });
 }
 
@@ -293,8 +303,17 @@ export function createRefundApprovalClient(fetcher: typeof fetch = fetch) {
         throw new RefundApprovalClientError("Denied");
       if (response.status !== 200 || response.headers.get("cache-control") !== "no-store")
         throw new RefundApprovalClientError("Unavailable");
-      const raw = record(await body(response), ["observedAt", "canApprove", "entries"]);
+      const raw = record(await body(response), [
+        "observedAt",
+        "canApprove",
+        "soleOperator",
+        "entries",
+      ]);
       if (
+        (raw.soleOperator !== null &&
+          raw.soleOperator !== "Effective" &&
+          raw.soleOperator !== "NotSet" &&
+          raw.soleOperator !== "OtherApprovers") ||
         typeof raw.canApprove !== "boolean" ||
         !Array.isArray(raw.entries) ||
         raw.entries.length > 100
@@ -305,6 +324,7 @@ export function createRefundApprovalClient(fetcher: typeof fetch = fetch) {
       return Object.freeze({
         observedAt: instant(raw.observedAt),
         canApprove: raw.canApprove,
+        soleOperator: raw.soleOperator as SoleOperatorStatus | null,
         entries: Object.freeze(entries),
       });
     },
@@ -313,7 +333,13 @@ export function createRefundApprovalClient(fetcher: typeof fetch = fetch) {
      * result: the server reuses the same approval, operation and send, so it never refunds twice.
      */
     async approve(
-      command: { orderReference: string; requestReference: string; approvalReference: string },
+      command: {
+        orderReference: string;
+        requestReference: string;
+        approvalReference: string;
+        /** WP-2423 Q19: the Owner confirms they approve their own request as sole operator. */
+        soleOperator?: boolean;
+      },
       csrf: string,
       signal?: AbortSignal,
     ) {
@@ -321,6 +347,7 @@ export function createRefundApprovalClient(fetcher: typeof fetch = fetch) {
         orderReference: ref(command.orderReference),
         requestReference: ref(command.requestReference),
         approvalReference: ref(command.approvalReference),
+        ...(command.soleOperator === true ? { approvalMode: "SoleOperator" } : {}),
       });
       if (!csrfPattern.test(csrf)) throw new RefundApprovalClientError("Unavailable");
       let response: Response;
@@ -390,6 +417,8 @@ export function createRefundApprovalClient(fetcher: typeof fetch = fetch) {
         requestReference: string;
         operationReference: string;
         reasonCode: DeclineReason;
+        /** WP-2423 Q19: the Owner withdraws their own request as sole operator. */
+        soleOperator?: boolean;
       },
       csrf: string,
       signal?: AbortSignal,
@@ -401,6 +430,7 @@ export function createRefundApprovalClient(fetcher: typeof fetch = fetch) {
         requestReference: ref(command.requestReference),
         operationReference: ref(command.operationReference),
         reasonCode: command.reasonCode,
+        ...(command.soleOperator === true ? { declineMode: "SoleOperator" } : {}),
       });
       let response: Response;
       try {
@@ -455,6 +485,8 @@ function refusal(status: number, data: unknown): never {
     throw new RefundApprovalClientError("AlreadyPrepared");
   if (status === 409 && error === "refund_already_declined")
     throw new RefundApprovalClientError("AlreadyDeclined");
+  if (status === 409 && error === "sole_operator_not_in_effect")
+    throw new RefundApprovalClientError("SoleOperatorNotInEffect");
   if (status === 409) throw new RefundApprovalClientError("Changed");
   if (status === 401 || status === 403) throw new RefundApprovalClientError("Denied");
   throw new RefundApprovalClientError("OutcomeUnknown");

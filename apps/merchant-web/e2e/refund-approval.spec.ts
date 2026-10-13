@@ -30,6 +30,7 @@ test("@production owner verifies and approves a refund above CAD 100 once", asyn
     approvedAt: null,
     approverName: null,
     canApprove: true,
+    soleOperatorApproval: false,
   };
   // A second card waiting for the same owner: one verification must serve both.
   const second = {
@@ -53,6 +54,10 @@ test("@production owner verifies and approves a refund above CAD 100 once", asyn
   );
   const stepUps: string[] = [],
     approvals: string[] = [];
+  // WP-2423 Q19: this owner is not the Brand Owner; the sole-operator section stays hidden.
+  await page.route("**/merchant/organization/sole-operator", (route) =>
+    route.fulfill({ status: 403, headers, json: { error: "brand_owner_required" } }),
+  );
   await page.route("**/merchant/session", (route) =>
     route.fulfill({
       headers,
@@ -84,7 +89,12 @@ test("@production owner verifies and approves a refund above CAD 100 once", asyn
   await page.route("**/merchant/payments/refunds/approvals", (route) =>
     route.fulfill({
       headers,
-      json: { observedAt: new Date(now).toISOString(), canApprove: true, entries: listed },
+      json: {
+        observedAt: new Date(now).toISOString(),
+        canApprove: true,
+        soleOperator: null,
+        entries: listed,
+      },
     }),
   );
   await page.route("**/merchant/identity/step-up", (route) => {
@@ -224,9 +234,14 @@ test("@production owner declines a refund with a reason and it leaves the list",
       approvedAt: null,
       approverName: null,
       canApprove: true,
+      soleOperatorApproval: false,
     },
   ];
   const declines: string[] = [];
+  // WP-2423 Q19: this owner is not the Brand Owner; the sole-operator section stays hidden.
+  await page.route("**/merchant/organization/sole-operator", (route) =>
+    route.fulfill({ status: 403, headers, json: { error: "brand_owner_required" } }),
+  );
   await page.route("**/merchant/session", (route) =>
     route.fulfill({
       headers,
@@ -258,7 +273,12 @@ test("@production owner declines a refund with a reason and it leaves the list",
   await page.route("**/merchant/payments/refunds/approvals", (route) =>
     route.fulfill({
       headers,
-      json: { observedAt: new Date(now).toISOString(), canApprove: true, entries: listed },
+      json: {
+        observedAt: new Date(now).toISOString(),
+        canApprove: true,
+        soleOperator: null,
+        entries: listed,
+      },
     }),
   );
   await page.route("**/merchant/identity/step-up", (route) => {
@@ -390,7 +410,12 @@ for (const pending of [false, true])
       await page.route("**/merchant/payments/refunds/approvals", (route) =>
         route.fulfill({
           headers,
-          json: { observedAt: "2026-10-12T15:00:00.000Z", canApprove: true, entries: [] },
+          json: {
+            observedAt: "2026-10-12T15:00:00.000Z",
+            canApprove: true,
+            soleOperator: null,
+            entries: [],
+          },
         }),
       );
       await page.goto("/app/operations/payments/" + id(31));

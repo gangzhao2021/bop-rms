@@ -1066,6 +1066,12 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/merchant-organization-source.ts";
+        // WP-2423 Q19: append-only Brand sole-operator setting and its public read.
+        const acceptedBrandSoleOperatorSettingAsset =
+          module.packageName === "@bop/tenant" &&
+          module.manifest.ownedDatabase?.schema === "bop_tenant" &&
+          module.manifest.ownedDatabase?.tables?.includes("brand_sole_operator_setting") &&
+          moduleRelative === "src/infrastructure/persistence/sole-operator-setting-store.ts";
         const acceptedBrowserSessionStoreAsset =
           module.packageName === "@bop/identity" &&
           module.manifest.ownedDatabase?.schema === "bop_identity" &&
@@ -3275,6 +3281,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedSelectedTaxReferenceAsset &&
           !acceptedTenantStoreReferenceAsset &&
           !acceptedMerchantOrganizationAsset &&
+          !acceptedBrandSoleOperatorSettingAsset &&
           !acceptedBrandLifecycleAsset &&
           !acceptedBrandConfigurationAuthoringAsset &&
           !acceptedPlatformBrandTemplateAsset &&

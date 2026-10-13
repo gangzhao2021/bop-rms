@@ -5,6 +5,7 @@ import { createPostgresReceiptOrderSource } from "@rms/ordering";
 import { createPostgresOrdinaryRefundApprovalQueueRuntime } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { createMerchantOrdinaryRefundAuthority } from "./merchant-ordinary-refund-authority.js";
+import { createMerchantSoleOperatorApproval } from "./merchant-sole-operator.js";
 import {
   businessTransaction,
   refundMfaRecencyMilliseconds,
@@ -106,6 +107,22 @@ export function createMerchantOrdinaryRefundApprovals(options: {
           }
         return names.get(actor) ?? null;
       };
+      // WP-2423 Q19: whether this approver may approve their own requests (sole operator in
+      // effect now). Read only when one of the entries is theirs; approval rechecks it.
+      const soleOperator =
+        canApprove && entries.some((entry) => entry.requesterReference === actorReference)
+          ? (
+              await createMerchantSoleOperatorApproval({
+                resolveContext: configuration.workforce.resolveContext,
+                authorize: still,
+              })(tx, {
+                ...scope,
+                permissionCode: "payment.refund.approve",
+                actorReference,
+                observedAt,
+              })
+            ).status
+          : null;
       const result = [];
       for (const entry of entries) {
         const requesterVerifiedUntil = await verifiedUntil(
@@ -136,12 +153,20 @@ export function createMerchantOrdinaryRefundApprovals(options: {
               entry.approval === null ? null : await name(entry.approval.approverReference),
             canApprove:
               canApprove &&
-              entry.requesterReference !== actorReference &&
+              (entry.requesterReference !== actorReference || soleOperator === "Effective") &&
               (entry.approval === null || entry.approval.approverReference === actorReference),
+            /** WP-2423 Q19: approving this one is the Owner approving their own request. */
+            soleOperatorApproval:
+              entry.requesterReference === actorReference && soleOperator === "Effective",
           }),
         );
       }
       if (!(await still())) return denied();
-      return Object.freeze({ observedAt, canApprove, entries: Object.freeze(result) });
+      return Object.freeze({
+        observedAt,
+        canApprove,
+        soleOperator,
+        entries: Object.freeze(result),
+      });
     });
 }

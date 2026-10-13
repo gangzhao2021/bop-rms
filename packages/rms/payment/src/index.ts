@@ -197,7 +197,14 @@ export {
   createPostgresOrdinaryRefundDeclineStore,
   OrdinaryRefundDeclineError,
   ordinaryRefundDeclineReasons,
+  createPostgresSoleOperatorRefundSummaryReader,
 } from "./infrastructure/persistence/ordinary-refund-approval-store.js";
+// WP-2423 Q19: how an approval satisfied the "another person" rule, and the sole-operator fact.
+export {
+  ordinaryRefundApprovalModeOf,
+  type OrdinaryRefundApprovalMode,
+  type OrdinaryRefundSoleOperatorStatus,
+} from "./application/ordinary-refund-approval.js";
 export { createPostgresOrdinaryRefundApprovalSource } from "./infrastructure/ordinary-refund-approval-source.js";
 export {
   createPostgresOrdinaryRefundApprovalSubjectSource,

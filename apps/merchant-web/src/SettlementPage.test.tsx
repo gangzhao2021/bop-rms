@@ -112,3 +112,19 @@ describe("WP-2423 P1 settlement report", () => {
     expect(() => parseSettlementView(foreign)).toThrow("Unavailable");
   });
 });
+
+describe("WP-2423 Q19 self-approved refunds at day close", () => {
+  it("shows the count and amount the owner approved alone, nothing when none, and an unread source", () => {
+    const withSelf = {
+      ...settlementViewFixture(),
+      selfApprovedRefunds: { count: 2, amountMinor: "23200", currencyCode: "CAD" },
+    };
+    const html = render(withSelf);
+    expect(html).toContain("Refunds the owner approved alone");
+    expect(html).toContain("2 refunds · $232.00 approved by the owner without a second person");
+    expect(render(settlementViewFixture())).not.toContain("approved alone");
+    expect(render({ ...settlementViewFixture(), selfApprovedRefunds: null })).toContain(
+      "Refunds approved by the owner alone could not be read.",
+    );
+  });
+});

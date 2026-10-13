@@ -6,7 +6,10 @@ it("requires explicit scoped mappings and selects eligibility for the exact acti
   expect(resolve("payment.refund.request", ["store_manager"])).toBe("Manager");
   expect(resolve("payment.refund.approve", ["finance"])).toBe("Finance");
   expect(resolve("payment.refund.approve", ["brand_owner", "finance"])).toBe("Owner");
-  expect(resolve("payment.refund.request", ["brand_owner"])).toBeNull();
+  // WP-2423 Q19: an Owner is named for a request; Payment admits it only under sole operator.
+  expect(resolve("payment.refund.request", ["brand_owner"])).toBe("Owner");
+  expect(resolve("payment.refund.request", ["brand_owner", "store_manager"])).toBe("Manager");
+  expect(resolve("payment.refund.request", ["finance"])).toBeNull();
   expect(resolve("payment.refund.approve", ["store_manager"])).toBeNull();
   expect(resolve("payment.refund.approve", ["Owner"])).toBeNull();
   expect(() => resolve("payment.refund.execute", ["brand_owner"])).toThrow();

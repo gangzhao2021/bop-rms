@@ -1,5 +1,6 @@
 import { MerchantStepUpError } from "./merchant-mfa-step-up.js";
 import { MerchantRefundApprovalError } from "./merchant-ordinary-refund-approval.js";
+import { MerchantSoleOperatorError } from "./merchant-sole-operator-setting.js";
 import { BrandStoreTopologyError } from "@bop/tenant";
 import {
   parsePublishingOptionSetPublicationOperation,
@@ -1930,6 +1931,7 @@ describe("WP-2423 P1 merchant settlement read route", () => {
     },
     captured: { count: 3, amountMinor: "4500", currencyCode: "CAD" as const },
     refunded: null,
+    selfApprovedRefunds: { count: 1, amountMinor: "11600", currencyCode: "CAD" as const },
     reconciliation: {
       settlement: null,
       operational: {
@@ -5238,6 +5240,7 @@ it("WP-2423 Q5: lists refunds awaiting approval as a same-origin read", async ()
     approvedAt: null,
     approverName: null,
     canApprove: true,
+    soleOperatorApproval: false,
   };
   type Approvals = NonNullable<MerchantBffRouterOptions["ordinaryRefundApprovals"]>;
   const read = vi.fn<Approvals>(
@@ -5245,6 +5248,7 @@ it("WP-2423 Q5: lists refunds awaiting approval as a same-origin read", async ()
       ({
         observedAt: "2026-10-12T15:01:00.000Z",
         canApprove: true,
+        soleOperator: null,
         entries: [{ ...entry, requesterReference: id(9) }],
       }) as never,
   );
@@ -5263,9 +5267,116 @@ it("WP-2423 Q5: lists refunds awaiting approval as a same-origin read", async ()
   expect(body).toEqual({
     observedAt: "2026-10-12T15:01:00.000Z",
     canApprove: true,
+    soleOperator: null,
     entries: [entry],
   });
   expect(JSON.stringify(body)).not.toContain(id(9));
+});
+
+it("WP-2423 Q19: a self-approval without sole operator in effect is named, not a sign-in", async () => {
+  type Approve = NonNullable<MerchantBffRouterOptions["ordinaryRefundApproval"]>;
+  const command = vi.fn<Approve>(async () => {
+    throw new MerchantRefundApprovalError("SoleOperatorNotInEffect");
+  });
+  const root = await serveRefundEscalation({ ordinaryRefundApproval: command });
+  const failed = await request(root, "/merchant/payments/refunds/approve", {
+    method: "POST",
+    headers: {
+      ...safeHeaders,
+      Cookie: "__Host-bop-merchant=" + sessionCookie,
+      "X-BOP-CSRF": csrf,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ approvalMode: "SoleOperator" }),
+  });
+  expect([failed.status, await failed.json()]).toEqual([
+    409,
+    { error: "sole_operator_not_in_effect" },
+  ]);
+  expect(command.mock.calls[0]?.[0].command).toEqual({ approvalMode: "SoleOperator" });
+});
+
+it("WP-2423 Q19: the Brand Owner reads and changes the sole-operator setting", async () => {
+  type SoleOperator = NonNullable<MerchantBffRouterOptions["soleOperator"]>;
+  const view = {
+    observedAt: "2026-10-13T12:00:00.000Z",
+    state: "On" as const,
+    version: 1,
+    history: [],
+    refundApproval: {
+      status: "OtherApprovers" as const,
+      youHoldApproval: true,
+      otherApprovers: [{ displayName: "Mia" }],
+    },
+    verifiedUntil: null,
+    reasons: { On: ["OWNER_RUNS_STORE_ALONE"], Off: ["OWNER_CHOICE"] },
+  };
+  const readView = vi.fn(async () => view as never);
+  const change = vi.fn(async () => ({
+    status: "Created" as const,
+    state: "Off" as const,
+    version: 2,
+    recordedAt: "2026-10-13T12:01:00.000Z",
+  }));
+  const soleOperator = Object.assign(change, { read: readView }) as unknown as SoleOperator;
+  const root = await serveRefundEscalation({ soleOperator });
+  const get = (extra: Record<string, string> = {}, suffix = "") =>
+    request(root, "/merchant/organization/sole-operator" + suffix, {
+      headers: { ...safeHeaders, Cookie: "__Host-bop-merchant=" + sessionCookie, ...extra },
+    });
+  expect((await get({ Origin: "https://foreign.invalid" })).status).toBe(403);
+  expect((await get({}, "?brand=x")).status).toBe(403);
+  expect((await get({ Cookie: "" })).status).toBe(403);
+  const ok = await get();
+  expect([ok.status, ok.headers.get("cache-control")]).toEqual([200, "no-store"]);
+  expect(await ok.json()).toEqual(view);
+  expect(readView).toHaveBeenLastCalledWith({ sessionCookie });
+  readView.mockRejectedValueOnce(new MerchantSoleOperatorError("Denied"));
+  const notOwner = await get();
+  expect([notOwner.status, await notOwner.json()]).toEqual([
+    403,
+    { error: "brand_owner_required" },
+  ]);
+  const post = (extra: Record<string, string> = {}) =>
+    request(root, "/merchant/organization/sole-operator", {
+      method: "POST",
+      headers: {
+        ...safeHeaders,
+        Cookie: "__Host-bop-merchant=" + sessionCookie,
+        "X-BOP-CSRF": csrf,
+        "Content-Type": "application/json",
+        ...extra,
+      },
+      body: "{}",
+    });
+  for (const bad of [{ Origin: "https://foreign.invalid" }, { Cookie: "" }, { "X-BOP-CSRF": "" }])
+    expect((await post(bad)).status).toBe(403);
+  expect(change).not.toHaveBeenCalled();
+  const changed = await post();
+  expect([changed.status, await changed.json()]).toEqual([
+    200,
+    { status: "Created", state: "Off", version: 2, recordedAt: "2026-10-13T12:01:00.000Z" },
+  ]);
+  for (const [error, status, body] of [
+    [new MerchantSoleOperatorError("Denied"), 403, { error: "brand_owner_required" }],
+    [new MerchantSoleOperatorError("NeedsReverification"), 409, { error: "needs_reverification" }],
+    [new MerchantSoleOperatorError("VersionConflict"), 409, { error: "setting_changed" }],
+    [new MerchantSoleOperatorError("NoChange"), 409, { error: "no_change" }],
+    [new MerchantSoleOperatorError("Invalid"), 422, { error: "invalid_request" }],
+    [new Error("private"), 403, { error: "request_denied" }],
+  ] as const) {
+    change.mockRejectedValueOnce(error);
+    const failed = await post();
+    expect([failed.status, await failed.json()]).toEqual([status, body]);
+  }
+  const unconfigured = await serveRefundEscalation();
+  expect(
+    (
+      await request(unconfigured, "/merchant/organization/sole-operator", {
+        headers: { ...safeHeaders, Cookie: "__Host-bop-merchant=" + sessionCookie },
+      })
+    ).status,
+  ).toBe(503);
 });
 
 it("WP-2423 Q5: declines through the session and names why a decline was refused", async () => {

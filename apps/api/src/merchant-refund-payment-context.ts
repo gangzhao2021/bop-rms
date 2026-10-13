@@ -9,6 +9,7 @@ import {
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { createMerchantWorkforcePermissionSource } from "./merchant-workforce-authority-source.js";
 import { refundReadAccess } from "./merchant-refund-read-authority.js";
+import type { MerchantRefundSoleOperatorResolver } from "./merchant-sole-operator.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 interface Scope {
@@ -29,6 +30,8 @@ export function createMerchantRefundPaymentContext(options: {
     environment: "Test" | "Live";
     roleMapping: unknown;
   }>;
+  /** WP-2423 Q19: lets an Owner start a request while sole operator is in effect for them. */
+  soleOperator?: MerchantRefundSoleOperatorResolver;
 }) {
   const resolve = createMerchantStoreScope(options.persistence);
   const deny = (): never => {
@@ -85,6 +88,24 @@ export function createMerchantRefundPaymentContext(options: {
       });
       const role = createOrdinaryRefundRoleResolver(configuration.roleMapping);
       const viewer = { canRequest: false as boolean };
+      // WP-2423 Q19: read once per request (display only; the request command rechecks).
+      let soleOperatorStatus: Promise<string> | null = null;
+      const soleOperator = options.soleOperator;
+      const soleOperatorEffective =
+        soleOperator === undefined
+          ? undefined
+          : async () => {
+              soleOperatorStatus ??= soleOperator(
+                businessTransaction,
+                {
+                  ...scope,
+                  actorReference: String(current.actorReference),
+                  observedAt: String(current.context.resolvedAt),
+                },
+                { context: current.context, authorize: current.allowed },
+              );
+              return (await soleOperatorStatus) === "Effective";
+            };
       const allowed = async () => {
         if (!(await current.allowed())) return false;
         // WP-2423 Q5: Owners/Finance read refunds too; only a Manager records requests.
@@ -97,6 +118,7 @@ export function createMerchantRefundPaymentContext(options: {
             observedAt: String(current.context.resolvedAt),
           },
           role,
+          soleOperatorEffective,
         );
         viewer.canRequest = access.canRequest;
         return access.canRead;
