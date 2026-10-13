@@ -1,3 +1,8 @@
+import {
+  merchantBrandSoleOperatorGate,
+  MerchantSoleOperatorGateError,
+  requireMerchantBrandSoleOperator,
+} from "./merchant-sole-operator.js";
 import { confirmActiveBrandMembers, type MemberDirectoryTransaction } from "@bop/membership";
 import { brandActionHeldBy, type RoleAssignmentTransaction } from "@bop/permission";
 import {
@@ -47,7 +52,11 @@ export class MerchantOptionRecipeError extends Error {
       | "AllergenUndeclared"
       | "ReviewRequired"
       | "ReviewerNotIndependent"
-      | "Invalid",
+      | "Invalid"
+      /** WP-2423 Q19: reviewing alone needs sole operator in effect for the reviewer. */
+      | "SoleOperatorNotInEffect"
+      /** WP-2423 Q19: reviewing alone needs a second-factor check in the last 15 minutes. */
+      | "NeedsReverification",
     readonly skuReference: string | null = null,
   ) {
     super(code);
@@ -78,6 +87,8 @@ export type OptionRecipeCommandBody =
       readonly kind: "Cost" | "FoodSafety";
       readonly decision: "Approved" | "Rejected";
       readonly comment: string | null;
+      /** WP-2423 Q19: the sole operator reviews alone (own change, or both kinds). */
+      readonly approvalMode?: "SoleOperator";
     }
   | {
       readonly action: "Publish";
@@ -110,9 +121,14 @@ export function parseOptionRecipeCommandBody(value: unknown): OptionRecipeComman
       change,
     };
   }
+  const withMode = r.action === "Review" && Object.hasOwn(r, "approvalMode");
+  if (withMode && r.approvalMode !== "SoleOperator") return fail("Invalid");
   if (
     r.action === "Review" &&
-    keysOf(r) === "action,changeVersionReference,comment,decision,kind,operationReference" &&
+    keysOf(r) ===
+      (withMode
+        ? "action,approvalMode,changeVersionReference,comment,decision,kind,operationReference"
+        : "action,changeVersionReference,comment,decision,kind,operationReference") &&
     (r.kind === "Cost" || r.kind === "FoodSafety") &&
     (r.decision === "Approved" || r.decision === "Rejected")
   ) {
@@ -135,6 +151,7 @@ export function parseOptionRecipeCommandBody(value: unknown): OptionRecipeComman
       kind: r.kind,
       decision: r.decision,
       comment,
+      ...(withMode ? { approvalMode: "SoleOperator" as const } : {}),
     };
   }
   if (r.action === "Publish" && keysOf(r) === "action,changeVersionReference,operationReference")
@@ -158,6 +175,7 @@ const changeErrors: Record<OptionRecipeChangeError["code"], MerchantOptionRecipe
   OPTION_RECIPE_NOT_FOUND: "NotFound",
   OPTION_RECIPE_REVIEW_REQUIRED: "ReviewRequired",
   OPTION_RECIPE_REVIEWER_NOT_INDEPENDENT: "ReviewerNotIndependent",
+  OPTION_RECIPE_SOLE_OPERATOR_NOT_IN_EFFECT: "SoleOperatorNotInEffect",
 };
 
 export function createMerchantOptionRecipes(options: {
@@ -245,6 +263,8 @@ export function createMerchantOptionRecipes(options: {
     if (error instanceof MerchantOptionRecipeError) throw error;
     if (error instanceof OptionRecipeChangeError)
       return fail(changeErrors[error.code], error.skuReference);
+    if (error instanceof MerchantSoleOperatorGateError)
+      return fail(error.code === "NotInEffect" ? "SoleOperatorNotInEffect" : "NeedsReverification");
     throw error;
   };
 
@@ -301,10 +321,31 @@ export function createMerchantOptionRecipes(options: {
                   },
           });
         }
+        // WP-2423 Q19: a reviewer who would review their own change, or give the second kind,
+        // sees whether they may do it alone as sole operator and why not.
+        const gate = s.permissions.mayReview
+          ? await merchantBrandSoleOperatorGate(tx as never, {
+              tenantReference: s.tenantReference,
+              brandReference: s.brandReference,
+              storeReference: s.storeReference,
+              actorReference: s.actor,
+              permissionCode: "recipe.approve",
+              observedAt: at,
+              allowed: async () => s.permissions.mayReview,
+            })
+          : null;
         return {
           screenId: "RECIPE-OPTION-LIST" as const,
           sourceAsOf: at,
           permissions: s.permissions,
+          soleOperator:
+            gate === null
+              ? null
+              : {
+                  status: gate.status,
+                  otherApprovers: gate.otherApprovers,
+                  verifiedUntil: gate.verifiedUntil,
+                },
           ingredients: ingredients.items
             .filter((item) => item.stockTracked && item.active)
             .map((item) => ({
@@ -350,9 +391,28 @@ export function createMerchantOptionRecipes(options: {
               expectedVersion: body.expectedVersion,
             });
           }
+          // WP-2423 Q19: the Brand's recipe review gate, read in this transaction.
+          const gateInput = (actor: string) => ({
+            tenantReference: s.tenantReference,
+            brandReference: s.brandReference,
+            storeReference: s.storeReference,
+            actorReference: actor,
+            permissionCode: "recipe.approve",
+            observedAt: at,
+            allowed: async () => s.permissions.mayReview || s.permissions.mayPublish,
+          });
           if (body.action === "Review") {
             if (!s.permissions.mayReview) fail("PermissionDenied");
+            const soleOperator =
+              body.approvalMode === "SoleOperator"
+                ? {
+                    reviewerMfaAt: (
+                      await requireMerchantBrandSoleOperator(tx as never, gateInput(s.actor))
+                    ).actorMfaAt,
+                  }
+                : undefined;
             return await reviewOptionRecipeChange(rtx(tx), scope, {
+              ...(soleOperator === undefined ? {} : { soleOperator }),
               operationReference: body.operationReference,
               actorReference: s.actor,
               at,
@@ -380,6 +440,9 @@ export function createMerchantOptionRecipes(options: {
                 actorReferences: actors,
                 at,
               })),
+            soleOperatorEffective: async (actor) =>
+              (await merchantBrandSoleOperatorGate(tx as never, gateInput(actor))).status ===
+              "Effective",
           });
         } catch (error) {
           return mapError(error);

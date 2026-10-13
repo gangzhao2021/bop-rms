@@ -36,6 +36,10 @@ export interface MerchantSettlementView {
   /** WP-2423 Q19: refunds an Owner approved for themself (sole operator) in the day, for review.
    * Null when the source could not answer or is not composed. */
   readonly selfApprovedRefunds: MerchantSettlementAmount | null;
+  /** WP-2423 Q19: when a closed day is shown, the current (open) business day's self-approved
+   * refunds so far, so the owner sees them without picking today. Null when not read. */
+  readonly currentDaySelfApprovedRefunds:
+    (MerchantSettlementAmount & { readonly businessDate: string }) | null;
   readonly reconciliation: MerchantSettlementReconciliation | null;
   readonly projectedAt: string;
 }
@@ -86,6 +90,10 @@ export function createMerchantSettlementRead(options: {
     scope: MerchantSettlementScope,
     window: MerchantSettlementWindow,
   ): Promise<MerchantSettlementAmount | null>;
+  currentDaySelfApprovedRefunds?(
+    tx: ConsumerTransaction,
+    scope: MerchantSettlementScope,
+  ): Promise<(MerchantSettlementAmount & { readonly businessDate: string }) | null>;
   now(): string;
 }) {
   return async (input: {
@@ -121,6 +129,10 @@ export function createMerchantSettlementRead(options: {
         options.selfApprovedRefunds === undefined
           ? null
           : await options.selfApprovedRefunds(tx, scope, window);
+      const currentDaySelfApprovedRefunds =
+        window.status === "Closed" && options.currentDaySelfApprovedRefunds !== undefined
+          ? await options.currentDaySelfApprovedRefunds(tx, scope)
+          : null;
       const again = await options.authorize(tx, { sessionCookie: input.sessionCookie, permission });
       if (!again || !sameScope(again, scope)) return unavailable();
       return Object.freeze({
@@ -136,6 +148,7 @@ export function createMerchantSettlementRead(options: {
         captured,
         refunded,
         selfApprovedRefunds,
+        currentDaySelfApprovedRefunds,
         reconciliation:
           reconciliation === null
             ? null

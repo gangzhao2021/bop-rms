@@ -19,6 +19,7 @@ import {
   loadRecipe,
   parseRecipeDraft,
   publishRecipe,
+  publishRecipePreparation,
   recordRecipeReview,
   saveRecipeDraft,
 } from "../../rms/recipe/src/index.ts";
@@ -472,7 +473,14 @@ it("recipe review: the sole operator reviews their own recipe alone, with MFA an
           allowed: async () => true,
         });
       /** A review as the composition makes it: `sole` reads the gate in the same transaction. */
-      const ownReview = (recipeReference, versionReference, actor, kind, sole) =>
+      const ownReview = (
+        recipeReference,
+        versionReference,
+        actor,
+        kind,
+        sole,
+        subject = "Recipe",
+      ) =>
         tx(async (t) => {
           const at = clock();
           const soleOperator = sole
@@ -485,7 +493,7 @@ it("recipe review: the sole operator reviews their own recipe alone, with MFA an
             reviewReference: next(),
             recipeReference,
             versionReference,
-            subject: "Recipe",
+            subject,
             kind,
             decision: "Approved",
             comment: null,
@@ -592,6 +600,60 @@ it("recipe review: the sole operator reviews their own recipe alone, with MFA an
       assert.equal(
         (await tx((t) => loadRecipe(t, scope, ownRecipe, clock()))).lifecycle,
         "Published",
+      );
+      // 3b. The kitchen steps (Preparation) are reviewed the same way: unmarked self-review is
+      // refused; both marked reviews let the owner publish the kitchen instructions, and the
+      // published review evidence carries the SoleOperator mark.
+      const kitchen = (operation = next()) =>
+        tx(async (t) => {
+          const at = clock();
+          return publishRecipePreparation(t, scope, {
+            actorReference: owner,
+            at,
+            nextReference: next,
+            operationReference: operation,
+            recipeReference: ownRecipe,
+            reviewersAuthorized: async () => true,
+            soleOperatorEffective: effective(t, at),
+            auditReference: next(),
+          });
+        });
+      await assert.rejects(kitchen(), refused("RECIPE_AUTHORING_REVIEW_REQUIRED"));
+      const published = await tx((t) => loadRecipe(t, scope, ownRecipe, clock()));
+      await assert.rejects(
+        ownReview(ownRecipe, published.versionReference, owner, "Cost", false, "Preparation"),
+        refused("RECIPE_AUTHORING_REVIEWER_NOT_INDEPENDENT"),
+      );
+      for (const kind of ["Cost", "FoodSafety"])
+        assert.equal(
+          (await ownReview(ownRecipe, published.versionReference, owner, kind, true, "Preparation"))
+            .status,
+          "Applied",
+        );
+      const kitchenOperation = next();
+      assert.equal((await kitchen(kitchenOperation)).status, "Applied");
+      assert.equal((await kitchen(kitchenOperation)).status, "AlreadyApplied");
+      const preparation = (
+        await admin.query(
+          "SELECT record_json #> '{reviewEvidence,reviews}' reviews FROM rms_recipe.recipe_preparation_content WHERE recipe_version_id=$1 AND modifier_rule_version_id IS NULL",
+          [published.versionReference],
+        )
+      ).rows[0];
+      assert.deepEqual(
+        preparation.reviews.map((review) => [review.reviewerActorReference, review.reviewMode]),
+        [
+          [owner, "SoleOperator"],
+          [owner, "SoleOperator"],
+        ],
+      );
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT review_mode FROM rms_recipe.recipe_authoring_review WHERE recipe_version_id=$1 AND subject='Preparation'",
+            [published.versionReference],
+          )
+        ).rows.map((row) => row.review_mode),
+        ["SoleOperator", "SoleOperator"],
       );
 
       // 4. A second reviewer joins: the waiver lapses; a sole review given before no longer counts.

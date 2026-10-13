@@ -1932,6 +1932,7 @@ describe("WP-2423 P1 merchant settlement read route", () => {
     captured: { count: 3, amountMinor: "4500", currencyCode: "CAD" as const },
     refunded: null,
     selfApprovedRefunds: { count: 1, amountMinor: "11600", currencyCode: "CAD" as const },
+    currentDaySelfApprovedRefunds: null,
     reconciliation: {
       settlement: null,
       operational: {
@@ -2514,6 +2515,7 @@ it("protects refund request transport and returns only request evidence", async 
     paymentAttemptReferences: [id(3)],
     approvalRequired: true,
     escalationReasons: ["OrderOrdinaryTotalAboveCad100" as const],
+    approveAlone: false,
     internalQuote: "private",
   };
   const command = vi.fn<NonNullable<MerchantBffRouterOptions["ordinaryRefundRequest"]>>(
@@ -2555,6 +2557,7 @@ it("protects refund request transport and returns only request evidence", async 
     paymentAttemptReferences: [id(3)],
     approvalRequired: true,
     escalationReasons: ["OrderOrdinaryTotalAboveCad100"],
+    approveAlone: false,
     replayed: false,
   });
   command.mockResolvedValueOnce({ ...data, status: "AlreadyCommitted" });
@@ -2730,6 +2733,7 @@ it("protects refund preview transport and whitelists component amounts", async (
     paymentAttemptReferences: [id(3)],
     approvalRequired: false,
     escalationReasons: [],
+    approveAlone: false,
     components,
   };
   const preview = vi.fn<NonNullable<MerchantBffRouterOptions["ordinaryRefundPreview"]>>(
@@ -5489,5 +5493,42 @@ it("WP-2423 Q5: reads one request's progress through the session without private
     observedAt: "2026-10-13T04:38:00.000Z",
   });
   read.mockRejectedValueOnce(new Error("private"));
+  expect((await send()).status).toBe(403);
+});
+
+it("WP-2423 Q19: a refund read retries a transaction conflict and never calls it a refusal", async () => {
+  const conflict = () =>
+    Object.assign(new Error("conflict"), { code: "TENANT_DATABASE_TRANSACTION_CONFLICT" });
+  type Progress = NonNullable<MerchantBffRouterOptions["ordinaryRefundProgress"]>;
+  const progress = vi.fn<Progress>();
+  const root = await serveRefundEscalation({ ordinaryRefundProgress: progress });
+  const send = () =>
+    request(root, "/merchant/payments/refunds/progress", {
+      method: "POST",
+      headers: {
+        ...safeHeaders,
+        Cookie: "__Host-bop-merchant=" + sessionCookie,
+        "X-BOP-CSRF": csrf,
+        "Content-Type": "application/json",
+      },
+      body: "{}",
+    });
+  progress.mockRejectedValueOnce(conflict()).mockResolvedValueOnce({
+    requestReference: "01909974-0000-7000-8000-000000000002",
+    progress: "Sending",
+    observedAt: "2026-10-13T12:00:00.000Z",
+  } as never);
+  const recovered = await send();
+  expect(recovered.status).toBe(200);
+  expect(progress).toHaveBeenCalledTimes(2);
+  progress.mockReset();
+  progress.mockImplementation(async () => {
+    throw conflict();
+  });
+  const busy = await send();
+  expect([busy.status, await busy.json()]).toEqual([503, { error: "retry_later" }]);
+  expect(progress).toHaveBeenCalledTimes(4);
+  progress.mockReset();
+  progress.mockRejectedValue(new Error("STORE_SERVICE_PERMISSION_DENIED"));
   expect((await send()).status).toBe(403);
 });

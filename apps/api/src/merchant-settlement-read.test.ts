@@ -115,3 +115,37 @@ it("WP-2423 Q19: shows the day's self-approved refunds, or null when not compose
   });
   expect(absent.selfApprovedRefunds).toBeNull();
 });
+
+it("WP-2423 Q19: beside a closed day, shows the current day's self-approved refunds so far", async () => {
+  const tx = { query: vi.fn() } as ConsumerTransaction;
+  const today = vi.fn(async () => ({
+    businessDate: "2026-09-22",
+    count: 1,
+    amountMinor: "11600",
+    currencyCode: "CAD" as const,
+  }));
+  const options = {
+    transactions: { run: async <T>(work: (t: ConsumerTransaction) => Promise<T>) => work(tx) },
+    authorize: async () => scope,
+    storeLabel: async () => "Synthetic Store",
+    captured: async () => null,
+    refunded: async () => null,
+    reconciliation: async () => null,
+    currentDaySelfApprovedRefunds: today,
+    now: () => "2026-09-22T09:00:00.000Z",
+  };
+  const closed = await createMerchantSettlementRead({ ...options, window: async () => window })({
+    sessionCookie: "c",
+    businessDate: null,
+  });
+  expect(closed.currentDaySelfApprovedRefunds).toMatchObject({
+    businessDate: "2026-09-22",
+    count: 1,
+  });
+  const open = await createMerchantSettlementRead({
+    ...options,
+    window: async () => ({ ...window, status: "Open" as const }),
+  })({ sessionCookie: "c", businessDate: "2026-09-21" });
+  expect(open.currentDaySelfApprovedRefunds).toBeNull();
+  expect(today).toHaveBeenCalledTimes(1);
+});

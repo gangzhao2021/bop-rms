@@ -2483,7 +2483,7 @@
       "column": null,
       "privilege": "SELECT",
       "principal": "api",
-      "approval": "PENDING OWNER APPROVAL (WP-2423 Q19): price book published by its author as sole operator (DEC-SOLE-OPERATOR-APPROVAL step 2)"
+      "approval": "Owner approved 2026-10-13 in session (\"批准\") (WP-2423 Q19 step 2): price book published by its author as sole operator (DEC-SOLE-OPERATOR-APPROVAL step 2)"
     },
     {
       "type": "table",
@@ -2492,7 +2492,7 @@
       "column": null,
       "privilege": "INSERT",
       "principal": "api",
-      "approval": "PENDING OWNER APPROVAL (WP-2423 Q19): price book published by its author as sole operator (DEC-SOLE-OPERATOR-APPROVAL step 2)"
+      "approval": "Owner approved 2026-10-13 in session (\"批准\") (WP-2423 Q19 step 2): price book published by its author as sole operator (DEC-SOLE-OPERATOR-APPROVAL step 2)"
     },
     {
       "type": "table",
@@ -2501,7 +2501,7 @@
       "column": null,
       "privilege": "SELECT",
       "principal": "api",
-      "approval": "PENDING OWNER APPROVAL (WP-2423 Q19): menu approved by its submitter as sole operator (DEC-SOLE-OPERATOR-APPROVAL step 2)"
+      "approval": "Owner approved 2026-10-13 in session (\"批准\") (WP-2423 Q19 step 2): menu approved by its submitter as sole operator (DEC-SOLE-OPERATOR-APPROVAL step 2)"
     },
     {
       "type": "table",
@@ -2510,7 +2510,7 @@
       "column": null,
       "privilege": "INSERT",
       "principal": "api",
-      "approval": "PENDING OWNER APPROVAL (WP-2423 Q19): menu approved by its submitter as sole operator (DEC-SOLE-OPERATOR-APPROVAL step 2)"
+      "approval": "Owner approved 2026-10-13 in session (\"批准\") (WP-2423 Q19 step 2): menu approved by its submitter as sole operator (DEC-SOLE-OPERATOR-APPROVAL step 2)"
     },
     {
       "type": "table",
@@ -2519,7 +2519,7 @@
       "column": null,
       "privilege": "SELECT",
       "principal": "api",
-      "approval": "PENDING OWNER APPROVAL (WP-2423 Q19): allergen roster recorded by one person and approved by another (DEC-SOLE-OPERATOR-APPROVAL step 2)"
+      "approval": "Owner approved 2026-10-13 in session (\"批准\") (WP-2423 Q19 step 2): allergen roster recorded by one person and approved by another (DEC-SOLE-OPERATOR-APPROVAL step 2)"
     },
     {
       "type": "table",
@@ -2528,7 +2528,7 @@
       "column": null,
       "privilege": "INSERT",
       "principal": "api",
-      "approval": "PENDING OWNER APPROVAL (WP-2423 Q19): allergen roster recorded by one person and approved by another (DEC-SOLE-OPERATOR-APPROVAL step 2)"
+      "approval": "Owner approved 2026-10-13 in session (\"批准\") (WP-2423 Q19 step 2): allergen roster recorded by one person and approved by another (DEC-SOLE-OPERATOR-APPROVAL step 2)"
     }
   ]
 }

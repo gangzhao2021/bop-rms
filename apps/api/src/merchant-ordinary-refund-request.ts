@@ -216,6 +216,11 @@ export function createMerchantOrdinaryRefundRequest(options: {
         ),
         approvalRequired: result.escalation?.requiresIndependentApproval ?? null,
         escalationReasons: Object.freeze([...(result.escalation?.reasons ?? [])]),
+        // WP-2423 Q19: the requester may approve this escalated refund themself (sole operator in
+        // effect for them now); the approval itself rechecks everything.
+        approveAlone:
+          result.escalation?.requiresIndependentApproval === true &&
+          (await soleOperatorEffective()),
       });
     });
   };
@@ -232,6 +237,7 @@ export function createMerchantOrdinaryRefundRequest(options: {
       paymentAttemptReferences: result.paymentAttemptReferences,
       approvalRequired: result.approvalRequired,
       escalationReasons: result.escalationReasons,
+      approveAlone: result.approveAlone,
     });
   };
   return Object.assign(record, {

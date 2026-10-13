@@ -41,7 +41,9 @@ export type OptionRecipeChangeErrorCode =
   | "OPTION_RECIPE_CONFLICT"
   | "OPTION_RECIPE_NOT_FOUND"
   | "OPTION_RECIPE_REVIEW_REQUIRED"
-  | "OPTION_RECIPE_REVIEWER_NOT_INDEPENDENT";
+  | "OPTION_RECIPE_REVIEWER_NOT_INDEPENDENT"
+  /** WP-2423 Q19: a review given alone no longer counts (another person now holds approval). */
+  | "OPTION_RECIPE_SOLE_OPERATOR_NOT_IN_EFFECT";
 export class OptionRecipeChangeError extends Error {
   constructor(
     readonly code: OptionRecipeChangeErrorCode,
@@ -721,6 +723,9 @@ export async function reviewOptionRecipeChange(
     readonly kind: "Cost" | "FoodSafety";
     readonly decision: "Approved" | "Rejected";
     readonly comment: string | null;
+    /** WP-2423 Q19: the reviewer acts alone as sole operator (read by the caller in this
+     * transaction); `reviewerMfaAt` must be within 15 minutes before the review (database). */
+    readonly soleOperator?: { readonly reviewerMfaAt: string };
   },
 ): Promise<{ readonly status: "Applied" | "AlreadyApplied" }> {
   const brand = scope.brandReference;
@@ -738,14 +743,27 @@ export async function reviewOptionRecipeChange(
   }
   const change = await latestChange(tx, brand, input.changeVersionReference);
   if (!change.isLatest || change.publishedByOperation !== null) fail("OPTION_RECIPE_CONFLICT");
-  if (change.author === input.actorReference) fail("OPTION_RECIPE_REVIEWER_NOT_INDEPENDENT");
+  // Another person reviews, and two people give the two kinds — except the sole operator alone,
+  // whose review of the other kind must then be marked too; the mark only where it waives a rule.
+  const others = (
+    await tx.query(
+      "SELECT review_kind,review_mode FROM rms_recipe.option_recipe_change_review WHERE brand_id=$1 AND change_version_id=$2 AND reviewer_actor_id=$3",
+      [brand, input.changeVersionReference, input.actorReference],
+    )
+  ).rows.filter((row) => row.review_kind !== input.kind);
+  const sole = input.soleOperator !== undefined;
+  const ownChange = change.author === input.actorReference;
+  if (!sole && (ownChange || others.length > 0)) fail("OPTION_RECIPE_REVIEWER_NOT_INDEPENDENT");
+  if (sole && !ownChange && others.length === 0) fail("OPTION_RECIPE_INVALID");
+  if (sole && others.some((row) => row.review_mode !== "SoleOperator"))
+    fail("OPTION_RECIPE_REVIEWER_NOT_INDEPENDENT");
   if (input.decision === "Rejected" && input.comment === null) fail("OPTION_RECIPE_INVALID");
   await tx.query(scopeSql, [brand, ""]);
   const reviewReference = derivedRecipeReference(input.operationReference, "review");
   const auditReference = derivedRecipeReference(input.operationReference, "audit");
   const saved = await tx.query(
-    `INSERT INTO rms_recipe.option_recipe_change_review(review_id,change_version_id,brand_id,change_digest,review_kind,decision,reviewer_actor_id,author_actor_id,comment,reviewed_at,operation_id,audit_id)
-     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (change_version_id,review_kind) DO NOTHING`,
+    `INSERT INTO rms_recipe.option_recipe_change_review(review_id,change_version_id,brand_id,change_digest,review_kind,decision,reviewer_actor_id,author_actor_id,comment,reviewed_at,operation_id,audit_id,review_mode,reviewer_mfa_at)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT (change_version_id,review_kind) DO NOTHING`,
     [
       reviewReference,
       input.changeVersionReference,
@@ -759,6 +777,8 @@ export async function reviewOptionRecipeChange(
       input.at,
       input.operationReference,
       auditReference,
+      sole ? "SoleOperator" : "Independent",
+      input.soleOperator?.reviewerMfaAt ?? null,
     ],
   );
   // Each kind is decided once per version; a later version is reviewed afresh.
@@ -774,7 +794,11 @@ export async function reviewOptionRecipeChange(
       correlationId: input.operationReference,
       at: input.at,
       auditReference,
-      afterSummary: { kind: input.kind, decision: input.decision },
+      afterSummary: {
+        kind: input.kind,
+        decision: input.decision,
+        ...(sole ? { approvalMode: "SoleOperator" } : {}),
+      },
     }),
   );
   return { status: "Applied" };
@@ -793,6 +817,8 @@ export async function publishOptionRecipeChange(
     readonly at: string;
     readonly changeVersionReference: string;
     readonly reviewersAuthorized: (actors: readonly string[]) => Promise<boolean>;
+    /** WP-2423 Q19: whether sole operator is still in effect for a reviewer who reviewed alone. */
+    readonly soleOperatorEffective?: (actor: string) => Promise<boolean>;
   },
 ): Promise<{ readonly status: "Applied" | "AlreadyApplied" }> {
   const brand = scope.brandReference;
@@ -805,7 +831,7 @@ export async function publishOptionRecipeChange(
   if (!change.isLatest) fail("OPTION_RECIPE_CONFLICT");
   const reviews = (
     await tx.query(
-      "SELECT review_id::text id,review_kind,decision,reviewer_actor_id::text reviewer,change_digest,reviewed_at FROM rms_recipe.option_recipe_change_review WHERE brand_id=$1 AND change_version_id=$2 ORDER BY review_kind",
+      "SELECT review_id::text id,review_kind,decision,reviewer_actor_id::text reviewer,change_digest,reviewed_at,review_mode FROM rms_recipe.option_recipe_change_review WHERE brand_id=$1 AND change_version_id=$2 ORDER BY review_kind",
       [brand, input.changeVersionReference],
     )
   ).rows;
@@ -818,11 +844,22 @@ export async function publishOptionRecipeChange(
     safety.decision !== "Approved" ||
     cost.change_digest !== change.digest ||
     safety.change_digest !== change.digest ||
-    cost.reviewer === safety.reviewer ||
-    [cost.reviewer, safety.reviewer].includes(change.author) ||
+    (cost.reviewer === safety.reviewer &&
+      (cost.review_mode !== "SoleOperator" || safety.review_mode !== "SoleOperator")) ||
+    [cost, safety].some(
+      (review) => review.reviewer === change.author && review.review_mode !== "SoleOperator",
+    ) ||
     !(await input.reviewersAuthorized([String(cost.reviewer), String(safety.reviewer)]))
   )
     return fail("OPTION_RECIPE_REVIEW_REQUIRED");
+  // WP-2423 Q19: a review given alone counts only while sole operator is still in effect for it.
+  for (const review of [cost, safety])
+    if (
+      review.review_mode === "SoleOperator" &&
+      (input.soleOperatorEffective === undefined ||
+        !(await input.soleOperatorEffective(String(review.reviewer))))
+    )
+      fail("OPTION_RECIPE_SOLE_OPERATOR_NOT_IN_EFFECT");
   const evidenceReviews = [cost, safety].map((review) => ({
     reviewReference: String(review.id),
     reviewKind: String(review.review_kind) as "Cost" | "FoodSafety",
@@ -830,6 +867,7 @@ export async function publishOptionRecipeChange(
     evidenceDigest: change.digest,
     reviewedAt: iso(review.reviewed_at),
     decision: "Approved" as const,
+    ...(review.review_mode === "SoleOperator" ? { reviewMode: "SoleOperator" as const } : {}),
   }));
   await tx.query(scopeSql, [brand, ""]);
   const writer = createPostgresRecipeModifierWriteStore(runnerOf(tx), brand);

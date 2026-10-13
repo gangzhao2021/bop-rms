@@ -1,3 +1,4 @@
+import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
@@ -38,6 +39,9 @@ const copy: Record<OptionRecipeErrorCode | "Loading", string> = {
   ReviewRequired:
     "Publishing needs an approved cost review and an approved food-safety review, by two people other than the author.",
   ReviewerNotIndependent: "The person who saved this change cannot review it.",
+  SoleOperatorNotInEffect:
+    "Someone else now also holds recipe review, so another person must review. Refresh to see who.",
+  NeedsReverification: "Confirm it is you with your authenticator code, then review again.",
   Invalid: "The change is not valid. Check the amounts.",
   Offline: "Offline. Nothing was confirmed; retry sends the same request again.",
   Unavailable: "Option recipes are unavailable.",
@@ -67,8 +71,11 @@ const blank: OptionRecipeChangeContent = {
 
 export function StoreOptionRecipesPage({
   client = unavailableOptionRecipeClient,
+  csrf,
 }: {
   readonly client?: OptionRecipeClient;
+  /** For the second-factor check of a sole operator's own review. */
+  readonly csrf?: string;
 }) {
   const [state, setState] = useState<
     | { readonly kind: "Loading" | OptionRecipeErrorCode }
@@ -467,6 +474,65 @@ export function StoreOptionRecipesPage({
           </table>
         </section>
       ))}
+      {(() => {
+        // WP-2423 Q19: changes this reviewer saved, or already reviewed once, that they may only
+        // review alone as sole operator (one remaining kind at a time).
+        const own = view.options.filter(
+          (row) =>
+            row.change !== null &&
+            !row.change.published &&
+            view.permissions.mayReview &&
+            (row.change.byViewer || row.change.reviews.some((review) => review.byViewer)) &&
+            row.change.reviews.length < 2 &&
+            !row.change.reviews.some((review) => review.decision === "Rejected"),
+        );
+        if (own.length === 0) return null;
+        return (
+          <section className="detail-section" aria-labelledby="own-option-reviews">
+            <h3 id="own-option-reviews">Your own changes</h3>
+            {own.map((row) => {
+              const change = row.change;
+              if (change === null) return null;
+              const kind = (["Cost", "FoodSafety"] as const).find(
+                (candidate) => !change.reviews.some((review) => review.kind === candidate),
+              );
+              if (kind === undefined) return null;
+              return (
+                <div key={keyOf(row)}>
+                  <p>
+                    {row.productName} · {row.setName} · {row.optionName}
+                  </p>
+                  <SoleOperatorSelfApproval
+                    gate={view.soleOperator}
+                    csrf={csrf}
+                    what={`the ${kind === "Cost" ? "cost" : "food safety"} of this option change`}
+                    permissionName="recipe review"
+                    busy={busy}
+                    actionLabel={
+                      kind === "Cost" ? "Approve cost on my own" : "Approve food safety on my own"
+                    }
+                    summary={<p>{summary(change.content)}</p>}
+                    onApprove={() =>
+                      void send(
+                        {
+                          action: "Review",
+                          operationReference: newOperationReference(),
+                          changeVersionReference: change.changeVersionReference,
+                          kind,
+                          decision: "Approved",
+                          comment: null,
+                          approvalMode: "SoleOperator",
+                        },
+                        kind === "Cost" ? "Cost review recorded." : "Food-safety review recorded.",
+                      )
+                    }
+                  />
+                </div>
+              );
+            })}
+          </section>
+        );
+      })()}
       {rejectable.length > 0 ? (
         <section className="detail-section" aria-labelledby="reject-change">
           <h3 id="reject-change">Reject a change</h3>

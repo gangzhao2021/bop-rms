@@ -76,9 +76,12 @@ function resultLabel(check: SettlementCheck): string {
 export function SettlementReport({
   view,
   timeZone,
+  onShowDay,
 }: {
   readonly view: SettlementView;
   readonly timeZone?: string | undefined;
+  /** WP-2423 Q19: open another business day (the current day's self-approved refunds). */
+  readonly onShowDay?: (businessDate: string) => void;
 }) {
   const zone = timeZone ?? view.window.timeZone;
   const open = view.window.status === "Open";
@@ -145,6 +148,24 @@ export function SettlementReport({
           <span className="overview-count__detail">Captured minus refunded</span>
         </li>
       </ul>
+      {view.currentDaySelfApprovedRefunds !== null &&
+      view.currentDaySelfApprovedRefunds.count > 0 ? (
+        <p role="status" className="settlement__self-approved-today">
+          Today so far ({view.currentDaySelfApprovedRefunds.businessDate}):{" "}
+          {view.currentDaySelfApprovedRefunds.count} refund
+          {view.currentDaySelfApprovedRefunds.count === 1 ? "" : "s"} ·{" "}
+          {formatSettlementMoney(view.currentDaySelfApprovedRefunds.amountMinor)} approved by the
+          owner alone.{" "}
+          {onShowDay ? (
+            <button
+              type="button"
+              onClick={() => onShowDay(view.currentDaySelfApprovedRefunds?.businessDate ?? "")}
+            >
+              View today
+            </button>
+          ) : null}
+        </p>
+      ) : null}
       {view.selfApprovedRefunds === null ? (
         <p className="bop-muted" role="status">
           Refunds approved by the owner alone could not be read.
@@ -381,7 +402,14 @@ export function SettlementPage({
           </p>
         </StatePanel>
       ) : view ? (
-        <SettlementReport view={view} timeZone={timeZone} />
+        <SettlementReport
+          view={view}
+          timeZone={timeZone}
+          onShowDay={(businessDate) => {
+            setDraft(businessDate);
+            setRequested(businessDate);
+          }}
+        />
       ) : null}
     </WorkspacePage>
   );

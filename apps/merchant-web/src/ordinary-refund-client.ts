@@ -595,15 +595,34 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
         components: Readonly<Record<string, string>>;
         approvalRequired: boolean | null;
         escalationReasons: readonly EscalationReason[];
+        approveAlone: boolean;
       }> | null = null;
+      // WP-2423 Q19: whether the requester may approve this refund alone (sole operator). Older
+      // servers do not send it; it then reads as false.
+      const alone = (data: Record<string, unknown>) => {
+        if (!Object.hasOwn(data, "approveAlone")) return false;
+        if (typeof data.approveAlone !== "boolean") return fail();
+        return data.approveAlone;
+      };
+      const withAlone = (value: unknown, keys: string[]) =>
+        value !== null && typeof value === "object" && Object.hasOwn(value, "approveAlone")
+          ? [...keys, "approveAlone"]
+          : keys;
       return Object.freeze({
         async preview(csrf: string, signal?: AbortSignal) {
           if (submitted) return fail();
           confirmed = null;
           return boundary(async () => {
+            const previewed = await send(
+              "/merchant/payments/refunds/preview",
+              body,
+              csrf,
+              200,
+              signal,
+            );
             const data = exact(
-              await send("/merchant/payments/refunds/preview", body, csrf, 200, signal),
-              [
+              previewed,
+              withAlone(previewed, [
                 "status",
                 "requestReference",
                 "operationReference",
@@ -614,7 +633,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
                 "approvalRequired",
                 "escalationReasons",
                 "components",
-              ],
+              ]),
             );
             if (
               data.status !== "Previewed" ||
@@ -640,6 +659,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
               components: allocation,
               paymentAttemptReferences: attempts(data.paymentAttemptReferences),
               ...escalation(data.approvalRequired, data.escalationReasons),
+              approveAlone: alone(data),
             });
             return Object.freeze({
               status: "Previewed" as const,
@@ -653,9 +673,16 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
           const preview = confirmed;
           submitted = true;
           return boundary(async () => {
+            const recorded = await send(
+              "/merchant/payments/refunds/request",
+              body,
+              csrf,
+              202,
+              signal,
+            );
             const data = exact(
-              await send("/merchant/payments/refunds/request", body, csrf, 202, signal),
-              [
+              recorded,
+              withAlone(recorded, [
                 "status",
                 "requestReference",
                 "operationReference",
@@ -666,7 +693,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
                 "approvalRequired",
                 "escalationReasons",
                 "replayed",
-              ],
+              ]),
             );
             if (
               data.status !== "RequestRecorded" ||
@@ -689,6 +716,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
               amountMinor: preview.amountMinor,
               paymentAttemptReferences: preview.paymentAttemptReferences,
               ...escalation(data.approvalRequired, data.escalationReasons),
+              approveAlone: alone(data),
               replayed: data.replayed,
             });
           }, true);

@@ -1,3 +1,4 @@
+import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
 /** WP-2423 slice 4.4: RECIPE-OPTION-LIST view contract and same-origin client. */
 export type OptionRecipeErrorCode =
   | "PermissionDenied"
@@ -12,6 +13,8 @@ export type OptionRecipeErrorCode =
   | "ReviewRequired"
   | "ReviewerNotIndependent"
   | "Invalid"
+  | "SoleOperatorNotInEffect"
+  | "NeedsReverification"
   | "Offline"
   | "Unavailable";
 export class OptionRecipePageError extends Error {
@@ -77,6 +80,8 @@ export interface OptionRecipeView {
     readonly mayReview: boolean;
     readonly mayPublish: boolean;
   };
+  /** WP-2423 Q19: for a reviewer: may they review alone as sole operator, and why not. */
+  readonly soleOperator: SoleOperatorGateView | null;
   readonly ingredients: readonly {
     readonly itemReference: string;
     readonly name: string;
@@ -102,6 +107,8 @@ export type OptionRecipeCommand =
       readonly kind: "Cost" | "FoodSafety";
       readonly decision: "Approved" | "Rejected";
       readonly comment: string | null;
+      /** WP-2423 Q19: the sole operator reviews alone (own change, or both kinds). */
+      readonly approvalMode?: "SoleOperator";
     }
   | {
       readonly action: "Publish";
@@ -122,7 +129,10 @@ export function parseOptionRecipeView(value: unknown): OptionRecipeView {
     !Array.isArray(r.ingredients)
   )
     throw new Error("OPTION_RECIPE_PAGE_INVALID");
-  return r as unknown as OptionRecipeView;
+  return {
+    ...r,
+    soleOperator: parseSoleOperatorGate(r.soleOperator),
+  } as unknown as OptionRecipeView;
 }
 /** "200" from 200000000 microunits; "0.018" from 18000. */
 export function microText(micro: string): string {
@@ -161,6 +171,8 @@ const codes = new Set<OptionRecipeErrorCode>([
   "ReviewRequired",
   "ReviewerNotIndependent",
   "Invalid",
+  "SoleOperatorNotInEffect",
+  "NeedsReverification",
 ]);
 export function createOptionRecipeClient(
   csrf: string,

@@ -794,6 +794,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
               <StoreOptionRecipesPage
                 key={state.workspace.selectedScope.storeReference + state.csrf}
                 client={createOptionRecipeClient(state.csrf)}
+                csrf={state.csrf}
               />
             ) : (
               <StoreOptionRecipesPage />

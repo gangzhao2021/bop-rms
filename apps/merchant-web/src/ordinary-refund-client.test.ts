@@ -57,7 +57,11 @@ it("freezes nested selection and retries the exact request after response loss",
   await operation.preview(csrf);
   await expect(operation.submit(csrf)).rejects.toMatchObject({ code: "OutcomeUnknown" });
   await expect(operation.preview(csrf)).rejects.toMatchObject({ code: "Unavailable" });
-  await expect(operation.submit("b".repeat(43))).resolves.toEqual({ ...recorded, replayed: true });
+  await expect(operation.submit("b".repeat(43))).resolves.toEqual({
+    ...recorded,
+    replayed: true,
+    approveAlone: false,
+  });
   for (const call of fetcher.mock.calls)
     expect(JSON.parse(String(call[1]?.body))).toEqual(command());
   expect(fetcher.mock.calls[2]?.[1]).toMatchObject({
@@ -323,6 +327,30 @@ it("WP-2423 Q5: reports why an owner approval is needed and rejects contradictor
       createOrdinaryRefundClient(failing).prepareRequest(command()).preview(csrf),
     ).rejects.toMatchObject({ code: "Unavailable" });
   }
+});
+
+it("WP-2423 Q19: says when the requester may approve the escalated refund alone", async () => {
+  const escalated = {
+    ...preview,
+    approvalRequired: true,
+    escalationReasons: ["MoreThan24Hours"],
+  };
+  const alone = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response({ ...escalated, approveAlone: true }));
+  await expect(
+    createOrdinaryRefundClient(alone).prepareRequest(command()).preview(csrf),
+  ).resolves.toMatchObject({ approvalRequired: true, approveAlone: true });
+  const older = vi.fn<typeof fetch>().mockResolvedValueOnce(response(escalated));
+  await expect(
+    createOrdinaryRefundClient(older).prepareRequest(command()).preview(csrf),
+  ).resolves.toMatchObject({ approveAlone: false });
+  const invalid = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response({ ...escalated, approveAlone: "yes" }));
+  await expect(
+    createOrdinaryRefundClient(invalid).prepareRequest(command()).preview(csrf),
+  ).rejects.toMatchObject({ code: "Unavailable" });
 });
 
 it("WP-2423 Q5: shows a declined request and sends an Other note only with that reason", async () => {

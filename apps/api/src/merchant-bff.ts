@@ -1,3 +1,4 @@
+import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import {
   parseMerchantStoreConfigurationOrdinaryWorkspace,
   parseMerchantStoreConfigurationHistoryPage,
@@ -913,6 +914,24 @@ function refundDecisionFailure(response: express.Response, error: MerchantRefund
   else if (error.code === "AlreadyDeclined")
     response.status(409).json({ error: "refund_already_declined" });
   else response.status(409).json({ error: "refund_changed" });
+}
+
+/** WP-2423 Q19: a read that kept meeting a database transaction conflict is "retry later"
+ * (503), never a permission refusal; anything else stays a plain denial. */
+function refundReadFailure(response: express.Response, error: unknown): void {
+  const code =
+    error !== null && typeof error === "object"
+      ? Object.getOwnPropertyDescriptor(error, "code")?.value
+      : undefined;
+  if (code === "TENANT_DATABASE_TRANSACTION_CONFLICT") {
+    response
+      .status(503)
+      .set("Cache-Control", NO_STORE)
+      .set("Retry-After", "1")
+      .json({ error: "retry_later" });
+    return;
+  }
+  denied(response);
 }
 
 function denied(response: express.Response): void {
@@ -4467,12 +4486,12 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       response.status(503).json({ error: "step_up_unavailable" });
       return;
     }
-    void options.mfaStepUp
-      .status({ sessionCookie })
+    const port = options.mfaStepUp;
+    void retryTransactionConflict(() => port.status({ sessionCookie }))
       .then((result) =>
         response.set("Cache-Control", NO_STORE).json({ validUntil: result.validUntil }),
       )
-      .catch(() => denied(response));
+      .catch((error: unknown) => refundReadFailure(response, error));
   });
 
   router.post("/identity/step-up", sameOriginMutation(options), (request, response) => {
@@ -4537,8 +4556,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       response.status(503).json({ error: "sole_operator_unavailable" });
       return;
     }
-    void options.soleOperator
-      .read({ sessionCookie })
+    const port = options.soleOperator;
+    void retryTransactionConflict(() => port.read({ sessionCookie }))
       .then((view) => response.set("Cache-Control", NO_STORE).json(view))
       .catch((error: unknown) => {
         if (error instanceof MerchantSoleOperatorError && error.code === "Denied") {
@@ -4548,7 +4567,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             .json({ error: "brand_owner_required" });
           return;
         }
-        denied(response);
+        refundReadFailure(response, error);
       });
   });
   router.post("/organization/sole-operator", sameOriginMutation(options), (request, response) => {
@@ -4611,8 +4630,9 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       response.status(503).json({ error: "refund_approvals_unavailable" });
       return;
     }
-    void options
-      .ordinaryRefundApprovals({ sessionCookie })
+    // WP-2423 Q19: a read rerun on a transaction conflict; still conflicting is "retry later".
+    const port = options.ordinaryRefundApprovals;
+    void retryTransactionConflict(() => port({ sessionCookie }))
       .then((view) =>
         response.set("Cache-Control", NO_STORE).json({
           observedAt: view.observedAt,
@@ -4641,7 +4661,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           })),
         }),
       )
-      .catch(() => denied(response));
+      .catch((error: unknown) => refundReadFailure(response, error));
   });
 
   // WP-2423 Q5: approve an escalated refund in person; it is sent at once with the approval.
@@ -4735,8 +4755,9 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       response.status(503).json({ error: "refund_progress_unavailable" });
       return;
     }
-    void options
-      .ordinaryRefundProgress({ sessionCookie, csrf, query: request.body })
+    // WP-2423 Q19: a read rerun on a transaction conflict; still conflicting is "retry later".
+    const port = options.ordinaryRefundProgress;
+    void retryTransactionConflict(() => port({ sessionCookie, csrf, query: request.body }))
       .then((result) =>
         response.set("Cache-Control", NO_STORE).json({
           requestReference: result.requestReference,
@@ -4744,7 +4765,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           observedAt: result.observedAt,
         }),
       )
-      .catch(() => denied(response));
+      .catch((error: unknown) => refundReadFailure(response, error));
   });
 
   router.post("/payments/refunds/status", sameOriginMutation(options), (request, response) => {
@@ -4763,8 +4784,9 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       response.status(503).json({ error: "refund_status_unavailable" });
       return;
     }
-    void options
-      .ordinaryRefundStatus({ sessionCookie, csrf, query: request.body })
+    // WP-2423 Q19: a read rerun on a transaction conflict; still conflicting is "retry later".
+    const port = options.ordinaryRefundStatus;
+    void retryTransactionConflict(() => port({ sessionCookie, csrf, query: request.body }))
       .then((result) =>
         response.json({
           orderReference: result.orderReference,
@@ -4785,7 +4807,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           })),
         }),
       )
-      .catch(() => denied(response));
+      .catch((error: unknown) => refundReadFailure(response, error));
   });
 
   router.post("/payments/refunds/context", sameOriginMutation(options), (request, response) => {
@@ -4804,8 +4826,9 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       response.status(503).json({ error: "refund_payment_context_unavailable" });
       return;
     }
-    void options
-      .refundPaymentContext({ sessionCookie, csrf, query: request.body })
+    // WP-2423 Q19: a read rerun on a transaction conflict; still conflicting is "retry later".
+    const port = options.refundPaymentContext;
+    void retryTransactionConflict(() => port({ sessionCookie, csrf, query: request.body }))
       .then((result) =>
         response.json({
           paymentIntentReference: result.paymentIntentReference,
@@ -4821,7 +4844,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           canRequest: result.canRequest,
         }),
       )
-      .catch(() => denied(response));
+      .catch((error: unknown) => refundReadFailure(response, error));
   });
 
   router.post("/payments/refunds/items", sameOriginMutation(options), (request, response) => {
@@ -4840,8 +4863,9 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       response.status(503).json({ error: "refund_items_unavailable" });
       return;
     }
-    void options
-      .ordinaryRefundItems({ sessionCookie, csrf, query: request.body })
+    // WP-2423 Q19: a read rerun on a transaction conflict; still conflicting is "retry later".
+    const port = options.ordinaryRefundItems;
+    void retryTransactionConflict(() => port({ sessionCookie, csrf, query: request.body }))
       .then((result) =>
         response.json({
           orderReference: result.orderReference,
@@ -4878,7 +4902,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           })),
         }),
       )
-      .catch(() => denied(response));
+      .catch((error: unknown) => refundReadFailure(response, error));
   });
 
   router.post("/payments/refunds/preview", sameOriginMutation(options), (request, response) => {
@@ -4910,6 +4934,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           paymentAttemptReferences: result.paymentAttemptReferences,
           approvalRequired: result.approvalRequired,
           escalationReasons: result.escalationReasons,
+          approveAlone: result.approveAlone,
           components: {
             netAmountMinor: result.components.netAmountMinor,
             taxAmountMinor: result.components.taxAmountMinor,
@@ -4951,6 +4976,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           paymentAttemptReferences: result.paymentAttemptReferences,
           approvalRequired: result.approvalRequired,
           escalationReasons: result.escalationReasons,
+          approveAlone: result.approveAlone,
           replayed: result.status === "AlreadyCommitted",
         });
       })
@@ -6433,6 +6459,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
     ReviewRequired: 409,
     ReviewerNotIndependent: 409,
     Invalid: 400,
+    SoleOperatorNotInEffect: 409,
+    NeedsReverification: 409,
   } as const;
   const optionRecipeFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof MerchantOptionRecipeError)) {

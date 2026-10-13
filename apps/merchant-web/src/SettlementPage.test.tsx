@@ -128,3 +128,31 @@ describe("WP-2423 Q19 self-approved refunds at day close", () => {
     );
   });
 });
+
+describe("WP-2423 Q19 current day beside a closed day", () => {
+  it("notes today's self-approved refunds so far with a way to open today", () => {
+    const html = render({
+      ...settlementViewFixture(),
+      currentDaySelfApprovedRefunds: {
+        businessDate: "2026-09-22",
+        count: 1,
+        amountMinor: "11600",
+        currencyCode: "CAD",
+      },
+    });
+    expect(html).toContain(
+      "Today so far (2026-09-22): 1 refund · $116.00 approved by the owner alone.",
+    );
+    expect(
+      render({
+        ...settlementViewFixture(),
+        currentDaySelfApprovedRefunds: {
+          businessDate: "2026-09-22",
+          count: 0,
+          amountMinor: "0",
+          currencyCode: "CAD",
+        },
+      }),
+    ).not.toContain("Today so far");
+  });
+});

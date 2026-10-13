@@ -753,6 +753,8 @@ it("sole operator: set by the Brand Owner, self-approval with MFA, lapse on a se
       assert.equal(recorded.status, "Created");
       assert.equal(recorded.approvalRequired, true);
       assert.ok(recorded.escalationReasons.includes("OrderOrdinaryTotalAboveCad100"));
+      // The owner is told they may approve it themself (sole operator in effect).
+      assert.equal(recorded.approveAlone, true);
       const ownerQueue = await approvals({ sessionCookie: "owner" });
       assert.equal(ownerQueue.soleOperator, "Effective");
       assert.deepEqual(

@@ -261,6 +261,31 @@ export function createPersistentMerchantSettlement(options: {
           } while (afterRefundReference !== null);
           return { count, amountMinor: amountMinor.toString(), currencyCode: "CAD" as const };
         }),
+      // WP-2423 Q19: the current business day so far, shown beside a closed day.
+      currentDaySelfApprovedRefunds: (tx, scope) =>
+        optional(async () => {
+          const now = persistence.now();
+          const today = resolveStoreBusinessDate({
+            occurredAt: now,
+            configuration: await configurationSource(tx, scope)(tx, now),
+          });
+          const startsAt = String(today.businessDateBoundaryAt);
+          if (startsAt >= now) return null;
+          const summary = await createPostgresSoleOperatorRefundSummaryReader({
+            scope: {
+              tenantReference: scope.tenantReference,
+              brandReference: scope.brandReference,
+              storeReference: scope.storeReference,
+            },
+            authorize: async (t) => guard(scope)(t),
+          })(tx, { startsAt, endsAt: now });
+          return {
+            businessDate: String(today.businessDate),
+            count: summary.count,
+            amountMinor: summary.amountMinor.toString(),
+            currencyCode: summary.currencyCode,
+          };
+        }),
       // WP-2423 Q19: the Owner's self-approved refunds in the day (sole operator), for review.
       selfApprovedRefunds: (tx, scope, window) =>
         optional(async () => {

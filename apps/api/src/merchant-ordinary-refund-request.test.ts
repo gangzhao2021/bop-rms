@@ -114,6 +114,7 @@ it("binds authenticated Manager and current Store, computes server time, and lim
     paymentAttemptReferences: [id(13)],
     approvalRequired: null,
     escalationReasons: [],
+    approveAlone: false,
   });
   expect(d.resolve).toHaveBeenCalledWith(
     f.tx,
@@ -172,6 +173,7 @@ it("previews server component amounts without reporting a committed request", as
     paymentAttemptReferences: [id(13)],
     approvalRequired: null,
     escalationReasons: [],
+    approveAlone: false,
     components: {
       netAmountMinor: "1000",
       taxAmountMinor: "130",

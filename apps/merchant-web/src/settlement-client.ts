@@ -78,6 +78,9 @@ export interface SettlementView {
   readonly refunded: SettlementAmount | null;
   /** WP-2423 Q19: refunds the Owner approved for themself (sole operator) in the day. */
   readonly selfApprovedRefunds: SettlementAmount | null;
+  /** WP-2423 Q19: the current business day's self-approved refunds so far (beside a closed day). */
+  readonly currentDaySelfApprovedRefunds:
+    (SettlementAmount & { readonly businessDate: string }) | null;
   readonly reconciliation: SettlementReconciliation | null;
   readonly projectedAt: string;
 }
@@ -104,6 +107,11 @@ export function parseSettlementView(value: unknown): SettlementView {
     "captured",
     "refunded",
     "selfApprovedRefunds",
+    ...(value !== null &&
+    typeof value === "object" &&
+    Object.hasOwn(value, "currentDaySelfApprovedRefunds")
+      ? ["currentDaySelfApprovedRefunds"]
+      : []),
     "reconciliation",
     "projectedAt",
   ]);
@@ -249,6 +257,19 @@ export function parseSettlementView(value: unknown): SettlementView {
     captured: amount(raw.captured),
     refunded: amount(raw.refunded),
     selfApprovedRefunds: amount(raw.selfApprovedRefunds),
+    currentDaySelfApprovedRefunds: (() => {
+      const today = raw.currentDaySelfApprovedRefunds;
+      if (today === null || today === undefined) return null;
+      const r = exact(today, ["businessDate", "count", "amountMinor", "currencyCode"]);
+      const day = text(r.businessDate, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/u.test(day)) return fail();
+      const parsed = amount({
+        count: r.count,
+        amountMinor: r.amountMinor,
+        currencyCode: r.currencyCode,
+      });
+      return parsed === null ? null : Object.freeze({ ...parsed, businessDate: day });
+    })(),
     reconciliation,
     projectedAt: instant(raw.projectedAt),
   });

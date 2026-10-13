@@ -585,9 +585,11 @@ function RefundWizard({
           (result.replayed ? "Original request recovered. " : "Request recorded. ") +
             "Refund amount: " +
             amount(result.amountMinor) +
-            (result.approvalRequired === true
-              ? ". Ask the owner to open Approvals on this device or theirs. If more than 15 minutes pass after your verification, you'll be asked to verify again here."
-              : ". Approval and execution are separate. No completed refund is confirmed here."),
+            (result.approvalRequired === true && result.approveAlone
+              ? ". You run this business alone (sole operator): open Approvals and approve it yourself after confirming it is you."
+              : result.approvalRequired === true
+                ? ". Ask the owner to open Approvals on this device or theirs. If more than 15 minutes pass after your verification, you'll be asked to verify again here."
+                : ". Approval and execution are separate. No completed refund is confirmed here."),
         );
       }
     } catch (error) {
@@ -816,8 +818,9 @@ function RefundWizard({
                 ))}
               </ul>
               <p>
-                An owner or finance member who is not you must approve this refund in person. First
-                confirm it is you; your verification lasts 15 minutes.
+                {preview.approveAlone
+                  ? "You run this business alone (sole operator), so you can approve this refund yourself on the Approvals page after confirming it is you. First confirm it is you; your verification lasts 15 minutes."
+                  : "An owner or finance member who is not you must approve this refund in person. First confirm it is you; your verification lasts 15 minutes."}
               </p>
               <StepUpVerification
                 purpose="RefundRequest"
