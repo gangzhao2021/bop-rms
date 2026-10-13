@@ -13,6 +13,7 @@ import { createInternalPricingPolicy } from "./pilot-pricing-policy.mjs";
 import { createInternalDiningCredentialLoaders } from "./pilot-dining-credentials.mjs";
 import { createInternalCredentialLoaders } from "./pilot-credentials.mjs";
 import { refreshInternalOrderReceiptObservations } from "./pilot-receipt-observations.mjs";
+import { createInternalStaffTotpVerifier } from "./pilot-staff-totp.mjs";
 const factories = {
   createInternalRefundReconciliation,
   createInternalRefundSend,
@@ -112,6 +113,8 @@ export function composeMerchantDependencies(
         }
       },
     },
+    // WP-2423 Q5: TEST-ONLY authenticator secrets in the private runtime directory.
+    staffTotpVerifier: createInternalStaffTotpVerifier({ directory }),
     // WP-2423 P6: TEST-ONLY internal simulator for the unmatched capture refund.
     refundUnmatchedCapture: async (request) => {
       const simulator = await provider();

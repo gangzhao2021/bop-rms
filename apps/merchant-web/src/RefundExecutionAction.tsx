@@ -9,6 +9,7 @@ export function RefundExecutionAction({
   orderReference,
   requestReference,
   operationReference,
+  approvalReference,
   phase,
   amountLabel,
   csrf,
@@ -18,6 +19,8 @@ export function RefundExecutionAction({
   orderReference: string;
   requestReference: string;
   operationReference: string;
+  /** WP-2423 Q5: the independent approval the prepared operation is bound to (null: none). */
+  approvalReference: string | null;
   phase: "Prepared" | "NeedsReconciliation" | "Confirmed";
   amountLabel: string;
   csrf: string;
@@ -59,7 +62,7 @@ export function RefundExecutionAction({
               requestReference,
               dispatchReference: serviceOperationReference(),
               auditReference: serviceOperationReference(),
-              approvalReference: null,
+              approvalReference,
             }))
           : (reconcile.current ??= client.prepareReconciliation({
               operationReference,

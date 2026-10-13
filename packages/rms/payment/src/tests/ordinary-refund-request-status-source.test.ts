@@ -70,6 +70,7 @@ it("reads a recorded request as not dispatched with its amount still reserved", 
       paymentIntentReference: id(10),
       state: "NotDispatched",
       executionOperationReference: null,
+      executionApprovalReference: null,
       amountMinor: "6000",
       confirmedMinor: "0",
       pendingMinor: "6000",
@@ -147,5 +148,7 @@ it("recovers prepared operation identity without promoting it to dispatch", asyn
   const result = await make()(tx, query);
   expect(result.payments[0]?.state).toBe("Prepared");
   expect(result.payments[0]?.executionOperationReference).toBe(id(40));
+  // WP-2423 Q5: the approval the prepared operation is bound to (null: none needed).
+  expect(result.payments[0]?.executionApprovalReference).toBeNull();
   expect(result.payments[0]?.pendingMinor).toBe("6000");
 });

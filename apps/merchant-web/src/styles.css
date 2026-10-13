@@ -7360,3 +7360,56 @@ body:has(.product-complete-draft) .bop-shell__header,
     grid-template-columns: minmax(0, 1fr);
   }
 }
+/* WP-2423 Q5: refunds awaiting an owner's approval, and the authenticator code dialog. */
+.refund-approval-list {
+  display: grid;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.refund-approval-card {
+  padding: 16px;
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-surface);
+  background: var(--bop-color-surface-default);
+}
+.refund-approval-card h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+.refund-approval-card dd ul,
+.refund-escalation ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.refund-escalation {
+  margin: 12px 0;
+  padding: 12px 16px;
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-surface);
+}
+.refund-escalation h4 {
+  margin: 0 0 8px;
+}
+.step-up-dialog {
+  width: min(400px, calc(100vw - 32px));
+  margin: auto;
+  padding: 20px;
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-surface);
+  background: var(--bop-color-surface-default);
+}
+.step-up-dialog::backdrop {
+  background: rgb(0 0 0 / 0.45);
+}
+.step-up-dialog h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+.step-up-dialog input {
+  width: 100%;
+  font-size: 20px;
+  letter-spacing: 0.2em;
+  font-variant-numeric: tabular-nums;
+}

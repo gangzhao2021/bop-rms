@@ -276,6 +276,8 @@ export * from "./infrastructure/persistence/browser-session-selection-store.js";
 export * from "./infrastructure/persistence/browser-brand-session-selection-store.js";
 
 export { createPostgresCurrentWorkforceMfaSource } from "./infrastructure/persistence/current-workforce-mfa-source.js";
+export * from "./infrastructure/persistence/workforce-mfa-step-up-store.js";
+export * from "./infrastructure/crypto/workforce-totp.js";
 
 export * from "./infrastructure/persistence/guest-entry-admission-store.js";
 

@@ -131,6 +131,8 @@ it("preserves configured refund roles, provider and Pickup workstation without g
       "createInternalMerchantSession",
       // WP-2423 P6: the unmatched capture refund is sent through the configured provider.
       "refundUnmatchedCapture",
+      // WP-2423 Q5: TEST-ONLY authenticator step-up verifier over the private runtime directory.
+      "staffTotpVerifier",
     ].sort(),
   );
   expect(typeof dependencies.refundUnmatchedCapture).toBe("function");

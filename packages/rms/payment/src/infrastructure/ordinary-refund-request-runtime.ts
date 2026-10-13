@@ -21,6 +21,8 @@ import { createPostgresOrdinaryRefundPricingSource } from "./ordinary-refund-pri
 import { createPostgresCapturedBatchPaymentSource } from "./persistence/captured-batch-payment-source.js";
 import { createPostgresPaymentIntentCreationStore } from "./persistence/payment-intent-creation-store.js";
 import { createPostgresPaymentTerminalStore } from "./persistence/payment-terminal-store.js";
+import { evaluateOrdinaryRefundEscalation } from "../application/ordinary-refund-escalation.js";
+import { ordinaryRefundClaimKind } from "../application/ordinary-refund-request.js";
 const fail = (): never => {
   throw new Error("ORDINARY_REFUND_REQUEST_UNAVAILABLE");
 };
@@ -115,6 +117,17 @@ export function createPostgresOrdinaryRefundRequestRuntime(options: {
   newAuditReference(): string;
   retentionPolicyCode: string;
   retentionPolicyVersion: number;
+  /** WP-2423 Q5: Store Business Date port. When present the result says whether this request
+   * needs independent approval (RF-D01–D03), evaluated on the same history as the claim. */
+  businessDate?(
+    tx: ConsumerTransaction,
+    query: {
+      tenantReference: string;
+      brandReference: string;
+      storeReference: string;
+      occurredAt: string;
+    },
+  ): Promise<string>;
 }) {
   const scope = Object.freeze({
     tenantReference: ref(options.scope.tenantReference),
@@ -269,15 +282,16 @@ export function createPostgresOrdinaryRefundRequestRuntime(options: {
       payments,
       ...(intent.claim === null ? {} : { claim: intent.claim }),
     });
+    const captureSource = createPostgresOrdinaryRefundCaptureSource({
+      scope,
+      now: options.now,
+      authorize,
+      validatePricing: createPostgresOrdinaryRefundPricingSource({ scope, authorize }),
+    });
     const store = createPostgresOrdinaryRefundRequestStore({
       scope,
       authorize,
-      validateSources: createPostgresOrdinaryRefundCaptureSource({
-        scope,
-        now: options.now,
-        authorize,
-        validatePricing: createPostgresOrdinaryRefundPricingSource({ scope, authorize }),
-      }),
+      validateSources: captureSource,
     });
     const result = await (preview ? store.preview : store.record)(tx, request, {
       auditId: request.auditReference,
@@ -295,8 +309,67 @@ export function createPostgresOrdinaryRefundRequestRuntime(options: {
       retentionPolicyCode: options.retentionPolicyCode,
       retentionPolicyVersion: options.retentionPolicyVersion,
     });
+    const escalation =
+      options.businessDate === undefined
+        ? null
+        : await (async () => {
+            const businessDate = options.businessDate;
+            if (businessDate === undefined) return fail();
+            const captured = await captureSource(tx, { request, history });
+            const at = (occurredAt: string) =>
+              businessDate(tx, {
+                tenantReference: scope.tenantReference,
+                brandReference: scope.brandReference,
+                storeReference: scope.storeReference,
+                occurredAt,
+              });
+            const selectedCaptures = [];
+            for (const leg of request.payments) {
+              const match = captured.find(
+                (entry) => entry.paymentAttemptReference === leg.paymentAttemptReference,
+              );
+              if (!match) return fail();
+              selectedCaptures.push({
+                tenantReference: scope.tenantReference,
+                brandReference: scope.brandReference,
+                storeReference: scope.storeReference,
+                orderReference: intent.orderReference,
+                paymentReference: leg.paymentAttemptReference,
+                firstCaptureReference: leg.firstCaptureReference,
+                firstCapturedAt: match.firstCapturedAt,
+                businessDate: await at(match.firstCapturedAt),
+              });
+            }
+            const decision = evaluateOrdinaryRefundEscalation({
+              tenantReference: scope.tenantReference,
+              brandReference: scope.brandReference,
+              storeReference: scope.storeReference,
+              orderReference: intent.orderReference,
+              requestReference: request.requestReference,
+              observedAt,
+              businessDate: await at(observedAt),
+              selectedCaptures,
+              claims: [...history, request].map((entry) => ({
+                tenantReference: scope.tenantReference,
+                brandReference: scope.brandReference,
+                storeReference: scope.storeReference,
+                orderReference: intent.orderReference,
+                requestReference: entry.requestReference,
+                kind: ordinaryRefundClaimKind(entry),
+                status: "Requested",
+                amountMinor: entry.amountMinor,
+                currencyCode: entry.currencyCode,
+                noProviderEffectReference: null,
+              })),
+              manualAllocationOverride: false,
+            });
+            return Object.freeze({
+              requiresIndependentApproval: decision.requiresIndependentApproval,
+              reasons: decision.reasons,
+            });
+          })();
     await authorize();
-    return Object.freeze({ ...result, request });
+    return Object.freeze({ ...result, request, escalation });
   };
   const record = async (tx: ConsumerTransaction, value: unknown) => {
     const result = await resolve(tx, value, false);

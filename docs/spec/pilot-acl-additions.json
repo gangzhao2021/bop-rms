@@ -2394,6 +2394,33 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "WP-2423 Owner 2026-10-10 (批准订单取消流程) / 2026-10-11 (按你建议做: Q6 staff cancels items not yet started; refund of exactly those items)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "workforce_mfa_step_up",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "PENDING OWNER APPROVAL (WP-2423 Q5): DEC-REFUND-ESCALATION-PILOT escalated refund approval and MFA step-up; staff re-verify a second factor and a different Owner/Finance member records the independent approval"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "workforce_mfa_step_up",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "PENDING OWNER APPROVAL (WP-2423 Q5): DEC-REFUND-ESCALATION-PILOT escalated refund approval and MFA step-up; staff re-verify a second factor and a different Owner/Finance member records the independent approval"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "ordinary_refund_approval",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "PENDING OWNER APPROVAL (WP-2423 Q5): DEC-REFUND-ESCALATION-PILOT escalated refund approval and MFA step-up; staff re-verify a second factor and a different Owner/Finance member records the independent approval"
     }
   ]
 }

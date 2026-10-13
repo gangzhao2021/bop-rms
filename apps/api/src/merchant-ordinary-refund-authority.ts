@@ -1,5 +1,10 @@
 import type { ConsumerTransaction } from "@bop/eventing";
-import { parseOpaqueUuidV7, readClosedRecord } from "@bop/identity";
+import {
+  createPostgresLatestWorkforceStepUpSource,
+  parseOpaqueUuidV7,
+  readClosedRecord,
+  resolveRecentWorkforceMfaAt,
+} from "@bop/identity";
 import { createOrdinaryRefundRoleResolver } from "@rms/payment";
 import { createMerchantWorkforceAuthoritySource } from "./merchant-workforce-authority-source.js";
 
@@ -18,6 +23,9 @@ export function createMerchantOrdinaryRefundAuthority(
         observedAt: string;
       },
     ): Promise<unknown>;
+    /** WP-2423 Q5: recent MFA also counts the actor's latest step-up at this Store
+     * (Identity owner read), not only the original enrollment verification. */
+    stepUp?: boolean;
   },
 ) {
   const workforce = createMerchantWorkforceAuthoritySource(options);
@@ -51,6 +59,37 @@ export function createMerchantOrdinaryRefundAuthority(
       current.activeRoleCodes,
     );
     if (role === null) throw new Error("ORDINARY_REFUND_AUTHORITY_DENIED");
+    const latestStepUpAt =
+      options.stepUp === true
+        ? await createPostgresLatestWorkforceStepUpSource({
+            // The same retained actor/Store fence as the enrollment read.
+            authorize: async (_tx, query) => {
+              const fresh = await options.resolveContext(tx, {
+                tenantReference: current.tenantReference,
+                brandReference: current.brandReference,
+                storeReference: current.storeReference,
+                actorReference: current.actorReference,
+                observedAt: current.observedAt,
+                permissionCode: current.permissionCode,
+              });
+              return (
+                query.actorReference === current.actorReference &&
+                query.observedAt === String(current.observedAt) &&
+                fresh.tenantReference === current.tenantReference &&
+                fresh.context.actor.actorReference === current.actorReference &&
+                fresh.context.actor.status === "Active" &&
+                fresh.context.brand.brandReference === query.brandReference &&
+                fresh.context.store?.storeReference === query.storeReference &&
+                String(fresh.context.resolvedAt) === String(current.observedAt)
+              );
+            },
+          })(tx, {
+            brandReference: current.brandReference,
+            storeReference: current.storeReference,
+            actorReference: current.actorReference,
+            observedAt: current.observedAt,
+          })
+        : null;
     return Object.freeze({
       tenantReference: current.tenantReference,
       brandReference: current.brandReference,
@@ -61,7 +100,12 @@ export function createMerchantOrdinaryRefundAuthority(
       active: true,
       permissionCode: current.permissionCode,
       allowed: current.decision.effect === "Allow",
-      recentMfaAt: current.mfa.status === "TotpVerified" ? current.mfa.verifiedAt : null,
+      recentMfaAt: resolveRecentWorkforceMfaAt({
+        status: current.mfa.status,
+        verifiedAt: current.mfa.verifiedAt,
+        resetAt: current.mfa.resetAt,
+        latestStepUpAt,
+      }),
       observedAt: current.observedAt,
     });
   };

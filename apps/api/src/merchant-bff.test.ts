@@ -1,3 +1,5 @@
+import { MerchantStepUpError } from "./merchant-mfa-step-up.js";
+import { MerchantRefundApprovalError } from "./merchant-ordinary-refund-approval.js";
 import { BrandStoreTopologyError } from "@bop/tenant";
 import {
   parsePublishingOptionSetPublicationOperation,
@@ -2508,6 +2510,8 @@ it("protects refund request transport and returns only request evidence", async 
     currencyCode: "CAD" as const,
     amountMinor: "1130",
     paymentAttemptReferences: [id(3)],
+    approvalRequired: true,
+    escalationReasons: ["OrderOrdinaryTotalAboveCad100" as const],
     internalQuote: "private",
   };
   const command = vi.fn<NonNullable<MerchantBffRouterOptions["ordinaryRefundRequest"]>>(
@@ -2547,6 +2551,8 @@ it("protects refund request transport and returns only request evidence", async 
     currencyCode: "CAD",
     amountMinor: "1130",
     paymentAttemptReferences: [id(3)],
+    approvalRequired: true,
+    escalationReasons: ["OrderOrdinaryTotalAboveCad100"],
     replayed: false,
   });
   command.mockResolvedValueOnce({ ...data, status: "AlreadyCommitted" });
@@ -2704,6 +2710,8 @@ it("protects refund preview transport and whitelists component amounts", async (
     currencyCode: "CAD" as const,
     amountMinor: "1130",
     paymentAttemptReferences: [id(3)],
+    approvalRequired: false,
+    escalationReasons: [],
     components,
   };
   const preview = vi.fn<NonNullable<MerchantBffRouterOptions["ordinaryRefundPreview"]>>(
@@ -2846,6 +2854,7 @@ it("protects refund status and strips private execution details", async () => {
     paymentIntentReference: id(1),
     state: "NotDispatched" as const,
     executionOperationReference: null,
+    executionApprovalReference: null,
     amountMinor: "1130",
     confirmedMinor: "0",
     pendingMinor: "1130",
@@ -5035,4 +5044,193 @@ it("WP-2423 Q6 step 2a: protects item cancellation transport and maps owner refu
   const denied = await submit("");
   expect(denied.status).toBe(403);
   expect(await denied.text()).not.toContain("synthetic");
+});
+
+async function serveRefundEscalation(extra: Partial<MerchantBffRouterOptions> = {}) {
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      ...extra,
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  return `http://127.0.0.1:${address.port}`;
+}
+
+it("WP-2423 Q5: verifies a step-up code for the session only and never echoes the code", async () => {
+  type StepUp = NonNullable<MerchantBffRouterOptions["mfaStepUp"]>;
+  const command = vi.fn<StepUp>(async () => ({
+    status: "Verified" as const,
+    stepUpReference: "01909974-0000-7000-8000-000000000001",
+    verifiedAt: "2026-10-12T15:00:00.000Z",
+    validUntil: "2026-10-12T15:15:00.000Z",
+  }));
+  const root = await serveRefundEscalation({ mfaStepUp: command });
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const send = (extra: Record<string, string> = {}) =>
+    request(root, "/merchant/identity/step-up", {
+      method: "POST",
+      headers: { ...headers, ...extra },
+      body: JSON.stringify({ purpose: "RefundApproval", code: "123456" }),
+    });
+  for (const bad of [
+    { Origin: "https://foreign.invalid" },
+    { "Sec-Fetch-Site": "cross-site" },
+    { Cookie: "" },
+    { "X-BOP-CSRF": "" },
+  ])
+    expect((await send(bad)).status).toBe(403);
+  expect(command).not.toHaveBeenCalled();
+  const ok = await send();
+  expect(ok.status).toBe(200);
+  expect(ok.headers.get("cache-control")).toBe("no-store");
+  expect(await ok.json()).toEqual({
+    status: "Verified",
+    verifiedAt: "2026-10-12T15:00:00.000Z",
+    validUntil: "2026-10-12T15:15:00.000Z",
+  });
+  expect(command.mock.calls[0]?.[0]).toMatchObject({ sessionCookie, csrf });
+  command.mockResolvedValueOnce({ status: "Rejected", reason: "CodeMismatch" });
+  const rejected = await send();
+  expect(rejected.status).toBe(422);
+  expect(await rejected.text()).not.toContain("123456");
+  command.mockResolvedValueOnce({ status: "Rejected", reason: "CodeReused" });
+  expect(await (await send()).json()).toEqual({ error: "code_already_used" });
+  command.mockResolvedValueOnce({ status: "Locked", retryAfterSeconds: 120 });
+  const locked = await send();
+  expect(locked.status).toBe(429);
+  expect(await locked.json()).toEqual({ error: "too_many_attempts", retryAfterSeconds: 120 });
+  command.mockRejectedValueOnce(new MerchantStepUpError("NotSetUp"));
+  expect((await send()).status).toBe(503);
+  command.mockRejectedValueOnce(new Error("private detail"));
+  const failed = await send();
+  expect(failed.status).toBe(403);
+  expect(await failed.text()).not.toContain("private");
+  const unconfigured = await serveRefundEscalation();
+  expect(
+    (
+      await request(unconfigured, "/merchant/identity/step-up", {
+        method: "POST",
+        headers,
+        body: "{}",
+      })
+    ).status,
+  ).toBe(503);
+});
+
+it("WP-2423 Q5: approves through the session and names who must re-verify", async () => {
+  const id = (n: number) => "01909974-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  type Approve = NonNullable<MerchantBffRouterOptions["ordinaryRefundApproval"]>;
+  const command = vi.fn<Approve>(async () => ({
+    status: "Approved" as const,
+    approvalReference: id(1),
+    replayed: false,
+    payments: [
+      { paymentAttemptReference: id(2), operationReference: id(3), state: "SendRecorded" as const },
+    ],
+  }));
+  const root = await serveRefundEscalation({ ordinaryRefundApproval: command });
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const send = (extra: Record<string, string> = {}) =>
+    request(root, "/merchant/payments/refunds/approve", {
+      method: "POST",
+      headers: { ...headers, ...extra },
+      body: "{}",
+    });
+  for (const bad of [{ Origin: "https://foreign.invalid" }, { Cookie: "" }, { "X-BOP-CSRF": "" }])
+    expect((await send(bad)).status).toBe(403);
+  expect(command).not.toHaveBeenCalled();
+  const ok = await send();
+  expect(ok.status).toBe(202);
+  expect(await ok.json()).toEqual({
+    status: "Approved",
+    approvalReference: id(1),
+    replayed: false,
+    payments: [
+      { paymentAttemptReference: id(2), operationReference: id(3), state: "SendRecorded" },
+    ],
+  });
+  command.mockRejectedValueOnce(new MerchantRefundApprovalError("SamePerson"));
+  const same = await send();
+  expect([same.status, await same.json()]).toEqual([422, { error: "same_person" }]);
+  command.mockRejectedValueOnce(
+    new MerchantRefundApprovalError("NeedsReverification", "Requester"),
+  );
+  const stale = await send();
+  expect([stale.status, await stale.json()]).toEqual([
+    409,
+    { error: "needs_reverification", party: "Requester" },
+  ]);
+  command.mockRejectedValueOnce(new MerchantRefundApprovalError("Changed"));
+  expect((await send()).status).toBe(409);
+  command.mockRejectedValueOnce(new Error("private"));
+  expect((await send()).status).toBe(403);
+});
+
+it("WP-2423 Q5: lists refunds awaiting approval as a same-origin read", async () => {
+  const id = (n: number) => "01909974-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const entry = {
+    orderReference: id(1),
+    orderNumber: "A-0042",
+    requestReference: id(2),
+    paymentIntentReferences: [id(3)],
+    currencyCode: "CAD",
+    amountMinor: "12500",
+    reasonCode: "WRONG_ITEM",
+    escalationReasons: ["OrderOrdinaryTotalAboveCad100"],
+    requestedAt: "2026-10-12T15:00:00.000Z",
+    requesterName: "Mia",
+    requestedByYou: false,
+    requesterVerifiedUntil: "2026-10-12T15:15:00.000Z",
+    state: "AwaitingApproval",
+    approvalReference: null,
+    approvedAt: null,
+    approverName: null,
+    canApprove: true,
+  };
+  type Approvals = NonNullable<MerchantBffRouterOptions["ordinaryRefundApprovals"]>;
+  const read = vi.fn<Approvals>(
+    async () =>
+      ({
+        observedAt: "2026-10-12T15:01:00.000Z",
+        canApprove: true,
+        entries: [{ ...entry, requesterReference: id(9) }],
+      }) as never,
+  );
+  const root = await serveRefundEscalation({ ordinaryRefundApprovals: read });
+  const get = (extra: Record<string, string> = {}, suffix = "") =>
+    request(root, "/merchant/payments/refunds/approvals" + suffix, {
+      headers: { ...safeHeaders, Cookie: "__Host-bop-merchant=" + sessionCookie, ...extra },
+    });
+  expect((await get({ Origin: "https://foreign.invalid" })).status).toBe(403);
+  expect((await get({}, "?store=x")).status).toBe(403);
+  expect((await get({ Cookie: "" })).status).toBe(403);
+  const ok = await get();
+  expect(ok.status).toBe(200);
+  expect(ok.headers.get("cache-control")).toBe("no-store");
+  const body = await ok.json();
+  expect(body).toEqual({
+    observedAt: "2026-10-12T15:01:00.000Z",
+    canApprove: true,
+    entries: [entry],
+  });
+  expect(JSON.stringify(body)).not.toContain(id(9));
 });

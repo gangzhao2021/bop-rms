@@ -68,6 +68,11 @@ import { createMerchantOrderItemStaffCancellation } from "../../apps/api/dist/me
 import { createMerchantOrdinaryRefundBusinessDate } from "../../apps/api/dist/merchant-ordinary-refund-business-date.js";
 import { createPersistentMerchantOrderQueue } from "../../apps/api/dist/persistent-merchant-order-queue.js";
 import { createInternalStoreConfiguration } from "./pilot-store-configuration.mjs";
+import { createMerchantMfaStepUp } from "../../apps/api/dist/merchant-mfa-step-up.js";
+import { createMerchantOrdinaryRefundApproval } from "../../apps/api/dist/merchant-ordinary-refund-approval.js";
+import { createMerchantOrdinaryRefundApprovals } from "../../apps/api/dist/merchant-ordinary-refund-approvals.js";
+import { createInternalRefundWorkforceContext } from "./pilot-refund-workforce.mjs";
+import { parseCanonicalInstant } from "../../packages/bop/identity/src/index.ts";
 export async function createInternalMerchant(
   resources,
   {
@@ -90,6 +95,7 @@ export async function createInternalMerchant(
     loadPricingCurrencyMetadata,
     refundUnmatchedCapture,
     cancellationRefundProvider,
+    staffTotpVerifier,
   },
 ) {
   const session = await createInternalMerchantSession(resources);
@@ -233,6 +239,13 @@ export async function createInternalMerchant(
           label: "Options",
           href: "/app/commerce/option-sets",
           permission: "catalog.option_set.read",
+        },
+        // WP-2423 Q5: refunds awaiting an Owner approval (Section 88 APPROVAL-INBOX).
+        {
+          screenId: "APPROVAL-INBOX",
+          label: "Approvals",
+          href: "/app/approvals",
+          permission: "workflow.operate",
         },
         // WP-2423 Q4: busy mode (pause/resume online ordering) and published hours.
         {
@@ -510,6 +523,13 @@ export async function createInternalMerchant(
     newReference: () => resources.credentials.reference(),
     locale: "en-CA",
   });
+  // WP-2423 Q5: the Store Business Date of the published configuration (RF-D01) for escalation.
+  const refundBusinessDate = createMerchantOrdinaryRefundBusinessDate({
+    ...selected,
+    ...persistence.publication,
+    timeZone: resources.operating.timeZone,
+    authorize: async (_tx, at) => at <= resources.now(),
+  });
   const ordinaryRefundRequest = createMerchantOrdinaryRefundRequest({
     persistence,
     authentication: service,
@@ -517,7 +537,78 @@ export async function createInternalMerchant(
     newAuditReference: () => resources.credentials.reference(),
     retentionPolicyCode: "FINANCIAL_COMPLIANCE",
     retentionPolicyVersion: 1,
+    businessDate: refundBusinessDate,
   });
+  // WP-2423 Q5: escalated refund approval. The requester's role, permission and MFA are read from
+  // their owners for that person (Identity roster, Membership, Permission, MFA step-ups).
+  const escalatedRefundConfiguration = async (tx, scope, authority) => {
+    const deny = () => {
+      throw new Error("INTERNAL_REFUND_APPROVAL_CONFIGURATION_DENIED");
+    };
+    for (const key of ["tenantReference", "brandReference", "storeReference"])
+      if (scope[key] !== selected[key]) deny();
+    const context = authority.context;
+    if (context.actor.actorReference !== scope.actorReference || !(await authority.authorize()))
+      deny();
+    const bound = await refundConfiguration(tx, scope);
+    const current = async (t, at) =>
+      t === tx &&
+      parseCanonicalInstant(at) <= parseCanonicalInstant(resources.now()) &&
+      (await authority.authorize());
+    return {
+      providerAccountReference: bound.providerAccountReference,
+      environment: bound.environment,
+      businessDate: refundBusinessDate,
+      workforce: {
+        resolveContext: createInternalRefundWorkforceContext({
+          expected: selected,
+          persistence,
+          sessionActorReference: scope.actorReference,
+          sessionContext: async () => context,
+          current,
+        }),
+        resolveRoleMapping: async (t, query) => {
+          for (const key of ["tenantReference", "brandReference", "storeReference"])
+            if (query[key] !== selected[key]) deny();
+          if (!(await current(t, query.observedAt))) deny();
+          return (await refundConfiguration(t, scope)).roleMapping;
+        },
+        stepUp: true,
+      },
+    };
+  };
+  const ordinaryRefundApproval = logUnexpected(
+    "INTERNAL_REFUND_APPROVAL_UNAVAILABLE",
+    createMerchantOrdinaryRefundApproval({
+      persistence,
+      authentication: service,
+      resolveConfiguration: escalatedRefundConfiguration,
+      prepare: ordinaryRefund,
+      send: ordinaryRefundSend,
+      retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+      retentionPolicyVersion: 1,
+    }),
+  );
+  const ordinaryRefundApprovals = logUnexpected(
+    "INTERNAL_REFUND_APPROVALS_UNAVAILABLE",
+    createMerchantOrdinaryRefundApprovals({
+      persistence,
+      resolveConfiguration: escalatedRefundConfiguration,
+    }),
+  );
+  // WP-2423 Q5: TEST-ONLY authenticator step-up (Cognito re-authentication in production).
+  const mfaStepUp =
+    staffTotpVerifier === undefined
+      ? undefined
+      : createMerchantMfaStepUp({
+          persistence,
+          authentication: service,
+          method: "InternalTestTotp",
+          verify: staffTotpVerifier,
+          newReference: () => resources.credentials.reference(),
+          retentionPolicyCode: "SECURITY_AUDIT",
+          retentionPolicyVersion: 1,
+        });
   const diningClosing = createMerchantDiningClosingCommand({
     exceptionTaskPolicy: resolveInternalDiningTaskPolicy({
       queue,
@@ -866,6 +957,9 @@ export async function createInternalMerchant(
       ordinaryRefundPreview: ordinaryRefundRequest.preview,
       ordinaryRefundItems,
       ordinaryRefundRequest,
+      ordinaryRefundApproval,
+      ordinaryRefundApprovals,
+      ...(mfaStepUp === undefined ? {} : { mfaStepUp }),
       diningJoinState,
       diningJoinRegenerate,
       diningSessionStart,

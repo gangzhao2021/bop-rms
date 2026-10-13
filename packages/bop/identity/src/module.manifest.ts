@@ -34,6 +34,7 @@ const moduleManifestInput = {
       "workforce_onboarding_operation",
       "workforce_account_binding",
       "workforce_mfa_status",
+      "workforce_mfa_step_up",
       "workforce_recovery_case",
     ],
   },

@@ -112,6 +112,8 @@ it("binds authenticated Manager and current Store, computes server time, and lim
     currencyCode: "CAD",
     amountMinor: "1130",
     paymentAttemptReferences: [id(13)],
+    approvalRequired: null,
+    escalationReasons: [],
   });
   expect(d.resolve).toHaveBeenCalledWith(
     f.tx,
@@ -168,6 +170,8 @@ it("previews server component amounts without reporting a committed request", as
     currencyCode: "CAD",
     amountMinor: "1130",
     paymentAttemptReferences: [id(13)],
+    approvalRequired: null,
+    escalationReasons: [],
     components: {
       netAmountMinor: "1000",
       taxAmountMinor: "130",
@@ -176,4 +180,38 @@ it("previews server component amounts without reporting a committed request", as
       serviceChargeTaxAmountMinor: "0",
     },
   });
+});
+
+it("WP-2423 Q5: accepts only the listed reasons and reports why approval is needed", async () => {
+  for (const reasonCode of ["OTHER", "SYNTHETIC_FREE_CODE", "customer_request"]) {
+    const f = setup();
+    await expect(
+      f.operation({ ...f.input, command: { ...f.input.command, reasonCode } }),
+    ).rejects.toThrow("ORDINARY_REFUND_REQUEST_DENIED");
+    expect(f.run).not.toHaveBeenCalled();
+  }
+  const f = setup();
+  d.record.mockImplementationOnce(async (_tx, value) => ({
+    status: "Created",
+    claimVersion: 1,
+    escalation: {
+      requiresIndependentApproval: true,
+      reasons: ["MoreThan24Hours", "OrderOrdinaryTotalAboveCad100"],
+    },
+    request: {
+      ...value,
+      currencyCode: "CAD",
+      amountMinor: 12000n,
+      payments: [{ paymentAttemptReference: id(13), items: [] }],
+    },
+  }));
+  const result = await f.operation({
+    ...f.input,
+    command: { ...f.input.command, reasonCode: "QUALITY_ISSUE" },
+  });
+  expect(result).toMatchObject({
+    approvalRequired: true,
+    escalationReasons: ["MoreThan24Hours", "OrderOrdinaryTotalAboveCad100"],
+  });
+  expect(d.record.mock.calls[0]?.[1]).toMatchObject({ reasonCode: "QUALITY_ISSUE" });
 });

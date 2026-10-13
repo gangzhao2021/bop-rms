@@ -23,6 +23,7 @@ import { StoreTimeZoneContext } from "./StoreTime.js";
 import { MerchantShell } from "./MerchantShell.js";
 import { StoreOverview } from "./StoreOverview.js";
 import { SettlementPage } from "./SettlementPage.js";
+import { RefundApprovalsPage } from "./RefundApprovalsPage.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { KitchenBoardPage, KitchenWorkItemPage } from "./KitchenBoardPages.js";
 import { PickupQueuePage } from "./PickupPages.js";
@@ -1376,6 +1377,25 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         />
         <Route path="/app/integrations/kds-profiles" element={<KdsProfilePage />} />
         <Route path="/app/operations/tables" element={<DiningTableListPage />} />
+        {/* WP-2423 Q5: Section 88 APPROVAL-INBOX — refunds awaiting an Owner/Finance approval. */}
+        <Route
+          path="/app/approvals"
+          element={
+            demo === null && state.kind === "Ready" && !state.switching ? (
+              <RefundApprovalsPage
+                key={state.workspace.selectedScope.storeReference + state.csrf}
+                csrf={state.csrf}
+                storeLabel={state.workspace.selectedScope.storeLabel}
+              />
+            ) : (
+              <WorkspacePage title="Approvals">
+                <StatePanel heading="Approvals unavailable" tone="error" status>
+                  <p>A current merchant session and Store are required.</p>
+                </StatePanel>
+              </WorkspacePage>
+            )
+          }
+        />
         <Route
           path="/app/operations/payment-reconciliation"
           element={

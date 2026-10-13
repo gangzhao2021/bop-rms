@@ -1,6 +1,6 @@
-import { createTenantContext } from "../../packages/bop/tenant/src/index.ts";
 import { parseCanonicalInstant } from "../../packages/bop/identity/src/index.ts";
 import { createMerchantOrdinaryRefundSendCommand } from "../../apps/api/dist/merchant-ordinary-refund-send-command.js";
+import { createInternalRefundWorkforceContext } from "./pilot-refund-workforce.mjs";
 /** Internal authenticated send only; construction never calls the Provider. */
 export function createInternalRefundSend({
   resources,
@@ -18,7 +18,8 @@ export function createInternalRefundSend({
     persistence,
     authentication,
     audit: {
-      reasonCode: "CUSTOMER_REQUEST",
+      // WP-2423 Q5: executing a recorded request; the request and its Audit carry the staff reason.
+      reasonCode: "REFUND_REQUEST_EXECUTION",
       retentionPolicyCode: "FINANCIAL_COMPLIANCE",
       retentionPolicyVersion: 1,
     },
@@ -54,35 +55,25 @@ export function createInternalRefundSend({
         providerAccountReference: providerAccountReference,
         environment: "Test",
         workforce: {
-          resolveContext: async (tx, q) => {
-            for (const key of ["tenantReference", "brandReference", "storeReference"])
-              if (q[key] !== expected[key]) deny();
-            if (
-              q.actorReference !== actorReference ||
-              ![
-                "payment.refund.request",
-                "payment.refund.approve",
-                "payment.refund.execute",
-              ].includes(q.permissionCode)
-            )
-              deny();
-            const { context } = await current(tx, q.observedAt);
-            return {
-              tenantReference: scope.tenantReference,
-              context: createTenantContext(
-                context.actor,
-                context.brand,
-                context.store,
-                parseCanonicalInstant(q.observedAt),
-              ),
-            };
-          },
+          // WP-2423 Q5: the other party of an escalated refund is resolved for that person through
+          // owners; the session's own identity is never lent to someone else.
+          resolveContext: createInternalRefundWorkforceContext({
+            expected,
+            persistence,
+            sessionActorReference: actorReference,
+            sessionContext: async (tx, at) => (await current(tx, at)).context,
+            current: async (tx, at) => {
+              await current(tx, at);
+              return true;
+            },
+          }),
           resolveRoleMapping: async (tx, q) => {
             for (const key of ["tenantReference", "brandReference", "storeReference"])
               if (q[key] !== expected[key]) deny();
             await current(tx, q.observedAt);
             return (await configuration(tx)).roleMapping;
           },
+          stepUp: true,
         },
         store: {
           ...scope,

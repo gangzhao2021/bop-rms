@@ -1,6 +1,6 @@
-import { createTenantContext } from "../../packages/bop/tenant/src/index.ts";
 import { parseCanonicalInstant } from "../../packages/bop/identity/src/index.ts";
 import { createMerchantOrdinaryRefundCommand } from "../../apps/api/dist/merchant-ordinary-refund-command.js";
+import { createInternalRefundWorkforceContext } from "./pilot-refund-workforce.mjs";
 /** Uses actual command fences and existing owner MFA; creates no role or MFA facts. */
 export function createInternalRefundPreparation({
   resources,
@@ -16,7 +16,8 @@ export function createInternalRefundPreparation({
     persistence,
     authentication,
     audit: {
-      reasonCode: "CUSTOMER_REQUEST",
+      // WP-2423 Q5: executing a recorded request; the request and its Audit carry the staff reason.
+      reasonCode: "REFUND_REQUEST_EXECUTION",
       retentionPolicyCode: "FINANCIAL_COMPLIANCE",
       retentionPolicyVersion: 1,
     },
@@ -43,36 +44,22 @@ export function createInternalRefundPreparation({
         providerAccountReference: bound.providerAccountReference,
         environment: bound.environment,
         workforce: {
-          resolveContext: async (t, query) => {
-            for (const key of ["tenantReference", "brandReference", "storeReference"])
-              if (query[key] !== expected[key]) deny();
-            // The current InternalTest source only knows this configured employee; never borrow its identity for another approver.
-            if (
-              query.actorReference !== scope.actorReference ||
-              ![
-                "payment.refund.request",
-                "payment.refund.approve",
-                "payment.refund.execute",
-              ].includes(query.permissionCode) ||
-              !(await current(t, query.observedAt))
-            )
-              deny();
-            return {
-              tenantReference: scope.tenantReference,
-              context: createTenantContext(
-                context.actor,
-                context.brand,
-                context.store,
-                parseCanonicalInstant(query.observedAt),
-              ),
-            };
-          },
+          // WP-2423 Q5: the requester (or approver) of an escalated refund is resolved for that
+          // person through owners; the session's own identity is never lent to someone else.
+          resolveContext: createInternalRefundWorkforceContext({
+            expected,
+            persistence,
+            sessionActorReference: scope.actorReference,
+            sessionContext: async () => context,
+            current,
+          }),
           resolveRoleMapping: async (t, query) => {
             for (const key of ["tenantReference", "brandReference", "storeReference"])
               if (query[key] !== expected[key]) deny();
             if (!(await current(t, query.observedAt))) deny();
             return (await resolveRefundConfiguration(t, scope)).roleMapping;
           },
+          stepUp: true,
         },
         store: {
           ...expected,

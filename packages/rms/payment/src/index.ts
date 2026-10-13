@@ -187,6 +187,16 @@ export { createPostgresOrderSettledFinalityStore } from "./infrastructure/persis
 export { createPostgresOrdinaryRefundRequestContextSource } from "./infrastructure/persistence/ordinary-refund-request-store.js";
 
 export { createPostgresOrdinaryRefundRequestRuntime } from "./infrastructure/ordinary-refund-request-runtime.js";
+export {
+  createPostgresOrdinaryRefundApprovalQueueRuntime,
+  createPostgresOrdinaryRefundCurrentEscalationSource,
+} from "./infrastructure/ordinary-refund-approval-queue-runtime.js";
+export {
+  createPostgresOrdinaryRefundApprovalStore,
+  createPostgresOrdinaryRefundApprovalReader,
+} from "./infrastructure/persistence/ordinary-refund-approval-store.js";
+export { createPostgresOrdinaryRefundApprovalSource } from "./infrastructure/ordinary-refund-approval-source.js";
+export { createPostgresOrdinaryRefundApprovalSubjectSource } from "./infrastructure/persistence/ordinary-refund-request-store.js";
 
 export { createPostgresPaymentIntentBindingSource } from "./infrastructure/persistence/payment-intent-binding-source.js";
 

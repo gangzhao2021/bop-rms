@@ -332,3 +332,68 @@ export function createPostgresOrdinaryRefundApprovalValidationSource(options: Op
     });
   };
 }
+
+/** WP-2423 Q5: ordinary refund requests at this Store that may still need an independent
+ * approval decision or its first send: recent Ordinary requests with no prepared operation
+ * (candidates; the caller re-evaluates escalation), and approved requests whose every payment
+ * is not yet dispatched. A list entry grants nothing; approval and dispatch recheck everything. */
+export function createPostgresOrdinaryRefundApprovalQueueReader(options: {
+  scope: Options["scope"];
+  authorize(
+    tx: ConsumerTransaction,
+    query: Options["scope"] & { observedAt: string },
+  ): Promise<boolean>;
+}) {
+  const scope = {
+    tenantReference: String(parsePaymentReference(options.scope.tenantReference)),
+    brandReference: String(parsePaymentReference(options.scope.brandReference)),
+    storeReference: String(parsePaymentReference(options.scope.storeReference)),
+  };
+  return async (tx: ConsumerTransaction, value: unknown) => {
+    const raw = exactPaymentObject(value, ["observedAt", "since", "limit"]);
+    const observedAt = parsePaymentInstant(raw.observedAt);
+    const since = parsePaymentInstant(raw.since);
+    if (
+      since > observedAt ||
+      typeof raw.limit !== "number" ||
+      !Number.isSafeInteger(raw.limit) ||
+      raw.limit < 1 ||
+      raw.limit > 100
+    )
+      return fail();
+    const authorize = async () => {
+      if ((await options.authorize(tx, { ...scope, observedAt })) !== true) return fail();
+    };
+    await authorize();
+    await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+      scope.brandReference,
+      scope.storeReference,
+    ]);
+    const result = await tx.query(
+      "SELECT r.order_id::text AS order_ref,r.request_id::text AS request_ref,a.approval_id::text AS approval_ref " +
+        "FROM rms_payment.ordinary_refund_request r " +
+        "LEFT JOIN LATERAL (SELECT x.approval_id FROM rms_payment.ordinary_refund_approval x " +
+        "WHERE x.brand_id=r.brand_id AND x.store_id=r.store_id AND x.request_id=r.request_id " +
+        "ORDER BY x.approved_at DESC,x.approval_id DESC LIMIT 1) a ON true " +
+        "WHERE r.brand_id=$1 AND r.store_id=$2 AND r.requested_at>=$3 AND r.requested_at<=$4 " +
+        "AND NOT (r.record_json ? 'claim') AND (" +
+        "(a.approval_id IS NULL AND NOT EXISTS (SELECT 1 FROM rms_payment.ordinary_refund_operation o " +
+        "WHERE o.brand_id=r.brand_id AND o.store_id=r.store_id AND o.request_id=r.request_id)) OR " +
+        "(a.approval_id IS NOT NULL AND (SELECT count(*) FROM rms_payment.ordinary_refund_dispatch d " +
+        "WHERE d.brand_id=r.brand_id AND d.store_id=r.store_id AND d.request_id=r.request_id)" +
+        "<jsonb_array_length(r.record_json->'payments'))) " +
+        "ORDER BY r.requested_at DESC,r.request_id DESC LIMIT $5",
+      [scope.brandReference, scope.storeReference, since, observedAt, raw.limit],
+    );
+    const entries = result.rows.map((row) =>
+      Object.freeze({
+        orderReference: String(parsePaymentReference(row.order_ref)),
+        requestReference: String(parsePaymentReference(row.request_ref)),
+        approvalReference:
+          row.approval_ref === null ? null : String(parsePaymentReference(row.approval_ref)),
+      }),
+    );
+    await authorize();
+    return Object.freeze(entries);
+  };
+}

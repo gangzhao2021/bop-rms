@@ -55,6 +55,30 @@ const label = (value: unknown): string => {
     return fail();
   return value;
 };
+/** WP-2423 Q5: why an Owner/Finance approval is needed (RF-D01–D03, manual allocation). */
+export const escalationReasons = [
+  "DifferentBusinessDate",
+  "MoreThan24Hours",
+  "OrderOrdinaryTotalAboveCad100",
+  "ManualAllocationOverride",
+] as const;
+export type EscalationReason = (typeof escalationReasons)[number];
+const escalation = (required: unknown, reasons: unknown) => {
+  if (
+    (required !== null && typeof required !== "boolean") ||
+    !Array.isArray(reasons) ||
+    reasons.length > escalationReasons.length ||
+    new Set(reasons).size !== reasons.length ||
+    reasons.some((reason) => !escalationReasons.includes(reason as EscalationReason)) ||
+    (required !== true && reasons.length > 0) ||
+    (required === true && reasons.length === 0)
+  )
+    return fail();
+  return Object.freeze({
+    approvalRequired: required,
+    escalationReasons: Object.freeze([...reasons] as EscalationReason[]),
+  });
+};
 const components = [
   "netAmountMinor",
   "taxAmountMinor",
@@ -303,6 +327,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
             "paymentIntentReference",
             "state",
             "executionOperationReference",
+            "executionApprovalReference",
             "amountMinor",
             "confirmedMinor",
             "pendingMinor",
@@ -331,8 +356,15 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
                 ? null
                 : fail()
               : ref(entry.executionOperationReference);
+          const executionApprovalReference =
+            entry.executionApprovalReference === null || executionOperationReference === null
+              ? entry.executionApprovalReference === null
+                ? null
+                : fail()
+              : ref(entry.executionApprovalReference);
           return Object.freeze({
             executionOperationReference,
+            executionApprovalReference,
             paymentAttemptReference: ref(entry.paymentAttemptReference),
             paymentIntentReference: ref(entry.paymentIntentReference),
             state: entry.state,
@@ -472,6 +504,8 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
         amountMinor: string;
         paymentAttemptReferences: readonly string[];
         components: Readonly<Record<string, string>>;
+        approvalRequired: boolean | null;
+        escalationReasons: readonly EscalationReason[];
       }> | null = null;
       return Object.freeze({
         async preview(csrf: string, signal?: AbortSignal) {
@@ -488,6 +522,8 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
                 "currencyCode",
                 "amountMinor",
                 "paymentAttemptReferences",
+                "approvalRequired",
+                "escalationReasons",
                 "components",
               ],
             );
@@ -514,6 +550,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
               amountMinor,
               components: allocation,
               paymentAttemptReferences: attempts(data.paymentAttemptReferences),
+              ...escalation(data.approvalRequired, data.escalationReasons),
             });
             return Object.freeze({
               status: "Previewed" as const,
@@ -537,6 +574,8 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
                 "currencyCode",
                 "amountMinor",
                 "paymentAttemptReferences",
+                "approvalRequired",
+                "escalationReasons",
                 "replayed",
               ],
             );
@@ -560,6 +599,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
               currencyCode: "CAD" as const,
               amountMinor: preview.amountMinor,
               paymentAttemptReferences: preview.paymentAttemptReferences,
+              ...escalation(data.approvalRequired, data.escalationReasons),
               replayed: data.replayed,
             });
           }, true);

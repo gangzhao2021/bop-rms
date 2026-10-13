@@ -1091,6 +1091,12 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "bop_identity" &&
           module.manifest.ownedDatabase?.tables?.includes("workforce_mfa_status") &&
           moduleRelative === "src/infrastructure/persistence/current-workforce-mfa-source.ts";
+        // WP-2423 Q5: append-only MFA step-up record and its latest-verification read.
+        const acceptedWorkforceMfaStepUpAsset =
+          module.packageName === "@bop/identity" &&
+          module.manifest.ownedDatabase?.schema === "bop_identity" &&
+          module.manifest.ownedDatabase?.tables?.includes("workforce_mfa_step_up") &&
+          moduleRelative === "src/infrastructure/persistence/workforce-mfa-step-up-store.ts";
         const acceptedCurrentWorkforceInvitationAsset =
           module.packageName === "@bop/identity" &&
           module.manifest.ownedDatabase?.schema === "bop_identity" &&
@@ -3370,6 +3376,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedPaymentReconciliationWindowAsset &&
           !acceptedReconciliationFollowUpAsset &&
           !acceptedUnmatchedCaptureRefundAsset &&
+          !acceptedWorkforceMfaStepUpAsset &&
           !acceptedProviderCaptureExceptionAsset &&
           !acceptedPaymentReconciliationExceptionAsset &&
           !acceptedOrdinaryRefundCaptureAsset &&

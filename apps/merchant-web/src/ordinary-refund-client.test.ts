@@ -18,6 +18,8 @@ const preview = {
   currencyCode: "CAD",
   amountMinor: "1130",
   paymentAttemptReferences: [id(6)],
+  approvalRequired: false,
+  escalationReasons: [],
   components: {
     netAmountMinor: "1000",
     taxAmountMinor: "130",
@@ -34,6 +36,8 @@ const recorded = {
   currencyCode: "CAD",
   amountMinor: "1130",
   paymentAttemptReferences: [id(6)],
+  approvalRequired: false,
+  escalationReasons: [],
   replayed: false,
 };
 const response = (value: unknown, status = 200) =>
@@ -243,6 +247,7 @@ it("binds status to request operation and rejects contradictory completion or mo
     paymentIntentReference: id(6),
     state: "NotDispatched",
     executionOperationReference: null,
+    executionApprovalReference: null,
     amountMinor: "1130",
     confirmedMinor: "0",
     pendingMinor: "1130",
@@ -284,5 +289,31 @@ it("binds status to request operation and rejects contradictory completion or mo
   ]) {
     fetcher.mockResolvedValueOnce(response(invalid));
     await expect(client.status(id(1), id(3), csrf)).rejects.toMatchObject({ code: "Unavailable" });
+  }
+});
+
+it("WP-2423 Q5: reports why an owner approval is needed and rejects contradictory reasons", async () => {
+  const escalated = {
+    ...preview,
+    approvalRequired: true,
+    escalationReasons: ["OrderOrdinaryTotalAboveCad100", "MoreThan24Hours"],
+  };
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(response(escalated));
+  await expect(
+    createOrdinaryRefundClient(fetcher).prepareRequest(command()).preview(csrf),
+  ).resolves.toMatchObject({
+    approvalRequired: true,
+    escalationReasons: ["OrderOrdinaryTotalAboveCad100", "MoreThan24Hours"],
+  });
+  for (const invalid of [
+    { ...preview, approvalRequired: true, escalationReasons: [] },
+    { ...preview, approvalRequired: false, escalationReasons: ["MoreThan24Hours"] },
+    { ...preview, approvalRequired: true, escalationReasons: ["Unknown"] },
+    { ...preview, approvalRequired: "yes" },
+  ]) {
+    const failing = vi.fn<typeof fetch>().mockResolvedValueOnce(response(invalid));
+    await expect(
+      createOrdinaryRefundClient(failing).prepareRequest(command()).preview(csrf),
+    ).rejects.toMatchObject({ code: "Unavailable" });
   }
 });

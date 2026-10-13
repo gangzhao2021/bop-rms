@@ -21,6 +21,7 @@ export interface MerchantNavigationItem {
   readonly screenId:
     | "HOME-OVERVIEW"
     | "TASK-INBOX"
+    | "APPROVAL-INBOX"
     | "STORE-SETUP"
     | "STORE-HOURS-SERVICE"
     | "ORG-STORE-LIST"
@@ -67,6 +68,8 @@ const REQUEST_TIMEOUT_MS = 15_000;
 const NAVIGATION = Object.freeze({
   "HOME-OVERVIEW": ["/app", "merchant.access"],
   "TASK-INBOX": ["/app/tasks", "workflow.operate"],
+  // WP-2423 Q5: refunds awaiting an Owner/Finance approval (Section 88 APPROVAL-INBOX).
+  "APPROVAL-INBOX": ["/app/approvals", "workflow.operate"],
   "ORG-STORE-LIST": ["/app/organization/stores", "organization.store.read"],
   "CAT-PRODUCT-LIST": ["/app/commerce/products", "catalog.manage"],
   "CAT-OPTIONSET-LIST": ["/app/commerce/option-sets", "catalog.option_set.read"],

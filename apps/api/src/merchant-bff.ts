@@ -196,6 +196,12 @@ import {
 import { PickupHandoffError, PickupProofError } from "@rms/fulfillment";
 import { UnmatchedCaptureRefundError } from "@rms/payment";
 import type { createMerchantUnmatchedCaptureRefund } from "./merchant-unmatched-capture-refund.js";
+import { MerchantStepUpError, type createMerchantMfaStepUp } from "./merchant-mfa-step-up.js";
+import {
+  MerchantRefundApprovalError,
+  type createMerchantOrdinaryRefundApproval,
+} from "./merchant-ordinary-refund-approval.js";
+import type { createMerchantOrdinaryRefundApprovals } from "./merchant-ordinary-refund-approvals.js";
 import type { createMerchantKitchenCommand } from "./merchant-kitchen-command.js";
 import type { createMerchantKitchenRelease } from "./merchant-kitchen-release.js";
 import {
@@ -304,6 +310,8 @@ export interface MerchantWorkspaceSnapshot {
 const merchantNavigation = Object.freeze({
   "HOME-OVERVIEW": ["/app", "merchant.access"],
   "TASK-INBOX": ["/app/tasks", "workflow.operate"],
+  // WP-2423 Q5: refunds awaiting an Owner/Finance approval (Section 88 APPROVAL-INBOX).
+  "APPROVAL-INBOX": ["/app/approvals", "workflow.operate"],
   "ORG-STORE-LIST": ["/app/organization/stores", "organization.store.read"],
   "CAT-PRODUCT-LIST": ["/app/commerce/products", "catalog.manage"],
   "CAT-OPTIONSET-LIST": ["/app/commerce/option-sets", "catalog.option_set.read"],
@@ -492,6 +500,12 @@ export interface MerchantBffRouterOptions {
   readonly orderItemStaffCancellation?: ReturnType<typeof createMerchantOrderItemStaffCancellation>;
   /** WP-2423 P6: refund a Provider capture that matches no payment or Order. */
   readonly unmatchedCaptureRefund?: ReturnType<typeof createMerchantUnmatchedCaptureRefund>;
+  /** WP-2423 Q5: the signed-in staff member re-verifies a second factor (MFA step-up). */
+  readonly mfaStepUp?: ReturnType<typeof createMerchantMfaStepUp>;
+  /** WP-2423 Q5: an Owner/Finance member approves an escalated refund, which is then sent. */
+  readonly ordinaryRefundApproval?: ReturnType<typeof createMerchantOrdinaryRefundApproval>;
+  /** WP-2423 Q5: refunds at this Store awaiting approval or approved and not yet sent. */
+  readonly ordinaryRefundApprovals?: ReturnType<typeof createMerchantOrdinaryRefundApprovals>;
   readonly kitchenQuery?: ReturnType<typeof createMerchantKitchenQuery>;
   readonly kitchenCommand?: ReturnType<typeof createMerchantKitchenCommand>;
   readonly kitchenRelease?: ReturnType<typeof createMerchantKitchenRelease>;
@@ -4402,6 +4416,142 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       },
     );
 
+  // WP-2423 Q5: second-factor re-verification by the signed-in staff member (no code echoed).
+  router.post("/identity/step-up", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    const command = options.mfaStepUp;
+    if (!command) {
+      response.status(503).json({ error: "step_up_unavailable" });
+      return;
+    }
+    void command({ sessionCookie, csrf, command: request.body })
+      .then((result) => {
+        response.set("Cache-Control", NO_STORE);
+        if (result.status === "Verified")
+          response.json({
+            status: "Verified",
+            verifiedAt: result.verifiedAt,
+            validUntil: result.validUntil,
+          });
+        else if (result.status === "Rejected")
+          response.status(422).json({
+            error: result.reason === "CodeReused" ? "code_already_used" : "code_rejected",
+          });
+        else
+          response
+            .status(429)
+            .json({ error: "too_many_attempts", retryAfterSeconds: result.retryAfterSeconds });
+      })
+      .catch((error: unknown) => {
+        if (error instanceof MerchantStepUpError && error.code === "NotSetUp") {
+          response.status(503).set("Cache-Control", NO_STORE).json({ error: "step_up_not_set_up" });
+          return;
+        }
+        denied(response);
+      });
+  });
+
+  // WP-2423 Q5: refunds awaiting an Owner/Finance approval at the selected Store.
+  router.get("/payments/refunds/approvals", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    if (
+      request.method !== "GET" ||
+      request.body !== undefined ||
+      sessionCookie === null ||
+      Object.keys(request.query).length !== 0 ||
+      rawHeaderValues(request, "origin").length > 1 ||
+      rawHeaderValues(request, "sec-fetch-site").length !== 1
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.ordinaryRefundApprovals) {
+      response.status(503).json({ error: "refund_approvals_unavailable" });
+      return;
+    }
+    void options
+      .ordinaryRefundApprovals({ sessionCookie })
+      .then((view) =>
+        response.set("Cache-Control", NO_STORE).json({
+          observedAt: view.observedAt,
+          canApprove: view.canApprove,
+          entries: view.entries.map((entry) => ({
+            orderReference: entry.orderReference,
+            orderNumber: entry.orderNumber,
+            requestReference: entry.requestReference,
+            paymentIntentReferences: entry.paymentIntentReferences,
+            currencyCode: entry.currencyCode,
+            amountMinor: entry.amountMinor,
+            reasonCode: entry.reasonCode,
+            escalationReasons: entry.escalationReasons,
+            requestedAt: entry.requestedAt,
+            requesterName: entry.requesterName,
+            requestedByYou: entry.requestedByYou,
+            requesterVerifiedUntil: entry.requesterVerifiedUntil,
+            state: entry.state,
+            approvalReference: entry.approvalReference,
+            approvedAt: entry.approvedAt,
+            approverName: entry.approverName,
+            canApprove: entry.canApprove,
+          })),
+        }),
+      )
+      .catch(() => denied(response));
+  });
+
+  // WP-2423 Q5: approve an escalated refund in person; it is sent at once with the approval.
+  router.post("/payments/refunds/approve", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    const command = options.ordinaryRefundApproval;
+    if (!command) {
+      response.status(503).json({ error: "refund_approval_unavailable" });
+      return;
+    }
+    void command({ sessionCookie, csrf, command: request.body })
+      .then((result) =>
+        response.status(202).json({
+          status: result.status,
+          approvalReference: result.approvalReference,
+          replayed: result.replayed,
+          payments: result.payments.map((payment) => ({
+            paymentAttemptReference: payment.paymentAttemptReference,
+            operationReference: payment.operationReference,
+            state: payment.state,
+          })),
+        }),
+      )
+      .catch((error: unknown) => {
+        if (!(error instanceof MerchantRefundApprovalError) || error.code === "Denied") {
+          denied(response);
+          return;
+        }
+        if (error.code === "SamePerson") response.status(422).json({ error: "same_person" });
+        else if (error.code === "NeedsReverification")
+          response.status(409).json({ error: "needs_reverification", party: error.party });
+        else response.status(409).json({ error: "refund_changed" });
+      });
+  });
+
   router.post("/payments/refunds/status", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant"),
       csrf = exactHeader(request, "x-bop-csrf");
@@ -4433,6 +4583,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             paymentIntentReference: payment.paymentIntentReference,
             state: payment.state,
             executionOperationReference: payment.executionOperationReference,
+            executionApprovalReference: payment.executionApprovalReference,
             amountMinor: payment.amountMinor,
             confirmedMinor: payment.confirmedMinor,
             pendingMinor: payment.pendingMinor,
@@ -4550,6 +4701,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           currencyCode: result.currencyCode,
           amountMinor: result.amountMinor,
           paymentAttemptReferences: result.paymentAttemptReferences,
+          approvalRequired: result.approvalRequired,
+          escalationReasons: result.escalationReasons,
           components: {
             netAmountMinor: result.components.netAmountMinor,
             taxAmountMinor: result.components.taxAmountMinor,
@@ -4589,6 +4742,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           currencyCode: result.currencyCode,
           amountMinor: result.amountMinor,
           paymentAttemptReferences: result.paymentAttemptReferences,
+          approvalRequired: result.approvalRequired,
+          escalationReasons: result.escalationReasons,
           replayed: result.status === "AlreadyCommitted",
         });
       })

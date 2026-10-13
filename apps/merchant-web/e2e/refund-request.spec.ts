@@ -171,6 +171,7 @@ for (const recovery of ["retry", "history"] as const)
               paymentIntentReference: id(31),
               state: recoveredPhase ?? (preparedOperation ? "Prepared" : "NotDispatched"),
               executionOperationReference: preparedOperation,
+              executionApprovalReference: null,
               amountMinor: "1130",
               confirmedMinor: recoveredPhase === "Confirmed" ? "1130" : "0",
               pendingMinor: recoveredPhase === "Confirmed" ? "0" : "1130",
@@ -201,6 +202,13 @@ for (const recovery of ["retry", "history"] as const)
         },
       });
     });
+    // WP-2423 Q5: nothing at this Store is waiting for an owner's approval.
+    await page.route("**/merchant/payments/refunds/approvals", (route) =>
+      route.fulfill({
+        headers,
+        json: { observedAt: "2026-09-20T12:01:00.000Z", canApprove: false, entries: [] },
+      }),
+    );
     await page.route("**/merchant/payments/refunds/preview", (route) => {
       const body = route.request().postData() ?? "";
       previews.push(body);
@@ -215,6 +223,8 @@ for (const recovery of ["retry", "history"] as const)
           currencyCode: "CAD",
           amountMinor: "1130",
           paymentAttemptReferences: [id(32)],
+          approvalRequired: false,
+          escalationReasons: [],
           components: {
             netAmountMinor: "1000",
             taxAmountMinor: "130",
@@ -250,6 +260,8 @@ for (const recovery of ["retry", "history"] as const)
           currencyCode: "CAD",
           amountMinor: "1130",
           paymentAttemptReferences: [id(32)],
+          approvalRequired: false,
+          escalationReasons: [],
           replayed: true,
         },
       });
@@ -264,6 +276,7 @@ for (const recovery of ["retry", "history"] as const)
     await page.getByRole("link", { name: "Start refund request" }).click();
     await page.getByRole("button", { name: "Load refundable items" }).click();
     await page.getByRole("spinbutton", { name: /Latte/ }).fill("1");
+    await page.getByRole("combobox", { name: "Reason" }).selectOption("CUSTOMER_REQUEST");
     await page.getByRole("button", { name: "Calculate refund" }).click();
     await expect(page.getByRole("region", { name: "Refund calculation" })).toContainText(
       "CAD 11.30",

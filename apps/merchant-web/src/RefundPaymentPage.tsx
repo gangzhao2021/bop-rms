@@ -9,7 +9,16 @@ import { SourceTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { createOrdinaryRefundClient, OrdinaryRefundClientError } from "./ordinary-refund-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
+import { StepUpVerification } from "./StepUpVerification.js";
+import { createRefundApprovalClient, type RefundApprovalEntry } from "./refund-approval-client.js";
+import {
+  describeRefundReason,
+  escalationReasonLabel,
+  refundReasonCodes,
+  refundReasonLabel,
+} from "./refund-reasons.js";
 const client = createOrdinaryRefundClient();
+const approvalClient = createRefundApprovalClient();
 type Context = Awaited<ReturnType<typeof client.context>>;
 type Items = Awaited<ReturnType<typeof client.items>>;
 type Intent = ReturnType<typeof client.prepareRequest>;
@@ -93,12 +102,15 @@ function RefundPreparationAction({
   orderReference,
   requestReference,
   paymentAttemptReference,
+  approvalReference,
   csrf,
   onPending,
 }: {
   orderReference: string;
   requestReference: string;
   paymentAttemptReference: string;
+  /** WP-2423 Q5: the independent approval this request carries, if one was needed. */
+  approvalReference: string | null;
   csrf: string;
   onPending: (pending: boolean) => void;
 }) {
@@ -126,7 +138,7 @@ function RefundPreparationAction({
         paymentAttemptReference,
         operationReference: serviceOperationReference(),
         auditReference: serviceOperationReference(),
-        approvalReference: null,
+        approvalReference,
       });
       const result = await intent.current.execute(csrf, controller.signal);
       if (!controller.signal.aborted) {
@@ -180,12 +192,15 @@ function RefundPreparationAction({
 function RecordedRequestStatus({
   orderReference,
   entry,
+  approval,
   csrf,
   onFinancialChange,
   onPending,
 }: {
   orderReference: string;
   entry: Items["recentRequests"][number];
+  /** WP-2423 Q5: this request's place in the Store's approval list (null: none needed/known). */
+  approval: RefundApprovalEntry | null;
   csrf: string;
   onFinancialChange: () => void;
   onPending: (paymentReference: string, active: boolean) => void;
@@ -257,6 +272,7 @@ function RecordedRequestStatus({
                     orderReference={orderReference}
                     requestReference={entry.requestReference}
                     operationReference={payment.executionOperationReference}
+                    approvalReference={payment.executionApprovalReference}
                     phase={payment.state}
                     amountLabel={amount(payment.amountMinor)}
                     csrf={csrf}
@@ -271,8 +287,19 @@ function RecordedRequestStatus({
                     }}
                   />
                 ) : null}
-                {payment.state === "NotDispatched" ? (
+                {payment.state === "NotDispatched" && approval !== null ? (
+                  <p>
+                    {approval.state === "AwaitingApproval"
+                      ? "Waiting for an owner or finance member to approve this refund in person."
+                      : "Approved; the approver finishes sending it on the Approvals page."}{" "}
+                    <Link to="/app/approvals">Open approvals</Link>
+                  </p>
+                ) : null}
+                {payment.state === "NotDispatched" && approval === null ? (
                   <RefundPreparationAction
+                    // A Manager prepares only a refund that needs no approval; an approved
+                    // refund is prepared and sent by its approval (one operation, never two).
+                    approvalReference={null}
                     orderReference={orderReference}
                     requestReference={entry.requestReference}
                     paymentAttemptReference={payment.paymentAttemptReference}
@@ -310,7 +337,9 @@ function RefundWizard({
 }) {
   const [items, setItems] = useState<Items | null>(null),
     [quantities, setQuantities] = useState<Record<string, number>>({}),
-    [reason, setReason] = useState("CUSTOMER_REQUEST"),
+    [reason, setReason] = useState(""),
+    [approvals, setApprovals] = useState<ReadonlyMap<string, RefundApprovalEntry>>(new Map()),
+    [verifiedUntil, setVerifiedUntil] = useState<string | null>(null),
     [preview, setPreview] = useState<Preview | null>(null),
     [confirmed, setConfirmed] = useState(false),
     [message, setMessage] = useState(""),
@@ -332,6 +361,8 @@ function RefundWizard({
     return () => window.removeEventListener("beforeunload", warn);
   }, [state]);
   const locked = state !== "Idle" || preparing.size > 0;
+  const verificationCurrent = () =>
+    verifiedUntil !== null && Date.parse(verifiedUntil) > Date.now();
   const clearPreview = () => {
     setPreview(null);
     setConfirmed(false);
@@ -349,7 +380,20 @@ function RefundWizard({
     if (!wasUnknown && !wasRecorded) clearPreview();
     try {
       const result = await client.items(orderReference, csrf, controller.signal);
+      // WP-2423 Q5: which recorded requests wait for an owner's approval (best effort).
+      const pendingApprovals = await approvalClient
+        .approvals(controller.signal)
+        .then(
+          (view) =>
+            new Map(
+              view.entries
+                .filter((value) => value.orderReference === orderReference)
+                .map((value) => [value.requestReference, value] as const),
+            ),
+        )
+        .catch(() => new Map<string, RefundApprovalEntry>());
       if (!controller.signal.aborted) {
+        setApprovals(pendingApprovals);
         setItems(result);
         if (wasUnknown) {
           const recovered = result.recentRequests.find(
@@ -394,6 +438,10 @@ function RefundWizard({
       setMessage("Select at least one item quantity.");
       return;
     }
+    if (!refundReasonCodes.includes(reason as (typeof refundReasonCodes)[number])) {
+      setMessage("Select the reason for this refund.");
+      return;
+    }
     const controller = new AbortController();
     pending.current = controller;
     setState("Busy");
@@ -431,7 +479,8 @@ function RefundWizard({
       !preview ||
       (!confirmed && state !== "Unknown") ||
       pending.current ||
-      state === "Recorded"
+      state === "Recorded" ||
+      (preview.approvalRequired === true && state !== "Unknown" && !verificationCurrent())
     )
       return;
     const controller = new AbortController();
@@ -447,7 +496,9 @@ function RefundWizard({
           (result.replayed ? "Original request recovered. " : "Request recorded. ") +
             "Refund amount: " +
             amount(result.amountMinor) +
-            ". Approval and execution are separate. No completed refund is confirmed here.",
+            (result.approvalRequired === true
+              ? ". An owner or finance member who did not ask for it must approve it in person on the Approvals page within 15 minutes of your verification; you may need to verify again."
+              : ". Approval and execution are separate. No completed refund is confirmed here."),
         );
       }
     } catch (error) {
@@ -496,9 +547,15 @@ function RefundWizard({
               {items.recentRequests.map((entry) => (
                 <li key={entry.requestReference}>
                   Request {entry.claimVersion}: {amount(entry.amountMinor)} ·{" "}
-                  {entry.reasonCode === "CUSTOMER_REQUEST" ? "Customer request" : entry.reasonCode}{" "}
-                  · <SourceTime instant={entry.requestedAt} />
+                  {describeRefundReason(entry.reasonCode)} ·{" "}
+                  <SourceTime instant={entry.requestedAt} />
+                  {approvals.get(entry.requestReference)?.state === "AwaitingApproval"
+                    ? " · Waiting for owner approval"
+                    : approvals.get(entry.requestReference)?.state === "Approved"
+                      ? " · Approved, sending not finished"
+                      : null}
                   <RecordedRequestStatus
+                    approval={approvals.get(entry.requestReference) ?? null}
                     onFinancialChange={onFinancialChange}
                     orderReference={orderReference}
                     entry={entry}
@@ -560,7 +617,12 @@ function RefundWizard({
             clearPreview();
           }}
         >
-          <option value="CUSTOMER_REQUEST">Customer request</option>
+          <option value="">Select a reason</option>
+          {refundReasonCodes.map((code) => (
+            <option key={code} value={code}>
+              {refundReasonLabel[code]}
+            </option>
+          ))}
         </select>
         <button disabled={!items} onClick={() => void calculate()}>
           Calculate refund
@@ -591,6 +653,27 @@ function RefundWizard({
             {preview.paymentAttemptReferences.length} original payment(s). Recording a request does
             not issue a refund.
           </p>
+          {preview.approvalRequired === true ? (
+            <section aria-label="Owner approval needed" className="refund-escalation">
+              <h4>Needs owner approval</h4>
+              <ul>
+                {preview.escalationReasons.map((code) => (
+                  <li key={code}>{escalationReasonLabel[code]}</li>
+                ))}
+              </ul>
+              <p>
+                An owner or finance member who is not you must approve this refund in person. First
+                confirm it is you; your verification lasts 15 minutes.
+              </p>
+              <StepUpVerification
+                purpose="RefundRequest"
+                csrf={csrf}
+                verifiedUntil={verifiedUntil}
+                onVerified={setVerifiedUntil}
+                label="Verify with your authenticator"
+              />
+            </section>
+          ) : null}
           <label>
             <input
               type="checkbox"
@@ -600,8 +683,15 @@ function RefundWizard({
             />
             I confirm the selected quantities, reason and {amount(preview.amountMinor)} request.
           </label>
-          <button disabled={!confirmed || locked} onClick={() => void submit()}>
-            Record refund request
+          <button
+            disabled={
+              !confirmed || locked || (preview.approvalRequired === true && !verificationCurrent())
+            }
+            onClick={() => void submit()}
+          >
+            {preview.approvalRequired === true
+              ? "Record request for owner approval"
+              : "Record refund request"}
           </button>
         </section>
       ) : null}

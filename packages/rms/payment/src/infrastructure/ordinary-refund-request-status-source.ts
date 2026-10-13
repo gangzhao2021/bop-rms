@@ -105,6 +105,8 @@ export function createPostgresOrdinaryRefundRequestStatusSource(options: {
           paymentAttemptReference: payment.paymentAttemptReference,
           paymentIntentReference: payment.paymentIntentReference,
           executionOperationReference: prepared?.operationReference ?? null,
+          // WP-2423 Q5: the independent approval the prepared operation is bound to, if any.
+          executionApprovalReference: prepared?.approvalReference ?? null,
           state:
             result?.position.state ??
             (prepared ? ("Prepared" as const) : ("NotDispatched" as const)),
