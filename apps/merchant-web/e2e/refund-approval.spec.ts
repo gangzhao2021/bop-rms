@@ -41,28 +41,13 @@ test("@production owner verifies and approves a refund above CAD 100 once", asyn
   };
   let listed = [entry, second];
   let refunded = false;
-  await page.route("**/merchant/payments/refunds/items", (route) =>
+  await page.route("**/merchant/payments/refunds/progress", (route) =>
     route.fulfill({
       headers,
       json: {
-        orderReference: id(1),
-        orderNumber: "A-0042",
-        canRequest: false,
-        claimVersion: 1,
-        items: [],
-        recentRequests: [
-          {
-            requestReference: id(2),
-            operationReference: id(6),
-            claimVersion: 1,
-            requestedAt: entry.requestedAt,
-            reasonCode: "WRONG_ITEM",
-            currencyCode: "CAD",
-            amountMinor: "12500",
-            decline: null,
-            progress: refunded ? "Refunded" : "Sending",
-          },
-        ],
+        requestReference: id(2),
+        progress: refunded ? "Refunded" : "Sending",
+        observedAt: new Date().toISOString(),
       },
     }),
   );
@@ -137,6 +122,10 @@ test("@production owner verifies and approves a refund above CAD 100 once", asyn
     });
   });
 
+  const itemReads: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().endsWith("/merchant/payments/refunds/items")) itemReads.push(request.url());
+  });
   await page.goto("/app/approvals");
   await expect(page.getByRole("link", { name: "Approvals" }).first()).toBeVisible();
   const card = page.getByRole("listitem").filter({ hasText: "Order A-0042" });
@@ -190,6 +179,8 @@ test("@production owner verifies and approves a refund above CAD 100 once", asyn
   await expect(card).toContainText("Refunded to the customer's original payment method.", {
     timeout: 15_000,
   });
+  // The Approvals page follows progress with its own small read, never the request item list.
+  expect(itemReads).toEqual([]);
   expect(approvals).toHaveLength(2);
   expect(approvals[1]).toBe(approvals[0]);
   expect(JSON.parse(approvals[0] ?? "{}")).toMatchObject({
@@ -312,3 +303,123 @@ test("@production owner declines a refund with a reason and it leaves the list",
   await card.getByRole("button", { name: "Refresh list" }).click();
   await expect(page.getByText("No refund at this store is waiting for approval.")).toBeVisible();
 });
+
+// WP-2423 Q5: an owner opens a refunded payment: state, history with status, no request form.
+for (const pending of [false, true])
+  test(
+    "@production owner sees refund history of a " +
+      (pending ? "pending" : "fully refunded") +
+      " payment",
+    async ({ page }) => {
+      const id = (n: number) => "01909968-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+      const scope = {
+        brandLabel: "Synthetic Brand",
+        storeLabel: "Synthetic Store",
+        storeReference: id(99),
+        timeZone: "America/Toronto",
+      };
+      const headers = { "cache-control": "no-store" };
+      await page.route("**/merchant/session", (route) =>
+        route.fulfill({
+          headers,
+          json: {
+            authenticated: true,
+            csrf: "a".repeat(43),
+            workspace: {
+              screenId: "HOME-OVERVIEW",
+              selectedScope: scope,
+              authorizedStores: [
+                {
+                  brandLabel: scope.brandLabel,
+                  storeLabel: scope.storeLabel,
+                  storeReference: id(99),
+                },
+              ],
+              businessDate: "2026-10-12",
+              storeStatus: "Open",
+              freshness: "Current",
+              dashboardAvailability: "UnavailableUntilWP1905",
+              navigation: [],
+            },
+          },
+        }),
+      );
+      await page.route("**/merchant/payments/refunds/context", (route) =>
+        route.fulfill({
+          headers,
+          json: {
+            paymentIntentReference: id(31),
+            paymentAttemptReference: id(32),
+            orderReference: id(1),
+            orderBatchReference: id(90),
+            observedAt: "2026-10-12T15:00:00.000Z",
+            paymentState: "Captured",
+            currencyCode: "CAD",
+            capturedAmountMinor: "1130",
+            confirmedRefundMinor: pending ? "0" : "1130",
+            pendingRefundMinor: pending ? "1130" : "0",
+            canRequest: false,
+          },
+        }),
+      );
+      await page.route("**/merchant/payments/refunds/items", (route) =>
+        route.fulfill({
+          headers,
+          json: {
+            orderReference: id(1),
+            orderNumber: "ORD-7",
+            canRequest: false,
+            claimVersion: 1,
+            recentRequests: [
+              {
+                requestReference: id(40),
+                operationReference: id(41),
+                claimVersion: 1,
+                requestedAt: "2026-10-12T14:00:00.000Z",
+                reasonCode: "WRONG_ITEM",
+                currencyCode: "CAD",
+                amountMinor: "1130",
+                decline: null,
+                progress: pending ? "Sending" : "Refunded",
+              },
+            ],
+            items: [],
+          },
+        }),
+      );
+      await page.route("**/merchant/payments/refunds/approvals", (route) =>
+        route.fulfill({
+          headers,
+          json: { observedAt: "2026-10-12T15:00:00.000Z", canApprove: true, entries: [] },
+        }),
+      );
+      await page.goto("/app/operations/payments/" + id(31));
+      await expect(
+        page.getByText(pending ? "Payment state: Paid, refund pending" : "Payment state: Refunded"),
+      ).toBeVisible();
+      await expect(
+        page.getByText(
+          pending
+            ? "A refund of CAD 11.30 is pending; nothing more can be requested until it finishes."
+            : "Nothing is left to refund on this payment.",
+        ),
+      ).toBeVisible();
+      await expect(page.getByRole("link", { name: "Open Approvals" })).toHaveAttribute(
+        "href",
+        "/app/approvals",
+      );
+      await expect(page.getByRole("link", { name: "Start refund request" })).toHaveCount(0);
+      await expect(page.getByRole("region", { name: "Recorded refund requests" })).toContainText(
+        pending ? "Sent — result pending" : "Refunded",
+      );
+      await expect(page.getByRole("group", { name: "Refund selection" })).toHaveCount(0);
+      // The /refund route shows the same state, never the item and reason form.
+      await page.goto("/app/operations/payments/" + id(31) + "/refund");
+      await expect(
+        page.getByText(pending ? "is pending; nothing more" : "Nothing is left to refund", {
+          exact: false,
+        }),
+      ).toBeVisible();
+      await expect(page.getByRole("group", { name: "Refund selection" })).toHaveCount(0);
+    },
+  );

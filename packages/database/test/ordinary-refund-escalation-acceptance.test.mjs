@@ -14,6 +14,8 @@ import {
 } from "../../bop/identity/src/index.ts";
 import { createBrand, createStore, createTenantContext } from "../../bop/tenant/src/index.ts";
 import { createStripeOrdinaryRefundAdapter } from "../../rms/payment/src/infrastructure/stripe/stripe-ordinary-refund-adapter.ts";
+import { createPostgresOrdinaryRefundReconciliationRuntime } from "../../rms/payment/src/infrastructure/ordinary-refund-reconciliation-runtime.ts";
+import { createPostgresOrdinaryRefundPositionSource } from "../../rms/payment/src/infrastructure/ordinary-refund-position-source.ts";
 import { createMerchantWorkforcePermissionSource } from "../../../apps/api/src/merchant-workforce-authority-source.ts";
 import { createMerchantMfaStepUp } from "../../../apps/api/src/merchant-mfa-step-up.ts";
 import { createMerchantOrdinaryRefundRequest } from "../../../apps/api/src/merchant-ordinary-refund-request.ts";
@@ -574,7 +576,8 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
 
       // ── Simulated Stripe (InternalTest): the real refund adapter over a fake transport.
       const providerRefunds = [];
-      let providerSends = 0;
+      let providerSends = 0,
+        providerLookups = 0;
       const stripe = createStripeOrdinaryRefundAdapter({
         brandReference: brand,
         storeReference: store,
@@ -992,6 +995,66 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
       assert.equal(providerSends, 1);
       assert.deepEqual(await counts(), before);
       assert.deepEqual((await approvals({ sessionCookie: "approver" })).entries, []);
+
+      // Reconciling after the send reuses the succeeded observation: no Provider lookup and no
+      // second observation of the same refund.
+      const lookups = () => providerLookups;
+      const lookupsBefore = lookups();
+      const firstOperation = approved.payments[0].operationReference;
+      const reconcile = createPostgresOrdinaryRefundReconciliationRuntime({
+        scope,
+        providerAccountReference: provider,
+        environment: "Test",
+        authorize: async () => true,
+        transactions: transactions(),
+        provider: {
+          lookupRefund: async (request) => {
+            providerLookups++;
+            return stripe.lookupRefund(request);
+          },
+        },
+      });
+      const observationsOf = async (operation) =>
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM rms_payment.ordinary_refund_observation WHERE operation_id=$1",
+            [operation],
+          )
+        ).rows[0].n;
+      const reconciled = await reconcile({
+        orderReference: first.order,
+        operationReference: firstOperation,
+        observationReference: fresh(),
+        auditReference: fresh(),
+      });
+      assert.equal(reconciled.status, "AlreadyConfirmed");
+      assert.equal(lookups(), lookupsBefore);
+      assert.equal(await observationsOf(firstOperation), 1);
+      // Even a second succeeded observation of the same Provider refund (as recorded on v15 before
+      // this change) is counted once: positions are per operation, never per observation.
+      await admin.query(
+        "INSERT INTO rms_payment.ordinary_refund_observation (tenant_id,brand_id,store_id,order_id,request_id,operation_id,provider_operation_id,payment_attempt_id,dispatch_id,observation_id,audit_id,provider_request_digest,provider_environment,outcome_kind,recorded_at,record_json) " +
+          "SELECT tenant_id,brand_id,store_id,order_id,request_id,operation_id,provider_operation_id,payment_attempt_id,dispatch_id,$2::uuid,$3::uuid,provider_request_digest,provider_environment,outcome_kind,recorded_at,jsonb_set(jsonb_set(record_json,'{observationReference}',to_jsonb($2::text)),'{auditReference}',to_jsonb($3::text)) " +
+          "FROM rms_payment.ordinary_refund_observation WHERE operation_id=$1",
+        [firstOperation, id(995), id(996)],
+      );
+      assert.equal(await observationsOf(firstOperation), 2);
+      const position = await transactions().run((tx) =>
+        createPostgresOrdinaryRefundPositionSource({
+          scope,
+          providerAccountReference: provider,
+          environment: "Test",
+          authorize: async () => true,
+        })(tx, {
+          orderReference: first.order,
+          paymentTransactionReference: first.batch.transaction,
+          paymentIntentReference: first.batch.intent,
+          paymentAttemptReference: first.batch.attempt,
+          observedAt: new Date().toISOString(),
+        }),
+      );
+      assert.equal(position.confirmedMinor, CAPTURED_MINOR);
+      assert.equal(position.pendingMinor, 0n);
 
       // The Owner reads the payment's refunds (not as a requester); progress reads "Refunded".
       const ownerView = await items({

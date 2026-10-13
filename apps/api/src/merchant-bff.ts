@@ -203,6 +203,7 @@ import {
 } from "./merchant-ordinary-refund-approval.js";
 import type { createMerchantOrdinaryRefundApprovals } from "./merchant-ordinary-refund-approvals.js";
 import type { createMerchantOrdinaryRefundDecline } from "./merchant-ordinary-refund-decline.js";
+import type { createMerchantOrdinaryRefundProgress } from "./merchant-ordinary-refund-progress.js";
 import type { createMerchantKitchenCommand } from "./merchant-kitchen-command.js";
 import type { createMerchantKitchenRelease } from "./merchant-kitchen-release.js";
 import {
@@ -507,6 +508,8 @@ export interface MerchantBffRouterOptions {
   readonly ordinaryRefundApproval?: ReturnType<typeof createMerchantOrdinaryRefundApproval>;
   /** WP-2423 Q5: an Owner/Finance member declines a refund nothing was prepared for. */
   readonly ordinaryRefundDecline?: ReturnType<typeof createMerchantOrdinaryRefundDecline>;
+  /** WP-2423 Q5: where one refund request stands, for anyone who may read refunds. */
+  readonly ordinaryRefundProgress?: ReturnType<typeof createMerchantOrdinaryRefundProgress>;
   /** WP-2423 Q5: refunds at this Store awaiting approval or approved and not yet sent. */
   readonly ordinaryRefundApprovals?: ReturnType<typeof createMerchantOrdinaryRefundApprovals>;
   readonly kitchenQuery?: ReturnType<typeof createMerchantKitchenQuery>;
@@ -4629,6 +4632,34 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         }
         refundDecisionFailure(response, error);
       });
+  });
+
+  router.post("/payments/refunds/progress", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.ordinaryRefundProgress) {
+      response.status(503).json({ error: "refund_progress_unavailable" });
+      return;
+    }
+    void options
+      .ordinaryRefundProgress({ sessionCookie, csrf, query: request.body })
+      .then((result) =>
+        response.set("Cache-Control", NO_STORE).json({
+          requestReference: result.requestReference,
+          progress: result.progress,
+          observedAt: result.observedAt,
+        }),
+      )
+      .catch(() => denied(response));
   });
 
   router.post("/payments/refunds/status", sameOriginMutation(options), (request, response) => {

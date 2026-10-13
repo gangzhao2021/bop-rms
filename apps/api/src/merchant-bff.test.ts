@@ -5342,3 +5342,41 @@ it("WP-2423 Q5: a role refusal names the missing role; any other failure stays a
     expect([response.status, await response.json()]).toEqual([status, body]);
   }
 });
+
+it("WP-2423 Q5: reads one request's progress through the session without private facts", async () => {
+  const id = (n: number) => "01909974-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  type Progress = NonNullable<MerchantBffRouterOptions["ordinaryRefundProgress"]>;
+  const read = vi.fn<Progress>(
+    async () =>
+      ({
+        requestReference: id(2),
+        progress: "Sending",
+        observedAt: "2026-10-13T04:38:00.000Z",
+        actorReference: "private",
+      }) as never,
+  );
+  const root = await serveRefundEscalation({ ordinaryRefundProgress: read });
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const send = (extra: Record<string, string> = {}) =>
+    request(root, "/merchant/payments/refunds/progress", {
+      method: "POST",
+      headers: { ...headers, ...extra },
+      body: JSON.stringify({ orderReference: id(1), requestReference: id(2) }),
+    });
+  for (const bad of [{ Origin: "https://foreign.invalid" }, { "X-BOP-CSRF": "" }])
+    expect((await send(bad)).status).toBe(403);
+  const ok = await send();
+  expect(ok.headers.get("cache-control")).toBe("no-store");
+  expect(await ok.json()).toEqual({
+    requestReference: id(2),
+    progress: "Sending",
+    observedAt: "2026-10-13T04:38:00.000Z",
+  });
+  read.mockRejectedValueOnce(new Error("private"));
+  expect((await send()).status).toBe(403);
+});

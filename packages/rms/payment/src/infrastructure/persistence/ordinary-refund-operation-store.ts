@@ -827,6 +827,76 @@ export function createPostgresOrdinaryRefundObservationReader(
   };
 }
 
+/** WP-2423 Q5: the earliest observation of this operation in which the Provider reported the
+ * refund succeeded, verified against the dispatch it belongs to, or null. A later reconciliation
+ * reuses it instead of recording the same Provider refund again. */
+export function createPostgresOrdinaryRefundSucceededObservationReader(
+  options: Parameters<typeof createPostgresOrdinaryRefundObservationStore>[0],
+) {
+  const scope = {
+    tenantReference: String(parsePaymentReference(options.scope.tenantReference)),
+    brandReference: String(parsePaymentReference(options.scope.brandReference)),
+    storeReference: String(parsePaymentReference(options.scope.storeReference)),
+  };
+  return async (tx: ConsumerTransaction, value: unknown) => {
+    const raw = exactPaymentObject(value, ["orderReference", "operationReference"]);
+    const query = {
+      ...scope,
+      orderReference: String(parsePaymentReference(raw.orderReference)),
+      operationReference: String(parsePaymentReference(raw.operationReference)),
+    };
+    const authorize = async () => {
+      if ((await options.authorize(tx, query)) !== true) return fail();
+    };
+    await authorize();
+    await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+      scope.brandReference,
+      scope.storeReference,
+    ]);
+    const rows = await tx.query(
+      "SELECT record_json::text AS record FROM rms_payment.ordinary_refund_observation WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3 ORDER BY recorded_at,observation_id LIMIT 1001",
+      [scope.brandReference, scope.storeReference, query.operationReference],
+    );
+    if (rows.rows.length > 1000) return fail();
+    const succeeded = rows.rows
+      .map((row) => decodeOrdinaryRefundObservation(row.record))
+      .find(
+        (observation) =>
+          observation.outcome.kind === "RefundObservation" &&
+          observation.outcome.status === "succeeded",
+      );
+    if (!succeeded) {
+      await authorize();
+      return null;
+    }
+    for (const key of [
+      "tenantReference",
+      "brandReference",
+      "storeReference",
+      "orderReference",
+      "operationReference",
+    ] as const)
+      if (succeeded[key] !== query[key]) return fail();
+    const recovery = await options.recover(tx, {
+      orderReference: query.orderReference,
+      operationReference: query.operationReference,
+    });
+    if (!recovery) return fail();
+    const rebuilt = createOrdinaryRefundObservation({
+      dispatch: recovery.dispatch,
+      request: recovery.request,
+      observationReference: succeeded.observationReference,
+      auditReference: succeeded.auditReference,
+      outcome: succeeded.outcome,
+      recordedAt: succeeded.recordedAt,
+    });
+    if (encodeOrdinaryRefundObservation(rebuilt) !== encodeOrdinaryRefundObservation(succeeded))
+      return fail();
+    await authorize();
+    return succeeded;
+  };
+}
+
 /** Complete persisted history for one requested payment leg, under the Order
  * fence also held by the observation writer. Missing dispatch stays pending. */
 export function createPostgresOrdinaryRefundClaimOutcomeReader(options: {

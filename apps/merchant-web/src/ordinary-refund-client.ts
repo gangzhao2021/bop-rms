@@ -408,6 +408,34 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
         });
       }, false);
     },
+    /** WP-2423 Q5: where one refund request stands (Recorded, Sending, Refunded, Declined). */
+    async progress(
+      orderReference: string,
+      requestReference: string,
+      csrf: string,
+      signal?: AbortSignal,
+    ) {
+      ref(orderReference);
+      ref(requestReference);
+      return boundary(async () => {
+        const data = exact(
+          await send(
+            "/merchant/payments/refunds/progress",
+            JSON.stringify({ orderReference, requestReference }),
+            csrf,
+            200,
+            signal,
+          ),
+          ["requestReference", "progress", "observedAt"],
+        );
+        if (
+          data.requestReference !== requestReference ||
+          !["Recorded", "Sending", "Refunded", "Declined"].includes(String(data.progress))
+        )
+          return fail();
+        return data.progress as "Recorded" | "Sending" | "Refunded" | "Declined";
+      }, false);
+    },
     async items(orderReference: string, csrf: string, signal?: AbortSignal) {
       ref(orderReference);
       return boundary(async () => {

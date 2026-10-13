@@ -3,7 +3,7 @@ import {
   createOrdinaryRefundPreparationClient,
   OrdinaryRefundPreparationClientError,
 } from "./ordinary-refund-preparation-client.js";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation, useParams } from "react-router";
 import { SourceTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
@@ -50,6 +50,33 @@ function refundableMinor(context: Context): bigint {
     BigInt(context.confirmedRefundMinor) -
     BigInt(context.pendingRefundMinor)
   );
+}
+/** WP-2423 Q5: why no new refund request can be recorded on this payment, or null. */
+function requestBlockedMessage(context: Context): ReactNode {
+  if (refundableMinor(context) <= 0n) {
+    const pending = BigInt(context.pendingRefundMinor ?? "0");
+    return (
+      <p>
+        {pending > 0n
+          ? `A refund of ${amount(String(pending))} is pending; nothing more can be requested until it finishes.`
+          : "Nothing is left to refund on this payment."}
+        {context.canRequest ? null : (
+          <>
+            {" "}
+            <Link to="/app/approvals">Open Approvals</Link>
+          </>
+        )}
+      </p>
+    );
+  }
+  if (!context.canRequest)
+    return (
+      <p>
+        Only a store manager records refund requests. Refunds that need your approval or decline are
+        on the <Link to="/app/approvals">Approvals</Link> page.
+      </p>
+    );
+  return null;
 }
 /** Payment state in staff language, including refunds already made. */
 function paymentStateLabel(context: Context): string {
@@ -357,10 +384,13 @@ function RefundWizard({
   orderReference,
   csrf,
   onFinancialChange,
+  blockedMessage = null,
 }: {
   readonly orderReference: string;
   readonly csrf: string;
   readonly onFinancialChange: () => void;
+  /** WP-2423 Q5: why no new request can be recorded here (history stays visible). */
+  readonly blockedMessage?: ReactNode;
 }) {
   const [items, setItems] = useState<Items | null>(null),
     [quantities, setQuantities] = useState<Record<string, number>>({}),
@@ -459,6 +489,13 @@ function RefundWizard({
       pending.current = null;
     }
   };
+  // WP-2423 Q5: show this order's refund requests and their progress straight away.
+  const loadedOnce = useRef(false);
+  useEffect(() => {
+    if (loadedOnce.current) return;
+    loadedOnce.current = true;
+    void load();
+  });
   const calculate = async () => {
     if (!items || locked || pending.current) return;
     const selection = items.items
@@ -583,9 +620,8 @@ function RefundWizard({
         <section aria-label="Recorded refund requests">
           <h3>Recorded refund requests</h3>
           <p>
-            Latest {items.recentRequests.length} of {items.claimVersion} recorded requests for this
-            order. These records do not confirm approval or completed refunds. An absent request
-            does not rule out a submission still in progress.
+            Latest {items.recentRequests.length} of {items.claimVersion} refund requests for this
+            order, with where each one stands.
           </p>
           {items.recentRequests.length === 0 ? (
             <p>No recorded requests in this snapshot.</p>
@@ -642,11 +678,15 @@ function RefundWizard({
           )}
         </section>
       ) : null}
-      {items?.canRequest === false ? (
-        <p>
-          Only a store manager records refund requests. You can follow these refunds here and
-          approve or decline them on the <Link to="/app/approvals">Approvals</Link> page.
-        </p>
+      {blockedMessage !== null || items?.canRequest === false ? (
+        <div role="status">
+          {blockedMessage ?? (
+            <p>
+              Only a store manager records refund requests. You can follow these refunds here and
+              approve or decline them on the <Link to="/app/approvals">Approvals</Link> page.
+            </p>
+          )}
+        </div>
       ) : (
         <fieldset disabled={locked}>
           <legend>Refund selection</legend>
@@ -919,26 +959,20 @@ function PaymentContent({
       ) : (
         <>
           <PaymentFinancialSummary initial={context} csrf={csrf} revision={financialRevision} />
-          {context.paymentState === "Captured" && wizard ? (
+          {context.paymentState !== "Captured" ? (
+            <p>A captured payment is required before starting a refund request.</p>
+          ) : !wizard && context.canRequest && refundableMinor(context) > 0n ? (
+            <Link to={"/app/operations/payments/" + paymentIntentReference + "/refund"}>
+              Start refund request
+            </Link>
+          ) : (
             <RefundWizard
               onFinancialChange={refreshFinancial}
               key={context.orderReference}
               orderReference={context.orderReference}
               csrf={csrf}
+              blockedMessage={requestBlockedMessage(context)}
             />
-          ) : context.paymentState !== "Captured" ? (
-            <p>A captured payment is required before starting a refund request.</p>
-          ) : refundableMinor(context) <= 0n ? (
-            <p>Nothing is left to refund on this payment.</p>
-          ) : !context.canRequest ? (
-            <p>
-              Only a store manager records refund requests. Refunds that need your approval are on
-              the <Link to="/app/approvals">Approvals</Link> page.
-            </p>
-          ) : (
-            <Link to={"/app/operations/payments/" + paymentIntentReference + "/refund"}>
-              Start refund request
-            </Link>
           )}
         </>
       )}

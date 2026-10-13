@@ -76,11 +76,13 @@ function ApprovalCard({
       await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
       if (controller.signal.aborted) return;
       try {
-        const current = await refunds.current.items(entry.orderReference, csrf, controller.signal);
-        const request = current.recentRequests.find(
-          (value) => value.requestReference === entry.requestReference,
+        const progress = await refunds.current.progress(
+          entry.orderReference,
+          entry.requestReference,
+          csrf,
+          controller.signal,
         );
-        if (request?.progress === "Refunded") {
+        if (progress === "Refunded") {
           setOutcome({ kind: "Sent", unknown: false, progress: "Refunded" });
           return;
         }

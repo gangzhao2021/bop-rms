@@ -7,6 +7,7 @@ import { createPostgresOrdinaryRefundRecoverySource } from "./ordinary-refund-re
 import {
   createPostgresOrdinaryRefundObservationStore,
   createPostgresOrdinaryRefundObservationReader,
+  createPostgresOrdinaryRefundSucceededObservationReader,
 } from "./persistence/ordinary-refund-operation-store.js";
 
 export function createPostgresOrdinaryRefundReconciliationRuntime(
@@ -19,6 +20,7 @@ export function createPostgresOrdinaryRefundReconciliationRuntime(
   const storageOptions = { scope: options.scope, authorize: options.authorize, recover };
   const reader = createPostgresOrdinaryRefundObservationReader(storageOptions);
   const writer = createPostgresOrdinaryRefundObservationStore(storageOptions);
+  const succeeded = createPostgresOrdinaryRefundSucceededObservationReader(storageOptions);
   return async (value: unknown) => {
     const raw = exactPaymentObject(value, [
       "orderReference",
@@ -39,15 +41,27 @@ export function createPostgresOrdinaryRefundReconciliationRuntime(
     };
     const prepared = await options.transactions.run(async (tx) => {
       const existing = await reader(tx, query);
-      if (existing) return { existing, recovery: null };
+      if (existing) return { existing, recovery: null, confirmed: null };
+      // WP-2423 Q5: the Provider already reported this refund succeeded (for example when it was
+      // sent); record nothing new and ask the Provider nothing more.
+      const confirmed = await succeeded(tx, {
+        orderReference: query.orderReference,
+        operationReference: query.operationReference,
+      });
+      if (confirmed) return { existing: null, recovery: null, confirmed };
       const recovery = await recover(tx, {
         orderReference: query.orderReference,
         operationReference: query.operationReference,
       });
       if (!recovery) throw new Error("ORDINARY_REFUND_RECOVERY_UNAVAILABLE");
-      return { existing: null, recovery };
+      return { existing: null, recovery, confirmed: null };
     });
     if (prepared.existing) return already(prepared.existing);
+    if (prepared.confirmed)
+      return Object.freeze({
+        status: "AlreadyConfirmed" as const,
+        observation: prepared.confirmed,
+      });
     if (!prepared.recovery) throw new Error("ORDINARY_REFUND_RECOVERY_UNAVAILABLE");
     let response: unknown;
     try {

@@ -73,6 +73,7 @@ import { createMerchantMfaStepUp } from "../../apps/api/dist/merchant-mfa-step-u
 import { createMerchantOrdinaryRefundApproval } from "../../apps/api/dist/merchant-ordinary-refund-approval.js";
 import { createMerchantOrdinaryRefundApprovals } from "../../apps/api/dist/merchant-ordinary-refund-approvals.js";
 import { createMerchantOrdinaryRefundDecline } from "../../apps/api/dist/merchant-ordinary-refund-decline.js";
+import { createMerchantOrdinaryRefundProgress } from "../../apps/api/dist/merchant-ordinary-refund-progress.js";
 import { createInternalRefundWorkforceContext } from "./pilot-refund-workforce.mjs";
 import { parseCanonicalInstant } from "../../packages/bop/identity/src/index.ts";
 export async function createInternalMerchant(
@@ -971,10 +972,26 @@ export async function createInternalMerchant(
       ordinaryRefund,
       diningHostSelection,
       diningHostTransfer,
-      ordinaryRefundStatus,
-      refundPaymentContext,
+      // WP-2423 Q5: refund reads log their real refusal code (no payload) for the operator.
+      ordinaryRefundStatus: logUnexpected(
+        "INTERNAL_REFUND_STATUS_UNAVAILABLE",
+        ordinaryRefundStatus,
+      ),
+      refundPaymentContext: logUnexpected(
+        "INTERNAL_REFUND_CONTEXT_UNAVAILABLE",
+        refundPaymentContext,
+      ),
       ordinaryRefundPreview: ordinaryRefundRequest.preview,
-      ordinaryRefundItems,
+      ordinaryRefundItems: logUnexpected("INTERNAL_REFUND_ITEMS_UNAVAILABLE", ordinaryRefundItems),
+      ordinaryRefundProgress: logUnexpected(
+        "INTERNAL_REFUND_PROGRESS_UNAVAILABLE",
+        createMerchantOrdinaryRefundProgress({
+          persistence,
+          authentication: service,
+          resolveConfiguration: refundConfiguration,
+          newReference: () => resources.credentials.reference(),
+        }),
+      ),
       ordinaryRefundRequest,
       ordinaryRefundApproval,
       ordinaryRefundApprovals,

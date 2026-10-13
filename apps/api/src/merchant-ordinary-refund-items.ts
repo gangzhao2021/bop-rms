@@ -11,6 +11,7 @@ import {
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { createMerchantWorkforcePermissionSource } from "./merchant-workforce-authority-source.js";
 import { refundReadAccess } from "./merchant-refund-read-authority.js";
+import { ordinaryRefundProgress } from "./merchant-ordinary-refund-progress.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 interface Scope {
@@ -242,14 +243,12 @@ export function createMerchantOrdinaryRefundItems(options: {
           operationReference: String(request.operationReference),
           observedAt,
         });
-        const states = current.payments.map((payment) => payment.state);
         progress.set(
           request.requestReference,
-          states.every((state) => state === "Confirmed")
-            ? "Refunded"
-            : states.every((state) => state === "NotDispatched")
-              ? "Recorded"
-              : "Sending",
+          ordinaryRefundProgress(
+            false,
+            current.payments.map((payment) => payment.state),
+          ),
         );
       }
       if (!(await allowed())) return deny();
