@@ -21,6 +21,8 @@ import {
   MerchantRefundApprovalError,
 } from "../../../apps/api/src/merchant-ordinary-refund-approval.ts";
 import { createMerchantOrdinaryRefundApprovals } from "../../../apps/api/src/merchant-ordinary-refund-approvals.ts";
+import { createMerchantOrdinaryRefundDecline } from "../../../apps/api/src/merchant-ordinary-refund-decline.ts";
+import { createMerchantOrdinaryRefundItems } from "../../../apps/api/src/merchant-ordinary-refund-items.ts";
 import { createMerchantOrdinaryRefundCommand } from "../../../apps/api/src/merchant-ordinary-refund-command.ts";
 import { createMerchantOrdinaryRefundSendCommand } from "../../../apps/api/src/merchant-ordinary-refund-send-command.ts";
 import { createInternalRefundWorkforceContext } from "../../../tooling/environment/pilot-refund-workforce.mjs";
@@ -559,6 +561,7 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
       }
       const first = await seedOrder(1000);
       const second = await seedOrder(2000);
+      const third = await seedOrder(3000);
       const { businessDate: businessDatePort, storeOptions } =
         await seedOrdinaryRefundStorePublication({ client: admin, scope, firstCapturedAt: paidAt });
 
@@ -692,6 +695,24 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
       const approvals = createMerchantOrdinaryRefundApprovals({
         persistence,
         resolveConfiguration: escalatedConfiguration,
+      });
+      const decline = createMerchantOrdinaryRefundDecline({
+        persistence,
+        authentication,
+        resolveConfiguration: escalatedConfiguration,
+        retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+        retentionPolicyVersion: 1,
+      });
+      const items = createMerchantOrdinaryRefundItems({
+        persistence,
+        authentication,
+        resolveConfiguration: async () => ({
+          providerAccountReference: provider,
+          environment: "Test",
+          roleMapping,
+        }),
+        newReference: fresh,
+        locale: "en-CA",
       });
       const request = createMerchantOrdinaryRefundRequest({
         persistence,
@@ -1039,7 +1060,206 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
         dual,
       );
 
-      // ── 9. RLS: another Store's scope sees no step-ups or approvals.
+      // ── 9. Decline (RF-D04): an owner says no to a refund nothing was prepared for. It stops
+      // occupying the Order, so a smaller request that would otherwise exceed CAD 100 (and the
+      // captured balance) now fits and is sent without approval.
+      const thirdRequest = fullRefund(third, fresh(), fresh());
+      assert.equal(
+        (await request({ ...session("requester"), command: thirdRequest })).approvalRequired,
+        true,
+      );
+      const declineCommand = {
+        orderReference: third.order,
+        requestReference: thirdRequest.requestReference,
+        operationReference: fresh(),
+        reasonCode: "ENTERED_IN_ERROR",
+      };
+      const declineCount = async () =>
+        (await admin.query("SELECT count(*)::int AS n FROM rms_payment.ordinary_refund_decline"))
+          .rows[0].n;
+      // The requester may not decline (no approval permission); nothing is recorded.
+      await assert.rejects(decline({ ...session("requester"), command: declineCommand }), {
+        code: "Denied",
+      });
+      // A sent refund cannot be declined.
+      await assert.rejects(
+        decline({
+          ...session("approver"),
+          command: {
+            orderReference: first.order,
+            requestReference: firstRequest.requestReference,
+            operationReference: fresh(),
+            reasonCode: "NOT_ELIGIBLE",
+          },
+        }),
+        { code: "AlreadyPrepared" },
+      );
+      assert.equal(await declineCount(), 0);
+      const declined = await decline({ ...session("approver"), command: declineCommand });
+      assert.equal(declined.status, "Declined");
+      assert.equal(declined.replayed, false);
+      const replayedDecline = await decline({ ...session("approver"), command: declineCommand });
+      assert.deepEqual(replayedDecline, { ...declined, replayed: true });
+      await assert.rejects(
+        decline({
+          ...session("dual"),
+          command: { ...declineCommand, operationReference: fresh() },
+        }),
+        { code: "AlreadyDeclined" },
+      );
+      assert.equal(await declineCount(), 1);
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT actor_reference::text AS actor,reason_code FROM platform_audit.audit_record WHERE action_code='PAYMENT_ORDINARY_REFUND_DECLINED'",
+          )
+        ).rows,
+        [{ actor: approver, reason_code: "ENTERED_IN_ERROR" }],
+      );
+      // Closed for good: not listed, never approved.
+      assert.ok(
+        !(await approvals({ sessionCookie: "approver" })).entries.some(
+          (e) => e.requestReference === thirdRequest.requestReference,
+        ),
+      );
+      await assert.rejects(
+        approve({
+          ...session("approver"),
+          command: {
+            orderReference: third.order,
+            requestReference: thirdRequest.requestReference,
+            approvalReference: fresh(),
+          },
+        }),
+        { code: "AlreadyDeclined" },
+      );
+      // The requester sees who declined, when and why; every unit is refundable again.
+      const thirdItems = await items({
+        ...session("requester"),
+        query: { orderReference: third.order },
+      });
+      assert.deepEqual(
+        thirdItems.recentRequests.map((r) => [r.requestReference, r.decline?.reasonCode]),
+        [[thirdRequest.requestReference, "ENTERED_IN_ERROR"]],
+      );
+      assert.equal(thirdItems.recentRequests[0].decline.declinedAt, declined.declinedAt);
+      assert.deepEqual(
+        thirdItems.items.map((i) => i.unclaimedQuantity),
+        LINES.map((line) => line.quantity),
+      );
+      // Line B alone: without the release it would push the Order above CAD 100 and the captured
+      // balance; now it needs no approval and the Manager sends it herself.
+      const smallRequest = {
+        ...fullRefund(third, fresh(), fresh(), 1),
+        reasonCode: "MISSING_ITEM",
+        items: [
+          {
+            orderBatchReference: third.batch.batch,
+            orderItemReference: third.batch.items[1],
+            quantity: LINES[1].quantity,
+          },
+        ],
+      };
+      const small = await request({ ...session("requester"), command: smallRequest });
+      assert.equal(small.approvalRequired, false);
+      assert.ok(BigInt(small.amountMinor) < 10000n);
+      const sendsBefore = providerSends;
+      const smallOperation = fresh();
+      await prepare({
+        ...session("requester"),
+        command: {
+          orderReference: third.order,
+          requestReference: smallRequest.requestReference,
+          paymentAttemptReference: third.batch.attempt,
+          operationReference: smallOperation,
+          auditReference: fresh(),
+          approvalReference: null,
+        },
+      });
+      await send({
+        ...session("requester"),
+        command: {
+          operationReference: smallOperation,
+          orderReference: third.order,
+          requestReference: smallRequest.requestReference,
+          dispatchReference: fresh(),
+          auditReference: fresh(),
+          approvalReference: null,
+        },
+      });
+      assert.equal(providerSends, sendsBefore + 1);
+      assert.equal(providerRefunds.at(-1).amount, Number(small.amountMinor));
+
+      // ── 10. "Other" needs a short note, kept off Audit and shown to the approver; nobody may
+      // decline their own request.
+      const otherRequest = {
+        ...fullRefund(third, fresh(), fresh(), 2),
+        reasonCode: "OTHER",
+        items: [
+          {
+            orderBatchReference: third.batch.batch,
+            orderItemReference: third.batch.items[0],
+            quantity: LINES[0].quantity,
+          },
+        ],
+      };
+      await assert.rejects(request({ ...session("dual"), command: otherRequest }));
+      await assert.rejects(
+        request({
+          ...session("dual"),
+          command: { ...otherRequest, reasonCode: "WRONG_ITEM", note: "Not allowed here" },
+        }),
+      );
+      const noted = await request({
+        ...session("dual"),
+        command: { ...otherRequest, note: "  Customer left before the food arrived  " },
+      });
+      assert.equal(noted.approvalRequired, true);
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT note,actor_id::text AS actor FROM rms_payment.ordinary_refund_request_note WHERE request_id=$1",
+            [otherRequest.requestReference],
+          )
+        ).rows,
+        [{ note: "Customer left before the food arrived", actor: dual }],
+      );
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM platform_audit.audit_record WHERE before_summary_json::text LIKE '%food arrived%' OR after_summary_json::text LIKE '%food arrived%' OR reason_code LIKE '%food%'",
+          )
+        ).rows[0].n,
+        0,
+      );
+      const queued = (await approvals({ sessionCookie: "approver" })).entries.find(
+        (e) => e.requestReference === otherRequest.requestReference,
+      );
+      assert.equal(queued?.reasonCode, "OTHER");
+      assert.equal(queued?.note, "Customer left before the food arrived");
+      await assert.rejects(
+        decline({
+          ...session("dual"),
+          command: {
+            orderReference: third.order,
+            requestReference: otherRequest.requestReference,
+            operationReference: fresh(),
+            reasonCode: "CUSTOMER_WITHDREW",
+          },
+        }),
+        { code: "SamePerson" },
+      );
+      // The decline and note records are append-only.
+      await assert.rejects(
+        admin.query("DELETE FROM rms_payment.ordinary_refund_decline"),
+        /append-only ordinary refund decline or note/u,
+      );
+      await assert.rejects(
+        admin.query("UPDATE rms_payment.ordinary_refund_request_note SET note='changed'"),
+        /append-only ordinary refund decline or note/u,
+      );
+
+      // ── 11. RLS: another Store's scope sees no step-ups or approvals.
       const isolated = await transactions().run(async (tx) => {
         await tx.query(
           "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",

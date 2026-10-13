@@ -28,6 +28,11 @@ it("serializes durable ordinary claims, preserves replay, excludes occupied bala
       await admin.query(
         "GRANT SELECT,INSERT,UPDATE,DELETE ON rms_payment.ordinary_refund_request TO " + role,
       );
+      // WP-2423 Q5: occupancy and replay read declines and "Other" notes.
+      await admin.query(
+        "GRANT SELECT ON rms_payment.ordinary_refund_decline,rms_payment.ordinary_refund_request_note TO " +
+          role,
+      );
       await admin.query("GRANT SELECT,INSERT ON platform_audit.audit_record TO " + role);
       await admin.query(
         "GRANT EXECUTE ON FUNCTION platform_helpers.is_uuid_v7(uuid),platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO " +

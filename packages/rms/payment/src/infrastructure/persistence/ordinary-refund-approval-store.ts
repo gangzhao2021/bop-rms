@@ -376,7 +376,8 @@ export function createPostgresOrdinaryRefundApprovalQueueReader(options: {
         "WHERE x.brand_id=r.brand_id AND x.store_id=r.store_id AND x.request_id=r.request_id " +
         "ORDER BY x.approved_at DESC,x.approval_id DESC LIMIT 1) a ON true " +
         "WHERE r.brand_id=$1 AND r.store_id=$2 AND r.requested_at>=$3 AND r.requested_at<=$4 " +
-        "AND NOT (r.record_json ? 'claim') AND (" +
+        "AND NOT (r.record_json ? 'claim') AND NOT EXISTS (SELECT 1 FROM rms_payment.ordinary_refund_decline y " +
+        "WHERE y.brand_id=r.brand_id AND y.store_id=r.store_id AND y.request_id=r.request_id) AND (" +
         "(a.approval_id IS NULL AND NOT EXISTS (SELECT 1 FROM rms_payment.ordinary_refund_operation o " +
         "WHERE o.brand_id=r.brand_id AND o.store_id=r.store_id AND o.request_id=r.request_id)) OR " +
         "(a.approval_id IS NOT NULL AND (SELECT count(*) FROM rms_payment.ordinary_refund_dispatch d " +
@@ -395,5 +396,212 @@ export function createPostgresOrdinaryRefundApprovalQueueReader(options: {
     );
     await authorize();
     return Object.freeze(entries);
+  };
+}
+
+/** WP-2423 Q5: why an Owner/Finance member declines an ordinary refund request. */
+export const ordinaryRefundDeclineReasons = Object.freeze([
+  "NOT_ELIGIBLE",
+  "NEEDS_MORE_INFORMATION",
+  "ENTERED_IN_ERROR",
+  "CUSTOMER_WITHDREW",
+] as const);
+export class OrdinaryRefundDeclineError extends Error {
+  constructor(
+    readonly code:
+      | "ORDINARY_REFUND_DECLINE_DENIED"
+      | "ORDINARY_REFUND_DECLINE_SAME_PERSON"
+      | "ORDINARY_REFUND_DECLINE_NEEDS_REVERIFICATION"
+      | "ORDINARY_REFUND_DECLINE_ALREADY_PREPARED"
+      | "ORDINARY_REFUND_DECLINE_ALREADY_DECLINED"
+      | "ORDINARY_REFUND_DECLINE_CONFLICT",
+  ) {
+    super(code);
+    this.name = "OrdinaryRefundDeclineError";
+  }
+}
+
+/**
+ * WP-2423 Q5 (RF-D04): an Owner/Finance member who is not the requester, with a second-factor
+ * verification at most 15 minutes old, declines an Ordinary request for which nothing has been
+ * prepared or sent. The decline is durable no-Provider-effect evidence: the request stops
+ * occupying the Order's ordinary total and captured balance. Idempotent per operation reference;
+ * atomic with its Audit. The caller retains its authority fences through commit.
+ */
+export function createPostgresOrdinaryRefundDeclineStore(options: Options) {
+  const subject = createPostgresOrdinaryRefundApprovalSubjectSource(options);
+  const denied = (code: OrdinaryRefundDeclineError["code"]): never => {
+    throw new OrdinaryRefundDeclineError(code);
+  };
+  return async (tx: ConsumerTransaction, value: unknown, auditPolicy: unknown) => {
+    const raw = exactPaymentObject(value, [
+      "orderReference",
+      "requestReference",
+      "declineReference",
+      "operationReference",
+      "auditReference",
+      "declinerReference",
+      "reasonCode",
+    ]);
+    const policy = exactPaymentObject(auditPolicy, [
+      "retentionPolicyCode",
+      "retentionPolicyVersion",
+    ]);
+    const ids = {
+      orderReference: String(parsePaymentReference(raw.orderReference)),
+      requestReference: String(parsePaymentReference(raw.requestReference)),
+      declineReference: String(parsePaymentReference(raw.declineReference)),
+      operationReference: String(parsePaymentReference(raw.operationReference)),
+      auditReference: String(parsePaymentReference(raw.auditReference)),
+      declinerReference: String(parsePaymentReference(raw.declinerReference)),
+    };
+    if (!ordinaryRefundDeclineReasons.includes(raw.reasonCode as never))
+      return denied("ORDINARY_REFUND_DECLINE_DENIED");
+    const reasonCode = raw.reasonCode as (typeof ordinaryRefundDeclineReasons)[number];
+    const scope = {
+      tenantReference: String(parsePaymentReference(options.scope.tenantReference)),
+      brandReference: String(parsePaymentReference(options.scope.brandReference)),
+      storeReference: String(parsePaymentReference(options.scope.storeReference)),
+    };
+    const authorize = async () => {
+      if (
+        (await options.authorize(tx, {
+          ...scope,
+          orderReference: ids.orderReference,
+          requestReference: ids.requestReference,
+        })) !== true
+      )
+        return denied("ORDINARY_REFUND_DECLINE_DENIED");
+    };
+    await authorize();
+    await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+      scope.brandReference,
+      scope.storeReference,
+    ]);
+    await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+      "OrdinaryRefundDecline:" +
+        scope.brandReference +
+        ":" +
+        scope.storeReference +
+        ":" +
+        ids.operationReference,
+    ]);
+    const clock = await tx.query("SELECT date_trunc('milliseconds',clock_timestamp()) AS now", []);
+    const time = clock.rows[0]?.now;
+    const observedAt = parsePaymentInstant(time instanceof Date ? time.toISOString() : time);
+    // Holds the Order fence shared with request, preparation and dispatch writers.
+    const current = await subject(tx, {
+      orderReference: ids.orderReference,
+      requestReference: ids.requestReference,
+      observedAt,
+    });
+    if (ordinaryRefundClaimKind(current.request) !== "Ordinary")
+      return denied("ORDINARY_REFUND_DECLINE_CONFLICT");
+    const prior = await tx.query(
+      "SELECT decline_id::text AS decline,request_id::text AS request,decliner_id::text AS decliner,reason_code,audit_id::text AS audit,operation_id::text AS operation,declined_at FROM rms_payment.ordinary_refund_decline WHERE brand_id=$1 AND store_id=$2 AND (operation_id=$3 OR request_id=$4)",
+      [scope.brandReference, scope.storeReference, ids.operationReference, ids.requestReference],
+    );
+    if (prior.rows.length > 1) return denied("ORDINARY_REFUND_DECLINE_CONFLICT");
+    const row = prior.rows[0];
+    if (row) {
+      if (row.operation !== ids.operationReference)
+        return denied("ORDINARY_REFUND_DECLINE_ALREADY_DECLINED");
+      if (
+        row.decline !== ids.declineReference ||
+        row.request !== ids.requestReference ||
+        row.decliner !== ids.declinerReference ||
+        row.reason_code !== reasonCode ||
+        row.audit !== ids.auditReference
+      )
+        return denied("ORDINARY_REFUND_DECLINE_CONFLICT");
+      await authorize();
+      const at = row.declined_at;
+      return Object.freeze({
+        status: "AlreadyCommitted" as const,
+        declinedAt: parsePaymentInstant(at instanceof Date ? at.toISOString() : at),
+      });
+    }
+    const prepared = await tx.query(
+      "SELECT count(*)::int AS n FROM rms_payment.ordinary_refund_operation WHERE brand_id=$1 AND store_id=$2 AND request_id=$3",
+      [scope.brandReference, scope.storeReference, ids.requestReference],
+    );
+    if (prepared.rows[0]?.n !== 0) return denied("ORDINARY_REFUND_DECLINE_ALREADY_PREPARED");
+    if (current.requesterReference === ids.declinerReference)
+      return denied("ORDINARY_REFUND_DECLINE_SAME_PERSON");
+    const facts = await options.authority(tx, {
+      ...scope,
+      orderReference: ids.orderReference,
+      actorReference: ids.declinerReference,
+      permissionCode: "payment.refund.approve",
+      observedAt,
+    });
+    const fact = (key: string): unknown => {
+      const descriptor =
+        facts !== null && typeof facts === "object"
+          ? Object.getOwnPropertyDescriptor(facts, key)
+          : undefined;
+      return descriptor && "value" in descriptor ? descriptor.value : undefined;
+    };
+    if (
+      fact("actorReference") !== ids.declinerReference ||
+      fact("permissionCode") !== "payment.refund.approve" ||
+      fact("active") !== true ||
+      fact("allowed") !== true ||
+      (fact("role") !== "Owner" && fact("role") !== "Finance") ||
+      fact("observedAt") !== observedAt
+    )
+      return denied("ORDINARY_REFUND_DECLINE_DENIED");
+    const mfa = fact("recentMfaAt");
+    const mfaAt = typeof mfa === "string" ? parsePaymentInstant(mfa) : null;
+    const age = mfaAt === null ? -1 : Date.parse(observedAt) - Date.parse(mfaAt);
+    if (mfaAt === null || age < 0 || age > 15 * 60 * 1000)
+      return denied("ORDINARY_REFUND_DECLINE_NEEDS_REVERIFICATION");
+    const audit = validateAuditRecord({
+      auditId: ids.auditReference,
+      brandId: scope.brandReference,
+      storeId: scope.storeReference,
+      actor: { type: "User", reference: ids.declinerReference },
+      actionCode: "PAYMENT_ORDINARY_REFUND_DECLINED",
+      targetType: "PaymentRefundDecline",
+      targetId: ids.declineReference,
+      reasonCode,
+      correlationId: ids.operationReference,
+      occurredAt: observedAt,
+      sourceChannel: "MERCHANT_WEB",
+      dataClassification: "Restricted",
+      retentionPolicyCode: policy.retentionPolicyCode,
+      retentionPolicyVersion: policy.retentionPolicyVersion,
+    });
+    await tx.query("SAVEPOINT ordinary_refund_decline_append", []);
+    try {
+      const inserted = await tx.query(
+        "INSERT INTO rms_payment.ordinary_refund_decline (tenant_id,brand_id,store_id,order_id,request_id,decline_id,operation_id,requester_id,decliner_id,reason_code,claim_count,declined_at,decliner_mfa_at,audit_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)",
+        [
+          scope.tenantReference,
+          scope.brandReference,
+          scope.storeReference,
+          ids.orderReference,
+          ids.requestReference,
+          ids.declineReference,
+          ids.operationReference,
+          current.requesterReference,
+          ids.declinerReference,
+          reasonCode,
+          current.claimVersion,
+          observedAt,
+          mfaAt,
+          ids.auditReference,
+        ],
+      );
+      if (inserted.rowCount !== 1) return denied("ORDINARY_REFUND_DECLINE_CONFLICT");
+      await appendAuditRecordInTransaction(tx, audit);
+      await authorize();
+      await tx.query("RELEASE SAVEPOINT ordinary_refund_decline_append", []);
+    } catch (error) {
+      await tx.query("ROLLBACK TO SAVEPOINT ordinary_refund_decline_append", []);
+      await tx.query("RELEASE SAVEPOINT ordinary_refund_decline_append", []);
+      throw error;
+    }
+    return Object.freeze({ status: "Created" as const, declinedAt: observedAt });
   };
 }

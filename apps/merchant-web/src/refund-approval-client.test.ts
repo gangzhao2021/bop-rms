@@ -25,6 +25,7 @@ const entry = {
   currencyCode: "CAD",
   amountMinor: "12500",
   reasonCode: "WRONG_ITEM",
+  note: null,
   escalationReasons: ["OrderOrdinaryTotalAboveCad100"],
   requestedAt: "2026-10-12T15:00:00.000Z",
   requesterName: "Mia",
@@ -173,4 +174,54 @@ it("WP-2423 Q5: shows reasons and amounts in staff language", () => {
   expect(html).toContain("Verify to approve");
   expect(html).toContain('autoComplete="one-time-code"');
   expect(html).toContain('inputMode="numeric"');
+});
+
+it("WP-2423 Q5: declines with a listed reason and names each refusal", async () => {
+  const command = {
+    orderReference: id(1),
+    requestReference: id(2),
+    operationReference: id(7),
+    reasonCode: "ENTERED_IN_ERROR" as const,
+  };
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(
+      json({ status: "Declined", declinedAt: "2026-10-12T15:05:00.000Z", replayed: false }),
+    )
+    .mockResolvedValueOnce(json({ error: "refund_already_prepared" }, 409))
+    .mockResolvedValueOnce(json({ error: "refund_already_declined" }, 409))
+    .mockResolvedValueOnce(json({ error: "same_person" }, 422))
+    .mockResolvedValueOnce(json({ error: "needs_reverification", party: "Approver" }, 409));
+  const client = createRefundApprovalClient(fetcher);
+  await expect(client.decline(command, csrf)).resolves.toEqual({
+    declinedAt: "2026-10-12T15:05:00.000Z",
+    replayed: false,
+  });
+  expect(fetcher.mock.calls[0]?.[0]).toBe("/merchant/payments/refunds/decline");
+  expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual(command);
+  for (const code of ["AlreadyPrepared", "AlreadyDeclined", "SamePerson", "NeedsReverification"])
+    await expect(client.decline(command, csrf)).rejects.toMatchObject({ code });
+  await expect(
+    client.decline({ ...command, reasonCode: "FREE" as never }, csrf),
+  ).rejects.toMatchObject({ code: "Unavailable" });
+  const noted = vi.fn<typeof fetch>().mockResolvedValueOnce(
+    json({
+      observedAt: "2026-10-12T15:01:00.000Z",
+      canApprove: true,
+      entries: [{ ...entry, reasonCode: "OTHER", note: "Customer left early" }],
+    }),
+  );
+  expect((await createRefundApprovalClient(noted).approvals()).entries[0]?.note).toBe(
+    "Customer left early",
+  );
+  const misplaced = vi.fn<typeof fetch>().mockResolvedValueOnce(
+    json({
+      observedAt: "2026-10-12T15:01:00.000Z",
+      canApprove: true,
+      entries: [{ ...entry, note: "Only for Other" }],
+    }),
+  );
+  await expect(createRefundApprovalClient(misplaced).approvals()).rejects.toMatchObject({
+    code: "Unavailable",
+  });
 });

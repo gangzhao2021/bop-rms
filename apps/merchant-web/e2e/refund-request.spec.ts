@@ -49,6 +49,7 @@ for (const recovery of ["retry", "history"] as const)
       reasonCode: string;
       currencyCode: string;
       amountMinor: string;
+      decline: null;
     } | null = null;
     await page.route("**/merchant/session", (route) =>
       route.fulfill({
@@ -247,6 +248,7 @@ for (const recovery of ["retry", "history"] as const)
         reasonCode: "CUSTOMER_REQUEST",
         currencyCode: "CAD",
         amountMinor: "1130",
+        decline: null,
       };
       if (requests.length === 1) return route.abort("failed");
       return route.fulfill({

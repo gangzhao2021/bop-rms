@@ -32,8 +32,13 @@ function selection(value: unknown) {
     value !== null &&
     typeof value === "object" &&
     Object.prototype.hasOwnProperty.call(value, "claim");
+  const hasNote =
+    value !== null &&
+    typeof value === "object" &&
+    Object.prototype.hasOwnProperty.call(value, "note");
   const raw = exactPaymentObject(value, [
     ...(hasClaim ? ["claim"] : []),
+    ...(hasNote ? ["note"] : []),
     "orderReference",
     "requestReference",
     "operationReference",
@@ -87,7 +92,15 @@ function selection(value: unknown) {
     reasonCode: raw.reasonCode,
     items: Object.freeze(items),
     claim: hasClaim ? cancellationClaim(raw.claim) : null,
+    // WP-2423 Q5: a reason "Other" needs a short staff note; no other reason carries one.
+    note: hasNote ? ordinaryRefundRequestNote(raw.note) : null,
   });
+}
+export function ordinaryRefundRequestNote(value: unknown): string {
+  if (typeof value !== "string") return fail();
+  const note = value.trim();
+  if (note.length < 1 || [...note].length > 200 || /[\p{Cc}]/u.test(note)) return fail();
+  return note;
 }
 function cancellationClaim(value: unknown): OrdinaryRefundCancellationClaim {
   const raw = exactPaymentObject(value, ["kind", "cancellationReference", "cancellationDigest"]);
@@ -140,6 +153,11 @@ export function createPostgresOrdinaryRefundRequestRuntime(options: {
   const resolve = async (tx: ConsumerTransaction, value: unknown, preview: boolean) => {
     const intent = selection(value),
       observedAt = parsePaymentInstant(options.now());
+    if (
+      (intent.reasonCode === "OTHER") !== (intent.note !== null) ||
+      (intent.note !== null && intent.claim !== null)
+    )
+      return fail();
     const authorize = async () => {
       if ((await options.authorize(tx, { ...scope, ...intent, observedAt })) !== true)
         return fail();
@@ -165,9 +183,11 @@ export function createPostgresOrdinaryRefundRequestRuntime(options: {
     )
       return fail();
     if (!previous && intent.expectedClaimVersion !== context.history.length) return fail();
+    // WP-2423 Q5: declined requests stop occupying units; a replay reproduces the allocation
+    // against what occupied the Order when the original request was appended.
     const history = previous
-      ? context.history.slice(0, previous.expectedClaimVersion)
-      : context.history;
+      ? context.occupyingBefore(previous.expectedClaimVersion + 1)
+      : context.occupying;
     const requestedAt = previous?.requestedAt ?? observedAt;
     const ownerScope = {
       brandReference: scope.brandReference,
@@ -293,7 +313,12 @@ export function createPostgresOrdinaryRefundRequestRuntime(options: {
       authorize,
       validateSources: captureSource,
     });
-    const result = await (preview ? store.preview : store.record)(tx, request, {
+    const result = await (
+      preview
+        ? store.preview
+        : (tx2: ConsumerTransaction, value2: unknown, audit2: unknown) =>
+            store.record(tx2, value2, audit2, intent.note)
+    )(tx, request, {
       auditId: request.auditReference,
       brandId: scope.brandReference,
       storeId: scope.storeReference,

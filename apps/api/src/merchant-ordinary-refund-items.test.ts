@@ -6,6 +6,7 @@ const d = vi.hoisted(() => ({
   context: vi.fn(),
   order: vi.fn(),
   capture: vi.fn(),
+  member: vi.fn(),
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => d.resolve }));
 vi.mock("./merchant-workforce-authority-source.js", () => ({
@@ -13,8 +14,18 @@ vi.mock("./merchant-workforce-authority-source.js", () => ({
 }));
 vi.mock("@rms/payment", async (original) => ({
   ...(await original<object>()),
-  createPostgresOrdinaryRefundRequestContextSource: () => d.context,
+  // Without declines every recorded request occupies the Order (WP-2423 Q5).
+  createPostgresOrdinaryRefundRequestContextSource:
+    () =>
+    async (...args: unknown[]) => {
+      const value = (await d.context(...args)) as { history: unknown[] };
+      return { occupying: value.history, declines: new Map(), ...value };
+    },
   createPostgresCapturedBatchPaymentSource: () => ({ load: d.capture }),
+}));
+vi.mock("@bop/membership", async (original) => ({
+  ...(await original<object>()),
+  loadStoreMember: d.member,
 }));
 vi.mock("@rms/ordering", async (original) => ({
   ...(await original<object>()),
@@ -118,6 +129,7 @@ it("returns paid unclaimed units and current claim version without private facts
         reasonCode: "CUSTOMER_REQUEST",
         currencyCode: "CAD",
         amountMinor: "1130",
+        decline: null,
       },
     ],
     items: [
@@ -205,4 +217,45 @@ it("bounds request summaries to latest20 without exposing actor or audit facts",
   expect(result.recentRequests[0]?.claimVersion).toBe(6);
   expect(result.recentRequests[19]?.claimVersion).toBe(25);
   expect(JSON.stringify(result)).not.toContain("private");
+});
+
+it("WP-2423 Q5: a declined request frees its units and shows who declined, when and why", async () => {
+  const f = setup();
+  const declined = {
+    requestReference: id(40),
+    operationReference: id(41),
+    expectedClaimVersion: 0,
+    requestedAt: "2026-09-20T12:00:00.000Z",
+    reasonCode: "OTHER",
+    currencyCode: "CAD",
+    amountMinor: 1130n,
+    payments: [{ items: [{ orderItemReference: id(12), refundUnitOrdinals: [1] }] }],
+  };
+  d.context.mockResolvedValue({
+    existing: null,
+    history: [declined],
+    occupying: [],
+    declines: new Map([
+      [
+        id(40),
+        {
+          declineReference: id(50),
+          requestReference: id(40),
+          declinerReference: id(4),
+          reasonCode: "ENTERED_IN_ERROR",
+          declinedAt: "2026-09-20T12:05:00.000Z",
+          claimCount: 1,
+        },
+      ],
+    ]),
+  });
+  d.member.mockResolvedValue({ displayName: "Sam" });
+  const result = await f.operation(f.input);
+  expect(result.items[0]?.unclaimedQuantity).toBe(3);
+  expect(result.recentRequests[0]?.decline).toEqual({
+    reasonCode: "ENTERED_IN_ERROR",
+    declinedAt: "2026-09-20T12:05:00.000Z",
+    declinerName: "Sam",
+    declinedByYou: true,
+  });
 });

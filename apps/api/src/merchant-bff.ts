@@ -202,6 +202,7 @@ import {
   type createMerchantOrdinaryRefundApproval,
 } from "./merchant-ordinary-refund-approval.js";
 import type { createMerchantOrdinaryRefundApprovals } from "./merchant-ordinary-refund-approvals.js";
+import type { createMerchantOrdinaryRefundDecline } from "./merchant-ordinary-refund-decline.js";
 import type { createMerchantKitchenCommand } from "./merchant-kitchen-command.js";
 import type { createMerchantKitchenRelease } from "./merchant-kitchen-release.js";
 import {
@@ -504,6 +505,8 @@ export interface MerchantBffRouterOptions {
   readonly mfaStepUp?: ReturnType<typeof createMerchantMfaStepUp>;
   /** WP-2423 Q5: an Owner/Finance member approves an escalated refund, which is then sent. */
   readonly ordinaryRefundApproval?: ReturnType<typeof createMerchantOrdinaryRefundApproval>;
+  /** WP-2423 Q5: an Owner/Finance member declines a refund nothing was prepared for. */
+  readonly ordinaryRefundDecline?: ReturnType<typeof createMerchantOrdinaryRefundDecline>;
   /** WP-2423 Q5: refunds at this Store awaiting approval or approved and not yet sent. */
   readonly ordinaryRefundApprovals?: ReturnType<typeof createMerchantOrdinaryRefundApprovals>;
   readonly kitchenQuery?: ReturnType<typeof createMerchantKitchenQuery>;
@@ -881,6 +884,18 @@ export function parseMerchantWorkspaceSnapshot(value: unknown): MerchantWorkspac
     dashboardAvailability: "UnavailableUntilWP1905",
     navigation,
   });
+}
+
+/** WP-2423 Q5: why an approval or decline was refused, without internal detail. */
+function refundDecisionFailure(response: express.Response, error: MerchantRefundApprovalError) {
+  if (error.code === "SamePerson") response.status(422).json({ error: "same_person" });
+  else if (error.code === "NeedsReverification")
+    response.status(409).json({ error: "needs_reverification", party: error.party });
+  else if (error.code === "AlreadyPrepared")
+    response.status(409).json({ error: "refund_already_prepared" });
+  else if (error.code === "AlreadyDeclined")
+    response.status(409).json({ error: "refund_already_declined" });
+  else response.status(409).json({ error: "refund_changed" });
 }
 
 function denied(response: express.Response): void {
@@ -4493,6 +4508,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             currencyCode: entry.currencyCode,
             amountMinor: entry.amountMinor,
             reasonCode: entry.reasonCode,
+            note: entry.note,
             escalationReasons: entry.escalationReasons,
             requestedAt: entry.requestedAt,
             requesterName: entry.requesterName,
@@ -4545,10 +4561,42 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           denied(response);
           return;
         }
-        if (error.code === "SamePerson") response.status(422).json({ error: "same_person" });
-        else if (error.code === "NeedsReverification")
-          response.status(409).json({ error: "needs_reverification", party: error.party });
-        else response.status(409).json({ error: "refund_changed" });
+        refundDecisionFailure(response, error);
+      });
+  });
+
+  // WP-2423 Q5: decline a refund nothing was prepared for; it stops counting toward the Order.
+  router.post("/payments/refunds/decline", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    const command = options.ordinaryRefundDecline;
+    if (!command) {
+      response.status(503).json({ error: "refund_decline_unavailable" });
+      return;
+    }
+    void command({ sessionCookie, csrf, command: request.body })
+      .then((result) =>
+        response.json({
+          status: result.status,
+          declinedAt: result.declinedAt,
+          replayed: result.replayed,
+        }),
+      )
+      .catch((error: unknown) => {
+        if (!(error instanceof MerchantRefundApprovalError) || error.code === "Denied") {
+          denied(response);
+          return;
+        }
+        refundDecisionFailure(response, error);
       });
   });
 
@@ -4659,6 +4707,15 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             reasonCode: entry.reasonCode,
             currencyCode: entry.currencyCode,
             amountMinor: entry.amountMinor,
+            decline:
+              entry.decline === null
+                ? null
+                : {
+                    reasonCode: entry.decline.reasonCode,
+                    declinedAt: entry.decline.declinedAt,
+                    declinerName: entry.decline.declinerName,
+                    declinedByYou: entry.decline.declinedByYou,
+                  },
           })),
           items: result.items.map((item) => ({
             orderBatchReference: item.orderBatchReference,

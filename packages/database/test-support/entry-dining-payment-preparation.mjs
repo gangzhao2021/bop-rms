@@ -16,6 +16,11 @@ export async function exerciseEntryDiningPaymentPreparation({
 }) {
   await admin.query("GRANT USAGE ON SCHEMA rms_payment TO " + role);
   await admin.query("GRANT SELECT,INSERT ON rms_payment.payment_tip_selection TO " + role);
+  // Pilot api grant (docs/spec/pilot-acl-matrix.json): the merchant order queue reads per-round
+  // payment outcomes (WP-2423 Q6).
+  await admin.query(
+    "GRANT SELECT ON rms_payment.payment_intent,rms_payment.payment_status_projection TO " + role,
+  );
   const now = commitment.allocated.options.now;
   const repository = createPostgresPaymentTipSelectionStore({ run }, scope, { now });
   const tips = createCustomerDiningSessionTipSelection(commitment.allocated.options, {

@@ -145,6 +145,7 @@ it("binds item queries to order and denies selectable units on uncaptured batche
           reasonCode: "CUSTOMER_REQUEST",
           currencyCode: "CAD",
           amountMinor: "1130",
+          decline: null,
         },
       ],
       items: [item],
@@ -213,6 +214,7 @@ it("rejects missing, duplicate or inconsistent persisted request history", async
     reasonCode: "CUSTOMER_REQUEST",
     currencyCode: "CAD",
     amountMinor: "1130",
+    decline: null,
   };
   const data = {
     orderReference: id(1),
@@ -316,4 +318,45 @@ it("WP-2423 Q5: reports why an owner approval is needed and rejects contradictor
       createOrdinaryRefundClient(failing).prepareRequest(command()).preview(csrf),
     ).rejects.toMatchObject({ code: "Unavailable" });
   }
+});
+
+it("WP-2423 Q5: shows a declined request and sends an Other note only with that reason", async () => {
+  const entry = {
+    requestReference: id(40),
+    operationReference: id(41),
+    claimVersion: 1,
+    requestedAt: "2026-09-20T12:00:00.000Z",
+    reasonCode: "OTHER",
+    currencyCode: "CAD",
+    amountMinor: "1130",
+    decline: {
+      reasonCode: "ENTERED_IN_ERROR",
+      declinedAt: "2026-09-20T12:05:00.000Z",
+      declinerName: "Sam",
+      declinedByYou: false,
+    },
+  };
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(
+    response({
+      orderReference: id(1),
+      orderNumber: "12",
+      claimVersion: 1,
+      recentRequests: [entry],
+      items: [],
+    }),
+  );
+  expect((await createOrdinaryRefundClient(fetcher).items(id(1), csrf)).recentRequests).toEqual([
+    entry,
+  ]);
+  const client = createOrdinaryRefundClient(vi.fn<typeof fetch>());
+  expect(() => client.prepareRequest({ ...command(), reasonCode: "OTHER" })).toThrow();
+  expect(() => client.prepareRequest({ ...command(), note: "Not allowed" })).toThrow();
+  const sending = vi.fn<typeof fetch>().mockResolvedValueOnce(response(preview));
+  await createOrdinaryRefundClient(sending)
+    .prepareRequest({ ...command(), reasonCode: "OTHER", note: "  Customer left early " })
+    .preview(csrf);
+  expect(JSON.parse(String(sending.mock.calls[0]?.[1]?.body))).toMatchObject({
+    reasonCode: "OTHER",
+    note: "Customer left early",
+  });
 });

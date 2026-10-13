@@ -672,6 +672,7 @@ describe("migration catalog", () => {
       "2000_027_alter_ordinary_refund_request_claim_kind",
       "2000_028_create_fulfillment_item_cancellation",
       "2000_029_create_workforce_mfa_step_up",
+      "2000_030_create_ordinary_refund_decline",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

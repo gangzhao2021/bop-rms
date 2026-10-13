@@ -366,7 +366,7 @@ export function createPostgresCancellationRefundRuntime(options: CancellationRef
         observedAt,
       });
       if (current.existing) return fail();
-      refuseOccupied(current.history, input);
+      refuseOccupied(current.occupying, input);
       const items = await lineQuantities(tx, input, observedAt);
       const result = await requestRuntime(ephemeralReference).preview(tx, {
         orderReference: input.orderReference,
@@ -433,7 +433,7 @@ export function createPostgresCancellationRefundRuntime(options: CancellationRef
             .join(",") !== input.orderItemReferences.join(",")
         )
           return fail("CANCELLATION_REFUND_REPLAY_CONFLICT");
-      } else refuseOccupied(current.history, input);
+      } else refuseOccupied(current.occupying, input);
       const requestedAt = previous?.requestedAt ?? observedAt;
       const items = await lineQuantities(tx, input, requestedAt);
       const requested = await requestRuntime(() => ids.requestAuditReference)(tx, {

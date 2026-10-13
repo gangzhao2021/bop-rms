@@ -71,6 +71,7 @@ import { createInternalStoreConfiguration } from "./pilot-store-configuration.mj
 import { createMerchantMfaStepUp } from "../../apps/api/dist/merchant-mfa-step-up.js";
 import { createMerchantOrdinaryRefundApproval } from "../../apps/api/dist/merchant-ordinary-refund-approval.js";
 import { createMerchantOrdinaryRefundApprovals } from "../../apps/api/dist/merchant-ordinary-refund-approvals.js";
+import { createMerchantOrdinaryRefundDecline } from "../../apps/api/dist/merchant-ordinary-refund-decline.js";
 import { createInternalRefundWorkforceContext } from "./pilot-refund-workforce.mjs";
 import { parseCanonicalInstant } from "../../packages/bop/identity/src/index.ts";
 export async function createInternalMerchant(
@@ -589,6 +590,17 @@ export async function createInternalMerchant(
       retentionPolicyVersion: 1,
     }),
   );
+  // WP-2423 Q5: an Owner declines a refund nothing was prepared for (RF-D04 release).
+  const ordinaryRefundDecline = logUnexpected(
+    "INTERNAL_REFUND_DECLINE_UNAVAILABLE",
+    createMerchantOrdinaryRefundDecline({
+      persistence,
+      authentication: service,
+      resolveConfiguration: escalatedRefundConfiguration,
+      retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+      retentionPolicyVersion: 1,
+    }),
+  );
   const ordinaryRefundApprovals = logUnexpected(
     "INTERNAL_REFUND_APPROVALS_UNAVAILABLE",
     createMerchantOrdinaryRefundApprovals({
@@ -959,6 +971,7 @@ export async function createInternalMerchant(
       ordinaryRefundRequest,
       ordinaryRefundApproval,
       ordinaryRefundApprovals,
+      ordinaryRefundDecline,
       ...(mfaStepUp === undefined ? {} : { mfaStepUp }),
       diningJoinState,
       diningJoinRegenerate,

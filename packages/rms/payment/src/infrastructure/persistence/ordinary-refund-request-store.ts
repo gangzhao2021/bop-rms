@@ -52,6 +52,80 @@ async function loadRequestHistory(
   );
 }
 
+/** WP-2423 Q5: durable no-Provider-effect declines of this Order's requests (RF-D04).
+ * claimCount: how many requests the Order had when the request was declined. */
+export interface OrdinaryRefundDecline {
+  readonly declineReference: string;
+  readonly requestReference: string;
+  readonly declinerReference: string;
+  readonly reasonCode: string;
+  readonly declinedAt: string;
+  readonly claimCount: number;
+}
+async function loadRequestDeclines(
+  tx: ConsumerTransaction,
+  scope: Scope,
+  orderReference: string,
+  history: readonly OrdinaryRefundRequest[],
+  observedAt: string,
+): Promise<ReadonlyMap<string, OrdinaryRefundDecline>> {
+  const records = await tx.query(
+    "SELECT decline_id::text AS decline,request_id::text AS request,requester_id::text AS requester,decliner_id::text AS decliner,reason_code,claim_count::text AS claims,declined_at FROM rms_payment.ordinary_refund_decline " +
+      "WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 ORDER BY claim_count,decline_id LIMIT 1001",
+    [scope.brandReference, scope.storeReference, orderReference],
+  );
+  if (records.rows.length > 1000) return fail("ORDINARY_REFUND_HISTORY_UNAVAILABLE");
+  const declines = new Map<string, OrdinaryRefundDecline>();
+  for (const row of records.rows) {
+    const requestReference = String(parsePaymentReference(row.request));
+    const index = history.findIndex((entry) => entry.requestReference === requestReference);
+    const request = history[index];
+    const claimCount = Number(row.claims);
+    const at = row.declined_at;
+    const declinedAt = parsePaymentInstant(at instanceof Date ? at.toISOString() : at);
+    if (
+      !request ||
+      declines.has(requestReference) ||
+      ordinaryRefundClaimKind(request) !== "Ordinary" ||
+      String(parsePaymentReference(row.requester)) !== request.actorReference ||
+      !Number.isSafeInteger(claimCount) ||
+      claimCount <= index ||
+      claimCount > history.length ||
+      declinedAt < request.requestedAt ||
+      declinedAt > observedAt ||
+      typeof row.reason_code !== "string"
+    )
+      return fail("ORDINARY_REFUND_HISTORY_UNAVAILABLE");
+    declines.set(
+      requestReference,
+      Object.freeze({
+        declineReference: String(parsePaymentReference(row.decline)),
+        requestReference,
+        declinerReference: String(parsePaymentReference(row.decliner)),
+        reasonCode: row.reason_code,
+        declinedAt,
+        claimCount,
+      }),
+    );
+  }
+  return declines;
+}
+/** Requests that occupied the Order when the request with claim version `version` was
+ * appended (a request declined before that no longer occupied anything); for the current
+ * position pass Infinity. Declines never change claim versions. */
+function occupyingAt(
+  history: readonly OrdinaryRefundRequest[],
+  declines: ReadonlyMap<string, OrdinaryRefundDecline>,
+  version: number,
+): readonly OrdinaryRefundRequest[] {
+  return Object.freeze(
+    history.slice(0, Number.isFinite(version) ? version - 1 : history.length).filter((entry) => {
+      const decline = declines.get(entry.requestReference);
+      return decline === undefined || decline.claimCount >= version;
+    }),
+  );
+}
+
 interface RequestContextQuery {
   readonly orderReference: string;
   readonly operationReference: string;
@@ -123,6 +197,13 @@ export function createPostgresOrdinaryRefundRequestContextSource(options: {
     )
       return fail();
     const history = await loadRequestHistory(tx, scope, query.orderReference, query.observedAt);
+    const declines = await loadRequestDeclines(
+      tx,
+      scope,
+      query.orderReference,
+      history,
+      query.observedAt,
+    );
     const matching = history.filter(
       (request) => request.operationReference === query.operationReference,
     );
@@ -134,7 +215,16 @@ export function createPostgresOrdinaryRefundRequestContextSource(options: {
     )
       return fail("ORDINARY_REFUND_HISTORY_UNAVAILABLE");
     await authorize();
-    return Object.freeze({ existing, history });
+    return Object.freeze({
+      existing,
+      /** Complete history: claim versions and replay identity. */
+      history,
+      /** WP-2423 Q5: requests that currently occupy the Order (declined ones excluded). */
+      occupying: occupyingAt(history, declines, Infinity),
+      /** Requests that occupied the Order when the request of this claim version was appended. */
+      occupyingBefore: (version: number) => occupyingAt(history, declines, version),
+      declines,
+    });
   };
 }
 
@@ -202,7 +292,16 @@ export function createPostgresOrdinaryRefundRequestPositionSource(options: {
         ":" +
         query.orderReference,
     ]);
-    const history = await loadRequestHistory(tx, scope, query.orderReference, query.observedAt);
+    const fullHistory = await loadRequestHistory(tx, scope, query.orderReference, query.observedAt);
+    const positionDeclines = await loadRequestDeclines(
+      tx,
+      scope,
+      query.orderReference,
+      fullHistory,
+      query.observedAt,
+    );
+    // WP-2423 Q5: a declined request has no Provider effect and occupies nothing (RF-D04).
+    const history = occupyingAt(fullHistory, positionDeclines, Infinity);
     let pendingMinor = 0n;
     let confirmedMinor = 0n;
     let observationCount = 0;
@@ -267,7 +366,7 @@ export function createPostgresOrdinaryRefundRequestPositionSource(options: {
       confirmedOrderAllocationMinor,
       confirmedTipMinor,
       unallocatedConfirmedMinor,
-      version: history.length + observationCount + 1,
+      version: fullHistory.length + positionDeclines.size + observationCount + 1,
       snapshotDigest:
         "sha256:" +
         createHash("sha256")
@@ -281,6 +380,7 @@ export function createPostgresOrdinaryRefundRequestPositionSource(options: {
               paymentIntentReference: query.paymentIntentReference,
               paymentAttemptReference: query.paymentAttemptReference,
               history: history.map(encodeOrdinaryRefundRequest),
+              declined: [...positionDeclines.keys()].sort(),
               outcomes,
             }),
           )
@@ -395,8 +495,20 @@ export function createPostgresOrdinaryRefundRequestStore(options: {
     value: unknown,
     auditValue: unknown,
     append: boolean,
+    note: string | null = null,
   ) {
     const request = parseOrdinaryRefundRequest(value);
+    if (
+      (note !== null &&
+        (typeof note !== "string" ||
+          note !== note.trim() ||
+          note.length < 1 ||
+          [...note].length > 200 ||
+          request.reasonCode !== "OTHER" ||
+          ordinaryRefundClaimKind(request) !== "Ordinary")) ||
+      (note === null && append && request.reasonCode === "OTHER")
+    )
+      return fail("ORDINARY_REFUND_NOTE_INVALID");
     const encoded = encodeOrdinaryRefundRequest(request);
     if (!sameScope(scope, request)) return fail("ORDINARY_REFUND_PERMISSION_DENIED");
     const authorize = async () => {
@@ -452,6 +564,11 @@ export function createPostgresOrdinaryRefundRequestStore(options: {
       if (!append) return fail();
       const prior = decodeOrdinaryRefundRequest(existing.rows[0]?.record);
       if (encodeOrdinaryRefundRequest(prior) !== encoded) return fail();
+      const priorNote = await tx.query(
+        "SELECT note FROM rms_payment.ordinary_refund_request_note WHERE brand_id=$1 AND store_id=$2 AND request_id=$3",
+        [scope.brandReference, scope.storeReference, request.requestReference],
+      );
+      if ((priorNote.rows[0]?.note ?? null) !== note || priorNote.rows.length > 1) return fail();
       await authorize();
       return Object.freeze({
         status: "AlreadyCommitted" as const,
@@ -466,6 +583,12 @@ export function createPostgresOrdinaryRefundRequestStore(options: {
     );
     if (history.length >= 1000) return fail("ORDINARY_REFUND_HISTORY_UNAVAILABLE");
     if (request.expectedClaimVersion !== history.length) return fail();
+    // WP-2423 Q5: declined requests no longer occupy units or balance.
+    const occupying = occupyingAt(
+      history,
+      await loadRequestDeclines(tx, scope, request.orderReference, history, request.requestedAt),
+      Infinity,
+    );
     const clock = await tx.query("SELECT date_trunc('milliseconds',clock_timestamp()) AS now", []);
     const now = clock.rows[0]?.now;
     if (
@@ -475,7 +598,7 @@ export function createPostgresOrdinaryRefundRequestStore(options: {
       return fail("ORDINARY_REFUND_SOURCE_UNAVAILABLE");
     const balances = await options.validateSources(tx, {
       request,
-      history: Object.freeze(history),
+      history: occupying,
     });
     if (!Array.isArray(balances) || balances.length !== request.payments.length)
       return fail("ORDINARY_REFUND_SOURCE_UNAVAILABLE");
@@ -496,7 +619,7 @@ export function createPostgresOrdinaryRefundRequestStore(options: {
         return fail("ORDINARY_REFUND_SOURCE_UNAVAILABLE");
       seen.add(balance.paymentAttemptReference);
       let occupied = balance.otherOccupiedAmountMinor;
-      for (const prior of history) {
+      for (const prior of occupying) {
         for (const previous of prior.payments) {
           if (previous.paymentAttemptReference !== payment.paymentAttemptReference) continue;
           if (
@@ -551,6 +674,23 @@ export function createPostgresOrdinaryRefundRequestStore(options: {
         ],
       );
       if (result.rowCount !== 1) return fail();
+      // WP-2423 Q5: the staff note of an "Other" reason; Confidential, never placed in Audit.
+      if (note !== null) {
+        const noted = await tx.query(
+          "INSERT INTO rms_payment.ordinary_refund_request_note (tenant_id,brand_id,store_id,order_id,request_id,actor_id,note,recorded_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+          [
+            scope.tenantReference,
+            scope.brandReference,
+            scope.storeReference,
+            request.orderReference,
+            request.requestReference,
+            request.actorReference,
+            note,
+            request.requestedAt,
+          ],
+        );
+        if (noted.rowCount !== 1) return fail();
+      }
       await appendAuditRecordInTransaction(tx, audit);
       await authorize();
       await tx.query("RELEASE SAVEPOINT ordinary_refund_request_append", []);
@@ -562,8 +702,13 @@ export function createPostgresOrdinaryRefundRequestStore(options: {
     return Object.freeze({ status: "Created" as const, claimVersion: history.length + 1 });
   }
   return {
-    async record(tx: ConsumerTransaction, value: unknown, auditValue: unknown) {
-      const result = await evaluate(tx, value, auditValue, true);
+    async record(
+      tx: ConsumerTransaction,
+      value: unknown,
+      auditValue: unknown,
+      note: string | null = null,
+    ) {
+      const result = await evaluate(tx, value, auditValue, true, note);
       if (result.status === "Previewed") return fail();
       return result;
     },
@@ -616,11 +761,14 @@ export function createPostgresOrdinaryRefundExecutionBalanceSource(
         return fail("ORDINARY_REFUND_PERMISSION_DENIED");
     };
     await authorize();
+    const declines = await loadRequestDeclines(tx, scope, orderReference, history, observedAt);
+    // WP-2423 Q5: a declined request can never be executed.
+    if (declines.has(requestReference)) return fail("ORDINARY_REFUND_DECLINED");
     // Reproduce original allocation using history preceding that request.
     // Later claims count toward current balance, not its original unit selection.
     const sources = await options.validateSources(tx, {
       request,
-      history: Object.freeze(history.slice(0, index)),
+      history: occupyingAt(history, declines, index + 1),
     });
     if (!Array.isArray(sources) || sources.length !== request.payments.length) return fail();
     const positions = request.payments.map((payment) => {
@@ -639,7 +787,7 @@ export function createPostgresOrdinaryRefundExecutionBalanceSource(
       )
         return fail("ORDINARY_REFUND_SOURCE_UNAVAILABLE");
       let occupied = source.otherOccupiedAmountMinor;
-      for (const prior of history)
+      for (const prior of occupyingAt(history, declines, Infinity))
         for (const leg of prior.payments) {
           if (leg.paymentAttemptReference !== payment.paymentAttemptReference) continue;
           if (
@@ -713,9 +861,12 @@ export function createPostgresOrdinaryRefundEscalationSource(options: {
     const index = history.findIndex((entry) => entry.requestReference === requestReference);
     const request = history[index];
     if (!request || (await options.authorize(tx, request)) !== true) return fail();
+    const declines = await loadRequestDeclines(tx, scope, orderReference, history, observedAt);
+    // A declined request is closed: it is never evaluated for approval or dispatch.
+    if (declines.has(requestReference)) return fail("ORDINARY_REFUND_DECLINED");
     const captures = await options.captures(tx, {
       request,
-      history: Object.freeze(history.slice(0, index)),
+      history: occupyingAt(history, declines, index + 1),
     });
     if (!Array.isArray(captures) || captures.length !== request.payments.length) return fail();
     const selectedCaptures = [];
@@ -746,14 +897,37 @@ export function createPostgresOrdinaryRefundEscalationSource(options: {
         orderReference,
         requestReference: entry.requestReference,
         kind: ordinaryRefundClaimKind(entry),
-        status: "Requested",
+        // WP-2423 Q5: a declined request is durable no-Provider-effect evidence (RF-D04).
+        status: declines.has(entry.requestReference) ? "Rejected" : "Requested",
         amountMinor: entry.amountMinor,
         currencyCode: entry.currencyCode,
-        noProviderEffectReference: null,
+        noProviderEffectReference: declines.get(entry.requestReference)?.declineReference ?? null,
       })),
       manualAllocationOverride: false,
     });
     if ((await options.authorize(tx, request)) !== true) return fail();
     return Object.freeze({ decision, observedAt, claimVersion: history.length, requestReference });
   };
+}
+
+/** WP-2423 Q5: the staff note of a request whose reason is "Other" (Confidential). Owner read
+ * for authorized staff screens only; never logged or placed in Audit. */
+export async function readOrdinaryRefundRequestNote(
+  tx: ConsumerTransaction,
+  scope: Scope,
+  requestReference: string,
+): Promise<string | null> {
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    String(parsePaymentReference(scope.brandReference)),
+    String(parsePaymentReference(scope.storeReference)),
+  ]);
+  const result = await tx.query(
+    "SELECT note FROM rms_payment.ordinary_refund_request_note WHERE brand_id=$1 AND store_id=$2 AND request_id=$3",
+    [scope.brandReference, scope.storeReference, String(parsePaymentReference(requestReference))],
+  );
+  if (result.rows.length > 1) return fail("ORDINARY_REFUND_HISTORY_UNAVAILABLE");
+  const note = result.rows[0]?.note;
+  if (note === undefined) return null;
+  if (typeof note !== "string") return fail("ORDINARY_REFUND_HISTORY_UNAVAILABLE");
+  return note;
 }

@@ -1,4 +1,5 @@
 import { createPostgresReceiptOrderSource } from "@rms/ordering";
+import { MemberDirectoryError, loadStoreMember } from "@bop/membership";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { readClosedRecord, parseOpaqueUuidV7 } from "@bop/identity";
 import {
@@ -148,7 +149,8 @@ export function createMerchantOrdinaryRefundItems(options: {
         if (payment) paid.set(batch.orderBatchReference, payment.paymentIntentReference);
       }
       const items = order.items.map(({ snapshot }) => {
-        const occupied = context.history.flatMap((request) =>
+        // WP-2423 Q5: units of a declined request are refundable again.
+        const occupied = context.occupying.flatMap((request) =>
           request.payments.flatMap((payment) =>
             payment.items
               .filter((item) => item.orderItemReference === snapshot.orderItemReference)
@@ -176,6 +178,44 @@ export function createMerchantOrdinaryRefundItems(options: {
           paymentIntentReference: paid.get(snapshot.orderBatchReference) ?? null,
         });
       });
+      // WP-2423 Q5: who declined a request, when and why (names are shown to staff only).
+      const names = new Map<string, string | null>();
+      const name = async (actor: string) => {
+        if (!names.has(actor))
+          try {
+            names.set(
+              actor,
+              (await loadStoreMember(businessTransaction, scope, actor)).displayName,
+            );
+          } catch (error) {
+            if (!(error instanceof MemberDirectoryError)) throw error;
+            names.set(actor, null);
+          }
+        return names.get(actor) ?? null;
+      };
+      const recent = context.history.slice(-20);
+      const declines = new Map<
+        string,
+        {
+          reasonCode: string;
+          declinedAt: string;
+          declinerName: string | null;
+          declinedByYou: boolean;
+        }
+      >();
+      for (const request of recent) {
+        const decline = context.declines.get(request.requestReference);
+        if (decline)
+          declines.set(
+            request.requestReference,
+            Object.freeze({
+              reasonCode: decline.reasonCode,
+              declinedAt: decline.declinedAt,
+              declinerName: await name(decline.declinerReference),
+              declinedByYou: decline.declinerReference === String(current.actorReference),
+            }),
+          );
+      }
       if (!(await allowed())) return deny();
       return Object.freeze({
         orderReference,
@@ -183,7 +223,7 @@ export function createMerchantOrdinaryRefundItems(options: {
         claimVersion: context.history.length,
         items: Object.freeze(items),
         recentRequests: Object.freeze(
-          context.history.slice(-20).map((request) =>
+          recent.map((request) =>
             Object.freeze({
               requestReference: String(request.requestReference),
               operationReference: String(request.operationReference),
@@ -192,6 +232,7 @@ export function createMerchantOrdinaryRefundItems(options: {
               reasonCode: request.reasonCode,
               currencyCode: request.currencyCode,
               amountMinor: request.amountMinor.toString(),
+              decline: declines.get(request.requestReference) ?? null,
             }),
           ),
         ),

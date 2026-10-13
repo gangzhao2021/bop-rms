@@ -215,3 +215,26 @@ it("WP-2423 Q5: accepts only the listed reasons and reports why approval is need
   });
   expect(d.record.mock.calls[0]?.[1]).toMatchObject({ reasonCode: "QUALITY_ISSUE" });
 });
+
+it("WP-2423 Q5: Other requires a short note and no other reason carries one", async () => {
+  for (const command of [
+    { reasonCode: "OTHER", note: "" },
+    { reasonCode: "OTHER", note: "x".repeat(201) },
+    { reasonCode: "WRONG_ITEM", note: "Not allowed" },
+  ]) {
+    const f = setup();
+    await expect(
+      f.operation({ ...f.input, command: { ...f.input.command, ...command } }),
+    ).rejects.toThrow("ORDINARY_REFUND_REQUEST_DENIED");
+    expect(f.run).not.toHaveBeenCalled();
+  }
+  const f = setup();
+  await f.operation({
+    ...f.input,
+    command: { ...f.input.command, reasonCode: "OTHER", note: " Customer left early " },
+  });
+  expect(d.record.mock.calls[0]?.[1]).toMatchObject({
+    reasonCode: "OTHER",
+    note: " Customer left early ",
+  });
+});

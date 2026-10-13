@@ -42,13 +42,17 @@ function setup() {
 }
 it("holds the writer operation and order fences before reading an empty history", async () => {
   const f = setup();
-  expect(await f.source(f.tx, f.input)).toEqual({ existing: null, history: [] });
+  const result = await f.source(f.tx, f.input);
+  expect(result).toMatchObject({ existing: null, history: [], occupying: [] });
+  expect(result.declines.size).toBe(0);
   expect(f.query.mock.calls.map(([sql]) => sql)).toEqual([
     expect.stringContaining("set_config"),
     expect.stringContaining("pg_advisory_xact_lock"),
     expect.stringContaining("pg_advisory_xact_lock"),
     expect.stringContaining("operation_id=$3"),
     expect.stringContaining("ORDER BY claim_version"),
+    // WP-2423 Q5: declines release occupancy (RF-D04).
+    expect.stringContaining("ordinary_refund_decline"),
   ]);
   expect(f.authorize).toHaveBeenCalledTimes(2);
   expect(f.authorize).toHaveBeenLastCalledWith(f.tx, { ...f.scope, ...f.input });

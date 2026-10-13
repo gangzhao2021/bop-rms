@@ -8,9 +8,9 @@ import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { createMerchantWorkforcePermissionSource } from "./merchant-workforce-authority-source.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
-/** WP-2423 Q5 (DEC-REFUND-ESCALATION-PILOT): the reasons staff choose from. Recorded on the
- * request and its Audit. An "other" reason with a staff note is not offered until the note has an
- * owner record (no free text is placed in Audit). */
+/** WP-2423 Q5 (DEC-REFUND-ESCALATION-PILOT): the reasons staff choose from, recorded on the
+ * request and its Audit. "Other" requires a short staff note, kept in Payment's Confidential note
+ * record (never in Audit, logs or URLs) and shown to the approver. */
 export const ordinaryRefundReasonCodes = Object.freeze([
   "CUSTOMER_REQUEST",
   "WRONG_ITEM",
@@ -19,6 +19,7 @@ export const ordinaryRefundReasonCodes = Object.freeze([
   "LONG_WAIT",
   "DUPLICATE_CHARGE",
   "STORE_ERROR",
+  "OTHER",
 ] as const);
 interface Scope {
   tenantReference: string;
@@ -54,16 +55,31 @@ export function createMerchantOrdinaryRefundRequest(options: {
     preview: boolean,
   ) => {
     const authenticated = await options.authentication.authorize(input);
-    const raw = readClosedRecord(input.command, [
+    const keys = [
       "orderReference",
       "requestReference",
       "operationReference",
       "expectedClaimVersion",
       "reasonCode",
       "items",
-    ]);
+    ];
+    const withNote =
+      input.command !== null &&
+      typeof input.command === "object" &&
+      Object.prototype.hasOwnProperty.call(input.command, "note");
+    const raw = readClosedRecord(input.command, withNote ? [...keys, "note"] : keys);
     const orderReference = String(parseOpaqueUuidV7(raw.orderReference, "ACTOR_REFERENCE_INVALID"));
     if (!ordinaryRefundReasonCodes.includes(raw.reasonCode as never)) return deny();
+    // "Other" needs a note of 1–200 characters; no other reason carries one.
+    if (
+      (raw.reasonCode === "OTHER") !== withNote ||
+      (withNote &&
+        (typeof raw.note !== "string" ||
+          raw.note.trim().length < 1 ||
+          [...raw.note.trim()].length > 200 ||
+          /[\p{Cc}]/u.test(raw.note.trim())))
+    )
+      return deny();
     return options.persistence.transactions.run(async (transaction) => {
       const current = await resolve(
         transaction,

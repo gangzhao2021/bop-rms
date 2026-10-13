@@ -5,10 +5,17 @@ import { SourceTime } from "./StoreTime.js";
 import { StepUpVerification } from "./StepUpVerification.js";
 import {
   createRefundApprovalClient,
+  declineReasons,
   RefundApprovalClientError,
+  type DeclineReason,
   type RefundApprovalEntry,
 } from "./refund-approval-client.js";
-import { describeRefundReason, escalationReasonLabel, formatCad } from "./refund-reasons.js";
+import {
+  declineReasonLabel,
+  describeRefundReason,
+  escalationReasonLabel,
+  formatCad,
+} from "./refund-reasons.js";
 import { serviceOperationReference } from "./service-control-client.js";
 
 type View = Awaited<ReturnType<ReturnType<typeof createRefundApprovalClient>["approvals"]>>;
@@ -16,6 +23,7 @@ type Outcome =
   | { readonly kind: "Idle" }
   | { readonly kind: "Busy" }
   | { readonly kind: "Sent"; readonly unknown: boolean }
+  | { readonly kind: "Declined"; readonly declinedAt: string }
   | { readonly kind: "Failed"; readonly message: string; readonly retry: boolean };
 
 const person = (entry: RefundApprovalEntry) =>
@@ -53,6 +61,50 @@ function ApprovalCard({
     return () => window.removeEventListener("beforeunload", warn);
   }, [outcome]);
   const who = person(entry);
+  // One decline identity per card: a retry after an unknown result reuses it.
+  const declineOperation = useRef(serviceOperationReference());
+  const [declineReason, setDeclineReason] = useState<DeclineReason | "">("");
+  const declineRefund = async () => {
+    if (pending.current || declineReason === "") return;
+    const controller = new AbortController();
+    pending.current = controller;
+    setOutcome({ kind: "Busy" });
+    try {
+      const result = await client.current.decline(
+        {
+          orderReference: entry.orderReference,
+          requestReference: entry.requestReference,
+          operationReference: declineOperation.current,
+          reasonCode: declineReason,
+        },
+        csrf,
+        controller.signal,
+      );
+      if (!controller.signal.aborted)
+        setOutcome({ kind: "Declined", declinedAt: result.declinedAt });
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      const code = error instanceof RefundApprovalClientError ? error.code : "OutcomeUnknown";
+      setOutcome({
+        kind: "Failed",
+        retry: false,
+        message:
+          code === "AlreadyPrepared"
+            ? "This refund was already sent, so it can no longer be declined. Refresh the list."
+            : code === "AlreadyDeclined"
+              ? "This refund was already declined. Refresh the list."
+              : code === "SamePerson"
+                ? "You asked for this refund. Another owner or finance member must decide."
+                : code === "NeedsReverification"
+                  ? "Confirm it is you with your authenticator code, then decline."
+                  : code === "Denied"
+                    ? "Your session or permission does not allow declining refunds. Sign in again."
+                    : "Result unknown. Decline again with the same reason — it is recorded once.",
+      });
+    } finally {
+      pending.current = null;
+    }
+  };
   const approve = async () => {
     if (pending.current) return;
     const controller = new AbortController();
@@ -89,8 +141,10 @@ function ApprovalCard({
                 : `You and ${who} must both confirm with an authenticator code again, then approve.`
             : code === "SamePerson"
               ? "You asked for this refund. Another owner or finance member must approve it."
-              : code === "Changed"
-                ? "This refund changed since it was shown. Refresh the list."
+              : code === "Changed" || code === "AlreadyDeclined" || code === "AlreadyPrepared"
+                ? code === "AlreadyDeclined"
+                  ? "This refund was declined. Refresh the list."
+                  : "This refund changed since it was shown. Refresh the list."
                 : code === "Denied"
                   ? "Your session or permission does not allow approving refunds. Sign in again."
                   : "Result unknown. Approve again to retry the same approval — it will not refund twice.",
@@ -114,6 +168,12 @@ function ApprovalCard({
           <dt>Reason</dt>
           <dd>{describeRefundReason(entry.reasonCode)}</dd>
         </div>
+        {entry.note !== null ? (
+          <div>
+            <dt>Note from {who === "You" ? "you" : who}</dt>
+            <dd>{entry.note}</dd>
+          </div>
+        ) : null}
         <div>
           <dt>Asked by</dt>
           <dd>
@@ -137,13 +197,15 @@ function ApprovalCard({
         <div>
           <dt>Status</dt>
           <dd>
-            {outcome.kind === "Sent"
-              ? outcome.unknown
-                ? "Approved — sending result unknown"
-                : "Approved — refund sent"
-              : entry.state === "Approved"
-                ? "Approved — sending not finished"
-                : "Waiting for approval"}
+            {outcome.kind === "Declined"
+              ? "Declined — nothing was refunded"
+              : outcome.kind === "Sent"
+                ? outcome.unknown
+                  ? "Approved — sending result unknown"
+                  : "Approved — refund sent"
+                : entry.state === "Approved"
+                  ? "Approved — sending not finished"
+                  : "Waiting for approval"}
           </dd>
         </div>
         <div>
@@ -169,7 +231,9 @@ function ApprovalCard({
           fetcher={fetcher}
         />
       ) : null}
-      {entry.canApprove && !(outcome.kind === "Sent" && !outcome.unknown) ? (
+      {entry.canApprove &&
+      outcome.kind !== "Declined" &&
+      !(outcome.kind === "Sent" && !outcome.unknown) ? (
         <div className="card-actions">
           <StepUpVerification
             purpose="RefundApproval"
@@ -194,6 +258,52 @@ function ApprovalCard({
                   : entry.state === "Approved"
                     ? "Send approved refund"
                     : `Approve and refund ${formatCad(entry.amountMinor)}`}
+          </button>
+        </div>
+      ) : null}
+      {entry.canApprove &&
+      entry.state === "AwaitingApproval" &&
+      outcome.kind !== "Sent" &&
+      outcome.kind !== "Declined" ? (
+        <form
+          className="card-actions refund-decline"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void declineRefund();
+          }}
+        >
+          <label htmlFor={"decline-reason-" + entry.requestReference}>Decline reason</label>
+          <select
+            id={"decline-reason-" + entry.requestReference}
+            required
+            value={declineReason}
+            disabled={busy}
+            onChange={(event) => setDeclineReason(event.currentTarget.value as DeclineReason | "")}
+          >
+            <option value="">Select a reason</option>
+            {declineReasons.map((code) => (
+              <option key={code} value={code}>
+                {declineReasonLabel[code]}
+              </option>
+            ))}
+          </select>
+          <button
+            type="submit"
+            data-variant="destructive"
+            disabled={busy || !approverCurrent || declineReason === ""}
+          >
+            Decline refund
+          </button>
+        </form>
+      ) : null}
+      {outcome.kind === "Declined" ? (
+        <div role="status">
+          <p>
+            Declined <SourceTime instant={outcome.declinedAt} />. Nothing was refunded and the
+            request no longer counts toward this order; {who === "You" ? "you" : who} can see why.
+          </p>
+          <button type="button" onClick={onChanged}>
+            Refresh list
           </button>
         </div>
       ) : null}

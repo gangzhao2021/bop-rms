@@ -194,9 +194,15 @@ export {
 export {
   createPostgresOrdinaryRefundApprovalStore,
   createPostgresOrdinaryRefundApprovalReader,
+  createPostgresOrdinaryRefundDeclineStore,
+  OrdinaryRefundDeclineError,
+  ordinaryRefundDeclineReasons,
 } from "./infrastructure/persistence/ordinary-refund-approval-store.js";
 export { createPostgresOrdinaryRefundApprovalSource } from "./infrastructure/ordinary-refund-approval-source.js";
-export { createPostgresOrdinaryRefundApprovalSubjectSource } from "./infrastructure/persistence/ordinary-refund-request-store.js";
+export {
+  createPostgresOrdinaryRefundApprovalSubjectSource,
+  readOrdinaryRefundRequestNote,
+} from "./infrastructure/persistence/ordinary-refund-request-store.js";
 
 export { createPostgresPaymentIntentBindingSource } from "./infrastructure/persistence/payment-intent-binding-source.js";
 

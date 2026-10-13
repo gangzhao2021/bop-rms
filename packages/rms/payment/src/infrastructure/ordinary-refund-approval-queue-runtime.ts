@@ -4,6 +4,7 @@ import { parsePaymentReference } from "../application/payment-provider-adapter.j
 import {
   createPostgresOrdinaryRefundApprovalSubjectSource,
   createPostgresOrdinaryRefundEscalationSource,
+  readOrdinaryRefundRequestNote,
 } from "./persistence/ordinary-refund-request-store.js";
 import { createPostgresOrdinaryRefundCaptureSource } from "./persistence/ordinary-refund-capture-source.js";
 import {
@@ -129,6 +130,11 @@ export function createPostgresOrdinaryRefundApprovalQueueRuntime(options: {
           requesterReference: current.requesterReference,
           requestedAt: current.request.requestedAt,
           reasonCode: current.request.reasonCode,
+          // WP-2423 Q5: the staff note of an "Other" reason, for the approver (Confidential).
+          note:
+            current.request.reasonCode === "OTHER"
+              ? await readOrdinaryRefundRequestNote(tx, scope, current.request.requestReference)
+              : null,
           currencyCode: current.request.currencyCode,
           amountMinor: current.request.amountMinor,
           paymentIntentReferences: Object.freeze(

@@ -2616,6 +2616,12 @@ it("protects refund items transport and strips private nested data", async () =>
         reasonCode: "CUSTOMER_REQUEST",
         currencyCode: "CAD",
         amountMinor: "1130",
+        decline: {
+          reasonCode: "ENTERED_IN_ERROR",
+          declinedAt: "2026-09-20T12:05:00.000Z",
+          declinerName: "Owner",
+          declinedByYou: false,
+        },
       },
     ],
     items: [{ ...item, customerNote: "private" }],
@@ -2654,6 +2660,12 @@ it("protects refund items transport and strips private nested data", async () =>
         reasonCode: "CUSTOMER_REQUEST",
         currencyCode: "CAD",
         amountMinor: "1130",
+        decline: {
+          reasonCode: "ENTERED_IN_ERROR",
+          declinedAt: "2026-09-20T12:05:00.000Z",
+          declinerName: "Owner",
+          declinedByYou: false,
+        },
       },
     ],
     items: [item],
@@ -5195,6 +5207,7 @@ it("WP-2423 Q5: lists refunds awaiting approval as a same-origin read", async ()
     currencyCode: "CAD",
     amountMinor: "12500",
     reasonCode: "WRONG_ITEM",
+    note: null,
     escalationReasons: ["OrderOrdinaryTotalAboveCad100"],
     requestedAt: "2026-10-12T15:00:00.000Z",
     requesterName: "Mia",
@@ -5233,4 +5246,49 @@ it("WP-2423 Q5: lists refunds awaiting approval as a same-origin read", async ()
     entries: [entry],
   });
   expect(JSON.stringify(body)).not.toContain(id(9));
+});
+
+it("WP-2423 Q5: declines through the session and names why a decline was refused", async () => {
+  type Decline = NonNullable<MerchantBffRouterOptions["ordinaryRefundDecline"]>;
+  const command = vi.fn<Decline>(async () => ({
+    status: "Declined" as const,
+    declinedAt: "2026-10-12T15:05:00.000Z",
+    replayed: false,
+  }));
+  const root = await serveRefundEscalation({ ordinaryRefundDecline: command });
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const send = (extra: Record<string, string> = {}) =>
+    request(root, "/merchant/payments/refunds/decline", {
+      method: "POST",
+      headers: { ...headers, ...extra },
+      body: "{}",
+    });
+  for (const bad of [{ Origin: "https://foreign.invalid" }, { Cookie: "" }, { "X-BOP-CSRF": "" }])
+    expect((await send(bad)).status).toBe(403);
+  expect(command).not.toHaveBeenCalled();
+  const ok = await send();
+  expect([ok.status, await ok.json()]).toEqual([
+    200,
+    { status: "Declined", declinedAt: "2026-10-12T15:05:00.000Z", replayed: false },
+  ]);
+  for (const [error, status, body] of [
+    [new MerchantRefundApprovalError("SamePerson"), 422, { error: "same_person" }],
+    [new MerchantRefundApprovalError("AlreadyPrepared"), 409, { error: "refund_already_prepared" }],
+    [new MerchantRefundApprovalError("AlreadyDeclined"), 409, { error: "refund_already_declined" }],
+    [
+      new MerchantRefundApprovalError("NeedsReverification", "Approver"),
+      409,
+      { error: "needs_reverification", party: "Approver" },
+    ],
+    [new Error("private"), 403, { error: "request_denied" }],
+  ] as const) {
+    command.mockRejectedValueOnce(error);
+    const failed = await send();
+    expect([failed.status, await failed.json()]).toEqual([status, body]);
+  }
 });

@@ -62,6 +62,8 @@ const moduleManifestInput =
         "ordinary_refund_dispatch",
         "ordinary_refund_operation",
         "ordinary_refund_approval",
+        "ordinary_refund_decline",
+        "ordinary_refund_request_note",
         "ordinary_refund_request",
         "payment_compensation_operations",
         "payment_refund_status_projection",

@@ -57,7 +57,10 @@ export async function exerciseCompensationRuntime({
     );
   }
   const id = (n) => "0190ed60-0000-7000-8000-" + n.toString(16).padStart(12, "0");
-  await admin.query("GRANT SELECT ON rms_payment.ordinary_refund_request TO " + role);
+  await admin.query(
+    "GRANT SELECT ON rms_payment.ordinary_refund_request,rms_payment.ordinary_refund_decline,rms_payment.ordinary_refund_request_note TO " +
+      role,
+  );
   let sequence = 100,
     refunded = 0n,
     refundCalls = 0,

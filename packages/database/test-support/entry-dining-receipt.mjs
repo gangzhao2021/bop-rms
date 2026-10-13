@@ -17,7 +17,7 @@ export async function exerciseEntryDiningReceipt({
   server,
 }) {
   await admin.query(
-    "GRANT SELECT ON rms_payment.payment_compensation_action_history,rms_payment.payment_compensation_refund,rms_payment.ordinary_refund_request,rms_payment.ordinary_refund_operation,rms_payment.ordinary_refund_dispatch TO " +
+    "GRANT SELECT ON rms_payment.payment_compensation_action_history,rms_payment.payment_compensation_refund,rms_payment.ordinary_refund_request,rms_payment.ordinary_refund_decline,rms_payment.ordinary_refund_request_note,rms_payment.ordinary_refund_operation,rms_payment.ordinary_refund_dispatch TO " +
       role,
   );
   const failures = [];

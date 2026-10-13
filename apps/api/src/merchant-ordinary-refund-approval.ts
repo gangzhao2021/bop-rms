@@ -20,7 +20,13 @@ export const refundMfaRecencyMilliseconds = 15 * 60 * 1000;
 export type RefundVerificationParty = "Requester" | "Approver" | "Both";
 export class MerchantRefundApprovalError extends Error {
   constructor(
-    readonly code: "Denied" | "SamePerson" | "NeedsReverification" | "Changed",
+    readonly code:
+      | "Denied"
+      | "SamePerson"
+      | "NeedsReverification"
+      | "Changed"
+      | "AlreadyPrepared"
+      | "AlreadyDeclined",
     readonly party: RefundVerificationParty | null = null,
   ) {
     super("Refund approval was not recorded");
@@ -129,6 +135,18 @@ export function createMerchantOrdinaryRefundApproval(options: {
       requestReference = ref(raw.requestReference),
       approvalReference = ref(raw.approvalReference);
     const approved = await options.persistence.transactions.run(async (transaction) => {
+      try {
+        return await approveInTransaction(transaction);
+      } catch (error) {
+        // WP-2423 Q5: a declined request is closed and is never approved or sent.
+        if (error instanceof Error && error.message === "ORDINARY_REFUND_DECLINED")
+          throw new MerchantRefundApprovalError("AlreadyDeclined");
+        throw error;
+      }
+    });
+    async function approveInTransaction(
+      transaction: Parameters<Parameters<typeof options.persistence.transactions.run>[0]>[0],
+    ) {
       const current = await resolve(
         transaction,
         input.sessionCookie,
@@ -249,7 +267,7 @@ export function createMerchantOrdinaryRefundApproval(options: {
       );
       if (!(await current.allowed())) throw new MerchantRefundApprovalError("Denied");
       return { replayed: false, payments };
-    });
+    }
     // Send at once, one payment at a time, with identities fixed by the approval reference.
     const results = [];
     for (const paymentAttemptReference of approved.payments) {

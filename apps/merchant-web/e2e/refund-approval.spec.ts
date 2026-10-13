@@ -19,6 +19,7 @@ test("@production owner verifies and approves a refund above CAD 100 once", asyn
     currencyCode: "CAD",
     amountMinor: "12500",
     reasonCode: "WRONG_ITEM",
+    note: null,
     escalationReasons: ["OrderOrdinaryTotalAboveCad100"],
     requestedAt: new Date(now - 60_000).toISOString(),
     requesterName: "Mia",
@@ -139,6 +140,117 @@ test("@production owner verifies and approves a refund above CAD 100 once", asyn
   expect(JSON.parse(approvals[0] ?? "{}")).toMatchObject({
     orderReference: id(1),
     requestReference: id(2),
+  });
+  await card.getByRole("button", { name: "Refresh list" }).click();
+  await expect(page.getByText("No refund at this store is waiting for approval.")).toBeVisible();
+});
+
+// WP-2423 Q5: the owner declines a request (with the requester's "Other" note shown).
+test("@production owner declines a refund with a reason and it leaves the list", async ({
+  page,
+}) => {
+  const id = (n: number) => "01909968-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const scope = {
+    brandLabel: "Synthetic Brand",
+    storeLabel: "Synthetic Store",
+    storeReference: id(99),
+    timeZone: "America/Toronto",
+  };
+  const headers = { "cache-control": "no-store" };
+  const now = Date.now();
+  let listed = [
+    {
+      orderReference: id(1),
+      orderNumber: "A-0043",
+      requestReference: id(2),
+      paymentIntentReferences: [id(3)],
+      currencyCode: "CAD",
+      amountMinor: "11600",
+      reasonCode: "OTHER",
+      note: "Customer left before the food arrived",
+      escalationReasons: ["OrderOrdinaryTotalAboveCad100"],
+      requestedAt: new Date(now - 60_000).toISOString(),
+      requesterName: "Mia",
+      requestedByYou: false,
+      requesterVerifiedUntil: null,
+      state: "AwaitingApproval",
+      approvalReference: null,
+      approvedAt: null,
+      approverName: null,
+      canApprove: true,
+    },
+  ];
+  const declines: string[] = [];
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [
+            { brandLabel: scope.brandLabel, storeLabel: scope.storeLabel, storeReference: id(99) },
+          ],
+          businessDate: "2026-10-12",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "APPROVAL-INBOX",
+              label: "Approvals",
+              href: "/app/approvals",
+              permission: "workflow.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  await page.route("**/merchant/payments/refunds/approvals", (route) =>
+    route.fulfill({
+      headers,
+      json: { observedAt: new Date(now).toISOString(), canApprove: true, entries: listed },
+    }),
+  );
+  await page.route("**/merchant/identity/step-up", (route) => {
+    const at = Date.now();
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Verified",
+        verifiedAt: new Date(at).toISOString(),
+        validUntil: new Date(at + 15 * 60_000).toISOString(),
+      },
+    });
+  });
+  await page.route("**/merchant/payments/refunds/decline", (route) => {
+    declines.push(route.request().postData() ?? "");
+    listed = [];
+    return route.fulfill({
+      headers,
+      json: { status: "Declined", declinedAt: new Date().toISOString(), replayed: false },
+    });
+  });
+  await page.goto("/app/approvals");
+  const card = page.getByRole("listitem").filter({ hasText: "Order A-0043" });
+  await expect(card).toContainText("Customer left before the food arrived");
+  await expect(card).toContainText("Needs to verify again before approval");
+  const declineButton = card.getByRole("button", { name: "Decline refund" });
+  await card.getByLabel("Decline reason").selectOption("NEEDS_MORE_INFORMATION");
+  await expect(declineButton).toBeDisabled();
+  await card.getByRole("button", { name: "Verify to approve" }).click();
+  const dialog = page.getByRole("dialog", { name: "Confirm it is you" });
+  await dialog.getByLabel("Six-digit code").fill("246810");
+  await dialog.getByRole("button", { name: "Verify" }).click();
+  await declineButton.click();
+  await expect(card).toContainText("Declined — nothing was refunded");
+  expect(JSON.parse(declines[0] ?? "{}")).toMatchObject({
+    orderReference: id(1),
+    requestReference: id(2),
+    reasonCode: "NEEDS_MORE_INFORMATION",
   });
   await card.getByRole("button", { name: "Refresh list" }).click();
   await expect(page.getByText("No refund at this store is waiting for approval.")).toBeVisible();

@@ -2402,7 +2402,7 @@
       "column": null,
       "privilege": "SELECT",
       "principal": "api",
-      "approval": "PENDING OWNER APPROVAL (WP-2423 Q5): DEC-REFUND-ESCALATION-PILOT escalated refund approval and MFA step-up; staff re-verify a second factor and a different Owner/Finance member records the independent approval"
+      "approval": "Owner approved 2026-10-12 in session (\"批准\") (WP-2423 Q5): DEC-REFUND-ESCALATION-PILOT escalated refund approval and MFA step-up; staff re-verify a second factor and a different Owner/Finance member records the independent approval"
     },
     {
       "type": "table",
@@ -2411,7 +2411,7 @@
       "column": null,
       "privilege": "INSERT",
       "principal": "api",
-      "approval": "PENDING OWNER APPROVAL (WP-2423 Q5): DEC-REFUND-ESCALATION-PILOT escalated refund approval and MFA step-up; staff re-verify a second factor and a different Owner/Finance member records the independent approval"
+      "approval": "Owner approved 2026-10-12 in session (\"批准\") (WP-2423 Q5): DEC-REFUND-ESCALATION-PILOT escalated refund approval and MFA step-up; staff re-verify a second factor and a different Owner/Finance member records the independent approval"
     },
     {
       "type": "table",
@@ -2420,7 +2420,43 @@
       "column": null,
       "privilege": "INSERT",
       "principal": "api",
-      "approval": "PENDING OWNER APPROVAL (WP-2423 Q5): DEC-REFUND-ESCALATION-PILOT escalated refund approval and MFA step-up; staff re-verify a second factor and a different Owner/Finance member records the independent approval"
+      "approval": "Owner approved 2026-10-12 in session (\"批准\") (WP-2423 Q5): DEC-REFUND-ESCALATION-PILOT escalated refund approval and MFA step-up; staff re-verify a second factor and a different Owner/Finance member records the independent approval"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "ordinary_refund_decline",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "PENDING OWNER APPROVAL (WP-2423 Q5): an Owner/Finance member declines an ordinary refund nothing was prepared for, releasing its occupancy (RF-D04); a refund reason \"Other\" keeps a short Confidential staff note for the approver"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "ordinary_refund_decline",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "PENDING OWNER APPROVAL (WP-2423 Q5): an Owner/Finance member declines an ordinary refund nothing was prepared for, releasing its occupancy (RF-D04); a refund reason \"Other\" keeps a short Confidential staff note for the approver"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "ordinary_refund_request_note",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "PENDING OWNER APPROVAL (WP-2423 Q5): an Owner/Finance member declines an ordinary refund nothing was prepared for, releasing its occupancy (RF-D04); a refund reason \"Other\" keeps a short Confidential staff note for the approver"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "ordinary_refund_request_note",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "PENDING OWNER APPROVAL (WP-2423 Q5): an Owner/Finance member declines an ordinary refund nothing was prepared for, releasing its occupancy (RF-D04); a refund reason \"Other\" keeps a short Confidential staff note for the approver"
     }
   ]
 }

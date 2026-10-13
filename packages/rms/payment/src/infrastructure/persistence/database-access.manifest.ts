@@ -35,6 +35,22 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier", "payment"],
     },
     {
+      table: "ordinary_refund_decline",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/payment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "financial-compliance",
+      piiClassification: ["indirect_identifier", "payment"],
+    },
+    {
+      table: "ordinary_refund_request_note",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/payment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "financial-compliance",
+      piiClassification: ["indirect_identifier", "personal"],
+    },
+    {
       table: "unmatched_capture_refund_request",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/payment" },
@@ -368,6 +384,46 @@ const databaseAccessManifestInput = {
       principal: { kind: "module", id: "@rms/payment" },
       source:
         "packages/rms/payment/src/infrastructure/persistence/ordinary-refund-approval-store.ts",
+    },
+    {
+      id: "ordinary-refund-decline.read",
+      operation: "read",
+      readPattern: "owner-repository",
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "ordinary_refund_decline" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/ordinary-refund-request-store.ts",
+    },
+    {
+      id: "ordinary-refund-decline.write",
+      operation: "write",
+      readPattern: null,
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "ordinary_refund_decline" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/ordinary-refund-approval-store.ts",
+    },
+    {
+      id: "ordinary-refund-request-note.read",
+      operation: "read",
+      readPattern: "owner-repository",
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "ordinary_refund_request_note" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/ordinary-refund-request-store.ts",
+    },
+    {
+      id: "ordinary-refund-request-note.write",
+      operation: "write",
+      readPattern: null,
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "ordinary_refund_request_note" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/ordinary-refund-request-store.ts",
     },
     {
       id: "ordinary-refund-request.read",

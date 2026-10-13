@@ -112,6 +112,7 @@ export function createMerchantOrdinaryRefundApprovals(options: {
             currencyCode: entry.currencyCode,
             amountMinor: entry.amountMinor.toString(),
             reasonCode: entry.reasonCode,
+            note: entry.note,
             escalationReasons: entry.escalationReasons,
             requestedAt: entry.requestedAt,
             requesterName: await name(entry.requesterReference),

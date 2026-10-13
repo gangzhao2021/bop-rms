@@ -4,7 +4,7 @@ import { createPostgresPaymentCompensationSource } from "../../rms/payment/src/i
 import { paymentCompensationSourceSnapshotContent } from "../../rms/payment/src/application/paid-without-fulfillable-order.ts";
 export async function exerciseCompensationSource({ admin, runner, role, scope, fact }) {
   await admin.query(
-    "GRANT SELECT ON rms_payment.ordinary_refund_request,rms_payment.payment_compensation_refund,rms_payment.payment_compensation_action_history TO " +
+    "GRANT SELECT ON rms_payment.ordinary_refund_request,rms_payment.ordinary_refund_decline,rms_payment.ordinary_refund_request_note,rms_payment.payment_compensation_refund,rms_payment.payment_compensation_action_history TO " +
       role,
   );
   const request = {

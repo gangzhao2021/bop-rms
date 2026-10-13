@@ -12,6 +12,7 @@ import { serviceOperationReference } from "./service-control-client.js";
 import { StepUpVerification } from "./StepUpVerification.js";
 import { createRefundApprovalClient, type RefundApprovalEntry } from "./refund-approval-client.js";
 import {
+  declineReasonLabel,
   describeRefundReason,
   escalationReasonLabel,
   refundReasonCodes,
@@ -338,6 +339,7 @@ function RefundWizard({
   const [items, setItems] = useState<Items | null>(null),
     [quantities, setQuantities] = useState<Record<string, number>>({}),
     [reason, setReason] = useState(""),
+    [note, setNote] = useState(""),
     [approvals, setApprovals] = useState<ReadonlyMap<string, RefundApprovalEntry>>(new Map()),
     [verifiedUntil, setVerifiedUntil] = useState<string | null>(null),
     [preview, setPreview] = useState<Preview | null>(null),
@@ -442,6 +444,10 @@ function RefundWizard({
       setMessage("Select the reason for this refund.");
       return;
     }
+    if (reason === "OTHER" && (note.trim() === "" || [...note.trim()].length > 200)) {
+      setMessage("Explain the reason in a short note (up to 200 characters).");
+      return;
+    }
     const controller = new AbortController();
     pending.current = controller;
     setState("Busy");
@@ -456,6 +462,7 @@ function RefundWizard({
         expectedClaimVersion: items.claimVersion,
         reasonCode: reason,
         items: selection,
+        ...(reason === "OTHER" ? { note: note.trim() } : {}),
       });
       operation.current = intent;
       const result = await intent.preview(csrf, controller.signal);
@@ -549,27 +556,40 @@ function RefundWizard({
                   Request {entry.claimVersion}: {amount(entry.amountMinor)} ·{" "}
                   {describeRefundReason(entry.reasonCode)} ·{" "}
                   <SourceTime instant={entry.requestedAt} />
-                  {approvals.get(entry.requestReference)?.state === "AwaitingApproval"
-                    ? " · Waiting for owner approval"
-                    : approvals.get(entry.requestReference)?.state === "Approved"
-                      ? " · Approved, sending not finished"
-                      : null}
-                  <RecordedRequestStatus
-                    approval={approvals.get(entry.requestReference) ?? null}
-                    onFinancialChange={onFinancialChange}
-                    orderReference={orderReference}
-                    entry={entry}
-                    csrf={csrf}
-                    onPending={(paymentReference, active) =>
-                      setPreparing((prior) => {
-                        const next = new Set(prior);
-                        const key = entry.requestReference + ":" + paymentReference;
-                        if (active) next.add(key);
-                        else next.delete(key);
-                        return next;
-                      })
-                    }
-                  />
+                  {entry.decline !== null ? (
+                    <>
+                      {" · Declined by "}
+                      {entry.decline.declinedByYou
+                        ? "you"
+                        : (entry.decline.declinerName ?? "an owner")}{" "}
+                      <SourceTime instant={entry.decline.declinedAt} />
+                      {": " +
+                        (declineReasonLabel[entry.decline.reasonCode] ?? "Other reason") +
+                        ". Nothing was refunded; you can request again."}
+                    </>
+                  ) : approvals.get(entry.requestReference)?.state === "AwaitingApproval" ? (
+                    " · Waiting for owner approval"
+                  ) : approvals.get(entry.requestReference)?.state === "Approved" ? (
+                    " · Approved, sending not finished"
+                  ) : null}
+                  {entry.decline !== null ? null : (
+                    <RecordedRequestStatus
+                      approval={approvals.get(entry.requestReference) ?? null}
+                      onFinancialChange={onFinancialChange}
+                      orderReference={orderReference}
+                      entry={entry}
+                      csrf={csrf}
+                      onPending={(paymentReference, active) =>
+                        setPreparing((prior) => {
+                          const next = new Set(prior);
+                          const key = entry.requestReference + ":" + paymentReference;
+                          if (active) next.add(key);
+                          else next.delete(key);
+                          return next;
+                        })
+                      }
+                    />
+                  )}
                 </li>
               ))}
             </ol>
@@ -624,6 +644,24 @@ function RefundWizard({
             </option>
           ))}
         </select>
+        {reason === "OTHER" ? (
+          <>
+            <label htmlFor="refund-note">
+              Note for the approver (required, up to 200 characters)
+            </label>
+            <textarea
+              id="refund-note"
+              maxLength={200}
+              required
+              value={note}
+              onChange={(event) => {
+                setNote(event.target.value);
+                clearPreview();
+              }}
+            />
+            <p>Describe what happened. Do not include card numbers or health details.</p>
+          </>
+        ) : null}
         <button disabled={!items} onClick={() => void calculate()}>
           Calculate refund
         </button>

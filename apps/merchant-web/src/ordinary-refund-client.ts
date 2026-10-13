@@ -101,6 +101,8 @@ export interface RefundRequestCommand {
   readonly operationReference: string;
   readonly expectedClaimVersion: number;
   readonly reasonCode: string;
+  /** WP-2423 Q5: required for reason "OTHER" only (1–200 characters). */
+  readonly note?: string;
   readonly items: readonly {
     readonly orderBatchReference: string;
     readonly orderItemReference: string;
@@ -108,6 +110,7 @@ export interface RefundRequestCommand {
   }[];
 }
 function command(value: RefundRequestCommand) {
+  const withNote = Object.prototype.hasOwnProperty.call(value, "note");
   const raw = exact(value, [
     "orderReference",
     "requestReference",
@@ -115,7 +118,16 @@ function command(value: RefundRequestCommand) {
     "expectedClaimVersion",
     "reasonCode",
     "items",
+    ...(withNote ? ["note"] : []),
   ]);
+  if (
+    (raw.reasonCode === "OTHER") !== withNote ||
+    (withNote &&
+      (typeof raw.note !== "string" ||
+        raw.note.trim().length < 1 ||
+        [...raw.note.trim()].length > 200))
+  )
+    return fail();
   if (
     typeof raw.reasonCode !== "string" ||
     !/^[A-Z][A-Z0-9_]{0,63}$/u.test(raw.reasonCode) ||
@@ -144,6 +156,7 @@ function command(value: RefundRequestCommand) {
     expectedClaimVersion: count(raw.expectedClaimVersion, 0, 999),
     reasonCode: raw.reasonCode,
     items: Object.freeze(items),
+    ...(withNote ? { note: String(raw.note).trim() } : {}),
   });
 }
 export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
@@ -458,7 +471,34 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
             "reasonCode",
             "currencyCode",
             "amountMinor",
+            "decline",
           ]);
+          const decline =
+            entry.decline === null
+              ? null
+              : (() => {
+                  const raw = exact(entry.decline, [
+                    "reasonCode",
+                    "declinedAt",
+                    "declinerName",
+                    "declinedByYou",
+                  ]);
+                  if (
+                    typeof raw.reasonCode !== "string" ||
+                    !/^[A-Z][A-Z0-9_]{0,63}$/u.test(raw.reasonCode) ||
+                    typeof raw.declinedAt !== "string" ||
+                    new Date(raw.declinedAt).toISOString() !== raw.declinedAt ||
+                    typeof raw.declinedByYou !== "boolean" ||
+                    (raw.declinerName !== null && label(raw.declinerName) !== raw.declinerName)
+                  )
+                    return fail();
+                  return Object.freeze({
+                    reasonCode: raw.reasonCode,
+                    declinedAt: raw.declinedAt,
+                    declinerName: raw.declinerName as string | null,
+                    declinedByYou: raw.declinedByYou,
+                  });
+                })();
           if (
             entry.claimVersion !== claimVersion - Math.min(20, claimVersion) + index + 1 ||
             typeof entry.requestedAt !== "string" ||
@@ -478,6 +518,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
             reasonCode: entry.reasonCode,
             currencyCode: "CAD" as const,
             amountMinor: money(entry.amountMinor),
+            decline,
           });
         });
         if (

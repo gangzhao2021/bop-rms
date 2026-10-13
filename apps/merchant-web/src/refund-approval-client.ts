@@ -1,5 +1,14 @@
 import { escalationReasons, type EscalationReason } from "./ordinary-refund-client.js";
 
+/** WP-2423 Q5: why an owner declines a refund (codes stay server-owned). */
+export const declineReasons = [
+  "NOT_ELIGIBLE",
+  "NEEDS_MORE_INFORMATION",
+  "ENTERED_IN_ERROR",
+  "CUSTOMER_WITHDREW",
+] as const;
+export type DeclineReason = (typeof declineReasons)[number];
+
 /**
  * WP-2423 Q5 (DEC-REFUND-ESCALATION-PILOT): second-factor re-verification of the signed-in staff
  * member, the Store's refunds awaiting an Owner/Finance approval, and the in-person approval that
@@ -18,7 +27,14 @@ export class StepUpError extends Error {
   }
 }
 export type ApprovalFailure =
-  "Denied" | "SamePerson" | "NeedsReverification" | "Changed" | "Unavailable" | "OutcomeUnknown";
+  | "Denied"
+  | "SamePerson"
+  | "NeedsReverification"
+  | "Changed"
+  | "AlreadyPrepared"
+  | "AlreadyDeclined"
+  | "Unavailable"
+  | "OutcomeUnknown";
 export class RefundApprovalClientError extends Error {
   constructor(
     readonly code: ApprovalFailure,
@@ -86,6 +102,8 @@ export interface RefundApprovalEntry {
   readonly currencyCode: "CAD";
   readonly amountMinor: string;
   readonly reasonCode: string;
+  /** Staff note of an "Other" reason (shown to staff only). */
+  readonly note: string | null;
   readonly escalationReasons: readonly EscalationReason[];
   readonly requestedAt: string;
   readonly requesterName: string | null;
@@ -107,6 +125,7 @@ function entry(value: unknown): RefundApprovalEntry {
     "currencyCode",
     "amountMinor",
     "reasonCode",
+    "note",
     "escalationReasons",
     "requestedAt",
     "requesterName",
@@ -131,7 +150,12 @@ function entry(value: unknown): RefundApprovalEntry {
     !Array.isArray(raw.escalationReasons) ||
     raw.escalationReasons.some((r) => !escalationReasons.includes(r as EscalationReason)) ||
     (raw.state === "Approved") !== (raw.approvalReference !== null) ||
-    (raw.approvalReference === null) !== (raw.approvedAt === null)
+    (raw.approvalReference === null) !== (raw.approvedAt === null) ||
+    (raw.note !== null &&
+      (typeof raw.note !== "string" ||
+        raw.note.trim() === "" ||
+        [...raw.note].length > 200 ||
+        raw.reasonCode !== "OTHER"))
   )
     return invalid();
   return Object.freeze({
@@ -142,6 +166,7 @@ function entry(value: unknown): RefundApprovalEntry {
     currencyCode: "CAD" as const,
     amountMinor: money(raw.amountMinor),
     reasonCode: raw.reasonCode,
+    note: raw.note as string | null,
     escalationReasons: Object.freeze([...(raw.escalationReasons as EscalationReason[])]),
     requestedAt: instant(raw.requestedAt),
     requesterName: nullable(raw.requesterName, text),
@@ -328,21 +353,77 @@ export function createRefundApprovalClient(fetcher: typeof fetch = fetch) {
           throw new RefundApprovalClientError("OutcomeUnknown");
         }
       }
-      const error = errorCode(data);
-      if (response.status === 422 && error === "same_person")
-        throw new RefundApprovalClientError("SamePerson");
-      if (response.status === 409 && error === "needs_reverification") {
-        const party =
-          data && typeof data === "object" && "party" in data ? (data.party as unknown) : null;
-        throw new RefundApprovalClientError(
-          "NeedsReverification",
-          party === "Requester" || party === "Approver" || party === "Both" ? party : "Both",
+      return refusal(response.status, data);
+    },
+    /** WP-2423 Q5: decline a refund nothing was prepared for. Retry with the same operation. */
+    async decline(
+      command: {
+        orderReference: string;
+        requestReference: string;
+        operationReference: string;
+        reasonCode: DeclineReason;
+      },
+      csrf: string,
+      signal?: AbortSignal,
+    ) {
+      if (!declineReasons.includes(command.reasonCode) || !csrfPattern.test(csrf))
+        throw new RefundApprovalClientError("Unavailable");
+      const payload = JSON.stringify({
+        orderReference: ref(command.orderReference),
+        requestReference: ref(command.requestReference),
+        operationReference: ref(command.operationReference),
+        reasonCode: command.reasonCode,
+      });
+      let response: Response;
+      try {
+        response = await request(
+          "/merchant/payments/refunds/decline",
+          {
+            method: "POST",
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+              "X-BOP-CSRF": csrf,
+            },
+            body: payload,
+          },
+          signal,
         );
+      } catch {
+        throw new RefundApprovalClientError("OutcomeUnknown");
       }
-      if (response.status === 409) throw new RefundApprovalClientError("Changed");
-      if (response.status === 401 || response.status === 403)
-        throw new RefundApprovalClientError("Denied");
-      throw new RefundApprovalClientError("OutcomeUnknown");
+      const data = await body(response);
+      if (response.status === 200) {
+        try {
+          const raw = record(data, ["status", "declinedAt", "replayed"]);
+          if (raw.status !== "Declined" || typeof raw.replayed !== "boolean") return invalid();
+          return Object.freeze({ declinedAt: instant(raw.declinedAt), replayed: raw.replayed });
+        } catch {
+          throw new RefundApprovalClientError("OutcomeUnknown");
+        }
+      }
+      return refusal(response.status, data);
     },
   });
+}
+
+/** An approval or decline the server refused, named without internal detail. */
+function refusal(status: number, data: unknown): never {
+  const error = errorCode(data);
+  if (status === 422 && error === "same_person") throw new RefundApprovalClientError("SamePerson");
+  if (status === 409 && error === "needs_reverification") {
+    const party =
+      data && typeof data === "object" && "party" in data ? (data.party as unknown) : null;
+    throw new RefundApprovalClientError(
+      "NeedsReverification",
+      party === "Requester" || party === "Approver" || party === "Both" ? party : "Both",
+    );
+  }
+  if (status === 409 && error === "refund_already_prepared")
+    throw new RefundApprovalClientError("AlreadyPrepared");
+  if (status === 409 && error === "refund_already_declined")
+    throw new RefundApprovalClientError("AlreadyDeclined");
+  if (status === 409) throw new RefundApprovalClientError("Changed");
+  if (status === 401 || status === 403) throw new RefundApprovalClientError("Denied");
+  throw new RefundApprovalClientError("OutcomeUnknown");
 }
