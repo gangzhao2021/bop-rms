@@ -97,9 +97,11 @@ function ApprovalCard({
                 ? "You asked for this refund. Another owner or finance member must decide."
                 : code === "NeedsReverification"
                   ? "Confirm it is you with your authenticator code, then decline."
-                  : code === "Denied"
-                    ? "Your session or permission does not allow declining refunds. Sign in again."
-                    : "Result unknown. Decline again with the same reason — it is recorded once.",
+                  : code === "NotPermitted"
+                    ? "Only an owner or finance member who didn't ask for this refund can decline it."
+                    : code === "Denied"
+                      ? "Your session has ended. Sign in again, then decline."
+                      : "Result unknown. Decline again with the same reason — it is recorded once.",
       });
     } finally {
       pending.current = null;
@@ -145,9 +147,13 @@ function ApprovalCard({
                 ? code === "AlreadyDeclined"
                   ? "This refund was declined. Refresh the list."
                   : "This refund changed since it was shown. Refresh the list."
-                : code === "Denied"
-                  ? "Your session or permission does not allow approving refunds. Sign in again."
-                  : "Result unknown. Approve again to retry the same approval — it will not refund twice.",
+                : code === "NotPermitted"
+                  ? "Only an owner or finance member who didn't ask for this refund can approve it."
+                  : code === "RequesterNotEligible"
+                    ? `${who} can no longer request refunds at this store. Ask a store manager to request it again.`
+                    : code === "Denied"
+                      ? "Your session has ended. Sign in again, then approve."
+                      : "Result unknown. Approve again to retry the same approval — it will not refund twice.",
       });
     } finally {
       pending.current = null;

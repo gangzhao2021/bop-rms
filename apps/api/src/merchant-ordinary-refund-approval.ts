@@ -26,7 +26,8 @@ export class MerchantRefundApprovalError extends Error {
       | "NeedsReverification"
       | "Changed"
       | "AlreadyPrepared"
-      | "AlreadyDeclined",
+      | "AlreadyDeclined"
+      | "RequesterNotEligible",
     readonly party: RefundVerificationParty | null = null,
   ) {
     super("Refund approval was not recorded");
@@ -201,14 +202,26 @@ export function createMerchantOrdinaryRefundApproval(options: {
           permissionCode,
           observedAt,
         });
-      const requester = await party(subject.requesterReference, "payment.refund.request");
-      const approver = await party(actorReference, "payment.refund.approve");
-      if (
-        requester.role !== "Manager" ||
-        !requester.allowed ||
-        (approver.role !== "Owner" && approver.role !== "Finance") ||
-        !approver.allowed
-      )
+      const roleRefused = (error: unknown) =>
+        error instanceof Error &&
+        (error.message === "ORDINARY_REFUND_AUTHORITY_DENIED" ||
+          error.message === "WORKFORCE_AUTHORITY_UNAVAILABLE");
+      // The requester may have lost the Manager role since asking; say so, not "sign in again".
+      const requester = await party(subject.requesterReference, "payment.refund.request").catch(
+        (error: unknown) => {
+          if (roleRefused(error)) throw new MerchantRefundApprovalError("RequesterNotEligible");
+          throw error;
+        },
+      );
+      const approver = await party(actorReference, "payment.refund.approve").catch(
+        (error: unknown) => {
+          if (roleRefused(error)) throw new MerchantRefundApprovalError("Denied");
+          throw error;
+        },
+      );
+      if (requester.role !== "Manager" || !requester.allowed)
+        throw new MerchantRefundApprovalError("RequesterNotEligible");
+      if ((approver.role !== "Owner" && approver.role !== "Finance") || !approver.allowed)
         throw new MerchantRefundApprovalError("Denied");
       const staleRequester = !recentEnough(requester.recentMfaAt, observedAt),
         staleApprover = !recentEnough(approver.recentMfaAt, observedAt);

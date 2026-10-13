@@ -779,9 +779,17 @@ Provide protected `merchant-runtime.json` with exactly `schemaVersion: 1`,
 `roleMapping`, and `workstation`. Scope contains Tenant/Brand/Store references;
 workstation contains the existing `deviceReference` and `pickupLocationReference`.
 All these references must be UUIDv7 strings. Role mapping has exactly `Manager`,
-`Owner` and `Finance`, each an array of the existing role codes. Preserve the
-previous mapping: adding a role is an authority change, not startup configuration
-migration. No grants are performed by these readers or compositions.
+`Owner` and `Finance`, each an array of Store/Brand role codes from the installed
+role catalog, each code in one group only (WP-2423 Q5: synthetic or unknown codes are
+refused at startup). The refund mapping is by real Store roles: `Manager:
+["store_manager"]`, `Owner: ["store_owner", "brand_owner"]`, `Finance: []` (the catalog
+has no finance role yet). `node --import
+./tooling/environment/register-workspace-typescript.mjs
+tooling/environment/pilot-refund-role-mapping.mjs --directory <runtime dir>` shows the
+current and standard mapping; add `--write` to
+replace only `roleMapping` (atomic, same file mode). Changing the mapping is an
+authority change, not startup configuration migration. No grants are performed by
+these readers or compositions.
 
 To configure Product reads, publication and operation recovery, use
 `schemaVersion: 2` with the same fields and an additional closed `product` object:

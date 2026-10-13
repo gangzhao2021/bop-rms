@@ -45,7 +45,11 @@ export function WorkspaceLayout({
         Home
       </a>
       {items
-        .filter((item) => item.href !== "/app")
+        // WP-2423 Q5: one link per destination even if a screen is listed twice.
+        .filter(
+          (item, index) =>
+            item.href !== "/app" && items.findIndex((other) => other.href === item.href) === index,
+        )
         .map((item) => (
           <a
             key={item.screenId}

@@ -888,7 +888,12 @@ export function parseMerchantWorkspaceSnapshot(value: unknown): MerchantWorkspac
 
 /** WP-2423 Q5: why an approval or decline was refused, without internal detail. */
 function refundDecisionFailure(response: express.Response, error: MerchantRefundApprovalError) {
-  if (error.code === "SamePerson") response.status(422).json({ error: "same_person" });
+  // A role refusal is not a session problem: the browser says who may decide, not "sign in".
+  if (error.code === "Denied")
+    response.status(403).set("Cache-Control", NO_STORE).json({ error: "refund_role_required" });
+  else if (error.code === "RequesterNotEligible")
+    response.status(409).json({ error: "requester_not_eligible" });
+  else if (error.code === "SamePerson") response.status(422).json({ error: "same_person" });
   else if (error.code === "NeedsReverification")
     response.status(409).json({ error: "needs_reverification", party: error.party });
   else if (error.code === "AlreadyPrepared")
@@ -4432,6 +4437,32 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
     );
 
   // WP-2423 Q5: second-factor re-verification by the signed-in staff member (no code echoed).
+  // WP-2423 Q5: the signed-in member's current verification (the recency refund approval uses).
+  router.get("/identity/step-up", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    if (
+      request.method !== "GET" ||
+      request.body !== undefined ||
+      sessionCookie === null ||
+      Object.keys(request.query).length !== 0 ||
+      rawHeaderValues(request, "origin").length > 1 ||
+      rawHeaderValues(request, "sec-fetch-site").length !== 1
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.mfaStepUp) {
+      response.status(503).json({ error: "step_up_unavailable" });
+      return;
+    }
+    void options.mfaStepUp
+      .status({ sessionCookie })
+      .then((result) =>
+        response.set("Cache-Control", NO_STORE).json({ validUntil: result.validUntil }),
+      )
+      .catch(() => denied(response));
+  });
+
   router.post("/identity/step-up", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant"),
       csrf = exactHeader(request, "x-bop-csrf");
@@ -4557,7 +4588,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         }),
       )
       .catch((error: unknown) => {
-        if (!(error instanceof MerchantRefundApprovalError) || error.code === "Denied") {
+        if (!(error instanceof MerchantRefundApprovalError)) {
           denied(response);
           return;
         }
@@ -4592,7 +4623,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         }),
       )
       .catch((error: unknown) => {
-        if (!(error instanceof MerchantRefundApprovalError) || error.code === "Denied") {
+        if (!(error instanceof MerchantRefundApprovalError)) {
           denied(response);
           return;
         }

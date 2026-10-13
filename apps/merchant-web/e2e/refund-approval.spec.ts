@@ -69,6 +69,8 @@ test("@production owner verifies and approves a refund above CAD 100 once", asyn
     }),
   );
   await page.route("**/merchant/identity/step-up", (route) => {
+    if (route.request().method() === "GET")
+      return route.fulfill({ headers, json: { validUntil: null } });
     stepUps.push(route.request().postData() ?? "");
     const at = Date.now();
     return route.fulfill({
@@ -129,6 +131,9 @@ test("@production owner verifies and approves a refund above CAD 100 once", asyn
   await dialog.getByRole("button", { name: "Verify" }).click();
   await expect(dialog).toBeHidden();
   expect(JSON.parse(stepUps[0] ?? "{}")).toEqual({ purpose: "RefundApproval", code: "123456" });
+  // Verified: no code entry is offered again until the verification runs out.
+  await expect(card.getByRole("button", { name: "Verify to approve" })).toHaveCount(0);
+  await expect(card).toContainText("Verified until");
   await expect(page.getByLabel("Six-digit code").first()).toHaveValue("");
 
   await approve.click();
@@ -216,6 +221,8 @@ test("@production owner declines a refund with a reason and it leaves the list",
     }),
   );
   await page.route("**/merchant/identity/step-up", (route) => {
+    if (route.request().method() === "GET")
+      return route.fulfill({ headers, json: { validUntil: null } });
     const at = Date.now();
     return route.fulfill({
       headers,

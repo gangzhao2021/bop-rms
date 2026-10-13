@@ -157,9 +157,40 @@ it("reads the latest verified step-up and combines it with enrollment", async ()
   const base = { status: "TotpVerified", verifiedAt: "2026-01-01T00:00:00.000Z", resetAt: null };
   expect(resolveRecentWorkforceMfaAt({ ...base, latestStepUpAt: latest })).toBe(latest);
   expect(resolveRecentWorkforceMfaAt({ ...base, latestStepUpAt: null })).toBe(base.verifiedAt);
+  // A never-enrolled ("Required") actor's verified step-up counts on its own.
   expect(
-    resolveRecentWorkforceMfaAt({ ...base, status: "ResetRequired", latestStepUpAt: latest }),
+    resolveRecentWorkforceMfaAt({
+      status: "Required",
+      verifiedAt: null,
+      resetAt: null,
+      latestStepUpAt: latest,
+    }),
+  ).toBe(latest);
+  expect(
+    resolveRecentWorkforceMfaAt({
+      status: "Required",
+      verifiedAt: null,
+      resetAt: null,
+      latestStepUpAt: null,
+    }),
   ).toBeNull();
+  // A reset voids earlier verifications; a later step-up counts.
+  expect(
+    resolveRecentWorkforceMfaAt({
+      status: "ResetRequired",
+      verifiedAt: null,
+      resetAt: "2026-10-12T14:58:00.000Z",
+      latestStepUpAt: latest,
+    }),
+  ).toBeNull();
+  expect(
+    resolveRecentWorkforceMfaAt({
+      status: "ResetRequired",
+      verifiedAt: null,
+      resetAt: "2026-10-12T14:50:00.000Z",
+      latestStepUpAt: latest,
+    }),
+  ).toBe(latest);
   expect(
     resolveRecentWorkforceMfaAt({
       ...base,

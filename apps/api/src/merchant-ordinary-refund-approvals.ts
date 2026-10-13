@@ -72,6 +72,29 @@ export function createMerchantOrdinaryRefundApprovals(options: {
       })(tx, { observedAt });
       const authority = createMerchantOrdinaryRefundAuthority(configuration.workforce);
       const order = createPostgresReceiptOrderSource({ ...scope, authorize });
+      // The same server-computed recency for every person (Identity enrollment and step-ups).
+      const verifiedUntil = async (
+        actor: string,
+        permissionCode: string,
+        orderReference: string,
+      ) => {
+        try {
+          const facts = await authority(tx, {
+            ...scope,
+            orderReference,
+            actorReference: actor,
+            permissionCode,
+            observedAt,
+          });
+          return facts.allowed && recentEnough(facts.recentMfaAt, observedAt)
+            ? new Date(
+                Date.parse(String(facts.recentMfaAt)) + refundMfaRecencyMilliseconds,
+              ).toISOString()
+            : null;
+        } catch {
+          return null;
+        }
+      };
       const names = new Map<string, string | null>();
       const name = async (actor: string) => {
         if (!names.has(actor))
@@ -85,23 +108,11 @@ export function createMerchantOrdinaryRefundApprovals(options: {
       };
       const result = [];
       for (const entry of entries) {
-        // The requester's current verification, read from Identity for that person.
-        let requesterVerifiedUntil: string | null = null;
-        try {
-          const requester = await authority(tx, {
-            ...scope,
-            orderReference: entry.orderReference,
-            actorReference: entry.requesterReference,
-            permissionCode: "payment.refund.request",
-            observedAt,
-          });
-          if (requester.allowed && recentEnough(requester.recentMfaAt, observedAt))
-            requesterVerifiedUntil = new Date(
-              Date.parse(String(requester.recentMfaAt)) + refundMfaRecencyMilliseconds,
-            ).toISOString();
-        } catch {
-          requesterVerifiedUntil = null;
-        }
+        const requesterVerifiedUntil = await verifiedUntil(
+          entry.requesterReference,
+          "payment.refund.request",
+          entry.orderReference,
+        );
         const placed = await order(tx, { orderReference: entry.orderReference, observedAt });
         result.push(
           Object.freeze({

@@ -54,6 +54,20 @@ export function StepUpVerification({
   const [message, setMessage] = useState("");
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => () => pending.current?.abort(), []);
+  // Start from the server's own record, so every page shows the same verification.
+  useEffect(() => {
+    if (verifiedUntil !== null) return;
+    const controller = new AbortController();
+    void client.current
+      .stepUpStatus(controller.signal)
+      .then((until) => {
+        if (!controller.signal.aborted && until !== null && Date.parse(until) > Date.now())
+          onVerified(until);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+    // Only on first display; later changes come from this component's own verification.
+  }, []);
   useEffect(() => {
     if (verifiedUntil === null) return;
     const timer = setInterval(() => setNow(Date.now()), 15_000);
@@ -100,16 +114,18 @@ export function StepUpVerification({
           "Confirm it is you with the code from your authenticator app."
         )}
       </p>
-      <button
-        type="button"
-        onClick={() => {
-          setMessage("");
-          dialog.current?.showModal();
-          input.current?.focus();
-        }}
-      >
-        {current ? "Verify again" : label}
-      </button>
+      {current ? null : (
+        <button
+          type="button"
+          onClick={() => {
+            setMessage("");
+            dialog.current?.showModal();
+            input.current?.focus();
+          }}
+        >
+          {label}
+        </button>
+      )}
       <dialog
         ref={dialog}
         className="step-up-dialog"
@@ -121,8 +137,9 @@ export function StepUpVerification({
       >
         <h2 id={titleId}>Confirm it is you</h2>
         <p>
-          Open your authenticator app and enter the six-digit code shown for this store. It stays
-          valid for 15 minutes.
+          Open your authenticator app and enter the six-digit code shown for this store. Codes
+          change every 30 seconds. After you verify, approvals and refunds can go ahead for 15
+          minutes.
         </p>
         <form
           onSubmit={(event) => {

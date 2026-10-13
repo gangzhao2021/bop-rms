@@ -27,6 +27,7 @@ import { createMerchantOrdinaryRefundCommand } from "../../../apps/api/src/merch
 import { createMerchantOrdinaryRefundSendCommand } from "../../../apps/api/src/merchant-ordinary-refund-send-command.ts";
 import { createInternalRefundWorkforceContext } from "../../../tooling/environment/pilot-refund-workforce.mjs";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
+import { standardRefundRoleMapping } from "../../../tooling/environment/pilot-refund-role-mapping.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { seedOrdinaryRefundStorePublication } from "../test-support/ordinary-refund-store-publication.mjs";
 import { seedStaffItemCancellationQuote } from "../test-support/staff-item-cancellation-pricing.mjs";
@@ -175,7 +176,7 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
       const roles = {
         manager: {
           id: id(910),
-          code: "synthetic_q5_manager",
+          code: "store_manager",
           actions: [
             "merchant.access",
             "workflow.operate",
@@ -185,7 +186,7 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
         },
         finance: {
           id: id(911),
-          code: "synthetic_q5_finance",
+          code: "store_owner",
           actions: [
             "merchant.access",
             "workflow.operate",
@@ -194,11 +195,8 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
           ],
         },
       };
-      const roleMapping = {
-        Manager: [roles.manager.code],
-        Owner: [],
-        Finance: [roles.finance.code],
-      };
+      // The pilot's refund role mapping by real Store roles (WP-2423 Q5).
+      const roleMapping = standardRefundRoleMapping;
       let permissionNumber = 950;
       for (const r of Object.values(roles)) {
         await admin.query(
@@ -245,10 +243,18 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
             "INSERT INTO bop_permission.role_assignment VALUES ($1,$2,$3,$4,$5,$6,$7,'Active',$8,$9,1,$8,$8)",
             [id(n + 3 + j), r.id, id(n), id(n + 2), actor, brand, store, from, until],
           );
-        await admin.query(
-          "INSERT INTO bop_identity.workforce_mfa_status (actor_id,status,provider_evidence_id,verified_at,reset_at,version) VALUES ($1,'TotpVerified',$2,$3,NULL,1)",
-          [actor, id(n + 6), time(-minutes(120))],
-        );
+        // The dual-role member never enrolled (status Required, as on v15): only a verified
+        // step-up can make their second factor recent.
+        if (actor === dual)
+          await admin.query(
+            "INSERT INTO bop_identity.workforce_mfa_status (actor_id,status,provider_evidence_id,verified_at,reset_at,version) VALUES ($1,'Required',NULL,NULL,NULL,1)",
+            [actor],
+          );
+        else
+          await admin.query(
+            "INSERT INTO bop_identity.workforce_mfa_status (actor_id,status,provider_evidence_id,verified_at,reset_at,version) VALUES ($1,'TotpVerified',$2,$3,NULL,1)",
+            [actor, id(n + 6), time(-minutes(120))],
+          );
       }
       // Identity roster double (pilot `currentActor`): an active workforce actor per reference.
       const currentActor = async (_tx, reference, authenticatedAt) => {

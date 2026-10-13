@@ -116,7 +116,15 @@ export function createMerchantOrdinaryRefundDecline(options: {
           throw new MerchantRefundApprovalError("AlreadyDeclined");
         throw new MerchantRefundApprovalError("Changed");
       }
-      throw new MerchantRefundApprovalError("Denied");
+      // The decliner holds no Owner/Finance refund role here; anything else (for example an
+      // ended session) stays a plain refusal.
+      if (
+        error instanceof Error &&
+        (error.message === "ORDINARY_REFUND_AUTHORITY_DENIED" ||
+          error.message === "WORKFORCE_AUTHORITY_UNAVAILABLE")
+      )
+        throw new MerchantRefundApprovalError("Denied");
+      throw error;
     }
   };
 }

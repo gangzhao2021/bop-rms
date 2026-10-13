@@ -348,6 +348,12 @@ function RefundWizard({
     [state, setState] = useState<"Idle" | "Busy" | "Unknown" | "Recorded">("Idle");
   const [preparing, setPreparing] = useState<ReadonlySet<string>>(new Set());
   const operationReference = useRef<string | null>(null);
+  // WP-2423 Q5: one preview identity while the selection, reason and note stay the same.
+  const previewIdentity = useRef<{
+    key: string;
+    requestReference: string;
+    operationReference: string;
+  } | null>(null);
   const operation = useRef<Intent | null>(null),
     pending = useRef<AbortController | null>(null),
     status = useRef<HTMLParagraphElement>(null);
@@ -454,10 +460,17 @@ function RefundWizard({
     setMessage("");
     clearPreview();
     try {
-      operationReference.current = serviceOperationReference();
+      const key = JSON.stringify([items.claimVersion, selection, reason, note.trim()]);
+      if (previewIdentity.current?.key !== key)
+        previewIdentity.current = {
+          key,
+          requestReference: serviceOperationReference(),
+          operationReference: serviceOperationReference(),
+        };
+      operationReference.current = previewIdentity.current.operationReference;
       const intent = client.prepareRequest({
         orderReference,
-        requestReference: serviceOperationReference(),
+        requestReference: previewIdentity.current.requestReference,
         operationReference: operationReference.current,
         expectedClaimVersion: items.claimVersion,
         reasonCode: reason,
@@ -497,6 +510,7 @@ function RefundWizard({
     try {
       const result = await operation.current.submit(csrf, controller.signal);
       if (!controller.signal.aborted) {
+        previewIdentity.current = null;
         setState("Recorded");
         onFinancialChange();
         setMessage(
@@ -504,7 +518,7 @@ function RefundWizard({
             "Refund amount: " +
             amount(result.amountMinor) +
             (result.approvalRequired === true
-              ? ". An owner or finance member who did not ask for it must approve it in person on the Approvals page within 15 minutes of your verification; you may need to verify again."
+              ? ". Ask the owner to open Approvals on this device or theirs. If more than 15 minutes pass after your verification, you'll be asked to verify again here."
               : ". Approval and execution are separate. No completed refund is confirmed here."),
         );
       }
@@ -598,35 +612,49 @@ function RefundWizard({
       ) : null}
       <fieldset disabled={locked}>
         <legend>Refund selection</legend>
-        {items?.items.map((item, index) => (
-          <div className="form-field" key={item.orderItemReference}>
-            <label htmlFor={"refund-quantity-" + index}>
-              {item.label} · line {index + 1} ({item.unclaimedQuantity} unclaimed of {item.quantity}
-              )
-            </label>
-            <input
-              id={"refund-quantity-" + index}
-              type="number"
-              inputMode="numeric"
-              min={0}
-              max={item.unclaimedQuantity}
-              step={1}
-              value={quantities[item.orderItemReference] ?? 0}
-              disabled={!item.paymentCaptured || item.unclaimedQuantity === 0}
-              onChange={(event) => {
-                const quantity = Number(event.target.value);
-                if (
-                  Number.isSafeInteger(quantity) &&
-                  quantity >= 0 &&
-                  quantity <= item.unclaimedQuantity
-                ) {
-                  setQuantities((prior) => ({ ...prior, [item.orderItemReference]: quantity }));
-                  clearPreview();
-                }
-              }}
-            />
-          </div>
-        ))}
+        {items?.items.map((item, index) =>
+          // WP-2423 Q5: a line that was never charged (e.g. a round cancelled before payment)
+          // cannot be refunded; it is summarized below instead of offered as a quantity.
+          !item.paymentCaptured ? null : (
+            <div className="form-field" key={item.orderItemReference}>
+              <label htmlFor={"refund-quantity-" + index}>
+                {item.label} · line {index + 1} ({item.unclaimedQuantity} unclaimed of{" "}
+                {item.quantity})
+              </label>
+              <input
+                id={"refund-quantity-" + index}
+                type="number"
+                inputMode="numeric"
+                min={0}
+                max={item.unclaimedQuantity}
+                step={1}
+                value={quantities[item.orderItemReference] ?? 0}
+                disabled={!item.paymentCaptured || item.unclaimedQuantity === 0}
+                onChange={(event) => {
+                  const quantity = Number(event.target.value);
+                  if (
+                    Number.isSafeInteger(quantity) &&
+                    quantity >= 0 &&
+                    quantity <= item.unclaimedQuantity
+                  ) {
+                    setQuantities((prior) => ({ ...prior, [item.orderItemReference]: quantity }));
+                    clearPreview();
+                  }
+                }}
+              />
+            </div>
+          ),
+        )}
+        {items && items.items.some((item) => !item.paymentCaptured) ? (
+          <p>
+            Not charged, so not refundable:{" "}
+            {items.items
+              .filter((item) => !item.paymentCaptured)
+              .map((item) => item.label)
+              .join(", ")}
+            .
+          </p>
+        ) : null}
         {items?.items.length === 0 ? <p>No items are available.</p> : null}
         <label htmlFor="refund-reason">Reason</label>
         <select

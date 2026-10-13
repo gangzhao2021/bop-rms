@@ -150,6 +150,16 @@ for (const recovery of ["retry", "history"] as const)
               paymentCaptured: true,
               paymentIntentReference: id(31),
             },
+            // WP-2423 Q5: a line from a round cancelled before payment was never charged.
+            {
+              orderBatchReference: id(91),
+              orderItemReference: id(4),
+              label: "Tea",
+              quantity: 1,
+              unclaimedQuantity: 0,
+              paymentCaptured: false,
+              paymentIntentReference: null,
+            },
           ],
         },
       }),
@@ -277,12 +287,21 @@ for (const recovery of ["retry", "history"] as const)
     );
     await page.getByRole("link", { name: "Start refund request" }).click();
     await page.getByRole("button", { name: "Load refundable items" }).click();
+    await expect(page.getByRole("spinbutton", { name: /Tea/ })).toHaveCount(0);
+    await expect(page.getByText("Not charged, so not refundable: Tea.")).toBeVisible();
     await page.getByRole("spinbutton", { name: /Latte/ }).fill("1");
     await page.getByRole("combobox", { name: "Reason" }).selectOption("CUSTOMER_REQUEST");
     await page.getByRole("button", { name: "Calculate refund" }).click();
     await expect(page.getByRole("region", { name: "Refund calculation" })).toContainText(
       "CAD 11.30",
     );
+    // WP-2423 Q5: calculating again with an unchanged selection reuses the same request identity.
+    await page.getByRole("button", { name: "Calculate refund" }).click();
+    await expect(page.getByRole("region", { name: "Refund calculation" })).toContainText(
+      "CAD 11.30",
+    );
+    expect(previews).toHaveLength(2);
+    expect(previews[1]).toBe(previews[0]);
     await expect(page.getByRole("button", { name: "Record refund request" })).toBeDisabled();
     await page.getByRole("checkbox", { name: /I confirm/ }).check();
     await page.getByRole("button", { name: "Record refund request" }).click();
@@ -317,7 +336,7 @@ for (const recovery of ["retry", "history"] as const)
       })
       .click();
     await expect(page.getByText("Original request recovered.", { exact: false })).toBeVisible();
-    expect(previews).toHaveLength(1);
+    expect(previews).toHaveLength(2);
     expect(requests).toHaveLength(recovery === "retry" ? 2 : 1);
     expect(requests[0]).toBe(previews[0]);
     if (recovery === "retry") expect(requests[1]).toBe(requests[0]);

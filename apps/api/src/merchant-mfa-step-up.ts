@@ -1,4 +1,8 @@
 import {
+  createPostgresCurrentWorkforceMfaSource,
+  createPostgresLatestWorkforceStepUpSource,
+  resolveRecentWorkforceMfaAt,
+  workforceStepUpRecencyMilliseconds,
   createPostgresWorkforceMfaStepUpStore,
   parseOpaqueUuidV7,
   readClosedRecord,
@@ -36,7 +40,7 @@ export function createMerchantMfaStepUp(options: {
   retentionPolicyVersion: number;
 }) {
   const resolve = createMerchantStoreScope(options.persistence);
-  return async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
+  const record = async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
     const authenticated = await options.authentication.authorize(input);
     const raw = readClosedRecord(input.command, ["purpose", "code"]);
     if (raw.purpose !== "RefundRequest" && raw.purpose !== "RefundApproval")
@@ -90,4 +94,37 @@ export function createMerchantMfaStepUp(options: {
       throw new MerchantStepUpError("Denied");
     }
   };
+  /** The signed-in member's current verification at this Store: the same Identity recency
+   * (enrollment or latest step-up) refund approval uses. validUntil null: verify again. */
+  const status = async (input: { sessionCookie: unknown }) =>
+    options.persistence.transactions.run(async (tx) => {
+      const current = await resolve(tx, input.sessionCookie, "merchant.access");
+      if (!(await current.allowed())) throw new MerchantStepUpError("Denied");
+      const actorReference = String(current.actorReference);
+      const brandReference = String(current.context.brand.brandReference);
+      const storeReference = String(current.store.storeReference);
+      const observedAt = String(current.context.resolvedAt);
+      const own = async (_tx: unknown, actor: string) =>
+        actor === actorReference && (await current.allowed());
+      const mfa = await createPostgresCurrentWorkforceMfaSource({
+        authorize: (t, actor) => own(t, actor),
+      })(tx, { actorReference, observedAt });
+      const latestStepUpAt = await createPostgresLatestWorkforceStepUpSource({
+        authorize: (t, query) => own(t, query.actorReference),
+      })(tx, { brandReference, storeReference, actorReference, observedAt });
+      const recent = resolveRecentWorkforceMfaAt({
+        status: mfa.status,
+        verifiedAt: mfa.verifiedAt,
+        resetAt: mfa.resetAt,
+        latestStepUpAt,
+      });
+      const until =
+        recent === null ? null : Date.parse(recent) + workforceStepUpRecencyMilliseconds;
+      return Object.freeze({
+        observedAt,
+        validUntil:
+          until !== null && until > Date.parse(observedAt) ? new Date(until).toISOString() : null,
+      });
+    });
+  return Object.assign(record, { status });
 }

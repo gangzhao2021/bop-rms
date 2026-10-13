@@ -33,6 +33,8 @@ export type ApprovalFailure =
   | "Changed"
   | "AlreadyPrepared"
   | "AlreadyDeclined"
+  | "NotPermitted"
+  | "RequesterNotEligible"
   | "Unavailable"
   | "OutcomeUnknown";
 export class RefundApprovalClientError extends Error {
@@ -253,6 +255,28 @@ export function createRefundApprovalClient(fetcher: typeof fetch = fetch) {
       if (response.status === 401 || response.status === 403) throw new StepUpError("Denied");
       throw new StepUpError("Unavailable");
     },
+    /** WP-2423 Q5: the signed-in member's current verification (server-computed), or null. */
+    async stepUpStatus(signal?: AbortSignal): Promise<string | null> {
+      let response: Response;
+      try {
+        response = await request(
+          "/merchant/identity/step-up",
+          { method: "GET", headers: { Accept: "application/json" } },
+          signal,
+        );
+      } catch {
+        throw new StepUpError("Unavailable");
+      }
+      if (response.status === 401 || response.status === 403) throw new StepUpError("Denied");
+      if (response.status !== 200 || response.headers.get("cache-control") !== "no-store")
+        throw new StepUpError("Unavailable");
+      try {
+        const raw = record(await body(response), ["validUntil"]);
+        return nullable(raw.validUntil, instant);
+      } catch {
+        throw new StepUpError("Unavailable");
+      }
+    },
     /** Refunds at the selected Store awaiting approval, or approved and not yet sent. */
     async approvals(signal?: AbortSignal) {
       let response: Response;
@@ -419,6 +443,10 @@ function refusal(status: number, data: unknown): never {
       party === "Requester" || party === "Approver" || party === "Both" ? party : "Both",
     );
   }
+  if (status === 403 && error === "refund_role_required")
+    throw new RefundApprovalClientError("NotPermitted");
+  if (status === 409 && error === "requester_not_eligible")
+    throw new RefundApprovalClientError("RequesterNotEligible");
   if (status === 409 && error === "refund_already_prepared")
     throw new RefundApprovalClientError("AlreadyPrepared");
   if (status === 409 && error === "refund_already_declined")

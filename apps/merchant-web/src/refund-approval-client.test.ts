@@ -225,3 +225,23 @@ it("WP-2423 Q5: declines with a listed reason and names each refusal", async () 
     code: "Unavailable",
   });
 });
+
+it("WP-2423 Q5: reads the server's own verification and names role refusals apart from sessions", async () => {
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(json({ validUntil: "2026-10-12T15:15:00.000Z" }))
+    .mockResolvedValueOnce(json({ validUntil: null }))
+    .mockResolvedValueOnce(json({ error: "request_denied" }, 403))
+    .mockResolvedValueOnce(json({ error: "refund_role_required" }, 403))
+    .mockResolvedValueOnce(json({ error: "requester_not_eligible" }, 409))
+    .mockResolvedValueOnce(json({ error: "request_denied" }, 403));
+  const client = createRefundApprovalClient(fetcher);
+  await expect(client.stepUpStatus()).resolves.toBe("2026-10-12T15:15:00.000Z");
+  expect(fetcher.mock.calls[0]?.[0]).toBe("/merchant/identity/step-up");
+  expect(fetcher.mock.calls[0]?.[1]).toMatchObject({ method: "GET" });
+  await expect(client.stepUpStatus()).resolves.toBeNull();
+  await expect(client.stepUpStatus()).rejects.toMatchObject({ code: "Denied" });
+  const command = { orderReference: id(1), requestReference: id(2), approvalReference: id(4) };
+  for (const code of ["NotPermitted", "RequesterNotEligible", "Denied"])
+    await expect(client.approve(command, csrf)).rejects.toMatchObject({ code });
+});

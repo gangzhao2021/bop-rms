@@ -5079,13 +5079,17 @@ async function serveRefundEscalation(extra: Partial<MerchantBffRouterOptions> = 
 
 it("WP-2423 Q5: verifies a step-up code for the session only and never echoes the code", async () => {
   type StepUp = NonNullable<MerchantBffRouterOptions["mfaStepUp"]>;
-  const command = vi.fn<StepUp>(async () => ({
+  const command = vi.fn<(...args: Parameters<StepUp>) => ReturnType<StepUp>>(async () => ({
     status: "Verified" as const,
     stepUpReference: "01909974-0000-7000-8000-000000000001",
     verifiedAt: "2026-10-12T15:00:00.000Z",
     validUntil: "2026-10-12T15:15:00.000Z",
   }));
-  const root = await serveRefundEscalation({ mfaStepUp: command });
+  const status = vi.fn<StepUp["status"]>(async () => ({
+    observedAt: "2026-10-12T15:01:00.000Z",
+    validUntil: "2026-10-12T15:15:00.000Z",
+  }));
+  const root = await serveRefundEscalation({ mfaStepUp: Object.assign(command, { status }) });
   const headers = {
     ...safeHeaders,
     Cookie: "__Host-bop-merchant=" + sessionCookie,
@@ -5131,6 +5135,17 @@ it("WP-2423 Q5: verifies a step-up code for the session only and never echoes th
   const failed = await send();
   expect(failed.status).toBe(403);
   expect(await failed.text()).not.toContain("private");
+  // The same server-computed recency is readable by the signed-in member (no code involved).
+  const read = (extra: Record<string, string> = {}) =>
+    request(root, "/merchant/identity/step-up", {
+      headers: { ...safeHeaders, Cookie: "__Host-bop-merchant=" + sessionCookie, ...extra },
+    });
+  expect((await read({ Origin: "https://foreign.invalid" })).status).toBe(403);
+  const current = await read();
+  expect(current.status).toBe(200);
+  expect(current.headers.get("cache-control")).toBe("no-store");
+  expect(await current.json()).toEqual({ validUntil: "2026-10-12T15:15:00.000Z" });
+  expect(status.mock.calls[0]?.[0]).toEqual({ sessionCookie });
   const unconfigured = await serveRefundEscalation();
   expect(
     (
@@ -5290,5 +5305,35 @@ it("WP-2423 Q5: declines through the session and names why a decline was refused
     command.mockRejectedValueOnce(error);
     const failed = await send();
     expect([failed.status, await failed.json()]).toEqual([status, body]);
+  }
+});
+
+it("WP-2423 Q5: a role refusal names the missing role; any other failure stays a plain denial", async () => {
+  type Approve = NonNullable<MerchantBffRouterOptions["ordinaryRefundApproval"]>;
+  const command = vi.fn<Approve>();
+  const root = await serveRefundEscalation({ ordinaryRefundApproval: command });
+  const send = () =>
+    request(root, "/merchant/payments/refunds/approve", {
+      method: "POST",
+      headers: {
+        ...safeHeaders,
+        Cookie: "__Host-bop-merchant=" + sessionCookie,
+        "X-BOP-CSRF": csrf,
+        "Content-Type": "application/json",
+      },
+      body: "{}",
+    });
+  for (const [error, status, body] of [
+    [new MerchantRefundApprovalError("Denied"), 403, { error: "refund_role_required" }],
+    [
+      new MerchantRefundApprovalError("RequesterNotEligible"),
+      409,
+      { error: "requester_not_eligible" },
+    ],
+    [new Error("STORE_SERVICE_PERMISSION_DENIED"), 403, { error: "request_denied" }],
+  ] as const) {
+    command.mockRejectedValueOnce(error);
+    const response = await send();
+    expect([response.status, await response.json()]).toEqual([status, body]);
   }
 });

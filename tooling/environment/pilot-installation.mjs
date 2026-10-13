@@ -7,6 +7,7 @@ import { constants } from "node:fs";
 import { join, isAbsolute } from "node:path";
 import process from "node:process";
 import { isPilotRuntime, matchesPilotEnvironment } from "./pilot-environment.mjs";
+import { validateRefundRoleMapping } from "./pilot-refund-role-mapping.mjs";
 import { Buffer } from "node:buffer";
 const unavailable = () => {
   throw new Error("PILOT_INSTALLATION_UNAVAILABLE");
@@ -382,17 +383,15 @@ export async function loadPilotInstallation(directory) {
             ) ||
             !exact(value.workstation, ["deviceReference", "pickupLocationReference"]) ||
             Object.values(value.workstation).some((v) => typeof v !== "string" || !ref.test(v)) ||
-            !exact(value.roleMapping, ["Manager", "Owner", "Finance"]) ||
-            Object.values(value.roleMapping).some(
-              (v) =>
-                !Array.isArray(v) ||
-                v.length > 100 ||
-                new Set(v).size !== v.length ||
-                v.some(
-                  (code) =>
-                    typeof code !== "string" || !/^[A-Za-z][A-Za-z0-9_]{0,127}$/u.test(code),
-                ),
-            ) ||
+            // WP-2423 Q5: only catalog Store/Brand role codes, each in one refund group.
+            !(() => {
+              try {
+                validateRefundRoleMapping(value.roleMapping);
+                return true;
+              } catch {
+                return false;
+              }
+            })() ||
             (value.schemaVersion === 2 &&
               (!exact(product, [
                 "contentPolicy",
@@ -492,14 +491,7 @@ export async function loadPilotInstallation(directory) {
             ...value,
             scope: Object.freeze({ ...value.scope }),
             workstation: Object.freeze({ ...value.workstation }),
-            roleMapping: Object.freeze(
-              Object.fromEntries(
-                Object.entries(value.roleMapping).map(([key, list]) => [
-                  key,
-                  Object.freeze([...list]),
-                ]),
-              ),
-            ),
+            roleMapping: validateRefundRoleMapping(value.roleMapping),
             ...(product === undefined
               ? {}
               : {

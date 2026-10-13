@@ -350,7 +350,7 @@ it("loads exact merchant mapping and workstation without adding authority and bi
     environment: "InternalTest",
     database: "synthetic_pilot",
     scope,
-    roleMapping: { Manager: ["synthetic_manager"], Owner: [], Finance: [] },
+    roleMapping: { Manager: ["store_manager"], Owner: ["store_owner"], Finance: [] },
     workstation: { deviceReference: ref, pickupLocationReference: ref },
   };
   const installation = await loadPilotInstallation(directory);
@@ -358,6 +358,9 @@ it("loads exact merchant mapping and workstation without adding authority and bi
   expect(await installation.loadMerchantRuntime()).toEqual(config);
   for (const change of [
     { roleMapping: { Manager: ["bad*"], Owner: [], Finance: [] } },
+    // WP-2423 Q5: a synthetic/unknown role or a role in two groups confers no refund authority.
+    { roleMapping: { Manager: ["synthetic_acceptance_0190fa30"], Owner: [], Finance: [] } },
+    { roleMapping: { Manager: ["store_owner"], Owner: ["store_owner"], Finance: [] } },
     { roleMapping: { Manager: [], Owner: [], Finance: [], Admin: [] } },
     { workstation: { deviceReference: ref } },
     { scope: { ...scope, tenantReference: "other" } },
@@ -396,7 +399,7 @@ it("loads explicit Product v2 selectors without defaults and retains the origina
       environment: "InternalTest",
       database: "synthetic_pilot",
       scope,
-      roleMapping: { Manager: ["synthetic_manager"], Owner: [], Finance: [] },
+      roleMapping: { Manager: ["store_manager"], Owner: ["store_owner"], Finance: [] },
       workstation: { deviceReference: id(6), pickupLocationReference: id(7) },
       product,
     };
@@ -479,7 +482,7 @@ function authoringMerchantFixture() {
       environment: "InternalTest",
       database: "synthetic_pilot",
       scope,
-      roleMapping: { Manager: ["synthetic_manager"], Owner: [], Finance: [] },
+      roleMapping: { Manager: ["store_manager"], Owner: ["store_owner"], Finance: [] },
       workstation: { deviceReference: id(6), pickupLocationReference: id(7) },
       product: {
         contentPolicy: {

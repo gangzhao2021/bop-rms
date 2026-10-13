@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { currentNavigationItem, usesWorkspaceLayout } from "./WorkspaceLayout.js";
+import { renderToStaticMarkup } from "react-dom/server";
+import { createElement } from "react";
+import { currentNavigationItem, usesWorkspaceLayout, WorkspaceLayout } from "./WorkspaceLayout.js";
 
 const items = [
   { screenId: "CAT-MENU-LIST", label: "Menus", href: "/app/commerce/menus", permission: "x" },
@@ -26,5 +28,26 @@ describe("WP-2423 workspace layout", () => {
     expect(currentNavigationItem(items, "/app/commerce/menus/abc")).toBe("CAT-MENU-LIST");
     expect(currentNavigationItem(items, "/app/commerce/menusx")).toBeNull();
     expect(currentNavigationItem(items, "/operations/orders")).toBe("OPS-ORDER-QUEUE");
+  });
+  it("WP-2423 Q5: shows each destination once in the workspace links", () => {
+    const approvals = {
+      screenId: "APPROVAL-INBOX",
+      label: "Approvals",
+      href: "/app/approvals",
+      permission: "workflow.operate",
+    };
+    const html = renderToStaticMarkup(
+      createElement(WorkspaceLayout, {
+        items: [approvals, approvals] as never,
+        path: "/app/approvals",
+        storeLabel: "Synthetic Store",
+        children: null,
+      }),
+    );
+    const sidebar = html.slice(
+      html.indexOf("workspace-sidebar__links"),
+      html.indexOf("workspace-sidebar__compact"),
+    );
+    expect(sidebar.match(/>Approvals</gu)).toHaveLength(1);
   });
 });

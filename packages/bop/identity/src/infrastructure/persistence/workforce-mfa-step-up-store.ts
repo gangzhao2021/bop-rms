@@ -278,16 +278,19 @@ export function createPostgresLatestWorkforceStepUpSource(options: {
   };
 }
 
-/** Most recent second-factor verification: enrollment or a later step-up. Only a currently
- * enrolled (TotpVerified) actor has one; a reset enrollment voids earlier step-ups. */
+/** Most recent second-factor verification: the enrollment verification (when currently
+ * TotpVerified) or the latest verified step-up. A step-up is itself an evidenced TOTP check of the
+ * actor's registered factor by Identity, so it counts whatever the enrollment status, except one
+ * made before a factor reset (reset voids earlier verifications). */
 export function resolveRecentWorkforceMfaAt(input: {
   readonly status: string;
   readonly verifiedAt: string | null;
   readonly resetAt: string | null;
   readonly latestStepUpAt: string | null;
 }): string | null {
-  if (input.status !== "TotpVerified" || input.verifiedAt === null) return null;
-  const candidates = [input.verifiedAt];
+  const candidates: string[] = [];
+  if (input.status === "TotpVerified" && input.verifiedAt !== null)
+    candidates.push(input.verifiedAt);
   if (
     input.latestStepUpAt !== null &&
     (input.resetAt === null || input.latestStepUpAt > input.resetAt)
