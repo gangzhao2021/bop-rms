@@ -136,6 +136,10 @@ const ReservationDetailPage = lazyPage(
 const ReservationListPage = lazyPage(() => import("./ReservationPages.js"), "ReservationListPage");
 const WaitlistBoardPage = lazyPage(() => import("./WaitlistPages.js"), "WaitlistBoardPage");
 const CapacityPolicyPage = lazyPage(() => import("./CapacityPolicyPage.js"), "CapacityPolicyPage");
+const StaffOrderEntryPage = lazyPage(
+  () => import("./StaffOrderEntryPage.js"),
+  "StaffOrderEntryPage",
+);
 const StockOverviewPage = lazyPage(() => import("./InventoryPages.js"), "StockOverviewPage");
 const InventoryItemStockHistoryPage = lazyPage(
   () => import("./InventoryMovementPages.js"),
@@ -913,7 +917,24 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         <Route path="/operations/delivery" element={<DeliveryDispatchPage />} />
         <Route path="/operations/delivery/:id" element={<DeliveryDetailPage />} />
         <Route path="/operations/delivery/exceptions" element={<DeliveryExceptionPage />} />
-        {/* WP-2423 Q7: /operations/order-entry stays unrouted until staff ordering has a backend and payment path. */}
+        {/* WP-2423 Q7: a pickup order taken at the counter, paid on the store's card machine. */}
+        <Route
+          path="/operations/order-entry"
+          element={
+            demo === null && state.kind === "Ready" && !state.switching ? (
+              <StaffOrderEntryPage
+                key={state.workspace.selectedScope.storeReference + state.csrf}
+                storeLabel={state.workspace.selectedScope.storeLabel}
+                csrf={state.csrf}
+                timeZone={state.workspace.selectedScope.timeZone}
+              />
+            ) : (
+              <StatePanel heading="Counter order unavailable" status>
+                <p>A current merchant session and Store are required.</p>
+              </StatePanel>
+            )
+          }
+        />
         <Route path="/operations/inventory" element={<StockOverviewPage />} />
         <Route
           path="/operations/inventory/counts"

@@ -9,6 +9,7 @@ import {
   type CartAggregate,
   type OrderingInstant,
   type OrderingReference,
+  isGuestCartChannel,
 } from "../domain/cart.js";
 import { expireCartLifecycle, terminateCartLifecycle } from "../domain/cart-lifecycle.js";
 import type {
@@ -92,7 +93,7 @@ function guestForCart(
       parseOrderingReference(session.brandReference) !== cart.brandReference ||
       parseOrderingReference(session.storeReference) !== cart.storeReference ||
       session.channel !== cart.orderType ||
-      !["Qr", "Web"].includes(cart.sourceChannel) ||
+      !isGuestCartChannel(cart.orderType, cart.sourceChannel) ||
       (cart.orderType === "Pickup" &&
         (sessionReference !== cart.createdByActorReference ||
           session.diningState !== "ContextOnly" ||

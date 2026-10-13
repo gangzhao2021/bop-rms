@@ -6,6 +6,7 @@ import {
   parseOrderingHash,
   parseOrderingInstant,
   parseOrderingReference,
+  isGuestCartChannel,
 } from "../../domain/cart.js";
 import {
   parseAnyCartQuoteAttachment,
@@ -322,7 +323,7 @@ function createQuoteStore<V extends 1 | 2>(
           assertCartLifecycleActive(cart.lifecycle, next.attachedAt);
           if (
             Date.parse(next.attachedAt) < Date.parse(cart.updatedAt) ||
-            !["Qr", "Web"].includes(cart.sourceChannel) ||
+            !isGuestCartChannel(cart.orderType, cart.sourceChannel) ||
             (cart.orderType === "Pickup" &&
               cart.createdByActorReference !== next.guestSessionReference) ||
             cart.items.length !== next.lines.length

@@ -103,7 +103,8 @@ function resultStatus(value: unknown): CustomerMenuQueryResult["status"] | null 
     : null;
 }
 
-function publicFound(value: CustomerMenuFound): CustomerMenuFound {
+/** The customer-facing menu fields only (also the counter item picker, WP-2423 Q7). */
+export function publicFound(value: CustomerMenuFound): CustomerMenuFound {
   return {
     status: "Found",
     schemaVersion: value.schemaVersion,

@@ -6,6 +6,7 @@ import {
   CheckoutValidationError,
   type CheckoutValidationPorts,
   type ConfiguredCheckoutValidationPorts,
+  isGuestCartChannel,
 } from "@rms/ordering";
 import type { CustomerCheckoutSessionOptions } from "./customer-checkout-session-composition.js";
 import type { CustomerPickupOrderSubmissionOptions } from "./customer-pickup-order-submission-composition.js";
@@ -106,7 +107,7 @@ function create<V extends 1 | 2>(
           link.cartVersion !== command.cartVersion ||
           link.quoteReference !== command.quoteReference ||
           command.orderType !== "Pickup" ||
-          !["Qr", "Web"].includes(command.sourceChannel) ||
+          !isGuestCartChannel(command.orderType, command.sourceChannel) ||
           command.observedAt < link.preparedAt ||
           String(command.observedAt) > String(now()) ||
           String(now()) >= String(link.validUntil)

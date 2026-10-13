@@ -13,6 +13,9 @@ const d = vi.hoisted(() => ({
   positionFactory: vi.fn(),
   lines: vi.fn(),
   releaseLines: vi.fn(),
+  cardMachine: vi.fn(),
+  cardMachinePayment: vi.fn(),
+  cardMachineRefunds: vi.fn(),
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => d.scope }));
 vi.mock("@rms/ordering", async (original) => ({
@@ -27,6 +30,7 @@ vi.mock("@rms/kitchen", async (original) => ({
 vi.mock("@rms/payment", async (original) => ({
   ...(await original<object>()),
   createPostgresPaymentCompensationRefundPositionSource: d.positionFactory,
+  createPostgresCardMachinePaymentStore: d.cardMachine,
 }));
 vi.mock("./submission-inventory-release.js", () => ({
   createSubmissionInventoryRelease: d.releaseFactory,
@@ -66,6 +70,13 @@ function setup() {
     allowed,
   });
   d.ordering.mockReturnValue({ loadByOperation: d.load, prepare: d.prepare, commit: d.commit });
+  // WP-2423 Q7: an online payment unless a test pays the Batch on the card machine.
+  d.cardMachine.mockReturnValue({
+    loadByBatch: d.cardMachinePayment,
+    refunds: d.cardMachineRefunds,
+  });
+  d.cardMachinePayment.mockResolvedValue(null);
+  d.cardMachineRefunds.mockResolvedValue([]);
   d.load.mockResolvedValue(null);
   d.prepare.mockResolvedValue({ status: "Ready", plan: { synthetic: "plan" } });
   d.commit.mockResolvedValue({ status: "Created", record });
@@ -114,6 +125,8 @@ it("WP-2423 Q6: cancels kitchen, Ordering and stock in one transaction with serv
     orderBatchReference: id(6),
     cancelledAt: at,
     refundStatus: "Pending",
+    refundMethod: "Online",
+    refundAmountMinor: null,
   });
   expect(f.run).toHaveBeenCalledTimes(1);
   expect(d.scope.mock.calls[0]?.[2]).toBe(staffOrderCancellationPermission);
@@ -191,6 +204,33 @@ it("WP-2423 Q6: replays the same staff command without writing and reports the r
   await expect(
     f.operation({ ...f.input, command: { ...f.input.command, reasonCode: "STORE_ERROR" } }),
   ).rejects.toMatchObject({ code: "ORDER_CANCELLATION_NOT_CANCELLABLE" });
+});
+
+it("WP-2423 Q7: a Batch paid on the store's card machine is refunded on that machine", async () => {
+  const f = setup();
+  d.cardMachinePayment.mockResolvedValue({
+    cardMachinePaymentReference: id(8),
+    preparation: { total: { amountMinor: 1280n, currencyCode: "CAD" } },
+  });
+  expect(await f.operation(f.input)).toMatchObject({
+    status: "Cancelled",
+    refundStatus: "Pending",
+    refundMethod: "CardMachine",
+    refundAmountMinor: "1280",
+  });
+  // Never the Provider compensation position for a card-machine payment.
+  expect(d.positionFactory).not.toHaveBeenCalled();
+  d.load.mockResolvedValue(record);
+  d.cardMachineRefunds.mockResolvedValue([
+    { sourceKind: "StaffCancellation", sourceReference: id(30), amountMinor: 1280n },
+  ]);
+  expect(await f.operation(f.input)).toMatchObject({
+    status: "AlreadyCancelled",
+    refundStatus: "Refunded",
+    refundMethod: "CardMachine",
+    refundAmountMinor: "1280",
+  });
+  expect(d.positionFactory).not.toHaveBeenCalled();
 });
 
 it("WP-2423 Q6: refuses invalid intent, withdrawn permission and ineligible orders", async () => {

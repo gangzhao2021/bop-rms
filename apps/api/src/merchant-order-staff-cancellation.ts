@@ -13,7 +13,10 @@ import {
   type StaffOrderCancellationReasonCode,
   type StaffOrderCancellationRecord,
 } from "@rms/ordering";
-import { createPostgresPaymentCompensationRefundPositionSource } from "@rms/payment";
+import {
+  createPostgresCardMachinePaymentStore,
+  createPostgresPaymentCompensationRefundPositionSource,
+} from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -52,6 +55,52 @@ export interface StaffOrderCancellationResult {
   readonly orderBatchReference: string;
   readonly cancelledAt: string;
   readonly refundStatus: StaffOrderRefundStatus;
+  /** WP-2423 Q7: a payment taken on the Store's card machine is refunded on that machine by staff. */
+  readonly refundMethod: "Online" | "CardMachine";
+  /** CardMachine: the amount staff refund (pending) or refunded on the machine. */
+  readonly refundAmountMinor: string | null;
+}
+
+/**
+ * WP-2423 Q7: refund of a staff-cancelled Batch paid on the Store's card machine (whole remaining
+ * payment, tip included, as for an online payment). Null when the Batch was paid online.
+ */
+export async function readCardMachineCancellationRefund(
+  transaction: ConsumerTransaction,
+  scope: { brandReference: string; storeReference: string },
+  record: Pick<
+    StaffOrderCancellationRecord,
+    "orderReference" | "orderBatchReference" | "cancellationReference"
+  >,
+  authorize: () => Promise<boolean>,
+): Promise<{
+  readonly status: StaffOrderRefundStatus;
+  readonly amountMinor: string;
+  readonly cardMachinePaymentReference: string;
+} | null> {
+  const store = createPostgresCardMachinePaymentStore({
+    scope,
+    authorize: async (_tx, value) =>
+      value.orderReference === String(record.orderReference) && (await authorize()),
+  });
+  const payment = await store.loadByBatch(
+    transaction,
+    String(record.orderReference),
+    String(record.orderBatchReference),
+  );
+  if (payment === null) return null;
+  const refunds = await store.refunds(transaction, payment.cardMachinePaymentReference);
+  const own = refunds.find(
+    (refund) =>
+      refund.sourceKind === "StaffCancellation" &&
+      refund.sourceReference === String(record.cancellationReference),
+  );
+  const refunded = refunds.reduce((sum, refund) => sum + refund.amountMinor, 0n);
+  return Object.freeze({
+    status: own === undefined ? ("Pending" as const) : ("Refunded" as const),
+    amountMinor: (own?.amountMinor ?? payment.preparation.total.amountMinor - refunded).toString(),
+    cardMachinePaymentReference: payment.cardMachinePaymentReference,
+  });
 }
 
 /** WP-2423 Q8: how much of a staff-cancelled batch's capture is refunded and still pending. */
@@ -193,10 +242,13 @@ export function createMerchantOrderStaffCancellation(options: {
           status: "Cancelled" | "AlreadyCancelled",
           record: StaffOrderCancellationRecord,
         ) => {
+          const card = await readCardMachineCancellationRefund(tx, selected, record, allowed);
           const refundStatus =
-            status === "Cancelled"
-              ? ("Pending" as const)
-              : await readStaffCancellationRefundStatus(tx, selected, record, allowed);
+            card !== null
+              ? card.status
+              : status === "Cancelled"
+                ? ("Pending" as const)
+                : await readStaffCancellationRefundStatus(tx, selected, record, allowed);
           if (!(await allowed())) return fail("ORDER_CANCELLATION_PERMISSION_DENIED");
           return Object.freeze({
             status,
@@ -204,6 +256,8 @@ export function createMerchantOrderStaffCancellation(options: {
             orderBatchReference,
             cancelledAt: String(record.cancelledAt),
             refundStatus,
+            refundMethod: card === null ? ("Online" as const) : ("CardMachine" as const),
+            refundAmountMinor: card?.amountMinor ?? null,
           });
         };
         // Replay of the same staff command: the original outcome, nothing written.

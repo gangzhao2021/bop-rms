@@ -2,6 +2,7 @@ import {
   parseCartAggregate,
   parseOrderingReference,
   parseOrderingInstant,
+  isGuestCartChannel,
 } from "../domain/cart.js";
 import { parseCartQuoteAttachmentOfVersion } from "../domain/cart-quote-attachment.js";
 import { assertCartLifecycleActive } from "../domain/cart-lifecycle.js";
@@ -63,7 +64,7 @@ function resolveVersionedPickupCapacityCartSource(value: unknown, quoteVersion: 
       cart.createdByActorReference !== guest ||
       cart.orderType !== "Pickup" ||
       cart.diningSessionReference !== null ||
-      !["Qr", "Web"].includes(cart.sourceChannel) ||
+      !isGuestCartChannel(cart.orderType, cart.sourceChannel) ||
       cart.items.length === 0 ||
       cart.updatedAt > at ||
       quote.brandReference !== brand ||

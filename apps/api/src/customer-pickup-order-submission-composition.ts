@@ -19,6 +19,7 @@ import {
   type CheckoutValidationPorts,
   type CapacityLinkedOrderCreationPorts,
   type OrderCapacityLink,
+  isGuestCartChannel,
 } from "@rms/ordering";
 import {
   createCustomerPickupCheckoutComposition,
@@ -137,7 +138,7 @@ function createVersionedCustomerPickupOrderSubmissionComposition<V extends 1 | 2
                       request.cartVersion !== link.cartVersion ||
                       request.quoteReference !== link.quoteReference ||
                       request.orderType !== "Pickup" ||
-                      !["Qr", "Web"].includes(request.sourceChannel) ||
+                      !isGuestCartChannel(request.orderType, request.sourceChannel) ||
                       request.observedAt < link.preparedAt ||
                       request.observedAt > at ||
                       at >= link.validUntil

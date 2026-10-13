@@ -23,7 +23,10 @@ export function createInternalInventoryEvidence(resources, installed) {
     resolveExpiryCutoff: createInternalExpiryCutoff(resources),
   });
 }
-export async function createInternalTestItems(resources, installed) {
+/** sourceChannel: "Qr" for the customer app; "Pos" for a counter order staff take (WP-2423 Q7). */
+export async function createInternalTestItems(resources, installed, sourceChannel = "Qr") {
+  if (sourceChannel !== "Qr" && sourceChannel !== "Pos")
+    throw new Error("INTERNAL_ITEMS_CHANNEL_INVALID");
   const saved = checkedInventory(resources, installed);
   const reads = createInternalReadTransactions(resources);
   const evidence = (request, kind, status) => ({
@@ -46,7 +49,7 @@ export async function createInternalTestItems(resources, installed) {
       catalogTransactions: reads,
       catalogScope: {
         menuReference: resources.menu.menuReference,
-        sourceChannel: "Qr",
+        sourceChannel,
         channelCode: "CUSTOMER_PWA",
         orderTypeCode: "PICKUP",
       },
@@ -59,7 +62,7 @@ export async function createInternalTestItems(resources, installed) {
           evidence: createInternalInventoryEvidence(resources, installed),
           transactions: reads,
           menuReference: resources.menu.menuReference,
-          sourceChannel: "Qr",
+          sourceChannel,
         }),
       },
       selectedInventory: {

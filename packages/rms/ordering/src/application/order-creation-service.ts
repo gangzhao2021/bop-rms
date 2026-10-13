@@ -19,6 +19,7 @@ import {
   type CartAggregate,
   type OrderingInstant,
   type OrderingReference,
+  isGuestCartChannel,
 } from "../domain/cart.js";
 import {
   CheckoutValidationError,
@@ -141,7 +142,7 @@ function authorizedForEvidence(
       parseOrderingReference(value.brandReference) !== evidence.brandReference ||
       parseOrderingReference(value.storeReference) !== evidence.storeReference ||
       value.channel !== evidence.orderType ||
-      !["Qr", "Web"].includes(evidence.sourceChannel)
+      !isGuestCartChannel(evidence.orderType, evidence.sourceChannel)
     )
       throw new Error("denied");
   } catch {

@@ -148,6 +148,64 @@ export function SettlementReport({
           <span className="overview-count__detail">Captured minus refunded</span>
         </li>
       </ul>
+      {/* WP-2423 Q7: the Store's own card machine, kept apart to match its batch total. */}
+      {view.cardMachine === undefined ? null : view.cardMachine === null ? (
+        <p className="bop-muted" role="status">
+          Card-machine payments could not be read.
+        </p>
+      ) : (
+        <section
+          className="store-card settlement__card-machine"
+          aria-labelledby="settlement-card-machine"
+        >
+          <header>
+            <h3 id="settlement-card-machine">Store card machine</h3>
+          </header>
+          <ul className="overview-counts settlement__totals" aria-label="Card machine totals">
+            <li>
+              <span className="overview-count__label">Taken on card machine</span>
+              <strong className="overview-count__value">{money(view.cardMachine.taken)}</strong>
+              <span className="overview-count__detail">
+                {view.cardMachine.taken.count} payment
+                {view.cardMachine.taken.count === 1 ? "" : "s"} · tips{" "}
+                {formatSettlementMoney(view.cardMachine.tipMinor)}
+              </span>
+            </li>
+            <li>
+              <span className="overview-count__label">Refunded on card machine</span>
+              <strong className="overview-count__value">{money(view.cardMachine.refunded)}</strong>
+              <span className="overview-count__detail">
+                {view.cardMachine.refunded.count} refund
+                {view.cardMachine.refunded.count === 1 ? "" : "s"}
+              </span>
+            </li>
+            <li>
+              <span className="overview-count__label">Card machine net</span>
+              <strong className="overview-count__value">
+                {formatSettlementMoney(
+                  netMinor(
+                    view.cardMachine.taken.amountMinor,
+                    view.cardMachine.refunded.amountMinor,
+                  ),
+                )}
+              </strong>
+              <span className="overview-count__detail">
+                Compare with the machine&apos;s batch total
+              </span>
+            </li>
+          </ul>
+          {view.cardMachine.recordedAfterOutageCount > 0 ? (
+            <p role="note">
+              {view.cardMachine.recordedAfterOutageCount} payment
+              {view.cardMachine.recordedAfterOutageCount === 1 ? " was" : "s were"} recorded after
+              an outage from paper orders; they count on the day they were paid.
+            </p>
+          ) : null}
+          <p className="bop-muted">
+            Not included in the online totals above or in the payment provider reconciliation.
+          </p>
+        </section>
+      )}
       {view.currentDaySelfApprovedRefunds !== null &&
       view.currentDaySelfApprovedRefunds.count > 0 ? (
         <p role="status" className="settlement__self-approved-today">

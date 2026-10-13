@@ -420,3 +420,6 @@ export {
   type StaffItemCancellationPreparation,
   type StaffItemCancellationNotEligibleReason,
 } from "./infrastructure/persistence/staff-item-cancellation-store.js";
+
+// WP-2423 Q7: staff-taken counter pickup orders.
+export * from "./infrastructure/persistence/counter-order-entry-store.js";

@@ -39,6 +39,7 @@ async function prove(context) {
       { table_name: "checkout_details_record" },
       { table_name: "checkout_session_allocation" },
       { table_name: "checkout_session_record" },
+      { table_name: "counter_order_entry" },
       { table_name: "digital_receipt_record" },
       { table_name: "dining_cart_operation" },
       { table_name: "dining_cart_replacement" },

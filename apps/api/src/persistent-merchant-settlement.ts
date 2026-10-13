@@ -1,6 +1,7 @@
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
+  createPostgresCardMachinePaymentStore,
   createPostgresConfirmedCompensationRefundSource,
   createPostgresOrdinaryRefundWindowSource,
   createPostgresPaymentCaptureWindowSource,
@@ -301,6 +302,32 @@ export function createPersistentMerchantSettlement(options: {
             count: summary.count,
             amountMinor: summary.amountMinor.toString(),
             currencyCode: summary.currencyCode,
+          };
+        }),
+      // WP-2423 Q7: the Store's own card machine, apart from online takings, by when the money moved.
+      cardMachine: (tx, scope, window) =>
+        optional(async () => {
+          const summary = await createPostgresCardMachinePaymentStore({
+            scope: {
+              tenantReference: scope.tenantReference,
+              brandReference: scope.brandReference,
+              storeReference: scope.storeReference,
+            },
+            authorize: async (t) => t === tx && (await guard(scope)(tx)),
+          }).summarize(tx, { from: window.startsAt, to: window.endsAt });
+          return {
+            taken: {
+              count: summary.paymentCount,
+              amountMinor: summary.takenMinor.toString(),
+              currencyCode: "CAD" as const,
+            },
+            tipMinor: summary.tipMinor.toString(),
+            recordedAfterOutageCount: summary.backEnteredCount,
+            refunded: {
+              count: summary.refundCount,
+              amountMinor: summary.refundedMinor.toString(),
+              currencyCode: "CAD" as const,
+            },
           };
         }),
       reconciliation: (tx, scope, window) =>

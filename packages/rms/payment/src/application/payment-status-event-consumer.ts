@@ -34,6 +34,16 @@ export interface PaymentStatusEventConsumerPorts {
   };
   readonly references: { generateGeneration(): string; now(): string };
   sha256(input: string): string;
+  /**
+   * WP-2423 Q7: whether the event is a payment recorded from the Store's card machine. Such a
+   * payment has no Provider status to project; its owner record is the status source.
+   */
+  readonly cardMachine?: {
+    isCardMachinePayment(
+      transaction: ConsumerTransaction,
+      event: PaymentTerminalEnvelope,
+    ): Promise<boolean>;
+  };
 }
 
 export function createPaymentStatusEventConsumerService(ports: PaymentStatusEventConsumerPorts) {
@@ -62,6 +72,10 @@ export function createPaymentStatusEventConsumerService(ports: PaymentStatusEven
       throw new PaymentStatusProjectionError("PAYMENT_STATUS_VERSION_CONFLICT");
     return projection;
   };
+  const cardMachine = async (tx: ConsumerTransaction, event: PaymentTerminalEnvelope) =>
+    event.eventType === "PaymentSucceeded" &&
+    ports.cardMachine !== undefined &&
+    (await ports.cardMachine.isCardMachinePayment(tx, event)) === true;
   const load = async (tx: ConsumerTransaction, event: PaymentTerminalEnvelope) => {
     const value = await ports.projections.load({
       transaction: tx,
@@ -83,6 +97,11 @@ export function createPaymentStatusEventConsumerService(ports: PaymentStatusEven
       const event = parsePaymentTerminalEnvelope(envelope);
       if (event.eventType !== eventType) return unavailable();
       await authorize(transaction, event);
+      if (await cardMachine(transaction, event)) {
+        const resultHash = ports.sha256("card-machine:" + event.eventId);
+        if (!/^[0-9a-f]{64}$/.test(resultHash)) return unavailable();
+        return { status: "completed", resultHash };
+      }
       let projection = await load(transaction, event);
       if (projection === null) {
         const candidate = buildPaymentStatusProjection({
@@ -120,13 +139,18 @@ export function createPaymentStatusEventConsumerService(ports: PaymentStatusEven
     async consume(transaction: ConsumerTransaction, envelope: PaymentTerminalEnvelope) {
       const event = parsePaymentTerminalEnvelope(envelope);
       await authorize(transaction, event);
-      await load(transaction, event); // Reject changed semantic payload even on an Inbox duplicate.
+      const card = await cardMachine(transaction, event);
+      if (!card) await load(transaction, event); // Reject changed semantic payload even on an Inbox duplicate.
       const selected = registrations.find((value) => value.eventType === event.eventType);
       if (!selected) return unavailable();
       await transaction.query("SAVEPOINT payment_status_event_consumer", []);
       try {
         const result = await consumeEventInTransaction(transaction, selected, event);
-        if (result.status === "duplicate_completed" && (await load(transaction, event)) === null)
+        if (
+          result.status === "duplicate_completed" &&
+          !card &&
+          (await load(transaction, event)) === null
+        )
           return unavailable();
         await transaction.query("RELEASE SAVEPOINT payment_status_event_consumer", []);
         return result;

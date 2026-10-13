@@ -51,7 +51,42 @@ import { createCustomerPickupPaymentAuthorization } from "../../../apps/api/src/
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import pg from "pg";
-import { it } from "vitest";
+import { it, vi } from "vitest";
+import { exerciseCounterCardMachinePayment } from "../test-support/counter-card-machine-payment.mjs";
+
+// WP-2423 Q7: only the counter staff member's merchant session lookup is a test double (the cookie
+// below names a signed-in staff member at this Store); every other cookie, such as the order
+// queue's real Workforce session, goes to the real scope resolution.
+const counterStaff = vi.hoisted(() => ({
+  cookie: "synthetic-counter-staff-session",
+  sessionReference: "01909995-0000-7000-8000-00000000f001",
+  actorReference: "01909995-0000-7000-8000-00000000f002",
+  allowed: true,
+  scope: null,
+}));
+vi.mock("../../../apps/api/src/merchant-store-scope.ts", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    createMerchantStoreScope: (source) => {
+      let real = null;
+      return async (tx, cookie, action, ...rest) => {
+        if (cookie === counterStaff.cookie) {
+          if (action !== "ordering.order.create_staff") throw new Error("unexpected permission");
+          return {
+            actorReference: counterStaff.actorReference,
+            selected: { tenantReference: counterStaff.scope.tenantReference },
+            context: { brand: { brandReference: counterStaff.scope.brandReference } },
+            store: { storeReference: counterStaff.scope.storeReference },
+            allowed: async () => counterStaff.allowed,
+          };
+        }
+        real ??= actual.createMerchantStoreScope(source);
+        return real(tx, cookie, action, ...rest);
+      };
+    },
+  };
+});
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { seedSubmissionCart } from "../test-support/dining-order-submission-seed.mjs";
 import { orderWriteFixture } from "../../rms/ordering/src/tests/order-creation-store.fixture.ts";
@@ -85,13 +120,15 @@ const { Client } = pg;
 const id = (n) => "01902402-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const hash = (value) => "sha256:" + createHash("sha256").update(value).digest("hex");
 it.each([
-  [false, false],
-  [true, false],
-  [false, true],
-  [true, true],
+  [false, false, false],
+  [true, false, false],
+  [false, true, false],
+  [true, true, false],
+  // WP-2423 Q7: a counter (Pos) pickup Cart staff open for a walk-up guest takes the same path.
+  [true, true, true],
 ])(
-  "prepares Pickup through persisted Identity, Cart, Quote and shared capacity with original recovery (configured=%s, positive=%s)",
-  async (configured, positive) => {
+  "prepares Pickup through persisted Identity, Cart, Quote and shared capacity with original recovery (configured=%s, positive=%s, counter=%s)",
+  async (configured, positive, counter) => {
     await withIsolatedDatabase({ caseId: "wp2402_pickup" }, async (env) => {
       const checkoutJourney = { tenantReference: id(1) };
       const admin = new Client(env.clientConfig);
@@ -99,7 +136,7 @@ it.each([
       const at = new Date(Date.now() - 1000).toISOString();
       let observedAt = at;
       const shift = (ms) => new Date(Date.parse(at) + ms).toISOString();
-      const f = orderWriteFixture({ at, namespace: "01902402" });
+      const f = orderWriteFixture({ at, namespace: "01902402", pos: counter });
       const cart = f.cart,
         scope = f.scope;
       const roles = ["i", "o", "f", "p", "k", "c", "q", "r"].map(
@@ -1265,37 +1302,58 @@ it.each([
           },
           { sessionCredential, csrfCredential },
         );
-        await exerciseSubmissionInventoryPayment({
-          journey: checkoutJourney,
-          positive,
-          sessionPayment: {
-            access: sessionAccessOptions,
-            orders: sessionOrders,
-            tips: tips,
-            input: tipInput,
-          },
-          admin,
-          runner: runner(roles[1]),
-          role: roles[1],
-          scope: ownerScope,
-          stock,
-          order: sealed.order,
-          clock: sealed.clock,
-          amounts,
-          selection: selected.record,
-          quoteVersion: configured ? 2 : 1,
-          paymentWorkflow: workflow.payment,
-          at: observedAt,
-          authorize: async (_tx, request) => {
-            const access = await claimAccess.authorize({
-              action: "CreatePaymentIntent",
-              submissionReference: request.submissionReference,
-              paymentOperationReference: sealed.clock.paymentOperationReference,
-              observedAt: preparation.now(),
-            });
-            return access !== null && access.guestSessionReference === request.actorReference;
-          },
-        });
+        if (counter) {
+          counterStaff.scope = ownerScope;
+          await exerciseCounterCardMachinePayment({
+            admin,
+            runner: runner(roles[1]),
+            role: roles[1],
+            scope: ownerScope,
+            order: sealed.order,
+            clock: sealed.clock,
+            amounts,
+            selection: selected.record,
+            quoteVersion: configured ? 2 : 1,
+            paymentWorkflow: workflow.payment,
+            authorize: async (_tx, request) =>
+              request.actorReference === guest.session.sessionReference,
+            stock,
+            merchant: counterStaff,
+            at: observedAt,
+            positive,
+          });
+        } else
+          await exerciseSubmissionInventoryPayment({
+            journey: checkoutJourney,
+            positive,
+            sessionPayment: {
+              access: sessionAccessOptions,
+              orders: sessionOrders,
+              tips: tips,
+              input: tipInput,
+            },
+            admin,
+            runner: runner(roles[1]),
+            role: roles[1],
+            scope: ownerScope,
+            stock,
+            order: sealed.order,
+            clock: sealed.clock,
+            amounts,
+            selection: selected.record,
+            quoteVersion: configured ? 2 : 1,
+            paymentWorkflow: workflow.payment,
+            at: observedAt,
+            authorize: async (_tx, request) => {
+              const access = await claimAccess.authorize({
+                action: "CreatePaymentIntent",
+                submissionReference: request.submissionReference,
+                paymentOperationReference: sealed.clock.paymentOperationReference,
+                observedAt: preparation.now(),
+              });
+              return access !== null && access.guestSessionReference === request.actorReference;
+            },
+          });
 
         await assert.rejects(tips.select({ ...tipInput, selectionReference: id(90011) }));
         observedAt = shift(360000);

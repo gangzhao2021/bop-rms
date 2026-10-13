@@ -17,10 +17,12 @@ export interface PaymentIntentAggregate {
   readonly paymentOperationReference: PaymentReference;
   readonly intentDigest: PaymentDigest;
   readonly preparation: OrderPaymentPreparationEvidence;
-  readonly paymentMethod: "OnlineCard";
+  /** WP-2423 Q7: StoreCardMachine is a payment staff took on the Store's own card machine and
+   * recorded; it never has a Provider intent (DEC-COUNTER-PAYMENT-RECORD). */
+  readonly paymentMethod: "OnlineCard" | "StoreCardMachine";
   readonly captureMode: "Automatic";
   readonly aggregateVersion: 1;
-  readonly creationStatus: "ProviderCreatePending";
+  readonly creationStatus: "ProviderCreatePending" | "Recorded";
   readonly createdAt: PaymentInstant;
 }
 
@@ -28,7 +30,7 @@ export interface PaymentAttempt {
   readonly paymentAttemptReference: PaymentReference;
   readonly paymentIntentReference: PaymentReference;
   readonly attemptNumber: 1;
-  readonly provider: "Stripe";
+  readonly provider: "Stripe" | "StoreCardMachine";
   readonly providerEnvironment: "Test" | "Live";
   readonly providerIdempotencyDigest: PaymentDigest;
   readonly createdAt: PaymentInstant;
@@ -133,11 +135,12 @@ function parseIntent(value: unknown): PaymentIntentAggregate {
     "creationStatus",
     "createdAt",
   ]);
+  const cardMachine = raw.paymentMethod === "StoreCardMachine";
   if (
-    raw.paymentMethod !== "OnlineCard" ||
+    (raw.paymentMethod !== "OnlineCard" && !cardMachine) ||
     raw.captureMode !== "Automatic" ||
     raw.aggregateVersion !== 1 ||
-    raw.creationStatus !== "ProviderCreatePending"
+    raw.creationStatus !== (cardMachine ? "Recorded" : "ProviderCreatePending")
   )
     return invalid();
   return Object.freeze({
@@ -145,10 +148,10 @@ function parseIntent(value: unknown): PaymentIntentAggregate {
     paymentOperationReference: parsePaymentReference(raw.paymentOperationReference),
     intentDigest: parsePaymentDigest(raw.intentDigest),
     preparation: parseOrderPaymentPreparationEvidence(raw.preparation),
-    paymentMethod: "OnlineCard",
+    paymentMethod: cardMachine ? "StoreCardMachine" : "OnlineCard",
     captureMode: "Automatic",
     aggregateVersion: 1,
-    creationStatus: "ProviderCreatePending",
+    creationStatus: cardMachine ? "Recorded" : "ProviderCreatePending",
     createdAt: parsePaymentInstant(raw.createdAt),
   });
 }
@@ -165,7 +168,7 @@ function parseAttempt(value: unknown): PaymentAttempt {
   ]);
   if (
     raw.attemptNumber !== 1 ||
-    raw.provider !== "Stripe" ||
+    (raw.provider !== "Stripe" && raw.provider !== "StoreCardMachine") ||
     (raw.providerEnvironment !== "Test" && raw.providerEnvironment !== "Live")
   )
     return invalid();
@@ -173,7 +176,7 @@ function parseAttempt(value: unknown): PaymentAttempt {
     paymentAttemptReference: parsePaymentReference(raw.paymentAttemptReference),
     paymentIntentReference: parsePaymentReference(raw.paymentIntentReference),
     attemptNumber: 1,
-    provider: "Stripe",
+    provider: raw.provider,
     providerEnvironment: raw.providerEnvironment,
     providerIdempotencyDigest: parsePaymentDigest(raw.providerIdempotencyDigest),
     createdAt: parsePaymentInstant(raw.createdAt),
@@ -218,7 +221,9 @@ export function parsePaymentIntentCreationRecord(value: unknown): PaymentIntentC
   const attempt = parseAttempt(raw.attempt);
   if (
     attempt.paymentIntentReference !== intent.paymentIntentReference ||
-    attempt.createdAt !== intent.createdAt
+    attempt.createdAt !== intent.createdAt ||
+    (intent.paymentMethod === "StoreCardMachine") !== (attempt.provider === "StoreCardMachine") ||
+    (intent.paymentMethod === "StoreCardMachine" && raw.providerOutcome !== null)
   )
     return invalid();
   return Object.freeze({

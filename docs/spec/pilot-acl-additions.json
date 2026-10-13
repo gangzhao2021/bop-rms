@@ -2529,6 +2529,60 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner approved 2026-10-13 in session (\"批准\") (WP-2423 Q19 step 2): allergen roster recorded by one person and approved by another (DEC-SOLE-OPERATOR-APPROVAL step 2)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "counter_order_entry",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "PENDING OWNER APPROVAL (WP-2423 Q7): DEC-COUNTER-PAYMENT-RECORD — staff take a pickup order at the counter (or enter a paper order after an outage) and record the payment or refund the Store's own card machine made; the order queue, day-end settlement and worker consumers read them"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "counter_order_entry",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "PENDING OWNER APPROVAL (WP-2423 Q7): DEC-COUNTER-PAYMENT-RECORD — staff take a pickup order at the counter (or enter a paper order after an outage) and record the payment or refund the Store's own card machine made; the order queue, day-end settlement and worker consumers read them"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "card_machine_payment",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "PENDING OWNER APPROVAL (WP-2423 Q7): DEC-COUNTER-PAYMENT-RECORD — staff take a pickup order at the counter (or enter a paper order after an outage) and record the payment or refund the Store's own card machine made; the order queue, day-end settlement and worker consumers read them"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "card_machine_payment",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "PENDING OWNER APPROVAL (WP-2423 Q7): DEC-COUNTER-PAYMENT-RECORD — staff take a pickup order at the counter (or enter a paper order after an outage) and record the payment or refund the Store's own card machine made; the order queue, day-end settlement and worker consumers read them"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "card_machine_refund",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "PENDING OWNER APPROVAL (WP-2423 Q7): DEC-COUNTER-PAYMENT-RECORD — staff take a pickup order at the counter (or enter a paper order after an outage) and record the payment or refund the Store's own card machine made; the order queue, day-end settlement and worker consumers read them"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "card_machine_refund",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "PENDING OWNER APPROVAL (WP-2423 Q7): DEC-COUNTER-PAYMENT-RECORD — staff take a pickup order at the counter (or enter a paper order after an outage) and record the payment or refund the Store's own card machine made; the order queue, day-end settlement and worker consumers read them"
     }
   ]
 }

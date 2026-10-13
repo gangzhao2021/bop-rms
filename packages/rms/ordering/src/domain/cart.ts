@@ -6,6 +6,19 @@ export type OrderingHash = string & { readonly __orderingHash: unique symbol };
 export type CartOrderType = "DineIn" | "Pickup";
 export type CartSourceChannel = "Api" | "Pos" | "Qr" | "Web";
 
+/**
+ * Channels whose carts a guest session operates. WP-2423 Q7: a counter (Pos) cart is a Pickup cart
+ * staff open at the counter for a walk-up guest, under that guest's own session; only Pickup takes
+ * it (staff dine-in ordering is a later slice).
+ */
+export function isGuestCartChannel(orderType: string | undefined, sourceChannel: string): boolean {
+  return (
+    sourceChannel === "Qr" ||
+    sourceChannel === "Web" ||
+    (sourceChannel === "Pos" && orderType === "Pickup")
+  );
+}
+
 export interface CartOptionSelection {
   readonly optionReference: OrderingReference;
   readonly quantity: number;

@@ -25,6 +25,18 @@ export type MerchantSettlementReconciliation = Pick<
   PaymentReconciliationDay,
   "settlement" | "operational" | "differences" | "differenceCount"
 >;
+/**
+ * WP-2423 Q7 (DEC-COUNTER-PAYMENT-RECORD decision 3): payments and refunds on the Store's own card
+ * machine in the day, apart from online (Provider) takings, to match the machine's batch total.
+ */
+export interface MerchantSettlementCardMachine {
+  readonly taken: MerchantSettlementAmount;
+  /** The tips within the takings. */
+  readonly tipMinor: string;
+  /** Payments entered afterwards from paper orders taken during an outage. */
+  readonly recordedAfterOutageCount: number;
+  readonly refunded: MerchantSettlementAmount;
+}
 export interface MerchantSettlementView {
   readonly screenId: "PAY-RECONCILIATION";
   readonly storeLabel: string;
@@ -41,6 +53,8 @@ export interface MerchantSettlementView {
   readonly currentDaySelfApprovedRefunds:
     (MerchantSettlementAmount & { readonly businessDate: string }) | null;
   readonly reconciliation: MerchantSettlementReconciliation | null;
+  /** Null when the source could not answer or is not composed. */
+  readonly cardMachine: MerchantSettlementCardMachine | null;
   readonly projectedAt: string;
 }
 const businessDatePattern = /^\d{4}-\d{2}-\d{2}$/u;
@@ -94,6 +108,11 @@ export function createMerchantSettlementRead(options: {
     tx: ConsumerTransaction,
     scope: MerchantSettlementScope,
   ): Promise<(MerchantSettlementAmount & { readonly businessDate: string }) | null>;
+  cardMachine?(
+    tx: ConsumerTransaction,
+    scope: MerchantSettlementScope,
+    window: MerchantSettlementWindow,
+  ): Promise<MerchantSettlementCardMachine | null>;
   now(): string;
 }) {
   return async (input: {
@@ -133,6 +152,8 @@ export function createMerchantSettlementRead(options: {
         window.status === "Closed" && options.currentDaySelfApprovedRefunds !== undefined
           ? await options.currentDaySelfApprovedRefunds(tx, scope)
           : null;
+      const cardMachine =
+        options.cardMachine === undefined ? null : await options.cardMachine(tx, scope, window);
       const again = await options.authorize(tx, { sessionCookie: input.sessionCookie, permission });
       if (!again || !sameScope(again, scope)) return unavailable();
       return Object.freeze({
@@ -158,6 +179,7 @@ export function createMerchantSettlementRead(options: {
                 differences: reconciliation.differences,
                 differenceCount: reconciliation.differenceCount,
               }),
+        cardMachine,
         projectedAt: options.now(),
       });
     });

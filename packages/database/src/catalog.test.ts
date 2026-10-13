@@ -680,6 +680,8 @@ describe("migration catalog", () => {
       "2000_035_alter_recipe_review_mode",
       "2000_036_create_allergen_registry_proposal",
       "2000_037_alter_option_recipe_review_mode",
+      "2000_038_create_card_machine_payment",
+      "2000_039_create_counter_order_entry",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

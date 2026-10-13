@@ -13,6 +13,7 @@ import {
   parseOrderingInstant,
   parseOrderingReference,
   type CartAggregate,
+  isGuestCartChannel,
 } from "../../domain/cart.js";
 import { createActiveCartLifecycle } from "../../domain/cart-lifecycle.js";
 import {
@@ -138,7 +139,7 @@ export function createPostgresPickupCartBindingStore(
   createActiveCartLifecycle({ ...policy, startedAt: validFrom });
   if (
     Date.parse(validUntil) <= Date.parse(validFrom) ||
-    !["Qr", "Web"].includes(options.sourceChannel)
+    !isGuestCartChannel("Pickup", options.sourceChannel)
   )
     fail();
   const sourceChannel = options.sourceChannel;

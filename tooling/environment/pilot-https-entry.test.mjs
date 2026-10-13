@@ -114,6 +114,7 @@ it("preserves configured refund roles, provider and Pickup workstation without g
   expect(Object.keys(dependencies).sort()).toEqual(
     [
       "cancellationRefundProvider",
+      "createInternalCounterOrder",
       "exceptionPaymentMode",
       "providerAccountReference",
       "expectedDatabaseName",

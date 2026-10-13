@@ -13,6 +13,7 @@ import {
 } from "./StaffItemCancelAction.js";
 import { orderMoney } from "./order-money.js";
 export { orderMoney } from "./order-money.js";
+import { CardMachineRefundAction } from "./CardMachineRefundAction.js";
 import { createOrderAcceptanceClient } from "./order-acceptance-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { StatePanel } from "@bop-rms/ui";
@@ -270,6 +271,16 @@ export function unpaidCancelledBatches(view: CurrentOrderQueue): ReadonlySet<str
   );
 }
 
+/**
+ * WP-2423 Q7: a paid counter order the store could not fulfil is refunded on the card machine by
+ * staff (not automatically); what is still owed, or null when nothing is.
+ */
+export function cardMachineOwed(order: CurrentOrderQueue["items"][number]): string | null {
+  const paid = order.counter?.paidOnCardMachine;
+  if (order.unfulfillable === null || !paid) return null;
+  const owed = BigInt(paid.amountMinor) - BigInt(paid.refundedMinor);
+  return owed > 0n ? owed.toString() : null;
+}
 /** Staff-facing words for an order's type and the channel it came in through (never codes). */
 export const orderTypeLabel = { DineIn: "Dine-in", Pickup: "Pickup" } as const;
 export function orderChannelLabel(channel: string): string {
@@ -278,7 +289,7 @@ export function orderChannelLabel(channel: string): string {
     : channel === "Web"
       ? "Website"
       : channel === "Pos"
-        ? "Point of sale"
+        ? "Counter"
         : channel === "Api"
           ? "Partner integration"
           : "Other";
@@ -480,11 +491,15 @@ export function CurrentOrderQueueRows({
               }
             >
               {order.awaitingPayment
-                ? "Awaiting payment"
+                ? order.counter !== null
+                  ? "Awaiting card-machine payment"
+                  : "Awaiting payment"
                 : order.pickupNotCollected
                   ? "Not collected"
                   : order.unfulfillable !== null
-                    ? "Expired · refunded"
+                    ? cardMachineOwed(order) !== null
+                      ? "Expired · refund on card machine"
+                      : "Expired · refunded"
                     : order.currentPhase === "InProgress"
                       ? "In progress"
                       : (order.currentPhase ?? "Status unavailable")}
@@ -511,6 +526,21 @@ export function CurrentOrderQueueRows({
               {order.orderType === "Pickup" && order.batches[0]?.staffCancellation ? (
                 <span className="order-staff-cancelled">
                   {staffCancellationSummary(order, order.batches[0])}
+                </span>
+              ) : null}
+              {/* WP-2423 Q7: a counter order — paid on the Store's card machine, or a paper order. */}
+              {order.counter?.paidOnCardMachine ? (
+                <span className="order-counter-paid">
+                  Paid on card machine{" "}
+                  {orderMoney({
+                    amountMinor: order.counter.paidOnCardMachine.amountMinor,
+                    currencyCode: "CAD",
+                  })}
+                </span>
+              ) : null}
+              {order.counter?.recordedAfterOutage ? (
+                <span className="order-counter-outage" data-tier="warning">
+                  Recorded after outage
                 </span>
               ) : null}
               {now === undefined ? null : <AcceptanceDeadline order={order} now={now} />}
@@ -562,6 +592,20 @@ export function CurrentOrderQueueRows({
                 </dd>
               </div>
             </dl>
+            {order.counter !== null ? (
+              <p className="order-counter-note" role="note">
+                Taken at the counter.{" "}
+                {order.counter.paidOnCardMachine === null
+                  ? "Not paid yet: charge it on the card machine from Counter order."
+                  : `Paid on the store's card machine (${orderMoney({
+                      amountMinor: order.counter.paidOnCardMachine.amountMinor,
+                      currencyCode: "CAD",
+                    })}) at ${storeTime(order.counter.paidOnCardMachine.takenAt, timeZone, true)}.`}
+                {order.counter.recordedAfterOutage
+                  ? " Recorded after an outage from a paper order: it may already have been made and handed over."
+                  : ""}
+              </p>
+            ) : null}
             {order.pickupNotCollected ? (
               <p className="order-workbench-closed" role="note">
                 Closed as not collected after the pickup hold. It was not refunded automatically; a
@@ -570,8 +614,15 @@ export function CurrentOrderQueueRows({
             ) : null}
             {order.unfulfillable !== null ? (
               <p className="order-workbench-closed" role="note">
-                {unfulfillableText[order.unfulfillable]} The payment was refunded automatically;
-                this order cannot be accepted.
+                {unfulfillableText[order.unfulfillable]}{" "}
+                {order.counter?.paidOnCardMachine
+                  ? cardMachineOwed(order) !== null
+                    ? `It was paid on the store's card machine: refund ${orderMoney({
+                        amountMinor: cardMachineOwed(order) ?? "0",
+                        currencyCode: "CAD",
+                      })} on the card machine, then record it here.`
+                    : "It was refunded on the store's card machine."
+                  : "The payment was refunded automatically; this order cannot be accepted."}
               </p>
             ) : null}
             {detail?.(order, opened.has(order.orderReference) || view.items.length === 1)}
@@ -591,9 +642,16 @@ export function CurrentOrderQueueRows({
                       </time>
                     </span>
                     <span>
-                      {batch.staffCancellation.refundStatus === "Refunded"
-                        ? "The payment, including any tip, was refunded in full."
-                        : "The payment, including any tip, is being refunded in full."}
+                      {batch.staffCancellation.refundMethod === "CardMachine"
+                        ? batch.staffCancellation.refundStatus === "Refunded"
+                          ? "Refunded in full on the store's card machine, including any tip."
+                          : `Refund ${orderMoney({
+                              amountMinor: batch.staffCancellation.refundAmountMinor ?? "0",
+                              currencyCode: "CAD",
+                            })} on the store's card machine, then record it here.`
+                        : batch.staffCancellation.refundStatus === "Refunded"
+                          ? "The payment, including any tip, was refunded in full."
+                          : "The payment, including any tip, is being refunded in full."}
                     </span>
                   </p>
                 ) : batch.acceptanceStatus === "Cancelled" ? (
@@ -648,7 +706,17 @@ export function CurrentOrderDetails({
   return (
     <>
       {lines}
-      <OrderPaymentLinks orderReference={order.orderReference} csrf={csrf} fetcher={fetcher} />
+      {order.counter?.paidOnCardMachine ? (
+        // WP-2423 Q7: refunds of a card-machine payment are made on that machine. Cancelling before
+        // the kitchen starts records the full refund; partial refunds come in a later step.
+        <p className="order-counter-note" role="note">
+          Paid on the store&apos;s card machine. To refund it in full before the kitchen starts,
+          cancel the order and refund on the card machine. A partial refund after that is made on
+          the card machine by a manager, who keeps the slip for the day-end count.
+        </p>
+      ) : (
+        <OrderPaymentLinks orderReference={order.orderReference} csrf={csrf} fetcher={fetcher} />
+      )}
       {order.orderType === "DineIn" && order.currentPhase !== "Cancelled" ? (
         <DiningOrderProgress
           orderReference={order.orderReference}
@@ -933,7 +1001,7 @@ export function CurrentOrderQueuePage({
                 >
                   <option value="All">All channels</option>
                   <option value="Api">Partner integration</option>
-                  <option value="Pos">Point of sale</option>
+                  <option value="Pos">Counter</option>
                   <option value="Qr">QR code</option>
                   <option value="Web">Website</option>
                 </select>
@@ -1022,7 +1090,21 @@ export function CurrentOrderQueuePage({
                 />
               )}
               action={(order, batch) =>
-                batch.canCancel || batch.canCancelItems ? (
+                (batch.staffCancellation?.refundMethod === "CardMachine" &&
+                  batch.staffCancellation.refundStatus === "Pending") ||
+                (batch.sequence === 1 && cardMachineOwed(order) !== null) ? (
+                  <fieldset disabled={servingBusy}>
+                    <CardMachineRefundAction
+                      key={"card-refund-" + batch.orderBatchReference}
+                      order={order}
+                      batch={batch}
+                      owedMinor={cardMachineOwed(order)}
+                      csrf={csrf}
+                      fetcher={fetcher}
+                      onSettled={() => reload(after)}
+                    />
+                  </fieldset>
+                ) : batch.canCancel || batch.canCancelItems ? (
                   <fieldset disabled={servingBusy} className="order-cancel-actions">
                     {batch.canCancel ? (
                       <StaffOrderCancelAction

@@ -194,6 +194,16 @@ import {
   StaffItemCancellationError,
   type createMerchantOrderItemStaffCancellation,
 } from "./merchant-order-item-staff-cancellation.js";
+import { CounterMenuError, type createMerchantCounterMenu } from "./merchant-counter-menu.js";
+import { CounterOrderError, type createMerchantCounterOrder } from "./merchant-counter-order.js";
+import {
+  CardMachinePaymentCommandError,
+  type createMerchantCardMachinePayment,
+} from "./merchant-card-machine-payment.js";
+import {
+  CardMachineRefundCommandError,
+  type createMerchantCardMachineCancellationRefund,
+} from "./merchant-card-machine-refund.js";
 import { PickupHandoffError, PickupProofError } from "@rms/fulfillment";
 import { UnmatchedCaptureRefundError } from "@rms/payment";
 import type { createMerchantUnmatchedCaptureRefund } from "./merchant-unmatched-capture-refund.js";
@@ -326,6 +336,8 @@ const merchantNavigation = Object.freeze({
   "CAT-AVAILABILITY": ["/app/commerce/availability", "catalog.sku.read"],
   "TAX-CONFIG": ["/app/commerce/tax", "pricing.tax-config.manage"],
   "OPS-ORDER-QUEUE": ["/operations/orders", "ordering.operate"],
+  // WP-2423 Q7: staff take a pickup order at the counter (Section 88 OPS-ORDER-ENTRY).
+  "OPS-ORDER-ENTRY": ["/operations/order-entry", "ordering.order.create_staff"],
   "OPS-ORDER-EXCEPTION": ["/operations/order-exceptions", "operations.order-exception.manage"],
   // WP-2423 P1: day-end settlement (Section 88 PAY-RECONCILIATION) under the pilot's exception permission.
   "PAY-RECONCILIATION": [
@@ -507,6 +519,14 @@ export interface MerchantBffRouterOptions {
   readonly orderStaffCancellation?: ReturnType<typeof createMerchantOrderStaffCancellation>;
   /** WP-2423 Q6 step 2a: staff cancel item lines before the kitchen starts them. */
   readonly orderItemStaffCancellation?: ReturnType<typeof createMerchantOrderItemStaffCancellation>;
+  /** WP-2423 Q7: the pickup menu staff take a counter order from (as customers see it now). */
+  readonly counterMenu?: ReturnType<typeof createMerchantCounterMenu>;
+  /** WP-2423 Q7: staff take a pickup order at the counter or enter a paper order afterwards. */
+  readonly counterOrder?: ReturnType<typeof createMerchantCounterOrder>;
+  /** WP-2423 Q7: staff record a payment the Store's card machine approved. */
+  readonly cardMachinePayment?: ReturnType<typeof createMerchantCardMachinePayment>;
+  /** WP-2423 Q7: staff record the card-machine refund of a cancelled card-machine order. */
+  readonly cardMachineRefund?: ReturnType<typeof createMerchantCardMachineCancellationRefund>;
   /** WP-2423 P6: refund a Provider capture that matches no payment or Order. */
   readonly unmatchedCaptureRefund?: ReturnType<typeof createMerchantUnmatchedCaptureRefund>;
   /** WP-2423 Q5: the signed-in staff member re-verifies a second factor (MFA step-up). */
@@ -1582,6 +1602,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             pickupNotCollected: item.pickupNotCollected,
             acceptBy: item.acceptBy,
             awaitingPayment: item.awaitingPayment,
+            // WP-2423 Q7: a staff-taken counter order and its card-machine payment.
+            counter: item.counter,
             batches: item.batches.map((batch) => ({
               orderBatchReference: batch.orderBatchReference,
               sequence: batch.sequence,
@@ -1600,6 +1622,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
                       reasonCode: batch.staffCancellation.reasonCode,
                       cancelledAt: batch.staffCancellation.cancelledAt,
                       refundStatus: batch.staffCancellation.refundStatus,
+                      refundMethod: batch.staffCancellation.refundMethod,
+                      refundAmountMinor: batch.staffCancellation.refundAmountMinor,
                     },
             })),
             currentPhase: item.currentPhase,
@@ -1649,6 +1673,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             pickupNotCollected: item.pickupNotCollected,
             acceptBy: item.acceptBy,
             awaitingPayment: item.awaitingPayment,
+            // WP-2423 Q7: a staff-taken counter order and its card-machine payment.
+            counter: item.counter,
             batches: item.batches.map((batch) => ({
               orderBatchReference: batch.orderBatchReference,
               sequence: batch.sequence,
@@ -1667,6 +1693,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
                       reasonCode: batch.staffCancellation.reasonCode,
                       cancelledAt: batch.staffCancellation.cancelledAt,
                       refundStatus: batch.staffCancellation.refundStatus,
+                      refundMethod: batch.staffCancellation.refundMethod,
+                      refundAmountMinor: batch.staffCancellation.refundAmountMinor,
                     },
             })),
             currentPhase: item.currentPhase,
@@ -9591,6 +9619,199 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       .catch(() => denied(response));
   });
 
+  // WP-2423 Q7: the counter item picker — the pickup menu customers see now, under staff ordering.
+  router.get("/counter/menu", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    if (
+      request.method !== "GET" ||
+      request.body !== undefined ||
+      sessionCookie === null ||
+      Object.keys(request.query).length !== 0 ||
+      rawHeaderValues(request, "origin").length > 1 ||
+      rawHeaderValues(request, "sec-fetch-site").length !== 1
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.counterMenu) {
+      response.status(503).json({ error: "counter_menu_unavailable" });
+      return;
+    }
+    void options
+      .counterMenu({ sessionCookie })
+      .then((menu) => {
+        response.set("Cache-Control", NO_STORE);
+        response.json({ screenId: "OPS-ORDER-ENTRY", menu });
+      })
+      .catch((error: unknown) => {
+        if (error instanceof CounterMenuError && error.code === "COUNTER_MENU_UNAVAILABLE") {
+          response
+            .status(503)
+            .set("Cache-Control", NO_STORE)
+            .json({ error: "counter_menu_unavailable" });
+          return;
+        }
+        denied(response);
+      });
+  });
+  const mutation = (
+    request: express.Request,
+    response: express.Response,
+  ): { sessionCookie: string; csrf: string } | null => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return null;
+    }
+    return { sessionCookie, csrf };
+  };
+  // WP-2423 Q7: staff take a pickup order at the counter (or a paper order after an outage); the
+  // reply is the amount to charge on the Store's card machine.
+  router.post("/counter/orders", sameOriginMutation(options), (request, response) => {
+    const auth = mutation(request, response);
+    if (auth === null) return;
+    if (!options.counterOrder) {
+      response.status(503).json({ error: "counter_order_unavailable" });
+      return;
+    }
+    void options
+      .counterOrder({ ...auth, command: request.body })
+      .then((result) => {
+        response.set("Cache-Control", NO_STORE);
+        response.json({
+          status: result.status,
+          orderReference: result.orderReference,
+          orderBatchReference: result.orderBatchReference,
+          orderNumber: result.orderNumber,
+          orderVersion: result.orderVersion,
+          orderMinor: result.orderMinor,
+          tipMinor: result.tipMinor,
+          totalMinor: result.totalMinor,
+          payBy: result.payBy,
+          recordedAfterOutage: result.recordedAfterOutage,
+        });
+      })
+      .catch((error: unknown) => {
+        if (!(error instanceof CounterOrderError)) {
+          denied(response);
+          return;
+        }
+        const [status, code] = (
+          {
+            COUNTER_ORDER_INPUT_INVALID: [400, "counter_order_input_invalid"],
+            COUNTER_ORDER_PERMISSION_DENIED: [403, "counter_order_permission_denied"],
+            COUNTER_ORDER_STORE_NOT_TAKING_ORDERS: [409, "store_not_taking_pickup_orders"],
+            COUNTER_ORDER_ITEM_UNAVAILABLE: [409, "item_unavailable"],
+            COUNTER_ORDER_NOT_PRICED: [409, "order_not_priced"],
+            COUNTER_ORDER_NOT_FINISHED: [409, "counter_order_not_finished"],
+            COUNTER_ORDER_IDEMPOTENCY_CONFLICT: [409, "counter_order_conflict"],
+            COUNTER_ORDER_UNAVAILABLE: [503, "counter_order_unavailable"],
+          } as const
+        )[error.code];
+        response
+          .status(status)
+          .set("Cache-Control", NO_STORE)
+          .json(
+            error.code === "COUNTER_ORDER_ITEM_UNAVAILABLE"
+              ? { error: code, lineIndex: error.lineIndex }
+              : { error: code },
+          );
+      });
+  });
+  // WP-2423 Q7: the Store's card machine approved the payment of a counter order; staff record it.
+  router.post("/orders/card-machine-payment", sameOriginMutation(options), (request, response) => {
+    const auth = mutation(request, response);
+    if (auth === null) return;
+    if (!options.cardMachinePayment) {
+      response.status(503).json({ error: "card_machine_payment_unavailable" });
+      return;
+    }
+    void options
+      .cardMachinePayment({ ...auth, command: request.body })
+      .then((result) => {
+        response.set("Cache-Control", NO_STORE);
+        response.json({
+          status: result.status,
+          orderReference: result.orderReference,
+          orderBatchReference: result.orderBatchReference,
+          amountMinor: result.amountMinor,
+          recordingReason: result.recordingReason,
+          takenAt: result.takenAt,
+          recordedAt: result.recordedAt,
+        });
+      })
+      .catch((error: unknown) => {
+        if (!(error instanceof CardMachinePaymentCommandError)) {
+          denied(response);
+          return;
+        }
+        const [status, code] = (
+          {
+            CARD_MACHINE_INPUT_INVALID: [400, "card_machine_input_invalid"],
+            CARD_MACHINE_PERMISSION_DENIED: [403, "card_machine_permission_denied"],
+            CARD_MACHINE_NOT_FOUND: [404, "counter_order_not_found"],
+            CARD_MACHINE_NOT_PAYABLE: [409, "order_not_payable"],
+            CARD_MACHINE_AMOUNT_CHANGED: [409, "amount_changed"],
+            CARD_MACHINE_PAYMENT_WINDOW_CLOSED: [409, "payment_window_closed"],
+            CARD_MACHINE_ALREADY_PAID: [409, "already_paid"],
+            CARD_MACHINE_IDEMPOTENCY_CONFLICT: [409, "card_machine_conflict"],
+            CARD_MACHINE_UNAVAILABLE: [503, "card_machine_payment_unavailable"],
+          } as const
+        )[error.code];
+        response
+          .status(status)
+          .set("Cache-Control", NO_STORE)
+          .json(
+            error.code === "CARD_MACHINE_AMOUNT_CHANGED"
+              ? { error: code, totalMinor: error.totalMinor }
+              : { error: code },
+          );
+      });
+  });
+  // WP-2423 Q7: staff refunded a cancelled card-machine order on the machine and record it.
+  router.post("/orders/card-machine-refund", sameOriginMutation(options), (request, response) => {
+    const auth = mutation(request, response);
+    if (auth === null) return;
+    if (!options.cardMachineRefund) {
+      response.status(503).json({ error: "card_machine_refund_unavailable" });
+      return;
+    }
+    void options
+      .cardMachineRefund({ ...auth, command: request.body })
+      .then((result) => {
+        response.set("Cache-Control", NO_STORE);
+        response.json({
+          status: result.status,
+          orderReference: result.orderReference,
+          orderBatchReference: result.orderBatchReference,
+          amountMinor: result.amountMinor,
+          refundedAt: result.refundedAt,
+        });
+      })
+      .catch((error: unknown) => {
+        if (!(error instanceof CardMachineRefundCommandError)) {
+          denied(response);
+          return;
+        }
+        const [status, code] = (
+          {
+            CARD_MACHINE_REFUND_INPUT_INVALID: [400, "card_machine_refund_input_invalid"],
+            CARD_MACHINE_REFUND_PERMISSION_DENIED: [403, "card_machine_refund_permission_denied"],
+            CARD_MACHINE_REFUND_NOT_FOUND: [404, "card_machine_refund_not_found"],
+            CARD_MACHINE_REFUND_NOTHING_OWED: [409, "nothing_to_refund"],
+            CARD_MACHINE_REFUND_IDEMPOTENCY_CONFLICT: [409, "card_machine_refund_conflict"],
+            CARD_MACHINE_REFUND_UNAVAILABLE: [503, "card_machine_refund_unavailable"],
+          } as const
+        )[error.code];
+        response.status(status).set("Cache-Control", NO_STORE).json({ error: code });
+      });
+  });
   // WP-2423 Q6: staff cancel a paid order or batch before the kitchen starts it; refunded in full.
   router.post("/orders/cancel", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");
@@ -9618,6 +9839,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           orderBatchReference: result.orderBatchReference,
           cancelledAt: result.cancelledAt,
           refundStatus: result.refundStatus,
+          refundMethod: result.refundMethod,
+          refundAmountMinor: result.refundAmountMinor,
         });
       })
       .catch((error: unknown) => {
@@ -9657,6 +9880,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         ORDER_CANCELLATION_NOT_CANCELLABLE: [409, "order_not_cancellable"],
         ORDER_CANCELLATION_STOCK_NOT_RELEASABLE: [409, "order_stock_not_releasable"],
         ORDER_ITEM_CANCELLATION_STOCK_LEGACY: [409, "order_item_stock_legacy"],
+        ORDER_ITEM_CANCELLATION_CARD_MACHINE: [409, "order_paid_on_card_machine"],
         ORDER_CANCELLATION_UNAVAILABLE: [503, "order_cancellation_unavailable"],
       } as const
     )[error.code];

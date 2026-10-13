@@ -22,6 +22,8 @@ const d = vi.hoisted(() => ({
   fulfillmentCancel: vi.fn(),
   releaseFactory: vi.fn(),
   releaseLines: vi.fn(),
+  cardMachine: vi.fn(),
+  cardMachinePayment: vi.fn(),
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => d.scope }));
 vi.mock("@rms/ordering", async (original) => ({
@@ -44,6 +46,7 @@ vi.mock("@rms/payment", async (original) => ({
   createPostgresCancellationRefundFollowUp: d.followUp,
   readCancellationRefundStatus: d.status,
   readPaymentRemainingRefundable: d.remaining,
+  createPostgresCardMachinePaymentStore: d.cardMachine,
 }));
 vi.mock("./submission-inventory-release.js", () => ({
   createSubmissionInventoryRelease: d.releaseFactory,
@@ -96,6 +99,9 @@ const record = {
   cancelledAt: at,
 };
 function setup(whole = vi.fn()) {
+  // WP-2423 Q7: paid online unless a test pays the Batch on the card machine.
+  d.cardMachine.mockReturnValue({ loadByBatch: d.cardMachinePayment });
+  d.cardMachinePayment.mockResolvedValue(null);
   let sequence = 100;
   const tx = { query: vi.fn() };
   const authorize = vi.fn(async () => ({ sessionReference: id(1) })),
@@ -215,6 +221,25 @@ it("keeps the cancellation when dispatch fails after commit (refund pending, nev
   const f = setup();
   d.drive.mockRejectedValue(new Error("provider down"));
   expect((await f.operation.cancel(f.input)).refund.status).toBe("Pending");
+});
+
+it("WP-2423 Q7: items of a card-machine payment are not cancelled one by one", async () => {
+  const f = setup();
+  d.cardMachinePayment.mockResolvedValue({ cardMachinePaymentReference: id(99) });
+  const command = {
+    orderReference: f.input.command.orderReference,
+    orderBatchReference: f.input.command.orderBatchReference,
+    orderItemReferences: f.input.command.orderItemReferences,
+    expectedOrderVersion: f.input.command.expectedOrderVersion,
+  };
+  await expect(f.operation.preview({ ...f.input, command })).rejects.toMatchObject({
+    code: "ORDER_ITEM_CANCELLATION_CARD_MACHINE",
+  });
+  await expect(f.operation.cancel(f.input)).rejects.toMatchObject({
+    code: "ORDER_ITEM_CANCELLATION_CARD_MACHINE",
+  });
+  expect(d.cancelItems).not.toHaveBeenCalled();
+  expect(d.commit).not.toHaveBeenCalled();
 });
 
 it("refuses started work, legacy stock and stale versions without a partial outcome", async () => {

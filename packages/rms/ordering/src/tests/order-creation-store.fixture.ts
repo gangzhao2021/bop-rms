@@ -12,7 +12,13 @@ import { orderCreatedSourceInput } from "../application/order-created-source.js"
 import type { OrderCreationPorts } from "../application/ports/order-creation-ports.js";
 import { orderSnapshotInput } from "./order-item-snapshot.fixture.js";
 export function orderWriteFixture(
-  options: { at?: string; namespace?: string; dineIn?: boolean } = {},
+  options: {
+    at?: string;
+    namespace?: string;
+    dineIn?: boolean;
+    /** WP-2423 Q7: a counter (Pos) pickup Cart staff open for a walk-up guest. */
+    pos?: boolean;
+  } = {},
 ) {
   const original = orderSnapshotInput();
   const at = options.at ?? new Date(Date.now() - 1000).toISOString();
@@ -33,6 +39,18 @@ export function orderWriteFixture(
   }
   const shifted = shift(original) as typeof original;
   const id = (n: number) => namespace + "-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const counter = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(counter);
+    if (value !== null && typeof value === "object")
+      return Object.fromEntries(
+        Object.entries(value).map(([k, v]) => [
+          k,
+          k === "sourceChannel" && v === "Qr" ? "Pos" : counter(v),
+        ]),
+      );
+    return value;
+  };
+  const channelled = (options.pos ? counter(shifted) : shifted) as typeof shifted;
   const input = options.dineIn
     ? {
         ...shifted,
@@ -58,7 +76,7 @@ export function orderWriteFixture(
           fulfillment: { ...shifted.checkoutValidationEvidence.fulfillment, orderType: "DineIn" },
         },
       }
-    : shifted;
+    : channelled;
   const hash = (value: string) => "sha256:" + createHash("sha256").update(value).digest("hex");
   const evidence = parseCheckoutValidationEvidence(input.checkoutValidationEvidence);
   const cart = parseCartAggregate(input.cart);

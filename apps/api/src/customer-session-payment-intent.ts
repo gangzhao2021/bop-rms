@@ -149,80 +149,118 @@ export function createCustomerSessionPaymentIntent(options: CustomerSessionPayme
         // Its original-operation path does not call ordering, admission or Provider.
         return pay(existing.intent.preparation, true);
       }
-      const submission = options.resolveSubmission
-        ? await options.resolveSubmission(session)
-        : { kind: options.submissionKind ?? "Initial", orders: options.orders, tips: options.tips };
-      if (
-        !submission ||
-        (submission.kind !== "Initial" && submission.kind !== "Additional") ||
-        (submission.kind === "Additional" && session.validation.orderType !== "DineIn") ||
-        typeof submission.orders?.create !== "function" ||
-        typeof submission.orders?.preparePaymentClock !== "function" ||
-        typeof submission.tips?.select !== "function"
-      )
-        throw new CheckoutSessionServiceError("INTENT_CONFLICT");
-      const submissionKind = submission.kind;
-      const submit = async () => {
-        const submitted = readClosedRecord(
-          await submission.orders.create(
-            submissionKind === "Additional"
-              ? { ...input, tipSelectionReference: selectionReference }
-              : input,
-          ),
-          ["status", "record", "session"],
-        );
-        sameSession(submitted.session);
-      };
-      if (submissionKind !== "Additional") await submit();
-      const selected = readClosedRecord(
-        await submission.tips.select({ ...input, selectionReference, tip }),
-        ["status", "record", "session"],
-      );
-      sameSession(selected.session);
-      const selection = parsePaymentTipSelection(selected.record);
-      if (
-        String(selection.selectionReference) !== selectionReference ||
-        String(selection.paymentOperationReference) !== session.paymentOperationReference ||
-        selection.tip.amountMinor !== tip.amountMinor ||
-        selection.tip.currencyCode !== tip.currencyCode
-      )
-        throw new CheckoutSessionServiceError("INTENT_CONFLICT");
-      if (submissionKind === "Additional") await submit();
-      const sealed = readClosedRecord(await submission.orders.preparePaymentClock(input), [
-        "order",
-        "clock",
-        "session",
-      ]);
-      sameSession(sealed.session);
-      const inventory = await options.inventory.load({
-        submissionReference: session.submissionReference,
-        actorReference: session.validation.guestSessionReference,
+      const preparation = await prepareCustomerSessionPayment(options, {
+        input,
+        session,
+        selectionReference,
+        tip,
       });
-      const preparation = buildCustomerPaymentPreparationSnapshot(
-        {
-          scope: { ...options.access.scope, tenantReference: options.tenantReference },
-          owner: session.validation.orderType === "DineIn" ? "Dining" : "AsapPickup",
-          quoteVersion: session.validation.quoteVersion,
-          ...(submissionKind === "Additional" ? { submissionKind: "Additional" as const } : {}),
-        },
-        {
-          preparationReference: options.nextPreparationReference(),
-          order: sealed.order,
-          capacity: sealed.clock,
-          selection: selected.record,
-          inventory,
-        },
-      );
-      if (
-        String(preparation.submissionReference) !== session.submissionReference ||
-        String(preparation.sourceCartReference) !== session.validation.cartReference ||
-        preparation.sourceCartVersion !== session.validation.cartVersion ||
-        String(preparation.quoteReference) !== session.validation.quoteReference ||
-        String(preparation.guestSessionReference) !== session.validation.guestSessionReference
-      )
-        throw new CheckoutSessionServiceError("INTENT_CONFLICT");
       sameSession(await reader.read(input));
       return pay(preparation);
     },
   });
+}
+
+/**
+ * The customer payment preparation steps before any Provider call: submit the Order (initial
+ * batches), record the tip choice, start the payment clock and build the Payment preparation from
+ * owner records. WP-2423 Q7 reuses it for a counter order paid on the Store's card machine.
+ */
+export async function prepareCustomerSessionPayment(
+  options: Pick<
+    CustomerSessionPaymentIntentOptions,
+    | "resolveSubmission"
+    | "submissionKind"
+    | "orders"
+    | "tips"
+    | "inventory"
+    | "access"
+    | "tenantReference"
+    | "nextPreparationReference"
+  >,
+  context: {
+    input: { sessionCredential: string; csrfCredential: string; checkoutSessionReference: string };
+    session: CheckoutSession;
+    selectionReference: string;
+    tip: Money;
+  },
+): Promise<OrderPaymentPreparationEvidence> {
+  const { input, session, selectionReference, tip } = context;
+  const sameSession = (value: unknown) => {
+    if (JSON.stringify(parseCheckoutSession(value)) !== JSON.stringify(session))
+      throw new CheckoutSessionServiceError("INTENT_CONFLICT");
+  };
+  const submission = options.resolveSubmission
+    ? await options.resolveSubmission(session)
+    : { kind: options.submissionKind ?? "Initial", orders: options.orders, tips: options.tips };
+  if (
+    !submission ||
+    (submission.kind !== "Initial" && submission.kind !== "Additional") ||
+    (submission.kind === "Additional" && session.validation.orderType !== "DineIn") ||
+    typeof submission.orders?.create !== "function" ||
+    typeof submission.orders?.preparePaymentClock !== "function" ||
+    typeof submission.tips?.select !== "function"
+  )
+    throw new CheckoutSessionServiceError("INTENT_CONFLICT");
+  const submissionKind = submission.kind;
+  const submit = async () => {
+    const submitted = readClosedRecord(
+      await submission.orders.create(
+        submissionKind === "Additional"
+          ? { ...input, tipSelectionReference: selectionReference }
+          : input,
+      ),
+      ["status", "record", "session"],
+    );
+    sameSession(submitted.session);
+  };
+  if (submissionKind !== "Additional") await submit();
+  const selected = readClosedRecord(
+    await submission.tips.select({ ...input, selectionReference, tip }),
+    ["status", "record", "session"],
+  );
+  sameSession(selected.session);
+  const selection = parsePaymentTipSelection(selected.record);
+  if (
+    String(selection.selectionReference) !== selectionReference ||
+    String(selection.paymentOperationReference) !== session.paymentOperationReference ||
+    selection.tip.amountMinor !== tip.amountMinor ||
+    selection.tip.currencyCode !== tip.currencyCode
+  )
+    throw new CheckoutSessionServiceError("INTENT_CONFLICT");
+  if (submissionKind === "Additional") await submit();
+  const sealed = readClosedRecord(await submission.orders.preparePaymentClock(input), [
+    "order",
+    "clock",
+    "session",
+  ]);
+  sameSession(sealed.session);
+  const inventory = await options.inventory.load({
+    submissionReference: session.submissionReference,
+    actorReference: session.validation.guestSessionReference,
+  });
+  const preparation = buildCustomerPaymentPreparationSnapshot(
+    {
+      scope: { ...options.access.scope, tenantReference: options.tenantReference },
+      owner: session.validation.orderType === "DineIn" ? "Dining" : "AsapPickup",
+      quoteVersion: session.validation.quoteVersion,
+      ...(submissionKind === "Additional" ? { submissionKind: "Additional" as const } : {}),
+    },
+    {
+      preparationReference: options.nextPreparationReference(),
+      order: sealed.order,
+      capacity: sealed.clock,
+      selection: selected.record,
+      inventory,
+    },
+  );
+  if (
+    String(preparation.submissionReference) !== session.submissionReference ||
+    String(preparation.sourceCartReference) !== session.validation.cartReference ||
+    preparation.sourceCartVersion !== session.validation.cartVersion ||
+    String(preparation.quoteReference) !== session.validation.quoteReference ||
+    String(preparation.guestSessionReference) !== session.validation.guestSessionReference
+  )
+    throw new CheckoutSessionServiceError("INTENT_CONFLICT");
+  return preparation;
 }

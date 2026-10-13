@@ -20,6 +20,8 @@ import { exerciseKitchenTicketCreation } from "./kitchen-ticket-creation.mjs";
 
 /** Actual captured Payment/resource context and published actions; external policy authority remains synthetic. */
 export async function exerciseCapturedOrderKitchen({
+  /** WP-2423 Q7: inspect the order queue's view of this Order before it is accepted. */
+  onQueueItem,
   kitchenNow,
   reuseInventoryRecipe,
   onPickupReady,
@@ -63,6 +65,11 @@ export async function exerciseCapturedOrderKitchen({
   );
   await admin.query(
     "GRANT SELECT ON rms_ordering.order_batch_checkout_cancellation,rms_ordering.order_staff_cancellation,rms_ordering.order_item_staff_cancellation TO " +
+      role,
+  );
+  // WP-2423 Q7: the order queue shows counter orders and their card-machine payments.
+  await admin.query(
+    "GRANT SELECT ON rms_ordering.counter_order_entry,rms_payment.card_machine_payment,rms_payment.card_machine_refund TO " +
       role,
   );
   await admin.query("GRANT SELECT,INSERT,UPDATE ON platform_eventing.consumer_inbox TO " + role);
@@ -294,6 +301,9 @@ export async function exerciseCapturedOrderKitchen({
     beforeAcceptance.items.find((item) => item.orderReference === record.orderReference)
       ?.canRequestAcceptance,
     true,
+  );
+  await onQueueItem?.(
+    beforeAcceptance.items.find((item) => item.orderReference === record.orderReference),
   );
   const resolveConfiguration = createMerchantAcceptanceConfigurationResolver({
     now: () => new Date().toISOString(),

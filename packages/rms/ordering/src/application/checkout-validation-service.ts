@@ -22,6 +22,7 @@ import {
   type CartItem,
   type OrderingInstant,
   type OrderingReference,
+  isGuestCartChannel,
 } from "../domain/cart.js";
 import { assertCartLifecycleActive } from "../domain/cart-lifecycle.js";
 import type { CheckoutValidationPorts } from "./ports/checkout-validation-ports.js";
@@ -81,7 +82,7 @@ function sessionScope(sessionValue: unknown, cart: CartAggregate, observedAt: Or
     if (
       parseOrderingReference(session.brandReference) !== cart.brandReference ||
       parseOrderingReference(session.storeReference) !== cart.storeReference ||
-      !["Qr", "Web"].includes(cart.sourceChannel) ||
+      !isGuestCartChannel(cart.orderType, cart.sourceChannel) ||
       session.channel !== cart.orderType ||
       (cart.orderType === "Pickup" &&
         (parseOrderingReference(session.sessionReference) !== cart.createdByActorReference ||

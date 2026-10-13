@@ -3,6 +3,8 @@ import { parsePaymentReference } from "../../application/payment-provider-adapte
 import { parsePaymentInstant } from "../../application/payment-intent-creation.js";
 import { createPostgresPaymentIntentCreationStore } from "./payment-intent-creation-store.js";
 import { createPostgresPaymentTerminalStore } from "./payment-terminal-store.js";
+import { createPostgresCardMachinePaymentStore } from "./card-machine-payment-store.js";
+import { createCardMachinePaymentEnvelope } from "../../application/card-machine-payment.js";
 
 export interface CapturedBatchPaymentScope {
   readonly brandReference: string;
@@ -68,7 +70,26 @@ export function createPostgresCapturedBatchPaymentSource(options: {
         const rows = Object.getOwnPropertyDescriptor(result, "rows")?.value as unknown;
         if (!Array.isArray(rows) || rows.length > 1) return unavailable();
         if (!(await allowed())) return unavailable();
-        if (rows.length === 0) return null;
+        if (rows.length === 0) {
+          // WP-2423 Q7: a Batch paid on the Store's card machine has the same paid signal.
+          const card = await createPostgresCardMachinePaymentStore({
+            scope: { brandReference: scope.brandReference, storeReference: scope.storeReference },
+            authorize: async () => allowed(),
+          }).loadByBatch(transaction, query.orderReference, query.orderBatchReference);
+          if (card === null) return null;
+          if (
+            card.environment !== scope.environment ||
+            card.recordedAt > query.observedAt ||
+            !(await allowed())
+          )
+            return unavailable();
+          return Object.freeze({
+            submissionReference: String(card.submissionReference),
+            paymentOperationReference: card.paymentOperationReference,
+            paymentIntentReference: card.paymentIntentReference,
+            paymentEvent: createCardMachinePaymentEnvelope(card),
+          });
+        }
         const row = rows[0] as Record<string, unknown>;
         const operation = String(parsePaymentReference(row.payment_operation_id));
         const intent = String(parsePaymentReference(row.payment_intent_id));

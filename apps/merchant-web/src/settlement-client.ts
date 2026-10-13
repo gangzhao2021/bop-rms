@@ -82,7 +82,16 @@ export interface SettlementView {
   readonly currentDaySelfApprovedRefunds:
     (SettlementAmount & { readonly businessDate: string }) | null;
   readonly reconciliation: SettlementReconciliation | null;
+  /** WP-2423 Q7: the Store's own card machine, apart from online payments; null when unreadable,
+   * undefined when the server does not report it. */
+  readonly cardMachine?: SettlementCardMachine | null;
   readonly projectedAt: string;
+}
+export interface SettlementCardMachine {
+  readonly taken: SettlementAmount;
+  readonly tipMinor: string;
+  readonly recordedAfterOutageCount: number;
+  readonly refunded: SettlementAmount;
 }
 
 const amount = (value: unknown): SettlementAmount | null => {
@@ -113,6 +122,9 @@ export function parseSettlementView(value: unknown): SettlementView {
       ? ["currentDaySelfApprovedRefunds"]
       : []),
     "reconciliation",
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "cardMachine")
+      ? ["cardMachine"]
+      : []),
     "projectedAt",
   ]);
   if (raw.screenId !== "PAY-RECONCILIATION") return fail();
@@ -271,6 +283,28 @@ export function parseSettlementView(value: unknown): SettlementView {
       return parsed === null ? null : Object.freeze({ ...parsed, businessDate: day });
     })(),
     reconciliation,
+    ...(raw.cardMachine === undefined
+      ? {}
+      : {
+          cardMachine: (() => {
+            if (raw.cardMachine === null) return null;
+            const c = exact(raw.cardMachine, [
+              "taken",
+              "tipMinor",
+              "recordedAfterOutageCount",
+              "refunded",
+            ]);
+            const taken = amount(c.taken),
+              refunded = amount(c.refunded);
+            if (taken === null || refunded === null) return fail();
+            return Object.freeze({
+              taken,
+              tipMinor: minor(c.tipMinor),
+              recordedAfterOutageCount: count(c.recordedAfterOutageCount),
+              refunded,
+            });
+          })(),
+        }),
     projectedAt: instant(raw.projectedAt),
   });
 }

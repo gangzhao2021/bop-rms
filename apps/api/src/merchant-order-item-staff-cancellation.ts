@@ -23,6 +23,7 @@ import {
   readPaymentRemainingRefundable,
   type CancellationRefundRuntimeOptions,
   type CancellationRefundStatus,
+  createPostgresCardMachinePaymentStore,
 } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -44,6 +45,8 @@ export const staffItemCancellationErrorCodes = [
   "ORDER_CANCELLATION_STOCK_NOT_RELEASABLE",
   /** The submission reserved stock submission-wide (schema 1): lines cannot be released alone. */
   "ORDER_ITEM_CANCELLATION_STOCK_LEGACY",
+  /** WP-2423 Q7: the Batch was paid on the Store's card machine; cancel the whole order instead. */
+  "ORDER_ITEM_CANCELLATION_CARD_MACHINE",
   "ORDER_CANCELLATION_UNAVAILABLE",
 ] as const;
 export type StaffItemCancellationErrorCode = (typeof staffItemCancellationErrorCodes)[number];
@@ -58,6 +61,24 @@ export class StaffItemCancellationError extends Error {
 const fail = (code: StaffItemCancellationErrorCode): never => {
   throw new StaffItemCancellationError(code);
 };
+
+/** WP-2423 Q7: items of a card-machine payment are not refunded line by line (slice 1). */
+async function refuseCardMachineBatch(
+  context: {
+    tx: ConsumerTransaction;
+    selected: { brandReference: string; storeReference: string };
+    allowed(): Promise<boolean>;
+  },
+  orderReference: string,
+  orderBatchReference: string,
+) {
+  const paid = await createPostgresCardMachinePaymentStore({
+    scope: context.selected,
+    authorize: async (_tx, value) =>
+      value.orderReference === orderReference && (await context.allowed()),
+  }).loadByBatch(context.tx, orderReference, orderBatchReference);
+  if (paid !== null) return fail("ORDER_ITEM_CANCELLATION_CARD_MACHINE");
+}
 
 export interface StaffItemCancellationRefund {
   readonly status: CancellationRefundStatus;
@@ -382,6 +403,11 @@ export function createMerchantOrderItemStaffCancellation(options: {
       const session = await options.authentication.authorize(input);
       const intent = parse(input.command, false);
       return scoped(input, session.sessionReference, async (context) => {
+        await refuseCardMachineBatch(
+          context,
+          String(intent.orderReference),
+          String(intent.orderBatchReference),
+        );
         const store = createPostgresStaffItemCancellationStore({
           brandReference: context.selected.brandReference,
           storeReference: context.selected.storeReference,
@@ -456,6 +482,11 @@ export function createMerchantOrderItemStaffCancellation(options: {
       const intent = parse(input.command, true);
       const operationReference = intent.operationReference as string;
       const outcome = await scoped(input, session.sessionReference, async (context) => {
+        await refuseCardMachineBatch(
+          context,
+          String(intent.orderReference),
+          String(intent.orderBatchReference),
+        );
         const { tx, selected, actorReference, allowed } = context;
         const owned = async (
           t: ConsumerTransaction,

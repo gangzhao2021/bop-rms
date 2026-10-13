@@ -14,6 +14,7 @@ import {
   type CartAggregate,
   type OrderingInstant,
   type OrderingReference,
+  isGuestCartChannel,
 } from "../domain/cart.js";
 import { assertCartLifecycleActive } from "../domain/cart-lifecycle.js";
 import { createCartQuoteAttachmentService } from "./cart-quote-attachment-service.js";
@@ -147,7 +148,7 @@ export function createPickupCartQuoteService(options: PickupCartQuoteOptions) {
         cart.brandReference !== brandReference ||
         cart.storeReference !== storeReference ||
         cart.orderType !== "Pickup" ||
-        !["Qr", "Web"].includes(cart.sourceChannel) ||
+        !isGuestCartChannel(cart.orderType, cart.sourceChannel) ||
         cart.createdByActorReference !== String(session.sessionReference) ||
         cart.diningSessionReference !== null ||
         cart.updatedAt > observedAt

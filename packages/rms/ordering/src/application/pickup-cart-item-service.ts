@@ -16,6 +16,7 @@ import {
   type CartAggregate,
   type OrderingInstant,
   type OrderingReference,
+  isGuestCartChannel,
 } from "../domain/cart.js";
 import { assertCartLifecycleActive } from "../domain/cart-lifecycle.js";
 import { createCartItemCommandService } from "./cart-item-command-service.js";
@@ -167,7 +168,7 @@ export function createPickupCartItemService(options: PickupCartItemOptions) {
       cart.storeReference !== storeReference ||
       cart.orderType !== "Pickup" ||
       cart.diningSessionReference !== null ||
-      !["Qr", "Web"].includes(cart.sourceChannel) ||
+      !isGuestCartChannel(cart.orderType, cart.sourceChannel) ||
       cart.createdByActorReference !== String(session.sessionReference) ||
       cart.updatedAt > observedAt
     )

@@ -3,6 +3,14 @@ const databaseAccessManifestInput = {
   module: { moduleName: "ordering", packageName: "@rms/ordering", layer: "RMS" },
   tables: [
     {
+      table: "counter_order_entry",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/ordering" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "order_item_staff_cancellation",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/ordering" },
@@ -343,6 +351,33 @@ const databaseAccessManifestInput = {
     },
   ],
   accesses: [
+    {
+      id: "counter-order-entry.read.counter_order_entry",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "counter_order_entry" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source: "packages/rms/ordering/src/infrastructure/persistence/counter-order-entry-store.ts",
+    },
+    {
+      id: "counter-order-entry.write.counter_order_entry",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "counter_order_entry" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: null,
+      source: "packages/rms/ordering/src/infrastructure/persistence/counter-order-entry-store.ts",
+    },
+    {
+      id: "counter-order-entry.read.order_batch",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_batch" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source: "packages/rms/ordering/src/infrastructure/persistence/counter-order-entry-store.ts",
+    },
     {
       id: "staff-item-cancellation.read.order_item_staff_cancellation",
       operation: "read",

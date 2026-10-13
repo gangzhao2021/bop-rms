@@ -1,5 +1,8 @@
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
+  cardMachinePaymentIntentView,
+  cardMachineTerminalView,
+  createPostgresCardMachinePaymentStore,
   createPostgresPaymentIntentCreationStore,
   createPostgresPaymentTerminalStore,
   parsePaymentIntentCreationRecord,
@@ -55,7 +58,32 @@ export function createOrderCapturedPaymentSource(options: {
           { now: options.now, generateObservationReference: unavailable },
         );
         const stored = await history.resolveOperation(event.correlationId);
-        if (stored === null) return unavailable();
+        if (stored === null) {
+          // WP-2423 Q7: a payment staff recorded from the Store's card machine.
+          const card = await createPostgresCardMachinePaymentStore({
+            scope: { brandReference: scope.brandReference, storeReference: scope.storeReference },
+            authorize: async () => true,
+          }).loadByPaymentOperation(transaction, event.correlationId);
+          if (card === null) return unavailable();
+          const payment = cardMachinePaymentIntentView(card);
+          const terminal = cardMachineTerminalView(card);
+          const p = payment.intent.preparation;
+          if (
+            card.environment !== scope.environment ||
+            payment.intent.paymentIntentReference !== event.payload.paymentIntentReference ||
+            payment.attempt.paymentAttemptReference !== event.payload.paymentAttemptReference ||
+            terminal.paymentTransactionReference !== event.payload.paymentTransactionReference ||
+            p.brandReference !== event.tenantId ||
+            p.storeReference !== event.storeId ||
+            p.orderReference !== event.payload.orderReference ||
+            p.total.amountMinor.toString() !== event.payload.amountMinor ||
+            createPaymentOutcomeEventBinding(parsePaymentSucceededEnvelope(terminal.event)) !==
+              createPaymentOutcomeEventBinding(event) ||
+            parsePaymentInstant(terminal.recordedAt) > parsePaymentInstant(options.now())
+          )
+            return unavailable();
+          return Object.freeze({ payment, terminal });
+        }
         const payment = parsePaymentIntentCreationRecord(stored);
         const preparation = payment.intent.preparation;
         if (

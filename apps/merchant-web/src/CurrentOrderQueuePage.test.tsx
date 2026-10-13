@@ -823,7 +823,7 @@ it("WP-2423: words an unpaid round's payment state for staff", () => {
   expect(["Qr", "Web", "Pos", "Api", "Kiosk"].map(orderChannelLabel)).toEqual([
     "QR code",
     "Website",
-    "Point of sale",
+    "Counter",
     "Partner integration",
     "Other",
   ]);

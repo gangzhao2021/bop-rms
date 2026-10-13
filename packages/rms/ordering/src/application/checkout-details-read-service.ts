@@ -9,6 +9,7 @@ import {
   parseCartAggregate,
   parseOrderingInstant,
   parseOrderingReference,
+  isGuestCartChannel,
 } from "../domain/cart.js";
 import { assertCartLifecycleActive } from "../domain/cart-lifecycle.js";
 import {
@@ -89,7 +90,7 @@ export function createCheckoutDetailsReadService(ports: CheckoutDetailsReadPorts
             cart.brandReference !== String(guest.brandReference) ||
             cart.storeReference !== String(guest.storeReference) ||
             cart.orderType !== guest.channel ||
-            !["Web", "Qr"].includes(cart.sourceChannel) ||
+            !isGuestCartChannel(cart.orderType, cart.sourceChannel) ||
             (cart.orderType === "Pickup"
               ? cart.createdByActorReference !== String(guest.sessionReference) ||
                 guest.diningState !== "ContextOnly"

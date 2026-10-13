@@ -22,9 +22,14 @@ import {
   createPostgresOrderCompensationCandidateReader,
   createPostgresStaffOrderCancellationReader,
 } from "../../rms/ordering/src/index.ts";
-import { createPaymentProviderSnapshot } from "../../rms/payment/src/index.ts";
+import {
+  createPaymentProviderSnapshot,
+  createPostgresCardMachinePaymentStore,
+} from "../../rms/payment/src/index.ts";
 import { createMerchantOrderStaffCancellation } from "../../../apps/api/src/merchant-order-staff-cancellation.ts";
 import { createPaymentCompensationComposition } from "../../../apps/api/src/payment-compensation-composition.ts";
+import { createMerchantCardMachineCancellationRefund } from "../../../apps/api/src/merchant-card-machine-refund.ts";
+import { withoutCardMachinePayments } from "../../../tooling/environment/pilot-compensation-candidates.mjs";
 import { createInternalCompensationIdentity } from "../../../tooling/environment/pilot-compensation-identity.mjs";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
@@ -422,7 +427,17 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
        * Payment's captured terminal fact (amount incl. tip), Ordering's Confirmed payment
        * disposition and the kitchen ticket with one queued work item per order item.
        */
-      async function seedOrder(n, { type = "Pickup", batches = [2], quantity = "1" }) {
+      async function seedOrder(
+        n,
+        {
+          type = "Pickup",
+          batches = [2],
+          quantity = "1",
+          cardMachine = false,
+          // WP-2423 Q7: paid, but Ordering found it could not be fulfilled (never accepted).
+          unfulfillable = false,
+        },
+      ) {
         const order = {
           order: id(n + 1),
           guest: id(n + 2),
@@ -578,97 +593,172 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
           previous = refs.submission;
           await reserve(b, refs, order.order, quantity, submittedAt);
 
+          // WP-2423 Q7: a counter order paid on the Store's card machine (recorded by staff).
+          if (cardMachine)
+            await admin.query(
+              "INSERT INTO rms_payment.card_machine_payment (tenant_id,brand_id,store_id,card_machine_payment_id,payment_intent_id,payment_attempt_id,payment_operation_id,operation_id,intent_digest,order_id,order_batch_id,submission_id,preparation_json,order_allocation_minor,tip_minor,total_minor,currency_code,payment_environment,slip_reference,recording_reason,taken_at,recorded_at,actor_id,event_id,audit_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15,$16,'CAD','Test','AUTH 0001','AtCounter',$17,$17,$18,$19,$20)",
+              [
+                tenant,
+                brand,
+                store,
+                refs.transaction,
+                refs.intent,
+                refs.attempt,
+                refs.paymentOperation,
+                id(b + 99),
+                hash(["card-machine", b]),
+                order.order,
+                refs.batch,
+                refs.submission,
+                JSON.stringify({
+                  preparationReference: id(b + 92),
+                  orderReference: order.order,
+                  orderBatchReference: refs.batch,
+                  submissionReference: refs.submission,
+                  sourceCartReference: refs.cart,
+                  sourceCartVersion: 1,
+                  brandReference: brand,
+                  storeReference: store,
+                  guestSessionReference: order.guest,
+                  quoteReference: refs.quote,
+                  capacityAllocationReference: id(b + 93),
+                  readiness: "PaymentPending",
+                  transactionBoundary: "OrderSubmissionPaymentPreparation",
+                  orderAllocation: {
+                    amountMinor: String(refs.orderAllocationMinor),
+                    currencyCode: "CAD",
+                  },
+                  tip: { amountMinor: String(refs.tipMinor), currencyCode: "CAD" },
+                  total: { amountMinor: String(refs.totalMinor), currencyCode: "CAD" },
+                  committedAt: submittedAt,
+                  capacityExpiresAt: time(-minutes(10 - 10 * k)),
+                  sourceDigest: hash(["preparation", b]),
+                }),
+                refs.orderAllocationMinor,
+                refs.tipMinor,
+                refs.totalMinor,
+                paidAt,
+                staff,
+                refs.event,
+                id(b + 79),
+              ],
+            );
           // Payment: the intent (allocation plus tip), the attempt, the captured Provider
           // observation and the verified terminal fact.
-          await admin.query(
-            "INSERT INTO rms_payment.payment_intent (payment_intent_id,brand_id,store_id,payment_operation_id,order_id,order_batch_id,submission_id,guest_session_id,source_cart_id,source_cart_version,quote_id,preparation_id,capacity_allocation_id,intent_digest,preparation_source_digest,order_allocation_minor,tip_minor,total_minor,currency_code,payment_method,capture_mode,aggregate_version,creation_status,prepared_at,capacity_expires_at,created_at) " +
-              "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,1,$10,$11,$12,$13,$14,$15,$16,$17,'CAD','OnlineCard','Automatic',1,'ProviderCreatePending',$18,$19,$18)",
-            [
-              refs.intent,
-              brand,
-              store,
-              refs.paymentOperation,
-              order.order,
-              refs.batch,
-              refs.submission,
-              order.guest,
-              refs.cart,
-              refs.quote,
-              id(b + 92),
-              id(b + 93),
-              hash(["payment-intent", b]),
-              hash(["preparation", b]),
-              refs.orderAllocationMinor,
-              refs.tipMinor,
-              refs.totalMinor,
-              submittedAt,
-              time(-minutes(10 - 10 * k)),
-            ],
-          );
-          await admin.query(
-            "INSERT INTO rms_payment.payment_attempt (payment_attempt_id,brand_id,store_id,payment_intent_id,attempt_number,provider,provider_environment,provider_idempotency_digest,created_at) VALUES ($1,$2,$3,$4,1,'Stripe','Test',$5,$6)",
-            [refs.attempt, brand, store, refs.intent, hash(["idempotency", b]), submittedAt],
-          );
-          await admin.query(
-            "INSERT INTO rms_payment.payment_intent_operation_record (payment_operation_id,brand_id,store_id,payment_intent_id,guest_session_id,intent_digest,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)",
-            [
-              refs.paymentOperation,
-              brand,
-              store,
-              refs.intent,
-              order.guest,
-              hash(["payment-intent", b]),
-              submittedAt,
-            ],
-          );
-          await admin.query(
-            "INSERT INTO rms_payment.payment_provider_observation (provider_observation_id,brand_id,store_id,payment_intent_id,payment_attempt_id,observation_kind,normalized_status,provider_intent_reference,provider_transaction_reference,requested_minor,authorized_minor,captured_minor,refunded_minor,currency_code,evidence_digest,provider_observed_at,recorded_at) VALUES ($1,$2,$3,$4,$5,'Snapshot','Captured',$6,$7,$8,$8,$8,0,'CAD',$9,$10,$10)",
-            [
-              refs.observation,
-              brand,
-              store,
-              refs.intent,
-              refs.attempt,
-              "pi_SYNTHETIC_" + b,
-              "ch_SYNTHETIC_" + b,
-              refs.totalMinor,
-              hash(["observation", b]),
-              paidAt,
-            ],
-          );
-          await admin.query(
-            "INSERT INTO rms_payment.provider_webhook_record (webhook_receipt_id,brand_id,store_id,provider,provider_environment,provider_account_id,provider_event_id,provider_event_type,provider_created_at,received_at,signature_timestamp,evidence_digest,accepted_at,raw_evidence_expires_at,dedupe_expires_at) VALUES ($1,$2,$3,'Stripe','Test',$4,$5,'payment_intent.succeeded',$6,$6,$6,$7,$6,$6::timestamptz+interval '30 days',$6::timestamptz+interval '90 days')",
-            [
-              refs.webhook,
-              brand,
-              store,
-              provider,
-              "evt_SYNTHETIC" + String(b).padStart(8, "0"),
-              paidAt,
-              hash(["webhook", b]),
-            ],
-          );
-          await admin.query(
-            "INSERT INTO rms_payment.payment_terminal_fact (payment_transaction_id,brand_id,store_id,payment_intent_id,payment_attempt_id,order_id,webhook_receipt_id,provider_event_id,provider_account_id,provider_environment,provider_intent_reference,provider_observation_id,authoritative_source,terminal_outcome,amount_minor,currency_code,failure_reason,retry_disposition,occurred_at,recorded_at,evidence_digest,event_id,causation_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'Test',$10,$11,'VerifiedWebhook','Succeeded',$12,'CAD',NULL,NULL,$13,$13,$14,$15,$7)",
-            [
-              refs.transaction,
-              brand,
-              store,
-              refs.intent,
-              refs.attempt,
-              order.order,
-              refs.webhook,
-              "evt_SYNTHETIC" + String(b).padStart(8, "0"),
-              provider,
-              "pi_SYNTHETIC_" + b,
-              refs.observation,
-              refs.totalMinor,
-              paidAt,
-              hash(["terminal", b]),
-              refs.event,
-            ],
-          );
-
+          else {
+            await admin.query(
+              "INSERT INTO rms_payment.payment_intent (payment_intent_id,brand_id,store_id,payment_operation_id,order_id,order_batch_id,submission_id,guest_session_id,source_cart_id,source_cart_version,quote_id,preparation_id,capacity_allocation_id,intent_digest,preparation_source_digest,order_allocation_minor,tip_minor,total_minor,currency_code,payment_method,capture_mode,aggregate_version,creation_status,prepared_at,capacity_expires_at,created_at) " +
+                "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,1,$10,$11,$12,$13,$14,$15,$16,$17,'CAD','OnlineCard','Automatic',1,'ProviderCreatePending',$18,$19,$18)",
+              [
+                refs.intent,
+                brand,
+                store,
+                refs.paymentOperation,
+                order.order,
+                refs.batch,
+                refs.submission,
+                order.guest,
+                refs.cart,
+                refs.quote,
+                id(b + 92),
+                id(b + 93),
+                hash(["payment-intent", b]),
+                hash(["preparation", b]),
+                refs.orderAllocationMinor,
+                refs.tipMinor,
+                refs.totalMinor,
+                submittedAt,
+                time(-minutes(10 - 10 * k)),
+              ],
+            );
+            await admin.query(
+              "INSERT INTO rms_payment.payment_attempt (payment_attempt_id,brand_id,store_id,payment_intent_id,attempt_number,provider,provider_environment,provider_idempotency_digest,created_at) VALUES ($1,$2,$3,$4,1,'Stripe','Test',$5,$6)",
+              [refs.attempt, brand, store, refs.intent, hash(["idempotency", b]), submittedAt],
+            );
+            await admin.query(
+              "INSERT INTO rms_payment.payment_intent_operation_record (payment_operation_id,brand_id,store_id,payment_intent_id,guest_session_id,intent_digest,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+              [
+                refs.paymentOperation,
+                brand,
+                store,
+                refs.intent,
+                order.guest,
+                hash(["payment-intent", b]),
+                submittedAt,
+              ],
+            );
+            await admin.query(
+              "INSERT INTO rms_payment.payment_provider_observation (provider_observation_id,brand_id,store_id,payment_intent_id,payment_attempt_id,observation_kind,normalized_status,provider_intent_reference,provider_transaction_reference,requested_minor,authorized_minor,captured_minor,refunded_minor,currency_code,evidence_digest,provider_observed_at,recorded_at) VALUES ($1,$2,$3,$4,$5,'Snapshot','Captured',$6,$7,$8,$8,$8,0,'CAD',$9,$10,$10)",
+              [
+                refs.observation,
+                brand,
+                store,
+                refs.intent,
+                refs.attempt,
+                "pi_SYNTHETIC_" + b,
+                "ch_SYNTHETIC_" + b,
+                refs.totalMinor,
+                hash(["observation", b]),
+                paidAt,
+              ],
+            );
+            await admin.query(
+              "INSERT INTO rms_payment.provider_webhook_record (webhook_receipt_id,brand_id,store_id,provider,provider_environment,provider_account_id,provider_event_id,provider_event_type,provider_created_at,received_at,signature_timestamp,evidence_digest,accepted_at,raw_evidence_expires_at,dedupe_expires_at) VALUES ($1,$2,$3,'Stripe','Test',$4,$5,'payment_intent.succeeded',$6,$6,$6,$7,$6,$6::timestamptz+interval '30 days',$6::timestamptz+interval '90 days')",
+              [
+                refs.webhook,
+                brand,
+                store,
+                provider,
+                "evt_SYNTHETIC" + String(b).padStart(8, "0"),
+                paidAt,
+                hash(["webhook", b]),
+              ],
+            );
+            await admin.query(
+              "INSERT INTO rms_payment.payment_terminal_fact (payment_transaction_id,brand_id,store_id,payment_intent_id,payment_attempt_id,order_id,webhook_receipt_id,provider_event_id,provider_account_id,provider_environment,provider_intent_reference,provider_observation_id,authoritative_source,terminal_outcome,amount_minor,currency_code,failure_reason,retry_disposition,occurred_at,recorded_at,evidence_digest,event_id,causation_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'Test',$10,$11,'VerifiedWebhook','Succeeded',$12,'CAD',NULL,NULL,$13,$13,$14,$15,$7)",
+              [
+                refs.transaction,
+                brand,
+                store,
+                refs.intent,
+                refs.attempt,
+                order.order,
+                refs.webhook,
+                "evt_SYNTHETIC" + String(b).padStart(8, "0"),
+                provider,
+                "pi_SYNTHETIC_" + b,
+                refs.observation,
+                refs.totalMinor,
+                paidAt,
+                hash(["terminal", b]),
+                refs.event,
+              ],
+            );
+          }
+          if (unfulfillable) {
+            await admin.query(
+              "INSERT INTO rms_ordering.order_payment_disposition_record (disposition_id,brand_id,store_id,order_id,order_batch_id,submission_id,payment_transaction_id,payment_intent_id,payment_attempt_id,payment_event_id,source_checkpoint,correlation_id,source_version,source_digest,evaluated_at,disposition,reason,kitchen_release_disposition) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'PaidWithoutFulfillableOrder','CapacityExpired','Blocked')",
+              [
+                refs.disposition,
+                brand,
+                store,
+                order.order,
+                refs.batch,
+                refs.submission,
+                refs.transaction,
+                refs.intent,
+                refs.attempt,
+                refs.event,
+                refs.submission,
+                refs.correlation,
+                version,
+                hash(["disposition", b]),
+                acceptedAt,
+              ],
+            );
+            order.batches.push(refs);
+            continue;
+          }
           // Ordering: the store accepted the Batch, then recorded the paid outcome Confirmed.
           await admin.query(
             "INSERT INTO rms_ordering.order_acceptance_record (acceptance_id,operation_id,brand_id,store_id,order_id,order_batch_id,expected_order_version,accepted_order_version,actor_type,actor_id,purpose_code,permission_code,reason_code,workflow_version_id,transition_id,source_digest,accepted_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'User',$9,'OrderAcceptance','order.accept','SYNTHETIC_TEST',$10,$11,$12,$13)",
@@ -959,8 +1049,16 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       const started = await seedOrder(2000, { batches: [2], quantity: "1" });
       const raceStart = await seedOrder(3000, { batches: [1], quantity: "1" });
       const raceCancel = await seedOrder(4000, { batches: [1], quantity: "1" });
+      // WP-2423 Q7: counter pickup Orders paid on the Store's card machine; one expired unaccepted.
+      const counter = await seedOrder(6000, { batches: [1], quantity: "1", cardMachine: true });
+      const expired = await seedOrder(7000, {
+        batches: [1],
+        quantity: "1",
+        cardMachine: true,
+        unfulfillable: true,
+      });
       const dineIn = await seedOrder(5000, { type: "DineIn", batches: [1, 2], quantity: "1.5" });
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "8" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "10" });
 
       // The kitchen accepted the first item of the pickup Order (still Queued, not started).
       assert.equal((await kitchen(pickup).accept(0)).outcome, "Accepted");
@@ -1119,7 +1217,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       assert.equal(releases.length, 1);
       assert.equal(releases[0].performedBy, staff);
       assert.equal(releases[0].reasonCode, "STAFF_CANCELLED_BEFORE_PREPARATION");
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "6" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "8" });
 
       // Payment's compensation source: the CancelledByStaff disposition, discovered only by the
       // refund workload (includeStaffCancellations).
@@ -1142,14 +1240,21 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       assert.equal(source.paymentAttemptReference, pickup.batches[0].attempt);
       assert.equal(source.paymentEventReference, pickup.batches[0].event);
       assert.equal(source.dispositionReference, staffRow[0].id);
+      // The pilot refund workload discovers through the same filter: payments taken on the
+      // Store's card machine (the expired counter Order seeded above) are never Provider refunds.
       const discover = (includeStaffCancellations) =>
-        scoped((tx) =>
-          createPostgresOrderCompensationCandidateReader({
-            scope: { brandReference: brand, storeReference: store },
-            includeStaffCancellations,
-            authorize: async (_tx, input) =>
-              input.purpose === "DiscoverPaidWithoutFulfillableOrder",
-          })(tx, { afterDispositionReference: null, limit: 100 }),
+        scoped(async (tx) =>
+          withoutCardMachinePayments(
+            tx,
+            { brandReference: brand, storeReference: store },
+            await createPostgresOrderCompensationCandidateReader({
+              scope: { brandReference: brand, storeReference: store },
+              includeStaffCancellations,
+              authorize: async (_tx, input) =>
+                input.purpose === "DiscoverPaidWithoutFulfillableOrder",
+            })(tx, { afterDispositionReference: null, limit: 100 }),
+            async () => true,
+          ),
         );
       assert.deepEqual((await discover(true)).candidates, [source]);
       assert.deepEqual((await discover(false)).candidates, []);
@@ -1166,7 +1271,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
         code: "ORDER_CANCELLATION_NOT_CANCELLABLE",
       });
       assert.deepEqual(await counts(), before);
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "6" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "8" });
 
       // ── Scenario 2: one item already started (In Progress): refused, nothing written.
       const startedKitchen = kitchen(started);
@@ -1177,7 +1282,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       await assert.rejects(cancel(started, 0), { code: "ORDER_CANCELLATION_PREPARATION_STARTED" });
       assert.deepEqual(await counts(), before);
       assert.deepEqual(await itemStatuses(started.batches[0].ticket), ["In Progress", "Queued"]);
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "6" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "8" });
 
       // ── Scenario 3a: the kitchen starts first and holds its row locks; the cancellation waits,
       // then sees the started item and is refused.
@@ -1253,7 +1358,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
           0,
         );
       }
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "5" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "7" });
 
       // ── Scenario 6: dine-in Order with an initial and an additional Batch; staff cancel the
       // additional Batch only. The Order stays open; the first Batch is unaffected.
@@ -1281,7 +1386,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       ]);
       assert.deepEqual(await itemStatuses(dineIn.batches[0].ticket), ["Queued"]);
       assert.deepEqual(await itemStatuses(dineIn.batches[1].ticket), ["Cancelled", "Cancelled"]);
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "3.5" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "5.5" });
       const diningState = await scoped((tx) =>
         createPostgresDiningOrderItemStateReader({
           brandReference: brand,
@@ -1307,7 +1412,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       dineIn.version = 5;
       assert.equal((await cancel(dineIn, 0)).status, "Cancelled");
       assert.deepEqual(await itemStatuses(dineIn.batches[0].ticket), ["Cancelled"]);
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "2" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "4" });
 
       // ── Scenario 7: the refund workload opens one compensation case for the staff-cancelled
       // payment attempt and refunds the whole capture including tip, through Payment's runtime
@@ -1399,6 +1504,165 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
           vi.unstubAllEnvs();
         }
       }
+
+      // ── WP-2423 Q7 (DEC-COUNTER-PAYMENT-RECORD decision 4): a counter Order paid on the Store's
+      // own card machine is cancelled the same way; its refund is made on that machine and
+      // recorded by staff, never sent to the Provider.
+      const cardTotal = String(counter.batches[0].totalMinor);
+      const cardCancelled = await cancel(counter, 0);
+      assert.equal(cardCancelled.status, "Cancelled");
+      assert.equal(cardCancelled.refundMethod, "CardMachine");
+      assert.equal(cardCancelled.refundStatus, "Pending");
+      assert.equal(cardCancelled.refundAmountMinor, cardTotal);
+      // Ordering offers it to compensation like any staff cancellation; the refund workload's
+      // discovery leaves the card-machine payment out (no Provider refund, no case).
+      const cardSource = await scoped((tx) =>
+        createPostgresStaffOrderCancellationReader({
+          brandReference: brand,
+          storeReference: store,
+        }).loadCompensationByPaymentEvent({
+          transaction: tx,
+          paymentEventReference: counter.batches[0].event,
+        }),
+      );
+      assert.equal(cardSource.paymentIntentReference, counter.batches[0].intent);
+      const page = await scoped(async (tx) =>
+        withoutCardMachinePayments(
+          tx,
+          { brandReference: brand, storeReference: store },
+          await createPostgresOrderCompensationCandidateReader({
+            scope: { brandReference: brand, storeReference: store },
+            includeStaffCancellations: true,
+            authorize: async (_tx, input) =>
+              input.purpose === "DiscoverPaidWithoutFulfillableOrder",
+          })(tx, { afterDispositionReference: null, limit: 100 }),
+          async () => true,
+        ),
+      );
+      assert.equal(
+        page.candidates.some((candidate) =>
+          [counter.batches[0].intent, expired.batches[0].intent].includes(
+            candidate.paymentIntentReference,
+          ),
+        ),
+        false,
+      );
+      const refundOnMachine = createMerchantCardMachineCancellationRefund({
+        persistence: {
+          transactions: transactions({ guc: false }),
+          now: () => new Date(Math.floor(Date.now())).toISOString(),
+        },
+        authentication: { authorize: async () => ({ sessionReference: id(12) }) },
+        nextReference: fresh,
+      });
+      const refundOperation = fresh();
+      const refundInput = (overrides = {}) => ({
+        sessionCookie: "synthetic-session",
+        csrf: "synthetic-csrf",
+        command: {
+          operationReference: refundOperation,
+          orderReference: counter.order,
+          orderBatchReference: counter.batches[0].batch,
+          slipReference: "REFUND 7731",
+          refundedAt: null,
+          ...overrides,
+        },
+      });
+      merchant.allowed = () => false;
+      await assert.rejects(refundOnMachine(refundInput()), {
+        code: "CARD_MACHINE_REFUND_PERMISSION_DENIED",
+      });
+      merchant.allowed = () => true;
+      await assert.rejects(refundOnMachine(refundInput({ slipReference: "1234567890123456" })), {
+        code: "CARD_MACHINE_REFUND_INPUT_INVALID",
+      });
+      // Only a cancelled card-machine Batch is refunded here (the Stripe-paid pickup is not).
+      await assert.rejects(
+        refundOnMachine(
+          refundInput({
+            operationReference: fresh(),
+            orderReference: pickup.order,
+            orderBatchReference: pickup.batches[0].batch,
+          }),
+        ),
+        { code: "CARD_MACHINE_REFUND_NOT_FOUND" },
+      );
+      const machineRefund = await refundOnMachine(refundInput());
+      assert.equal(machineRefund.status, "Recorded");
+      assert.equal(machineRefund.amountMinor, cardTotal);
+      assert.equal((await refundOnMachine(refundInput())).status, "AlreadyRecorded");
+      await assert.rejects(refundOnMachine(refundInput({ operationReference: fresh() })), {
+        code: "CARD_MACHINE_REFUND_NOTHING_OWED",
+      });
+      const cardReplay = await cancel(counter, 0, {
+        operationReference: (
+          await admin.query(
+            "SELECT operation_id::text AS op FROM rms_ordering.order_staff_cancellation WHERE order_id=$1",
+            [counter.order],
+          )
+        ).rows[0].op,
+      });
+      assert.equal(cardReplay.status, "AlreadyCancelled");
+      assert.equal(cardReplay.refundStatus, "Refunded");
+      assert.equal(cardReplay.refundMethod, "CardMachine");
+      assert.equal(cardReplay.refundAmountMinor, cardTotal);
+      const machineDay = await scoped((tx) =>
+        createPostgresCardMachinePaymentStore({
+          scope: { tenantReference: tenant, brandReference: brand, storeReference: store },
+          authorize: async () => true,
+        }).summarize(tx, {
+          from: time(-minutes(120)),
+          to: new Date(Date.now() + 60_000).toISOString(),
+        }),
+      );
+      assert.equal(machineDay.paymentCount, 2);
+      assert.equal(
+        machineDay.takenMinor,
+        BigInt(cardTotal) + BigInt(expired.batches[0].totalMinor),
+      );
+      assert.equal(machineDay.refundCount, 1);
+      assert.equal(machineDay.refundedMinor, BigInt(cardTotal));
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM platform_audit.audit_record WHERE action_code='PAYMENT_CARD_MACHINE_REFUND_RECORDED'",
+          )
+        ).rows[0].n,
+        1,
+      );
+      // A paid counter Order that expired before it was accepted is owed in full too.
+      const expiredRefund = await refundOnMachine(
+        refundInput({
+          operationReference: fresh(),
+          orderReference: expired.order,
+          orderBatchReference: expired.batches[0].batch,
+          slipReference: null,
+        }),
+      );
+      assert.equal(expiredRefund.status, "Recorded");
+      assert.equal(expiredRefund.amountMinor, String(expired.batches[0].totalMinor));
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT source_kind FROM rms_payment.card_machine_refund WHERE order_id=$1",
+            [expired.order],
+          )
+        ).rows[0].source_kind,
+        "UnfulfillableOrder",
+      );
+      await assert.rejects(
+        refundOnMachine(
+          refundInput({
+            operationReference: fresh(),
+            orderReference: expired.order,
+            orderBatchReference: expired.batches[0].batch,
+          }),
+        ),
+        { code: "CARD_MACHINE_REFUND_NOTHING_OWED" },
+      );
+      await scoped(async (tx) => {
+        await assert.rejects(tx.query("DELETE FROM rms_payment.card_machine_refund", []));
+      });
 
       // History stays append-only for the API role.
       await scoped(async (tx) => {

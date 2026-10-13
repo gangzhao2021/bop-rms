@@ -101,6 +101,7 @@ export async function createInternalMerchant(
     refundUnmatchedCapture,
     cancellationRefundProvider,
     staffTotpVerifier,
+    createInternalCounterOrder,
   },
 ) {
   const session = await createInternalMerchantSession(resources);
@@ -183,6 +184,13 @@ export async function createInternalMerchant(
           label: "Orders",
           href: "/operations/orders",
           permission: "ordering.operate",
+        },
+        // WP-2423 Q7: a pickup order taken at the counter, paid on the Store's card machine.
+        {
+          screenId: "OPS-ORDER-ENTRY",
+          label: "Counter order",
+          href: "/operations/order-entry",
+          permission: "ordering.order.create_staff",
         },
         {
           screenId: "KIT-KITCHEN-QUEUE",
@@ -993,6 +1001,10 @@ export async function createInternalMerchant(
       ...(unmatchedCaptureRefund === undefined ? {} : { unmatchedCaptureRefund }),
       orderStaffCancellation,
       ...(orderItemStaffCancellation === undefined ? {} : { orderItemStaffCancellation }),
+      // WP-2423 Q7: counter pickup orders and card-machine payments and refunds.
+      ...(createInternalCounterOrder === undefined
+        ? {}
+        : await createInternalCounterOrder(resources, persistence, service)),
       ordinaryRefundSend,
       ordinaryRefundReconciliation,
       ordinaryRefund,

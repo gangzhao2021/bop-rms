@@ -2,6 +2,7 @@ import { expect, it, vi } from "vitest";
 import {
   cancelledItemsRefund,
   createCurrentOrderQueueClient,
+  CurrentOrderQueueError,
   parseCurrentOrderDetail,
   parseCurrentOrderQueue,
 } from "./current-order-queue-client.js";
@@ -368,10 +369,55 @@ it("WP-2423 Q6: reads staff cancellation and refuses inconsistent cancel capabil
     currentVersion: 3,
     batches: [{ ...batch, staffCancellation: cancellation }],
   };
+  // An older server without the refund method refunds online.
   expect(
     parseCurrentOrderQueue({ items: [pickup], nextAfterOrderReference: null }).items[0]?.batches[0]
       ?.staffCancellation,
-  ).toEqual(cancellation);
+  ).toEqual({ ...cancellation, refundMethod: "Online", refundAmountMinor: null });
+  // WP-2423 Q7: a counter order paid on the card machine is refunded on the machine.
+  const machine = { ...cancellation, refundMethod: "CardMachine", refundAmountMinor: "1280" };
+  expect(
+    parseCurrentOrderQueue({
+      items: [
+        {
+          ...pickup,
+          sourceChannel: "Pos",
+          counter: {
+            recordedAfterOutage: true,
+            paidOnCardMachine: {
+              amountMinor: "1280",
+              takenAt: "2026-09-14T00:00:10.000Z",
+              recordedAfterOutage: true,
+              refundedMinor: "0",
+            },
+          },
+          batches: [{ ...batch, staffCancellation: machine }],
+        },
+      ],
+      nextAfterOrderReference: null,
+    }).items[0],
+  ).toMatchObject({
+    counter: { recordedAfterOutage: true, paidOnCardMachine: { amountMinor: "1280" } },
+    batches: [{ staffCancellation: machine }],
+  });
+  for (const bad of [
+    { ...cancellation, refundMethod: "CardMachine", refundAmountMinor: null },
+    { ...cancellation, refundMethod: "Online", refundAmountMinor: "1280" },
+    { ...cancellation, refundMethod: "Cash", refundAmountMinor: "1" },
+  ])
+    expect(() =>
+      parseCurrentOrderQueue({
+        items: [{ ...pickup, batches: [{ ...batch, staffCancellation: bad }] }],
+        nextAfterOrderReference: null,
+      }),
+    ).toThrow(CurrentOrderQueueError);
+  // A counter record belongs to a counter (Pos) order only.
+  expect(() =>
+    parseCurrentOrderQueue({
+      items: [{ ...row(), counter: { recordedAfterOutage: false, paidOnCardMachine: null } }],
+      nextAfterOrderReference: null,
+    }),
+  ).toThrow(CurrentOrderQueueError);
   const dining = {
     ...row(),
     orderType: "DineIn",

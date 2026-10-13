@@ -14,6 +14,8 @@ import { createInternalDiningCredentialLoaders } from "./pilot-dining-credential
 import { createInternalCredentialLoaders } from "./pilot-credentials.mjs";
 import { refreshInternalOrderReceiptObservations } from "./pilot-receipt-observations.mjs";
 import { createInternalStaffTotpVerifier } from "./pilot-staff-totp.mjs";
+import { createInternalCounterOrder } from "./pilot-counter-order.mjs";
+import { createInternalQrLoaders } from "./pilot-qr.mjs";
 const factories = {
   createInternalRefundReconciliation,
   createInternalRefundSend,
@@ -28,6 +30,8 @@ const factories = {
   createInternalDiningCredentialLoaders,
   createInternalCredentialLoaders,
   refreshInternalOrderReceiptObservations,
+  createInternalCounterOrder,
+  createInternalQrLoaders,
 };
 export function composeMerchantDependencies(
   directory,
@@ -123,6 +127,22 @@ export function composeMerchantDependencies(
       } finally {
         simulator.close();
       }
+    },
+    // WP-2423 Q7: staff take counter pickup orders paid on the Store's own card machine; the walk-up
+    // guest enters through the Store's pickup QR like a customer scanning it at the counter.
+    createInternalCounterOrder: (resources, persistence, authentication) => {
+      const qr = f.createInternalQrLoaders({
+        file: join(directory, "internal-test-qr-key.pem"),
+        loadProfile: installation.loadProfile,
+        expectedDatabaseName: installation.database,
+      });
+      return f.createInternalCounterOrder(resources, persistence, authentication, {
+        customer,
+        loadPickupWorkflow: () => installation.loadWorkflow("Pickup"),
+        loadPickupQrToken: async () =>
+          (await qr.loadInternalPickupQr(await installation.loadProfile())).token(),
+        expectedDatabaseName: installation.database,
+      });
     },
     createInternalDiningCredentials: dining.createInternalDiningCredentials,
     createInternalMerchantDining: f.createInternalMerchantDining,

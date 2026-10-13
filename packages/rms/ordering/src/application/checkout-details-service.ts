@@ -9,6 +9,7 @@ import {
   parseCartAggregate,
   parseOrderingInstant,
   parseOrderingReference,
+  isGuestCartChannel,
 } from "../domain/cart.js";
 import { assertCartLifecycleActive } from "../domain/cart-lifecycle.js";
 import { parseCartQuoteAttachmentOfVersion } from "../domain/cart-quote-attachment.js";
@@ -158,7 +159,7 @@ export function createCheckoutDetailsService(ports: CheckoutDetailsPorts) {
             cart.brandReference !== String(guest.brandReference) ||
             cart.storeReference !== String(guest.storeReference) ||
             cart.orderType !== guest.channel ||
-            !["Qr", "Web"].includes(cart.sourceChannel) ||
+            !isGuestCartChannel(cart.orderType, cart.sourceChannel) ||
             (cart.orderType === "Pickup" &&
               (cart.createdByActorReference !== String(guest.sessionReference) ||
                 guest.diningState !== "ContextOnly")) ||

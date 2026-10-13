@@ -18,6 +18,7 @@ import {
   parseOrderingInstant,
   parseOrderingHash,
   type CartAggregate,
+  isGuestCartChannel,
 } from "../domain/cart.js";
 // Version-specific on purpose: this service attaches configured (v2) Quotes only.
 import {
@@ -149,7 +150,7 @@ export function createConfiguredCartQuoteService(ports: ConfiguredCartQuotePorts
             String(session.brandReference) !== cart.brandReference ||
             String(session.storeReference) !== cart.storeReference ||
             session.channel !== cart.orderType ||
-            !["Qr", "Web"].includes(cart.sourceChannel) ||
+            !isGuestCartChannel(cart.orderType, cart.sourceChannel) ||
             (cart.orderType === "Pickup" &&
               (cart.createdByActorReference !== String(session.sessionReference) ||
                 session.diningState !== "ContextOnly" ||

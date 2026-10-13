@@ -7406,3 +7406,168 @@ body:has(.product-complete-draft) .bop-shell__header,
   letter-spacing: 0.2em;
   font-variant-numeric: tabular-nums;
 }
+/* WP-2423 Q7 (OPS-ORDER-ENTRY): a pickup order taken at the counter, paid on the store's card
+   machine. Menu on the left, the order and the charge on the right; one column on a phone. */
+.counter-order__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: var(--bop-space-6);
+  align-items: start;
+}
+.counter-order__menu {
+  grid-row: span 2;
+  min-width: 0;
+}
+.counter-order__menu h2,
+.counter-order__ticket h2,
+.counter-order__charge h2 {
+  margin: 0 0 var(--bop-space-3);
+  font-size: 18px;
+}
+.counter-order__menu h3 {
+  margin: var(--bop-space-4) 0 var(--bop-space-2);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--bop-color-text-muted);
+}
+.counter-order__items,
+.counter-order__lines {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.counter-order__items li,
+.counter-order__lines li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: var(--bop-space-3);
+  align-items: center;
+  padding: var(--bop-space-3) 0;
+  border-bottom: 1px solid var(--bop-color-border-default);
+}
+.counter-order__items li[data-available="false"] .counter-order__item-name {
+  color: var(--bop-color-text-muted);
+  text-decoration: line-through;
+}
+.counter-order__item-price {
+  font-variant-numeric: tabular-nums;
+}
+.counter-order__ticket,
+.counter-order__charge {
+  display: grid;
+  gap: var(--bop-space-4);
+  min-width: 0;
+}
+.counter-order__choose {
+  display: grid;
+  gap: var(--bop-space-3);
+  padding-bottom: var(--bop-space-4);
+  border-bottom: 1px solid var(--bop-color-border-default);
+}
+.counter-order__choose h3 {
+  margin: 0;
+  font-size: 16px;
+}
+.counter-order fieldset {
+  display: grid;
+  gap: var(--bop-space-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.counter-order legend {
+  margin-bottom: var(--bop-space-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+.counter-order fieldset > label,
+.counter-order__quantity,
+.counter-order__charge form label {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--bop-space-2);
+  align-items: center;
+}
+.counter-order__tip {
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+}
+.counter-order__tip legend,
+.counter-order__custom-tip {
+  grid-column: 1 / -1;
+}
+.counter-order__quantity input {
+  width: 5rem;
+}
+.counter-order__estimate {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.counter-order__charge {
+  border-color: var(--bop-color-text-default);
+}
+.counter-order__charge h2:focus-visible {
+  outline: 2px solid var(--bop-color-text-default);
+  outline-offset: 4px;
+}
+.counter-order__charge form {
+  display: grid;
+  gap: var(--bop-space-3);
+}
+.order-counter-paid,
+.order-counter-outage {
+  display: block;
+  font-weight: 600;
+}
+.order-counter-outage {
+  color: var(--bop-color-text-default);
+}
+.order-counter-note {
+  margin: 0 0 var(--bop-space-3);
+  font-weight: 600;
+}
+.settlement__card-machine {
+  display: grid;
+  gap: var(--bop-space-3);
+}
+@media (max-width: 900px) {
+  .counter-order__layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .counter-order__menu {
+    grid-row: auto;
+  }
+}
+.counter-order .counter-order__primary {
+  border-color: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
+  background: var(--bop-color-brand-primary);
+  font-weight: 600;
+}
+.counter-order .counter-order__primary:hover:not(:disabled) {
+  background: #000000;
+}
+.counter-order .counter-order__primary:disabled {
+  border-color: var(--bop-color-border-default);
+  color: var(--bop-color-text-muted);
+  background: var(--bop-color-surface-raised);
+  cursor: not-allowed;
+}
+.workspace-page .store-card.counter-order__charge dl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--bop-space-2);
+  margin: 0;
+}
+.workspace-page .store-card.counter-order__charge dl div {
+  display: grid;
+  grid-template-columns: minmax(8rem, 0.8fr) minmax(0, 1fr);
+  gap: var(--bop-space-3);
+}
+.counter-order__charge dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}

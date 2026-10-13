@@ -3,6 +3,7 @@ import {
   assertCartLifecycleActive,
   parseOrderingInstant,
   parseOrderingReference,
+  isGuestCartChannel,
 } from "@rms/ordering";
 import type { CustomerCartSelectionInventoryOptions } from "./customer-cart-selection-inventory.js";
 
@@ -35,7 +36,7 @@ export function createCustomerPickupCartInventoryAuthorization(
         cart.createdByActorReference !== context.guestSessionReference ||
         cart.orderType !== "Pickup" ||
         cart.diningSessionReference !== null ||
-        !["Qr", "Web"].includes(cart.sourceChannel) ||
+        !isGuestCartChannel(cart.orderType, cart.sourceChannel) ||
         cart.updatedAt > observedAt
       )
         return false;

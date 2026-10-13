@@ -251,7 +251,7 @@ export function createPostgresPaymentReceiptCoverageSource(options: {
             },
             providerIntentReference: fact.providerIntentReference,
             providerTransactionReference: latest.provider_transaction_reference as never,
-            paymentMethod: intent.paymentMethod,
+            paymentMethod: intent.paymentMethod === "OnlineCard" ? "OnlineCard" : unavailable(),
             captureMode: intent.captureMode,
             status,
             requestedAmount: decimal(latest.requested_minor),

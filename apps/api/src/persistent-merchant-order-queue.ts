@@ -1,5 +1,6 @@
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
+  createPostgresCounterOrderEntryStore,
   createPostgresStaffItemCancellationReader,
   createPostgresStaffOrderCancellationReader,
   listStoreConfirmedOrderBatches,
@@ -14,11 +15,15 @@ import {
   listStorePickupAcceptanceDeadlines,
   listStoreUncollectedPickupOrders,
 } from "@rms/fulfillment";
-import { listStoreOrderBatchPaymentOutcomes } from "@rms/payment";
+import {
+  createPostgresCardMachinePaymentStore,
+  listStoreOrderBatchPaymentOutcomes,
+} from "@rms/payment";
 import { createPostgresCurrentBrowserSessionSource } from "@bop/identity";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { createMerchantOrderQueueRead } from "./merchant-order-queue-read.js";
 import {
+  readCardMachineCancellationRefund,
   readStaffCancellationRefundStatus,
   staffOrderCancellationPermission,
   type StaffOrderRefundStatus,
@@ -230,6 +235,22 @@ export function createPersistentMerchantOrderQueue(options: {
           reasonCode: StaffOrderCancellationRecord["reasonCode"];
           cancelledAt: string;
           refundStatus: StaffOrderRefundStatus;
+          /** WP-2423 Q7: refunded on the Store's card machine (amount to refund or refunded). */
+          refundMethod: "Online" | "CardMachine";
+          refundAmountMinor: string | null;
+        }
+      >();
+      /** WP-2423 Q7: counter orders (staff-taken) and their card-machine payment, by Order. */
+      const counter = new Map<
+        string,
+        {
+          recordedAfterOutage: boolean;
+          paidOnCardMachine: {
+            amountMinor: string;
+            takenAt: string;
+            recordedAfterOutage: boolean;
+            refundedMinor: string;
+          } | null;
         }
       >();
       let confirmed: ReadonlySet<string> = new Set<string>();
@@ -249,17 +270,53 @@ export function createPersistentMerchantOrderQueue(options: {
         for (const record of await createPostgresStaffOrderCancellationReader(scoped).listByOrders(
           businessTransaction,
           orderReferences,
-        ))
+        )) {
+          const card = await readCardMachineCancellationRefund(
+            businessTransaction,
+            scoped,
+            record,
+            stillAllowed,
+          );
           cancellations.set(String(record.orderBatchReference), {
             reasonCode: record.reasonCode,
             cancelledAt: String(record.cancelledAt),
-            refundStatus: await readStaffCancellationRefundStatus(
-              businessTransaction,
-              scoped,
-              record,
-              stillAllowed,
-            ),
+            refundStatus:
+              card?.status ??
+              (await readStaffCancellationRefundStatus(
+                businessTransaction,
+                scoped,
+                record,
+                stillAllowed,
+              )),
+            refundMethod: card === null ? "Online" : "CardMachine",
+            refundAmountMinor: card?.amountMinor ?? null,
           });
+        }
+        const entries = await createPostgresCounterOrderEntryStore({
+          ...scoped,
+          authorize: stillAllowed,
+        }).listByOrders(businessTransaction, orderReferences);
+        const cardPayments = createPostgresCardMachinePaymentStore({
+          scope: scoped,
+          authorize: async () => stillAllowed(),
+        });
+        for (const [order, entry] of entries) {
+          const paid = (await cardPayments.listByOrder(businessTransaction, order))[0];
+          counter.set(order, {
+            recordedAfterOutage: entry.recordedAfterOutage,
+            paidOnCardMachine:
+              paid === undefined
+                ? null
+                : {
+                    amountMinor: paid.payment.preparation.total.amountMinor.toString(),
+                    takenAt: String(paid.payment.takenAt),
+                    recordedAfterOutage: paid.payment.recordingReason === "RecordedAfterOutage",
+                    refundedMinor: paid.refunds
+                      .reduce((sum, refund) => sum + refund.amountMinor, 0n)
+                      .toString(),
+                  },
+          });
+        }
         if (cancelAllowed) {
           confirmed = await listStoreConfirmedOrderBatches(
             businessTransaction,
@@ -390,6 +447,7 @@ export function createPersistentMerchantOrderQueue(options: {
               ...item,
               unfulfillable: closed,
               pickupNotCollected: uncollected.has(item.orderReference),
+              counter: counter.get(item.orderReference) ?? null,
               acceptBy: deadlines.get(item.orderReference) ?? null,
               awaitingPayment:
                 closed === null &&

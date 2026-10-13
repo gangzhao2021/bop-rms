@@ -32,6 +32,7 @@ export interface MerchantNavigationItem {
     | "CAT-PRODUCT-LIST"
     | "CAT-OPTIONSET-LIST"
     | "OPS-ORDER-QUEUE"
+    | "OPS-ORDER-ENTRY"
     | "OPS-ORDER-EXCEPTION"
     | "PAY-RECONCILIATION"
     | "KIT-KITCHEN-QUEUE"
@@ -78,6 +79,8 @@ const NAVIGATION = Object.freeze({
   "CAT-AVAILABILITY": ["/app/commerce/availability", "catalog.sku.read"],
   "TAX-CONFIG": ["/app/commerce/tax", "pricing.tax-config.manage"],
   "OPS-ORDER-QUEUE": ["/operations/orders", "ordering.operate"],
+  // WP-2423 Q7: staff take a pickup order at the counter (Section 88 OPS-ORDER-ENTRY).
+  "OPS-ORDER-ENTRY": ["/operations/order-entry", "ordering.order.create_staff"],
   "OPS-ORDER-EXCEPTION": ["/operations/order-exceptions", "operations.order-exception.manage"],
   // WP-2423 P1: day-end settlement under the pilot's exception permission.
   "PAY-RECONCILIATION": [

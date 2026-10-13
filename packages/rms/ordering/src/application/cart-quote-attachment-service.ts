@@ -17,6 +17,7 @@ import {
   type CartAggregate,
   type OrderingInstant,
   type OrderingReference,
+  isGuestCartChannel,
 } from "../domain/cart.js";
 import { assertCartLifecycleActive } from "../domain/cart-lifecycle.js";
 import type { CartQuoteAttachmentPorts } from "./ports/cart-quote-attachment-ports.js";
@@ -145,7 +146,7 @@ function sessionScope(
     if (
       parseOrderingReference(session.brandReference) !== scope.brandReference ||
       parseOrderingReference(session.storeReference) !== scope.storeReference ||
-      !["Qr", "Web"].includes(scope.sourceChannel ?? "Qr") ||
+      !isGuestCartChannel(scope.orderType, scope.sourceChannel ?? "Qr") ||
       (scope.orderType !== undefined && session.channel !== scope.orderType) ||
       (scope.orderType === "Pickup" &&
         (parseOrderingReference(session.sessionReference) !== scope.createdByActorReference ||

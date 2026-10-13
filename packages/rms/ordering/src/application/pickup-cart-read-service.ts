@@ -11,6 +11,7 @@ import {
   parseOrderingReference,
   type CartAggregate,
   type OrderingInstant,
+  isGuestCartChannel,
 } from "../domain/cart.js";
 
 export interface PickupCartReadPorts {
@@ -139,7 +140,7 @@ export function createPickupCartReadService(ports: PickupCartReadPorts) {
           cart.brandReference !== brand ||
           cart.storeReference !== store ||
           cart.orderType !== "Pickup" ||
-          !["Qr", "Web"].includes(cart.sourceChannel) ||
+          !isGuestCartChannel(cart.orderType, cart.sourceChannel) ||
           cart.createdByActorReference !== String(session.sessionReference) ||
           cart.diningSessionReference !== null ||
           cart.updatedAt > observedAt ||

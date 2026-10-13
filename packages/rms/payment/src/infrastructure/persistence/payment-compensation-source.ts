@@ -206,7 +206,8 @@ export function createPostgresPaymentCompensationSource(options: {
             },
             providerIntentReference: fact.providerIntentReference,
             providerTransactionReference: latest.provider_transaction_reference as never,
-            paymentMethod: record.intent.paymentMethod,
+            // A card-machine payment has no Provider intent and is never compensated here.
+            paymentMethod: record.intent.paymentMethod === "OnlineCard" ? "OnlineCard" : fail(),
             captureMode: record.intent.captureMode,
             status,
             requestedAmount: decimal(latest.requested_minor),

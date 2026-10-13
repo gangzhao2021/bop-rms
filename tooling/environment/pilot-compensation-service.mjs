@@ -53,6 +53,7 @@ export function createInternalCompensationService({
   if (!active()) return deny();
   const candidates = createInternalCompensationCandidates(resources, {
     includeStaffCancellations: true,
+    excludeCardMachinePayments: true,
   });
   const dispositionEvidence = createPaymentCompensationDispositionEvidence({
     scope,
@@ -94,6 +95,7 @@ export function createInternalCompensationService({
     ]),
   );
   return Object.freeze({
+    // WP-2423 Q7: discovery already leaves out payments taken on the Store's card machine.
     discover: candidates.discover,
     readReconciliationExceptions: createInternalReconciliationExceptions(resources),
     recoverReconciliationProjectionPage: createInternalReconciliationProjection(resources),

@@ -50,6 +50,8 @@ const moduleManifestInput =
     ownedDatabase: {
       schema: "rms_payment",
       tables: [
+        "card_machine_payment",
+        "card_machine_refund",
         "store_payment_configuration_version",
         "store_payment_configuration_operation",
         "reconciliation_follow_up_history",

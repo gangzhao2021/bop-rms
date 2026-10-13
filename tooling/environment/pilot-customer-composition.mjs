@@ -130,11 +130,15 @@ export function composeCustomerDependencies(directory, installation, config) {
       createInternalCartReplacement(r, e, { createCart: cart, ...account }),
     createInternalDiningCart: (r, items) =>
       createInternalDiningCart(r, items, { createCart: cart }),
-    createInternalTestItems: async (r) =>
-      createInternalTestItems(r, {
-        saved: await installation.loadCustomerData("internal-test-inventory.json"),
-        expectedDatabaseName,
-      }),
+    createInternalTestItems: async (r, sourceChannel = "Qr") =>
+      createInternalTestItems(
+        r,
+        {
+          saved: await installation.loadCustomerData("internal-test-inventory.json"),
+          expectedDatabaseName,
+        },
+        sourceChannel,
+      ),
     // WP-2423 8.6: the menu shows the Store's offers, sold-out items and the prices the Quote uses.
     // WP-2423 Q12: items whose ingredients have run out show sold out, from the Store's stock.
     createInternalMenuStoreFacts: async (r) =>

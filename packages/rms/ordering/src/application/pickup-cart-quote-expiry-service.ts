@@ -24,6 +24,7 @@ import {
   parseOrderingReference,
   type CartAggregate,
   type OrderingInstant,
+  isGuestCartChannel,
 } from "../domain/cart.js";
 import {
   parseCartQuoteAttachmentOfVersion,
@@ -154,7 +155,7 @@ export function createPickupCartQuoteExpiryService(options: PickupCartQuoteExpir
       cart.storeReference !== storeReference ||
       cart.orderType !== "Pickup" ||
       cart.diningSessionReference !== null ||
-      !["Qr", "Web"].includes(cart.sourceChannel) ||
+      !isGuestCartChannel(cart.orderType, cart.sourceChannel) ||
       cart.createdByActorReference !== String(current.sessionReference) ||
       cart.updatedAt > checkedAt
     )

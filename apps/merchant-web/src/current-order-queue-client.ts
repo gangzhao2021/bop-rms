@@ -45,21 +45,71 @@ export const staffCancellationReasons = [
   "DUPLICATE_ORDER",
 ] as const;
 export type StaffCancellationReason = (typeof staffCancellationReasons)[number];
+const minorPattern = /^(0|[1-9][0-9]{0,17})$/;
 function parseStaffCancellation(value: unknown, submittedAt: string) {
   if (value === null) return null;
-  const raw = exact(value, ["reasonCode", "cancelledAt", "refundStatus"]);
+  // WP-2423 Q7: how the refund is made; older servers without the keys refund online.
+  const withMethod =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "refundMethod");
+  const raw = exact(value, [
+    "reasonCode",
+    "cancelledAt",
+    "refundStatus",
+    ...(withMethod ? ["refundMethod", "refundAmountMinor"] : []),
+  ]);
   const cancelledAt = instant(raw.cancelledAt);
+  const refundMethod = withMethod ? raw.refundMethod : "Online";
+  const refundAmountMinor = withMethod ? raw.refundAmountMinor : null;
   if (
     !staffCancellationReasons.includes(raw.reasonCode as StaffCancellationReason) ||
     (raw.refundStatus !== "Pending" && raw.refundStatus !== "Refunded") ||
-    cancelledAt < submittedAt
+    cancelledAt < submittedAt ||
+    (refundMethod !== "Online" && refundMethod !== "CardMachine") ||
+    (refundMethod === "Online"
+      ? refundAmountMinor !== null
+      : typeof refundAmountMinor !== "string" || !minorPattern.test(refundAmountMinor))
   )
     return fail();
   return Object.freeze({
     reasonCode: raw.reasonCode as StaffCancellationReason,
     cancelledAt,
     refundStatus: raw.refundStatus as "Pending" | "Refunded",
+    /** WP-2423 Q7: CardMachine — staff refund it on the Store's card machine and record it. */
+    refundMethod: refundMethod as "Online" | "CardMachine",
+    refundAmountMinor: refundAmountMinor as string | null,
   });
+}
+/** WP-2423 Q7: a pickup order staff took at the counter, and its card-machine payment. */
+function parseCounter(value: unknown, sourceChannel: unknown) {
+  if (value === null || value === undefined) return null;
+  const raw = exact(value, ["recordedAfterOutage", "paidOnCardMachine"]);
+  if (typeof raw.recordedAfterOutage !== "boolean" || sourceChannel !== "Pos") return fail();
+  let paid = null;
+  if (raw.paidOnCardMachine !== null) {
+    const p = exact(raw.paidOnCardMachine, [
+      "amountMinor",
+      "takenAt",
+      "recordedAfterOutage",
+      "refundedMinor",
+    ]);
+    if (
+      typeof p.amountMinor !== "string" ||
+      !minorPattern.test(p.amountMinor) ||
+      typeof p.refundedMinor !== "string" ||
+      !minorPattern.test(p.refundedMinor) ||
+      BigInt(p.refundedMinor) > BigInt(p.amountMinor) ||
+      typeof p.recordedAfterOutage !== "boolean"
+    )
+      return fail();
+    paid = Object.freeze({
+      amountMinor: p.amountMinor,
+      /** When the card machine took it (a paper order's actual time). */
+      takenAt: instant(p.takenAt),
+      recordedAfterOutage: p.recordedAfterOutage,
+      refundedMinor: p.refundedMinor,
+    });
+  }
+  return Object.freeze({ recordedAfterOutage: raw.recordedAfterOutage, paidOnCardMachine: paid });
 }
 /**
  * WP-2423: an unpaid dine-in round. When its payment failed it is cancelled automatically at
@@ -80,7 +130,10 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
   if (!Array.isArray(raw.items) || raw.items.length > 50) return fail();
   let previous = after;
   const items = raw.items.map((value) => {
+    const withCounter =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "counter");
     const item = exact(value, [
+      ...(withCounter ? ["counter"] : []),
       "orderReference",
       "orderNumber",
       "orderType",
@@ -256,6 +309,8 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       return fail();
     return Object.freeze({
       batches: Object.freeze(batches),
+      /** WP-2423 Q7: staff took this pickup at the counter (null for customer orders). */
+      counter: parseCounter(item.counter, item.sourceChannel),
       orderReference,
       orderNumber: item.orderNumber,
       orderType: item.orderType,

@@ -1,5 +1,8 @@
 import { consumeEventInTransaction } from "../../packages/bop/eventing/src/index.ts";
-import { parsePaymentSucceededEnvelope } from "../../packages/rms/payment/src/index.ts";
+import {
+  createPostgresCardMachinePaymentStore,
+  parsePaymentSucceededEnvelope,
+} from "../../packages/rms/payment/src/index.ts";
 import { isPilotRuntime } from "./pilot-environment.mjs";
 export function createInternalReceiptConsumer(resources, { createReceipt }) {
   const authorize = (event) =>
@@ -20,6 +23,13 @@ export function createInternalReceiptConsumer(resources, { createReceipt }) {
     handler: async ({ transaction, envelope }) => {
       const event = parsePaymentSucceededEnvelope(envelope);
       if (!authorize(event)) throw new Error("INTERNAL_RECEIPT_SCOPE_DENIED");
+      // WP-2423 Q7: a counter order paid on the Store's card machine has no customer device to
+      // receive a digital receipt; the machine prints its own slip. Nothing to issue here.
+      const card = await createPostgresCardMachinePaymentStore({
+        scope: resources.scope,
+        authorize: async () => authorize(event),
+      }).loadByIntent(transaction, event.payload.paymentIntentReference);
+      if (card !== null) return { status: "completed" };
       const issuer = await createReceipt(resources, { run: (work) => work(transaction) });
       await issuer.issueOriginal({
         orderReference: event.payload.orderReference,

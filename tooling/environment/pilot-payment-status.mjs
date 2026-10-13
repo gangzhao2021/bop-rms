@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   createPaymentStatusEventConsumerService,
+  createPostgresCardMachinePaymentStore,
   createPostgresPaymentStatusStore,
 } from "../../packages/rms/payment/src/index.ts";
 import { isPilotRuntime } from "./pilot-environment.mjs";
@@ -34,6 +35,14 @@ export function createInternalPaymentStatus(resources, { providerAccountReferenc
     projections,
     references: { generateGeneration: resources.credentials.reference, now: resources.now },
     sha256: (value) => createHash("sha256").update(value).digest("hex"),
+    // WP-2423 Q7: a card-machine payment has no Provider status; its own record is the status.
+    cardMachine: {
+      isCardMachinePayment: async (tx, event) =>
+        (await createPostgresCardMachinePaymentStore({
+          scope: resources.scope,
+          authorize: async () => active(),
+        }).loadByIntent(tx, event.aggregateId)) !== null,
+    },
   });
   return { ...service, projections };
 }

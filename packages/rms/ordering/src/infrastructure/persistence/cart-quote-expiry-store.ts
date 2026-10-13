@@ -1,6 +1,6 @@
 import { appendAuditRecordInTransaction, validateAuditRecord } from "@bop/audit";
 import { readClosedRecord } from "@bop/identity";
-import { CartError, parseOrderingReference } from "../../domain/cart.js";
+import { CartError, parseOrderingReference, isGuestCartChannel } from "../../domain/cart.js";
 import {
   parseCartQuoteExpiryRecord,
   sameCartQuoteExpiryIntent,
@@ -188,7 +188,7 @@ export function createPostgresCartQuoteExpiryStore(
                 cart.createdByActorReference !== next.guestSessionReference
               : cart.orderType !== "DineIn" ||
                 cart.diningSessionReference !== diningSessionReference) ||
-            !["Qr", "Web"].includes(cart.sourceChannel) ||
+            !isGuestCartChannel(cart.orderType, cart.sourceChannel) ||
             cart.aggregateVersion < next.cartVersion ||
             cart.updatedAt > next.expiredAt
           )

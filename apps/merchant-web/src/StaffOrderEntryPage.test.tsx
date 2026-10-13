@@ -1,114 +1,221 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it } from "vitest";
-import { StaffOrderEntryScreen, StaffOrderEntryState } from "./StaffOrderEntryPage.js";
-import { parseStaffOrderEntryView, StaffOrderEntryClientError } from "./staff-order-entry.js";
+import { describe, expect, it, vi } from "vitest";
+import {
+  choicesComplete,
+  estimatedLineMinor,
+  paidAtInstant,
+  StaffOrderEntryPage,
+} from "./StaffOrderEntryPage.js";
+import {
+  CounterOrderClientError,
+  createCounterOrderClient,
+  parseCounterMenu,
+  parsePlacedCounterOrder,
+} from "./staff-order-entry.js";
+import { validSlipReference } from "./CardMachineRefundAction.js";
 
 const id = (n: number) => `018fa700-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
-function projection(overrides: Record<string, unknown> = {}) {
+const price = (amount: string | null) =>
+  amount === null
+    ? { status: "Unavailable", amount: null, currency: null, reason: "PRICE_NOT_SET" }
+    : { status: "Available", amount, currency: "CAD", reason: null };
+function counterMenuResponse() {
   return {
     screenId: "OPS-ORDER-ENTRY",
-    projectionVersion: "MERCHANT_STAFF_ORDER_ENTRY_V1",
-    asOfUtc: "2026-09-20T18:00:00.000Z",
-    freshness: "Current",
-    partial: false,
-    tenantReference: id(1),
-    brandReference: id(2),
-    storeReference: id(3),
-    storeLabel: "Toronto Pilot",
-    serviceMode: "DineIn",
-    actorReference: id(4),
-    actorLabel: "Authorized Counter Staff",
-    sourceChannel: "Pos",
-    menuSnapshotReference: id(5),
-    menuItems: [
-      {
-        sellableReference: id(6),
-        code: "BOWL_01",
-        localizedName: "Seasonal bowl",
-        sectionCode: "MAINS",
-        availability: "AvailableNow",
-        configuredPrice: { amountMinor: 1895, currencyCode: "CAD" },
-        allergenRequirement: "ReviewRequired",
+    menu: {
+      status: "Found",
+      schemaVersion: 1,
+      projection: {},
+      scope: {},
+      menu: {
+        menuReference: id(1),
+        menuVersionReference: id(2),
+        releaseReference: id(3),
+        locale: "en-CA",
+        name: "Menu",
+        effectiveFrom: "2026-10-01T00:00:00.000Z",
+        effectiveUntil: null,
+        sections: [
+          {
+            sectionReference: id(4),
+            name: "Coffee",
+            sellables: [
+              {
+                sellableReference: id(5),
+                productVersionReference: id(6),
+                name: "Flat White",
+                presentationRole: "Standard",
+                pinned: false,
+                availability: "Available",
+                optionRules: [
+                  {
+                    name: "Milk",
+                    bindingReference: id(7),
+                    optionSetVersionReference: id(8),
+                    minimumSelections: 1,
+                    maximumSelections: 1,
+                    enabledOptionReferences: [id(9), id(10)],
+                    defaultOptionReferences: [id(9)],
+                    options: [
+                      {
+                        optionReference: id(9),
+                        name: "Whole milk",
+                        maximumQuantity: 1,
+                        conflictOptionReferences: [],
+                        selectedByDefault: true,
+                        incrementalPrice: price("0.00"),
+                      },
+                      {
+                        optionReference: id(10),
+                        name: "Oat milk",
+                        maximumQuantity: 1,
+                        conflictOptionReferences: [],
+                        selectedByDefault: false,
+                        incrementalPrice: price("0.75"),
+                      },
+                    ],
+                  },
+                ],
+                allergenDisclosure: {},
+                displayPrice: price("4.50"),
+                taxDisplayContext: {},
+              },
+              {
+                sellableReference: id(11),
+                productVersionReference: id(12),
+                name: "Croissant",
+                presentationRole: "Standard",
+                pinned: false,
+                availability: "SoldOut",
+                optionRules: [],
+                allergenDisclosure: {},
+                displayPrice: price("3.25"),
+                taxDisplayContext: {},
+              },
+            ],
+          },
+        ],
       },
-    ],
-    cart: {
-      cartReference: id(7),
-      cartVersion: 3,
-      lineCount: 1,
-      quoteReference: id(8),
-      quoteStatus: "Current",
-      total: { amountMinor: 2141, currencyCode: "CAD" },
     },
-    diningSession: { eligibility: "Eligible", sessionReference: id(9) },
-    customerReference: { verified: true, maskedReference: "Verified customer ref …92" },
-    allergenReview: "Current",
-    terminalStatus: "NotStarted",
-    ...overrides,
   };
 }
 
-describe("OPS-ORDER-ENTRY", () => {
-  it("strictly parses the complete shared-contract projection", () => {
-    expect(parseStaffOrderEntryView(projection())).toMatchObject({
-      screenId: "OPS-ORDER-ENTRY",
-      sourceChannel: "Pos",
-      cart: { quoteStatus: "Current" },
+describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
+  it("reads the pickup menu customers see, with prices in exact cents and sold-out items", () => {
+    const menu = parseCounterMenu(counterMenuResponse());
+    const [flatWhite, croissant] = menu.sections[0]?.items ?? [];
+    expect(flatWhite?.priceMinor).toBe("450");
+    expect(flatWhite?.available).toBe(true);
+    expect(flatWhite?.rules[0]?.options.map((option) => option.priceMinor)).toEqual(["0", "75"]);
+    expect(croissant?.available).toBe(false);
+    expect(() => parseCounterMenu({ ...counterMenuResponse(), screenId: "OTHER" })).toThrow(
+      CounterOrderClientError,
+    );
+  });
+
+  it("estimates a line from the menu and requires each required choice", () => {
+    const item = parseCounterMenu(counterMenuResponse()).sections[0]?.items[0];
+    if (!item) throw new Error("fixture");
+    expect(
+      estimatedLineMinor({
+        key: "a",
+        item,
+        quantity: 2,
+        options: [{ optionReference: id(10), name: "Oat milk", quantity: 1 }],
+      }),
+    ).toBe(1050n);
+    expect(choicesComplete(item, { [id(7)]: [] })).toBe(false);
+    expect(choicesComplete(item, { [id(7)]: [id(9)] })).toBe(true);
+  });
+
+  it("accepts a paper order's paid time only within the last three days", () => {
+    const now = Date.parse("2026-10-13T18:00:00");
+    expect(paidAtInstant("2026-10-13T14:05", now)).toBe(new Date("2026-10-13T14:05").toISOString());
+    expect(paidAtInstant("2026-10-13T18:30", now)).toBeNull();
+    expect(paidAtInstant("2026-10-09T18:00", now)).toBeNull();
+    expect(paidAtInstant("", now)).toBeNull();
+  });
+
+  it("never takes a card number as the slip reference", () => {
+    expect(validSlipReference("")).toBe(true);
+    expect(validSlipReference("AUTH 482913")).toBe(true);
+    expect(validSlipReference("1234 5678 9012 3456")).toBe(false);
+    expect(validSlipReference("x".repeat(41))).toBe(false);
+  });
+
+  it("reads the placed order and maps refusals to plain outcomes", async () => {
+    const placed = {
+      status: "Placed",
+      orderReference: id(20),
+      orderBatchReference: id(21),
+      orderNumber: "12",
+      orderVersion: 1,
+      orderMinor: "1130",
+      tipMinor: "150",
+      totalMinor: "1280",
+      payBy: "2026-10-13T18:30:00.000Z",
+      recordedAfterOutage: false,
+    };
+    expect(parsePlacedCounterOrder(placed).totalMinor).toBe("1280");
+    expect(() => parsePlacedCounterOrder({ ...placed, totalMinor: "1281" })).toThrow();
+    const responses: [number, unknown][] = [
+      [409, { error: "item_unavailable", lineIndex: 1 }],
+      [409, { error: "store_not_taking_pickup_orders" }],
+      [503, { error: "counter_order_unavailable" }],
+    ];
+    const fetcher = vi.fn(async () => {
+      const [status, body] = responses.shift() ?? [500, {}];
+      return new Response(JSON.stringify(body), { status });
     });
-    expect(() => parseStaffOrderEntryView({ ...projection(), amountOverride: 1 })).toThrow(
-      StaffOrderEntryClientError,
+    const client = createCounterOrderClient("a".repeat(43), fetcher as unknown as typeof fetch);
+    const command = {
+      operationReference: id(30),
+      lines: [],
+      tip: { kind: "None" } as const,
+      recordedAfterOutage: false,
+    };
+    await expect(client.placeOrder(command)).rejects.toMatchObject({
+      code: "ItemUnavailable",
+      lineIndex: 1,
+    });
+    await expect(client.placeOrder(command)).rejects.toMatchObject({
+      code: "StoreNotTakingOrders",
+    });
+    await expect(client.placeOrder(command)).rejects.toMatchObject({ code: "OutcomeUnknown" });
+    expect(fetcher).toHaveBeenCalledWith(
+      "/merchant/counter/orders",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ "X-BOP-CSRF": "a".repeat(43) }),
+      }),
     );
+    const pay = createCounterOrderClient(
+      "a".repeat(43),
+      (async () =>
+        new Response(JSON.stringify({ error: "amount_changed", totalMinor: "1310" }), {
+          status: 409,
+        })) as unknown as typeof fetch,
+    );
+    await expect(
+      pay.recordPayment({
+        operationReference: id(31),
+        orderReference: id(20),
+        orderBatchReference: id(21),
+        expectedTotalMinor: "1280",
+        slipReference: null,
+        takenAt: null,
+      }),
+    ).rejects.toMatchObject({ code: "AmountChanged", totalMinor: "1310" });
   });
-  it("renders canonical fields, filters, boundaries and disabled commands", () => {
-    const html = renderToStaticMarkup(
+
+  it("starts by loading the menu", () => {
+    const markup = renderToStaticMarkup(
       <MemoryRouter>
-        <StaffOrderEntryScreen view={parseStaffOrderEntryView(projection())} />
+        <StaffOrderEntryPage storeLabel="Toronto Pilot" csrf={"a".repeat(43)} />
       </MemoryRouter>,
     );
-    for (const text of [
-      "Public-effective Menu and Sellable configurator",
-      "Staff Cart / canonical Quote",
-      "Dining Session / verified Customer reference",
-      "Structured allergen review",
-      "Cashless Terminal handoff",
-      "Price and tax are server-derived",
-      "Pending only",
-    ])
-      expect(html).toContain(text);
-    expect(html).toMatch(/<button disabled="">Submit Order \/ Batch idempotently<\/button>/u);
-    expect(html).toMatch(/<button disabled="">Start Terminal payment<\/button>/u);
-  });
-  it("renders stale partial data read-only and an empty filtered state", () => {
-    const html = renderToStaticMarkup(
-      <MemoryRouter>
-        <StaffOrderEntryScreen
-          view={parseStaffOrderEntryView(
-            projection({ freshness: "Stale", partial: true, menuItems: [] }),
-          )}
-        />
-      </MemoryRouter>,
-    );
-    expect(html).toContain("Read-only dependency context");
-    expect(html).toContain("No matching Sellables");
-  });
-  it("covers every mandatory state", () => {
-    for (const state of [
-      "Loading",
-      "PermissionDenied",
-      "NotFound",
-      "FeatureDisabled",
-      "Stale",
-      "Conflict",
-      "CommandFailed",
-      "Offline",
-      "Unavailable",
-    ] as const)
-      expect(
-        renderToStaticMarkup(
-          <MemoryRouter>
-            <StaffOrderEntryState state={state} />
-          </MemoryRouter>,
-        ),
-      ).toContain("status");
+    expect(markup).toContain("Counter order");
+    expect(markup).toContain("Loading the menu");
   });
 });

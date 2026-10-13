@@ -2175,6 +2175,16 @@ async function scanUnsupported(root, module, diagnostics) {
             owner: "payment",
             tables: ["payment_intent", "payment_terminal_fact"],
           },
+          // WP-2423 Q7: payments and refunds staff record from the Store's own card machine.
+          "src/infrastructure/persistence/card-machine-payment-store.ts": {
+            owner: "payment",
+            tables: ["card_machine_payment", "card_machine_refund"],
+          },
+          // WP-2423 Q7: the staff member and command behind a counter pickup order.
+          "src/infrastructure/persistence/counter-order-entry-store.ts": {
+            owner: "ordering",
+            tables: ["counter_order_entry", "order_batch"],
+          },
         }[moduleRelative];
         const acceptedPilotPublicationAsset =
           pilotPublicationAsset !== undefined &&

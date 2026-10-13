@@ -12,6 +12,7 @@ import {
   parseCartAggregate,
   parseOrderingInstant,
   parseOrderingReference,
+  isGuestCartChannel,
 } from "../domain/cart.js";
 import {
   createConfiguredCartQuoteService,
@@ -153,7 +154,7 @@ export function createConfiguredCustomerQuoteService(options: ConfiguredCustomer
             bound.orderType !== "Pickup" ||
             bound.createdByActorReference !== String(current.sessionReference) ||
             bound.diningSessionReference !== null ||
-            !["Qr", "Web"].includes(bound.sourceChannel)
+            !isGuestCartChannel(bound.orderType, bound.sourceChannel)
           )
             throw new CartError("CART_UNAVAILABLE");
           if (bound.updatedAt > checkedAt) return unavailable();

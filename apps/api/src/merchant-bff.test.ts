@@ -10,6 +10,10 @@ import {
 import { MerchantProductWriteFeatureDisabled } from "./merchant-product-write-authority.js";
 import { StaffOrderCancellationError } from "./merchant-order-staff-cancellation.js";
 import { StaffItemCancellationError } from "./merchant-order-item-staff-cancellation.js";
+import { CounterOrderError } from "./merchant-counter-order.js";
+import { CounterMenuError } from "./merchant-counter-menu.js";
+import { CardMachinePaymentCommandError } from "./merchant-card-machine-payment.js";
+import { CardMachineRefundCommandError } from "./merchant-card-machine-refund.js";
 import { BrowserSessionError } from "@bop/identity";
 import { parsePaymentReference, ReconciliationFollowUpError } from "@rms/payment";
 import { parsePaymentInstant } from "@rms/payment";
@@ -1944,6 +1948,12 @@ describe("WP-2423 P1 merchant settlement read route", () => {
       differences: [],
       differenceCount: 0,
     },
+    cardMachine: {
+      taken: { count: 2, amountMinor: "2560", currencyCode: "CAD" as const },
+      tipMinor: "180",
+      recordedAfterOutageCount: 1,
+      refunded: { count: 0, amountMinor: "0", currencyCode: "CAD" as const },
+    },
     projectedAt: "2026-09-22T09:00:00.000Z",
   };
   const headers = {
@@ -2098,6 +2108,8 @@ it("WP-2423 Q6: protects staff cancellation transport and maps owner refusals to
     orderBatchReference: "0190fa01-0000-7000-8000-000000000002",
     cancelledAt: "2026-10-11T12:00:00.000Z",
     refundStatus: "Pending" as const,
+    refundMethod: "CardMachine" as const,
+    refundAmountMinor: "1280",
   };
   const cancel = vi.fn<NonNullable<MerchantBffRouterOptions["orderStaffCancellation"]>>(
     async () => ({ ...result, privateEvidence: "synthetic-private" }) as typeof result,
@@ -2154,6 +2166,215 @@ it("WP-2423 Q6: protects staff cancellation transport and maps owner refusals to
       })
     ).status,
   ).toBe(503);
+});
+
+async function serveCounter(
+  options: Pick<
+    MerchantBffRouterOptions,
+    "counterMenu" | "counterOrder" | "cardMachinePayment" | "cardMachineRefund"
+  > = {},
+) {
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      ...options,
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  return `http://127.0.0.1:${address.port}`;
+}
+it("WP-2423 Q7: protects counter order and card-machine transport and maps refusals to stable codes", async () => {
+  const order = "0190fa01-0000-7000-8000-000000000001",
+    batch = "0190fa01-0000-7000-8000-000000000002";
+  const placed = {
+    status: "Placed" as const,
+    orderReference: order,
+    orderBatchReference: batch,
+    orderNumber: "12",
+    orderVersion: 1,
+    orderMinor: "1130",
+    tipMinor: "150",
+    totalMinor: "1280",
+    payBy: "2026-10-13T18:30:00.000Z",
+    recordedAfterOutage: false,
+  };
+  const counterOrder = vi.fn<NonNullable<MerchantBffRouterOptions["counterOrder"]>>(
+    async () => ({ ...placed, guestCredential: "synthetic-private" }) as typeof placed,
+  );
+  const paid = {
+    status: "Recorded" as const,
+    orderReference: order,
+    orderBatchReference: batch,
+    amountMinor: "1280",
+    recordingReason: "RecordedAfterOutage" as const,
+    takenAt: "2026-10-13T16:00:00.000Z",
+    recordedAt: "2026-10-13T18:01:00.000Z",
+  };
+  const cardMachinePayment = vi.fn<NonNullable<MerchantBffRouterOptions["cardMachinePayment"]>>(
+    async () => paid,
+  );
+  const refunded = {
+    status: "Recorded" as const,
+    orderReference: order,
+    orderBatchReference: batch,
+    amountMinor: "1280",
+    refundedAt: "2026-10-13T18:10:00.000Z",
+  };
+  const cardMachineRefund = vi.fn<NonNullable<MerchantBffRouterOptions["cardMachineRefund"]>>(
+    async () => refunded,
+  );
+  const menu = { status: "Found" } as never;
+  const counterMenu = vi.fn<NonNullable<MerchantBffRouterOptions["counterMenu"]>>(async () => menu);
+  const root = await serveCounter({
+    counterMenu,
+    counterOrder,
+    cardMachinePayment,
+    cardMachineRefund,
+  });
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const submit = (path: string, extra: Record<string, string> = {}) =>
+    request(root, "/merchant" + path, {
+      method: "POST",
+      body: '{"a":1}',
+      headers: { ...headers, ...extra },
+    });
+  for (const path of [
+    "/counter/orders",
+    "/orders/card-machine-payment",
+    "/orders/card-machine-refund",
+  ]) {
+    for (const extra of [
+      { Origin: "https://foreign.invalid" },
+      { "Sec-Fetch-Site": "cross-site" },
+      { "X-BOP-CSRF": "" },
+      { Cookie: "" },
+    ])
+      expect((await submit(path, extra)).status).toBe(403);
+    expect((await submit(path + "?store=other")).status).toBe(403);
+  }
+  expect(counterOrder).not.toHaveBeenCalled();
+  expect(cardMachinePayment).not.toHaveBeenCalled();
+  expect(cardMachineRefund).not.toHaveBeenCalled();
+
+  const placedResponse = await submit("/counter/orders");
+  expect(placedResponse.status).toBe(200);
+  expect(placedResponse.headers.get("cache-control")).toBe("no-store");
+  expect(await placedResponse.json()).toEqual(placed);
+  expect(counterOrder).toHaveBeenCalledWith({ sessionCookie, csrf, command: { a: 1 } });
+  for (const [code, status, error] of [
+    ["COUNTER_ORDER_INPUT_INVALID", 400, "counter_order_input_invalid"],
+    ["COUNTER_ORDER_PERMISSION_DENIED", 403, "counter_order_permission_denied"],
+    ["COUNTER_ORDER_STORE_NOT_TAKING_ORDERS", 409, "store_not_taking_pickup_orders"],
+    ["COUNTER_ORDER_NOT_PRICED", 409, "order_not_priced"],
+    ["COUNTER_ORDER_NOT_FINISHED", 409, "counter_order_not_finished"],
+    ["COUNTER_ORDER_IDEMPOTENCY_CONFLICT", 409, "counter_order_conflict"],
+    ["COUNTER_ORDER_UNAVAILABLE", 503, "counter_order_unavailable"],
+  ] as const) {
+    counterOrder.mockRejectedValueOnce(new CounterOrderError(code));
+    const refused = await submit("/counter/orders");
+    expect(refused.status).toBe(status);
+    expect(await refused.json()).toEqual({ error });
+  }
+  counterOrder.mockRejectedValueOnce(new CounterOrderError("COUNTER_ORDER_ITEM_UNAVAILABLE", 1));
+  const soldOut = await submit("/counter/orders");
+  expect(soldOut.status).toBe(409);
+  expect(await soldOut.json()).toEqual({ error: "item_unavailable", lineIndex: 1 });
+
+  const paidResponse = await submit("/orders/card-machine-payment");
+  expect(paidResponse.status).toBe(200);
+  expect(await paidResponse.json()).toEqual(paid);
+  for (const [code, status, error] of [
+    ["CARD_MACHINE_INPUT_INVALID", 400, "card_machine_input_invalid"],
+    ["CARD_MACHINE_PERMISSION_DENIED", 403, "card_machine_permission_denied"],
+    ["CARD_MACHINE_NOT_FOUND", 404, "counter_order_not_found"],
+    ["CARD_MACHINE_NOT_PAYABLE", 409, "order_not_payable"],
+    ["CARD_MACHINE_PAYMENT_WINDOW_CLOSED", 409, "payment_window_closed"],
+    ["CARD_MACHINE_ALREADY_PAID", 409, "already_paid"],
+    ["CARD_MACHINE_IDEMPOTENCY_CONFLICT", 409, "card_machine_conflict"],
+    ["CARD_MACHINE_UNAVAILABLE", 503, "card_machine_payment_unavailable"],
+  ] as const) {
+    cardMachinePayment.mockRejectedValueOnce(new CardMachinePaymentCommandError(code));
+    const refused = await submit("/orders/card-machine-payment");
+    expect(refused.status).toBe(status);
+    expect(await refused.json()).toEqual({ error });
+  }
+  cardMachinePayment.mockRejectedValueOnce(
+    new CardMachinePaymentCommandError("CARD_MACHINE_AMOUNT_CHANGED", "1310"),
+  );
+  const changed = await submit("/orders/card-machine-payment");
+  expect(changed.status).toBe(409);
+  expect(await changed.json()).toEqual({ error: "amount_changed", totalMinor: "1310" });
+
+  const refundResponse = await submit("/orders/card-machine-refund");
+  expect(refundResponse.status).toBe(200);
+  expect(await refundResponse.json()).toEqual(refunded);
+  for (const [code, status, error] of [
+    ["CARD_MACHINE_REFUND_INPUT_INVALID", 400, "card_machine_refund_input_invalid"],
+    ["CARD_MACHINE_REFUND_PERMISSION_DENIED", 403, "card_machine_refund_permission_denied"],
+    ["CARD_MACHINE_REFUND_NOT_FOUND", 404, "card_machine_refund_not_found"],
+    ["CARD_MACHINE_REFUND_NOTHING_OWED", 409, "nothing_to_refund"],
+    ["CARD_MACHINE_REFUND_IDEMPOTENCY_CONFLICT", 409, "card_machine_refund_conflict"],
+    ["CARD_MACHINE_REFUND_UNAVAILABLE", 503, "card_machine_refund_unavailable"],
+  ] as const) {
+    cardMachineRefund.mockRejectedValueOnce(new CardMachineRefundCommandError(code));
+    const refused = await submit("/orders/card-machine-refund");
+    expect(refused.status).toBe(status);
+    expect(await refused.json()).toEqual({ error });
+  }
+  cardMachineRefund.mockRejectedValueOnce(new Error("synthetic-private"));
+  const denied = await submit("/orders/card-machine-refund");
+  expect(denied.status).toBe(403);
+  expect(await denied.text()).not.toContain("synthetic");
+
+  const readHeaders = {
+    Host: "merchant.invalid",
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "Sec-Fetch-Site": "same-origin",
+  };
+  const menuResponse = await request(root, "/merchant/counter/menu", { headers: readHeaders });
+  expect(menuResponse.status).toBe(200);
+  expect(menuResponse.headers.get("cache-control")).toBe("no-store");
+  expect(await menuResponse.json()).toEqual({ screenId: "OPS-ORDER-ENTRY", menu });
+  expect(counterMenu).toHaveBeenCalledWith({ sessionCookie });
+  counterMenu.mockRejectedValueOnce(new CounterMenuError("COUNTER_MENU_PERMISSION_DENIED"));
+  expect((await request(root, "/merchant/counter/menu", { headers: readHeaders })).status).toBe(
+    403,
+  );
+  counterMenu.mockRejectedValueOnce(new CounterMenuError("COUNTER_MENU_UNAVAILABLE"));
+  expect((await request(root, "/merchant/counter/menu", { headers: readHeaders })).status).toBe(
+    503,
+  );
+  expect(
+    (await request(root, "/merchant/counter/menu?store=other", { headers: readHeaders })).status,
+  ).toBe(403);
+  const unconfigured = await serveCounter();
+  for (const path of [
+    "/counter/orders",
+    "/orders/card-machine-payment",
+    "/orders/card-machine-refund",
+  ])
+    expect(
+      (
+        await request(unconfigured, "/merchant" + path, {
+          method: "POST",
+          headers,
+          body: "{}",
+        })
+      ).status,
+    ).toBe(503);
 });
 
 async function serveDiningClosing(diningClosing?: MerchantBffRouterOptions["diningClosing"]) {

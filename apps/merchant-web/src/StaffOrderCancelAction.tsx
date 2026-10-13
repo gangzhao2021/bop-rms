@@ -20,9 +20,16 @@ export const staffCancellationReasonLabel: Readonly<Record<StaffCancellationReas
 /** "Cancelled by store · refund pending" (pickup) or "Batch 2 cancelled · refunded" (dine-in). */
 export function staffCancellationSummary(order: Order, batch: Batch) {
   if (batch.staffCancellation === null) return null;
+  const machine = batch.staffCancellation.refundMethod === "CardMachine";
   return (
     (order.orderType === "Pickup" ? "Cancelled by store" : `Batch ${batch.sequence} cancelled`) +
-    (batch.staffCancellation.refundStatus === "Refunded" ? " · refunded" : " · refund pending")
+    (batch.staffCancellation.refundStatus === "Refunded"
+      ? machine
+        ? " · refunded on card machine"
+        : " · refunded"
+      : machine
+        ? " · refund on card machine"
+        : " · refund pending")
   );
 }
 

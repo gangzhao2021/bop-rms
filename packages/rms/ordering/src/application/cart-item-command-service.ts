@@ -14,6 +14,7 @@ import {
   type CatalogSelectionEvidence,
   type OrderingInstant,
   type OrderingReference,
+  isGuestCartChannel,
 } from "../domain/cart.js";
 import { advanceCartLifecycle, assertCartLifecycleActive } from "../domain/cart-lifecycle.js";
 import type {
@@ -133,7 +134,7 @@ function authorizeSession(
       sessionBrandReference !== cart.brandReference ||
       sessionStoreReference !== cart.storeReference ||
       session.channel !== cart.orderType ||
-      !["Qr", "Web"].includes(cart.sourceChannel) ||
+      !isGuestCartChannel(cart.orderType, cart.sourceChannel) ||
       (cart.orderType === "Pickup" &&
         (sessionReference !== cart.createdByActorReference ||
           session.diningState !== "ContextOnly" ||

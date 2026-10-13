@@ -6,6 +6,7 @@ import {
   parseCartAggregate,
   parseOrderingInstant,
   parseOrderingReference,
+  isGuestCartChannel,
 } from "../domain/cart.js";
 import {
   parseAnyCartQuoteAttachment,
@@ -148,7 +149,7 @@ function snapshot(value: PickupCartReadResult | DiningCartReadResult, mode: "Pic
   const cart = parseCartAggregate(raw.cart);
   if (
     cart.orderType !== mode ||
-    !["Qr", "Web"].includes(cart.sourceChannel) ||
+    !isGuestCartChannel(cart.orderType, cart.sourceChannel) ||
     cart.lifecycle === null ||
     cart.aggregateVersion > 999_999_999 ||
     cart.updatedAt > observedAt
