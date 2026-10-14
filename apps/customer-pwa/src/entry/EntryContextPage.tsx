@@ -1,8 +1,9 @@
 import { DiningAdmissionPanel, type DiningAdmissionUi } from "../dining/DiningAdmissionPanel.js";
-import { CustomerPage } from "../journey/CustomerPage.js";
+import { CustomerPage, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import { formatClockTime } from "../journey/format.js";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
+import type { CustomerCurrentOrder } from "../session/session-bootstrap.js";
 import type {
   CustomerEntryClient,
   CustomerEntryEstablishedContext,
@@ -29,6 +30,13 @@ export interface EntryContextPageProps {
   readonly diningAdmission?: DiningAdmissionUi | undefined;
   readonly client?: CustomerEntryClient | undefined;
   readonly onEstablished?: ((context: CustomerEntryEstablishedContext) => void) | undefined;
+  /**
+   * WP-2423 Q10: an order this browser already placed. Starting a new visit would replace the
+   * Session that can open it, so the page offers the order first and starts only when asked.
+   */
+  readonly currentOrder?: CustomerCurrentOrder | undefined;
+  /** The Store of that order, restored with the Session. */
+  readonly store?: CustomerStoreContext | undefined;
 }
 
 /** "21:30:00" → "9:30 PM" (published local time; no time zone conversion). */
@@ -41,7 +49,10 @@ export function EntryContextPage({
   client = unavailableClient,
   onEstablished,
   diningAdmission,
+  currentOrder,
+  store,
 }: EntryContextPageProps) {
+  const [holding, setHolding] = useState(currentOrder !== undefined);
   const initial = (): CustomerEntryScreenState =>
     client.hasEntry ? Object.freeze({ kind: "Loading" }) : Object.freeze({ kind: "Missing" });
   const [result, setResult] = useState<{
@@ -79,12 +90,12 @@ export function EntryContextPage({
       }
     }
     runCurrent.current = run;
-    void run("start");
+    if (!holding) void run("start");
     return () => {
       active = false;
       runCurrent.current = null;
     };
-  }, [client]);
+  }, [client, holding]);
 
   useEffect(() => {
     if (state.kind !== "Loading") heading.current?.focus();
@@ -94,6 +105,14 @@ export function EntryContextPage({
     void runCurrent.current?.("retry");
   };
 
+  if (holding && currentOrder)
+    return (
+      <CurrentOrderView
+        order={currentOrder}
+        store={store}
+        onStartNew={client.hasEntry ? () => setHolding(false) : undefined}
+      />
+    );
   return (
     <EntryContextView
       diningAdmission={diningAdmission}
@@ -102,6 +121,58 @@ export function EntryContextPage({
       onRetry={retry}
       state={state}
     />
+  );
+}
+
+/** WP-2423 Q10: the customer's order in progress, offered before any new visit starts. */
+export function CurrentOrderView({
+  order,
+  store,
+  onStartNew,
+}: Readonly<{
+  order: CustomerCurrentOrder;
+  store?: CustomerStoreContext | undefined;
+  onStartNew?: (() => void) | undefined;
+}>) {
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => heading.current?.focus(), []);
+  return (
+    <CustomerPage
+      step="entry"
+      store={store}
+      orderReference={order.orderReference}
+      className="entry-page"
+      fallbackTitle="Your order"
+    >
+      <section className="entry-card" aria-labelledby="entry-heading">
+        <div>
+          <StateHeading headingRef={heading}>Your order {order.orderNumber}</StateHeading>
+          <p>
+            {order.orderType === "DineIn"
+              ? "You ordered at a table from this phone. You can check your order and everything your table ordered."
+              : "You placed a pickup order from this phone. Check its status and your pickup code."}
+          </p>
+          <div className="shell-actions">
+            <Link className="entry-action" to={`/orders/${order.orderReference}`}>
+              View order {order.orderNumber}
+            </Link>
+            {order.orderType === "DineIn" ? <Link to="/dine-in/session">Your table</Link> : null}
+          </div>
+          {onStartNew ? (
+            <>
+              <p>
+                Starting a new order here closes this order on this phone. The store still has it.
+              </p>
+              <button className="entry-secondary-action" type="button" onClick={onStartNew}>
+                Start a new order
+              </button>
+            </>
+          ) : (
+            <p>To start a new order, scan the QR code at your table or at the counter.</p>
+          )}
+        </div>
+      </section>
+    </CustomerPage>
   );
 }
 

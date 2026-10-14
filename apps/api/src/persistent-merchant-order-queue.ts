@@ -8,6 +8,7 @@ import {
   listStorePaidOrderBatches,
   listStoreUnfulfillablePaidOrders,
   loadMerchantOrderLines,
+  loadOrderPickupContact,
   type StaffOrderCancellationRecord,
 } from "@rms/ordering";
 import { listStoreKitchenOrderItemStates, listStoreStartedKitchenBatches } from "@rms/kitchen";
@@ -433,9 +434,20 @@ export function createPersistentMerchantOrderQueue(options: {
                 }),
               ),
             });
+      // WP-2423 Q10: on one order's detail only (never the list), the contact a pickup customer
+      // gave so the Store can reach them about this order — or that it was removed after the
+      // retention period. Read under the same ordering.operate scope in this transaction.
+      const pickupContact =
+        input.orderReference === undefined ||
+        only === undefined ||
+        only.orderType !== "Pickup" ||
+        ownerScope === null
+          ? null
+          : await loadOrderPickupContact(businessTransaction, ownerScope, only.orderReference);
       return Object.freeze({
         ...result,
         lines: detailLines,
+        pickupContact,
         items: Object.freeze(
           result.items.map((item) => {
             const latestBatchSequence = item.batches.reduce(

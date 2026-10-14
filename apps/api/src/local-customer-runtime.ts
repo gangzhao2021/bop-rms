@@ -561,6 +561,8 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
           },
           customerOrderStatus: {
             ...options.orderStatus,
+            // WP-2423 Q10: status shows the Store's published phone and address.
+            ...("persistent" in entry ? { publicProfile: entry.persistent.profile } : {}),
             scope,
             credentials: entry.session.credentials,
             now,
@@ -572,6 +574,8 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
       : {
           customerReceipt: {
             ...options.receipt,
+            // WP-2423 Q10: the receipt shows how to reach the Store.
+            ...("persistent" in entry ? { publicProfile: entry.persistent.profile } : {}),
             scope,
             credentials: entry.session.credentials,
             now,

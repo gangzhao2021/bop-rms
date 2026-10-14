@@ -2,6 +2,7 @@ import type { createCustomerOrderStatusRead } from "./customer-order-status-read
 import { GuestSessionError, readClosedRecord } from "@bop/identity";
 import { OrderStatusProjectionError, type CustomerOrderStatusView } from "@rms/ordering";
 import type { RequestHandler, Response } from "express";
+import { storeContactJson } from "./customer-store-contact.js";
 
 type SourcedStatus = Awaited<ReturnType<ReturnType<typeof createCustomerOrderStatusRead>["read"]>>;
 type CustomerStatusResponse = CustomerOrderStatusView & Partial<Pick<SourcedStatus, "sources">>;
@@ -233,6 +234,10 @@ export class CustomerOrderStatusHandler {
                           cancelledAt: cancellation.cancelledAt,
                         })),
                       }),
+                  // WP-2423 Q10: the Store's published phone and address.
+                  ...(sources.storeContact === undefined
+                    ? {}
+                    : { storeContact: storeContactJson(sources.storeContact) }),
                 },
               };
         response.status(200).json({ schemaVersion: 1, status: { ...status, ...publicSources } });

@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
-import { EntryContextView } from "./EntryContextPage.js";
+import { CurrentOrderView, EntryContextView } from "./EntryContextPage.js";
 import type { CustomerEntryEstablishedContext, CustomerEntryScreenState } from "./types.js";
 
 const context: CustomerEntryEstablishedContext = Object.freeze({
@@ -121,5 +121,40 @@ describe("WP-2423 Q4 not accepting orders", () => {
     });
     expect(paused).toContain("Online ordering is paused for a short while.");
     expect(paused).toContain("Closed today.");
+  });
+});
+
+describe("WP-2423 Q10 continue the order in progress", () => {
+  const order = Object.freeze({
+    orderReference: "018f2a1b-7c3d-7a4e-8b5c-1234567890ac",
+    orderNumber: "12",
+    orderType: "Pickup" as const,
+  });
+  const view = (props: Parameters<typeof CurrentOrderView>[0]) =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <CurrentOrderView {...props} />
+      </MemoryRouter>,
+    );
+  it("offers the pickup order first and says what a new order does to it", () => {
+    const html = view({
+      order,
+      onStartNew: vi.fn(),
+      store: { storeName: "Harbour Test Store", serviceMode: "Pickup" },
+    });
+    expect(html).toContain("Your order 12");
+    expect(html).toContain("Harbour Test Store");
+    expect(html).not.toContain("Scan the location QR code to begin");
+    expect(html).toContain(`href="/orders/${order.orderReference}"`);
+    expect(html).toContain("View order 12");
+    expect(html).toContain("Start a new order");
+    expect(html).toContain("closes this order on this phone");
+    expect(html).not.toContain("Your table");
+  });
+  it("links a dine-in guest to the table and asks for a QR scan when no code was scanned", () => {
+    const html = view({ order: { ...order, orderType: "DineIn" } });
+    expect(html).toContain('href="/dine-in/session"');
+    expect(html).toContain("scan the QR code at your table or at the counter");
+    expect(html).not.toContain("<button");
   });
 });

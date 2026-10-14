@@ -2,6 +2,7 @@ import { createHttpReceiptClient } from "./receipt/receipt-client.js";
 import { createReceiptController } from "./receipt/receipt-controller.js";
 import type { DiningAdmissionUi } from "./dining/DiningAdmissionPanel.js";
 import { Route, Routes, useParams } from "react-router";
+import type { CustomerCurrentOrder } from "./session/session-bootstrap.js";
 import { useCallback, useMemo, useState } from "react";
 import { CartPage } from "./cart/CartPage.js";
 import { CheckoutPage } from "./checkout/CheckoutPage.js";
@@ -116,12 +117,15 @@ export function App({
   diningAdmission,
   entryClient,
   initialMenuContext,
+  currentOrder,
   demo,
 }: Readonly<{
   checkoutNow?: () => number;
   diningAdmission?: DiningAdmissionUi | undefined;
   entryClient?: CustomerEntryClient | undefined;
   initialMenuContext?: MenuJourneyContext | undefined;
+  /** WP-2423 Q10: the order this browser's Session placed, offered on the start page. */
+  currentOrder?: CustomerCurrentOrder | undefined;
   demo?: CustomerDemoDependencies | undefined;
 }>) {
   const [menuContext, setMenuContext] = useState<MenuJourneyContext | undefined>(
@@ -171,6 +175,8 @@ export function App({
               diningAdmission={diningAdmission}
               client={entryClient ?? demo?.entryClient}
               onEstablished={establishMenuContext}
+              currentOrder={currentOrder}
+              store={store}
             />
           }
         />

@@ -29,6 +29,7 @@ import {
   CurrentOrderQueueError,
   type CurrentOrderDetail,
   type CurrentOrderQueue,
+  type OrderPickupContact,
 } from "./current-order-queue-client.js";
 
 type State =
@@ -321,6 +322,52 @@ export function storeCancelledBatches(view: CurrentOrderQueue): ReadonlySet<stri
   );
 }
 
+/** "+14165550123" → "(416) 555-0123"; other countries keep the international form. */
+export function formatContactPhone(phone: string): string {
+  const match = /^\+1([2-9][0-9]{2})([0-9]{3})([0-9]{4})$/u.exec(phone);
+  return match ? `(${match[1]}) ${match[2]}-${match[3]}` : phone;
+}
+
+/**
+ * WP-2423 Q10: who the pickup is for and how to reach them about this order — the contact the
+ * customer gave for exactly that. Shown on the order detail only.
+ */
+export function PickupContactPanel({
+  contact,
+  timeZone,
+}: {
+  readonly contact: OrderPickupContact | null;
+  readonly timeZone?: string | undefined;
+}) {
+  if (contact === null) return null;
+  return (
+    <section className="order-pickup-contact" aria-label="Pickup customer">
+      {contact.status === "Available" ? (
+        <p>
+          <span>Pickup for {contact.name}</span>
+          {" · "}
+          {contact.channel === "Phone" ? (
+            <a href={`tel:${contact.value}`}>Call {formatContactPhone(contact.value)}</a>
+          ) : (
+            <a href={`mailto:${contact.value}`}>Email {contact.value}</a>
+          )}
+        </p>
+      ) : contact.status === "Removed" ? (
+        <p>
+          The customer&apos;s contact was removed on{" "}
+          {new Date(contact.removedAt).toLocaleDateString("en-CA", {
+            ...(timeZone ? { timeZone } : {}),
+            dateStyle: "medium",
+          })}{" "}
+          (contacts are kept only for a limited time).
+        </p>
+      ) : (
+        <p>No contact was given. Call out the order number at the counter.</p>
+      )}
+    </section>
+  );
+}
+
 /** Reads an Order's lines when its queue entry is opened. */
 function QueuedOrderLines({
   orderReference,
@@ -347,13 +394,16 @@ function QueuedOrderLines({
     return () => controller.abort();
   }, [orderReference, client]);
   return state.kind === "Ready" ? (
-    <CurrentOrderLines
-      lines={state.detail.lines}
-      refundCheck={refundCheck}
-      cancelledBatches={storeCancelledBatches(state.detail.view)}
-      unpaidCancelledBatches={unpaidCancelledBatches(state.detail.view)}
-      failedPaymentBatches={failedPaymentBatches(state.detail.view)}
-    />
+    <>
+      <PickupContactPanel contact={state.detail.pickupContact} />
+      <CurrentOrderLines
+        lines={state.detail.lines}
+        refundCheck={refundCheck}
+        cancelledBatches={storeCancelledBatches(state.detail.view)}
+        unpaidCancelledBatches={unpaidCancelledBatches(state.detail.view)}
+        failedPaymentBatches={failedPaymentBatches(state.detail.view)}
+      />
+    </>
   ) : (
     <p className="order-lines-state" role="status">
       {state.kind === "Loading"
@@ -1051,18 +1101,21 @@ export function CurrentOrderQueuePage({
                   fetcher={fetcher}
                   lines={
                     detail !== undefined ? (
-                      <CurrentOrderLines
-                        lines={detail.lines}
-                        cancelledBatches={storeCancelledBatches(detail.view)}
-                        unpaidCancelledBatches={unpaidCancelledBatches(detail.view)}
-                        failedPaymentBatches={failedPaymentBatches(detail.view)}
-                        refundCheck={{
-                          orderReference: order.orderReference,
-                          csrf,
-                          fetcher,
-                          onChecked: () => reload(after),
-                        }}
-                      />
+                      <>
+                        <PickupContactPanel contact={detail.pickupContact} timeZone={timeZone} />
+                        <CurrentOrderLines
+                          lines={detail.lines}
+                          cancelledBatches={storeCancelledBatches(detail.view)}
+                          unpaidCancelledBatches={unpaidCancelledBatches(detail.view)}
+                          failedPaymentBatches={failedPaymentBatches(detail.view)}
+                          refundCheck={{
+                            orderReference: order.orderReference,
+                            csrf,
+                            fetcher,
+                            onChecked: () => reload(after),
+                          }}
+                        />
+                      </>
                     ) : open ? (
                       <>
                         <QueuedOrderLines

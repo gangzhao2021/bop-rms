@@ -104,3 +104,36 @@ it("whitelists a recovery reference and refuses malformed owner output", async (
   f.read.mockResolvedValue({ csrfToken: "B".repeat(43), checkoutSessionReference: "invalid" });
   expect((await f.request()).status).toBe(503);
 });
+
+it("WP-2423 Q10: returns the Session's latest order so a reopened app can continue it", async () => {
+  const f = await setup();
+  const menuContext = {
+    publicStoreReference: "0190fa21-0000-7000-8000-000000000001",
+    channel: "Pickup",
+    locale: "en-CA",
+    brandDisplayName: "DEMO Brand",
+    storeDisplayName: "DEMO Store",
+  };
+  const currentOrder = {
+    orderReference: "0190fa21-0000-7000-8000-000000000003",
+    orderNumber: "12",
+    orderType: "Pickup",
+  };
+  f.read.mockResolvedValue({
+    csrfToken: "B".repeat(43),
+    currentOrder: { ...currentOrder, guestSessionReference: "must-not-leak" },
+    menuContext,
+  });
+  const r = await f.request();
+  expect(r.status).toBe(200);
+  const body = await r.json();
+  expect(body).toEqual({ schemaVersion: 1, csrfToken: "B".repeat(43), currentOrder, menuContext });
+  for (const malformed of [
+    { ...currentOrder, orderNumber: "0" },
+    { ...currentOrder, orderType: "Delivery" },
+    { ...currentOrder, orderReference: "not-a-reference" },
+  ]) {
+    f.read.mockResolvedValue({ csrfToken: "B".repeat(43), currentOrder: malformed, menuContext });
+    expect((await f.request()).status).toBe(503);
+  }
+});

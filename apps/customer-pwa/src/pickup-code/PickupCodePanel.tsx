@@ -78,8 +78,8 @@ export function PickupCodePanel({
       {state.status === "permission-denied" ? (
         <>
           <p role="alert">
-            This code can’t be shown in this session. Open the order in the browser you used at
-            checkout, or ask staff.
+            Your visit on this phone has ended, so the code can’t be shown here. Give your name or
+            order number at the counter.
           </p>
           {closeButton}
         </>

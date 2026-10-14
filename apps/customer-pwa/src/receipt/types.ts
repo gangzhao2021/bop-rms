@@ -1,3 +1,5 @@
+import type { StoreContactView } from "../journey/StoreContact.js";
+
 export type ReceiptPaymentStatus = "Paid" | "RefundPending" | "PartiallyRefunded" | "Refunded";
 export type ReceiptRecordKind = "Original" | "Correction" | "Void" | "Refund" | "Reissue";
 
@@ -47,6 +49,8 @@ export interface ReceiptFinancialView {
 }
 export interface ReceiptView {
   readonly financial?: ReceiptFinancialView | null;
+  /** WP-2423 Q10: the Store's published phone and address. */
+  readonly storeContact?: StoreContactView;
   readonly orderReference: string;
   readonly freshnessStatus: "Fresh" | "Stale";
   readonly deliveryStatus:

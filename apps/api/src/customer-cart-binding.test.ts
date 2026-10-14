@@ -178,7 +178,7 @@ describe("same-origin binding credential transport", () => {
       recoveryProof: proof,
     });
     expect(response.headers.getSetCookie()).toEqual([
-      `__Host-bop-guest=${candidate}; Path=/; Secure; HttpOnly; SameSite=Lax`,
+      `__Host-bop-guest=${candidate}; Path=/; Max-Age=86400; Secure; HttpOnly; SameSite=Lax`,
       `__Host-bop-guest-candidate-${op}=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0`,
     ]);
     expect(await response.json()).toEqual({

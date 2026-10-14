@@ -90,10 +90,9 @@ test("@production receipt navigation removes inaccessible history and fits commo
     page.getByRole("heading", { name: "Live receipt status is unavailable" }),
   ).toBeVisible();
   await expect(page.getByText("$11.30", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Request email receipt" })).toHaveAttribute(
-    "aria-describedby",
-    "receipt-email-unavailable",
-  );
+  // WP-2423 Q10: no inactive email stub; printing or saving is the working way to keep a copy.
+  await expect(page.getByRole("button", { name: "Request email receipt" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Print or save receipt" })).toBeVisible();
   for (const viewport of [
     { width: 1440, height: 900 },
     { width: 390, height: 844 },
@@ -101,7 +100,7 @@ test("@production receipt navigation removes inaccessible history and fits commo
   ]) {
     await page.setViewportSize(viewport);
     await expect(page.getByRole("heading", { name: "Receipt history" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Receipt actions" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Keep a copy" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Back to order status" })).toBeVisible();
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
@@ -130,17 +129,11 @@ test("@production receipt navigation removes inaccessible history and fits commo
     }
     const actions = page.locator(".receipt-page__actions");
     await expect(actions).toHaveCSS("flex-direction", viewport.width <= 511 ? "column" : "row");
-    const print = await page.getByRole("button", { name: "Print receipt" }).boundingBox();
-    const email = await page.getByRole("button", { name: "Request email receipt" }).boundingBox();
+    const print = await page.getByRole("button", { name: "Print or save receipt" }).boundingBox();
     expect(print).not.toBeNull();
-    expect(email).not.toBeNull();
     expect(print?.height).toBeGreaterThanOrEqual(44);
-    expect(email?.height).toBeGreaterThanOrEqual(44);
-    if (viewport.width <= 511 && print && email) {
-      expect(email.y).toBeGreaterThanOrEqual(print.y + print.height);
-      expect(email.x).toBe(print.x);
-      expect(email.width).toBe(print.width);
-    }
+    // WP-2423 Q10: the Store's contact (or "ask a staff member") sits beside the receipt actions.
+    await expect(page.getByRole("heading", { name: "Questions about this order?" })).toBeVisible();
     await page.screenshot({ path: `test-results/receipt-${viewport.width}.png`, fullPage: true });
   }
   await navigate(id(99));

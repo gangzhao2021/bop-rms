@@ -58,7 +58,7 @@ describe("CUST-PICKUP-CODE contextual screen", () => {
   it.each([
     ["loading", "Checking your pickup code"],
     ["not-ready", "isn’t ready yet"],
-    ["permission-denied", "can’t be shown in this session"],
+    ["permission-denied", "Your visit on this phone has ended"],
     ["not-found", "No pickup code is available"],
     ["feature-disabled", "not used at this location"],
     ["conflict", "Your pickup code changed"],

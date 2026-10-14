@@ -32,6 +32,7 @@ const detail = (orderType: "Pickup" | "DineIn") =>
   parseCurrentOrderDetail(
     {
       screenId: "OPS-ORDER-DETAIL",
+      pickupContact: null,
       order: {
         orderReference: id(1),
         orderNumber: "ORD-1001",

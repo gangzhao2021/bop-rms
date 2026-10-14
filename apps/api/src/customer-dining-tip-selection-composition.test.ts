@@ -225,3 +225,14 @@ it.each([1, 2])(
     expect(calls.some((sql) => sql.startsWith("SELECT r.revision_id"))).toBe(true);
   },
 );
+it("WP-2423 Q10: an internal failure after valid input is retryable, not a missing checkout", async () => {
+  const f = await fixture();
+  vi.spyOn(f.options.preparation.submissions, "loadSubmission").mockRejectedValue(
+    new Error("synthetic lock wait"),
+  );
+  await expect(f.service().select(f.input)).rejects.toMatchObject({
+    name: "CheckoutSessionServiceError",
+    code: "DEPENDENCY_UNAVAILABLE",
+  });
+  expect(f.tipWrites()).toBe(0);
+});

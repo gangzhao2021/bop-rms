@@ -122,6 +122,7 @@
 .customer-page .pickup-code,
 .customer-page .receipt-page__content > section,
 .customer-page .receipt-page__version,
+.customer-page .store-contact,
 .customer-page .dining-admission {
   min-width: 0;
   padding: var(--bop-space-4);
@@ -149,7 +150,8 @@
 .customer-page .shell-action,
 .customer-page .checkout-details-form__save,
 .customer-page .receipt-page__toolbar button,
-.customer-page .order-status__actions button {
+.customer-page .order-status__actions button,
+.customer-page .entry-secondary-action {
   display: inline-flex;
   min-height: 44px;
   align-items: center;
@@ -167,7 +169,8 @@
 }
 .customer-page .checkout-details-form__save,
 .customer-page .receipt-page__toolbar button,
-.customer-page .order-status__actions button {
+.customer-page .order-status__actions button,
+.customer-page .entry-secondary-action {
   color: var(--bop-color-text-default);
   background: var(--bop-color-surface-default);
   border-color: var(--bop-color-border-strong);
@@ -308,6 +311,14 @@
 }
 .entry-action {
   width: 100%;
+}
+/* WP-2423 Q10: an order in progress is offered before a new visit starts. */
+.entry-card .shell-actions {
+  margin: var(--bop-space-4) 0;
+}
+.entry-card .shell-actions .entry-action {
+  width: auto;
+  flex: 1 1 12rem;
 }
 .entry-help h2 {
   margin: 0 0 var(--bop-space-2);
@@ -1104,6 +1115,15 @@
   color: inherit;
   font-weight: 500;
 }
+/* Adjacent order links ("View receipt", "Back to menu") stay separate, with a usable tap height. */
+.order-status__receipt,
+.order-status__back {
+  min-height: 44px;
+  line-height: 44px;
+}
+.order-status__receipt {
+  margin-right: var(--bop-space-5);
+}
 .payment-result-page__badge {
   display: inline-flex;
   min-height: 1.75rem;
@@ -1459,7 +1479,7 @@
   .receipt-page__action-card {
     grid-area: actions;
   }
-  .receipt-page__support {
+  .receipt-page__content .store-contact {
     grid-area: support;
   }
 }
@@ -1557,4 +1577,26 @@
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
   }
+}
+
+/* ---------- WP-2423 Q10 store contact ---------- */
+.store-contact h2 {
+  margin: 0 0 var(--bop-space-2);
+  font-size: 1.0625rem;
+}
+.store-contact__phone {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  font-weight: 600;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.store-contact__address {
+  font-style: normal;
+  color: var(--bop-color-text-muted);
+}
+.order-status__visit-ended .order-status__retry {
+  margin-top: var(--bop-space-2);
 }

@@ -137,3 +137,46 @@ it("rejects invalid recovery references before installing any session state", as
     expect(getCheckoutSessionReference()).toBeNull();
   }
 });
+
+it("WP-2423 Q10: restores the Session's current order and rejects malformed or private fields", async () => {
+  const currentOrder = {
+    orderReference: "0190fa21-0000-7000-8000-000000000003",
+    orderNumber: "12",
+    orderType: "Pickup",
+  };
+  const onOrder = vi.fn();
+  expect(
+    await restoreCustomerSession(
+      vi
+        .fn()
+        .mockResolvedValue(
+          response({ schemaVersion: 1, csrfToken: "B".repeat(43), currentOrder, menuContext }),
+        ),
+      undefined,
+      onOrder,
+    ),
+  ).toBe(true);
+  expect(onOrder).toHaveBeenCalledWith(currentOrder);
+  for (const malformed of [
+    { ...currentOrder, orderNumber: "0" },
+    { ...currentOrder, orderType: "Delivery" },
+    { ...currentOrder, guestSessionReference: "hidden" },
+    { orderReference: currentOrder.orderReference },
+  ]) {
+    setCustomerCsrfCredential(null);
+    const rejected = vi.fn();
+    expect(
+      await restoreCustomerSession(
+        vi
+          .fn()
+          .mockResolvedValue(
+            response({ schemaVersion: 1, csrfToken: "B".repeat(43), currentOrder: malformed }),
+          ),
+        undefined,
+        rejected,
+      ),
+    ).toBe(false);
+    expect(rejected).not.toHaveBeenCalled();
+    expect(getCustomerCsrfCredential()).toBeNull();
+  }
+});

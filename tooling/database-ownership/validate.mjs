@@ -2110,6 +2110,26 @@ async function scanUnsupported(root, module, diagnostics) {
             owner: "ordering",
             tables: ["order_header", "order_submission_record", "order_batch"],
           },
+          // WP-2423 Q10: the Guest Session's latest Order for "continue your order".
+          "src/infrastructure/persistence/guest-session-order-source.ts": {
+            owner: "ordering",
+            tables: ["order_header", "order_submission_record"],
+          },
+          // WP-2423 Q10: the pickup contact on the staff order detail (or that it was removed).
+          "src/infrastructure/persistence/order-pickup-contact-source.ts": {
+            owner: "ordering",
+            tables: [
+              "order_submission_record",
+              "order_checkout_details_link",
+              "checkout_details_record",
+              "checkout_contact_redaction",
+            ],
+          },
+          // WP-2423 Q10/Q16: remove checkout contacts after the retention period, with evidence.
+          "src/infrastructure/persistence/checkout-contact-retention-store.ts": {
+            owner: "ordering",
+            tables: ["checkout_details_record", "checkout_contact_redaction"],
+          },
           // WP-2423 Q12: unpaid pickup Orders closed after the payment window (System termination).
           "src/infrastructure/persistence/pickup-payment-window-closure-store.ts": {
             owner: "ordering",
@@ -3047,6 +3067,14 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "bop_task" &&
           module.manifest.ownedDatabase?.tables?.includes("task_version") &&
           moduleRelative === "src/infrastructure/persistence/task-store.ts";
+        // WP-2423 Q10: append-only evidence of customer order messages (provider-gated).
+        const acceptedCustomerOrderNotificationAsset =
+          module.packageName === "@bop/notification" &&
+          module.manifest.ownedDatabase?.schema === "bop_notification" &&
+          ["customer_order_notification_attempt", "customer_order_notification_outcome"].every(
+            (table) => module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/customer-order-notification-store.ts";
         const acceptedOrderSettledFinalityAsset =
           module.packageName === "@rms/payment" &&
           module.manifest.ownedDatabase?.schema === "rms_payment" &&
@@ -3492,6 +3520,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedOrderPaymentDispositionAsset &&
           !acceptedOrderPaymentWaitAsset &&
           !acceptedTaskStoreAsset &&
+          !acceptedCustomerOrderNotificationAsset &&
           !acceptedOrderSettledFinalityAsset &&
           !acceptedBatchCheckoutExpiryAsset &&
           !acceptedOrderClosurePositionAsset &&

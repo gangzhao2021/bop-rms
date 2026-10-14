@@ -1,6 +1,10 @@
 import { createDiningOrderDeliveryProgress } from "./dining-order-delivery-progress.js";
 import { createPostgresKitchenCustomerStatusReader } from "@rms/kitchen";
-import { createPostgresPaymentStatusStore, listStoreOrderBatchPaymentOutcomes } from "@rms/payment";
+import {
+  createPostgresPaymentStatusStore,
+  listOrderPaymentTerminalOutcomes,
+  listStoreOrderBatchPaymentOutcomes,
+} from "@rms/payment";
 import { loadPickupNotCollected } from "@rms/fulfillment";
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
@@ -24,6 +28,8 @@ import {
   type CartQueryTransactionRunner,
 } from "@rms/ordering";
 import type { CustomerCheckoutSessionAuthorizationOptions } from "./customer-checkout-session-authorization.js";
+import type { PersistentPublicStoreProfileOptions } from "./persistent-public-store-profile.js";
+import { readCustomerStoreContact, type CustomerStoreContact } from "./customer-store-contact.js";
 import { readStaffCancellationRefundStatus } from "./merchant-order-staff-cancellation.js";
 import { readItemCancellationRefundStatus } from "./merchant-order-item-staff-cancellation.js";
 import {
@@ -60,6 +66,8 @@ export function createCustomerOrderStatusRead(
       providerAccountReference: string;
       environment: "Test" | "Live";
     };
+    /** WP-2423 Q10: the Store's published phone and address, shown with the order. */
+    readonly publicProfile?: PersistentPublicStoreProfileOptions;
     readonly transactions: {
       run<T>(work: (transaction: ConsumerTransaction) => Promise<T>): Promise<T>;
     };
@@ -208,7 +216,14 @@ export function createCustomerOrderStatusRead(
             kitchen.batches.every((batch) =>
               expectedBatches.has(String(batch.orderBatchReference)),
             );
-          let payments = null;
+          let payments:
+            | null
+            | {
+                status: "Succeeded" | "Failed";
+                occurredAt: string;
+                amount: { amountMinor: bigint; currencyCode: string } | null;
+                freshnessStatus: "Fresh" | "Stale" | "Rebuilding" | "Failed";
+              }[] = null;
           if (options.paymentScope !== undefined) {
             if (
               options.paymentScope.brandReference !== options.scope.brandReference ||
@@ -228,6 +243,26 @@ export function createCustomerOrderStatusRead(
               amount: projection.snapshot.amount,
               freshnessStatus: projection.freshnessStatus,
             }));
+            // WP-2423 Q10: the status projection is updated asynchronously. A payment the Payment
+            // owner already recorded as final (what the payment result page shows) is reported
+            // from that fact, so this page never says "pending" after "Payment confirmed".
+            if (await stillAuthorized()) {
+              const projected = new Set(
+                projections.map((projection) => String(projection.snapshot.paymentIntentReference)),
+              );
+              for (const fact of await listOrderPaymentTerminalOutcomes(
+                transaction,
+                options.paymentScope,
+                orderReference,
+              ))
+                if (!projected.has(fact.paymentIntentReference))
+                  payments.push({
+                    status: fact.outcome,
+                    occurredAt: fact.occurredAt,
+                    amount: fact.amount,
+                    freshnessStatus: "Fresh",
+                  });
+            }
           }
           // WP-2423: a pickup the Store closed as not collected (Fulfillment's fact).
           const pickup =
@@ -319,6 +354,18 @@ export function createCustomerOrderStatusRead(
               cancelled: new Set(unpaidCancellations.map((entry) => entry.orderBatchReference)),
             });
           }
+          // WP-2423 Q10: how to reach the Store about this order (public profile owner read).
+          let storeContact: CustomerStoreContact | null = null;
+          if (options.publicProfile !== undefined && (await stillAuthorized()))
+            storeContact = await readCustomerStoreContact(
+              transaction,
+              options.publicProfile,
+              {
+                publicStoreReference: String(guest.publicStoreReference),
+                locale: String(guest.locale),
+              },
+              now(),
+            );
           if (!(await stillAuthorized()))
             throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
           const checkedAt = now();
@@ -350,6 +397,7 @@ export function createCustomerOrderStatusRead(
               ...(itemCancellations.length === 0 ? {} : { itemCancellations }),
               ...(batchPayments.length === 0 ? {} : { batchPayments }),
               ...(unpaidCancellations.length === 0 ? {} : { unpaidCancellations }),
+              ...(storeContact === null ? {} : { storeContact }),
             },
           };
         });

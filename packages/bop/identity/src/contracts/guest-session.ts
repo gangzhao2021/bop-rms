@@ -151,6 +151,22 @@ export interface GuestSessionCookieDescriptor {
   readonly domain: null;
 }
 
+/** Section 86 Guest Session limits (accepted): 4 hours idle, 24 hours absolute, 2 hours after Order closure. */
+export const guestSessionIdleLifetimeMs = 4 * 60 * 60 * 1000;
+export const guestSessionAbsoluteLifetimeMs = 24 * 60 * 60 * 1000;
+export const guestSessionClosureLifetimeMs = 2 * 60 * 60 * 1000;
+/**
+ * WP-2423 Q10: the browser keeps the Guest cookie across a browser restart for at most the Session's
+ * absolute lifetime (it is issued or rotated together with a fresh Session). The server-side idle,
+ * absolute and closure limits still decide whether the Session is usable.
+ */
+export const guestSessionCookieMaxAgeSeconds = guestSessionAbsoluteLifetimeMs / 1000;
+
+/** `Set-Cookie` value for a freshly issued or rotated Guest Session credential. */
+export function serializeGuestSessionCookie(credential: GuestRawCredential): string {
+  return `${guestSessionCookie.name}=${parseGuestRawCredential(credential)}; Path=/; Max-Age=${guestSessionCookieMaxAgeSeconds}; Secure; HttpOnly; SameSite=Lax`;
+}
+
 export const guestSessionCookie: GuestSessionCookieDescriptor = Object.freeze({
   name: "__Host-bop-guest",
   secure: true,
@@ -388,12 +404,12 @@ export function createGuestSession(value: unknown): GuestSession {
   ];
   if (
     Date.parse(lastSeenAt) < Date.parse(createdAt) ||
-    Date.parse(idleExpiresAt) !== Date.parse(lastSeenAt) + 4 * 60 * 60 * 1000 ||
-    Date.parse(absoluteExpiresAt) !== Date.parse(createdAt) + 24 * 60 * 60 * 1000 ||
+    Date.parse(idleExpiresAt) !== Date.parse(lastSeenAt) + guestSessionIdleLifetimeMs ||
+    Date.parse(absoluteExpiresAt) !== Date.parse(createdAt) + guestSessionAbsoluteLifetimeMs ||
     (orderClosedAt === null) !== (closureExpiresAt === null) ||
     (orderClosedAt !== null &&
       Date.parse(closureExpiresAt as CanonicalInstant) !==
-        Date.parse(orderClosedAt) + 2 * 60 * 60 * 1000) ||
+        Date.parse(orderClosedAt) + guestSessionClosureLifetimeMs) ||
     (status === "Active" && (revocationReason !== null || revokedAt !== null)) ||
     (status === "Revoked" &&
       (!reasons.includes(revocationReason as GuestSessionRevocationReason) ||

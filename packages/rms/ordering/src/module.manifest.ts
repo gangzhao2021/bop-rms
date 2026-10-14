@@ -72,6 +72,7 @@ const moduleManifestInput =
         "order_payment_acceptance_wait",
         "checkout_session_record",
         "checkout_details_record",
+        "checkout_contact_redaction",
         "order_checkout_details_link",
         "cart",
         "cart_binding_record",

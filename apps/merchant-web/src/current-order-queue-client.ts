@@ -384,8 +384,50 @@ function parseItemCancellation(value: unknown, submittedAt: string, currencyCode
   });
 }
 /** WP-2423 OPS-ORDER-DETAIL: one Order with what was ordered (names, options, notes, amounts). */
+/**
+ * WP-2423 Q10: the contact a pickup customer gave so the Store can reach them about this order
+ * (detail only), or that it was removed after the retention period, or that none was given.
+ */
+export type OrderPickupContact =
+  | {
+      readonly status: "Available";
+      readonly name: string;
+      readonly channel: "Phone" | "Email";
+      readonly value: string;
+    }
+  | { readonly status: "Removed"; readonly removedAt: string }
+  | { readonly status: "NotGiven" };
+function parsePickupContact(value: unknown, orderType: string): OrderPickupContact | null {
+  if (value === null) return null;
+  if (orderType !== "Pickup") return fail();
+  const status =
+    value !== null && typeof value === "object" ? (value as { status?: unknown }).status : null;
+  if (status === "NotGiven") {
+    exact(value, ["status"]);
+    return Object.freeze({ status: "NotGiven" });
+  }
+  if (status === "Removed") {
+    const raw = exact(value, ["status", "removedAt"]);
+    if (typeof raw.removedAt !== "string" || !Number.isFinite(Date.parse(raw.removedAt)))
+      return fail();
+    return Object.freeze({ status: "Removed", removedAt: raw.removedAt });
+  }
+  const raw = exact(value, ["status", "name", "channel", "value"]);
+  if (raw.status !== "Available" || (raw.channel !== "Phone" && raw.channel !== "Email"))
+    return fail();
+  const contact = text(raw.value, 254);
+  if (
+    raw.channel === "Phone"
+      ? !/^\+[1-9][0-9]{6,14}$/u.test(contact)
+      : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(contact)
+  )
+    return fail();
+  const name = text(raw.name, 120);
+  if (name.length < 1) return fail();
+  return Object.freeze({ status: "Available", name, channel: raw.channel, value: contact });
+}
 export function parseCurrentOrderDetail(value: unknown, orderReference: string) {
-  const raw = exact(value, ["screenId", "order", "lines"]);
+  const raw = exact(value, ["screenId", "order", "lines", "pickupContact"]);
   if (raw.screenId !== "OPS-ORDER-DETAIL") return fail();
   const queue = parseCurrentOrderQueue({ items: [raw.order], nextAfterOrderReference: null });
   const order = queue.items[0];
@@ -470,6 +512,7 @@ export function parseCurrentOrderDetail(value: unknown, orderReference: string) 
   return Object.freeze({
     view: queue,
     order,
+    pickupContact: parsePickupContact(raw.pickupContact, order.orderType),
     lines: Object.freeze({
       items: Object.freeze(items),
       totals: Object.freeze({

@@ -19,6 +19,7 @@ afterEach(async () => {
 async function setup(
   enabled = true,
   financial?: import("./customer-receipt-financial.js").CustomerReceiptFinancialView | null,
+  storeContact?: Record<string, unknown>,
 ) {
   const chain = parseDigitalReceiptChain({
     orderReference: id(1),
@@ -63,7 +64,11 @@ async function setup(
     ],
   });
   const read = vi.fn().mockResolvedValue(chain);
-  const readView = vi.fn().mockImplementation(async () => ({ chain, financial }));
+  const readView = vi.fn().mockImplementation(async () => ({
+    chain,
+    financial,
+    ...(storeContact === undefined ? {} : { storeContact }),
+  }));
   const server = createServer(
     createApp(
       enabled
@@ -196,4 +201,24 @@ it("returns authorized history when optional financial source is unavailable", a
   expect(response.status).toBe(200);
   const body = await response.json();
   expect(body).toMatchObject({ receipt: { financial: null, records: [{ version: 1 }] } });
+});
+
+it("WP-2423 Q10: serializes only the Store's published phone and address with the receipt", async () => {
+  const storeContact = {
+    phone: "+14165550123",
+    addressLines: ["DEMO 100 Test Street"],
+    locality: "Toronto",
+    regionCode: "ON",
+    postalCode: "M5V 1A1",
+  };
+  const test = await setup(true, null, { ...storeContact, ownerEmail: "private" });
+  const response = await test.send();
+  expect(response.status).toBe(200);
+  const text = await response.text();
+  expect(JSON.parse(text).receipt.storeContact).toEqual(storeContact);
+  expect(text).not.toContain("private");
+  const without = (await (await (await setup(true, null)).send()).json()) as {
+    receipt: Record<string, unknown>;
+  };
+  expect(without.receipt).not.toHaveProperty("storeContact");
 });

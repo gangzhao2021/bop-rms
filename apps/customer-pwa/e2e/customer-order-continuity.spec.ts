@@ -1,0 +1,191 @@
+import { expect, test, type Page } from "@playwright/test";
+
+// WP-2423 Q10 synthetic HTTP evidence for the production App: keep the order reachable, say plainly
+// when a visit has ended, and show how to reach the Store. No live Store, contact or Provider.
+const id = (n: number) => "018f8800-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+const csrf = "c".repeat(43);
+const orderReference = id(1);
+const storeContact = {
+  phone: "+14165550123",
+  addressLines: ["DEMO 100 Test Street"],
+  locality: "Toronto",
+  regionCode: "ON",
+  postalCode: "M5V 1A1",
+};
+const menuContext = {
+  publicStoreReference: id(6),
+  channel: "Pickup",
+  locale: "en-CA",
+  brandDisplayName: "Synthetic Brand",
+  storeDisplayName: "Synthetic Continuity Store",
+};
+function status(withContact: boolean) {
+  return {
+    schemaVersion: 1,
+    status: {
+      projectionName: "ordering_order_status_v1",
+      projectionVersion: 1,
+      sourceCheckpoint: id(8),
+      projectedAt: "2026-08-11T14:00:00.000Z",
+      freshnessStatus: "Fresh",
+      order: {
+        orderReference,
+        orderNumber: "12",
+        orderType: "Pickup",
+        canonicalPhase: "Submitted",
+        paymentStatus: "NotReported",
+        kitchenStatus: "Unavailable",
+        fulfillmentStatus: "Unavailable",
+        fulfilledAt: null,
+        eta: null,
+        submittedAt: "2026-08-11T13:55:00.000Z",
+        batches: [
+          {
+            orderBatchReference: id(3),
+            submittedAt: "2026-08-11T13:55:00.000Z",
+            items: [
+              {
+                orderItemReference: id(4),
+                displayName: "Synthetic tea",
+                quantity: 1,
+                lineTotal: { amountMinor: "450", currencyCode: "CAD" },
+              },
+            ],
+          },
+        ],
+      },
+      sources: {
+        checkedAt: "2026-08-11T14:00:00.000Z",
+        kitchen: null,
+        payments: [
+          {
+            status: "Succeeded",
+            occurredAt: "2026-08-11T13:56:00.000Z",
+            amount: { amountMinor: "450", currencyCode: "CAD" },
+            freshnessStatus: "Fresh",
+          },
+        ],
+        ...(withContact ? { storeContact } : {}),
+      },
+    },
+  };
+}
+const json = { "content-type": "application/json", "cache-control": "no-store" };
+async function bootstrap(page: Page, body: Record<string, unknown> | null) {
+  await page.route("**/api/v1/customer/session/csrf", (route) =>
+    body === null
+      ? route.fulfill({
+          status: 401,
+          headers: json,
+          body: JSON.stringify({ schemaVersion: 1, error: { code: "session_unavailable" } }),
+        })
+      : route.fulfill({ status: 200, headers: json, body: JSON.stringify(body) }),
+  );
+}
+async function noHorizontalOverflow(page: Page) {
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+  ).toBe(true);
+}
+
+for (const viewport of [
+  { width: 390, height: 844 },
+  { width: 1440, height: 900 },
+]) {
+  test.describe(`@production WP-2423 Q10 order continuity at ${viewport.width}px`, () => {
+    test.use({ viewport, serviceWorkers: "block" });
+
+    test("a reopened app offers the order this phone placed and opens it", async ({ page }) => {
+      await bootstrap(page, {
+        schemaVersion: 1,
+        csrfToken: csrf,
+        currentOrder: { orderReference, orderNumber: "12", orderType: "Pickup" },
+        menuContext,
+      });
+      await page.route("**/api/v1/orders/*/status", (route) =>
+        route.fulfill({ headers: json, body: JSON.stringify(status(true)) }),
+      );
+      await page.goto("/");
+      await expect(page.getByRole("heading", { name: "Your order 12", exact: true })).toBeVisible();
+      await expect(page.getByText("To start a new order, scan the QR code")).toBeVisible();
+      await noHorizontalOverflow(page);
+      await page.getByRole("link", { name: "View order 12", exact: true }).click();
+      await expect(page).toHaveURL(new RegExp("/orders/" + orderReference + "$", "u"));
+      await expect(page.getByText("Payment received $4.50", { exact: true })).toBeVisible();
+      // How to reach the Store, from its published profile.
+      const contact = page.getByRole("region", { name: "Contact the store" });
+      await expect(contact).toBeVisible();
+      await expect(contact.getByRole("link", { name: "Call (416) 555-0123" })).toHaveAttribute(
+        "href",
+        "tel:+14165550123",
+      );
+      await expect(contact.getByText("Toronto, ON M5V 1A1")).toBeVisible();
+      await noHorizontalOverflow(page);
+    });
+
+    test("a QR code scanned again during an order shows the order before starting anew", async ({
+      page,
+    }) => {
+      await bootstrap(page, {
+        schemaVersion: 1,
+        csrfToken: csrf,
+        currentOrder: { orderReference, orderNumber: "12", orderType: "Pickup" },
+        menuContext,
+      });
+      let entries = 0;
+      await page.route("**/bff/customer/entry", (route) => {
+        entries += 1;
+        return route.fulfill({
+          status: 201,
+          headers: { "cache-control": "no-store" },
+          json: {
+            schemaVersion: 2,
+            status: "Established",
+            brandDisplayName: "Synthetic Brand",
+            storeDisplayName: "Synthetic Continuity Store",
+            publicStoreReference: id(6),
+            publicTableReference: null,
+            channel: "Pickup",
+            operatingState: "Open",
+            availableServiceModes: ["Pickup"],
+            locale: "en-CA",
+            contextExpiresAt: new Date(Date.now() + 600_000).toISOString(),
+            csrfToken: "d".repeat(43),
+          },
+        });
+      });
+      await page.goto("/#qr=aaa.bbb.ccc");
+      await expect(page.getByRole("heading", { name: "Your order 12", exact: true })).toBeVisible();
+      await expect(page.getByText("closes this order on this phone")).toBeVisible();
+      expect(entries).toBe(0);
+      await noHorizontalOverflow(page);
+      await page.getByRole("button", { name: "Start a new order", exact: true }).click();
+      await expect(
+        page.getByRole("heading", { name: "Ready to order", exact: true }),
+      ).toBeVisible();
+      expect(entries).toBe(1);
+    });
+
+    test("an ended visit explains the way back instead of 'access denied'", async ({ page }) => {
+      await bootstrap(page, null);
+      let statusCalls = 0;
+      await page.route("**/api/v1/orders/*/status", (route) => {
+        statusCalls += 1;
+        return route.fulfill({ status: 404, headers: json, body: "{}" });
+      });
+      await page.goto("/orders/" + orderReference);
+      await expect(
+        page.getByRole("heading", { name: "Your visit on this phone has ended", exact: true }),
+      ).toBeVisible();
+      await expect(page.getByText("Scan the table QR code again")).toBeVisible();
+      await expect(page.getByText("the store still has your order")).toBeVisible();
+      await expect(page.getByText(/access denied|browser you used at checkout/iu)).toHaveCount(0);
+      await expect(
+        page.getByRole("link", { name: "Go to the start", exact: true }),
+      ).toHaveAttribute("href", "/");
+      // Without a session there is nothing to ask the server for.
+      expect(statusCalls).toBe(0);
+      await noHorizontalOverflow(page);
+    });
+  });
+}

@@ -2,8 +2,10 @@ import {
   assertGuestSessionUsable,
   createGuestSession,
   createGuestSessionRecord,
+  guestSessionAbsoluteLifetimeMs,
   guestSessionCookie,
   GuestSessionError,
+  guestSessionIdleLifetimeMs,
   parseGuestAdmissionEvidence,
   parseGuestDiningAdmissionEvidence,
   parseGuestDiningAdmissionReference,
@@ -27,8 +29,8 @@ import type {
   GuestSessionStorePort,
 } from "./ports/guest-session-ports.js";
 
-const fourHours = 4 * 60 * 60 * 1000;
-const twentyFourHours = 24 * 60 * 60 * 1000;
+const fourHours = guestSessionIdleLifetimeMs;
+const twentyFourHours = guestSessionAbsoluteLifetimeMs;
 const plus = (value: CanonicalInstant, milliseconds: number) =>
   new Date(Date.parse(value) + milliseconds).toISOString() as CanonicalInstant;
 const command = (

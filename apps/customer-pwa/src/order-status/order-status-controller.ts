@@ -1,3 +1,4 @@
+import { parseStoreContact } from "../journey/StoreContact.js";
 import type {
   OrderStatusSources,
   OrderStatusState,
@@ -171,6 +172,9 @@ function parseSources(
       : []),
     ...(value !== null && typeof value === "object" && Object.hasOwn(value, "unpaidCancellations")
       ? ["unpaidCancellations"]
+      : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "storeContact")
+      ? ["storeContact"]
       : []),
   ]);
   const checkedAt = parseInstant(raw.checkedAt);
@@ -476,6 +480,18 @@ function parseSources(
     ...(itemCancellations === undefined ? {} : { itemCancellations }),
     ...(batchPayments === undefined ? {} : { batchPayments }),
     ...(unpaidCancellations === undefined ? {} : { unpaidCancellations }),
+    // WP-2423 Q10: the Store's published phone and address.
+    ...(Object.hasOwn(raw, "storeContact")
+      ? {
+          storeContact: (() => {
+            try {
+              return parseStoreContact(raw.storeContact);
+            } catch {
+              return invalid();
+            }
+          })(),
+        }
+      : {}),
   });
 }
 

@@ -383,6 +383,11 @@ export {
   type OrderItemInventoryLink,
 } from "./infrastructure/persistence/order-item-inventory-link-reader.js";
 export * from "./infrastructure/persistence/pickup-payment-window-closure-store.js";
+// WP-2423 Q10: a reopened customer app finds its Guest Session's latest Order.
+export * from "./infrastructure/persistence/guest-session-order-source.js";
+// WP-2423 Q10: staff see the pickup contact on the order; it is removed after its retention period.
+export * from "./infrastructure/persistence/order-pickup-contact-source.js";
+export * from "./infrastructure/persistence/checkout-contact-retention-store.js";
 
 // WP-2423 Q6: store staff cancel a paid, accepted Order/Batch before the kitchen starts it.
 export {

@@ -1,4 +1,8 @@
-import { createPostgresGuestCheckoutRecovery, parseOrderingReference } from "@rms/ordering";
+import {
+  createPostgresGuestCheckoutRecovery,
+  findLatestGuestSessionOrder,
+  parseOrderingReference,
+} from "@rms/ordering";
 import { createPublicStoreProfileService, parseGetPublicStoreRequest } from "@rms/store";
 import {
   createPersistentPublicStoreProfilePorts,
@@ -62,12 +66,27 @@ export function createCustomerSessionBootstrapRead(
           guestSessionReference: guest.sessionReference,
           observedAt: options.now(),
         });
+        // WP-2423 Q10: a customer who reopens the app can go straight back to the order this
+        // Guest Session placed (read only after the Session is confirmed in this transaction).
+        const latestOrder = await findLatestGuestSessionOrder(transaction, options.scope, {
+          guestSessionReference: String(guest.sessionReference),
+          observedAt: options.now(),
+        });
         const current = await identity.resolve({ sessionCredential, activity: "Background" });
         if (JSON.stringify(current) !== JSON.stringify(guest))
           throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
         return {
           csrfToken,
           ...(allocation ? { checkoutSessionReference: allocation.checkoutSessionReference } : {}),
+          ...(latestOrder
+            ? {
+                currentOrder: {
+                  orderReference: latestOrder.orderReference,
+                  orderNumber: latestOrder.orderNumber,
+                  orderType: latestOrder.orderType,
+                },
+              }
+            : {}),
           menuContext: {
             publicStoreReference: guest.publicStoreReference,
             channel: guest.channel,
@@ -88,6 +107,11 @@ export function createCustomerSessionBootstrapHandler(options?: {
       | {
           csrfToken: string;
           checkoutSessionReference?: string;
+          currentOrder?: {
+            orderReference: string;
+            orderNumber: string;
+            orderType: "Pickup" | "DineIn";
+          };
           menuContext: {
             publicStoreReference: string;
             channel: "DineIn" | "Pickup";
@@ -137,6 +161,25 @@ export function createCustomerSessionBootstrapHandler(options?: {
         typeof result === "string" ? result : result.csrfToken,
       );
       const menuContext = typeof result === "string" ? undefined : result.menuContext;
+      const currentOrder =
+        typeof result === "string" || result.currentOrder === undefined
+          ? undefined
+          : {
+              orderReference: String(parseOrderingReference(result.currentOrder.orderReference)),
+              orderNumber: /^[1-9][0-9]{0,18}$/u.test(result.currentOrder.orderNumber)
+                ? result.currentOrder.orderNumber
+                : (() => {
+                    throw new Error("invalid order number");
+                  })(),
+              orderType:
+                result.currentOrder.orderType === "DineIn"
+                  ? ("DineIn" as const)
+                  : result.currentOrder.orderType === "Pickup"
+                    ? ("Pickup" as const)
+                    : (() => {
+                        throw new Error("invalid order type");
+                      })(),
+            };
       const checkoutSessionReference =
         typeof result === "string" || result.checkoutSessionReference === undefined
           ? undefined
@@ -145,6 +188,7 @@ export function createCustomerSessionBootstrapHandler(options?: {
         schemaVersion: 1,
         csrfToken,
         ...(checkoutSessionReference ? { checkoutSessionReference } : {}),
+        ...(currentOrder ? { currentOrder } : {}),
         ...(menuContext
           ? {
               menuContext: {

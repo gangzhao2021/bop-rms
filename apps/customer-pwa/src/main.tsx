@@ -9,7 +9,7 @@ import {
   getCustomerCsrfCredential,
   setCustomerCsrfCredential,
 } from "./session/customer-transaction-context.js";
-import { restoreCustomerSession } from "./session/session-bootstrap.js";
+import { restoreCustomerSession, type CustomerCurrentOrder } from "./session/session-bootstrap.js";
 import { protectCustomerHistoryRestore } from "./session/history-recovery.js";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -36,11 +36,19 @@ protectCustomerHistoryRestore({
 });
 async function start() {
   let initialMenuContext: MenuJourneyContext | undefined;
-  if (window.location.pathname !== "/")
-    await restoreCustomerSession(window.fetch.bind(window), (context) => {
-      initialMenuContext = context;
-    });
+  let currentOrder: CustomerCurrentOrder | undefined;
   const hash = window.location.hash;
+  // WP-2423 Q10: a reopened app, or a QR code scanned again while an order is in progress, still
+  // finds the order this browser placed before a new visit could replace its Session.
+  await restoreCustomerSession(
+    window.fetch.bind(window),
+    (context) => {
+      initialMenuContext = context;
+    },
+    (order) => {
+      currentOrder = order;
+    },
+  );
   const inMemoryToken = await loadInternalEntryToken({
     enabled: import.meta.env.VITE_BOP_INTERNAL_SIMULATED_PAYMENT === "1",
     location: window.location,
@@ -85,6 +93,7 @@ async function start() {
             entryClient={entryClient}
             diningAdmission={diningAdmission}
             initialMenuContext={initialMenuContext}
+            currentOrder={currentOrder}
           />
         </BrowserRouter>
       </AppErrorBoundary>

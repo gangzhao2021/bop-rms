@@ -5,6 +5,7 @@ const f = vi.hoisted(() => ({
   latest: vi.fn(),
   factory: vi.fn(),
   profile: vi.fn(),
+  latestOrder: vi.fn(),
 }));
 vi.mock("@bop/identity", async (original) => ({
   ...(await original<typeof import("@bop/identity")>()),
@@ -17,6 +18,7 @@ vi.mock("@bop/identity", async (original) => ({
 vi.mock("@rms/ordering", async (original) => ({
   ...(await original<typeof import("@rms/ordering")>()),
   createPostgresGuestCheckoutRecovery: f.factory,
+  findLatestGuestSessionOrder: f.latestOrder,
 }));
 vi.mock("@rms/store", async (original) => ({
   ...(await original<typeof import("@rms/store")>()),
@@ -53,6 +55,7 @@ beforeEach(() => {
     profile: { brandDisplayName: "Brand", storeDisplayName: "Store" },
   });
   f.factory.mockReturnValue({ latest: f.latest });
+  f.latestOrder.mockResolvedValue(null);
   f.latest.mockImplementation(async (transaction, input) => {
     const auth = f.factory.mock.calls[0]?.[0].authorize;
     if (!(await auth(transaction, input))) throw new Error("denied");
@@ -88,4 +91,22 @@ it("returns ordinary menu bootstrap when no checkout exists", async () => {
   const result = await createCustomerSessionBootstrapRead(options).read("A".repeat(43));
   expect(result).toHaveProperty("menuContext");
   expect(result).not.toHaveProperty("checkoutSessionReference");
+});
+
+it("WP-2423 Q10: returns this Guest Session's latest order, looked up by the confirmed Session only", async () => {
+  f.latestOrder.mockResolvedValue({
+    orderReference: ref(7),
+    orderNumber: "41",
+    orderType: "Pickup",
+    createdAt: "2026-09-21T05:00:00.000Z",
+  });
+  const result = await createCustomerSessionBootstrapRead(options).read("A".repeat(43));
+  expect(result).toMatchObject({
+    currentOrder: { orderReference: ref(7), orderNumber: "41", orderType: "Pickup" },
+  });
+  expect(JSON.stringify(result)).not.toContain("createdAt");
+  expect(f.latestOrder).toHaveBeenCalledWith(tx, options.scope, {
+    guestSessionReference: ref(3),
+    observedAt: options.now(),
+  });
 });

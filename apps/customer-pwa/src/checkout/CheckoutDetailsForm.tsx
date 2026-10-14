@@ -101,7 +101,9 @@ export function CheckoutDetailsForm({
           selection.orderType === "Pickup"
             ? (prior?.pickupContact ?? { name: "", channel: "Phone", value: "" })
             : null,
-        receipt: prior?.receipt ?? { choice: "InSession", email: null },
+        // WP-2423 Q10: emailing a receipt needs the store's email account (an external gate); until
+        // it is connected the receipt is shown on the order page, and no email is collected.
+        receipt: { choice: "InSession", email: null },
         policies: [],
       });
       setPolicy(requirements);
@@ -249,7 +251,8 @@ export function CheckoutDetailsForm({
           <legend>{selection.orderType === "Pickup" ? "Pickup contact" : "Receipt"}</legend>
           {selection.orderType === "Pickup" ? (
             <p className="checkout-details-form__hint">
-              We’ll use this to reach you if there’s a problem with your order.
+              The store uses this only to contact you about this order, for example if an item sold
+              out.
             </p>
           ) : null}
           {draft.pickupContact !== null ? (
@@ -315,37 +318,9 @@ export function CheckoutDetailsForm({
           ) : (
             <p>No contact details are required for your dine-in order.</p>
           )}
-          <label>
-            Receipt
-            <select
-              value={draft.receipt.choice}
-              onChange={(event) =>
-                edit({
-                  receipt:
-                    event.target.value === "TransactionalEmail"
-                      ? { choice: "TransactionalEmail", email: "" }
-                      : { choice: "InSession", email: null },
-                })
-              }
-            >
-              <option value="InSession">View receipt here</option>
-              <option value="TransactionalEmail">Email my receipt</option>
-            </select>
-          </label>
-          {draft.receipt.choice === "TransactionalEmail" ? (
-            <label>
-              Receipt email
-              <input
-                required
-                type="email"
-                maxLength={254}
-                value={draft.receipt.email}
-                onChange={(event) =>
-                  edit({ receipt: { choice: "TransactionalEmail", email: event.target.value } })
-                }
-              />
-            </label>
-          ) : null}
+          <p className="checkout-details-form__hint">
+            Your receipt appears on your order page, where you can print or save it.
+          </p>
           {policy.documents.map((document) => (
             <details key={document.documentReference}>
               <summary>{document.title}</summary>

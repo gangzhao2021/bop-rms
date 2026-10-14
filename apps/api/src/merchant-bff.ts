@@ -1631,6 +1631,20 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             observedAt: item.observedAt,
           },
           lines: view.lines,
+          // WP-2423 Q10: the pickup customer's contact for this order (detail only).
+          pickupContact:
+            view.pickupContact === null
+              ? null
+              : view.pickupContact.status === "Available"
+                ? {
+                    status: "Available",
+                    name: view.pickupContact.name,
+                    channel: view.pickupContact.channel,
+                    value: view.pickupContact.value,
+                  }
+                : view.pickupContact.status === "Removed"
+                  ? { status: "Removed", removedAt: view.pickupContact.removedAt }
+                  : { status: "NotGiven" },
         });
       })
       .catch(() => denied(response));

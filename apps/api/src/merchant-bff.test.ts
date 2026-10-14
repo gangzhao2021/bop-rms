@@ -802,6 +802,7 @@ it("protects current order queue reads and bounds cursor authority", async () =>
     items: [],
     nextAfterOrderReference: null,
     lines: null,
+    pickupContact: null,
   }));
   const root = await serve(
     fakeService(),
@@ -878,10 +879,18 @@ it("WP-2423: reads one order's detail with its lines and hides other Stores' ord
     observedAt: "2026-10-08T21:10:00.000Z",
   };
   const lines = { items: [], totals: {} };
+  // WP-2423 Q10: the pickup customer's contact for this order, on the detail only.
+  const pickupContact = {
+    status: "Available",
+    name: "Synthetic Guest",
+    channel: "Phone",
+    value: "+14165550123",
+  };
   const queue = vi.fn(async () => ({
     items: [item],
     nextAfterOrderReference: null,
     lines,
+    pickupContact: { ...pickupContact },
   }));
   const root = await serve(
     fakeService(),
@@ -903,13 +912,23 @@ it("WP-2423: reads one order's detail with its lines and hides other Stores' ord
   expect(queue).not.toHaveBeenCalled();
   const response = await request(root, "/merchant/orders/detail?order=" + order, { headers });
   expect(response.status).toBe(200);
-  expect(await response.json()).toEqual({ screenId: "OPS-ORDER-DETAIL", order: item, lines });
+  expect(await response.json()).toEqual({
+    screenId: "OPS-ORDER-DETAIL",
+    order: item,
+    lines,
+    pickupContact,
+  });
   expect(queue).toHaveBeenCalledWith({
     sessionCookie,
     afterOrderReference: null,
     orderReference: order,
   });
-  queue.mockResolvedValueOnce({ items: [], nextAfterOrderReference: null, lines: null } as never);
+  queue.mockResolvedValueOnce({
+    items: [],
+    nextAfterOrderReference: null,
+    lines: null,
+    pickupContact: null,
+  } as never);
   const missing = await request(root, "/merchant/orders/detail?order=" + order, { headers });
   expect(missing.status).toBe(404);
   // WP-2423: an unpaid round's failed payment and its automatic cancellation time reach staff.
@@ -919,6 +938,7 @@ it("WP-2423: reads one order's detail with its lines and hides other Stores' ord
     items: [{ ...item, batches: [{ ...batch, paymentDue: due }] }],
     nextAfterOrderReference: null,
     lines,
+    pickupContact: null,
   } as never);
   const warned = await request(root, "/merchant/orders/detail?order=" + order, { headers });
   expect(((await warned.json()) as { order: typeof item }).order.batches[0]).toEqual({

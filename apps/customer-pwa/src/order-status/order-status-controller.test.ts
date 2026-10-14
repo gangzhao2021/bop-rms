@@ -269,6 +269,29 @@ describe("independent order status sources", () => {
       },
     };
   }
+  it("WP-2423 Q10: admits only the Store's published phone and address", () => {
+    const input = sourced();
+    const storeContact = {
+      phone: "+14165550123",
+      addressLines: ["DEMO 100 Test Street"],
+      locality: "Toronto",
+      regionCode: "ON",
+      postalCode: "M5V 1A1",
+    };
+    expect(
+      parseOrderStatusView({ ...input, sources: { ...input.sources, storeContact } }, id(1)).sources
+        ?.storeContact,
+    ).toEqual(storeContact);
+    expect(() =>
+      parseOrderStatusView(
+        {
+          ...input,
+          sources: { ...input.sources, storeContact: { ...storeContact, ownerEmail: "x" } },
+        },
+        id(1),
+      ),
+    ).toThrow();
+  });
   it("WP-2423: admits a Pickup not-collected fact only for Pickup and within the source window", () => {
     const input = sourced();
     const withPickup = {

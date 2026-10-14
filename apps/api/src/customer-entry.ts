@@ -1,4 +1,8 @@
-import type { GuestRawCredential, GuestSessionCookieDescriptor } from "@bop/identity";
+import {
+  serializeGuestSessionCookie,
+  type GuestRawCredential,
+  type GuestSessionCookieDescriptor,
+} from "@bop/identity";
 import type { RequestHandler, Response } from "express";
 
 const compactSegmentPattern = /^[A-Za-z0-9_-]+$/u;
@@ -378,8 +382,9 @@ function parsePortResult(
   throw new TypeError("unknown Customer-entry result");
 }
 
+/** WP-2423 Q10: persistent for the Session's absolute lifetime so a browser restart keeps the order. */
 function serializeCookie(credential: GuestRawCredential): string {
-  return `${expectedGuestSessionCookie.name}=${credential}; Path=/; Secure; HttpOnly; SameSite=Lax`;
+  return serializeGuestSessionCookie(credential);
 }
 
 export const unavailableCustomerEntryHandler: RequestHandler = (_request, response) => {

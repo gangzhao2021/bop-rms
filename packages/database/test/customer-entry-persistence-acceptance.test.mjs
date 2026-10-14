@@ -187,10 +187,18 @@ it.each(["synthetic", "crypto"])("HTTP Guest lifecycle with %s", async (mode) =>
       const cookie = response.headers.get("set-cookie");
       assert.match(cookie, /^__Host-bop-guest=/u);
       assert.match(cookie, /Secure; HttpOnly; SameSite=Lax/u);
+      // WP-2423 Q10: the cookie survives a browser restart for exactly the Session's absolute
+      // lifetime; the server-side idle/absolute/closure limits still decide whether it is usable.
+      assert.match(cookie, /; Max-Age=86400;/u);
+      assert.doesNotMatch(cookie, /Expires=|Domain=/u);
       const sessionCredential = cookie.split(";")[0].split("=")[1];
       const selector = options.session.credentials.hashCredential("Session", sessionCredential);
       const record = await entryStore.resolve(selector);
       assert(record);
+      assert.equal(
+        Date.parse(record.session.absoluteExpiresAt) - Date.parse(record.session.createdAt),
+        86_400_000,
+      );
       assert.equal(record.session.diningState, "ContextOnly");
       assert.equal(record.session.brandReference, scope.brandReference);
       assert.equal(record.session.storeReference, scope.storeReference);

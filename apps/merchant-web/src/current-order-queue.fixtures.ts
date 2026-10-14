@@ -83,6 +83,7 @@ export function currentOrderDetailFixture(orderReference: string) {
   const batch = order.batches[0]?.orderBatchReference ?? id(11);
   return {
     screenId: "OPS-ORDER-DETAIL",
+    pickupContact: null,
     order,
     lines: {
       items: [

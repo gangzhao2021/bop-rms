@@ -1,3 +1,4 @@
+import { parseStoreContact } from "../journey/StoreContact.js";
 import type { ReceiptRecordKind, ReceiptState, ReceiptView } from "./types.js";
 
 export type ReceiptClientErrorCode =
@@ -269,7 +270,16 @@ export function parseReceiptView(value: unknown, expectedReference: string): Rec
     ...(value !== null && typeof value === "object" && Object.hasOwn(value, "financial")
       ? ["financial"]
       : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "storeContact")
+      ? ["storeContact"]
+      : []),
   ]);
+  let storeContact: ReceiptView["storeContact"];
+  try {
+    if (Object.hasOwn(raw, "storeContact")) storeContact = parseStoreContact(raw.storeContact);
+  } catch {
+    return invalid();
+  }
   if (
     raw.orderReference !== expectedReference ||
     !["Fresh", "Stale"].includes(String(raw.freshnessStatus)) ||
@@ -283,6 +293,7 @@ export function parseReceiptView(value: unknown, expectedReference: string): Rec
   return Object.freeze({
     orderReference: expectedReference,
     ...(Object.hasOwn(raw, "financial") ? { financial: financial(raw.financial) } : {}),
+    ...(storeContact === undefined ? {} : { storeContact }),
     freshnessStatus: raw.freshnessStatus as "Fresh" | "Stale",
     deliveryStatus: raw.deliveryStatus as ReceiptView["deliveryStatus"],
     supportEligible: raw.supportEligible,

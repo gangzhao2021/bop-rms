@@ -6,6 +6,7 @@ import {
   type DigitalReceiptChain,
 } from "@rms/ordering";
 import type { RequestHandler, Response } from "express";
+import { storeContactJson, type CustomerStoreContact } from "./customer-store-contact.js";
 
 export const customerReceiptRoute = "/api/v1/orders/:order_id/receipt";
 export interface CustomerReceiptInput {
@@ -15,9 +16,12 @@ export interface CustomerReceiptInput {
 }
 interface ReceiptPort {
   read(input: CustomerReceiptInput): Promise<DigitalReceiptChain>;
-  readView?(
-    input: CustomerReceiptInput,
-  ): Promise<{ chain: DigitalReceiptChain; financial: CustomerReceiptFinancialView | null }>;
+  readView?(input: CustomerReceiptInput): Promise<{
+    chain: DigitalReceiptChain;
+    financial: CustomerReceiptFinancialView | null;
+    /** WP-2423 Q10: the Store's published phone and address (absent when not published). */
+    storeContact?: CustomerStoreContact | null;
+  }>;
 }
 function financialJson(value: CustomerReceiptFinancialView | null) {
   if (value === null) return null;
@@ -121,6 +125,7 @@ export class CustomerReceiptHandler {
         const receipt = {
           orderReference: chain.orderReference,
           ...(view ? { financial: financialJson(view.financial) } : {}),
+          ...(view?.storeContact ? { storeContact: storeContactJson(view.storeContact) } : {}),
           // No current financial, delivery or support source is inferred from immutable history.
           freshnessStatus: "Stale",
           deliveryStatus: "Unavailable",

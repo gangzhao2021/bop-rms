@@ -69,7 +69,7 @@ function render(state: ReceiptState) {
   );
 }
 describe("CUST-RECEIPT-SUPPORT screen contract", () => {
-  it("renders the immutable snapshot, accessible totals, print and gated email intent", () => {
+  it("renders the immutable snapshot, accessible totals and print, with no inactive email stub", () => {
     const html = render(ready());
     expect(html).toContain('class="receipt-page__content"');
     expect(html).toContain('class="receipt-page__history"');
@@ -77,16 +77,20 @@ describe("CUST-RECEIPT-SUPPORT screen contract", () => {
     expect(html).toContain("Receipt history");
     expect(html).toContain("Synthetic Operating Entity");
     expect(html).toContain("$11.30");
-    expect(html).toContain("Print receipt");
+    expect(html).toContain("Print or save receipt");
     expect(html).toContain("Refresh receipt");
-    expect(html).toContain("Request email receipt");
-    expect(html).toContain("disabled");
+    // WP-2423 Q10: no reachable stub — email appears only once a provider is connected.
+    expect(html).not.toContain("Request email receipt");
+    expect(html).not.toContain("not active yet");
+    // No internal delivery/support codes for the customer.
+    expect(html).not.toMatch(/Delivery status|support action|server validation/u);
+    expect(html).toContain("Ask a staff member at Synthetic Store");
     expect(html).not.toContain(`>${id(1)}<`);
   });
   it.each([
     [{ status: "loading" }, "Loading receipt"],
     [{ status: "invalid-reference" }, "Receipt link is invalid"],
-    [{ status: "permission-denied" }, "Receipt access denied"],
+    [{ status: "permission-denied" }, "Your visit on this phone has ended"],
     [{ status: "not-found" }, "Receipt not found"],
     [{ status: "feature-disabled" }, "Digital receipt is disabled"],
     [{ status: "unavailable" }, "Receipt is unavailable"],
@@ -124,7 +128,7 @@ describe("receipt adjustment display", () => {
     expect(html).toContain("<dt>Discount</dt><dd>$1.00</dd>");
     expect(html).toContain("<dt>Fees</dt><dd>$0.50</dd>");
     expect(html).toContain("$10.80");
-    expect(html).toContain("Print receipt");
+    expect(html).toContain("Print or save receipt");
     const original = render(ready());
     expect(original).not.toContain("<dt>Discount</dt>");
     expect(original).not.toContain("<dt>Fees</dt>");
@@ -153,4 +157,29 @@ it("separates current pending refunds from immutable history and hides them offl
   const offline = render({ status: "offline", view });
   expect(offline).not.toContain("$6.00");
   expect(offline).toContain("unavailable while offline");
+});
+
+describe("WP-2423 Q10 store contact on the receipt", () => {
+  it("shows the Store's published phone and address with a call link", () => {
+    const state = ready();
+    if (state.status !== "ready") throw new Error("missing fixture");
+    const html = render({
+      ...state,
+      view: {
+        ...state.view,
+        storeContact: {
+          phone: "+14165550123",
+          addressLines: ["DEMO 100 Test Street"],
+          locality: "Toronto",
+          regionCode: "ON",
+          postalCode: "M5V 1A1",
+        },
+      },
+    });
+    expect(html).toContain("Contact the store");
+    expect(html).toContain('href="tel:+14165550123"');
+    expect(html).toContain("Call (416) 555-0123");
+    expect(html).toContain("DEMO 100 Test Street");
+    expect(html).toContain("Toronto, ON M5V 1A1");
+  });
 });

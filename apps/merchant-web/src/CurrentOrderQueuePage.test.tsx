@@ -3,6 +3,8 @@ import { expect, it } from "vitest";
 import {
   CurrentOrderDetails,
   CurrentOrderLines,
+  formatContactPhone,
+  PickupContactPanel,
   orderMoney,
   CurrentOrderQueueRows,
   storeTime,
@@ -568,6 +570,7 @@ it("WP-2423 Q6 step 2: marks cancelled items, their refund and the refund total"
   const { lines } = parseCurrentOrderDetail(
     {
       screenId: "OPS-ORDER-DETAIL",
+      pickupContact: null,
       order: {
         orderReference: id(1),
         orderNumber: "ORD-1001",
@@ -753,6 +756,7 @@ it("WP-2423: lines of a round cancelled for a failed payment are marked and not 
   const detail = parseCurrentOrderDetail(
     {
       screenId: "OPS-ORDER-DETAIL",
+      pickupContact: null,
       order: {
         orderReference: unpaidId(1),
         orderNumber: "ORD-1007",
@@ -827,4 +831,43 @@ it("WP-2423: words an unpaid round's payment state for staff", () => {
     "Partner integration",
     "Other",
   ]);
+});
+
+it("WP-2423 Q10: shows who the pickup is for and how to reach them, only from the detail", () => {
+  const phone = renderToStaticMarkup(
+    <PickupContactPanel
+      contact={{
+        status: "Available",
+        name: "Synthetic Guest",
+        channel: "Phone",
+        value: "+14165550123",
+      }}
+    />,
+  );
+  expect(phone).toContain("Pickup for Synthetic Guest");
+  expect(phone).toContain('href="tel:+14165550123"');
+  expect(phone).toContain("Call (416) 555-0123");
+  const email = renderToStaticMarkup(
+    <PickupContactPanel
+      contact={{
+        status: "Available",
+        name: "Synthetic Guest",
+        channel: "Email",
+        value: "guest@example.test",
+      }}
+    />,
+  );
+  expect(email).toContain('href="mailto:guest@example.test"');
+  const removed = renderToStaticMarkup(
+    <PickupContactPanel
+      contact={{ status: "Removed", removedAt: "2026-11-10T12:00:00.000Z" }}
+      timeZone="America/Toronto"
+    />,
+  );
+  expect(removed).toContain("contact was removed on Nov 10, 2026");
+  expect(renderToStaticMarkup(<PickupContactPanel contact={{ status: "NotGiven" }} />)).toContain(
+    "No contact was given",
+  );
+  expect(renderToStaticMarkup(<PickupContactPanel contact={null} />)).toBe("");
+  expect(formatContactPhone("+442071234567")).toBe("+442071234567");
 });

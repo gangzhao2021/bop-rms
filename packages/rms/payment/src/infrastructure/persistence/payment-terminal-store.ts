@@ -333,3 +333,83 @@ export function createPostgresPaymentTerminalStore(
     },
   });
 }
+
+export interface OrderPaymentTerminalOutcome {
+  readonly paymentIntentReference: string;
+  readonly outcome: "Succeeded" | "Failed";
+  readonly amount: { readonly amountMinor: bigint; readonly currencyCode: string } | null;
+  readonly occurredAt: string;
+}
+
+/**
+ * WP-2423 Q10: the Payment owner's own terminal facts for one Order (the same facts the payment
+ * result page reads). The customer status projection is updated asynchronously and may lag behind
+ * them; a reader uses these so the order page never says "pending" for a payment the result page
+ * already confirmed. Caller must authorize the Order in the same transaction first.
+ */
+export async function listOrderPaymentTerminalOutcomes(
+  transaction: { query(text: string, values: readonly unknown[]): Promise<unknown> },
+  scope: {
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly providerAccountReference: string;
+    readonly environment: "Test" | "Live";
+  },
+  orderReference: string,
+): Promise<readonly OrderPaymentTerminalOutcome[]> {
+  try {
+    const brand = parsePaymentReference(scope.brandReference),
+      store = parsePaymentReference(scope.storeReference),
+      account = parsePaymentReference(scope.providerAccountReference),
+      order = parsePaymentReference(orderReference);
+    if (scope.environment !== "Test" && scope.environment !== "Live") return fail();
+    await transaction.query(
+      "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+      [brand, store],
+    );
+    const result: unknown = await transaction.query(
+      "SELECT payment_intent_id::text AS payment_intent_id,terminal_outcome,amount_minor::text AS amount_minor,currency_code," +
+        "to_char(occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS occurred_at " +
+        "FROM rms_payment.payment_terminal_fact WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 " +
+        "AND provider_account_id=$4 AND provider_environment=$5 ORDER BY occurred_at,payment_intent_id LIMIT 101",
+      [brand, store, order, account, scope.environment],
+    );
+    const found: unknown =
+      result !== null && typeof result === "object"
+        ? Object.getOwnPropertyDescriptor(result, "rows")?.value
+        : undefined;
+    if (!Array.isArray(found) || found.length > 100) return fail();
+    return Object.freeze(
+      found.map((value: unknown) => {
+        const row = exactPaymentObject(value, [
+          "payment_intent_id",
+          "terminal_outcome",
+          "amount_minor",
+          "currency_code",
+          "occurred_at",
+        ]);
+        const outcome = row.terminal_outcome;
+        if (outcome !== "Succeeded" && outcome !== "Failed") return fail();
+        const amount =
+          outcome === "Succeeded"
+            ? typeof row.amount_minor === "string" &&
+              /^[1-9][0-9]{0,18}$/u.test(row.amount_minor) &&
+              row.currency_code === "CAD"
+              ? Object.freeze({ amountMinor: BigInt(row.amount_minor), currencyCode: "CAD" })
+              : fail()
+            : row.amount_minor === null && row.currency_code === null
+              ? null
+              : fail();
+        return Object.freeze({
+          paymentIntentReference: String(parsePaymentReference(row.payment_intent_id)),
+          outcome,
+          amount,
+          occurredAt: String(parsePaymentInstant(row.occurred_at)),
+        });
+      }),
+    );
+  } catch (error) {
+    if (error instanceof PaymentTerminalError) throw error;
+    return fail();
+  }
+}

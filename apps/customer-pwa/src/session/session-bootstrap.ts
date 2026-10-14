@@ -30,10 +30,38 @@ function menuContext(value: unknown): MenuJourneyContext | null {
     return null;
   return Object.freeze(raw) as unknown as MenuJourneyContext;
 }
+/** WP-2423 Q10: the order this browser's Guest Session placed, for "continue your order". */
+export interface CustomerCurrentOrder {
+  readonly orderReference: string;
+  readonly orderNumber: string;
+  readonly orderType: "Pickup" | "DineIn";
+}
+function currentOrder(value: unknown): CustomerCurrentOrder | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  const keys = ["orderReference", "orderNumber", "orderType"];
+  if (Object.keys(raw).length !== keys.length || keys.some((key) => !(key in raw))) return null;
+  if (
+    typeof raw.orderReference !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+      raw.orderReference,
+    ) ||
+    typeof raw.orderNumber !== "string" ||
+    !/^[1-9][0-9]{0,18}$/u.test(raw.orderNumber) ||
+    (raw.orderType !== "Pickup" && raw.orderType !== "DineIn")
+  )
+    return null;
+  return Object.freeze({
+    orderReference: raw.orderReference,
+    orderNumber: raw.orderNumber,
+    orderType: raw.orderType,
+  });
+}
 /** Restore foreground CSRF and current public menu context in memory only. */
 export async function restoreCustomerSession(
   fetcher: typeof fetch = fetch,
   onMenuContext?: (context: MenuJourneyContext) => void,
+  onCurrentOrder?: (order: CustomerCurrentOrder) => void,
 ): Promise<boolean> {
   if (getCustomerCsrfCredential() !== null) return true;
   const current = captureCustomerCsrfContext();
@@ -87,7 +115,10 @@ export async function restoreCustomerSession(
       typeof value !== "object" ||
       Array.isArray(value) ||
       Object.keys(value).length !==
-        2 + ("menuContext" in value ? 1 : 0) + ("checkoutSessionReference" in value ? 1 : 0) ||
+        2 +
+          ("menuContext" in value ? 1 : 0) +
+          ("checkoutSessionReference" in value ? 1 : 0) +
+          ("currentOrder" in value ? 1 : 0) ||
       !("schemaVersion" in value) ||
       value.schemaVersion !== 1 ||
       !("csrfToken" in value) ||
@@ -97,6 +128,8 @@ export async function restoreCustomerSession(
       return false;
     const context = "menuContext" in value ? menuContext(value.menuContext) : undefined;
     if (context === null) return false;
+    const order = "currentOrder" in value ? currentOrder(value.currentOrder) : undefined;
+    if (order === null) return false;
     const checkout =
       "checkoutSessionReference" in value ? value.checkoutSessionReference : undefined;
     if (
@@ -108,6 +141,7 @@ export async function restoreCustomerSession(
     setCustomerCsrfCredential(value.csrfToken);
     if (typeof checkout === "string") setCheckoutSessionReference(checkout);
     if (context) onMenuContext?.(context);
+    if (order) onCurrentOrder?.(order);
     return true;
   } catch {
     return false;

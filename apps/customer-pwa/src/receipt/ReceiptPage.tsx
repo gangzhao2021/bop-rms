@@ -9,6 +9,7 @@ import type { ReceiptMoneyView, ReceiptRecordView, ReceiptView } from "./types.j
 
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import { formatDateTime, formatMoney } from "../journey/format.js";
+import { StoreContactCard } from "../journey/StoreContact.js";
 
 function money(value: ReceiptMoneyView): string {
   return formatMoney(value.amountMinor, value.currencyCode);
@@ -161,37 +162,22 @@ function ReceiptContent({
           <ReceiptVersion key={record.recordReference} record={record} />
         ))}
       </section>
-      <section className="receipt-page__support" aria-labelledby="receipt-delivery-heading">
-        <h2 id="receipt-delivery-heading">Delivery and support</h2>
-        <p>Delivery status: {view.deliveryStatus}</p>
-        <p>
-          {view.supportEligible
-            ? "Support is available for this order."
-            : "No support action is currently eligible."}
-        </p>
-        <p>
-          {view.cancellationEligible
-            ? "Cancellation may be requested and remains subject to server validation."
-            : "Cancellation is not available for this receipt."}
-        </p>
-      </section>
+      {/* WP-2423 Q10: how to reach the Store, instead of internal delivery/support codes. */}
+      {view.storeContact ? (
+        <StoreContactCard contact={view.storeContact} storeName={current.storeDisplayName} />
+      ) : (
+        <section className="store-contact" aria-labelledby="store-contact-heading">
+          <h2 id="store-contact-heading">Questions about this order?</h2>
+          <p>Ask a staff member at {current.storeDisplayName}.</p>
+        </section>
+      )}
       <section className="receipt-page__action-card" aria-labelledby="receipt-actions-heading">
-        <h2 id="receipt-actions-heading">Receipt actions</h2>
+        <h2 id="receipt-actions-heading">Keep a copy</h2>
         <div className="receipt-page__actions">
+          {/* Emailing a receipt appears only once the store's email account is connected. */}
           <button type="button" onClick={() => window.print()}>
-            Print receipt
+            Print or save receipt
           </button>
-          <div className="receipt-page__email-action">
-            <button
-              type="button"
-              disabled
-              aria-describedby="receipt-email-unavailable"
-              title="Transactional email delivery is not active yet"
-            >
-              Request email receipt
-            </button>
-            <p id="receipt-email-unavailable">Transactional email delivery is not active yet.</p>
-          </div>
         </div>
       </section>
     </>
@@ -229,9 +215,10 @@ export function ReceiptPage({
   const messages: Partial<Record<typeof state.status, [string, string]>> = {
     loading: ["Loading receipt", "Retrieving your receipt."],
     "invalid-reference": ["Receipt link is invalid", "Use the exact link supplied for this order."],
+    // WP-2423 Q10: the visit on this phone ended; say so and point to the counter.
     "permission-denied": [
-      "Receipt access denied",
-      "Open this receipt in the browser you used at checkout.",
+      "Your visit on this phone has ended",
+      "This receipt can only be opened while your visit is active. Ask a staff member for a copy.",
     ],
     "not-found": ["Receipt not found", "No authorized receipt was found."],
     "feature-disabled": ["Digital receipt is disabled", "Contact the Store for support."],

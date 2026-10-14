@@ -281,3 +281,27 @@ it("WP-2423 Q6: serializes unpaid dine-in rounds and their automatic cancellatio
   expect(body.status.sources.unpaidCancellations).toEqual([cancelled]);
   expect(JSON.stringify(body)).not.toContain("private");
 });
+it("WP-2423 Q10: serializes only the Store's published phone and address", async () => {
+  const f = await setup();
+  const storeContact = {
+    phone: "+14165550123",
+    addressLines: ["DEMO 100 Test Street"],
+    locality: "Toronto",
+    regionCode: "ON",
+    postalCode: "M5V 1A1",
+  };
+  f.read.mockResolvedValue({
+    ...f.result,
+    sources: {
+      checkedAt: "2026-09-12T12:00:00.000Z",
+      kitchen: null,
+      payments: null,
+      storeContact: { ...storeContact, ownerEmail: "private" },
+    },
+  });
+  const body = (await (await f.send()).json()) as {
+    status: { sources: Record<string, unknown> };
+  };
+  expect(body.status.sources.storeContact).toEqual(storeContact);
+  expect(JSON.stringify(body)).not.toContain("private");
+});

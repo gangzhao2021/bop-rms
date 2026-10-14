@@ -176,7 +176,7 @@ test.describe("@production order status HTTP continuity", () => {
     revoke = true;
     await page.getByRole("button", { name: "Refresh now", exact: true }).click();
     await expect(
-      page.getByRole("heading", { name: "Order access denied", exact: true }),
+      page.getByRole("heading", { name: "Your visit on this phone has ended", exact: true }),
     ).toBeVisible();
     await expect(page.getByText("Payment received $12.99", { exact: true })).toHaveCount(0);
     expect(await page.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0);

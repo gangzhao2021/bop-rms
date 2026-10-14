@@ -173,6 +173,16 @@ const databaseAccessManifestInput = {
       retentionCategory: "transactional",
       piiClassification: ["indirect_identifier", "personal"],
     },
+    // WP-2423 Q10/Q16: evidence that a checkout contact was removed after its retention period
+    // (when and under which policy); never the removed value.
+    {
+      table: "checkout_contact_redaction",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/ordering" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "privacy-governance",
+      piiClassification: ["indirect_identifier"],
+    },
     {
       table: "order_capacity_link",
       classification: "append-only-record",

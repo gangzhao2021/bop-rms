@@ -289,6 +289,7 @@ const line = (n: number) => ({
 });
 const detail = () => ({
   screenId: "OPS-ORDER-DETAIL",
+  pickupContact: null,
   order: row(1),
   lines: {
     items: [line(1)],
@@ -633,4 +634,44 @@ it("WP-2423: reads an unpaid dine-in round's payment due and refuses malformed o
     expect(() =>
       parseCurrentOrderQueue({ items: [invalid], nextAfterOrderReference: null }),
     ).toThrow();
+});
+
+it("WP-2423 Q10: admits the pickup customer's contact on the detail and refuses anything else", () => {
+  const pickup = { ...detail(), order: { ...row(1), orderType: "Pickup" } };
+  const contact = {
+    status: "Available",
+    name: "Synthetic Guest",
+    channel: "Phone",
+    value: "+14165550123",
+  };
+  expect(
+    parseCurrentOrderDetail({ ...pickup, pickupContact: contact }, id(1)).pickupContact,
+  ).toEqual(contact);
+  expect(
+    parseCurrentOrderDetail(
+      { ...pickup, pickupContact: { status: "Removed", removedAt: "2026-11-10T08:00:00.000Z" } },
+      id(1),
+    ).pickupContact,
+  ).toEqual({ status: "Removed", removedAt: "2026-11-10T08:00:00.000Z" });
+  expect(
+    parseCurrentOrderDetail({ ...pickup, pickupContact: { status: "NotGiven" } }, id(1))
+      .pickupContact,
+  ).toEqual({ status: "NotGiven" });
+  for (const invalid of [
+    { ...contact, value: "416-555-0123" },
+    { ...contact, channel: "Email", value: "not-an-email" },
+    { ...contact, guestSessionReference: id(9) },
+    { status: "Removed", removedAt: "yesterday" },
+    { status: "NotGiven", name: "x" },
+  ])
+    expect(() => parseCurrentOrderDetail({ ...pickup, pickupContact: invalid }, id(1))).toThrow();
+  const withoutField: Record<string, unknown> = { ...pickup };
+  delete withoutField.pickupContact;
+  expect(() => parseCurrentOrderDetail(withoutField, id(1))).toThrow();
+  expect(() =>
+    parseCurrentOrderDetail(
+      { ...pickup, order: { ...row(1), orderType: "DineIn" }, pickupContact: contact },
+      id(1),
+    ),
+  ).toThrow();
 });

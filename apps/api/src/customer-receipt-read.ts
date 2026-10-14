@@ -19,11 +19,15 @@ import {
   type CartQueryTransactionRunner,
 } from "@rms/ordering";
 import type { CustomerCheckoutSessionAuthorizationOptions } from "./customer-checkout-session-authorization.js";
+import type { PersistentPublicStoreProfileOptions } from "./persistent-public-store-profile.js";
+import { readCustomerStoreContact, type CustomerStoreContact } from "./customer-store-contact.js";
 
 /** Side-effect-free receipt retrieval under the same current Guest transaction. */
 export function createCustomerReceiptRead(
   options: Omit<CustomerCheckoutSessionAuthorizationOptions, "transactions"> & {
     readonly financial?: CustomerReceiptFinancialOptions;
+    /** WP-2423 Q10: the Store's published phone and address for questions about the receipt. */
+    readonly publicProfile?: PersistentPublicStoreProfileOptions;
     readonly transactions: {
       run<T>(work: (transaction: ConsumerTransaction) => Promise<T>): Promise<T>;
     };
@@ -117,9 +121,20 @@ export function createCustomerReceiptRead(
             stillAuthorized,
           );
         }
+        let storeContact: CustomerStoreContact | null = null;
+        if (includeFinancial && options.publicProfile !== undefined && (await stillAuthorized()))
+          storeContact = await readCustomerStoreContact(
+            transaction,
+            options.publicProfile,
+            {
+              publicStoreReference: String(guest.publicStoreReference),
+              locale: String(guest.locale),
+            },
+            now(),
+          );
         if (!(await stillAuthorized()))
           throw new DigitalReceiptError("DIGITAL_RECEIPT_PERMISSION_DENIED");
-        return { chain, financial };
+        return { chain, financial, storeContact };
       });
     } catch (error) {
       if (error instanceof DigitalReceiptError) throw error;

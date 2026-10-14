@@ -135,8 +135,8 @@ describe("CUST-ORDER-STATUS screen contract", () => {
   it.each([
     [{ status: "loading" }, "Loading order status"],
     [{ status: "invalid-reference" }, "Order link is invalid"],
-    [{ status: "permission-denied" }, "Order access denied"],
-    [{ status: "not-found" }, "This order cannot be opened"],
+    [{ status: "permission-denied" }, "Your visit on this phone has ended"],
+    [{ status: "not-found" }, "We can&#x27;t show this order here yet"],
     [{ status: "feature-disabled" }, "Order tracking is disabled"],
     [{ status: "unavailable" }, "Order status is not available"],
     [{ status: "offline", view: null }, "You’re offline"],
@@ -740,4 +740,47 @@ describe("WP-2423: a dine-in round whose payment didn't go through", () => {
     expect(html).not.toContain("cancelled by the store");
     expect(isOrderSettled(view)).toBe(false);
   });
+});
+
+describe("WP-2423 Q10 plain guidance when the visit has ended", () => {
+  it("explains the expired table visit, the way back and the pickup counter, without internal wording", () => {
+    const html = render({ status: "permission-denied" });
+    expect(html).toContain("Scan the table QR code again");
+    expect(html).toContain("your earlier orders are on your table page");
+    expect(html).toContain("the store still has your order");
+    expect(html).toContain('href="/"');
+    expect(html).not.toMatch(/access denied|browser you used at checkout|session/iu);
+  });
+  it("lets a just-paid customer retry instead of a dead end", () => {
+    const html = render({ status: "not-found" });
+    expect(html).toContain("can take a few seconds to appear");
+    expect(html).toContain("Try again");
+    expect(html).not.toMatch(/browser you used at checkout|access session/iu);
+  });
+});
+
+it("WP-2423 Q10: shows how to call and find the Store under the order", () => {
+  const state = readyState();
+  if (state.status !== "ready") throw new Error("fixture");
+  const html = render({
+    ...state,
+    view: {
+      ...state.view,
+      sources: {
+        checkedAt: "2026-08-11T14:00:00.000Z",
+        kitchen: null,
+        payments: null,
+        storeContact: {
+          phone: "+14165550123",
+          addressLines: ["DEMO 100 Test Street"],
+          locality: "Toronto",
+          regionCode: "ON",
+          postalCode: "M5V 1A1",
+        },
+      },
+    },
+  });
+  expect(html).toContain("Contact the store");
+  expect(html).toContain('href="tel:+14165550123"');
+  expect(html).toContain("Toronto, ON M5V 1A1");
 });

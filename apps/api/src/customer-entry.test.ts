@@ -189,7 +189,7 @@ describe("WP-1004 Customer-entry contract", () => {
 
     expect(response.status).toBe(201);
     expect(response.headers.get("set-cookie")).toBe(
-      `__Host-bop-guest=${SESSION_CREDENTIAL}; Path=/; Secure; HttpOnly; SameSite=Lax`,
+      `__Host-bop-guest=${SESSION_CREDENTIAL}; Path=/; Max-Age=86400; Secure; HttpOnly; SameSite=Lax`,
     );
     expect(await response.json()).toEqual({
       schemaVersion: 2,

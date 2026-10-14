@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { createCheckoutSessionClient } from "../checkout/session-client.js";
+import {
+  CheckoutSessionClientError,
+  createCheckoutSessionClient,
+} from "../checkout/session-client.js";
 import {
   captureCustomerCsrfContext,
   getCheckoutSessionReference,
@@ -47,6 +50,16 @@ function configuration() {
     return null;
   }
 }
+/**
+ * WP-2423 Q10: only a checkout the server no longer recognises ends the payment page; a timeout,
+ * outage or other failure keeps the customer here with a retry.
+ */
+export function checkoutLoadFailureState(error: unknown): "denied" | "retry" {
+  return error instanceof CheckoutSessionClientError &&
+    (error.code === "denied" || error.code === "invalid" || error.code === "conflict")
+    ? "denied"
+    : "retry";
+}
 export function SessionPaymentPage({
   store,
 }: {
@@ -79,9 +92,12 @@ function PreparedSessionPaymentPage({
     | "processing"
     | "unknown"
     | "denied"
+    | "retry"
     | "closed"
     | "unavailable"
   >("loading");
+  // WP-2423 Q10: a failed check of the checkout is retried in place, never a dead end.
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [selectedTip] = useState(getCheckoutTipSelection);
   const [payment, setPayment] = useState<SessionPaymentView | null>(null);
   const [secret, setSecret] = useState<string | null>(null);
@@ -109,14 +125,15 @@ function PreparedSessionPaymentPage({
         .then(() => {
           if (!stopped && current()) setStatus("ready");
         })
-        .catch(() => {
-          if (!stopped) setStatus("denied");
+        .catch((error: unknown) => {
+          if (stopped) return;
+          setStatus(checkoutLoadFailureState(error));
         });
     return () => {
       stopped = true;
       alive.current = false;
     };
-  }, [config, current, sessionReference, selectedTip]);
+  }, [config, current, sessionReference, selectedTip, loadAttempt]);
   useEffect(() => {
     const offline = () => {
       setOnline(false);
@@ -231,7 +248,30 @@ function PreparedSessionPaymentPage({
         </section>
       ) : null}
       {status === "denied" ? (
-        <p role="alert">This checkout is no longer available. Return to checkout to continue.</p>
+        <section className="checkout-attention" role="alert">
+          <h2>This checkout has ended</h2>
+          <p>
+            You haven’t been charged for it. Go back to your cart to check out again, or ask a staff
+            member for help.
+          </p>
+          <Link to="/cart">Back to your cart</Link>
+        </section>
+      ) : null}
+      {status === "retry" ? (
+        <section className="checkout-attention" role="alert">
+          <h2>We couldn’t load your payment</h2>
+          <p>You haven’t been charged. Check your connection and try again.</p>
+          <button
+            type="button"
+            disabled={!online}
+            onClick={() => {
+              setStatus("loading");
+              setLoadAttempt((count) => count + 1);
+            }}
+          >
+            Try again
+          </button>
+        </section>
       ) : null}
       {status === "closed" ? (
         <p role="alert">
@@ -240,6 +280,7 @@ function PreparedSessionPaymentPage({
         </p>
       ) : null}
       {status !== "denied" &&
+      status !== "retry" &&
       status !== "closed" &&
       status !== "unavailable" &&
       status !== "loading" ? (

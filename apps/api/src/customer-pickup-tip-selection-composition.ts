@@ -1,3 +1,4 @@
+import { rethrowTipSelectionFailure } from "./customer-tip-selection-failure.js";
 import {
   GuestSessionError,
   GuestSessionService,
@@ -41,6 +42,8 @@ function createVersionedCustomerPickupTipSelectionComposition<V extends 1 | 2>(
   });
   return Object.freeze({
     async select(value: unknown) {
+      // Malformed caller input is a refusal; failures after it are classified below.
+      let inputAccepted = false;
       try {
         const raw = readClosedRecord(value, [
           "sessionCredential",
@@ -64,6 +67,7 @@ function createVersionedCustomerPickupTipSelectionComposition<V extends 1 | 2>(
         if (!Number.isSafeInteger(raw.cartVersion) || (raw.cartVersion as number) < 1)
           return unavailable();
         const cartVersion = raw.cartVersion as number;
+        inputAccepted = true;
         let last: string | undefined;
         const now = () => {
           const at = parseCanonicalInstant(preparation.now());
@@ -158,8 +162,9 @@ function createVersionedCustomerPickupTipSelectionComposition<V extends 1 | 2>(
           tip,
           paymentOperationReference: original.paymentOperationReference,
         });
-      } catch {
-        return unavailable();
+      } catch (error) {
+        // WP-2423 Q10: an internal failure is retryable; only owner refusals keep their meaning.
+        return inputAccepted ? rethrowTipSelectionFailure(error) : unavailable();
       }
     },
   });

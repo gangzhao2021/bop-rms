@@ -1,5 +1,6 @@
 import {
   guestSessionCookie,
+  serializeGuestSessionCookie,
   parseCanonicalInstant,
   parseGuestOperationReference,
   parseGuestRawCredential,
@@ -237,7 +238,8 @@ export class CustomerCartBindingHandler {
         )
           throw new Error("invalid activation result");
         response.setHeader("Set-Cookie", [
-          serialize(guestSessionCookie.name, expectedSession),
+          // WP-2423 Q10: the rotated Session cookie survives a browser restart (absolute lifetime).
+          serializeGuestSessionCookie(parseGuestRawCredential(expectedSession)),
           serialize(stagedName(operationReference), "", true),
         ]);
         response

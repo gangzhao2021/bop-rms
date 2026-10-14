@@ -1,3 +1,5 @@
+import type { StoreContactView } from "../journey/StoreContact.js";
+
 export type OrderStatusFreshness = "Fresh" | "Stale" | "Rebuilding" | "Failed";
 
 export interface OrderStatusSources {
@@ -37,6 +39,8 @@ export interface OrderStatusSources {
   readonly batchPayments?: readonly BatchPayment[];
   /** WP-2423: dine-in rounds cancelled because their payment didn't go through (never charged). */
   readonly unpaidCancellations?: readonly UnpaidBatchCancellation[];
+  /** WP-2423 Q10: the Store's published phone and address. */
+  readonly storeContact?: StoreContactView;
 }
 
 export interface BatchPayment {

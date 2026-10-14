@@ -1435,7 +1435,7 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
         assert.equal(completionResponse.status, 200);
         assert.equal(completionResponse.headers.get("cache-control"), "no-store");
         assert.deepEqual(completionResponse.headers.getSetCookie(), [
-          `__Host-bop-guest=${rawCandidate}; Path=/; Secure; HttpOnly; SameSite=Lax`,
+          `__Host-bop-guest=${rawCandidate}; Path=/; Max-Age=86400; Secure; HttpOnly; SameSite=Lax`,
           `${stagedName}=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0`,
         ]);
         assert.deepEqual(await completionResponse.json(), completionBody);

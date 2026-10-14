@@ -7286,6 +7286,20 @@ body:has(.product-complete-draft) .bop-shell__header,
   color: var(--bop-color-text-muted);
   font-size: 13px;
 }
+/* WP-2423 Q10: who a pickup is for and how to reach them (order detail only). */
+.order-pickup-contact {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.order-pickup-contact a {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 
 @media (max-width: 64rem) {
   .workspace-layout {

@@ -15,6 +15,9 @@ import {
   type GuestSessionCredentialPort,
   type GuestSessionRecord,
   type GuestSessionStorePort,
+  guestSessionAbsoluteLifetimeMs,
+  guestSessionCookieMaxAgeSeconds,
+  serializeGuestSessionCookie,
 } from "../index.js";
 
 const ids = {
@@ -803,4 +806,22 @@ it("rejects recovery and derived authorization for expired, revoked or unavailab
       }),
     ).rejects.toThrow(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
   }
+});
+
+describe("WP-2423 Q10 Guest cookie continuity", () => {
+  it("keeps the cookie across a browser restart for exactly the absolute Session lifetime", () => {
+    const credential = "S".repeat(43);
+    expect(guestSessionCookieMaxAgeSeconds).toBe(guestSessionAbsoluteLifetimeMs / 1000);
+    expect(guestSessionCookieMaxAgeSeconds).toBe(86_400);
+    expect(serializeGuestSessionCookie(credential as never)).toBe(
+      `__Host-bop-guest=${credential}; Path=/; Max-Age=86400; Secure; HttpOnly; SameSite=Lax`,
+    );
+    // Never a Domain attribute; never an Expires date derived from a client clock.
+    expect(serializeGuestSessionCookie(credential as never)).not.toMatch(/Domain|Expires/u);
+  });
+
+  it("refuses to serialize anything but a canonical raw credential", () => {
+    for (const value of ["", "short", "S".repeat(42) + ";", "S".repeat(44)])
+      expect(() => serializeGuestSessionCookie(value as never)).toThrow(GuestSessionError);
+  });
 });

@@ -15,6 +15,7 @@ import { PickupCodePanel } from "../pickup-code/PickupCodePanel.js";
 import type { PickupCodeController } from "../pickup-code/pickup-code-controller.js";
 import { CustomerPage, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import { formatClockTime, formatMoney } from "../journey/format.js";
+import { StoreContactCard } from "../journey/StoreContact.js";
 
 /** How often an active order re-reads its status when no live connection is available. */
 export const orderStatusPollIntervalMs = 15_000;
@@ -443,6 +444,30 @@ function StatusContent({
   );
 }
 
+/**
+ * WP-2423 Q10: the browser no longer holds this visit (it expired, the table closed, or the app was
+ * opened somewhere else). Say so plainly and give the way back instead of "access denied".
+ */
+export function VisitEndedNotice() {
+  return (
+    <section className="order-status__card order-status__visit-ended" role="alert">
+      <h2>Your visit on this phone has ended</h2>
+      <p>
+        At a table: your table visit ended or expired. Scan the table QR code again and ask a staff
+        member for the table code to continue. While your table is still open, your earlier orders
+        are on your table page.
+      </p>
+      <p>
+        For a pickup order: the store still has your order. Give your name or order number at the
+        counter.
+      </p>
+      <Link className="order-status__retry" to="/">
+        Go to the start
+      </Link>
+    </section>
+  );
+}
+
 export function OrderStatusPage({
   controller: provided,
   pickupController,
@@ -513,18 +538,23 @@ export function OrderStatusPage({
           <p>Use the exact link provided after checkout.</p>
         </section>
       ) : null}
-      {state.status === "permission-denied" ? (
-        <section role="alert">
-          <h2>Order access denied</h2>
-          <p>Open this order in the browser you used at checkout.</p>
-        </section>
-      ) : null}
+      {state.status === "permission-denied" ? <VisitEndedNotice /> : null}
       {state.status === "not-found" ? (
-        <section role="alert">
-          <h2>This order cannot be opened</h2>
+        <section className="order-status__unavailable" role="alert">
+          <h2>We can&apos;t show this order here yet</h2>
           <p>
-            Check your order link and use the browser you used at checkout. Your access session may
-            have ended. Ask the store for help if you still cannot open it.
+            If you just paid, your order can take a few seconds to appear. Try again in a moment.
+          </p>
+          <button
+            className="order-status__retry"
+            type="button"
+            onClick={() => void controller.refresh()}
+          >
+            Try again
+          </button>
+          <p>
+            This page only opens orders placed on this phone or browser. If it still doesn&apos;t
+            open, ask a staff member with your order number.
           </p>
         </section>
       ) : null}
@@ -585,6 +615,9 @@ export function OrderStatusPage({
             {state.refreshing ? "Refreshing…" : "Refresh now"}
           </button>
         </section>
+      ) : null}
+      {view?.sources?.storeContact ? (
+        <StoreContactCard contact={view.sources.storeContact} storeName={store?.storeName} />
       ) : null}
       {view?.order.orderType === "DineIn" ? (
         // WP-2423 Q8: every round at the table, including other guests', and what is still due.
