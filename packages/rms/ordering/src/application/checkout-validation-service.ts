@@ -330,10 +330,10 @@ export function createVersionedCheckoutValidationService<V extends 1 | 2>(
         }),
       );
       if (authorized === null) return fail("CHECKOUT_PERMISSION_DENIED");
-      const [loadedCart, loadedQuote] = await Promise.all([
-        dependency(ports.repository.loadCart(cartReference)),
-        dependency(ports.repository.loadQuote(cartReference)),
-      ]);
+      // Owner ports may share one caller transaction (the final submission re-validates inside
+      // its own); never run them concurrently on it (WP-2423, v15 2026-10-14).
+      const loadedCart = await dependency(ports.repository.loadCart(cartReference));
+      const loadedQuote = await dependency(ports.repository.loadQuote(cartReference));
       if (loadedCart === null) return fail("CHECKOUT_CART_UNAVAILABLE");
       let cart: CartAggregate;
       try {
@@ -383,9 +383,12 @@ export function createVersionedCheckoutValidationService<V extends 1 | 2>(
         })
       )
         return fail("CHECKOUT_REQUOTE_REQUIRED");
-      const catalogResults = await Promise.all(
-        cart.items.map((item) =>
-          dependency(
+      // One line at a time: a Cart with several lines must not run its Catalog/Inventory checks
+      // concurrently on a shared transaction (they failed every multi-line dine-in round on v15).
+      const catalogResults: Awaited<ReturnType<typeof ports.catalog.validateSelection>>[] = [];
+      for (const item of cart.items)
+        catalogResults.push(
+          await dependency(
             ports.catalog.validateSelection({
               brandReference: cart.brandReference as never,
               storeReference: cart.storeReference as never,
@@ -396,8 +399,7 @@ export function createVersionedCheckoutValidationService<V extends 1 | 2>(
               observedAt: requestedAt as never,
             }),
           ),
-        ),
-      );
+        );
       const catalogLines = Object.freeze(
         catalogResults.map((result, index) => {
           if (result.status === "Rejected")

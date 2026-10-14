@@ -459,3 +459,45 @@ describe("WP-1220 Checkout Validation", () => {
     },
   );
 });
+
+describe("WP-2423 Checkout Validation on a shared transaction (v15 2026-10-14)", () => {
+  it("checks a multi-line Cart one line at a time, never two owner calls at once", async () => {
+    const base = cart();
+    const first = base.items[0];
+    if (first === undefined) throw new Error("synthetic line missing");
+    const second = { ...first, cartItemReference: id(70) as never, quantity: 1 };
+    const twoLines = cart({ items: [first, second] });
+    const baseQuote = quote();
+    const firstLine = baseQuote.lines[0];
+    if (firstLine === undefined) throw new Error("synthetic quote line missing");
+    const twoLineQuote = quote({
+      lines: [firstLine, { ...firstLine, lineReference: id(70) as never, quantity: 1 }],
+    });
+    let inFlight = 0;
+    let overlapped = false;
+    const f = fixture({ cart: twoLines, quote: twoLineQuote });
+    const original = f.calls;
+    const ports = {
+      authorization: { authorize: async () => ({ guestSession: guest() }) },
+      catalog: {
+        async validateSelection(selection: unknown) {
+          original.catalog.push(selection);
+          inFlight += 1;
+          if (inFlight > 1) overlapped = true;
+          // A real owner check awaits its transaction; give a concurrent caller the chance.
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          inFlight -= 1;
+          if (overlapped) throw new Error("concurrent use of one transaction");
+          return acceptedCatalog();
+        },
+      },
+      fulfillment: { validate: async () => acceptedFulfillment() },
+      references: { hashIntent: hash },
+      repository: { loadCart: async () => twoLines, loadQuote: async () => twoLineQuote },
+    } as unknown as CheckoutValidationPorts;
+    const result = await createCheckoutValidationService(ports).validate(input());
+    expect(result.catalogLines.map((line) => line.cartItemReference)).toEqual([ids.item, id(70)]);
+    expect(original.catalog).toHaveLength(2);
+    expect(overlapped).toBe(false);
+  });
+});
