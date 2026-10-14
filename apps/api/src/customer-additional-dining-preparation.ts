@@ -17,6 +17,7 @@ import {
   createCustomerDiningSubmissionPreparation,
   type CustomerDiningSubmissionPreparationOptions,
 } from "./customer-dining-checkout-composition.js";
+import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 
 export interface AdditionalDiningPreparationOptions {
   readonly preparation: CustomerDiningSubmissionPreparationOptions;
@@ -195,7 +196,9 @@ export function createPersistentAdditionalDiningPreparation(options: {
     preparation: options.preparation,
     currentOrder: {
       resolve: (input) =>
-        options.transactions.run((transaction) => source.resolve({ ...input, transaction })),
+        retryTransactionConflict(() =>
+          options.transactions.run((transaction) => source.resolve({ ...input, transaction })),
+        ),
     },
   });
 }

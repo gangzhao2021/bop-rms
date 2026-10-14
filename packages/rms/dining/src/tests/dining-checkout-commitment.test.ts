@@ -6,6 +6,7 @@ import {
   assertDiningCheckoutCommitmentUsable,
   parseDiningCheckoutCommitment,
   assertDiningCheckoutPreparedForOrdering,
+  DINING_CHECKOUT_PREPARED_HOLD_MS,
   DiningCheckoutHeldError,
   diningCheckoutHeldUntil,
   isDiningCheckoutHeld,
@@ -282,14 +283,21 @@ it("requires the exact current Prepared window before Ordering", () => {
 });
 
 describe("DEC-DINING-ANY-PARTICIPANT-SUBMIT checkout hold of a Cart version", () => {
-  it("holds while Prepared, until the preparation deadline only", () => {
+  it("holds while Prepared only briefly: the earlier of a minute and the preparation deadline", () => {
     const f = fixture();
     const prepared = prepareDiningCheckoutCommitment(f.input, f.context);
-    expect(diningCheckoutHeldUntil(prepared, at)).toBe("2026-09-10T12:05:00.000Z");
-    expect(diningCheckoutHeldUntil(prepared, "2026-09-10T12:04:59.999Z")).toBe(
-      "2026-09-10T12:05:00.000Z",
+    // preparedAt 12:00:00, preparation deadline 12:05:00: an unsealed attempt holds one minute.
+    expect(diningCheckoutHeldUntil(prepared, at)).toBe("2026-09-10T12:01:00.000Z");
+    expect(diningCheckoutHeldUntil(prepared, "2026-09-10T12:00:59.999Z")).toBe(
+      "2026-09-10T12:01:00.000Z",
     );
-    expect(diningCheckoutHeldUntil(prepared, "2026-09-10T12:05:00.000Z")).toBeNull();
+    expect(diningCheckoutHeldUntil(prepared, "2026-09-10T12:01:00.000Z")).toBeNull();
+    const short = prepareDiningCheckoutCommitment(
+      { ...f.input, preparationValidUntil: "2026-09-10T12:00:30.000Z" },
+      f.context,
+    );
+    expect(diningCheckoutHeldUntil(short, at)).toBe("2026-09-10T12:00:30.000Z");
+    expect(DINING_CHECKOUT_PREPARED_HOLD_MS).toBe(60_000);
   });
   it("holds while PaymentPending until the capacity deadline, never once Expired", () => {
     const f = fixture();

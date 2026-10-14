@@ -1090,7 +1090,15 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
           participantReference,
           observedAt,
         });
-      const heldUntil3 = R3.f.request.checkoutValidationEvidence.fulfillment.validUntil;
+      // An unsealed checkout holds the table for at most a minute (the customer's Continue prepares
+      // and pays in one action); a failed or abandoned attempt then stops blocking the others.
+      const preparedAt3 = R3.f.request.checkoutValidationEvidence.fulfillment.checkedAt;
+      const heldUntil3 = new Date(
+        Math.min(
+          Date.parse(R3.f.request.checkoutValidationEvidence.fulfillment.validUntil),
+          Date.parse(preparedAt3) + 60_000,
+        ),
+      ).toISOString();
       assert.deepEqual(await holdOf(dining.host.participantReference, R3.batch.sourceCartVersion), {
         heldUntil: heldUntil3,
       });

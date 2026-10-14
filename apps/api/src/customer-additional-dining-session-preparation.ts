@@ -14,6 +14,7 @@ import {
 import { createCustomerCheckoutSessionRead } from "./customer-checkout-session-read.js";
 import type { CustomerCheckoutSessionAuthorizationOptions } from "./customer-checkout-session-authorization.js";
 import { createPersistentAdditionalDiningPreparation } from "./customer-additional-dining-preparation.js";
+import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 
 /** Server-selected target Order; current owner queries authorize it, never a browser-supplied parent. */
 export function createCustomerAdditionalDiningSessionPreparation(options: {
@@ -73,16 +74,18 @@ export function createCustomerAdditionalDiningSessionPreparation(options: {
         )
           throw new CheckoutSessionServiceError("INTENT_CONFLICT");
         const diningSessionReference = cart.diningSessionReference;
-        const parent = await configured.transactions.run((transaction) =>
-          parents.resolveAdditionalParent({
-            transaction,
-            brandReference: v.brandReference,
-            storeReference: v.storeReference,
-            orderReference,
-            diningSessionReference,
-            guestSessionReference: v.guestSessionReference,
-            observedAt: parseCanonicalInstant(configured.preparation.now()),
-          }),
+        const parent = await retryTransactionConflict(() =>
+          configured.transactions.run((transaction) =>
+            parents.resolveAdditionalParent({
+              transaction,
+              brandReference: v.brandReference,
+              storeReference: v.storeReference,
+              orderReference,
+              diningSessionReference,
+              guestSessionReference: v.guestSessionReference,
+              observedAt: parseCanonicalInstant(configured.preparation.now()),
+            }),
+          ),
         );
         if (parent === null) throw new CheckoutSessionServiceError("DEPENDENCY_UNAVAILABLE");
         const service = createPersistentAdditionalDiningPreparation({

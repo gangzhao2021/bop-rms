@@ -1,5 +1,8 @@
 import { expect, it } from "vitest";
-import { createCustomerAdditionalDiningPreparation } from "./customer-additional-dining-preparation.js";
+import {
+  createCustomerAdditionalDiningPreparation,
+  createPersistentAdditionalDiningPreparation,
+} from "./customer-additional-dining-preparation.js";
 import { submissionFixture, id } from "../test-support/dining-order-submission-fixture.js";
 function setup() {
   const f = submissionFixture();
@@ -115,4 +118,29 @@ it.each([
   await expect(f.service().prepareForOrdering(f.input)).rejects.toBeDefined();
   expect(orderReads).toBe(0);
   expect(f.writes()).toBe(0);
+});
+
+it("reruns the current Order read after a deadlock with a concurrent Order disposition (v15 2026-10-13)", async () => {
+  const f = setup();
+  let runs = 0;
+  const service = createPersistentAdditionalDiningPreparation({
+    preparation: f.options.preparation,
+    authorizeOrder: async () => true,
+    // Test-only stand-in for the owner read: the first attempt is chosen as the deadlock victim
+    // (nothing committed); the rerun observes the current Order.
+    transactions: {
+      run: (async () => {
+        runs += 1;
+        if (runs === 1)
+          throw Object.assign(new Error("synthetic deadlock"), {
+            code: "TENANT_DATABASE_TRANSACTION_CONFLICT",
+          });
+        return f.current;
+      }) as never,
+    },
+  });
+  const result = await service.prepareForOrdering(f.input);
+  expect(result.record.orderReference).toBe(id(300));
+  expect(runs).toBe(3);
+  expect(f.writes()).toBe(1);
 });

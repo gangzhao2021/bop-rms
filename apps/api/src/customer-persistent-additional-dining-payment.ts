@@ -15,6 +15,7 @@ import {
 } from "@rms/ordering";
 import { createCustomerCheckoutSessionRead } from "./customer-checkout-session-read.js";
 import { createCustomerAdditionalDiningPaymentComposition } from "./customer-additional-dining-payment-composition.js";
+import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 type Base = Parameters<typeof createCustomerAdditionalDiningPaymentComposition>[0];
 
 /** Resolves parent facts through owning stores; callers cannot inject parent versions/counts. */
@@ -137,16 +138,18 @@ export function createCustomerPersistentAdditionalDiningPayment(
           String(clock.quoteReference) !== v.quoteReference
         )
           throw new CheckoutSessionServiceError("INTENT_CONFLICT");
-        const current = await s.runtime.transactions.run((transaction) =>
-          parents.resolveAdditionalParent({
-            transaction,
-            brandReference: v.brandReference,
-            storeReference: v.storeReference,
-            orderReference: String(clock.orderReference),
-            diningSessionReference: String(clock.diningSessionReference),
-            guestSessionReference: v.guestSessionReference,
-            observedAt: parseCanonicalInstant(s.source.clock.now()),
-          }),
+        const current = await retryTransactionConflict(() =>
+          s.runtime.transactions.run((transaction) =>
+            parents.resolveAdditionalParent({
+              transaction,
+              brandReference: v.brandReference,
+              storeReference: v.storeReference,
+              orderReference: String(clock.orderReference),
+              diningSessionReference: String(clock.diningSessionReference),
+              guestSessionReference: v.guestSessionReference,
+              observedAt: parseCanonicalInstant(s.source.clock.now()),
+            }),
+          ),
         );
         if (current === null) throw new CheckoutSessionServiceError("DEPENDENCY_UNAVAILABLE");
         parent = {

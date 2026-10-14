@@ -20,6 +20,7 @@ import {
 } from "./customer-additional-dining-submission-store.js";
 import { createCustomerAdditionalDiningGuestAuthorization } from "./customer-additional-dining-guest-authorization.js";
 import type { CustomerDiningCheckoutCompositionOptions } from "./customer-dining-checkout-composition.js";
+import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 
 export interface CustomerAdditionalDiningSubmissionRuntimeOptions extends Omit<
   CustomerAdditionalDiningSubmissionStoreOptions,
@@ -63,60 +64,64 @@ export function createCustomerAdditionalDiningSubmissionRuntime(
         snapshot.storeReference !== options.storeReference
       )
         throw new AdditionalDiningBatchStoreError();
-      return options.transactions.run(async (transaction) => {
-        const bound = {
-          run: async <T>(work: (tx: ConsumerTransaction) => Promise<T>) => work(transaction),
-        };
-        const configured = options.identity(transaction);
-        if (
-          configured.scope.brandReference !== options.brandReference ||
-          configured.scope.storeReference !== options.storeReference
-        )
-          throw new AdditionalDiningBatchStoreError();
-        const identity = {
-          ...configured,
-          session: {
-            ...configured.session,
-            store: createPostgresGuestSessionEntryStore(bound, configured.scope),
-          },
-          dining: {
-            ...configured.dining,
-            current: createPostgresDiningGuestBindingStore(bound, options.inventory.scope),
-          },
-        };
-        const authorize = createCustomerAdditionalDiningGuestAuthorization(identity, credentials);
-        if (!(await authorize(transaction, snapshot))) throw new AdditionalDiningBatchStoreError();
-        const tips = createPostgresPaymentTipSelectionStore(bound, configured.scope, {
-          now: () => parseCanonicalInstant(configured.now()),
-        });
-        const selection = await tips.load(tipSelectionReference);
-        if (selection === null) throw new AdditionalDiningBatchStoreError();
-        const selected = parsePaymentTipSelection(selection);
-        const batch = snapshot.batch;
-        if (
-          String(selected.selectionReference) !== String(tipSelectionReference) ||
-          String(selected.paymentOperationReference) !==
-            String(capacityLink.paymentOperationReference) ||
-          String(selected.submissionReference) !== String(batch.submissionReference) ||
-          String(selected.brandReference) !== String(snapshot.brandReference) ||
-          String(selected.storeReference) !== String(snapshot.storeReference) ||
-          String(selected.guestSessionReference) !== String(snapshot.guestSessionReference) ||
-          String(selected.cartReference) !== String(batch.sourceCartReference) ||
-          selected.cartVersion !== batch.sourceCartVersion ||
-          String(selected.quoteReference) !== String(batch.quoteReference) ||
-          Date.parse(selected.selectedAt) > Date.parse(batch.submittedAt)
-        )
-          throw new AdditionalDiningBatchStoreError();
-        const store = createCustomerAdditionalDiningSubmissionStore({ ...options, authorize });
-        const result = await store.append({
-          transaction,
-          snapshot,
-          checkoutValidationEvidence: raw.checkoutValidationEvidence,
-          capacityLink,
-        });
-        if (!(await authorize(transaction, snapshot))) throw new AdditionalDiningBatchStoreError();
-        return result;
-      });
+      return retryTransactionConflict(() =>
+        options.transactions.run(async (transaction) => {
+          const bound = {
+            run: async <T>(work: (tx: ConsumerTransaction) => Promise<T>) => work(transaction),
+          };
+          const configured = options.identity(transaction);
+          if (
+            configured.scope.brandReference !== options.brandReference ||
+            configured.scope.storeReference !== options.storeReference
+          )
+            throw new AdditionalDiningBatchStoreError();
+          const identity = {
+            ...configured,
+            session: {
+              ...configured.session,
+              store: createPostgresGuestSessionEntryStore(bound, configured.scope),
+            },
+            dining: {
+              ...configured.dining,
+              current: createPostgresDiningGuestBindingStore(bound, options.inventory.scope),
+            },
+          };
+          const authorize = createCustomerAdditionalDiningGuestAuthorization(identity, credentials);
+          if (!(await authorize(transaction, snapshot)))
+            throw new AdditionalDiningBatchStoreError();
+          const tips = createPostgresPaymentTipSelectionStore(bound, configured.scope, {
+            now: () => parseCanonicalInstant(configured.now()),
+          });
+          const selection = await tips.load(tipSelectionReference);
+          if (selection === null) throw new AdditionalDiningBatchStoreError();
+          const selected = parsePaymentTipSelection(selection);
+          const batch = snapshot.batch;
+          if (
+            String(selected.selectionReference) !== String(tipSelectionReference) ||
+            String(selected.paymentOperationReference) !==
+              String(capacityLink.paymentOperationReference) ||
+            String(selected.submissionReference) !== String(batch.submissionReference) ||
+            String(selected.brandReference) !== String(snapshot.brandReference) ||
+            String(selected.storeReference) !== String(snapshot.storeReference) ||
+            String(selected.guestSessionReference) !== String(snapshot.guestSessionReference) ||
+            String(selected.cartReference) !== String(batch.sourceCartReference) ||
+            selected.cartVersion !== batch.sourceCartVersion ||
+            String(selected.quoteReference) !== String(batch.quoteReference) ||
+            Date.parse(selected.selectedAt) > Date.parse(batch.submittedAt)
+          )
+            throw new AdditionalDiningBatchStoreError();
+          const store = createCustomerAdditionalDiningSubmissionStore({ ...options, authorize });
+          const result = await store.append({
+            transaction,
+            snapshot,
+            checkoutValidationEvidence: raw.checkoutValidationEvidence,
+            capacityLink,
+          });
+          if (!(await authorize(transaction, snapshot)))
+            throw new AdditionalDiningBatchStoreError();
+          return result;
+        }),
+      );
     },
   });
 

@@ -361,10 +361,20 @@ export class DiningCheckoutHeldError extends Error {
 }
 
 /**
+ * How long an unsealed (Prepared) checkout may hold its Cart version against other guests. The
+ * customer's "Continue to payment" prepares the commitment and asks for the payment in one action,
+ * and a successful request seals it within seconds; a Prepared commitment older than this belongs
+ * to an attempt that failed or was abandoned, so it stops holding the table (its holder may still
+ * retry while nobody else has changed the Cart).
+ */
+export const DINING_CHECKOUT_PREPARED_HOLD_MS = 60_000;
+
+/**
  * Until when this commitment holds its Cart version for checkout, or null once it no longer does:
- * Prepared until its preparation deadline, PaymentPending until its capacity deadline; Expired
- * (or past the deadline) never holds. Submission also moves the Cart to a new version, so a
- * completed or failed submission stops holding the version other guests now see.
+ * Prepared until the earlier of its preparation deadline and DINING_CHECKOUT_PREPARED_HOLD_MS after
+ * preparation; PaymentPending until its capacity deadline; Expired (or past the deadline) never.
+ * Submission also moves the Cart to a new version, so a submitted round stops holding the version
+ * other guests now see.
  */
 export function diningCheckoutHeldUntil(
   value: unknown,
@@ -375,7 +385,14 @@ export function diningCheckoutHeldUntil(
       observedAt = parseDiningInstant(observedAtValue);
     const deadline =
       commitment.state === "Prepared"
-        ? commitment.preparationValidUntil
+        ? parseDiningInstant(
+            new Date(
+              Math.min(
+                time(commitment.preparationValidUntil),
+                time(commitment.preparedAt) + DINING_CHECKOUT_PREPARED_HOLD_MS,
+              ),
+            ).toISOString(),
+          )
         : commitment.state === "PaymentPending"
           ? commitment.capacityExpiresAt
           : null;
