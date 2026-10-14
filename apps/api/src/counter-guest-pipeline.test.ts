@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { CheckoutSessionServiceError } from "@rms/ordering";
-import { createCounterGuestPipeline } from "./counter-guest-pipeline.js";
-import { counterTipMinor, parseCounterOrderCommand } from "./merchant-counter-order.js";
+import {
+  counterEntryOperatingReader,
+  createCounterGuestPipeline,
+} from "./counter-guest-pipeline.js";
+import {
+  counterTakesOrder,
+  counterTipMinor,
+  parseCounterOrderCommand,
+} from "./merchant-counter-order.js";
 
 const id = (n: number) => `0198a7c0-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const credential = (c: string) => c.repeat(43);
@@ -58,6 +65,16 @@ function pipeline(overrides: Record<string, unknown> = {}) {
           subtotal: { amountMinor: 1000n, currencyCode: "CAD" },
           total: { amountMinor: 1130n, currencyCode: "CAD" },
           blockingReasons: [],
+        },
+      })),
+    },
+    details: {
+      save: vi.fn(async (input: { command: Record<string, unknown> }) => ({
+        status: "Saved",
+        snapshot: {
+          cartReference: input.command.cartReference,
+          cartVersion: input.command.cartVersion,
+          quoteReference: input.command.quoteReference,
         },
       })),
     },
@@ -169,9 +186,93 @@ describe("counter guest pipeline — WP-2423 Q7", () => {
         checkoutSessionReference: id(14),
         selectionReference: id(15),
         tip: { amountMinor: 0n, currencyCode: "CAD" } as never,
+        recordedAfterOutage: true,
       }),
     ).rejects.toMatchObject({ code: "STORE_CLOSED" });
+    expect(options.takesOrder).toHaveBeenCalledWith({ recordedAfterOutage: true });
     expect(options.payment).not.toHaveBeenCalled();
+  });
+
+  it("saves the checkout details every pickup Order needs, collecting nothing personal", async () => {
+    const { pipeline: p, options } = pipeline();
+    const input = {
+      operationReference: id(16),
+      detailsReference: id(17),
+      cartReference: id(6),
+      cartVersion: 2,
+      quoteReference: id(7),
+    };
+    await p.saveDetails(guest, input);
+    expect(options.details.save).toHaveBeenCalledWith({
+      ...guest,
+      command: {
+        operationReference: id(16),
+        detailsReference: id(17),
+        expectedVersion: 0,
+        cartReference: id(6),
+        cartVersion: 2,
+        quoteReference: id(7),
+        quoteVersion: 2,
+        pickupContact: null,
+        receipt: { choice: "InSession", email: null },
+        policies: [],
+      },
+    });
+    options.details.save.mockResolvedValueOnce({
+      status: "Saved",
+      snapshot: { cartReference: id(6), cartVersion: 1, quoteReference: id(7) },
+    });
+    await expect(p.saveDetails(guest, input)).rejects.toThrow();
+  });
+});
+
+describe("counter opening rule — WP-2423 Q7 (online pause does not stop the counter)", () => {
+  const status = (
+    state: "Open" | "Closed" | "TemporarilyClosed",
+    available: string[],
+    scheduled?: string[],
+  ) => ({
+    state,
+    availableServiceModes: available,
+    ...(scheduled === undefined ? {} : { scheduledServiceModes: scheduled }),
+  });
+  it("takes a walk-up order during pickup hours, paused or not, and a paper order any time", () => {
+    const live = { recordedAfterOutage: false };
+    expect(counterTakesOrder(status("Open", ["Pickup"], ["Pickup"]), live)).toBe(true);
+    expect(counterTakesOrder(status("TemporarilyClosed", [], ["Pickup", "DineIn"]), live)).toBe(
+      true,
+    );
+    expect(counterTakesOrder(status("Open", ["DineIn"], ["Pickup", "DineIn"]), live)).toBe(true);
+    expect(counterTakesOrder(status("Closed", [], []), live)).toBe(false);
+    expect(counterTakesOrder(status("Open", ["DineIn"], ["DineIn"]), live)).toBe(false);
+    expect(counterTakesOrder(status("Closed", [], []), { recordedAfterOutage: true })).toBe(true);
+    // A reader without scheduled hours falls back to the customer rule.
+    expect(counterTakesOrder(status("TemporarilyClosed", []), live)).toBe(false);
+  });
+
+  it("lets the counter's guest enter while online ordering is paused", async () => {
+    const reader = {
+      readCurrent: vi.fn(async () => ({
+        brandReference: id(1),
+        storeReference: id(2),
+        evaluatedAt: "2026-10-13T18:00:00.000Z",
+        state: "TemporarilyClosed" as const,
+        availableServiceModes: [] as never[],
+      })),
+    };
+    const input = {
+      brandReference: id(1),
+      storeReference: id(2),
+      publicStoreReference: id(3),
+      evaluatedAt: "2026-10-13T18:00:00.000Z",
+    };
+    expect(await counterEntryOperatingReader(reader).readCurrent(input)).toMatchObject({
+      state: "Open",
+      availableServiceModes: ["Pickup"],
+      evaluatedAt: "2026-10-13T18:00:00.000Z",
+    });
+    reader.readCurrent.mockResolvedValueOnce(null as never);
+    expect(await counterEntryOperatingReader(reader).readCurrent(input)).toBeNull();
   });
 });
 

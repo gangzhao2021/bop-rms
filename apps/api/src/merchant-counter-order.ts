@@ -29,6 +29,7 @@ export const counterOrderErrorCodes = [
   "COUNTER_ORDER_ITEM_UNAVAILABLE",
   "COUNTER_ORDER_NOT_PRICED",
   "COUNTER_ORDER_NOT_FINISHED",
+  "COUNTER_ORDER_IN_PROGRESS",
   "COUNTER_ORDER_IDEMPOTENCY_CONFLICT",
   "COUNTER_ORDER_UNAVAILABLE",
 ] as const;
@@ -48,6 +49,29 @@ const fail = (code: CounterOrderErrorCode, lineIndex: number | null = null): nev
   throw new CounterOrderError(code, lineIndex);
 };
 
+/** What the counter reads from the Store's current operating status. */
+export interface CounterStoreOperatingNow {
+  readonly state: "Open" | "Closed" | "TemporarilyClosed";
+  readonly availableServiceModes: readonly string[];
+  /** The service the published hours offer now, before any pause. */
+  readonly scheduledServiceModes?: readonly string[];
+}
+
+/**
+ * WP-2423 Q7 (Owner, 2026-10-13): pausing online ordering does not stop the counter. Staff take a
+ * walk-up pickup order whenever the Store's published hours offer pickup now, paused or not; a
+ * paper order taken during an outage is entered whenever the system is back, even after closing.
+ */
+export function counterTakesOrder(
+  status: CounterStoreOperatingNow,
+  input: { readonly recordedAfterOutage: boolean },
+): boolean {
+  if (input.recordedAfterOutage) return true;
+  if (status.scheduledServiceModes !== undefined)
+    return status.scheduledServiceModes.includes("Pickup");
+  return status.state === "Open" && status.availableServiceModes.includes("Pickup");
+}
+
 export interface CounterGuestCredentials {
   readonly sessionCredential: string;
   readonly csrfCredential: string;
@@ -59,6 +83,8 @@ export interface CounterGuestCredentials {
  * reservation). The credentials live only in this request's memory and are never returned.
  */
 export interface CounterGuestPipeline {
+  /** The counter's opening rule ({@link counterTakesOrder}) on the Store's current status. */
+  takesOrder(input: { readonly recordedAfterOutage: boolean }): Promise<boolean>;
   open(input: {
     readonly requestedAt: string;
   }): Promise<
@@ -106,6 +132,20 @@ export interface CounterGuestPipeline {
       }
     | { readonly status: "NotPriced" }
   >;
+  /**
+   * The checkout details every pickup Order carries. A walk-up guest gives no contact (staff
+   * call the order number) and keeps the card machine slip, so nothing personal is collected.
+   */
+  saveDetails(
+    credentials: CounterGuestCredentials,
+    input: {
+      readonly operationReference: string;
+      readonly detailsReference: string;
+      readonly cartReference: string;
+      readonly cartVersion: number;
+      readonly quoteReference: string;
+    },
+  ): Promise<void>;
   startCheckout(
     credentials: CounterGuestCredentials,
     input: {
@@ -125,6 +165,7 @@ export interface CounterGuestPipeline {
       readonly checkoutSessionReference: string;
       readonly selectionReference: string;
       readonly tip: Money;
+      readonly recordedAfterOutage: boolean;
     },
   ): Promise<OrderPaymentPreparationEvidence>;
 }
@@ -270,6 +311,13 @@ export function createMerchantCounterOrder(options: {
   authentication: Pick<MerchantBffService, "authorize">;
   pipeline: CounterGuestPipeline;
   nextReference(): string;
+  /**
+   * Told the original error of an unexpected failure before staff get "try again"; the pilot
+   * logs its code and source frames only (never the order, credentials or payload).
+   */
+  onUnexpected?(error: unknown): void;
+  /** How long an unfinished attempt is treated as still being sent (default two minutes). */
+  inProgressMs?: number;
 }) {
   const resolveScope = createMerchantStoreScope(options.persistence);
   const now = () => options.persistence.now();
@@ -363,6 +411,26 @@ export function createMerchantCounterOrder(options: {
           recordedAfterOutage: entry.recordedAfterOutage,
         });
       });
+    /**
+     * The same staff command sent before. An attempt that created no Order is either still being
+     * sent or failed part way; a failed attempt leaves only what an abandoned customer checkout
+     * leaves (its pickup capacity hold and guest session lapse on their own), so staff send the
+     * order again as a new one.
+     */
+    const earlier = async (record: CounterOrderEntryRecord) => {
+      try {
+        return await finished("AlreadyPlaced", record);
+      } catch (error) {
+        if (
+          error instanceof CounterOrderError &&
+          error.code === "COUNTER_ORDER_NOT_FINISHED" &&
+          Date.parse(now()) - Date.parse(String(record.createdAt)) <
+            (options.inProgressMs ?? 120_000)
+        )
+          return fail("COUNTER_ORDER_IN_PROGRESS");
+        throw error;
+      }
+    };
     try {
       // A retry of the same staff command returns the order it created, never a second one.
       const prior = await inScope(async (tx, scope, allowed) => {
@@ -374,7 +442,11 @@ export function createMerchantCounterOrder(options: {
           return fail("COUNTER_ORDER_IDEMPOTENCY_CONFLICT");
         return found;
       });
-      if (prior !== null) return await finished("AlreadyPlaced", prior);
+      if (prior !== null) return await earlier(prior);
+      if (
+        !(await options.pipeline.takesOrder({ recordedAfterOutage: command.recordedAfterOutage }))
+      )
+        return fail("COUNTER_ORDER_STORE_NOT_TAKING_ORDERS");
       const opened = await options.pipeline.open({ requestedAt: now() });
       if (opened.status !== "Established") return fail("COUNTER_ORDER_STORE_NOT_TAKING_ORDERS");
       const bound = await options.pipeline.bindCart(opened.credentials, {
@@ -399,7 +471,7 @@ export function createMerchantCounterOrder(options: {
         return created;
       });
       // A concurrent retry recorded the same command first: it owns its own guest Cart.
-      if (entry.status === "AlreadyRecorded") return await finished("AlreadyPlaced", entry.record);
+      if (entry.status === "AlreadyRecorded") return await earlier(entry.record);
       let cartVersion = bound.cartVersion;
       for (const [index, line] of command.lines.entries()) {
         const added = await options.pipeline.addItem(credentials, {
@@ -422,6 +494,13 @@ export function createMerchantCounterOrder(options: {
       });
       if (quoted.status !== "Quoted") return fail("COUNTER_ORDER_NOT_PRICED");
       const tip = counterTipMinor(command.tip, quoted.subtotalMinor);
+      await options.pipeline.saveDetails(credentials, {
+        operationReference: options.nextReference(),
+        detailsReference: options.nextReference(),
+        cartReference: bound.cartReference,
+        cartVersion,
+        quoteReference: quoted.quoteReference,
+      });
       const checkout = await options.pipeline.startCheckout(credentials, {
         createOperationReference: options.nextReference(),
         cartReference: bound.cartReference,
@@ -433,6 +512,7 @@ export function createMerchantCounterOrder(options: {
         checkoutSessionReference: checkout.checkoutSessionReference,
         selectionReference: tipSelectionReference,
         tip: { amountMinor: tip, currencyCode: "CAD" } as Money,
+        recordedAfterOutage: command.recordedAfterOutage,
       });
       if (preparation.tip.amountMinor !== tip) return fail("COUNTER_ORDER_UNAVAILABLE");
       return await finished("Placed", entry.record);
@@ -448,6 +528,11 @@ export function createMerchantCounterOrder(options: {
         return fail("COUNTER_ORDER_PERMISSION_DENIED");
       // The Store closed or paused pickup while the order was being sent.
       if (code === "STORE_CLOSED") return fail("COUNTER_ORDER_STORE_NOT_TAKING_ORDERS");
+      try {
+        options.onUnexpected?.(error);
+      } catch {
+        // Reporting never changes the answer.
+      }
       return fail("COUNTER_ORDER_UNAVAILABLE");
     }
   };

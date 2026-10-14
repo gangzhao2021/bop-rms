@@ -155,6 +155,18 @@ it.each([false, true])("saves current bound details for Dining=%s", async (dinin
   });
   expect(f.persist).toHaveBeenCalledOnce();
 });
+it("requires a customer's pickup contact but not a walk-up counter guest's (WP-2423 Q7)", async () => {
+  const customer = setup();
+  await expect(
+    customer.service.save({ ...customer.command, pickupContact: null }),
+  ).rejects.toMatchObject({ code: "CHECKOUT_DETAILS_INPUT_INVALID" });
+  expect(customer.persist).not.toHaveBeenCalled();
+  const counter = setup();
+  counter.loadCart.mockResolvedValue({ ...counter.f.cart, sourceChannel: "Pos" } as never);
+  const saved = await counter.service.save({ ...counter.command, pickupContact: null });
+  expect(saved.status).toBe("Saved");
+  expect(saved.snapshot.pickupContact).toBeNull();
+});
 it("recovers the original after quote expiry without rewriting policy or time", async () => {
   const f = setup();
   const original = await f.service.save(f.command);

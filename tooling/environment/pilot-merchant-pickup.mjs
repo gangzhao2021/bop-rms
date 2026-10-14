@@ -157,7 +157,28 @@ export async function createInternalMerchantPickup(
   };
 }
 
-/** Logs an unexpected failure as a code and source locations only (no message or business data). */
+/**
+ * Logs an unexpected failure as its event, error code and source frames only: never the message
+ * text of a non-code error, the request, credentials or any order content.
+ */
+export function reportUnexpected(event, error) {
+  // A plain Error whose message is an error code (UPPER_SNAKE) carries that code.
+  const code =
+    error?.code ??
+    (/^[A-Z][A-Z0-9_]{2,79}$/.test(error?.message ?? "") ? error.message : error?.name);
+  console.error(
+    JSON.stringify({
+      event,
+      code: /^[A-Za-z0-9_]{1,80}$/.test(code ?? "") ? code : "UNAVAILABLE",
+      frames:
+        String(error?.stack ?? "")
+          .match(
+            /(?:apps\/api\/(?:dist|src)|packages\/[a-z]+\/[a-z-]+\/src|tooling\/environment)\/[a-zA-Z0-9_./-]+:\d+:\d+/g,
+          )
+          ?.slice(0, 5) ?? [],
+    }),
+  );
+}
 export function logUnexpected(event, call) {
   return async (input) => {
     try {
@@ -167,24 +188,8 @@ export function logUnexpected(event, call) {
       if (
         error?.name !== "FulfillmentReadinessError" &&
         !/^Merchant[A-Za-z]*Error$/.test(error?.name ?? "")
-      ) {
-        // A plain Error whose message is an error code (UPPER_SNAKE) carries that code.
-        const code =
-          error?.code ??
-          (/^[A-Z][A-Z0-9_]{2,79}$/.test(error?.message ?? "") ? error.message : error?.name);
-        console.error(
-          JSON.stringify({
-            event,
-            code: /^[A-Za-z0-9_]{1,80}$/.test(code ?? "") ? code : "UNAVAILABLE",
-            frames:
-              String(error?.stack ?? "")
-                .match(
-                  /(?:apps\/api\/dist|packages\/[a-z]+\/[a-z-]+\/src)\/[a-zA-Z0-9_./-]+:\d+:\d+/g,
-                )
-                ?.slice(0, 5) ?? [],
-          }),
-        );
-      }
+      )
+        reportUnexpected(event, error);
       throw error;
     }
   };

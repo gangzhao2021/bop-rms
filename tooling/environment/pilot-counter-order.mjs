@@ -25,12 +25,20 @@ import { createCustomerOrderPaymentClaimAdmission } from "../../apps/api/dist/cu
 import { createCustomerCapacityPaymentClaimAdmission } from "../../apps/api/dist/customer-capacity-payment-admission.js";
 import { createCustomerInventoryPaymentClaimAdmission } from "../../apps/api/dist/customer-inventory-payment-admission.js";
 import { createCustomerIntactReservationPaymentAction } from "../../apps/api/dist/customer-payment-workflow-action.js";
-import { createCounterGuestPipeline } from "../../apps/api/dist/counter-guest-pipeline.js";
-import { createMerchantCounterOrder } from "../../apps/api/dist/merchant-counter-order.js";
+import {
+  counterEntryOperatingReader,
+  createCounterGuestPipeline,
+} from "../../apps/api/dist/counter-guest-pipeline.js";
+import {
+  counterTakesOrder,
+  createMerchantCounterOrder,
+} from "../../apps/api/dist/merchant-counter-order.js";
 import { createMerchantCounterMenu } from "../../apps/api/dist/merchant-counter-menu.js";
 import { createMerchantCardMachinePayment } from "../../apps/api/dist/merchant-card-machine-payment.js";
 import { createMerchantCardMachineCancellationRefund } from "../../apps/api/dist/merchant-card-machine-refund.js";
+import { createPostgresPublishedStoreOperatingStatusReader } from "../../packages/rms/store/src/index.ts";
 import { createInternalPaymentPreparation } from "./pilot-payment-preparation.mjs";
+import { reportUnexpected } from "./pilot-merchant-pickup.mjs";
 import { createInternalExpiryCutoff } from "./pilot-expiry-cutoff.mjs";
 import { matchesPilotEnvironment } from "./pilot-environment.mjs";
 
@@ -81,11 +89,8 @@ export async function createInternalCounterOrder(
     configuredEntry,
     items.catalogCartItems,
   );
-  const diningCheckout = customer.createInternalDiningCheckout(
-    resources,
-    configuredEntry,
-    checkout,
-  );
+  // The same checkout details record a customer saves (a walk-up guest gives no contact).
+  const { checkoutDetails } = customer.createInternalCheckoutDetails(resources, entry);
   const orders = await customer.createInternalOrder(resources, checkout, items.catalogCartItems);
   const prepared = createInternalPaymentPreparation(resources, checkout, orders);
   const store = createPostgresGuestSessionEntryStore(transactions, scope);
@@ -129,11 +134,26 @@ export async function createInternalCounterOrder(
     fallback: createCustomerCartReadPort(query),
   });
   const checkoutRead = createCustomerCheckoutSessionRead(checkout.accessOptions);
-  const checkoutWrite = createCustomerCheckoutSessionComposition(diningCheckout.checkoutSessions);
+  // The pickup checkout without the customer's open gate: the counter's own rule
+  // (counterTakesOrder) is applied by the staff command before the guest opens and at payment.
+  const checkoutWrite = createCustomerCheckoutSessionComposition(checkout.checkoutSessions);
+  const operatingNow = () =>
+    transactions.run((tx) =>
+      createPostgresPublishedStoreOperatingStatusReader(resources.operating)(tx, now()),
+    );
   const pipeline = createCounterGuestPipeline({
     pickupQrToken: loadPickupQrToken,
     entry: createPersistentCustomerEntryComposition({
       ...entry.persistent,
+      // The counter's guest enters while online ordering is paused (see counterEntryOperatingReader).
+      sources: async (tx, input) => {
+        const sources = await entry.persistent.sources(tx, input);
+        if (sources.operatingReader === undefined) throw new Error("INTERNAL_COUNTER_ENTRY_ONLY");
+        return {
+          ...sources,
+          operatingReader: counterEntryOperatingReader(sources.operatingReader),
+        };
+      },
       session: entry.session,
     }),
     binding: createCustomerCartBindingComposition({
@@ -151,11 +171,12 @@ export async function createInternalCounterOrder(
     },
     cart,
     quote: quotes,
+    details: checkoutDetails,
     checkout: {
       create: (value) => checkoutWrite.create(value),
       read: (value) => checkoutRead.read(value),
     },
-    takesOrder: (guest) => diningCheckout.takesOrder(guest),
+    takesOrder: async (input) => counterTakesOrder(await operatingNow(), input),
     payment: (guest) => ({
       access: checkout.accessOptions,
       tenantReference,
@@ -205,6 +226,7 @@ export async function createInternalCounterOrder(
       authentication,
       pipeline,
       nextReference: reference,
+      onUnexpected: (error) => reportUnexpected("INTERNAL_COUNTER_ORDER_UNAVAILABLE", error),
     }),
     cardMachinePayment: createMerchantCardMachinePayment({
       persistence,
@@ -212,6 +234,7 @@ export async function createInternalCounterOrder(
       // TEST-ONLY: the pilot payment environment is Test (internal testing).
       environment: "Test",
       nextReference: reference,
+      onUnexpected: (error) => reportUnexpected("INTERNAL_CARD_MACHINE_PAYMENT_UNAVAILABLE", error),
       // The same owner admission an online payment of a pickup Order passes (order payable,
       // pickup capacity clock open, reserved stock intact), under this staff member's authority.
       admission: ({ scope: selected, preparation, allowed }) => {
@@ -250,6 +273,7 @@ export async function createInternalCounterOrder(
       persistence,
       authentication,
       nextReference: reference,
+      onUnexpected: (error) => reportUnexpected("INTERNAL_CARD_MACHINE_REFUND_UNAVAILABLE", error),
     }),
   };
 }

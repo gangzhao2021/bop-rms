@@ -879,6 +879,9 @@ it.each([
           detailsTransactions: runner(roles[1]),
           session: preparation.session,
           now: preparation.now,
+          // WP-2423 Q7: the counter case saves the counter's own details (no contact); the real
+          // order submission below then proves they satisfy a pickup Order.
+          counter,
         });
         // Isolated fixture grants; not a production runtime permission policy.
         await admin.query(

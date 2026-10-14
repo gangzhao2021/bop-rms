@@ -92,6 +92,14 @@ export function createPostgresStoreOperatingStatusReader(
       });
       const local = resolveStoreOperatingLocalFields(at, content.timeZone);
       const evaluation = evaluateStoreOperatingStatus({ evaluatedAt: at, ...local, ...content });
+      // WP-2423 Q7: the service the published hours offer now, before any pause. Staff at the
+      // counter keep serving walk-up guests while online ordering is paused.
+      const scheduledServiceModes = evaluateStoreOperatingStatus({
+        evaluatedAt: at,
+        ...local,
+        ...content,
+        temporaryClosures: [],
+      }).availableServiceModes;
       if ((await options.authorize(tx, at)) !== true) throw new Error();
       // WP-2423 Q4: today's published hours (a dated exception replaces the weekday), so a
       // customer arriving while the Store is closed can be told when it serves.
@@ -105,7 +113,14 @@ export function createPostgresStoreOperatingStatusReader(
           Object.freeze({ startLocalTime, endLocalTime, endsNextDay }),
         ),
       );
-      return Object.freeze({ businessDate, evaluatedAt: at, ...local, ...evaluation, todayHours });
+      return Object.freeze({
+        businessDate,
+        evaluatedAt: at,
+        ...local,
+        ...evaluation,
+        scheduledServiceModes,
+        todayHours,
+      });
     } catch {
       throw new Error("STORE_OPERATING_STATUS_UNAVAILABLE");
     }

@@ -192,7 +192,7 @@ export async function exerciseCustomerCheckoutDetailsHttp({
     const selection = {
       cartReference: body.cartReference,
       cartVersion: body.cartVersion,
-      orderType: body.pickupContact === null ? "DineIn" : "Pickup",
+      orderType: mode,
     };
     const policyClient = createCheckoutPolicyClient();
     setCustomerCsrfCredential("x".repeat(43));
@@ -219,7 +219,7 @@ export async function exerciseCustomerCheckoutDetailsHttp({
     );
     await controller.save({
       ...body,
-      orderType: body.pickupContact === null ? "DineIn" : "Pickup",
+      orderType: mode,
     });
     assert.deepEqual(controller.getState(), { status: "unknown", canRetry: true });
     await controller.retry();

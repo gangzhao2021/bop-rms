@@ -79,11 +79,13 @@ function placeErrorText(error: CounterOrderClientError, lines: readonly Line[]) 
         : "An item can't be sold right now. Check the order and send again.";
     }
     case "StoreNotTakingOrders":
-      return "The store is not taking pickup orders right now (closed or pickup paused).";
+      return "Pickup hours are over, so the counter can't take a new order now. A paper order taken earlier can still be entered under Paper order.";
     case "NotPriced":
       return "This order could not be priced. Check the items and options and send again.";
     case "NotFinished":
-      return "This order was not sent. Send it again.";
+      return "This order didn't go through and nothing was charged. Send it again.";
+    case "InProgress":
+      return "This order is still being sent. Wait a moment, then send again to see it.";
     case "PermissionDenied":
       return "Your session can't take counter orders. Sign in again or ask a manager.";
     case "OutcomeUnknown":
@@ -247,8 +249,10 @@ export function StaffOrderEntryPage({
         error instanceof CounterOrderClientError
           ? error
           : new CounterOrderClientError("Unavailable");
-      // Only an unknown outcome keeps the same operation (a retry returns the same order).
-      if (failure.code !== "OutcomeUnknown") placeOperation.current = null;
+      // An unknown or still-running outcome keeps the same operation (a retry returns the same
+      // order); anything else starts over as a new order.
+      if (failure.code !== "OutcomeUnknown" && failure.code !== "InProgress")
+        placeOperation.current = null;
       setProblem(placeErrorText(failure, lines));
       setPhase("Building");
     }

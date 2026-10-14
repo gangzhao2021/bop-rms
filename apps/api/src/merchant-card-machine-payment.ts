@@ -116,6 +116,8 @@ export function createMerchantCardMachinePayment(options: {
   }): PaymentIntentClaimAdmission;
   environment: "Test" | "Live";
   nextReference(): string;
+  /** Told the original error of an unexpected failure (the pilot logs code and frames only). */
+  onUnexpected?(error: unknown): void;
 }) {
   const resolveScope = createMerchantStoreScope(options.persistence);
   const now = () => options.persistence.now();
@@ -277,6 +279,11 @@ export function createMerchantCardMachinePayment(options: {
       const code = (error as { code?: unknown } | null)?.code;
       if (code === "STORE_SERVICE_PERMISSION_DENIED") return fail("CARD_MACHINE_PERMISSION_DENIED");
       if (code === "23505") return fail("CARD_MACHINE_ALREADY_PAID");
+      try {
+        options.onUnexpected?.(error);
+      } catch {
+        // Reporting never changes the answer.
+      }
       return fail("CARD_MACHINE_UNAVAILABLE");
     }
   };

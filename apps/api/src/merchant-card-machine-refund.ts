@@ -85,6 +85,8 @@ export function createMerchantCardMachineCancellationRefund(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
   nextReference(): string;
+  /** Told the original error of an unexpected failure (the pilot logs code and frames only). */
+  onUnexpected?(error: unknown): void;
 }) {
   const resolveScope = createMerchantStoreScope(options.persistence);
   return async (input: {
@@ -249,6 +251,11 @@ export function createMerchantCardMachineCancellationRefund(options: {
       const code = (error as { code?: unknown } | null)?.code;
       if (code === "STORE_SERVICE_PERMISSION_DENIED")
         return fail("CARD_MACHINE_REFUND_PERMISSION_DENIED");
+      try {
+        options.onUnexpected?.(error);
+      } catch {
+        // Reporting never changes the answer.
+      }
       return fail("CARD_MACHINE_REFUND_UNAVAILABLE");
     }
   };

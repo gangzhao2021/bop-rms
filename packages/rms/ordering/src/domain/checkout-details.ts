@@ -160,7 +160,9 @@ export function parseCheckoutDetailsSnapshot(value: unknown): CheckoutDetailsSna
     )
       return fail();
     const pickupContact = raw.pickupContact === null ? null : contact(raw.pickupContact);
-    if ((raw.orderType === "Pickup") !== (pickupContact !== null)) return fail();
+    // A dine-in Order never carries a pickup contact. A pickup Order normally does; the one
+    // exception (a walk-up counter guest, WP-2423 Q7) is decided where the Cart is known.
+    if (raw.orderType === "DineIn" && pickupContact !== null) return fail();
     return Object.freeze({
       schemaVersion: 1,
       detailsReference: parseOrderingReference(raw.detailsReference),

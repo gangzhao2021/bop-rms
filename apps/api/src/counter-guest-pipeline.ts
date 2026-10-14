@@ -9,9 +9,62 @@ import type { Money } from "@rms/pricing";
 import type { CustomerCartBindingPort } from "./customer-cart-binding.js";
 import type { CustomerCartPort } from "./customer-cart.js";
 import type { CustomerEntryPort } from "./customer-entry.js";
+import type { CustomerEntryOperatingReader } from "./customer-entry-composition.js";
+import type { CustomerCheckoutDetailsPort } from "./customer-checkout-details.js";
 import type { CustomerQuotePort } from "./customer-quote.js";
 import { prepareCustomerSessionPayment } from "./customer-session-payment-intent.js";
 import type { CounterGuestCredentials, CounterGuestPipeline } from "./merchant-counter-order.js";
+
+/**
+ * WP-2423 Q7: the checkout details of a counter order. Every pickup Order carries a checkout
+ * details record; a walk-up guest gives no contact (staff call the order number) and keeps the
+ * card machine slip as the receipt.
+ */
+export function counterCheckoutDetailsCommand(input: {
+  readonly operationReference: string;
+  readonly detailsReference: string;
+  readonly cartReference: string;
+  readonly cartVersion: number;
+  readonly quoteReference: string;
+}) {
+  return Object.freeze({
+    operationReference: input.operationReference,
+    detailsReference: input.detailsReference,
+    expectedVersion: 0,
+    cartReference: input.cartReference,
+    cartVersion: input.cartVersion,
+    quoteReference: input.quoteReference,
+    quoteVersion: 2 as const,
+    pickupContact: null,
+    receipt: Object.freeze({ choice: "InSession" as const, email: null }),
+    policies: Object.freeze([]) as readonly never[],
+  });
+}
+
+/**
+ * WP-2423 Q7: the counter's walk-up guest enters with the Store's pickup QR even while online
+ * ordering is paused (or, for a paper order entered after an outage, after closing). Whether the
+ * counter takes the order is decided by the staff command ({@link counterTakesOrder}) before the
+ * guest is opened and again before payment; this view only keeps the customer entry rule from
+ * refusing the counter's guest. Customers' own entry is unchanged.
+ */
+export function counterEntryOperatingReader(
+  reader: CustomerEntryOperatingReader,
+): CustomerEntryOperatingReader {
+  return Object.freeze({
+    async readCurrent(input: Parameters<CustomerEntryOperatingReader["readCurrent"]>[0]) {
+      const current = await reader.readCurrent(input);
+      if (current === null) return null;
+      return Object.freeze({
+        ...current,
+        state: "Open" as const,
+        availableServiceModes: Object.freeze([
+          ...new Set([...current.availableServiceModes, "Pickup" as const]),
+        ]),
+      });
+    },
+  });
+}
 
 type PaymentOptions = Parameters<typeof prepareCustomerSessionPayment>[0];
 
@@ -36,12 +89,14 @@ export function createCounterGuestPipeline(options: {
   };
   cart: Pick<CustomerCartPort, "getCurrentCart" | "addItem">;
   quote: CustomerQuotePort;
+  /** The customer checkout details owner (the same record the customer app saves). */
+  details: Pick<CustomerCheckoutDetailsPort, "save">;
   checkout: {
     create(value: unknown): Promise<unknown>;
     read(value: unknown): Promise<unknown>;
   };
-  /** WP-2423 Q4: the Store takes a pickup order now (checked again when payment starts). */
-  takesOrder(credentials: CounterGuestCredentials): Promise<boolean>;
+  /** The counter's opening rule on the Store's current status (checked again at payment). */
+  takesOrder(input: { readonly recordedAfterOutage: boolean }): Promise<boolean>;
   payment: (credentials: CounterGuestCredentials) => PaymentOptions;
   nextReference(): string;
   now(): string;
@@ -50,6 +105,7 @@ export function createCounterGuestPipeline(options: {
     throw new Error("COUNTER_GUEST_PIPELINE_UNAVAILABLE");
   };
   const pipeline: CounterGuestPipeline = {
+    takesOrder: (input) => options.takesOrder(input),
     async open(input) {
       const result = (await options.entry.establish({
         entryRequestReference: options.nextReference(),
@@ -179,6 +235,27 @@ export function createCounterGuestPipeline(options: {
         totalMinor: quote.total.amountMinor,
       };
     },
+    async saveDetails(credentials, input) {
+      const saved = readClosedRecord(
+        await options.details.save({
+          ...credentials,
+          command: counterCheckoutDetailsCommand(input),
+        }),
+        ["status", "snapshot"],
+      );
+      const snapshot = saved.snapshot as {
+        cartReference?: unknown;
+        cartVersion?: unknown;
+        quoteReference?: unknown;
+      } | null;
+      if (
+        (saved.status !== "Saved" && saved.status !== "AlreadySaved") ||
+        String(snapshot?.cartReference) !== input.cartReference ||
+        snapshot?.cartVersion !== input.cartVersion ||
+        String(snapshot?.quoteReference) !== input.quoteReference
+      )
+        return failed();
+    },
     async startCheckout(credentials, input) {
       try {
         const created = readClosedRecord(
@@ -206,7 +283,7 @@ export function createCounterGuestPipeline(options: {
       }
     },
     async preparePayment(credentials, input): Promise<OrderPaymentPreparationEvidence> {
-      if (!(await options.takesOrder(credentials)))
+      if (!(await options.takesOrder({ recordedAfterOutage: input.recordedAfterOutage })))
         throw new CheckoutSessionServiceError("STORE_CLOSED");
       const read = { ...credentials, checkoutSessionReference: input.checkoutSessionReference };
       const session: CheckoutSession = parseCheckoutSession(await options.checkout.read(read));

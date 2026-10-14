@@ -4,6 +4,7 @@ import {
   createCustomerDiningCheckoutDetailsComposition,
   createCustomerPickupCheckoutDetailsComposition,
 } from "../../../apps/api/src/customer-checkout-details-composition.ts";
+import { counterCheckoutDetailsCommand } from "../../../apps/api/src/counter-guest-pipeline.ts";
 const id = (n) => "01909997-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 export async function exerciseCustomerCheckoutDetails({
   journey,
@@ -19,6 +20,7 @@ export async function exerciseCustomerCheckoutDetails({
   session,
   identity,
   now,
+  counter = false,
 }) {
   let policyRead = false;
   let policyMode = "Ready",
@@ -80,9 +82,19 @@ export async function exerciseCustomerCheckoutDetails({
     mode === "DineIn"
       ? createCustomerDiningCheckoutDetailsComposition({ ...options, identity })
       : createCustomerPickupCheckoutDetailsComposition({ ...options, session });
+  // WP-2423 Q7: a counter order saves the counter's own details command (no contact).
+  const counterCommand = counter
+    ? counterCheckoutDetailsCommand({
+        operationReference: id(1),
+        detailsReference: id(2),
+        cartReference: cart.cartReference,
+        cartVersion: cart.aggregateVersion,
+        quoteReference: quote.quoteReference,
+      })
+    : null;
   const input = {
     ...credentials,
-    command: {
+    command: counterCommand ?? {
       operationReference: id(1),
       detailsReference: id(2),
       expectedVersion: 0,
@@ -106,17 +118,28 @@ export async function exerciseCustomerCheckoutDetails({
     await assert.rejects(service.save(input), { code: "CART_DEPENDENCY_UNAVAILABLE" });
   }
   policyMode = "Ready";
-  const saved = await exerciseCustomerCheckoutDetailsHttp({
-    journey,
-    service,
-    input,
-    quoteVersion,
-    runtimeOptions: { mode, scope, sessionTransactions, cartTransactions, session, identity, now },
-    changePolicy: (value) => {
-      policyMode = value;
-      policyRead = false;
-    },
-  });
+  // The counter saves through the details owner (no customer form or browser is involved).
+  const saved = counter
+    ? await service.save(input)
+    : await exerciseCustomerCheckoutDetailsHttp({
+        journey,
+        service,
+        input,
+        quoteVersion,
+        runtimeOptions: {
+          mode,
+          scope,
+          sessionTransactions,
+          cartTransactions,
+          session,
+          identity,
+          now,
+        },
+        changePolicy: (value) => {
+          policyMode = value;
+          policyRead = false;
+        },
+      });
   assert.equal(saved.status, "Saved");
   assert.equal(saved.snapshot.orderType, mode);
   assert.equal(saved.snapshot.cartReference, cart.cartReference);

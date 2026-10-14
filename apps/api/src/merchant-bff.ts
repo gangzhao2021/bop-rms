@@ -9710,6 +9710,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             COUNTER_ORDER_ITEM_UNAVAILABLE: [409, "item_unavailable"],
             COUNTER_ORDER_NOT_PRICED: [409, "order_not_priced"],
             COUNTER_ORDER_NOT_FINISHED: [409, "counter_order_not_finished"],
+            COUNTER_ORDER_IN_PROGRESS: [409, "counter_order_in_progress"],
             COUNTER_ORDER_IDEMPOTENCY_CONFLICT: [409, "counter_order_conflict"],
             COUNTER_ORDER_UNAVAILABLE: [503, "counter_order_unavailable"],
           } as const

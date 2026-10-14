@@ -193,6 +193,14 @@ export function createCheckoutDetailsService(ports: CheckoutDetailsPorts) {
           });
         // Copy and freeze request data before awaiting further owner calls.
         const desired = candidate(initial.at);
+        // A customer's pickup Order needs a contact to reach them; a walk-up guest staff serve
+        // at the counter (a Pos Cart, WP-2423 Q7) is called by order number and gives none.
+        if (
+          desired.orderType === "Pickup" &&
+          desired.pickupContact === null &&
+          cart.sourceChannel !== "Pos"
+        )
+          throw new CheckoutDetailsError();
         await authorize();
         const originalValue = await ports.repository.resolveOperation(
           operationReference,

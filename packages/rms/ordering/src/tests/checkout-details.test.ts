@@ -64,8 +64,12 @@ it("records a transactional email request separately from pickup contact", () =>
   });
   expect(parsed.pickupContact?.channel).toBe("Phone");
 });
+it("lets a pickup detail omit the contact; the details service decides who may (WP-2423 Q7)", () => {
+  expect(parseCheckoutDetailsSnapshot({ ...fixture(), pickupContact: null }).pickupContact).toBe(
+    null,
+  );
+});
 it.each([
-  { pickupContact: null },
   { orderType: "DineIn" },
   { cartVersion: 0 },
   { quoteVersion: 3 },

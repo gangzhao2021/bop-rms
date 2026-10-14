@@ -14,6 +14,7 @@ export class CounterOrderClientError extends Error {
       | "ItemUnavailable"
       | "NotPriced"
       | "NotFinished"
+      | "InProgress"
       | "AmountChanged"
       | "PaymentWindowClosed"
       | "AlreadyPaid"
@@ -359,6 +360,7 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
         throw new CounterOrderClientError("StoreNotTakingOrders");
       if (code === "order_not_priced") throw new CounterOrderClientError("NotPriced");
       if (code === "counter_order_not_finished") throw new CounterOrderClientError("NotFinished");
+      if (code === "counter_order_in_progress") throw new CounterOrderClientError("InProgress");
       if (code === "counter_order_conflict") throw new CounterOrderClientError("Conflict");
       if (response.status === 400) throw new CounterOrderClientError("Invalid");
       throw new CounterOrderClientError(response.status >= 500 ? "OutcomeUnknown" : "Unavailable");
