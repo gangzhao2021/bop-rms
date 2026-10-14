@@ -17,6 +17,7 @@ import {
   IdentityContractError,
   merchantSessionCookie,
   parseRawBrowserCredential,
+  recordSessionActivity,
   sessionPolicies,
   type AuthorizationTransaction,
   type BrowserCredentialGeneratorPort,
@@ -30,6 +31,7 @@ import {
   type OidcCodeExchangeRequest,
   type OidcProviderPort,
   type RawBrowserCredential,
+  type RecordBrowserSessionActivityCommand,
   type RevokeBrowserSessionCommand,
   type RotateBrowserSessionCommand,
   type SelectorHash,
@@ -235,6 +237,22 @@ class SyntheticStore implements BrowserSessionStorePort {
       encryptedSecrets: command.nextEncryptedSecrets,
     });
     this.sessions.set(command.nextSelectorHash, next);
+    return next;
+  }
+
+  activityWrites = 0;
+
+  async recordActivity(command: RecordBrowserSessionActivityCommand) {
+    const record = required(this.sessions.get(command.selectorHash));
+    if (record.session.sessionReference !== command.expectedSessionReference)
+      throw new BrowserSessionError("BROWSER_SESSION_DENIED");
+    const next = recordSessionActivity(record.session, command.observedAt);
+    if (next === null) return record.session;
+    this.activityWrites += 1;
+    this.sessions.set(
+      command.selectorHash,
+      createBrowserSessionRecord({ ...record, session: next }),
+    );
     return next;
   }
 
@@ -463,6 +481,44 @@ describe("browser Session and same-origin BFF Domain orchestration", () => {
     await expect(service.bootstrap(sessionCookie)).rejects.toBe(failure);
     await expect(service.authorize({ sessionCookie, csrf })).rejects.toBe(failure);
     await expect(service.rotate(sessionCookie, "RiskChange")).rejects.toBe(failure);
+  });
+
+  it("WP-2423 Q18: authorized activity slides the idle deadline with bounded writes", async () => {
+    let observedAt = AT;
+    const { service, store, sessionCookie, csrf } = await signedInFixture(() => observedAt);
+    observedAt = "2026-07-29T12:00:30.000Z";
+    const first = await service.recordActivity({ sessionCookie, csrf });
+    expect(first.idleExpiresAt).toBe("2026-07-29T12:30:00.000Z");
+    expect(store.activityWrites).toBe(0);
+    observedAt = "2026-07-29T12:20:00.000Z";
+    const moved = await service.recordActivity({ sessionCookie, csrf });
+    expect(moved.idleExpiresAt).toBe("2026-07-29T12:50:00.000Z");
+    expect(moved.absoluteExpiresAt).toBe("2026-07-30T00:00:00.000Z");
+    expect(store.activityWrites).toBe(1);
+    // The extended Session now authorizes past its original idle deadline.
+    observedAt = "2026-07-29T12:45:00.000Z";
+    await expect(service.authorize({ sessionCookie, csrf })).resolves.toMatchObject({
+      idleExpiresAt: "2026-07-29T12:50:00.000Z",
+    });
+  });
+
+  it("WP-2423 Q18: activity needs the bound CSRF and never revives an ended Session", async () => {
+    let observedAt = AT;
+    const { service, store, sessionCookie, csrf } = await signedInFixture(() => observedAt);
+    await expect(
+      service.recordActivity({ sessionCookie, csrf: Buffer.alloc(32, 7).toString("base64url") }),
+    ).rejects.toMatchObject({ code: "BROWSER_SESSION_DENIED" });
+    observedAt = "2026-07-29T12:30:00.000Z";
+    await expect(service.recordActivity({ sessionCookie, csrf })).rejects.toMatchObject({
+      code: "BROWSER_SESSION_DENIED",
+    });
+    expect(store.activityWrites).toBe(0);
+    observedAt = AT;
+    await service.logout(sessionCookie);
+    await expect(service.recordActivity({ sessionCookie, csrf })).rejects.toMatchObject({
+      code: "BROWSER_SESSION_DENIED",
+    });
+    expect(store.activityWrites).toBe(0);
   });
 
   it("creates a one-time PKCE transaction without persisting raw credentials", async () => {

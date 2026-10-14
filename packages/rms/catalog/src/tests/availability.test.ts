@@ -170,7 +170,7 @@ function createInput() {
   };
 }
 function serviceFixture(
-  options: { denied?: boolean; invalidFacts?: boolean; store?: boolean } = {},
+  options: { denied?: boolean; invalidFacts?: boolean; store?: boolean; action?: string } = {},
 ) {
   let aggregate: AvailabilityRuleAggregate | null = null;
   const operations = new Map<string, AvailabilityOperationRecord>();
@@ -184,7 +184,7 @@ function serviceFixture(
             effect: "Allow",
             reason: "ROLE_PERMISSION",
             source: "RolePermission",
-            action: "catalog.sku.availability.manage",
+            action: options.action ?? "catalog.sku.availability.manage",
             scopeKind: options.store ? "Store" : "Brand",
             policySnapshotReference: ids.policy,
             policyVersion: 1,
@@ -419,5 +419,67 @@ describe("Store Availability Overlay", () => {
         requestedAt: at,
       }),
     ).resolves.toMatchObject({ aggregate: { lifecycle: "Active", aggregateVersion: 2 } });
+  });
+  it("limits the floor-staff sold-out mark to today's sold-out marks at its own Store", async () => {
+    const mark = "catalog.sku.sold_out.mark";
+    const today = {
+      ...createInput(),
+      decision: "Unavailable",
+      reasonCode: "SOLD_OUT",
+      priority: 900,
+      effectiveFrom: at,
+      effectiveUntil: "2026-08-02T04:00:00.000Z",
+    };
+    // Not at Brand scope, not without an end, not beyond the business day, not another reason.
+    await expect(serviceFixture({ action: mark }).service.create(today)).rejects.toMatchObject({
+      code: "CATALOG_PERMISSION_DENIED",
+    });
+    for (const change of [
+      { effectiveUntil: null },
+      { effectiveUntil: "2026-08-02T17:00:00.001Z" },
+      { reasonCode: "MANUAL_BLOCK" },
+      { decision: "Available" },
+      { storeReference: id(98) },
+    ])
+      await expect(
+        serviceFixture({ store: true, action: mark }).service.create({ ...today, ...change }),
+      ).rejects.toMatchObject({ code: "CATALOG_PERMISSION_DENIED" });
+    await expect(
+      serviceFixture({ store: true, action: "catalog.sku.read" }).service.create(today),
+    ).rejects.toMatchObject({ code: "CATALOG_PERMISSION_DENIED" });
+    const state = serviceFixture({ store: true, action: mark });
+    await expect(state.service.create(today)).resolves.toMatchObject({
+      status: "Applied",
+      aggregate: { decision: "Unavailable", reasonCode: "SOLD_OUT", lifecycle: "Draft" },
+    });
+    const lifecycle = (targetLifecycle: string, version: number, n: number) =>
+      state.service.changeLifecycle({
+        ruleReference: ids.brandRule,
+        targetLifecycle,
+        expectedAggregateVersion: version,
+        operationReference: id(n),
+        requestedAt: at,
+      });
+    await expect(lifecycle("Archived", 1, 20)).rejects.toMatchObject({
+      code: "CATALOG_PERMISSION_DENIED",
+    });
+    await expect(lifecycle("Active", 1, 21)).resolves.toMatchObject({
+      aggregate: { lifecycle: "Active", aggregateVersion: 2 },
+    });
+    await expect(
+      state.service.replace({
+        ruleReference: ids.brandRule,
+        expectedAggregateVersion: 2,
+        rule: { ...state.current(), aggregateVersion: 3, effectiveUntil: null },
+        operationReference: id(22),
+        requestedAt: at,
+      }),
+    ).rejects.toMatchObject({ code: "CATALOG_PERMISSION_DENIED" });
+    await expect(lifecycle("Inactive", 2, 23)).resolves.toMatchObject({
+      aggregate: { lifecycle: "Inactive", aggregateVersion: 3 },
+    });
+    await expect(lifecycle("Active", 3, 24)).rejects.toMatchObject({
+      code: "CATALOG_PERMISSION_DENIED",
+    });
   });
 });

@@ -19,8 +19,12 @@
  * (organization.store.publish), so a different person approves every change.
  * v9 (2026-10-14): dining.table.qr.manage (WP-2423 Q11): issue, print, replace and turn off table
  * QR codes. Owner and Store Manager hold it; Front of House does not.
+ * v10 (2026-10-14): catalog.sku.sold_out.mark (WP-2423 Q17): Kitchen and Front of House mark an item
+ * sold out for the rest of today and back in stock; offering items, longer sold-out marks, menus,
+ * prices and schedules stay with catalog.sku.availability.manage and the menu permissions. Brand
+ * templates keep the broader code and do not take this Store-floor code.
  */
-export const storePermissionCatalogVersion = 9 as const;
+export const storePermissionCatalogVersion = 10 as const;
 export type PermissionRisk = "Low" | "Medium" | "High";
 export interface StorePermissionDefinition {
   readonly code: string;
@@ -138,6 +142,12 @@ const catalog: readonly StorePermissionDefinition[] = Object.freeze([
           true,
         ] as const,
     ),
+    // v10 (WP-2423 Q17): floor staff mark an item sold out for today and back in stock.
+    [
+      "catalog.sku.sold_out.mark",
+      "Mark an item sold out for the rest of today and back in stock",
+      "Low",
+    ],
     ["catalog.option_set.submit", "Submit an Option Set for review", "Medium"],
     ["catalog.option_set.approve", "Approve an Option Set", "High"],
     ["catalog.option_set.publish", "Publish an Option Set release", "High"],
@@ -384,6 +394,8 @@ export const legacyPermissionReplacements: Readonly<Record<string, readonly stri
 
 export type StoreRoleTemplateCode =
   "owner" | "store-manager" | "front-of-house" | "kitchen" | "inventory-manager";
+/** v10: the Store-floor sold-out code; Brand templates hold the broader availability code instead. */
+const storeFloorOnly = new Set(["catalog.sku.sold_out.mark"]);
 const pick = (prefixes: readonly string[]) =>
   catalog
     .map((entry) => entry.code)
@@ -431,6 +443,7 @@ export const storeRoleTemplates: Readonly<Record<StoreRoleTemplateCode, readonly
       "catalog.menu.read",
       "catalog.product.availability.manage",
       "catalog.sku.availability.manage",
+      "catalog.sku.sold_out.mark",
       "catalog.product.suspend",
       "catalog.product.resume",
       "catalog.sku.suspend",
@@ -448,6 +461,8 @@ export const storeRoleTemplates: Readonly<Record<StoreRoleTemplateCode, readonly
       "dining.session.manage",
       "dining.item.serve",
       "inventory.waste.record",
+      // v10 (WP-2423 Q17): sold out for today and back in stock.
+      "catalog.sku.sold_out.mark",
       "task.read",
       "task.claim",
       "task.complete",
@@ -460,6 +475,8 @@ export const storeRoleTemplates: Readonly<Record<StoreRoleTemplateCode, readonly
       "kitchen.work_item.complete",
       "kitchen.exception.manage",
       "inventory.waste.record",
+      // v10 (WP-2423 Q17): sold out for today and back in stock.
+      "catalog.sku.sold_out.mark",
     ]),
     "inventory-manager": Object.freeze([
       "merchant.access",
@@ -496,12 +513,13 @@ export const storeRoleTemplateProfiles: Readonly<
   "front-of-house": {
     roleCode: "front_of_house",
     displayName: "Front of House",
-    description: "View and accept orders, staff-entered orders, pickup handoff and waste records",
+    description:
+      "View and accept orders, staff-entered orders, pickup handoff, waste records and items sold out today",
   },
   kitchen: {
     roleCode: "kitchen",
     displayName: "Kitchen",
-    description: "Kitchen display work items and kitchen exceptions",
+    description: "Kitchen display work items, kitchen exceptions and items sold out today",
   },
   "inventory-manager": {
     roleCode: "inventory_manager",
@@ -528,6 +546,8 @@ export function withLegacyEquivalents(catalogCodes: readonly string[]): readonly
   return Object.freeze([...codes].sort());
 }
 
+const pickBrand = (prefixes: readonly string[]) =>
+  pick(prefixes).filter((code) => !storeFloorOnly.has(code));
 export type BrandRoleTemplateCode =
   "brand-owner" | "recipe-developer" | "recipe-reviewer" | "menu-manager";
 /**
@@ -537,7 +557,7 @@ export type BrandRoleTemplateCode =
 export const brandRoleTemplates: Readonly<Record<BrandRoleTemplateCode, readonly string[]>> =
   Object.freeze({
     "brand-owner": Object.freeze(
-      pick([
+      pickBrand([
         "merchant.access",
         "organization.staff.",
         "organization.brand.manage",
@@ -570,7 +590,7 @@ export const brandRoleTemplates: Readonly<Record<BrandRoleTemplateCode, readonly
       "catalog.allergen.read",
     ]),
     "menu-manager": Object.freeze(
-      pick([
+      pickBrand([
         "merchant.access",
         "catalog.",
         "pricing.price_book.",

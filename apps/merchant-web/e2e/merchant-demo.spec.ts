@@ -130,11 +130,18 @@ test.describe("@production production demo exclusion", () => {
       await page.route("**/merchant/session", async (request) =>
         request.fulfill({ status: 401, contentType: "application/json", body: "{}" }),
       );
+      // WP-2423 Q18: a signed-out staff page asks where to sign in (production: secure sign-in).
+      await page.route("**/merchant/sign-in-entry", async (request) =>
+        request.fulfill({ json: { path: "/merchant/login?returnTo=/app", testOnly: false } }),
+      );
       await page.goto(route.path);
       await expect(page.getByRole("status", { name: "Local synthetic preview" })).toHaveCount(0);
       await expect(page.getByText(/Sign in required|unavailable/iu).first()).toBeVisible();
-      expect(violations).toHaveLength(2);
-      expect(violations).toEqual(
+      const boundary = violations.filter(
+        (violation) => violation !== "application request: GET /merchant/sign-in-entry",
+      );
+      expect(boundary).toHaveLength(2);
+      expect(boundary).toEqual(
         expect.arrayContaining([
           "application request: GET /merchant/session",
           "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)",

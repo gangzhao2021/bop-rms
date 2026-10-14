@@ -152,6 +152,7 @@ import {
   type KitchenQueueSearch,
   type KitchenWorkItemDetailView,
 } from "./kitchen-board.js";
+import { StaffSignInLink } from "./StaffSession.js";
 
 export type LoadState<T> =
   | { readonly kind: "Loading" }
@@ -519,6 +520,7 @@ export function KitchenBoardScreen({
   onSoundToggle,
   autoRefresh = false,
   stale,
+  soldOutHref,
 }: {
   readonly view: KitchenBoardView;
   readonly onSearch?: (search: KitchenQueueSearch | null) => void;
@@ -535,6 +537,8 @@ export function KitchenBoardScreen({
   readonly autoRefresh?: boolean;
   /** IDR-0039: the last re-read failed; the board shows the last loaded work, read-only. */
   readonly stale?: StaleRead | undefined;
+  /** WP-2423 Q17: where the cook marks an item sold out for today, when the role may. */
+  readonly soldOutHref?: string | undefined;
 }) {
   const location = useLocation();
   const restored = restoredQueueScope(location.state);
@@ -813,6 +817,11 @@ export function KitchenBoardScreen({
             </p>
           </div>
           <div className="kitchen-board-heading__actions">
+            {soldOutHref ? (
+              <a className="kitchen-sold-out-link" href={soldOutHref}>
+                Mark an item sold out
+              </a>
+            ) : null}
             {onSoundToggle ? (
               <button
                 type="button"
@@ -1114,6 +1123,8 @@ interface KitchenPageProps {
   readonly storeLabel?: string;
   readonly storeReference?: string;
   readonly navigation?: ReactNode;
+  /** WP-2423 Q17: the Item availability page, when the role may mark items sold out. */
+  readonly soldOutHref?: string | undefined;
 }
 function useClient({ client, csrf, storeLabel, storeReference }: KitchenPageProps) {
   return useMemo(
@@ -1273,6 +1284,7 @@ function KitchenBoardContent(props: KitchenPageProps) {
           onSoundToggle={toggleSound}
           autoRefresh
           stale={stale}
+          soldOutHref={props.soldOutHref}
         />
       ) : (
         <AppFrame
@@ -1376,6 +1388,8 @@ export function KitchenBoardPage(
     return (
       <StatePanel heading="Kitchen display signed out" status>
         <p>The next named operator must sign in before using this board.</p>
+        {/* WP-2423 Q18: the sign-in that works here (the labelled test sign-in in the pilot). */}
+        <StaffSignInLink label="Sign in to the kitchen display" />
       </StatePanel>
     );
   if (covered)

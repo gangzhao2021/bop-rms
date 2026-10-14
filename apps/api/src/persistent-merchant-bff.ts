@@ -37,6 +37,7 @@ import {
 import { createMerchantSessionSelection } from "./merchant-session-selection.js";
 import { createMerchantSelectedContext } from "./merchant-selected-context.js";
 import {
+  merchantNavigationActions,
   parseMerchantWorkspaceSnapshot,
   type MerchantBffService,
   type MerchantWorkspaceSnapshot,
@@ -318,8 +319,15 @@ export function createPersistentMerchantBffService(
         if (show) navigation.push(item);
         continue;
       }
-      if (item.permission === "merchant.access" || (await allowed(item.permission)))
+      if (item.permission === "merchant.access") {
         navigation.push(item);
+        continue;
+      }
+      for (const action of merchantNavigationActions(item))
+        if (await allowed(action)) {
+          navigation.push(item);
+          break;
+        }
     }
     if (currentBrandNavigation) {
       if (!hold) throw new Error("MERCHANT_BFF_UNAVAILABLE");
@@ -457,6 +465,7 @@ export function createPersistentMerchantBffService(
     start: (path) => base.start(path),
     callback: (input) => base.callback(input),
     authorize: (input) => base.authorize(input),
+    recordActivity: (input) => base.recordActivity(input),
     logout: (cookie) => base.logout(cookie),
     async bootstrap(cookie) {
       const bootstrap = await base.bootstrap(cookie);

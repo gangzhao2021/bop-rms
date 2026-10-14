@@ -1,6 +1,7 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import type { ReactNode } from "react";
 import type { MerchantWorkspaceSnapshot } from "./merchant-workspace.js";
+import { StaffSignInLink } from "./StaffSession.js";
 import { Freshness } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 
@@ -42,11 +43,8 @@ function StateView({ state }: { readonly state: Exclude<MerchantShellState, { ki
   return (
     <StatePanel heading={details[0]} tone={details[2]} status>
       <p>{details[1]}</p>
-      {state.kind === "SignedOut" ? (
-        <a className="shell-action" href="/merchant/login?returnTo=/app">
-          Sign in securely
-        </a>
-      ) : null}
+      {/* WP-2423 Q18: the sign-in that works here (the labelled test sign-in in the pilot). */}
+      {state.kind === "SignedOut" ? <StaffSignInLink /> : null}
     </StatePanel>
   );
 }

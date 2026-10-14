@@ -5927,3 +5927,128 @@ it("WP-2423 Q19: a refund read retries a transaction conflict and never calls it
   progress.mockRejectedValue(new Error("STORE_SERVICE_PERMISSION_DENIED"));
   expect((await send()).status).toBe(403);
 });
+
+async function serveSessionContinuity(
+  service: MerchantBffService,
+  signInEntry?: MerchantBffRouterOptions["signInEntry"],
+) {
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service,
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      ...(signInEntry ? { signInEntry } : {}),
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  return `http://127.0.0.1:${address.port}`;
+}
+
+describe("WP-2423 Q18 staff session continuity routes", () => {
+  const extended = createAuthenticationSession({
+    sessionReference: session.sessionReference,
+    actor: session.actor,
+    status: "Active",
+    policyCode: "WorkforceStandard",
+    maxActiveSessions: 5,
+    idleTimeoutMinutes: 30,
+    absoluteTimeoutMinutes: 720,
+    version: 1,
+    authenticatedAt: session.authenticatedAt,
+    createdAt: session.createdAt,
+    lastSeenAt: new Date(Date.parse(session.createdAt) + 20 * 60_000).toISOString(),
+    idleExpiresAt: new Date(Date.parse(session.createdAt) + 50 * 60_000).toISOString(),
+    absoluteExpiresAt: session.absoluteExpiresAt,
+    rotatedFromSessionReference: null,
+    revocationReason: null,
+    revokedAt: null,
+  });
+  const authorized = {
+    ...safeHeaders,
+    Cookie: `__Host-bop-merchant=${sessionCookie}`,
+    "X-BOP-CSRF": csrf,
+  };
+
+  it("records activity only through a same-origin CSRF POST and returns deadlines only", async () => {
+    const service = { ...fakeService(), recordActivity: vi.fn(async () => extended) };
+    const root = await serveSessionContinuity(service);
+    const response = await request(root, "/merchant/session/activity", {
+      method: "POST",
+      headers: authorized,
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toEqual([
+      "absoluteExpiresAt",
+      "idleExpiresAt",
+      "idleTimeoutMinutes",
+      "serverTime",
+    ]);
+    expect(body).toMatchObject({
+      idleExpiresAt: extended.idleExpiresAt,
+      absoluteExpiresAt: extended.absoluteExpiresAt,
+      idleTimeoutMinutes: 30,
+    });
+    expect(JSON.stringify(body)).not.toContain(session.sessionReference);
+    expect(service.recordActivity).toHaveBeenCalledWith({ sessionCookie, csrf });
+
+    const crossSite = await request(root, "/merchant/session/activity", {
+      method: "POST",
+      headers: { ...authorized, "Sec-Fetch-Site": "cross-site" },
+    });
+    expect(crossSite.status).toBe(403);
+    expect(service.recordActivity).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads deadlines without extending them and refuses an ended Session", async () => {
+    const service = { ...fakeService(), recordActivity: vi.fn(async () => extended) };
+    const root = await serveSessionContinuity(service);
+    const response = await request(root, "/merchant/session/expiry", { headers: authorized });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ idleExpiresAt: session.idleExpiresAt });
+    expect(service.recordActivity).not.toHaveBeenCalled();
+    vi.mocked(service.authorize).mockRejectedValueOnce(new Error("synthetic-expired"));
+    const ended = await request(root, "/merchant/session/expiry", { headers: authorized });
+    expect(ended.status).toBe(403);
+    expect(await ended.text()).toBe('{"error":"request_denied"}');
+  });
+
+  it("falls back to authorization where the store keeps a fixed deadline", async () => {
+    const service = fakeService();
+    const root = await serveSessionContinuity(service);
+    const response = await request(root, "/merchant/session/activity", {
+      method: "POST",
+      headers: authorized,
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ idleExpiresAt: session.idleExpiresAt });
+  });
+
+  it("names the production sign-in by default and the labelled pilot sign-in when configured", async () => {
+    const production = await serveSessionContinuity(fakeService());
+    const entry = await request(production, "/merchant/sign-in-entry", { headers: safeHeaders });
+    expect(entry.status).toBe(200);
+    expect(await entry.json()).toEqual({ path: "/merchant/login?returnTo=/app", testOnly: false });
+    const pilot = await serveSessionContinuity(fakeService(), {
+      path: "/internal-test/staff",
+      testOnly: true,
+    });
+    expect(
+      await (await request(pilot, "/merchant/sign-in-entry", { headers: safeHeaders })).json(),
+    ).toEqual({ path: "/internal-test/staff", testOnly: true });
+    const unsafe = await serveSessionContinuity(fakeService(), {
+      path: "//evil.invalid/login",
+      testOnly: true,
+    });
+    expect(
+      (await request(unsafe, "/merchant/sign-in-entry", { headers: safeHeaders })).status,
+    ).toBe(503);
+  });
+});

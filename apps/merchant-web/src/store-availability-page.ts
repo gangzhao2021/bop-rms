@@ -22,7 +22,12 @@ export interface StoreAvailabilityView {
   readonly sourceAsOf: string;
   readonly viewer: string;
   readonly timeZone: string;
-  readonly permissions: { readonly mayOffer: boolean; readonly mayMarkSoldOut: boolean };
+  readonly permissions: {
+    readonly mayOffer: boolean;
+    readonly mayMarkSoldOut: boolean;
+    /** WP-2423 Q17: false for floor staff, who mark items sold out for today only. */
+    readonly mayMarkUntilBack?: boolean;
+  };
   readonly items: readonly AvailabilityItem[];
 }
 export type AvailabilityCommand =
@@ -76,6 +81,38 @@ export function soldOutText(until: string | null, timeZone: string): string {
     day: "2-digit",
   }).format(end);
   return `Sold out through ${day} ${time}`;
+}
+/** What a viewer may do with one item (WP-2423 Q17: floor staff mark sold out for today only). */
+export type AvailabilityAction =
+  | "SoldOutToday"
+  | "SoldOutUntilBack"
+  | "BackInStock"
+  | "ManagerBringsBack"
+  | "Offer"
+  | "StopOffering";
+/** Kitchen and Front of House: sold out for today and back in stock, nothing else. */
+export function floorStaffOnly(permissions: StoreAvailabilityView["permissions"]): boolean {
+  return (
+    permissions.mayMarkSoldOut &&
+    !(permissions.mayMarkUntilBack ?? permissions.mayMarkSoldOut) &&
+    !permissions.mayOffer
+  );
+}
+export function availabilityActions(
+  item: Pick<AvailabilityItem, "status" | "soldOutUntil">,
+  permissions: StoreAvailabilityView["permissions"],
+): AvailabilityAction[] {
+  const untilBack = permissions.mayMarkUntilBack ?? permissions.mayMarkSoldOut;
+  const selling = item.status === "Available" || item.status === "Varies";
+  const actions: AvailabilityAction[] = [];
+  if (permissions.mayMarkSoldOut && selling) actions.push("SoldOutToday");
+  if (untilBack && selling) actions.push("SoldOutUntilBack");
+  if (permissions.mayMarkSoldOut && item.status === "SoldOut")
+    actions.push(!untilBack && item.soldOutUntil === null ? "ManagerBringsBack" : "BackInStock");
+  if (permissions.mayOffer && (item.status === "NotOffered" || item.status === "Unavailable"))
+    actions.push("Offer");
+  if (permissions.mayOffer && selling) actions.push("StopOffering");
+  return actions;
 }
 export const unavailableAvailabilityClient: AvailabilityClient = {
   load: async () => {

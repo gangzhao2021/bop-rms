@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  brandRoleTemplates,
   legacyPermissionReplacements,
   storePermissionCatalog,
   storePermissionCodes,
@@ -61,5 +62,25 @@ describe("DEC-PERM-CATALOG Store permission catalog", () => {
     const owner = storeRoleTemplateActions("owner");
     for (const action of ["store.service.approve", "store.service.publish"])
       expect(owner, action).toContain(action);
+  });
+  it("lets Kitchen and Front of House mark items sold out today without managing availability", () => {
+    for (const role of ["kitchen", "front-of-house"] as const) {
+      const actions = storeRoleTemplateActions(role);
+      expect(actions, role).toContain("catalog.sku.sold_out.mark");
+      for (const broader of [
+        "catalog.sku.availability.manage",
+        "catalog.product.availability.manage",
+        "catalog.sku.read",
+        "catalog.menu.update",
+        "pricing.price_book.update",
+        "organization.store.update",
+      ])
+        expect(actions, role + ":" + broader).not.toContain(broader);
+    }
+    for (const role of ["store-manager", "owner"] as const)
+      for (const code of ["catalog.sku.sold_out.mark", "catalog.sku.availability.manage"])
+        expect(storeRoleTemplateActions(role), role + ":" + code).toContain(code);
+    for (const [role, codes] of Object.entries(brandRoleTemplates))
+      expect(codes, role).not.toContain("catalog.sku.sold_out.mark");
   });
 });

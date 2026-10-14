@@ -32,11 +32,14 @@ export function WorkspaceLayout({
   path,
   storeLabel,
   children,
+  footer = null,
 }: {
   readonly items: readonly MerchantNavigationItem[];
   readonly path: string;
   readonly storeLabel: string;
   readonly children: ReactNode;
+  /** WP-2423 Q18: session actions (Switch staff) under the navigation. */
+  readonly footer?: ReactNode;
 }) {
   const current = currentNavigationItem(items, path);
   const links = (
@@ -79,8 +82,12 @@ export function WorkspaceLayout({
               ? ""
               : " · " + (items.find((item) => item.screenId === current)?.label ?? "")}
           </summary>
-          <div>{links}</div>
+          <div>
+            {links}
+            {footer}
+          </div>
         </details>
+        {footer === null ? null : <div className="workspace-sidebar__footer">{footer}</div>}
       </nav>
       <div className="workspace-content">
         <SkipLinkProvidedContext.Provider value={true}>{children}</SkipLinkProvidedContext.Provider>

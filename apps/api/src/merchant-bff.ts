@@ -372,6 +372,21 @@ const merchantNavigation = Object.freeze({
   "INV-WASTE-RECORD": ["/operations/inventory/waste", "inventory.waste.record"],
 } as const);
 
+/**
+ * WP-2423 Q17: further actions that also admit a navigation entry. Kitchen and Front of House reach
+ * Item availability with the today-only sold-out mark, without reading the Brand catalog.
+ */
+const navigationAlternatives: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  "CAT-AVAILABILITY": Object.freeze(["catalog.sku.sold_out.mark"]),
+});
+/** Actions any one of which admits a navigation entry: its own permission first. */
+export function merchantNavigationActions(item: {
+  readonly screenId: string;
+  readonly permission: string;
+}): readonly string[] {
+  return [item.permission, ...(navigationAlternatives[item.screenId] ?? [])];
+}
+
 export interface MerchantNavigationItem {
   readonly screenId:
     keyof typeof merchantNavigation | "STORE-SETUP" | "STORE-HOURS-SERVICE" | "ORG-BRAND-DETAIL";
@@ -404,6 +419,14 @@ export interface MerchantBffService {
     readonly csrf: unknown;
   }): Promise<AuthenticationSession>;
   logout(sessionCookie: unknown): Promise<BrowserCookieMutation>;
+  /**
+   * WP-2423 Q18: genuine staff activity slides the Session's idle deadline (bounded writes, never
+   * past the absolute deadline). Absent where the Session store keeps a fixed deadline.
+   */
+  recordActivity?(input: {
+    readonly sessionCookie: unknown;
+    readonly csrf: unknown;
+  }): Promise<AuthenticationSession>;
   switchStore(input: {
     readonly sessionCookie: unknown;
     readonly csrf: unknown;
@@ -631,6 +654,27 @@ export interface MerchantBffRouterOptions {
   readonly service: MerchantBffService;
   readonly exactOrigin: string;
   readonly acceptedHost: string;
+  /**
+   * WP-2423 Q18: where staff sign in. Production uses the Cognito sign-in (`/merchant/login`); the
+   * InternalTest pilot passes its TEST-ONLY staff sign-in page, labelled as such for staff.
+   */
+  readonly signInEntry?: { readonly path: string; readonly testOnly: boolean };
+}
+
+const defaultSignInEntry = Object.freeze({
+  path: "/merchant/login?returnTo=/app",
+  testOnly: false,
+});
+const signInPathPattern = /^\/(?!\/)[A-Za-z0-9/_?=&.-]{0,200}$/u;
+
+/** WP-2423 Q18: the deadlines staff see; never the Session reference or any credential. */
+function sessionDeadlines(session: AuthenticationSession) {
+  return {
+    idleExpiresAt: session.idleExpiresAt,
+    absoluteExpiresAt: session.absoluteExpiresAt,
+    idleTimeoutMinutes: session.policy.idleTimeoutMinutes,
+    serverTime: new Date().toISOString(),
+  };
 }
 
 const NO_STORE = "no-store";
@@ -1935,6 +1979,45 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         }
         denied(response);
       });
+  });
+
+  // WP-2423 Q18: where to sign in (public; no Session needed to find the sign-in page).
+  router.get("/sign-in-entry", safeRead(options), (_request, response) => {
+    const entry = options.signInEntry ?? defaultSignInEntry;
+    if (!signInPathPattern.test(entry.path) || typeof entry.testOnly !== "boolean") {
+      response.status(503).set("Cache-Control", NO_STORE).json({ error: "sign_in_unavailable" });
+      return;
+    }
+    response.set("Cache-Control", NO_STORE).json({ path: entry.path, testOnly: entry.testOnly });
+  });
+
+  // WP-2423 Q18: read the current deadlines without extending them (e.g. before warning staff).
+  router.get("/session/expiry", safeRead(options), (request, response) => {
+    void options.service
+      .authorize({
+        sessionCookie: cookie(request, "__Host-bop-merchant"),
+        csrf: request.header("x-bop-csrf"),
+      })
+      .then((session) => {
+        response.set("Cache-Control", NO_STORE).json(sessionDeadlines(session));
+      })
+      .catch(() => denied(response));
+  });
+
+  // WP-2423 Q18: genuine staff activity (user action, or a visible operational screen).
+  router.post("/session/activity", sameOriginMutation(options), (request, response) => {
+    const record = options.service.recordActivity;
+    const input = {
+      sessionCookie: cookie(request, "__Host-bop-merchant"),
+      csrf: request.header("x-bop-csrf"),
+    };
+    void (
+      record === undefined ? options.service.authorize(input) : record.call(options.service, input)
+    )
+      .then((session) => {
+        response.set("Cache-Control", NO_STORE).json(sessionDeadlines(session));
+      })
+      .catch(() => denied(response));
   });
 
   router.get("/service-control", safeRead(options), (request, response) => {

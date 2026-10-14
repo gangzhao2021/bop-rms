@@ -49,7 +49,9 @@ describe("HOME-OVERVIEW Merchant shell", () => {
       <MerchantShell state={{ kind: "SignedOut" }} onSwitchStore={vi.fn()} />,
     );
     expect(html).toContain("Sign in required");
-    expect(html).toContain("/merchant/login?returnTo=/app");
+    // WP-2423 Q18: the sign-in path comes from the server (no hard-coded, possibly dead, link).
+    expect(html).toContain("Finding the sign-in page");
+    expect(html).not.toContain("/merchant/login");
     expect(html).toContain('href="#main-content"');
     expect(html).not.toContain("synthetic-provider-error");
   });

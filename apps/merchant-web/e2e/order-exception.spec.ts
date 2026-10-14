@@ -55,7 +55,9 @@ test("@production exception read recovers and clears old data on refresh denial"
   let response: "denied" | "stale" | "empty" = "denied";
   const mutations: string[] = [];
   page.on("request", (request) => {
-    if (request.method() !== "GET") mutations.push(request.method());
+    // WP-2423 Q18: the staff Session activity report is not a business mutation.
+    if (request.method() !== "GET" && !request.url().endsWith("/merchant/session/activity"))
+      mutations.push(request.method());
   });
   await page.route("**/merchant/session", (route) =>
     route.fulfill({

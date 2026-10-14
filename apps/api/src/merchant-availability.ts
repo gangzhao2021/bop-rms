@@ -11,6 +11,9 @@ import {
   parseCatalogInstant,
   parseCatalogReference,
   resolveStoreAvailability,
+  availabilityPermission,
+  soldOutMarkPermission,
+  soldOutReasonCode,
   type AvailabilityRuleAggregate,
   type ProductLifecycleTransaction,
 } from "@rms/catalog";
@@ -27,6 +30,9 @@ import { retryTransactionConflict } from "./transaction-conflict-retry.js";
  * an item at the Store (or stopping) is a Brand decision; marking an item sold out (until the end of
  * the business day or until it is back) and back in stock is also open to the Store's own manager.
  * Both use `catalog.sku.availability.manage`; rules are recorded by the Catalog availability service.
+ * WP-2423 Q17: Kitchen and Front of House notice first, so `catalog.sku.sold_out.mark` lets them mark
+ * an item sold out for the rest of the business day and bring today's marks back; offering items and
+ * "until further notice" marks stay with `catalog.sku.availability.manage`.
  */
 export class MerchantAvailabilityError extends Error {
   constructor(readonly code: "PermissionDenied" | "NotFound" | "Conflict" | "Invalid") {
@@ -86,7 +92,7 @@ const contexts = [
 ] as const;
 export type ItemAvailabilityStatus =
   "Available" | "SoldOut" | "Unavailable" | "NotOffered" | "Varies";
-const soldOutReason = "SOLD_OUT";
+const soldOutReason = soldOutReasonCode;
 const offeredReason = "STORE_OFFERED";
 const effectiveAt = (rule: AvailabilityRuleAggregate, at: string) =>
   rule.lifecycle === "Active" &&
@@ -161,7 +167,8 @@ export function createMerchantAvailability(options: {
     options.authentication
       .authorize({ sessionCookie: input.sessionCookie, csrf: input.csrf })
       .catch(() => fail("PermissionDenied"));
-  const action = "catalog.sku.availability.manage";
+  const action = availabilityPermission;
+  const markAction = soldOutMarkPermission;
   async function scopeFor(tx: Tx, sessionCookie: unknown, sessionReference: string) {
     const scope = await resolveScope(tx, sessionCookie, sessionReference).catch(() =>
       fail("PermissionDenied"),
@@ -170,16 +177,20 @@ export function createMerchantAvailability(options: {
       decision?.effect === "Allow" ? decision : null;
     const brandDecision = async () => allow(await scope.authorizeAction(action));
     const storeDecision = async () => allow(await scope.authorizeStoreAction(action));
+    const markDecision = async () => allow(await scope.authorizeStoreAction(markAction));
+    const mayOffer = (await brandDecision()) !== null;
+    const mayMarkUntilBack = mayOffer || (await storeDecision()) !== null;
+    const mayMarkToday = !mayMarkUntilBack && (await markDecision()) !== null;
     const mayRead =
+      mayMarkToday ||
       (await scope.authorizeAction("catalog.sku.read"))?.effect === "Allow" ||
       (await scope.authorizeStoreAction("catalog.sku.read"))?.effect === "Allow";
     if (!mayRead) fail("PermissionDenied");
-    const mayOffer = (await brandDecision()) !== null;
-    const mayMarkSoldOut = mayOffer || (await storeDecision()) !== null;
     return {
       scope,
       brandDecision,
       storeDecision,
+      markDecision,
       owner: {
         tenantReference: String(scope.tenantReference),
         brandReference: String(scope.context.brand.brandReference),
@@ -187,7 +198,11 @@ export function createMerchantAvailability(options: {
       },
       timeZone: scope.selectedStoreTimeZone,
       actor: String(scope.actorReference),
-      permissions: { mayOffer, mayMarkSoldOut },
+      permissions: {
+        mayOffer,
+        mayMarkSoldOut: mayMarkUntilBack || mayMarkToday,
+        mayMarkUntilBack,
+      },
     };
   }
   type Scope = Awaited<ReturnType<typeof scopeFor>>;
@@ -234,6 +249,13 @@ export function createMerchantAvailability(options: {
         const at = options.persistence.now();
         const brandWide = body.action === "Offer" || body.action === "StopOffering";
         if (brandWide ? !s.permissions.mayOffer : !s.permissions.mayMarkSoldOut)
+          fail("PermissionDenied");
+        // Q17: the today-only mark never sets "until further notice".
+        if (
+          body.action === "SoldOut" &&
+          body.until === "UntilBack" &&
+          !s.permissions.mayMarkUntilBack
+        )
           fail("PermissionDenied");
         const sku = (await listBrandSkuChoices(ptx(tx), s.owner)).find(
           (candidate) => candidate.skuReference === body.skuReference && candidate.active,
@@ -322,6 +344,12 @@ export function createMerchantAvailability(options: {
                 rule.lifecycle === "Active" &&
                 (rule.effectiveUntil === null || Date.parse(at) < Date.parse(rule.effectiveUntil)),
             );
+            // Q17: a manager's "until further notice" mark is brought back by a manager.
+            if (
+              !s.permissions.mayMarkUntilBack &&
+              marks.some((rule) => rule.effectiveUntil === null)
+            )
+              fail("PermissionDenied");
             for (const rule of marks) await setLifecycle(rule, "Inactive");
           }
           const after = (await listStoreAvailabilityRules(ptx(tx), s.owner)).filter(
@@ -340,12 +368,15 @@ export function createMerchantAvailability(options: {
     );
   };
 
-  /** The Catalog availability service with the Brand authority, or the Store's for sold-out marks. */
+  /**
+   * The Catalog availability service with the Brand authority, or the Store's for sold-out marks
+   * (the Store Manager's availability permission, else the floor staff's today-only sold-out mark).
+   */
   function availabilityService(tx: Tx, s: Scope, operation: string, storeAllowed: boolean) {
     const authority = async () => {
       const brand = await s.brandDecision();
       if (brand !== null) return { decision: brand, context: s.scope.context, store: null };
-      const store = storeAllowed ? await s.storeDecision() : null;
+      const store = storeAllowed ? ((await s.storeDecision()) ?? (await s.markDecision())) : null;
       return store === null
         ? null
         : { decision: store, context: s.scope.storeContext, store: s.owner.storeReference };

@@ -53,6 +53,16 @@ export interface RevokeBrowserSessionCommand {
   readonly observedAt: CanonicalInstant;
 }
 
+/**
+ * WP-2423 Q18: genuine staff activity on an authorized Session. The store extends the idle
+ * deadline (bounded by the absolute deadline) at most once per write interval.
+ */
+export interface RecordBrowserSessionActivityCommand {
+  readonly selectorHash: SelectorHash;
+  readonly expectedSessionReference: SessionReference;
+  readonly observedAt: CanonicalInstant;
+}
+
 export interface BrowserSessionStorePort {
   createAuthorizationTransaction(transaction: AuthorizationTransaction): Promise<void>;
   consumeAuthorizationTransaction(
@@ -62,4 +72,6 @@ export interface BrowserSessionStorePort {
   resolveSession(selectorHash: SelectorHash): Promise<BrowserSessionRecord | null>;
   rotateSession(command: RotateBrowserSessionCommand): Promise<BrowserSessionRecord>;
   revokeSession(command: RevokeBrowserSessionCommand): Promise<AuthenticationSession | null>;
+  /** Optional: stores without sliding idle expiry keep the deadline fixed at creation. */
+  recordActivity?(command: RecordBrowserSessionActivityCommand): Promise<AuthenticationSession>;
 }

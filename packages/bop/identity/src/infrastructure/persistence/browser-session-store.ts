@@ -5,6 +5,7 @@ import {
   createAuthenticationSession,
   parseSessionReference,
   parseSessionVersion,
+  recordSessionActivity,
   sessionPolicies,
   type AuthenticationSession,
   type SessionPolicyCode,
@@ -96,6 +97,7 @@ export function createPostgresBrowserSessionStore(options: Options): BrowserSess
     resolveSession: store.resolveSession,
     rotateSession: store.rotateSession,
     revokeSession: store.revokeSession,
+    recordActivity: store.recordActivity,
   });
 }
 export function createPostgresPlatformBrowserSessionStore(
@@ -612,6 +614,41 @@ function createStore(options: Options, profile: Profile) {
         await options.onSessionCreated?.(tx, record);
         await platformFinal(tx, record, observedAt, originalQuery);
         return record;
+      });
+    },
+    /**
+     * WP-2423 Q18: slides the idle deadline of a usable Workforce Session. The row is locked, the
+     * Actor is re-read, and the update only matches the exact Active row that was read, so a
+     * concurrent revocation wins and an expired or revoked Session is never revived. Version and
+     * status are untouched: activity is not a lifecycle change (logout/revocation keep their
+     * expected-version checks). At most one write per interval per Session.
+     */
+    async recordActivity(
+      command: Parameters<NonNullable<BrowserSessionStorePort["recordActivity"]>>[0],
+    ) {
+      if (strong) return denied();
+      return safe(async (tx) => {
+        const observedAt = parseCanonicalInstant(command.observedAt);
+        const current = await load(tx, command.selectorHash, observedAt, true);
+        if (!current || current.session.sessionReference !== command.expectedSessionReference)
+          return denied();
+        const next = recordSessionActivity(current.session, observedAt);
+        if (next === null) return current.session;
+        const updated = rows(
+          await tx.query(
+            "UPDATE bop_identity.authentication_session SET last_seen_at=$2,idle_expires_at=$3 WHERE session_id=$1 AND status='Active' AND version=$4 AND last_seen_at=$5 AND idle_expires_at=$6 AND idle_expires_at>$2 AND absolute_expires_at>$2 AND $3<=absolute_expires_at RETURNING session_id",
+            [
+              next.sessionReference,
+              next.lastSeenAt,
+              next.idleExpiresAt,
+              current.session.version,
+              current.session.lastSeenAt,
+              current.session.idleExpiresAt,
+            ],
+          ),
+        );
+        if (updated.length !== 1) return denied();
+        return next;
       });
     },
     async revokeSession(command: Parameters<BrowserSessionStorePort["revokeSession"]>[0]) {

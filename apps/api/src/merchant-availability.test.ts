@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseAvailabilityRule } from "@rms/catalog";
+import { merchantNavigationActions } from "./merchant-bff.js";
 import {
   itemAvailability,
   MerchantAvailabilityError,
@@ -73,5 +74,13 @@ describe("WP-2423 item availability", () => {
     ).toBe("Available");
     const pickupOnly = rule(12, { orderTypeCodes: ["PICKUP"] });
     expect(itemAvailability([pickupOnly], scope, id(3), at).status).toBe("Varies");
+  });
+  it("admits Item availability for the floor staff's sold-out mark (WP-2423 Q17)", () => {
+    expect(
+      merchantNavigationActions({ screenId: "CAT-AVAILABILITY", permission: "catalog.sku.read" }),
+    ).toEqual(["catalog.sku.read", "catalog.sku.sold_out.mark"]);
+    expect(
+      merchantNavigationActions({ screenId: "CAT-MENU-LIST", permission: "catalog.menu.read" }),
+    ).toEqual(["catalog.menu.read"]);
   });
 });

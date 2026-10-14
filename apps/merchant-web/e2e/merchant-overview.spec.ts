@@ -228,6 +228,18 @@ test("@production Home reads only the summaries the staff member's screens permi
       },
     }),
   );
+  // WP-2423 Q18: the staff Session activity report (not a summary read).
+  await page.route("**/merchant/session/activity", (route) =>
+    route.fulfill({
+      headers: { "cache-control": "no-store" },
+      json: {
+        idleExpiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+        absoluteExpiresAt: new Date(Date.now() + 12 * 60 * 60_000).toISOString(),
+        idleTimeoutMinutes: 30,
+        serverTime: new Date().toISOString(),
+      },
+    }),
+  );
   const requested: string[] = [];
   for (const path of [
     "**/merchant/orders*",

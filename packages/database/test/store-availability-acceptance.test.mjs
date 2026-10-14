@@ -27,6 +27,7 @@ it("manages which items a Store sells with Brand and Store authority", async () 
       owner = id(4),
       manager = id(5),
       cashier = id(6),
+      cook = id(13),
       sku = id(12),
       at = "2026-09-20T00:00:00.000Z",
       names = JSON.stringify({ "en-CA": "Mocha" });
@@ -76,8 +77,9 @@ it("manages which items a Store sells with Brand and Store authority", async () 
         brandReference,
         storeReference,
         policyReference: id(300),
-        grants: { [owner]: manage, [manager]: [], [cashier]: [] },
-        storeGrants: { [manager]: manage, [cashier]: [] },
+        grants: { [owner]: manage, [manager]: [], [cashier]: [], [cook]: [] },
+        // WP-2423 Q17: the Kitchen and Front of House templates hold only the today-only mark.
+        storeGrants: { [manager]: manage, [cashier]: [], [cook]: ["catalog.sku.sold_out.mark"] },
       });
       const availability = createMerchantAvailability({
         persistence,
@@ -110,6 +112,48 @@ it("manages which items a Store sells with Brand and Store authority", async () 
       const offer = { action: "Offer", operationReference: next(), skuReference: sku };
       assert.equal((await call(offer)).item.status, "Available");
       assert.equal((await call(offer)).status, "Unchanged");
+      // WP-2423 Q17: the cook marks it sold out for the rest of today and back, and nothing else.
+      scope.as(cook);
+      const cookView = await availability.query({ sessionCookie: "s", csrf: "c" });
+      assert.deepEqual(cookView.permissions, {
+        mayOffer: false,
+        mayMarkSoldOut: true,
+        mayMarkUntilBack: false,
+      });
+      for (const body of [
+        { action: "StopOffering", operationReference: next(), skuReference: sku },
+        { action: "Offer", operationReference: next(), skuReference: sku },
+        { action: "SoldOut", operationReference: next(), skuReference: sku, until: "UntilBack" },
+      ])
+        await assert.rejects(call(body), { code: "PermissionDenied" });
+      assert.deepEqual(
+        (
+          await call({
+            action: "SoldOut",
+            operationReference: next(),
+            skuReference: sku,
+            until: "EndOfDay",
+          })
+        ).item,
+        { status: "SoldOut", soldOutUntil: "2026-10-08T04:00:00.000Z" },
+      );
+      assert.equal(
+        (await call({ action: "BackInStock", operationReference: next(), skuReference: sku })).item
+          .status,
+        "Available",
+      );
+      const cookAudits = (
+        await admin.query(
+          "SELECT action_code,store_id::text store FROM platform_audit.audit_record WHERE actor_reference=$1 ORDER BY occurred_at,audit_id",
+          [cook],
+        )
+      ).rows;
+      // Create and activate share one instant; compare as a set.
+      assert.deepEqual(cookAudits.map((a) => a.action_code + "@" + a.store).sort(), [
+        "CATALOG_AVAILABILITY_CHANGELIFECYCLE@" + storeReference,
+        "CATALOG_AVAILABILITY_CHANGELIFECYCLE@" + storeReference,
+        "CATALOG_AVAILABILITY_CREATE@" + storeReference,
+      ]);
       // The Store Manager marks it sold out for the rest of the business day, then back in stock.
       scope.as(manager);
       const soldOut = await call({
@@ -143,6 +187,13 @@ it("manages which items a Store sells with Brand and Store authority", async () 
         { status: (await status()).status, until: (await status()).soldOutUntil },
         { status: "SoldOut", until: null },
       );
+      // The cook cannot bring back a manager's "until further notice" mark.
+      scope.as(cook);
+      await assert.rejects(
+        call({ action: "BackInStock", operationReference: next(), skuReference: sku }),
+        { code: "PermissionDenied" },
+      );
+      scope.as(manager);
       await call({ action: "BackInStock", operationReference: next(), skuReference: sku });
       scope.as(owner);
       assert.equal(
@@ -166,6 +217,7 @@ it("manages which items a Store sells with Brand and Store authority", async () 
           ["STORE_OFFERED", "Available", 100, "Inactive", storeReference],
           ["SOLD_OUT", "Unavailable", 900, "Inactive", storeReference],
           ["SOLD_OUT", "Unavailable", 900, "Inactive", storeReference],
+          ["SOLD_OUT", "Unavailable", 900, "Inactive", storeReference],
         ],
       );
       const audits = (
@@ -173,20 +225,20 @@ it("manages which items a Store sells with Brand and Store authority", async () 
           "SELECT action_code,store_id::text store FROM platform_audit.audit_record WHERE action_code LIKE 'CATALOG_AVAILABILITY_%' ORDER BY occurred_at,audit_id",
         )
       ).rows;
-      assert.equal(audits.length, 9);
-      assert.equal(audits.filter((a) => a.store === storeReference).length, 6);
+      assert.equal(audits.length, 12);
+      assert.equal(audits.filter((a) => a.store === storeReference).length, 9);
       assert.equal(
         (
           await admin.query(
             "SELECT count(*)::int n FROM platform_eventing.outbox_event WHERE event_type LIKE 'AvailabilityRule%'",
           )
         ).rows[0].n,
-        9,
+        12,
       );
       const snapshots = await admin.query(
         "SELECT count(*)::int n FROM rms_catalog.availability_rule_operation_snapshot",
       );
-      assert.equal(snapshots.rows[0].n, 9);
+      assert.equal(snapshots.rows[0].n, 12);
       await admin.query(
         "UPDATE rms_catalog.availability_rule_operation_snapshot SET record_json='{}'",
       );
@@ -197,7 +249,7 @@ it("manages which items a Store sells with Brand and Store authority", async () 
             "SELECT count(*)::int n FROM rms_catalog.availability_rule_operation_snapshot WHERE record_json<>'{}'",
           )
         ).rows[0].n,
-        9,
+        12,
       );
     } finally {
       await admin.query("DROP OWNED BY " + role).catch(() => undefined);

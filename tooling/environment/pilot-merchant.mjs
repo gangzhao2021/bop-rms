@@ -953,6 +953,9 @@ export async function createInternalMerchant(
     pickupNotCollected,
     orderAcceptance,
     bff: {
+      // WP-2423 Q18: TEST-ONLY staff sign-in page of the InternalTest pilot (the Cognito sign-in is
+      // an external gate); staff see it labelled as test sign-in.
+      signInEntry: { path: "/internal-test/staff", testOnly: true },
       // WP-2423 Q4: busy mode — a manager pauses and resumes taking new online orders.
       ...(() => {
         const control = createMerchantServiceControl({

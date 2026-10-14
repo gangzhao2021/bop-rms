@@ -19,6 +19,8 @@ import {
 } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router";
 import { usesWorkspaceLayout, WorkspaceLayout } from "./WorkspaceLayout.js";
+import { StaffSessionGuard, StaffSignedOutPanel, StaffSwitchButton } from "./StaffSession.js";
+import { isOperationalScreen } from "./staff-session.js";
 import { StoreTimeZoneContext } from "./StoreTime.js";
 import { MerchantShell } from "./MerchantShell.js";
 import { StoreOverview } from "./StoreOverview.js";
@@ -1306,6 +1308,10 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                   csrf={state.csrf}
                   storeReference={state.workspace.selectedScope.storeReference}
                   storeLabel={state.workspace.selectedScope.storeLabel}
+                  soldOutHref={
+                    state.workspace.navigation.find((item) => item.screenId === "CAT-AVAILABILITY")
+                      ?.href
+                  }
                   navigation={state.workspace.navigation.map((item) => (
                     <a
                       key={item.screenId}
@@ -1479,6 +1485,8 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
       </Routes>
     </Suspense>
   );
+  // WP-2423 Q18: a staff page opened without a Session offers the sign-in that works here.
+  const staffPage = isOperationalScreen(pathname) || pathname.startsWith("/app/operations/");
   return (
     <StoreTimeZoneContext.Provider
       value={state.kind === "Ready" ? state.workspace.selectedScope.timeZone : undefined}
@@ -1488,12 +1496,26 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           items={state.workspace.navigation}
           path={pathname}
           storeLabel={state.workspace.selectedScope.storeLabel}
+          footer={demo === null ? <StaffSwitchButton /> : null}
         >
           {routes}
         </WorkspaceLayout>
+      ) : state.kind === "SignedOut" && demo === null && staffPage ? (
+        <AppFrame title="Operations" description="Store workspace">
+          <StaffSignedOutPanel />
+        </AppFrame>
       ) : (
         routes
       )}
+      {/* WP-2423 Q18: keep the Session alive while staff work; warn before it ends. */}
+      {state.kind === "Ready" && demo === null ? (
+        <StaffSessionGuard
+          key={state.csrf}
+          csrf={state.csrf}
+          path={pathname}
+          timeZone={state.workspace.selectedScope.timeZone}
+        />
+      ) : null}
     </StoreTimeZoneContext.Provider>
   );
 }

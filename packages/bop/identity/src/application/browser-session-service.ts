@@ -313,6 +313,29 @@ export class BrowserSessionService {
     return record.session;
   }
 
+  /**
+   * WP-2423 Q18: genuine staff activity (a user action, or an operational screen the browser
+   * reports as visible) on an authorized Session. Returns the Session with its current deadlines;
+   * the idle deadline slides at most once per write interval and never past the absolute deadline.
+   */
+  async recordActivity(input: {
+    readonly sessionCookie: unknown;
+    readonly csrf: unknown;
+  }): Promise<AuthenticationSession> {
+    const session = await this.authorize(input);
+    const record = this.#store.recordActivity;
+    if (record === undefined) return session;
+    const updated = await record.call(this.#store, {
+      selectorHash: this.#hasher.hash(parseRawBrowserCredential(input.sessionCookie)),
+      expectedSessionReference: session.sessionReference,
+      observedAt: this.#observedAt(),
+    });
+    if (updated.sessionReference !== session.sessionReference) {
+      throw new BrowserSessionError("BROWSER_SESSION_DENIED");
+    }
+    return updated;
+  }
+
   async rotate(
     sessionCookieInput: unknown,
     reason:

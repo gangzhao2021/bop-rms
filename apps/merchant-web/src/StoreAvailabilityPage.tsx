@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { newOperationReference } from "./RoleAdministrationPages.js";
 import {
   AvailabilityPageError,
+  availabilityActions,
+  floorStaffOnly,
   parseStoreAvailabilityView,
   soldOutText,
   unavailableAvailabilityClient,
@@ -18,7 +20,7 @@ import {
 const copy: Record<AvailabilityErrorCode | "Loading", string> = {
   Loading: "Loading item availability…",
   PermissionDenied:
-    "You do not have permission for this. Offering items is a Brand decision; Store managers can mark items sold out.",
+    "You do not have permission for this. Offering items is a Brand decision; kitchen and front-of-house staff can mark items sold out for today, and a manager can mark them sold out until further notice.",
   NotFound: "This item is no longer sold by the Brand.",
   Conflict:
     "The item changed since you opened the page, or is not offered here. Refresh and check.",
@@ -74,6 +76,14 @@ export function StoreAvailabilityPage({
       </StatePanel>
     );
   const view = state.view;
+  // WP-2423 Q17: floor staff (Kitchen, Front of House) see only items sold here.
+  const floorOnly = floorStaffOnly(view.permissions);
+  const items = floorOnly
+    ? view.items.filter(
+        (item) =>
+          item.status === "Available" || item.status === "Varies" || item.status === "SoldOut",
+      )
+    : view.items;
   const send = async (fresh: AvailabilityCommand, done: string) => {
     if (!client.command) return;
     const command =
@@ -114,71 +124,56 @@ export function StoreAvailabilityPage({
       skuReference: item.skuReference,
       until,
     });
-    const buttons = [];
-    if (
-      view.permissions.mayMarkSoldOut &&
-      (item.status === "Available" || item.status === "Varies")
-    )
-      buttons.push(
-        <button
-          key="eod"
-          type="button"
-          disabled={busy}
-          onClick={() => void send(soldOut("EndOfDay"), `${label(item)} is sold out for today.`)}
-        >
-          Sold out today
-        </button>,
-        <button
-          key="back"
-          type="button"
-          disabled={busy}
-          onClick={() =>
-            void send(soldOut("UntilBack"), `${label(item)} is sold out until you bring it back.`)
-          }
-        >
-          Sold out until further notice
-        </button>,
-      );
-    if (view.permissions.mayMarkSoldOut && item.status === "SoldOut")
-      buttons.push(
-        <button
-          key="instock"
-          type="button"
-          disabled={busy}
-          onClick={() => void send(command("BackInStock"), `${label(item)} is back in stock.`)}
-        >
-          Back in stock
-        </button>,
-      );
-    if (
-      view.permissions.mayOffer &&
-      (item.status === "NotOffered" || item.status === "Unavailable")
-    )
-      buttons.push(
-        <button
-          key="offer"
-          type="button"
-          disabled={busy}
-          onClick={() =>
-            void send(command("Offer"), `${label(item)} is now offered at this Store.`)
-          }
-        >
-          Offer at this Store
-        </button>,
-      );
-    if (view.permissions.mayOffer && (item.status === "Available" || item.status === "Varies"))
-      buttons.push(
-        <button
-          key="stop"
-          type="button"
-          disabled={busy}
-          onClick={() =>
-            void send(command("StopOffering"), `${label(item)} is no longer offered at this Store.`)
-          }
-        >
-          Stop offering
-        </button>,
-      );
+    const button = (key: string, text: string, fresh: AvailabilityCommand, done: string) => (
+      <button key={key} type="button" disabled={busy} onClick={() => void send(fresh, done)}>
+        {text}
+      </button>
+    );
+    const buttons = availabilityActions(item, view.permissions).map((action) => {
+      switch (action) {
+        case "SoldOutToday":
+          return button(
+            "eod",
+            "Sold out today",
+            soldOut("EndOfDay"),
+            `${label(item)} is sold out for today.`,
+          );
+        case "SoldOutUntilBack":
+          return button(
+            "back",
+            "Sold out until further notice",
+            soldOut("UntilBack"),
+            `${label(item)} is sold out until you bring it back.`,
+          );
+        case "BackInStock":
+          return button(
+            "instock",
+            "Back in stock",
+            command("BackInStock"),
+            `${label(item)} is back in stock.`,
+          );
+        case "ManagerBringsBack":
+          return (
+            <span key="manager" className="availability-note">
+              A manager marked this sold out until further notice. Ask a manager to bring it back.
+            </span>
+          );
+        case "Offer":
+          return button(
+            "offer",
+            "Offer at this Store",
+            command("Offer"),
+            `${label(item)} is now offered at this Store.`,
+          );
+        case "StopOffering":
+          return button(
+            "stop",
+            "Stop offering",
+            command("StopOffering"),
+            `${label(item)} is no longer offered at this Store.`,
+          );
+      }
+    });
     return buttons;
   };
   return (
@@ -187,11 +182,19 @@ export function StoreAvailabilityPage({
         <div>
           <p className="bop-eyebrow">Item availability · Store</p>
           <h2>Item availability</h2>
-          <p>
-            Customers can order an item on a published menu only where it is offered and not sold
-            out; ingredient stock is checked again when they order. Source as of{" "}
-            <SourceTime instant={view.sourceAsOf} />
-          </p>
+          {floorOnly ? (
+            <p>
+              Ran out of something? Mark it sold out and customers can no longer order it. It comes
+              back by itself when today's business day ends, or when you mark it back in stock.
+              Source as of <SourceTime instant={view.sourceAsOf} />
+            </p>
+          ) : (
+            <p>
+              Customers can order an item on a published menu only where it is offered and not sold
+              out; ingredient stock is checked again when they order. Source as of{" "}
+              <SourceTime instant={view.sourceAsOf} />
+            </p>
+          )}
         </div>
       </header>
       {message ? (
@@ -203,25 +206,29 @@ export function StoreAvailabilityPage({
           <p>{message.text}</p>
         </StatePanel>
       ) : null}
-      {view.items.length === 0 ? (
+      {items.length === 0 ? (
         <StatePanel heading="No items" status>
-          <p>The Brand has no active items yet. Create products under Products.</p>
+          <p>
+            {floorOnly
+              ? "No items are sold at this Store right now."
+              : "The Brand has no active items yet. Create products under Products."}
+          </p>
         </StatePanel>
       ) : (
         <table>
           <thead>
             <tr>
               <th>Item</th>
-              <th>Code</th>
+              {floorOnly ? null : <th>Code</th>}
               <th>Status</th>
               <th aria-label="Actions" />
             </tr>
           </thead>
           <tbody>
-            {view.items.map((item) => (
+            {items.map((item) => (
               <tr key={item.skuReference}>
                 <td>{label(item)}</td>
-                <td data-label="Code">{item.skuCode}</td>
+                {floorOnly ? null : <td data-label="Code">{item.skuCode}</td>}
                 <td data-label="Status">
                   {item.status === "SoldOut"
                     ? soldOutText(item.soldOutUntil, view.timeZone)

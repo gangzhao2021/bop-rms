@@ -1,0 +1,311 @@
+import { StatePanel } from "@bop-rms/ui";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { storeTime } from "./StoreTime.js";
+import {
+  createStaffSessionClient,
+  isOperationalScreen,
+  remaining,
+  sessionNotice,
+  shouldReportActivity,
+  type SessionDeadlines,
+  type SessionRead,
+  type SignInEntry,
+  type StaffSessionClient,
+} from "./staff-session.js";
+
+/** WP-2423 Q18: the sign-in staff actually use here (the labelled test sign-in in the pilot). */
+export function StaffSignInLink({
+  client,
+  label = "Sign in",
+}: {
+  readonly client?: StaffSessionClient;
+  readonly label?: string;
+}) {
+  const source = useMemo(() => client ?? createStaffSessionClient(), [client]);
+  const [entry, setEntry] = useState<SignInEntry | "Loading" | "Unavailable">("Loading");
+  const load = useCallback(() => {
+    setEntry("Loading");
+    source.signInEntry().then(setEntry, () => setEntry("Unavailable"));
+  }, [source]);
+  useEffect(load, [load]);
+  if (entry === "Loading") return <p className="staff-session__hint">Finding the sign-in page…</p>;
+  if (entry === "Unavailable")
+    return (
+      <p className="staff-session__hint" role="alert">
+        The sign-in page could not be reached.{" "}
+        <button type="button" onClick={load}>
+          Try again
+        </button>
+      </p>
+    );
+  return (
+    <p className="staff-session__sign-in">
+      <a className="shell-action" href={entry.path}>
+        {label}
+      </a>
+      {entry.testOnly ? (
+        <span className="staff-session__test-only">
+          <strong>TEST-ONLY</strong> internal pilot sign-in. A live store signs in with each staff
+          member’s own account.
+        </span>
+      ) : null}
+    </p>
+  );
+}
+
+/** WP-2423 Q18: shown wherever a staff page needs a Session and there is none. */
+export function StaffSignedOutPanel({
+  client,
+  heading = "Sign in required",
+  message = "Sign in to open your Store workspace.",
+}: {
+  readonly client?: StaffSessionClient;
+  readonly heading?: string;
+  readonly message?: string;
+}) {
+  return (
+    <StatePanel heading={heading} tone="neutral" status>
+      <p>{message}</p>
+      <StaffSignInLink {...(client ? { client } : {})} />
+    </StatePanel>
+  );
+}
+
+/**
+ * WP-2423 Q18: "Switch staff" on a shared tablet — ends this staff member's Session and opens the
+ * sign-in so the next person signs in as themselves. Nothing of the previous Session stays usable.
+ */
+export function StaffSwitchButton({ client }: { readonly client?: StaffSessionClient }) {
+  const source = useMemo(() => client ?? createStaffSessionClient(), [client]);
+  const [state, setState] = useState<"Idle" | "Working" | "Failed">("Idle");
+  return (
+    <div className="staff-session__switch">
+      <button
+        type="button"
+        disabled={state === "Working"}
+        onClick={() => {
+          setState("Working");
+          void (async () => {
+            try {
+              await source.signOut();
+              const entry = await source.signInEntry();
+              window.location.assign(entry.path);
+            } catch {
+              setState("Failed");
+            }
+          })();
+        }}
+      >
+        {state === "Working" ? "Signing out…" : "Switch staff"}
+      </button>
+      {state === "Failed" ? (
+        <p role="alert" className="staff-session__hint">
+          Sign-out did not finish. Check the connection and try again.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function useNow(fast: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), fast ? 1_000 : 5_000);
+    return () => clearInterval(timer);
+  }, [fast]);
+  return now;
+}
+
+/**
+ * WP-2423 Q18: keeps the staff Session alive while staff work, warns before it ends (idle or the
+ * 12-hour limit), and covers the screen with a working sign-in once it has ended.
+ */
+export function StaffSessionGuard({
+  csrf,
+  path,
+  timeZone,
+  client,
+}: {
+  readonly csrf: string;
+  readonly path: string;
+  readonly timeZone: string | undefined;
+  readonly client?: StaffSessionClient;
+}) {
+  const source = useMemo(() => client ?? createStaffSessionClient(), [client]);
+  const [current, setCurrent] = useState<SessionDeadlines | null>(null);
+  const [ended, setEnded] = useState<"Idle" | "Absolute" | "SignedOut" | null>(null);
+  const [staying, setStaying] = useState(false);
+  const lastInput = useRef(Date.now());
+  const lastReport = useRef(Number.NEGATIVE_INFINITY);
+  const lastVerify = useRef(Number.NEGATIVE_INFINITY);
+  const inFlight = useRef(false);
+  const verifying = useRef(false);
+  const verifiedEnd = useRef(false);
+  const operational = isOperationalScreen(path);
+  const notice = current === null ? { kind: "None" as const } : sessionNotice(current, Date.now());
+  const now = useNow(notice.kind !== "None");
+  const dialog = useRef<HTMLHeadingElement>(null);
+
+  const apply = useCallback((read: SessionRead) => {
+    if (read === "Ended") {
+      setEnded("SignedOut");
+      return;
+    }
+    setCurrent(read);
+  }, []);
+  const report = useCallback(
+    async (force = false) => {
+      if (inFlight.current) return;
+      const at = Date.now();
+      if (
+        !force &&
+        !shouldReportActivity({
+          visible: document.visibilityState === "visible",
+          operational,
+          lastInputAt: lastInput.current,
+          lastReportAt: lastReport.current,
+          now: at,
+        })
+      )
+        return;
+      inFlight.current = true;
+      lastReport.current = at;
+      try {
+        apply(await source.activity(csrf));
+      } catch {
+        // Offline or unavailable: keep the last known deadlines; warnings still follow the clock.
+      } finally {
+        inFlight.current = false;
+      }
+    },
+    [apply, csrf, operational, source],
+  );
+
+  // Opening a staff page is activity; staff input marks the screen as used.
+  useEffect(() => {
+    void report(true);
+    const used = () => {
+      lastInput.current = Date.now();
+    };
+    const shown = () => {
+      if (document.visibilityState !== "visible") return;
+      lastInput.current = Date.now();
+      void report();
+    };
+    const options = { capture: true, passive: true } as const;
+    window.addEventListener("pointerdown", used, options);
+    window.addEventListener("keydown", used, options);
+    window.addEventListener("touchstart", used, options);
+    document.addEventListener("visibilitychange", shown);
+    return () => {
+      window.removeEventListener("pointerdown", used, options);
+      window.removeEventListener("keydown", used, options);
+      window.removeEventListener("touchstart", used, options);
+      document.removeEventListener("visibilitychange", shown);
+    };
+  }, [report]);
+
+  // Each tick: report activity if due. Before warning or ending, re-read the deadlines once (another
+  // tab may have extended them); re-read at most every 30 s while a warning is shown.
+  useEffect(() => {
+    if (ended !== null) return;
+    void report();
+    if (current === null) return;
+    const local = sessionNotice(current, now);
+    if (local.kind === "None" || verifying.current) return;
+    const due =
+      now - lastVerify.current >= 30_000 || (local.kind === "Ended" && !verifiedEnd.current);
+    if (!due) return;
+    verifying.current = true;
+    lastVerify.current = now;
+    verifiedEnd.current = local.kind === "Ended";
+    void source
+      .expiry(csrf)
+      .then(
+        (read) => {
+          if (read === "Ended") {
+            setEnded(local.kind === "Ended" ? local.reason : "SignedOut");
+            return;
+          }
+          const fresh = sessionNotice(read, Date.now());
+          if (fresh.kind !== "Ended") verifiedEnd.current = false;
+          setCurrent(read);
+          if (fresh.kind === "Ended") setEnded(fresh.reason);
+        },
+        () => {
+          // Unreachable server: the clock still decides when the Session has ended.
+          if (local.kind === "Ended") setEnded(local.reason);
+        },
+      )
+      .finally(() => {
+        verifying.current = false;
+      });
+  }, [csrf, current, ended, now, report, source]);
+
+  useEffect(() => {
+    if (ended !== null) dialog.current?.focus();
+  }, [ended]);
+
+  if (ended !== null)
+    return (
+      <div className="staff-session__cover">
+        <section
+          className="staff-session__dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="staff-session-ended"
+        >
+          <h2 id="staff-session-ended" tabIndex={-1} ref={dialog}>
+            You’ve been signed out
+          </h2>
+          <p>
+            {ended === "Idle"
+              ? `For security, this screen signs out after ${current?.idleTimeoutMinutes ?? 30} minutes without use.`
+              : ended === "Absolute"
+                ? "A sign-in lasts at most 12 hours. Sign in again to keep working."
+                : "This sign-in has ended (signed out here or on another screen)."}
+          </p>
+          <StaffSignInLink client={source} label="Sign in again" />
+        </section>
+      </div>
+    );
+  if (current === null || notice.kind === "None" || notice.kind === "Ended") return null;
+  const at = storeTime(notice.at, timeZone);
+  return (
+    <section
+      className="staff-session__notice"
+      role="alert"
+      aria-label={notice.kind === "IdleWarning" ? "Signing out soon" : "Sign-in ending"}
+    >
+      {notice.kind === "IdleWarning" ? (
+        <>
+          <p>
+            <strong>Still there?</strong> This screen signs out at {at} (in{" "}
+            {remaining(notice.at, current, now)}) because it hasn’t been used.
+          </p>
+          <button
+            type="button"
+            className="shell-action"
+            disabled={staying}
+            onClick={() => {
+              setStaying(true);
+              lastInput.current = Date.now();
+              void report(true).finally(() => setStaying(false));
+            }}
+          >
+            {staying ? "Staying signed in…" : "Stay signed in"}
+          </button>
+        </>
+      ) : (
+        <>
+          <p>
+            <strong>Sign in again at {at}.</strong> A sign-in lasts at most 12 hours, so this one
+            ends at {at} (in {remaining(notice.at, current, now)}). Finish what you’re doing;
+            staying active does not extend it.
+          </p>
+          <StaffSwitchButton client={source} />
+        </>
+      )}
+    </section>
+  );
+}

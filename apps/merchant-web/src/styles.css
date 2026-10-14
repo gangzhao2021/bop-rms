@@ -1470,6 +1470,7 @@
   gap: 8px;
 }
 .kitchen-board-heading__actions button,
+.kitchen-board-heading__actions a,
 .kitchen-work-item-screen__heading-actions button,
 .kitchen-work-item-screen__heading-actions a,
 .kitchen-filter-toggle,
@@ -1490,10 +1491,12 @@
   font: inherit;
   font-weight: 500;
 }
+.kitchen-board-heading__actions a,
 .kitchen-work-item-screen__heading-actions a {
   text-decoration: none;
 }
 .kitchen-board-heading__actions button:hover:not(:disabled),
+.kitchen-board-heading__actions a:hover,
 .kitchen-work-item-screen__heading-actions button:hover:not(:disabled),
 .kitchen-work-item-screen__heading-actions a:hover,
 .kitchen-filter-toggle:hover {
@@ -7684,4 +7687,109 @@ body:has(.product-complete-draft) .bop-shell__header,
   padding-left: 8px;
   border-left: 3px solid var(--bop-color-text-default);
   font-size: 13px;
+}
+
+/* WP-2423 Q17: why floor staff cannot bring back a manager's "until further notice" mark. */
+.availability-note {
+  display: inline-block;
+  max-width: 36ch;
+  color: var(--bop-color-text-muted);
+}
+
+/* WP-2423 Q18: staff session continuity — warning bar, signed-out cover, switch staff. */
+.staff-session__notice {
+  position: fixed;
+  right: var(--bop-space-4);
+  bottom: var(--bop-space-4);
+  left: var(--bop-space-4);
+  z-index: 60;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--bop-space-3) var(--bop-space-4);
+  max-width: 48rem;
+  margin-inline: auto;
+  padding: var(--bop-space-4);
+  border: 1px solid var(--bop-color-border-default);
+  border-left: 6px solid var(--bop-color-warning);
+  border-radius: var(--bop-radius-card);
+  background: var(--bop-color-surface-default);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 16%);
+}
+.staff-session__notice p {
+  flex: 1 1 18rem;
+  margin: 0;
+}
+.staff-session__notice .shell-action,
+.staff-session__switch button {
+  min-height: 44px;
+}
+.staff-session__cover {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: var(--bop-space-4);
+  background: var(--bop-color-surface-raised);
+}
+.staff-session__dialog {
+  display: grid;
+  gap: var(--bop-space-3);
+  width: min(32rem, 100%);
+  padding: var(--bop-space-6);
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-card);
+  background: var(--bop-color-surface-default);
+}
+.staff-session__dialog h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+}
+.staff-session__dialog p {
+  margin: 0;
+}
+.staff-session__sign-in {
+  display: grid;
+  justify-items: start;
+  gap: var(--bop-space-2);
+}
+.staff-session__test-only,
+.staff-session__hint {
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+}
+.staff-session__test-only strong {
+  font-family: var(--bop-font-mono);
+  letter-spacing: 0.04em;
+}
+.workspace-sidebar__footer {
+  margin-top: 16px;
+  padding: 12px 8px 0;
+  border-top: 1px solid var(--bop-color-border-default);
+}
+.staff-session__switch {
+  display: grid;
+  gap: 4px;
+}
+.staff-session__switch button {
+  padding: 6px 12px;
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-size: 14px;
+  text-align: start;
+  cursor: pointer;
+}
+@media (max-width: 64rem) {
+  .workspace-sidebar__footer {
+    display: none;
+  }
+  .workspace-sidebar__compact .staff-session__switch {
+    margin-top: 8px;
+  }
 }
