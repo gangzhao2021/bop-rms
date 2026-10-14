@@ -323,9 +323,10 @@ test("@production Pickup paging, current scope and permission recovery", async (
   denied = false;
   await page.keyboard.press("Enter");
   await expect(heading("Order " + first)).toBeVisible();
+  // Another Store's answer is a scope loss: the queue clears rather than going stale (IDR-0039).
   foreign = true;
   await refresh.click();
-  await expect(heading("Pickups unavailable")).toBeVisible();
+  await expect(heading("Permission denied")).toBeVisible();
   await expect(page.locator("article")).toHaveCount(0);
   expect(
     await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length })),

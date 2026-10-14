@@ -220,7 +220,7 @@ it("rejects a response for a different selected Store", async () => {
   f.fetcher.mockResolvedValue(
     response({ ...metadata, storeReference: id(98), items: [item()], nextCursor: null }),
   );
-  await expect(f.client.loadQueue()).rejects.toMatchObject({ code: "Unavailable" });
+  await expect(f.client.loadQueue()).rejects.toMatchObject({ code: "PermissionDenied" });
 });
 it("WP-2423 Q3: groups the menu's declared allergens and fails closed on malformed ones", async () => {
   const f = setup();

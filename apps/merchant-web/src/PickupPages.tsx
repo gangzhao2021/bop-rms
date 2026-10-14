@@ -8,6 +8,13 @@ import { useCallback, useEffect, useState, useMemo, useRef, type RefObject } fro
 import { createPickupClient } from "./pickup-client.js";
 import { Link } from "react-router";
 import {
+  replacesLastRead,
+  StaleReadNotice,
+  useStaleRetry,
+  type ReadFailure,
+  type StaleRead,
+} from "./stale-read.js";
+import {
   parsePickupQueueView,
   PickupClientError,
   unavailablePickupClient,
@@ -17,17 +24,15 @@ import {
   type PickupWorkstation,
 } from "./pickup.js";
 type State =
+  | { readonly kind: "Loading" }
+  | { readonly kind: ReadFailure }
   | {
-      readonly kind:
-        | "Loading"
-        | "PermissionDenied"
-        | "NotFound"
-        | "Offline"
-        | "Conflict"
-        | "CommandFailed"
-        | "Unavailable";
-    }
-  | { readonly kind: "Found"; readonly view: PickupQueueView };
+      readonly kind: "Found";
+      readonly view: PickupQueueView;
+      readonly loadedAt: string;
+      /** IDR-0039: the re-read failed; `view` is the last loaded queue, shown read-only. */
+      readonly stale?: StaleRead;
+    };
 export function PickupStatePanel({ state }: { readonly state: Exclude<State["kind"], "Found"> }) {
   const copy = {
     Loading: ["Loading", "Loading pickups…"],
@@ -183,8 +188,10 @@ export function PickupQueueScreen({
   onCompletedChange,
   refreshButtonRef,
   proofContext,
+  stale,
 }: {
   readonly view: PickupQueueView;
+  readonly stale?: StaleRead | undefined;
   readonly proofContext?: { csrf: string; storeReference: string } | undefined;
   readonly onRefresh?: () => void;
   readonly onNext?: () => void;
@@ -197,7 +204,7 @@ export function PickupQueueScreen({
   const [claimFilter, setClaimFilter] = useState("All");
   const [exceptionFilter, setExceptionFilter] = useState("All");
   const [orderQuery, setOrderQuery] = useState("");
-  const readOnly = view.freshnessStatus !== "Fresh";
+  const readOnly = view.freshnessStatus !== "Fresh" || stale !== undefined;
   const query = orderQuery.trim().toLocaleLowerCase();
   const items = view.items.filter(
     (item) =>
@@ -218,7 +225,7 @@ export function PickupQueueScreen({
       className="pickup-queue"
       title="Pickup"
       meta={view.storeLabel}
-      status={<Freshness status={view.freshnessStatus} at={view.projectedAt} />}
+      status={<Freshness status={stale ? "Stale" : view.freshnessStatus} at={view.projectedAt} />}
       actions={
         <button ref={refreshButtonRef} disabled={!onRefresh} onClick={onRefresh}>
           Refresh
@@ -226,7 +233,9 @@ export function PickupQueueScreen({
       }
     >
       <>
-        {readOnly ? (
+        {stale ? (
+          <StaleReadNotice stale={stale} />
+        ) : readOnly ? (
           <StatePanel heading="Data may be out of date" tone="offline" status>
             <p>Refresh before confirming a handoff.</p>
           </StatePanel>
@@ -363,40 +372,75 @@ export function PickupQueuePage(props: {
         .then(parsePickupQueueView),
     [client, cursor, includeCompleted],
   );
-  const key = JSON.stringify([cursor, includeCompleted, revision]);
-  const [stored, setStored] = useState<{ key: string; load: typeof load; state: State }>({
-    key,
-    load,
-    state: { kind: "Loading" },
-  });
-  const state =
-    stored.key === key && stored.load === load ? stored.state : { kind: "Loading" as const };
+  const queueKey = JSON.stringify([cursor, includeCompleted]);
+  const key = queueKey + ":" + String(revision);
+  const [stored, setStored] = useState<{
+    key: string;
+    queueKey: string;
+    load: typeof load;
+    state: State;
+    failures: number;
+  }>({ key, queueKey, load, state: { kind: "Loading" }, failures: 0 });
+  const current = stored.key === key && stored.load === load;
+  // A plain refresh keeps the queue on screen while it re-reads; another page or filter does not.
+  const sameQueue = stored.queueKey === queueKey && stored.load === load;
+  const state: State =
+    current || (sameQueue && stored.state.kind === "Found") ? stored.state : { kind: "Loading" };
   const refreshButtonRef = useRef<HTMLButtonElement>(null),
     focusAfterLoad = useRef(false);
   useEffect(() => {
     let active = true;
     void load()
       .then((view) => {
-        if (active) setStored({ key, load, state: { kind: "Found", view } });
-      })
-      .catch((error) => {
         if (active)
           setStored({
             key,
+            queueKey,
             load,
-            state: { kind: error instanceof PickupClientError ? error.code : "Unavailable" },
+            failures: 0,
+            state: { kind: "Found", view, loadedAt: new Date().toISOString() },
           });
+      })
+      .catch((error) => {
+        if (!active) return;
+        const reason: ReadFailure = error instanceof PickupClientError ? error.code : "Unavailable";
+        setStored((previous) => {
+          const failures = previous.failures + 1;
+          // IDR-0039: the same queue stays visible, read-only, unless access itself was lost.
+          const keep =
+            previous.state.kind === "Found" &&
+            previous.load === load &&
+            previous.queueKey === queueKey &&
+            !replacesLastRead(reason);
+          return {
+            key,
+            queueKey,
+            load,
+            failures,
+            state:
+              keep && previous.state.kind === "Found"
+                ? {
+                    kind: "Found",
+                    view: previous.state.view,
+                    loadedAt: previous.state.loadedAt,
+                    stale: { reason, lastLoadedAt: previous.state.loadedAt, attempts: failures },
+                  }
+                : { kind: reason },
+          };
+        });
       });
     return () => {
       active = false;
     };
-  }, [key, load]);
+  }, [key, queueKey, load]);
+  const stale = state.kind === "Found" ? state.stale : undefined;
+  useStaleRetry(stale?.attempts ?? null, () => setRevision((value) => value + 1));
   useEffect(() => {
-    if (state.kind !== "Loading" && focusAfterLoad.current) {
+    if (current && state.kind !== "Loading" && focusAfterLoad.current) {
       refreshButtonRef.current?.focus();
       focusAfterLoad.current = false;
     }
-  }, [state.kind, key]);
+  }, [current, state.kind, key]);
   const refresh = () => {
     focusAfterLoad.current = true;
     setRevision((value) => value + 1);
@@ -429,6 +473,7 @@ export function PickupQueuePage(props: {
       }
       onRefresh={refresh}
       refreshButtonRef={refreshButtonRef}
+      stale={stale}
       includeCompleted={includeCompleted}
       onCompletedChange={(value) => {
         focusAfterLoad.current = true;

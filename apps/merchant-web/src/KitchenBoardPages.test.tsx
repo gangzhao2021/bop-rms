@@ -13,7 +13,11 @@ import {
   playKitchenChime,
   groupKitchenItemsByOrder,
   kitchenOrderLabel,
+  failedLoadState,
+  retryAttempts,
+  type LoadState,
 } from "./KitchenBoardPages.js";
+import { staleRetryDelayMs } from "./stale-read.js";
 import { kitchenBoardFixture, kitchenItemFixture } from "./kitchen-board.fixtures.js";
 import { parseKitchenBoardView, parseKitchenWorkItemDetailView } from "./kitchen-board.js";
 describe("WP-1804 Kitchen Board screens", () => {
@@ -541,5 +545,103 @@ describe("WP-2423 Q2 kitchen order context", () => {
     expect(kitchenOrderLabel({ ...item, orderLabel: null } as never)).toBe(
       "Order details unavailable",
     );
+  });
+});
+
+describe("IDR-0039 kitchen stale read-only mode", () => {
+  const view = parseKitchenBoardView({
+    ...kitchenBoardFixture(),
+    items: [
+      {
+        ...kitchenItemFixture(),
+        execution: {
+          orderItemReference: "018f0f58-767a-7f3b-a1d0-000000000433",
+          stationReference: "018f0f58-767a-7f3b-a1d0-000000000431",
+          ticketVersion: "1",
+          workItemVersion: "1",
+          acceptedAt: null,
+          readyAt: null,
+        },
+      },
+    ],
+  });
+  const found: LoadState<typeof view> = {
+    kind: "Found",
+    view,
+    loadedAt: "2026-08-12T15:12:30.000Z",
+  };
+  it("keeps the last tickets on a lost connection and replaces them on a denial", () => {
+    for (const reason of ["Offline", "Unavailable"] as const) {
+      const stale = failedLoadState(found, reason, 1, true);
+      expect(stale).toEqual({
+        kind: "Found",
+        view,
+        loadedAt: found.loadedAt,
+        stale: { reason, lastLoadedAt: found.loadedAt, attempts: 1 },
+      });
+      expect(retryAttempts(stale)).toBe(1);
+      // A further failure keeps the same data and counts up for the backoff.
+      expect(retryAttempts(failedLoadState(stale, reason, 2, true))).toBe(2);
+    }
+    for (const reason of ["PermissionDenied", "NotFound"] as const) {
+      const replaced = failedLoadState(found, reason, 1, true);
+      expect(replaced).toEqual({ kind: reason, attempts: 1 });
+      expect(retryAttempts(replaced)).toBeNull();
+    }
+    // Screens that do not opt in (work item detail) still replace their data.
+    expect(failedLoadState(found, "Offline", 1, false)).toEqual({ kind: "Offline", attempts: 1 });
+    // A first read that never succeeded keeps retrying too.
+    expect(retryAttempts(failedLoadState({ kind: "Loading" }, "Offline", 3, true))).toBe(3);
+    expect(retryAttempts(found)).toBeNull();
+    expect(retryAttempts({ kind: "Loading" })).toBeNull();
+  });
+  it("retries with backoff from 5 s up to every 30 s", () => {
+    expect([1, 2, 3, 4, 5, 9].map(staleRetryDelayMs)).toEqual([
+      5_000, 10_000, 20_000, 30_000, 30_000, 30_000,
+    ]);
+  });
+  it("shows the last tickets read-only with the time of the last update", () => {
+    const live = renderToStaticMarkup(
+      <MemoryRouter>
+        <KitchenBoardScreen
+          view={view}
+          onAction={() => undefined}
+          actionsBlocked={false}
+          autoRefresh
+        />
+      </MemoryRouter>,
+    );
+    expect(live).toContain("<button>Accept</button>");
+    expect(live).not.toContain("Read-only until reconnected");
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <KitchenBoardScreen
+          view={view}
+          onAction={() => undefined}
+          actionsBlocked={false}
+          autoRefresh
+          stale={{ reason: "Offline", lastLoadedAt: found.loadedAt, attempts: 1 }}
+        />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("Mushroom rice bowl");
+    expect(html).toContain("Read-only until reconnected");
+    expect(html).toContain(
+      'Offline — showing the last update from <time dateTime="2026-08-12T15:12:30.000Z">15:12 UTC</time>. Actions are paused until the connection returns.',
+    );
+    expect(html).toContain("Trying again automatically.");
+    expect(html).toContain('<button disabled="">Accept</button>');
+    expect(html).toContain("Data may be out of date");
+    expect(html).not.toContain("Auto-refresh every 10 s");
+    expect(html).not.toContain("Board locked — read-only");
+    const lost = renderToStaticMarkup(
+      <MemoryRouter>
+        <KitchenBoardScreen
+          view={view}
+          stale={{ reason: "Unavailable", lastLoadedAt: found.loadedAt, attempts: 2 }}
+        />
+      </MemoryRouter>,
+    );
+    expect(lost).toContain("Connection lost — showing the last update from");
   });
 });

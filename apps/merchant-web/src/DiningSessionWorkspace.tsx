@@ -7,6 +7,7 @@ import {
   type StaffDiningTable,
 } from "./dining-session-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
+import { StaleReadNotice, useStaleRetry, type StaleRead } from "./stale-read.js";
 type Operation = ReturnType<ReturnType<typeof createDiningSessionClient>["prepareStart"]>;
 type AvailabilityOperation = ReturnType<
   ReturnType<typeof createDiningSessionClient>["prepareAvailability"]
@@ -69,6 +70,9 @@ export function DiningSessionWorkspace({
   const [search, setSearch] = useState("");
   const [areaFilter, setAreaFilter] = useState("All");
   const [stateFilter, setStateFilter] = useState("All");
+  // IDR-0039: a failed refresh keeps the last loaded tables on screen, read-only, and retries.
+  const [stale, setStale] = useState<StaleRead | null>(null);
+  const loadedAt = useRef<string | null>(null);
   const locked = state !== "Idle" || hostLocked;
   const load = async (more = false) => {
     if ((pending.current && !pending.current.signal.aborted) || state === "Unknown" || hostLocked)
@@ -90,6 +94,8 @@ export function DiningSessionWorkspace({
         controller.signal,
       );
       if (!controller.signal.aborted) {
+        loadedAt.current = new Date().toISOString();
+        setStale(null);
         setTables((prior) => (more ? [...prior, ...result.items] : result.items));
         setNext(result.next);
         setCanOperateTables(result.canOperateTables);
@@ -98,14 +104,26 @@ export function DiningSessionWorkspace({
       }
     } catch (error) {
       if (!controller.signal.aborted) {
-        setTables([]);
-        setNext(null);
-        setCanOperateTables(false);
-        setMessage(
-          error instanceof DiningSessionClientError && error.code === "Denied"
-            ? "Your current permissions do not allow table operations."
-            : "Tables unavailable. Check your connection and refresh.",
-        );
+        const denied = error instanceof DiningSessionClientError && error.code === "Denied";
+        const lastLoadedAt = loadedAt.current;
+        if (!denied && lastLoadedAt !== null && tables.length > 0) {
+          setStale((prior) => ({
+            reason: "Unavailable",
+            lastLoadedAt,
+            attempts: (prior?.attempts ?? 0) + 1,
+          }));
+        } else {
+          loadedAt.current = null;
+          setStale(null);
+          setTables([]);
+          setNext(null);
+          setCanOperateTables(false);
+          setMessage(
+            denied
+              ? "Your current permissions do not allow table operations."
+              : "Tables unavailable. Check your connection and refresh.",
+          );
+        }
       }
     } finally {
       if (pending.current === controller) {
@@ -116,6 +134,7 @@ export function DiningSessionWorkspace({
   };
   const loadRef = useRef(load);
   loadRef.current = load;
+  useStaleRetry(stale?.attempts ?? null, () => void loadRef.current());
   useEffect(() => {
     void loadRef.current();
     return () => {
@@ -292,7 +311,7 @@ export function DiningSessionWorkspace({
               Refresh tables
             </button>
             {next ? (
-              <button disabled={locked} onClick={() => void load(true)}>
+              <button disabled={locked || stale !== null} onClick={() => void load(true)}>
                 Load more tables
               </button>
             ) : null}
@@ -338,6 +357,7 @@ export function DiningSessionWorkspace({
             </label>
           </div>
         </section>
+        {stale ? <StaleReadNotice stale={stale} /> : null}
         <div className="dining-floor-layout">
           <section className="dining-floor-board" aria-label="Dining tables by area">
             {visibleAreas.length === 0 ? (
@@ -391,7 +411,7 @@ export function DiningSessionWorkspace({
                             </p>
                           ) : null}
                           <button
-                            disabled={locked}
+                            disabled={locked || stale !== null}
                             aria-pressed={selected?.tableReference === table.tableReference}
                             onClick={() => {
                               setSelected(table);

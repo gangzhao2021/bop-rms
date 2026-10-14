@@ -115,3 +115,29 @@ it("WP-2423: offers closing as not collected only after the one-hour pickup hold
   expect(render("2026-08-12T14:00:00.000Z")).toContain("not refunded automatically");
   expect(render("2026-08-12T14:50:00.000Z")).not.toContain("Mark not collected");
 });
+it("IDR-0039: keeps the last pickups on a failed refresh, read-only with no handoff", () => {
+  const fixture = pickupQueueFixture();
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <PickupQueueScreen
+        view={parsePickupQueueView({
+          ...fixture,
+          workstation: {
+            deviceReference: "01900000-0000-7000-8000-000000000008",
+            pickupLocationReference: "01900000-0000-7000-8000-000000000009",
+          },
+          items: fixture.items.map((item) => ({ ...item, proofReadiness: "Expired" })),
+        })}
+        proofContext={{
+          csrf: "A".repeat(43),
+          storeReference: "01900000-0000-7000-8000-000000000004",
+        }}
+        stale={{ reason: "Offline", lastLoadedAt: "2026-08-12T15:12:30.000Z", attempts: 1 }}
+      />
+    </MemoryRouter>,
+  );
+  expect(html).toContain("ORD-1001");
+  expect(html).toContain("Offline — showing the last update from");
+  expect(html).toContain("Actions are paused until the connection returns.");
+  expect(html).not.toContain("Hand over after checking in person");
+});

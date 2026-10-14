@@ -66,9 +66,12 @@ export function createPickupClient(options: {
         const text = await response.text();
         if (controller.signal.aborted || text.length > 1048576) return fail();
         const result = record(JSON.parse(text));
+        // An answer for another Store means the selected scope no longer holds: never keep showing
+        // the last queue as if only the connection were lost (IDR-0039 stale mode).
+        if (result.storeReference !== options.storeReference)
+          throw new PickupClientError("PermissionDenied");
         if (
           result.source !== "CurrentFulfillment" ||
-          result.storeReference !== options.storeReference ||
           !Array.isArray(result.items) ||
           result.items.length > 50 ||
           !("nextAfterFulfillmentReference" in result)

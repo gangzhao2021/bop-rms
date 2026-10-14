@@ -1178,3 +1178,132 @@ for (const supported of [true, false]) {
       );
   });
 }
+
+// IDR-0039 (Handoff §87.11.1): a lost connection keeps the last tickets visible, read-only, and
+// the board recovers on its own; nothing is queued while offline.
+test("@production Kitchen keeps the last tickets read-only offline and recovers on its own", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const scope = {
+    brandLabel: "Training Brand",
+    storeLabel: "Training Store",
+    storeReference: id(99),
+  };
+  const headers = { "cache-control": "no-store" };
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-09-19",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "KIT-KITCHEN-QUEUE",
+              label: "Kitchen",
+              href: "/operations/kitchen",
+              permission: "kitchen.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  const item = {
+    workItemReference: id(1),
+    ticketReference: id(2),
+    orderReference: id(3),
+    orderItemReference: id(4),
+    stationReference: id(5),
+    localizedDisplayNames: { "en-CA": "Synthetic rice" },
+    orderLabel: { orderNumber: "14", orderType: "DineIn", tableLabel: "T4" },
+    customerNote: null,
+    allergens: { status: "Unavailable" },
+    selectedOptions: [],
+    status: "Queued",
+    requiredQuantity: 1,
+    completedQuantity: 0,
+    workItemCreatedAt: new Date(Date.now() - 2 * 60_000).toISOString(),
+    acceptedAt: null,
+    orderItemReadyAt: null,
+    ticketAggregateVersion: "1",
+    workItemVersion: "1",
+  };
+  let offline = false,
+    reads = 0,
+    commands = 0;
+  await page.route("**/merchant/kitchen/query", (route) => {
+    reads++;
+    if (offline) return route.abort("internetdisconnected");
+    return route.fulfill({
+      headers,
+      json: {
+        storeReference: scope.storeReference,
+        operatorStatus: "Named",
+        projectionName: "kitchen_work_queue_v1",
+        projectionVersion: 1,
+        projectionGenerationReference: id(6),
+        projectedAt: new Date().toISOString(),
+        partial: false,
+        stale: false,
+        freshnessStatus: "Fresh",
+        items: [item],
+        nextCursor: null,
+      },
+    });
+  });
+  await page.route("**/merchant/kitchen/work", (route) => {
+    commands++;
+    return route.abort("internetdisconnected");
+  });
+  const accept = page.getByRole("button", { name: "Accept", exact: true });
+  const notice = page.getByRole("status").filter({ hasText: "Read-only until reconnected" });
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 1024, height: 768 },
+    { width: 390, height: 844 },
+  ]) {
+    offline = false;
+    await page.setViewportSize(viewport);
+    await page.goto("/operations/kitchen");
+    await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
+    await expect(accept).toBeEnabled();
+    await expect(page.getByText("Auto-refresh every 10 s", { exact: true })).toBeVisible();
+
+    // The connection drops: the next read fails, the tickets stay, every action is paused.
+    offline = true;
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText(
+      /Offline — showing the last update from \d\d:\d\d.*\. Actions are paused until the connection returns\./u,
+    );
+    await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
+    await expect(accept).toBeDisabled();
+    await expect(page.getByText(/^Data may be out of date · \d\d:\d\d/u)).toBeVisible();
+    await expect(page.getByText("Auto-refresh every 10 s", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("You’re offline", { exact: true })).toHaveCount(0);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      `no horizontal overflow at ${viewport.width}`,
+    ).toBe(true);
+
+    // It keeps trying on its own (first retry after 5 s) and returns to normal once a read succeeds.
+    const before = reads;
+    await expect.poll(() => reads, { timeout: 8_000 }).toBeGreaterThan(before);
+    await expect(notice).toBeVisible();
+    offline = false;
+    await expect(notice).toHaveCount(0, { timeout: 15_000 });
+    await expect(accept).toBeEnabled();
+    await expect(page.getByText("Auto-refresh every 10 s", { exact: true })).toBeVisible();
+  }
+  expect(commands).toBe(0);
+});

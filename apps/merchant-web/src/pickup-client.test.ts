@@ -84,8 +84,12 @@ it("requests one scoped page and preserves an advancing empty page after concurr
 });
 it("rejects another Store, unsafe versions, duplicate records and nonadvancing cursor", async () => {
   const f = setup();
+  // Another Store's answer is a scope loss, so the screen clears instead of keeping stale data.
+  f.fetcher.mockResolvedValueOnce(response({ ...page(), storeReference: id(98) }));
+  await expect(
+    f.client.loadQueue({ afterFulfillmentReference: id(1), includeCompleted: false }),
+  ).rejects.toMatchObject({ code: "PermissionDenied" });
   for (const value of [
-    { ...page(), storeReference: id(98) },
     { ...page(), items: [{ ...item(), aggregateVersion: 9007199254740992 }] },
     { ...page(), items: [item(), item()] },
     { ...page(), nextAfterFulfillmentReference: id(1) },

@@ -174,8 +174,11 @@ export function createKitchenBoardClient(options: {
         !["Fresh", "Stale"].includes(String(result.freshnessStatus))
       )
         return fail();
+      // An answer for another Store means the selected scope no longer holds: the board clears
+      // instead of keeping the last tickets as if only the connection were lost (IDR-0039).
+      if (result.storeReference !== options.storeReference)
+        throw new KitchenBoardClientError("PermissionDenied");
       if (
-        result.storeReference !== options.storeReference ||
         !["Named", "Locked", "HandoverRequired", "Unavailable", "Unverified"].includes(
           String(result.operatorStatus),
         )

@@ -3,6 +3,13 @@ import type { KitchenAction } from "./kitchen-work-client.js";
 import { createKitchenBoardClient } from "./kitchen-board-client.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { Freshness, SourceTime } from "./StoreTime.js";
+import {
+  replacesLastRead,
+  StaleReadNotice,
+  useStaleRetry,
+  type ReadFailure,
+  type StaleRead,
+} from "./stale-read.js";
 
 /** WP-2423 M3: the board re-reads the queue on its own while it is visible. */
 export const kitchenRefreshIntervalMs = 10_000;
@@ -143,43 +150,85 @@ import {
   type KitchenWorkItemDetailView,
 } from "./kitchen-board.js";
 
-type LoadState<T> =
+export type LoadState<T> =
+  | { readonly kind: "Loading" }
+  | { readonly kind: ReadFailure; readonly attempts?: number }
   | {
-      readonly kind:
-        | "Loading"
-        | "PermissionDenied"
-        | "NotFound"
-        | "Offline"
-        | "Conflict"
-        | "CommandFailed"
-        | "Unavailable";
-    }
-  | { readonly kind: "Found"; readonly view: T; readonly reloading?: boolean };
+      readonly kind: "Found";
+      readonly view: T;
+      /** When this device loaded `view` (UTC instant). */
+      readonly loadedAt: string;
+      readonly reloading?: boolean;
+      /** IDR-0039: the re-read failed; `view` is the last loaded data, shown read-only. */
+      readonly stale?: StaleRead;
+    };
+/**
+ * The state after a failed read. With `keepLast`, work already on screen stays visible in an
+ * explicit stale, read-only state; a denial or missing scope still replaces it at once.
+ */
+export function failedLoadState<T>(
+  previous: LoadState<T>,
+  reason: ReadFailure,
+  attempts: number,
+  keepLast: boolean,
+): LoadState<T> {
+  if (keepLast && previous.kind === "Found" && !replacesLastRead(reason))
+    return {
+      kind: "Found",
+      view: previous.view,
+      loadedAt: previous.loadedAt,
+      stale: { reason, lastLoadedAt: previous.loadedAt, attempts },
+    };
+  return { kind: reason, attempts };
+}
+/** Consecutive failed reads that should be retried on their own, or null when nothing should. */
+export function retryAttempts(state: LoadState<unknown>): number | null {
+  if (state.kind === "Found") return state.stale?.attempts ?? null;
+  if (state.kind === "Loading" || replacesLastRead(state.kind)) return null;
+  return state.attempts ?? null;
+}
 /**
  * Loads for a key. A board that already shows work keeps showing it while a re-read is in
- * flight (no flash to "Loading" every ten seconds); a failure or denial replaces it at once.
+ * flight (no flash to "Loading" every ten seconds). A failed re-read either replaces it or, with
+ * `keepLast`, keeps it on screen as stale and read-only.
  */
-function useLoad<T>(load: () => Promise<T>, key: string): LoadState<T> {
+function useLoad<T>(load: () => Promise<T>, key: string, keepLast = false): LoadState<T> {
   const [stored, setStored] = useState<{
     key: string;
     load: () => Promise<T>;
     state: LoadState<T>;
-  }>({ key, load, state: { kind: "Loading" } });
+    failures: number;
+  }>({ key, load, state: { kind: "Loading" }, failures: 0 });
   useEffect(() => {
     let active = true;
-    const setState = (state: LoadState<T>) => setStored({ key, load, state });
-    setStored((previous) =>
-      previous.state.kind === "Found"
-        ? { key, load, state: { ...previous.state, reloading: true } }
-        : { key, load, state: { kind: "Loading" } },
-    );
+    setStored((previous) => ({
+      key,
+      load,
+      failures: previous.failures,
+      state:
+        previous.state.kind === "Found"
+          ? { ...previous.state, reloading: true }
+          : { kind: "Loading" },
+    }));
     void load()
       .then((view) => {
-        if (active) setState({ kind: "Found", view });
+        if (active)
+          setStored({
+            key,
+            load,
+            failures: 0,
+            state: { kind: "Found", view, loadedAt: new Date().toISOString() },
+          });
       })
       .catch((error: unknown) => {
-        if (active)
-          setState({ kind: error instanceof KitchenBoardClientError ? error.code : "Unavailable" });
+        if (!active) return;
+        const reason = error instanceof KitchenBoardClientError ? error.code : "Unavailable";
+        setStored((previous) => ({
+          key,
+          load,
+          failures: previous.failures + 1,
+          state: failedLoadState(previous.state, reason, previous.failures + 1, keepLast),
+        }));
       });
     return () => {
       active = false;
@@ -451,6 +500,7 @@ export function KitchenBoardScreen({
   soundOn,
   onSoundToggle,
   autoRefresh = false,
+  stale,
 }: {
   readonly view: KitchenBoardView;
   readonly onSearch?: (search: KitchenQueueSearch | null) => void;
@@ -465,6 +515,8 @@ export function KitchenBoardScreen({
   readonly onSoundToggle?: (() => void) | undefined;
   /** Whether the board re-reads itself; shown so the operator knows nothing is stuck. */
   readonly autoRefresh?: boolean;
+  /** IDR-0039: the last re-read failed; the board shows the last loaded work, read-only. */
+  readonly stale?: StaleRead | undefined;
 }) {
   const location = useLocation();
   const restored = restoredQueueScope(location.state);
@@ -733,13 +785,13 @@ export function KitchenBoardScreen({
           <div>
             <h2>Kitchen</h2>
             <p className="kitchen-board-freshness">
-              <Freshness status={view.freshnessStatus} at={view.projectedAt} />
+              <Freshness status={stale ? "Stale" : view.freshnessStatus} at={view.projectedAt} />
               <span data-operator={view.operatorStatus}>
                 {view.operatorStatus === "Unverified"
                   ? "KDS session unverified"
                   : `${view.operatorStatus} operator`}
               </span>
-              {autoRefresh ? <span>Auto-refresh every 10 s</span> : null}
+              {autoRefresh && !stale ? <span>Auto-refresh every 10 s</span> : null}
             </p>
           </div>
           <div className="kitchen-board-heading__actions">
@@ -766,7 +818,9 @@ export function KitchenBoardScreen({
         >
           Filters{hasFilters || searchApplied ? " · Applied" : " · Active work"}
         </button>
-        {readOnly ? (
+        {stale ? (
+          <StaleReadNotice stale={stale} className="kitchen-board-lock kitchen-board-stale" />
+        ) : readOnly ? (
           <div className="kitchen-board-lock">
             <StatePanel heading="Board locked — read-only" tone="offline" status>
               <p>
@@ -850,7 +904,7 @@ export function KitchenBoardScreen({
                           <WorkCard
                             key={item.workItemReference}
                             item={item}
-                            readOnly={readOnly || actionsBlocked}
+                            readOnly={readOnly || actionsBlocked || stale !== undefined}
                             {...(onAction ? { onAction } : {})}
                             observedAt={view.projectedAt}
                             detailState={{
@@ -1087,7 +1141,9 @@ function KitchenBoardContent(props: KitchenPageProps) {
   const state = useLoad(
     load,
     `queue:${revision}:${search?.kind ?? "all"}:${search ? "exact" : ""}`,
+    true,
   );
+  const stale = state.kind === "Found" ? state.stale : undefined;
   const actions = useKitchenActions({
     csrf: props.csrf,
     storeReference: props.storeReference,
@@ -1099,7 +1155,7 @@ function KitchenBoardContent(props: KitchenPageProps) {
     restoreRetryFocus = useRef(false);
   // M3: re-read the queue on its own while the board is visible and no action is in flight.
   const submitting = actions.state.kind === "Submitting";
-  const found = state.kind === "Found";
+  const found = state.kind === "Found" && stale === undefined;
   useEffect(() => {
     if (!found || typeof window === "undefined") return;
     const timer = window.setInterval(() => {
@@ -1107,6 +1163,8 @@ function KitchenBoardContent(props: KitchenPageProps) {
     }, kitchenRefreshIntervalMs);
     return () => window.clearInterval(timer);
   }, [found, submitting]);
+  // IDR-0039: after a failed read, keep trying with backoff (and at once when the network returns).
+  useStaleRetry(retryAttempts(state), () => setRevision((value) => value + 1));
   // M3: chime once for work that arrived since the previous read, when the operator asked for it.
   const previousView = useRef<KitchenBoardView | null>(null);
   useEffect(() => {
@@ -1170,7 +1228,11 @@ function KitchenBoardContent(props: KitchenPageProps) {
                         : "The action was not accepted. Refresh and review the current work item."}
           </p>
           {actions.state.kind === "Unknown" ? (
-            <button ref={retryButtonRef} disabled={!actions.canRetry} onClick={retry}>
+            <button
+              ref={retryButtonRef}
+              disabled={!actions.canRetry || stale !== undefined}
+              onClick={retry}
+            >
               Retry same operation
             </button>
           ) : null}
@@ -1184,11 +1246,12 @@ function KitchenBoardContent(props: KitchenPageProps) {
           onRefresh={refresh}
           refreshButtonRef={refreshButtonRef}
           onAction={runAction}
-          actionsBlocked={actions.blocked}
+          actionsBlocked={actions.blocked || stale !== undefined}
           navigation={props.navigation}
           soundOn={soundOn}
           onSoundToggle={toggleSound}
           autoRefresh
+          stale={stale}
         />
       ) : (
         <AppFrame
