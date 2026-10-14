@@ -35,6 +35,16 @@ import type {
 import { parseOptionSetAggregate, validateProductOptionBinding } from "../domain/option-set.js";
 import { parseProductEditorContentDetails } from "../domain/product-editor-content.js";
 
+/** Map one value at a time: owner ports may share one caller transaction (no concurrent use). */
+async function mapInSequence<T, R>(
+  values: readonly T[],
+  map: (value: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = [];
+  for (const value of values) results.push(await map(value));
+  return results;
+}
+
 function exact(
   value: unknown,
   keys: readonly string[],
@@ -206,27 +216,25 @@ function verifiedRecord(
   });
 }
 async function validateOptionBindings(ports: CatalogProductPorts, aggregate: ProductAggregate) {
-  await Promise.all(
-    aggregate.draft.optionBindings.map(async (binding) => {
-      const candidate = await ports.optionSets
-        .resolveVersion({
-          brandReference: aggregate.brandReference,
-          optionSetReference: binding.optionSetReference,
-          optionSetVersionReference: binding.optionSetVersionReference,
-        })
-        .catch(failure);
-      if (candidate === null) throw new CatalogError("CATALOG_UNAVAILABLE");
-      let optionSet;
-      try {
-        optionSet = parseOptionSetAggregate(candidate);
-      } catch {
-        throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
-      }
-      if (optionSet.brandReference !== aggregate.brandReference)
-        throw new CatalogError("CATALOG_UNAVAILABLE");
-      validateProductOptionBinding(binding, optionSet);
-    }),
-  );
+  await mapInSequence(aggregate.draft.optionBindings, async (binding) => {
+    const candidate = await ports.optionSets
+      .resolveVersion({
+        brandReference: aggregate.brandReference,
+        optionSetReference: binding.optionSetReference,
+        optionSetVersionReference: binding.optionSetVersionReference,
+      })
+      .catch(failure);
+    if (candidate === null) throw new CatalogError("CATALOG_UNAVAILABLE");
+    let optionSet;
+    try {
+      optionSet = parseOptionSetAggregate(candidate);
+    } catch {
+      throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+    }
+    if (optionSet.brandReference !== aggregate.brandReference)
+      throw new CatalogError("CATALOG_UNAVAILABLE");
+    validateProductOptionBinding(binding, optionSet);
+  });
 }
 
 export function createCatalogProductService(ports: CatalogProductPorts) {

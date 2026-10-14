@@ -208,8 +208,21 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
                   "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
                   [tenant, scope.brandReference, scope.storeReference],
                 );
+              // Same rule as the application runner: one query at a time per transaction.
+              let inFlight = 0;
               const result = await work({
-                query: (sql, values) => client.query(sql, values === undefined ? [] : [...values]),
+                query: async (sql, values) => {
+                  if (inFlight > 0)
+                    throw Object.assign(new Error("concurrent query"), {
+                      code: "TENANT_DATABASE_TRANSACTION_CONCURRENT_QUERY",
+                    });
+                  inFlight += 1;
+                  try {
+                    return await client.query(sql, values === undefined ? [] : [...values]);
+                  } finally {
+                    inFlight -= 1;
+                  }
+                },
               });
               await client.query(rollback ? "ROLLBACK" : "COMMIT");
               return result;

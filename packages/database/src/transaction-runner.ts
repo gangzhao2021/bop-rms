@@ -22,6 +22,16 @@ export function isRetryableTransactionConflict(error: unknown): boolean {
   );
 }
 
+/**
+ * WP-2423 (v15 2026-10-14): one transaction is one connection, and its queries must run one at a
+ * time. A second query while one is in flight (for example `Promise.all` over owner ports sharing
+ * the transaction) is refused with TENANT_DATABASE_TRANSACTION_CONCURRENT_QUERY and the whole
+ * transaction rolls back, everywhere except production, where the driver still queues it.
+ */
+function refuseConcurrentQueries(): boolean {
+  return process.env.NODE_ENV !== "production";
+}
+
 export interface DatabaseTransaction {
   query(sql: string, values: readonly unknown[]): Promise<unknown>;
 }
@@ -61,6 +71,7 @@ export function createTenantTransactionRunner(
         let active = true;
         let failed = false;
         let conflicted = false;
+        let concurrent = false;
         let pending = 0;
         try {
           const result = await action(
@@ -71,6 +82,13 @@ export function createTenantTransactionRunner(
                     "TENANT_DATABASE_TRANSACTION_FAILED",
                     tenantContextDatabaseDiagnostic(undefined, true),
                   );
+                if (pending > 0 && refuseConcurrentQueries()) {
+                  failed = true;
+                  concurrent = true;
+                  throw new TenantContextDatabaseError(
+                    "TENANT_DATABASE_TRANSACTION_CONCURRENT_QUERY",
+                  );
+                }
                 pending += 1;
                 try {
                   return await client.query(sql, [...values]);
@@ -93,13 +111,18 @@ export function createTenantTransactionRunner(
           );
           if (failed || pending !== 0)
             throw new TenantContextDatabaseError(
-              conflicted
-                ? "TENANT_DATABASE_TRANSACTION_CONFLICT"
-                : "TENANT_DATABASE_TRANSACTION_FAILED",
+              concurrent
+                ? "TENANT_DATABASE_TRANSACTION_CONCURRENT_QUERY"
+                : conflicted
+                  ? "TENANT_DATABASE_TRANSACTION_CONFLICT"
+                  : "TENANT_DATABASE_TRANSACTION_FAILED",
             );
           return result;
         } catch (error) {
-          // Whatever the action made of it, a conflicted transaction is reported as retryable.
+          // Whatever the action made of it, a conflicted transaction is reported as retryable,
+          // and concurrent use of the transaction as the programming error it is.
+          if (concurrent)
+            throw new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_CONCURRENT_QUERY");
           if (conflicted)
             throw new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_CONFLICT");
           throw error;

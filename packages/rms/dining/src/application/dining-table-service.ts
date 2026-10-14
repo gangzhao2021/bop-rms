@@ -297,26 +297,22 @@ export function createDiningTableService(ports: DiningTablePorts) {
         observedAt,
         targetType: "DiningSession",
       });
-      const [sessionInput, sourceInput, targetInput] = await Promise.all([
+      // Sequential: owner ports may share one caller transaction (no concurrent use of a client).
+      const sessionInput = await ports.repository
+        .loadSession(sessionReference)
+        .then((value) =>
+          value === null ? null : parseState(() => parseDiningSession(snapshot(value))),
+        )
+        .catch(dependency);
+      const loadTable = (reference: typeof sourceReference) =>
         ports.repository
-          .loadSession(sessionReference)
-          .then((value) =>
-            value === null ? null : parseState(() => parseDiningSession(snapshot(value))),
-          )
-          .catch(dependency),
-        ports.repository
-          .loadTable(sourceReference)
-          .then((value) =>
-            value === null ? null : parseState(() => createDiningTable(snapshot(value))),
-          )
-          .catch(dependency),
-        ports.repository
-          .loadTable(targetReference)
+          .loadTable(reference)
           .then((value) =>
             value === null ? null : parseState(() => createDiningTable(snapshot(value))),
           )
-          .catch(dependency),
-      ]);
+          .catch(dependency);
+      const sourceInput = await loadTable(sourceReference);
+      const targetInput = await loadTable(targetReference);
       if (sessionInput === null || sourceInput === null || targetInput === null)
         throw new DiningTableWorkflowError("DINING_TABLE_VERSION_CONFLICT");
       const session = parseState(() => parseDiningSession(sessionInput));

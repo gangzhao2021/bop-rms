@@ -561,10 +561,9 @@ export async function executeLotHold(value: unknown, ports: LotExpiryPorts) {
     )
       return fail("LOT_HOLD_NOT_FOUND");
     if (before === null && payload.expectedVersion !== 0) return fail("LOT_HOLD_CONFLICT");
-    const [snapshotRaw, complianceRaw] = await Promise.all([
-      ports.snapshot.inspect(input),
-      ports.compliance.resolveDecision(input),
-    ]);
+    // Sequential: owner ports may share one caller transaction (no concurrent use of a client).
+    const snapshotRaw = await ports.snapshot.inspect(input);
+    const complianceRaw = await ports.compliance.resolveDecision(input);
     const snapshot = validateSnapshot(snapshotRaw, input, before);
     validateCompliance(complianceRaw, input);
     let after: LotHoldAggregate;

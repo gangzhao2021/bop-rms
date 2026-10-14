@@ -115,10 +115,9 @@ export function createOrderStatusProjector(ports: OrderStatusProjectionPorts) {
       } catch {
         return fail("ORDER_STATUS_INPUT_INVALID");
       }
-      const [sourceValue, currentValue] = await Promise.all([
-        ports.source.loadExact(orderReference).catch(dependency),
-        ports.projections.load(orderReference).catch(dependency),
-      ]);
+      // Sequential: owner ports may share one caller transaction (no concurrent use of a client).
+      const sourceValue = await ports.source.loadExact(orderReference).catch(dependency);
+      const currentValue = await ports.projections.load(orderReference).catch(dependency);
       if (sourceValue === null) return fail("ORDER_STATUS_NOT_FOUND");
       const source = parseDependencySource(sourceValue);
       if (source.orderReference !== orderReference)

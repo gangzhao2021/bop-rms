@@ -17,6 +17,16 @@ import {
 } from "../domain/order-item-snapshot.js";
 import type { OrderCreationPorts } from "./ports/order-creation-ports.js";
 
+/** Map one value at a time: owner ports may share one caller transaction (no concurrent use). */
+async function mapInSequence<T, R>(
+  values: readonly T[],
+  map: (value: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = [];
+  for (const value of values) results.push(await map(value));
+  return results;
+}
+
 export class OrderSubmissionSourceError extends Error {
   readonly code = "ORDER_SUBMISSION_SOURCE_UNAVAILABLE";
   constructor() {
@@ -103,90 +113,88 @@ function createVersionedOrderSubmissionSource<V extends 1 | 2>(
         });
         const byLine = new Map(prices.map((line) => [line.lineReference, line]));
         if (byLine.size !== cart.items.length) throw new OrderSubmissionSourceError();
-        const lines = await Promise.all(
-          cart.items.map(async (item) => {
-            const price = byLine.get(item.cartItemReference);
+        const lines = await mapInSequence(cart.items, async (item) => {
+          const price = byLine.get(item.cartItemReference);
+          if (
+            !price ||
+            price.sellableReference !== item.sellableReference ||
+            price.quantity !== item.quantity ||
+            price.quoteReference !== evidence.quoteReference ||
+            price.quoteVersion !== evidence.quoteVersion ||
+            price.quoteInputDigest !== evidence.quoteInputDigest ||
+            price.quotedAt > evidence.validatedAt
+          )
+            throw new OrderSubmissionSourceError();
+          const catalog = parseOrderCatalogLineSnapshot(
+            await options.catalog.capture({
+              brandReference: brand as never,
+              storeReference: store as never,
+              sourceChannel: cart.sourceChannel,
+              orderType: cart.orderType,
+              sellableReference: item.sellableReference as never,
+              optionSelections: item.optionSelections as never,
+              observedAt: evidence.validatedAt as never,
+            }),
+          );
+          const validated = expected.get(item.cartItemReference);
+          if (
+            catalog.brandReference !== brand ||
+            catalog.storeReference !== store ||
+            catalog.sellableReference !== item.sellableReference ||
+            catalog.menuVersionReference !== validated?.menuVersionReference ||
+            catalog.productVersionReference !== validated.productVersionReference ||
+            catalog.capturedAt !== evidence.validatedAt ||
+            catalog.options.length !== item.optionSelections.length ||
+            catalog.options.some(
+              (option) =>
+                !item.catalogSelectionEvidence?.ruleEvidence.some(
+                  (rule) =>
+                    rule.bindingReference === option.bindingReference &&
+                    rule.optionSetVersionReference === option.optionSetVersionReference,
+                ),
+            ) ||
+            item.optionSelections.some(
+              (selected) =>
+                !catalog.options.some(
+                  (option) =>
+                    option.optionReference === selected.optionReference &&
+                    option.quantity === selected.quantity,
+                ),
+            ) ||
+            price.taxComponents.some(
+              (tax) => tax.taxClassificationReference !== catalog.taxClassificationReference,
+            )
+          )
+            throw new OrderSubmissionSourceError();
+          if (price.quoteVersion === 2) {
             if (
-              !price ||
-              price.sellableReference !== item.sellableReference ||
-              price.quantity !== item.quantity ||
-              price.quoteReference !== evidence.quoteReference ||
-              price.quoteVersion !== evidence.quoteVersion ||
-              price.quoteInputDigest !== evidence.quoteInputDigest ||
-              price.quotedAt > evidence.validatedAt
+              catalog.skuReference !== item.sellableReference ||
+              price.optionPrices.length !== catalog.options.length ||
+              price.optionPrices.some((option) => {
+                const selected = catalog.options.find(
+                  (value) =>
+                    value.bindingReference === option.bindingReference &&
+                    value.optionReference === option.optionReference,
+                );
+                return (
+                  selected === undefined ||
+                  selected.quantity !== option.selectedQuantity ||
+                  option.brandReference !== brand ||
+                  option.storeReference !== store ||
+                  option.sellableReference !== item.sellableReference ||
+                  option.orderType !== cart.orderType ||
+                  option.taxClassificationReference !== catalog.taxClassificationReference
+                );
+              })
             )
               throw new OrderSubmissionSourceError();
-            const catalog = parseOrderCatalogLineSnapshot(
-              await options.catalog.capture({
-                brandReference: brand as never,
-                storeReference: store as never,
-                sourceChannel: cart.sourceChannel,
-                orderType: cart.orderType,
-                sellableReference: item.sellableReference as never,
-                optionSelections: item.optionSelections as never,
-                observedAt: evidence.validatedAt as never,
-              }),
-            );
-            const validated = expected.get(item.cartItemReference);
-            if (
-              catalog.brandReference !== brand ||
-              catalog.storeReference !== store ||
-              catalog.sellableReference !== item.sellableReference ||
-              catalog.menuVersionReference !== validated?.menuVersionReference ||
-              catalog.productVersionReference !== validated.productVersionReference ||
-              catalog.capturedAt !== evidence.validatedAt ||
-              catalog.options.length !== item.optionSelections.length ||
-              catalog.options.some(
-                (option) =>
-                  !item.catalogSelectionEvidence?.ruleEvidence.some(
-                    (rule) =>
-                      rule.bindingReference === option.bindingReference &&
-                      rule.optionSetVersionReference === option.optionSetVersionReference,
-                  ),
-              ) ||
-              item.optionSelections.some(
-                (selected) =>
-                  !catalog.options.some(
-                    (option) =>
-                      option.optionReference === selected.optionReference &&
-                      option.quantity === selected.quantity,
-                  ),
-              ) ||
-              price.taxComponents.some(
-                (tax) => tax.taxClassificationReference !== catalog.taxClassificationReference,
-              )
-            )
-              throw new OrderSubmissionSourceError();
-            if (price.quoteVersion === 2) {
-              if (
-                catalog.skuReference !== item.sellableReference ||
-                price.optionPrices.length !== catalog.options.length ||
-                price.optionPrices.some((option) => {
-                  const selected = catalog.options.find(
-                    (value) =>
-                      value.bindingReference === option.bindingReference &&
-                      value.optionReference === option.optionReference,
-                  );
-                  return (
-                    selected === undefined ||
-                    selected.quantity !== option.selectedQuantity ||
-                    option.brandReference !== brand ||
-                    option.storeReference !== store ||
-                    option.sellableReference !== item.sellableReference ||
-                    option.orderType !== cart.orderType ||
-                    option.taxClassificationReference !== catalog.taxClassificationReference
-                  );
-                })
-              )
-                throw new OrderSubmissionSourceError();
-            }
-            return Object.freeze({
-              cartItemReference: item.cartItemReference,
-              catalog,
-              pricing: price,
-            });
-          }),
-        );
+          }
+          return Object.freeze({
+            cartItemReference: item.cartItemReference,
+            catalog,
+            pricing: price,
+          });
+        });
         fresh();
         assertCartLifecycleActive(cart.lifecycle, last);
         return Object.freeze({ cart, lines: Object.freeze(lines) });

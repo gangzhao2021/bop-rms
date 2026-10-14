@@ -20,7 +20,9 @@ export function createInternalReconciliationProjection(resources) {
       };
       const convert = (value) => mapInternalReconciliationSource(value, scope, tx);
       if (!Array.isArray(page.items) || page.items.length > 5) return fail();
-      const sources = await Promise.all(page.items.map(convert));
+      // One at a time: every conversion reads through the same transaction `tx`.
+      const sources = [];
+      for (const item of page.items) sources.push(await convert(item));
       let previous = cursor;
       for (const source of sources) {
         if (previous !== null && source.sourceReference <= previous) return fail();

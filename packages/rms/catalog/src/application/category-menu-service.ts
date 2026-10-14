@@ -315,18 +315,17 @@ async function validateMenuFacts(ports: CategoryMenuPorts, aggregate: MenuAggreg
       ),
     ),
   ];
-  const [categoriesValid, sellablesValid] = await Promise.all([
-    ports.facts
-      .validateCategories({ brandReference: aggregate.brandReference, categoryReferences })
-      .catch(dependencyFailure),
-    ports.facts
-      .validateSellables({
-        brandReference: aggregate.brandReference,
-        sellableReferences,
-        sellableType: "Sku",
-      })
-      .catch(dependencyFailure),
-  ]);
+  // Sequential: owner ports may share one caller transaction (no concurrent use of a client).
+  const categoriesValid = await ports.facts
+    .validateCategories({ brandReference: aggregate.brandReference, categoryReferences })
+    .catch(dependencyFailure);
+  const sellablesValid = await ports.facts
+    .validateSellables({
+      brandReference: aggregate.brandReference,
+      sellableReferences,
+      sellableType: "Sku",
+    })
+    .catch(dependencyFailure);
   if (!categoriesValid || !sellablesValid) throw new CatalogError("CATALOG_UNAVAILABLE");
   await inspectBase(ports, aggregate);
 }

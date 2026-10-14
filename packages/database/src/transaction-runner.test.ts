@@ -145,6 +145,40 @@ describe("WP-2212 pooled transaction runner", () => {
       diagnostic: { sqlState: null, constraint: null, table: null, closed: true },
     });
   });
+  it("refuses a second query while one is in flight and rolls the transaction back", async () => {
+    const f = fixture();
+    let release: (() => void) | undefined;
+    f.query.mockImplementation(async (sql: string) => {
+      if (sql === "SELECT slow")
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      return { rows: [] };
+    });
+    let second: unknown;
+    const failure = await f.runner
+      .run(async (t) => {
+        const first = t.query("SELECT slow", []);
+        second = await t.query("SELECT other", []).catch((error: unknown) => error);
+        release?.();
+        await first;
+      })
+      .catch((error: unknown) => error);
+    expect(second).toMatchObject({ code: "TENANT_DATABASE_TRANSACTION_CONCURRENT_QUERY" });
+    expect(failure).toMatchObject({ code: "TENANT_DATABASE_TRANSACTION_CONCURRENT_QUERY" });
+    expect(f.query.mock.calls.map(([sql]) => sql)).not.toContain("SELECT other");
+    expect(f.query.mock.calls.some(([sql]) => sql === "COMMIT")).toBe(false);
+  });
+  it("allows the same queries one after another", async () => {
+    const f = fixture();
+    expect(
+      await f.runner.run(async (t) => {
+        await t.query("SELECT 1", []);
+        await t.query("SELECT 2", []);
+        return "done";
+      }),
+    ).toBe("done");
+  });
   it("keeps other failures non-retryable", async () => {
     const f = fixture("SELECT secret");
     const failure = await f.runner

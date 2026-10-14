@@ -46,6 +46,7 @@ async function prove(context) {
       { table_name: "workforce_account_binding" },
       { table_name: "workforce_invitation" },
       { table_name: "workforce_mfa_status" },
+      { table_name: "workforce_mfa_step_up" },
       { table_name: "workforce_onboarding_operation" },
       { table_name: "workforce_recovery_case" },
     ]);
@@ -193,6 +194,7 @@ async function prove(context) {
         "reject_api_client_history_update",
         "reject_browser_brand_selection_mutation",
         "reject_guest_session_operation_mutation",
+        "reject_workforce_mfa_step_up_mutation",
         "validate_guest_binding_preparation",
         "validate_guest_dining_binding_preparation",
         "workforce_account_binding_acceptance_admit",

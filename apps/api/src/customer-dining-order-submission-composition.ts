@@ -115,10 +115,9 @@ function createVersionedCustomerDiningOrderSubmissionComposition<V extends 1 | 2
           return unavailable();
         sourceValidUntil = history.preparationValidUntil;
       } else {
-        const [cartValue, quoteValue] = await Promise.all([
-          options.checkout.repository.loadCart(cartReference),
-          options.checkout.repository.loadQuote(cartReference),
-        ]);
+        // Sequential: owner ports may share one caller transaction (no concurrent use of a client).
+        const cartValue = await options.checkout.repository.loadCart(cartReference);
+        const quoteValue = await options.checkout.repository.loadQuote(cartReference);
         if (cartValue === null || quoteValue === null) return unavailable();
         const cart = parseCartAggregate(cartValue),
           quote = parseCartQuoteAttachmentOfVersion(quoteValue, quoteVersion);

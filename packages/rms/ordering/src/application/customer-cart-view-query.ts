@@ -209,15 +209,14 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
             locale: first.storeRequest.requestedLocale,
           };
         });
-        const [storeResult, descriptions, quoteResult] = await Promise.all([
-          ports.stores.getPublicStore(first.storeRequest),
-          ports.catalog.describeMany(requests),
-          ports.quotes.loadLatest({
-            cartReference: cart.cartReference,
-            cartVersion: cart.aggregateVersion,
-            observedAt: first.observedAt,
-          }),
-        ]);
+        // Sequential: owner ports may share one caller transaction (no concurrent use of a client).
+        const storeResult = await ports.stores.getPublicStore(first.storeRequest);
+        const descriptions = await ports.catalog.describeMany(requests);
+        const quoteResult = await ports.quotes.loadLatest({
+          cartReference: cart.cartReference,
+          cartVersion: cart.aggregateVersion,
+          observedAt: first.observedAt,
+        });
         const store = closed(storeResult, ["status", "profile"]);
         if (store.status !== "Available") return unavailable();
         const profile = closed(store.profile, [
