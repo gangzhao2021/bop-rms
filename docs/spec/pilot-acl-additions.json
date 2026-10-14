@@ -2583,6 +2583,33 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner approved 2026-10-13 in session (\"批准\") (WP-2423 Q7): DEC-COUNTER-PAYMENT-RECORD — staff take a pickup order at the counter (or enter a paper order after an outage) and record the payment or refund the Store's own card machine made; the order queue, day-end settlement and worker consumers read them"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "checkout_contact_redaction",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-14 in session (\"按建议，批准\") (WP-2423 Q10): customer order continuity — staff read of removed-contact evidence; 30-day contact removal run by the pilot worker under the api role (database accepts only the contact-clearing update)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "checkout_contact_redaction",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-14 in session (\"按建议，批准\") (WP-2423 Q10): customer order continuity — staff read of removed-contact evidence; 30-day contact removal run by the pilot worker under the api role (database accepts only the contact-clearing update)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "checkout_details_record",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-14 in session (\"按建议，批准\") (WP-2423 Q10): customer order continuity — staff read of removed-contact evidence; 30-day contact removal run by the pilot worker under the api role (database accepts only the contact-clearing update)"
     }
   ]
 }
