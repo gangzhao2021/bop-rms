@@ -8028,6 +8028,105 @@ body:has(.product-complete-draft) .bop-shell__header,
   margin: 0;
   color: var(--bop-color-text-muted);
 }
+/* DEC-KITCHEN-STALE-TICKETS: earlier business days' kitchen tickets, collapsed and apart. */
+.kitchen-earlier-days {
+  margin-bottom: 16px;
+  border: 1px solid var(--bop-color-warning);
+  border-radius: var(--bop-radius-card);
+  background: var(--bop-color-surface-raised);
+}
+.kitchen-earlier-days summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  min-height: 48px;
+  padding: 12px 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.kitchen-earlier-days__count {
+  padding: 2px 10px;
+  border: 1px solid var(--bop-color-warning);
+  border-radius: var(--bop-radius-control);
+  font-size: 14px;
+}
+.kitchen-earlier-days__intro {
+  margin: 0;
+  padding: 0 14px 12px;
+  color: var(--bop-color-text-muted);
+}
+.kitchen-earlier-days__tickets {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 1fr));
+  gap: 12px;
+  padding: 0 12px 12px;
+}
+.kitchen-earlier-ticket {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+}
+.kitchen-earlier-ticket__heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.kitchen-earlier-ticket__heading h4 {
+  margin: 0;
+}
+.kitchen-earlier-ticket__day {
+  margin: 2px 0 0;
+  color: var(--bop-color-text-muted);
+  overflow-wrap: anywhere;
+}
+.kitchen-earlier-ticket__day strong {
+  color: var(--bop-color-text-default);
+}
+.kitchen-earlier-ticket__close {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--bop-color-border-strong);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-weight: 600;
+}
+.kitchen-earlier-ticket__close:disabled {
+  border-color: var(--bop-color-border-default);
+  color: var(--bop-color-text-muted);
+}
+.kitchen-close-dialog p,
+.kitchen-earlier-confirm p {
+  margin: 0;
+}
+.kitchen-close-dialog__money {
+  padding: 8px 10px;
+  border-inline-start: 4px solid var(--bop-color-warning);
+  background: var(--bop-color-surface-raised);
+}
+.kitchen-earlier-confirm > div {
+  display: grid;
+  gap: 14px;
+}
+.kitchen-earlier-confirm h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.kitchen-earlier-confirm .kitchen-remake-dialog__actions button:last-child {
+  background: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
+}
 /* WP-2423 Q14: Store sales reports (RPT-OPS-DASHBOARD). */
 .store-reports {
   display: grid;

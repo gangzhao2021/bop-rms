@@ -97,4 +97,15 @@ describe("DEC-PERM-CATALOG Store permission catalog", () => {
       risk: "Medium",
     });
   });
+  it("lets only Store Manager and Owner close an earlier business day's kitchen ticket (v13)", () => {
+    for (const role of ["store-manager", "owner"] as const)
+      expect(storeRoleTemplateActions(role), role).toContain("kitchen.ticket.close_stale");
+    for (const role of ["kitchen", "front-of-house", "inventory-manager"] as const)
+      expect(storeRoleTemplateActions(role), role).not.toContain("kitchen.ticket.close_stale");
+    for (const [role, codes] of Object.entries(brandRoleTemplates))
+      expect(codes, role).not.toContain("kitchen.ticket.close_stale");
+    expect(
+      storePermissionCatalog().find((entry) => entry.code === "kitchen.ticket.close_stale"),
+    ).toMatchObject({ module: "kitchen", risk: "Medium" });
+  });
 });

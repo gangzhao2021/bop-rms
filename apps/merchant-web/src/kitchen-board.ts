@@ -43,6 +43,11 @@ export interface KitchenBoardItem {
   readonly orderLabel?: KitchenOrderLabel | null;
   /** WP-2423 Q2 (DEC-KDS-CUSTOMER-NOTE): Restricted; shown verbatim, never stored or logged. */
   readonly customerNote?: string | null;
+  /**
+   * DEC-KITCHEN-STALE-TICKETS: the Order's business day (order numbers restart every day). Omitted
+   * by older sources; null when unknown.
+   */
+  readonly businessDate?: string | null;
   readonly execution?: {
     readonly orderItemReference: string;
     readonly stationReference: string;
@@ -62,6 +67,8 @@ export interface KitchenBoardView {
   readonly freshnessStatus: "Fresh" | "Stale";
   readonly operatorStatus: "Named" | "Locked" | "HandoverRequired" | "Unavailable" | "Unverified";
   readonly items: readonly KitchenBoardItem[];
+  /** DEC-KITCHEN-STALE-TICKETS: this staff member may close an earlier business day's ticket. */
+  readonly canCloseEarlierDayTickets?: boolean;
 }
 
 export interface KitchenWorkItemDetailView {
@@ -179,6 +186,17 @@ export function parseKitchenCustomerNote(value: unknown): string | null {
     throw new Error("KITCHEN_BOARD_INVALID");
   return value;
 }
+/** DEC-KITCHEN-STALE-TICKETS: a business date (YYYY-MM-DD) or null when unknown. */
+export function parseKitchenBusinessDate(value: unknown): string | null {
+  if (value === null) return null;
+  if (
+    typeof value !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/u.test(value) ||
+    new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) !== value
+  )
+    throw new Error("KITCHEN_BOARD_INVALID");
+  return value;
+}
 /** WP-2423 Q3: names grouped by classification, as the API serves them. */
 export function parseKitchenItemAllergens(value: unknown): KitchenItemAllergens {
   const status =
@@ -215,6 +233,8 @@ function item(value: unknown): KitchenBoardItem {
     value !== null && typeof value === "object" && Object.hasOwn(value, "orderLabel");
   const hasCustomerNote =
     value !== null && typeof value === "object" && Object.hasOwn(value, "customerNote");
+  const hasBusinessDate =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "businessDate");
   const input = closed(value, [
     "workItemReference",
     "ticketReference",
@@ -231,6 +251,7 @@ function item(value: unknown): KitchenBoardItem {
     ...(hasAllergens ? ["allergens"] : []),
     ...(hasOrderLabel ? ["orderLabel"] : []),
     ...(hasCustomerNote ? ["customerNote"] : []),
+    ...(hasBusinessDate ? ["businessDate"] : []),
     ...(hasExecution ? ["execution"] : []),
   ]);
   if (
@@ -266,6 +287,7 @@ function item(value: unknown): KitchenBoardItem {
     ...(hasAllergens ? { allergens: parseKitchenItemAllergens(input.allergens) } : {}),
     ...(hasOrderLabel ? { orderLabel: parseKitchenOrderLabel(input.orderLabel) } : {}),
     ...(hasCustomerNote ? { customerNote: parseKitchenCustomerNote(input.customerNote) } : {}),
+    ...(hasBusinessDate ? { businessDate: parseKitchenBusinessDate(input.businessDate) } : {}),
     ...(hasExecution ? { execution: execution(input.execution) } : {}),
   });
 }
@@ -299,6 +321,10 @@ function execution(value: unknown): NonNullable<KitchenBoardItem["execution"]> {
 }
 
 export function parseKitchenBoardView(value: unknown): KitchenBoardView {
+  const hasCanClose =
+    value !== null &&
+    typeof value === "object" &&
+    Object.hasOwn(value, "canCloseEarlierDayTickets");
   const input = closed(value, [
     "screenId",
     "projectionName",
@@ -308,7 +334,10 @@ export function parseKitchenBoardView(value: unknown): KitchenBoardView {
     "freshnessStatus",
     "operatorStatus",
     "items",
+    ...(hasCanClose ? ["canCloseEarlierDayTickets"] : []),
   ]);
+  if (hasCanClose && typeof input.canCloseEarlierDayTickets !== "boolean")
+    throw new Error("KITCHEN_BOARD_INVALID");
   if (
     input.screenId !== "KIT-KITCHEN-QUEUE" ||
     input.projectionName !== "kitchen_work_queue_v1" ||
@@ -335,6 +364,9 @@ export function parseKitchenBoardView(value: unknown): KitchenBoardView {
     freshnessStatus: input.freshnessStatus as KitchenBoardView["freshnessStatus"],
     operatorStatus: input.operatorStatus as KitchenBoardView["operatorStatus"],
     items,
+    ...(hasCanClose
+      ? { canCloseEarlierDayTickets: input.canCloseEarlierDayTickets as boolean }
+      : {}),
   });
 }
 

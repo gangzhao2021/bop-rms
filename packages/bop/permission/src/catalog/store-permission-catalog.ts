@@ -29,8 +29,11 @@
  * v12 (2026-10-14): reporting.sales.read and reporting.sales.export (WP-2423 Q14, Section 88
  * RPT-OPS-DASHBOARD): the Store's sales, item, hourly and tip reports, and downloading them as CSV
  * (reading never implies exporting). Owner and Store Manager hold both.
+ * v13 (2026-10-14): kitchen.ticket.close_stale (WP-2423, DEC-KITCHEN-STALE-TICKETS): close a kitchen
+ * ticket left open from an earlier business day with a reason (no refund, no Order change). Owner
+ * and Store Manager hold it (Store Manager through the `kitchen.` prefix); Kitchen does not.
  */
-export const storePermissionCatalogVersion = 12 as const;
+export const storePermissionCatalogVersion = 13 as const;
 export type PermissionRisk = "Low" | "Medium" | "High";
 export interface StorePermissionDefinition {
   readonly code: string;
@@ -262,6 +265,12 @@ const catalog: readonly StorePermissionDefinition[] = Object.freeze([
     [
       "kitchen.work_item.rework",
       "Remake a finished dish or put a dish marked done by mistake back in progress",
+      "Medium",
+    ],
+    // v13 (DEC-KITCHEN-STALE-TICKETS): a manager decision about an earlier day's open ticket.
+    [
+      "kitchen.ticket.close_stale",
+      "Close a kitchen ticket left open from an earlier business day",
       "Medium",
     ],
     ["kitchen.exception.manage", "Report, acknowledge and resolve Kitchen exceptions", "Medium"],

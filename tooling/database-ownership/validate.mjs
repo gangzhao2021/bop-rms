@@ -2775,6 +2775,18 @@ async function scanUnsupported(root, module, diagnostics) {
             "kitchen_rework_operation",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/kitchen-rework-store.ts";
+        // DEC-KITCHEN-STALE-TICKETS: a manager closes an earlier business day's ticket.
+        const acceptedKitchenStaleTicketAsset =
+          module.packageName === "@rms/kitchen" &&
+          module.manifest.ownedDatabase?.schema === "rms_kitchen" &&
+          [
+            "kitchen_ticket",
+            "kitchen_work_item",
+            "kitchen_order_item_ready_result",
+            "kitchen_rework_item",
+            "kitchen_ticket_closure",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/kitchen-stale-ticket-store.ts";
         const acceptedKitchenQueueSourceAsset =
           module.packageName === "@rms/kitchen" &&
           module.manifest.ownedDatabase?.schema === "rms_kitchen" &&
@@ -3570,6 +3582,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedKitchenLifecycleStoreAsset &&
           !acceptedKitchenWorkCancellationAsset &&
           !acceptedKitchenReworkAsset &&
+          !acceptedKitchenStaleTicketAsset &&
           !acceptedKitchenQueueQueriesAsset &&
           !acceptedKitchenQueueSourceAsset &&
           !acceptedKitchenCustomerStatusAsset &&

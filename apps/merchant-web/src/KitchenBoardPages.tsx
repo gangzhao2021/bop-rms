@@ -9,6 +9,19 @@ import {
   type RemakeChoice,
 } from "./KitchenRework.js";
 import type { KitchenReworkView } from "./kitchen-rework-client.js";
+import {
+  earlierDayText,
+  earlierDayTickets,
+  fromEarlierKitchenDay,
+  KitchenCloseTicketDialog,
+  KitchenEarlierDayConfirm,
+  KitchenStaleCloseStatus,
+  kitchenWaitText,
+  useKitchenStaleClose,
+  type EarlierDayTicket,
+} from "./KitchenEarlierDays.js";
+import type { KitchenStaleCloseReason } from "./kitchen-stale-close-client.js";
+import { useStoreBusinessDay } from "./StoreBusinessDay.js";
 import type { KitchenAction } from "./kitchen-work-client.js";
 import { createKitchenBoardClient } from "./kitchen-board-client.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
@@ -363,7 +376,7 @@ function WorkCard({
         {!isActiveKitchenWork(item) ? (
           <span data-age="done">Done</span>
         ) : (
-          <span data-age={kitchenAgeTier(age)}>{age} min</span>
+          <span data-age={kitchenAgeTier(age)}>{kitchenWaitText(age)}</span>
         )}
       </div>
       <div className="kitchen-work-item__facts">
@@ -544,8 +557,16 @@ export function KitchenBoardScreen({
   stale,
   soldOutHref,
   remakes,
+  earlierDays,
 }: {
   readonly view: KitchenBoardView;
+  /** DEC-KITCHEN-STALE-TICKETS: closing an earlier business day's ticket, when offered. */
+  readonly earlierDays?:
+    | {
+        readonly blocked: boolean;
+        readonly onClose: (ticket: EarlierDayTicket, reason: KitchenStaleCloseReason) => void;
+      }
+    | undefined;
   /** WP-2423 Q26: remakes, when this source offers them. */
   readonly remakes?:
     | {
@@ -586,7 +607,52 @@ export function KitchenBoardScreen({
   const [remakeTarget, setRemakeTarget] = useState<KitchenBoardItem | null>(null);
   const readOnly = view.freshnessStatus !== "Fresh" || view.operatorStatus !== "Named";
   const remakeReadOnly = readOnly || stale !== undefined || (remakes?.blocked ?? true);
-  const onRemake = remakes?.canRework ? setRemakeTarget : undefined;
+  // DEC-KITCHEN-STALE-TICKETS: order numbers restart every business day. An earlier day's open
+  // work is kept apart (collapsed), labelled with its day and guarded before any kitchen step.
+  const today = useStoreBusinessDay()?.businessDate ?? null;
+  const dayLabel = (item: KitchenBoardItem) =>
+    fromEarlierKitchenDay(item, today) && item.businessDate
+      ? `${kitchenOrderLabel(item)} · ${earlierDayText(item.businessDate)}`
+      : kitchenOrderLabel(item);
+  const [confirm, setConfirm] = useState<{
+    readonly businessDate: string;
+    readonly orderLabel: string;
+    readonly actionLabel: string;
+    readonly proceed: () => void;
+  } | null>(null);
+  const [closeTarget, setCloseTarget] = useState<EarlierDayTicket | null>(null);
+  const guarded = (item: KitchenBoardItem, actionLabel: string, proceed: () => void) => {
+    if (fromEarlierKitchenDay(item, today) && item.businessDate)
+      setConfirm({
+        businessDate: item.businessDate,
+        orderLabel: kitchenOrderLabel(item),
+        actionLabel,
+        proceed,
+      });
+    else proceed();
+  };
+  const actionLabels: Record<KitchenAction, string> = {
+    AcceptKitchenWorkItem: "Accept",
+    StartKitchenWorkItem: "Start",
+    CompleteKitchenWorkItem: "Complete quantity",
+    MarkKitchenOrderItemReady: "Mark ready",
+  };
+  const guardedAction = onAction
+    ? (item: KitchenBoardItem, action: KitchenAction) =>
+        guarded(item, actionLabels[action], () => onAction(item, action))
+    : undefined;
+  const onRemake = remakes?.canRework
+    ? (item: KitchenBoardItem) => guarded(item, "Remake", () => setRemakeTarget(item))
+    : undefined;
+  const earlierTickets = earlierDayTickets(
+    view.items.filter(isActiveKitchenWork),
+    today,
+    kitchenOrderLabel,
+  );
+  const earlierOpen = new Set(
+    earlierTickets.flatMap((ticket) => ticket.items.map((item) => item.workItemReference)),
+  );
+  const canCloseEarlier = view.canCloseEarlierDayTickets === true && earlierDays !== undefined;
   const stations = [
     ...new Set(
       view.items.flatMap((item) => (item.stationLabel === null ? [] : [item.stationLabel])),
@@ -603,6 +669,7 @@ export function KitchenBoardScreen({
   const activeException = exceptionFilterAvailable ? exception : "All";
   const items = view.items.filter(
     (item) =>
+      !earlierOpen.has(item.workItemReference) &&
       (activeStation === "All" || item.stationLabel === activeStation) &&
       (status === "All" ||
         (status === "Active" ? isActiveKitchenWork(item) : item.status === status)) &&
@@ -933,9 +1000,81 @@ export function KitchenBoardScreen({
             />
           </div>
         ) : null}
+        {earlierTickets.length > 0 ? (
+          <details className="kitchen-earlier-days">
+            <summary>
+              <span>From earlier days — check and close</span>
+              <span className="kitchen-earlier-days__count">
+                {earlierTickets.length === 1 ? "1 ticket" : `${earlierTickets.length} tickets`}
+              </span>
+            </summary>
+            <p className="kitchen-earlier-days__intro">
+              These tickets are from an earlier business day. Order numbers restart every day, so
+              they are not today&apos;s orders with the same number.{" "}
+              {canCloseEarlier
+                ? "Check what happened to each one, then close it."
+                : "Ask a manager to check and close them."}
+            </p>
+            <div className="kitchen-earlier-days__tickets">
+              {earlierTickets.map((ticket) => {
+                const waited = Math.max(
+                  0,
+                  Math.floor(
+                    (Date.parse(view.projectedAt) - Date.parse(ticket.createdAt)) / 60_000,
+                  ),
+                );
+                return (
+                  <section
+                    className="kitchen-earlier-ticket"
+                    key={ticket.ticketReference}
+                    aria-label={`${ticket.orderLabel}, ${earlierDayText(ticket.businessDate)}`}
+                  >
+                    <header className="kitchen-earlier-ticket__heading">
+                      <div>
+                        <h4 className="kitchen-order-group__label">{ticket.orderLabel}</h4>
+                        <p className="kitchen-earlier-ticket__day">
+                          <strong>{earlierDayText(ticket.businessDate)}</strong> · waiting{" "}
+                          {kitchenWaitText(waited)}
+                        </p>
+                      </div>
+                      {canCloseEarlier ? (
+                        <button
+                          type="button"
+                          className="kitchen-earlier-ticket__close"
+                          disabled={
+                            stale !== undefined ||
+                            (earlierDays?.blocked ?? true) ||
+                            ticket.ticketVersion === null
+                          }
+                          onClick={() => setCloseTarget(ticket)}
+                        >
+                          Close ticket
+                        </button>
+                      ) : null}
+                    </header>
+                    {ticket.items.map((item) => (
+                      <WorkCard
+                        key={item.workItemReference}
+                        item={item}
+                        readOnly={readOnly || actionsBlocked || stale !== undefined}
+                        {...(guardedAction ? { onAction: guardedAction } : {})}
+                        onRemake={onRemake}
+                        observedAt={view.projectedAt}
+                      />
+                    ))}
+                  </section>
+                );
+              })}
+            </div>
+          </details>
+        ) : null}
         {items.length === 0 ? (
           <StatePanel
-            heading={searchApplied || view.items.length > 0 ? "No matching work" : "No active work"}
+            heading={
+              searchApplied || view.items.length > earlierOpen.size
+                ? "No matching work"
+                : "No active work"
+            }
             status
           >
             <p>
@@ -943,7 +1082,9 @@ export function KitchenBoardScreen({
                 ? "No work item matches this exact reference. Clear search to restore the queue."
                 : view.items.length === 0
                   ? "No authorized work item is available in the loaded queue."
-                  : "No loaded work item matches the current filters. Clear the filters to restore the queue."}
+                  : view.items.length === earlierOpen.size
+                    ? "Nothing from today is waiting. Earlier days' tickets are listed above."
+                    : "No loaded work item matches the current filters. Clear the filters to restore the queue."}
             </p>
           </StatePanel>
         ) : (
@@ -973,17 +1114,17 @@ export function KitchenBoardScreen({
                       <section
                         className="kitchen-order-group"
                         key={group.orderReference}
-                        aria-label={kitchenOrderLabel(group.items[0] as KitchenBoardItem)}
+                        aria-label={dayLabel(group.items[0] as KitchenBoardItem)}
                       >
                         <h4 className="kitchen-order-group__label">
-                          {kitchenOrderLabel(group.items[0] as KitchenBoardItem)}
+                          {dayLabel(group.items[0] as KitchenBoardItem)}
                         </h4>
                         {group.items.map((item) => (
                           <WorkCard
                             key={item.workItemReference}
                             item={item}
                             readOnly={readOnly || actionsBlocked || stale !== undefined}
-                            {...(onAction ? { onAction } : {})}
+                            {...(guardedAction ? { onAction: guardedAction } : {})}
                             onRemake={onRemake}
                             observedAt={view.projectedAt}
                             detailState={{
@@ -1008,8 +1149,8 @@ export function KitchenBoardScreen({
             reworks={remakes.items}
             observedAt={view.projectedAt}
             readOnly={remakeReadOnly}
-            onRemake={setRemakeTarget}
-            orderLabel={kitchenOrderLabel}
+            onRemake={onRemake}
+            orderLabel={dayLabel}
           />
         ) : null}
         {remakes && onRemake ? (
@@ -1018,6 +1159,14 @@ export function KitchenBoardScreen({
             observedAt={view.projectedAt}
             onSubmit={remakes.onCreate}
             onClose={() => setRemakeTarget(null)}
+          />
+        ) : null}
+        <KitchenEarlierDayConfirm request={confirm} onCancel={() => setConfirm(null)} />
+        {canCloseEarlier && earlierDays ? (
+          <KitchenCloseTicketDialog
+            ticket={closeTarget}
+            onSubmit={earlierDays.onClose}
+            onClose={() => setCloseTarget(null)}
           />
         ) : null}
       </div>
@@ -1274,6 +1423,11 @@ function KitchenBoardContent(props: KitchenPageProps) {
     revision,
     onChanged: useCallback(() => setRevision((value) => value + 1), []),
   });
+  // DEC-KITCHEN-STALE-TICKETS: a manager closes an earlier business day's ticket.
+  const staleClose = useKitchenStaleClose({
+    csrf: props.csrf,
+    onChanged: useCallback(() => setRevision((value) => value + 1), []),
+  });
   const refreshButtonRef = useRef<HTMLButtonElement>(null),
     retryButtonRef = useRef<HTMLButtonElement>(null),
     restoreRetryFocus = useRef(false);
@@ -1366,6 +1520,7 @@ function KitchenBoardContent(props: KitchenPageProps) {
         </StatePanel>
       ) : null}
       <KitchenReworkStatus rework={rework} />
+      <KitchenStaleCloseStatus close={staleClose} />
       {state.kind === "Found" ? (
         <KitchenBoardScreen
           view={state.view}
@@ -1381,6 +1536,14 @@ function KitchenBoardContent(props: KitchenPageProps) {
           autoRefresh
           stale={stale}
           soldOutHref={props.soldOutHref}
+          earlierDays={
+            props.csrf
+              ? {
+                  blocked: staleClose.busy || browserOffline(),
+                  onClose: staleClose.close,
+                }
+              : undefined
+          }
           remakes={
             rework.board
               ? {

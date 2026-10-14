@@ -890,6 +890,8 @@ export async function verifyPersistentMerchantBff({
     "GRANT SELECT ON rms_kitchen.kitchen_work_queue_projection_generation,rms_kitchen.kitchen_work_queue_projection,rms_kitchen.kitchen_work_item TO " +
       role,
   );
+  // DEC-KITCHEN-STALE-TICKETS: the Kitchen board leaves out tickets a manager closed (pilot api grant).
+  await admin.query("GRANT SELECT ON rms_kitchen.kitchen_ticket_closure TO " + role);
   // WP-2423 Q2/Q3: the Kitchen board reads published menu allergens (pilot api SELECT grants).
   await admin.query("GRANT USAGE ON SCHEMA rms_catalog TO " + role);
   await admin.query(

@@ -442,6 +442,9 @@ export function createPostgresKitchenReworkStore(options: {
             " AND w.store_id=k.store_id AND w.kitchen_work_item_id=k.original_kitchen_work_item_id" +
             " WHERE k.brand_id=$1 AND k.store_id=$2 AND " +
             "(k.status<>'Completed' OR k.completed_at >= $3::timestamptz - make_interval(secs => $4)) " +
+            // DEC-KITCHEN-STALE-TICKETS: a closed earlier-day ticket's remakes leave the board.
+            "AND NOT EXISTS (SELECT 1 FROM rms_kitchen.kitchen_ticket_closure c WHERE c.brand_id=k.brand_id " +
+            "AND c.store_id=k.store_id AND c.kitchen_ticket_id=k.kitchen_ticket_id) " +
             "ORDER BY k.created_at DESC, k.kitchen_rework_item_id DESC LIMIT 100",
           [brand, store, at, kitchenReworkRecentWindowMs / 1000],
         );
@@ -494,8 +497,10 @@ export async function listOpenKitchenReworkItems(
     ]);
     const result = await tx.query<Record<string, unknown>>(
       "SELECT order_id::text AS order_id,order_item_id::text AS order_item_id,sum(quantity)::int AS open " +
-        "FROM rms_kitchen.kitchen_rework_item WHERE brand_id=$1 AND store_id=$2 AND order_id=ANY($3::uuid[]) " +
-        "AND status<>'Completed' GROUP BY order_id,order_item_id ORDER BY order_id,order_item_id",
+        "FROM rms_kitchen.kitchen_rework_item k WHERE brand_id=$1 AND store_id=$2 AND order_id=ANY($3::uuid[]) " +
+        "AND status<>'Completed' AND NOT EXISTS (SELECT 1 FROM rms_kitchen.kitchen_ticket_closure c " +
+        "WHERE c.brand_id=k.brand_id AND c.store_id=k.store_id AND c.kitchen_ticket_id=k.kitchen_ticket_id) " +
+        "GROUP BY order_id,order_item_id ORDER BY order_id,order_item_id",
       [brand, store, orders],
     );
     return Object.freeze(

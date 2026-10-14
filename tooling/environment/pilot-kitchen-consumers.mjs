@@ -4,6 +4,7 @@ import {
   parseKitchenWorkCreatedEnvelope,
   parseKitchenWorkLifecycleEnvelope,
   parseKitchenReadyEnvelope,
+  parseKitchenTicketClosedEnvelope,
 } from "../../packages/rms/kitchen/src/index.ts";
 import { isPilotRuntime } from "./pilot-environment.mjs";
 export function createInternalKitchenConsumers(resources, { createQueue }) {
@@ -16,6 +17,8 @@ export function createInternalKitchenConsumers(resources, { createQueue }) {
     KitchenItemProgressRecorded: parseKitchenWorkLifecycleEnvelope,
     // WP-2423 Q6: staff cancelled a batch before the kitchen started it.
     KitchenWorkCancelled: parseKitchenWorkCancelledEnvelope,
+    // DEC-KITCHEN-STALE-TICKETS: a manager closed an earlier business day's ticket.
+    KitchenTicketClosed: parseKitchenTicketClosedEnvelope,
     KitchenItemReady: parseKitchenReadyEnvelope,
     KitchenOrderReady: parseKitchenReadyEnvelope,
   };

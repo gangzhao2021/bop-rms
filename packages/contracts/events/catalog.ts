@@ -190,6 +190,29 @@ const kitchenWorkCancelledPayload = z.strictObject({
   cancelledAt: z.iso.datetime({ offset: false }),
 });
 
+// DEC-KITCHEN-STALE-TICKETS: a manager closed an earlier business day's kitchen ticket.
+const kitchenTicketClosedPayload = z.strictObject({
+  kitchenTicketReference: z.string().regex(canonicalUuidV7),
+  orderReference: z.string().regex(canonicalUuidV7),
+  orderBatchReference: z.string().regex(canonicalUuidV7),
+  reasonCode: z.enum(["ALREADY_SERVED", "CANCELLED_ELSEWHERE", "NOT_MADE_ABANDONED"]),
+  foodMade: z.boolean(),
+  orderBusinessDate: z.iso.date(),
+  ticketVersion: z.string().regex(/^[1-9][0-9]{0,18}$/u),
+  openWorkItems: z
+    .array(
+      z.strictObject({
+        kitchenWorkItemReference: z.string().regex(canonicalUuidV7),
+        orderItemReference: z.string().regex(canonicalUuidV7),
+        status: z.enum(["Queued", "Held", "In Progress", "Completed"]),
+        requiredQuantity: z.int().min(1).max(999),
+        completedQuantity: z.int().min(0).max(999),
+      }),
+    )
+    .max(100),
+  closedAt: z.iso.datetime({ offset: false }),
+});
+
 const kitchenReworkCreatedPayload = z.strictObject({
   kitchenReworkItemReference: z.string().regex(canonicalUuidV7),
   kitchenTicketReference: z.string().regex(canonicalUuidV7),
@@ -1599,6 +1622,25 @@ export const eventCatalog = defineEventCatalog([
     deprecated: false,
     replacement: null,
     payloadSchema: kitchenReworkCreatedPayload,
+  },
+  {
+    eventType: "KitchenTicketClosed",
+    schemaVersion: 1,
+    ownerModule: "@rms/kitchen",
+    producerModule: "@rms/kitchen",
+    stability: "stable",
+    consumers: [
+      "inventory.kitchen-ticket-closed-consumption:v1",
+      "kitchen.queue-ticket-closed-projection:v1",
+    ],
+    tenantScope: "store",
+    dataClassification: "personal",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: kitchenTicketClosedPayload,
   },
   {
     eventType: "KitchenWorkAccepted",

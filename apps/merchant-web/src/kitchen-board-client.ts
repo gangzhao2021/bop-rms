@@ -117,6 +117,8 @@ function item(value: unknown) {
     allergens: allergens(raw.allergens),
     orderLabel: raw.orderLabel,
     customerNote: raw.customerNote,
+    // DEC-KITCHEN-STALE-TICKETS: the Order's business day, when this source gives it.
+    ...("businessDate" in raw ? { businessDate: raw.businessDate } : {}),
     execution: {
       orderItemReference: raw.orderItemReference,
       stationReference: raw.stationReference,
@@ -239,12 +241,14 @@ export function createKitchenBoardClient(options: {
             freshnessStatus: first.stale ? "Stale" : first.freshnessStatus,
             operatorStatus: first.operatorStatus,
             items,
+            ...(typeof first.canCloseEarlierDayTickets === "boolean"
+              ? { canCloseEarlierDayTickets: first.canCloseEarlierDayTickets }
+              : {}),
           });
         const next = record(cursor);
-        if (
-          next.projectionGenerationReference !== first.projectionGenerationReference ||
-          result.items.length === 0
-        )
+        // A page may be empty when every ticket on it was just closed (DEC-KITCHEN-STALE-TICKETS);
+        // reading stays bounded to four pages.
+        if (next.projectionGenerationReference !== first.projectionGenerationReference)
           return fail();
         parseKitchenRouteReference(next.afterWorkItemReference);
         if (typeof next.afterCreatedAt !== "string") return fail();

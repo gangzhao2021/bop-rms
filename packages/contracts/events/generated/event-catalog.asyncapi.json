@@ -3260,6 +3260,115 @@
         "x-bop-schema-version": 1,
         "x-bop-tenant-scope": "store"
       },
+      "KitchenTicketClosedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "KitchenTicketClosedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "closedAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "foodMade": {
+              "type": "boolean"
+            },
+            "kitchenTicketReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "openWorkItems": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "completedQuantity": {
+                    "maximum": 999,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "kitchenWorkItemReference": {
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                    "type": "string"
+                  },
+                  "orderItemReference": {
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                    "type": "string"
+                  },
+                  "requiredQuantity": {
+                    "maximum": 999,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "status": {
+                    "enum": ["Queued", "Held", "In Progress", "Completed"],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kitchenWorkItemReference",
+                  "orderItemReference",
+                  "status",
+                  "requiredQuantity",
+                  "completedQuantity"
+                ],
+                "type": "object"
+              },
+              "maxItems": 100,
+              "type": "array"
+            },
+            "orderBatchReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "orderBusinessDate": {
+              "format": "date",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+              "type": "string"
+            },
+            "orderReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "reasonCode": {
+              "enum": ["ALREADY_SERVED", "CANCELLED_ELSEWHERE", "NOT_MADE_ABANDONED"],
+              "type": "string"
+            },
+            "ticketVersion": {
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kitchenTicketReference",
+            "orderReference",
+            "orderBatchReference",
+            "reasonCode",
+            "foodMade",
+            "orderBusinessDate",
+            "ticketVersion",
+            "openWorkItems",
+            "closedAt"
+          ],
+          "type": "object"
+        },
+        "title": "KitchenTicketClosed v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": [
+          "inventory.kitchen-ticket-closed-consumption:v1",
+          "kitchen.queue-ticket-closed-projection:v1"
+        ],
+        "x-bop-data-classification": "personal",
+        "x-bop-event-type": "KitchenTicketClosed",
+        "x-bop-owner-module": "@rms/kitchen",
+        "x-bop-producer-module": "@rms/kitchen",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "store"
+      },
       "KitchenWorkAcceptedV1": {
         "contentType": "application/json",
         "deprecated": false,

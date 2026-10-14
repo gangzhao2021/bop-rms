@@ -2745,6 +2745,24 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (WP-2423 Q26): DEC-KITCHEN-REWORK (Handoff Section 26.6) — kitchen staff remake a finished dish as a new append-only Rework work item linked to the original (which keeps its result) with reason, actor and time; the pilot API (api role) records the rework, its operations, audit and KitchenReworkCreated event, the kitchen board and pickup queue read open remakes, and the Inventory consumer (api role) records the first dish as Store waste"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_ticket_closure",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 kitchen stale tickets): DEC-KITCHEN-STALE-TICKETS (Handoff Section 26.1/26.4) — a manager closes a kitchen ticket left open from an earlier business day with a reason (already served, cancelled elsewhere, not made) as one append-only closure row with actor, time and both business days; the pilot API (api role) records the closure, its audit and KitchenTicketClosed event, the kitchen queue refresh and board read exclude closed tickets, and nothing is refunded or cancelled"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_ticket_closure",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 kitchen stale tickets): DEC-KITCHEN-STALE-TICKETS (Handoff Section 26.1/26.4) — a manager closes a kitchen ticket left open from an earlier business day with a reason (already served, cancelled elsewhere, not made) as one append-only closure row with actor, time and both business days; the pilot API (api role) records the closure, its audit and KitchenTicketClosed event, the kitchen queue refresh and board read exclude closed tickets, and nothing is refunded or cancelled"
     }
   ]
 }

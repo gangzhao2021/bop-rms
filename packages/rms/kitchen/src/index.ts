@@ -438,3 +438,33 @@ export {
   listOpenKitchenReworkByOrder,
   listOpenKitchenReworkItems,
 } from "./infrastructure/persistence/kitchen-rework-store.js";
+// WP-2423 DEC-KITCHEN-STALE-TICKETS: a manager closes a ticket left from an earlier business day.
+export {
+  KitchenStaleTicketError,
+  kitchenStaleTicketClosePermission,
+  kitchenStaleTicketCloseReasons,
+  kitchenStaleTicketClosedActionCode,
+  kitchenStaleTicketErrorCodes,
+  kitchenStaleTicketFoodMade,
+  kitchenTicketClosedInventoryConsumer,
+  kitchenTicketClosedQueueConsumer,
+  parseCloseStaleKitchenTicketCommand,
+  parseKitchenBusinessDate,
+  type CloseStaleKitchenTicketCommand,
+  type KitchenStaleTicketCloseReason,
+  type KitchenStaleTicketCloseResult,
+  type KitchenStaleTicketClosure,
+  type KitchenStaleTicketErrorCode,
+  type KitchenStaleTicketOpenWorkItem,
+  type KitchenTicketClosedEnvelope,
+  type KitchenTicketClosedPayload,
+  type KitchenTicketClosedWorkItem,
+} from "./contracts/kitchen-stale-ticket.js";
+export {
+  createKitchenTicketClosedEnvelope,
+  parseKitchenTicketClosedEnvelope,
+} from "./application/kitchen-ticket-closed-event.js";
+export {
+  createPostgresKitchenStaleTicketStore,
+  listClosedKitchenTickets,
+} from "./infrastructure/persistence/kitchen-stale-ticket-store.js";

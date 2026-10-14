@@ -19,6 +19,9 @@ const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(1
 type Options = Parameters<typeof createMerchantKitchenQuery>[0];
 function setup() {
   const allowed = vi.fn(async () => true),
+    authorizeAction = vi.fn<(action: string) => Promise<{ effect: string }>>(async () => ({
+      effect: "Deny",
+    })),
     authorize = vi.fn(async () => ({ sessionReference: id(9) }));
   const tx = { query: vi.fn(async () => ({ rows: [], rowCount: 0 })) };
   const run = vi.fn(async (work: (tx: object) => Promise<unknown>) => work(tx));
@@ -27,12 +30,14 @@ function setup() {
     context: { brand: { brandReference: id(3) } },
     store: { storeReference: id(4) },
     allowed,
+    authorizeAction,
   });
   doubles.service.mockReturnValue({ list: doubles.list, get: doubles.get });
   doubles.list.mockResolvedValue({
     items: [
       {
         workItemReference: id(5),
+        ticketReference: id(7),
         orderReference: id(6),
         ticketAggregateVersion: 9007199254740993n,
         workItemVersion: 2n,
@@ -60,7 +65,7 @@ function setup() {
     csrf: "synthetic-csrf",
     query: { kind: "List", filters: {}, cursor: null, limit: 20 },
   };
-  return { operation, input, allowed, authorize, run, tx };
+  return { operation, input, allowed, authorize, authorizeAction, run, tx };
 }
 beforeEach(() => vi.resetAllMocks());
 it("authenticates before business reads", async () => {
@@ -93,14 +98,17 @@ it("derives current authority, preserves integer strings, and rechecks permissio
   expect(result).toEqual({
     operatorStatus: "Unverified",
     storeReference: id(4),
+    canCloseEarlierDayTickets: false,
     items: [
       {
         workItemReference: id(5),
+        ticketReference: id(7),
         orderReference: id(6),
         ticketAggregateVersion: "9007199254740993",
         workItemVersion: "2",
         allergens: { status: "Unavailable" },
         orderLabel: null,
+        businessDate: null,
         customerNote: null,
       },
     ],
@@ -132,9 +140,35 @@ it("returns detail with exact version strings", async () => {
       workItemVersion: "2",
       allergens: { status: "Unavailable" },
       orderLabel: null,
+      businessDate: null,
       customerNote: null,
     },
   });
+});
+it("DEC-KITCHEN-STALE-TICKETS: labels each ticket with its Order's business day, drops closed tickets at once and says who may close", async () => {
+  const f = setup();
+  doubles.list.mockResolvedValue({
+    items: [
+      { workItemReference: id(5), ticketReference: id(7), orderReference: id(6) },
+      { workItemReference: id(8), ticketReference: id(10), orderReference: id(11) },
+    ].map((item) => ({ ...item, ticketAggregateVersion: 3n, workItemVersion: 2n })),
+  });
+  f.authorizeAction.mockResolvedValue({ effect: "Allow" });
+  f.tx.query.mockImplementation((async (sql: string) =>
+    sql.includes("FROM rms_kitchen.kitchen_ticket_closure")
+      ? { rows: [{ ticket: id(10) }], rowCount: 1 }
+      : sql.includes("business_date::text")
+        ? { rows: [{ order_id: id(6), business_date: "2026-10-09" }], rowCount: 1 }
+        : { rows: [], rowCount: 0 }) as never);
+  const result = (await f.operation(f.input)) as {
+    canCloseEarlierDayTickets: boolean;
+    items: { workItemReference: string; businessDate: string | null }[];
+  };
+  expect(result.items.map((item) => [item.workItemReference, item.businessDate])).toEqual([
+    [id(5), "2026-10-09"],
+  ]);
+  expect(result.canCloseEarlierDayTickets).toBe(true);
+  expect(f.authorizeAction).toHaveBeenCalledWith("kitchen.ticket.close_stale");
 });
 it("WP-2423 Q3: serves the published menu disclosure per work item and restores Store scope", async () => {
   const f = setup();
@@ -225,6 +259,7 @@ it("preserves projection-owned selected modifiers through List and Get", async (
     items: [
       {
         workItemReference: id(5),
+        ticketReference: id(12),
         orderReference: id(7),
         ticketAggregateVersion: 3n,
         workItemVersion: 2n,

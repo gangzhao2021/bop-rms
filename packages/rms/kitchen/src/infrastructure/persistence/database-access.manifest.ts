@@ -123,6 +123,14 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier", "personal"],
     },
     {
+      table: "kitchen_ticket_closure",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier", "personal"],
+    },
+    {
       table: "kitchen_work_cancellation",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/kitchen" },

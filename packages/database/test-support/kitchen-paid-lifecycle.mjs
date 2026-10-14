@@ -41,6 +41,8 @@ export async function exercisePaidKitchenLifecycle({
   );
   // WP-2423 Q6: the lifecycle store explains Cancelled work from its cancellation rows.
   await admin.query("GRANT SELECT ON rms_kitchen.kitchen_work_cancellation TO " + role);
+  // DEC-KITCHEN-STALE-TICKETS: the queue source reader leaves closed tickets out.
+  await admin.query("GRANT SELECT ON rms_kitchen.kitchen_ticket_closure TO " + role);
   const queryFailures = [];
   let next = 30000;
   let allowed = true;

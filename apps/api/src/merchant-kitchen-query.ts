@@ -6,11 +6,13 @@ import {
   createPostgresKitchenQueueQueries,
   lockPostgresKitchenQueueRead,
   KitchenQueueProjectionError,
+  kitchenStaleTicketClosePermission,
+  listClosedKitchenTickets,
   listKitchenWorkItemPreparationFacts,
   type KitchenQueueItemView,
 } from "@rms/kitchen";
 import { listPublishedSellableAllergenDisclosures, sellableDisclosureKey } from "@rms/catalog";
-import { listStoreKitchenOrderLabels } from "@rms/ordering";
+import { listStoreKitchenOrderLabels, listStoreOrderBusinessDates } from "@rms/ordering";
 import { listDiningSessionTableLabels } from "@rms/dining";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -94,6 +96,11 @@ export interface KitchenOrderLabel {
 export interface KitchenPreparation {
   readonly allergens: KitchenItemAllergens;
   readonly orderLabel: KitchenOrderLabel | null;
+  /**
+   * DEC-KITCHEN-STALE-TICKETS: the Order's business day (Ordering), so a ticket left from an
+   * earlier day is never mistaken for today's ticket with the same number. Null when unknown.
+   */
+  readonly businessDate: string | null;
   /** Restricted (DEC-KDS-CUSTOMER-NOTE): displayed only; never logged or evented. */
   readonly customerNote: string | null;
 }
@@ -101,6 +108,7 @@ const unavailableAllergens: KitchenItemAllergens = Object.freeze({ status: "Unav
 const noPreparation: KitchenPreparation = Object.freeze({
   allergens: unavailableAllergens,
   orderLabel: null,
+  businessDate: null,
   customerNote: null,
 });
 const itemView = (item: KitchenQueueItemView, preparation: KitchenPreparation) => ({
@@ -109,6 +117,7 @@ const itemView = (item: KitchenQueueItemView, preparation: KitchenPreparation) =
   workItemVersion: item.workItemVersion.toString(10),
   allergens: preparation.allergens,
   orderLabel: preparation.orderLabel,
+  businessDate: preparation.businessDate,
   customerNote: preparation.customerNote,
 });
 /**
@@ -129,6 +138,15 @@ export async function kitchenPreparation(
   const orders = await listStoreKitchenOrderLabels(transaction, scope, [
     ...new Set(items.map((item) => item.orderReference)),
   ]);
+  const orderReferences = [...new Set(items.map((item) => item.orderReference))];
+  const businessDates = new Map<string, string>();
+  for (let start = 0; start < orderReferences.length; start += 100)
+    for (const [order, date] of await listStoreOrderBusinessDates(
+      transaction,
+      scope,
+      orderReferences.slice(start, start + 100),
+    ))
+      businessDates.set(order, date);
   const tables = await listDiningSessionTableLabels(transaction, scope, [
     ...new Set(
       [...orders.values()].flatMap((order) =>
@@ -145,6 +163,7 @@ export async function kitchenPreparation(
         Object.freeze({
           allergens: facts?.allergens ?? unavailableAllergens,
           customerNote: facts?.customerNote ?? null,
+          businessDate: businessDates.get(item.orderReference) ?? null,
           orderLabel:
             order === undefined
               ? null
@@ -327,12 +346,21 @@ export function createMerchantKitchenQuery(options: {
           cursor: query.cursor,
           limit: query.limit,
         });
-        const preparation = await kitchenPreparation(tx, authority, result.items);
+        // DEC-KITCHEN-STALE-TICKETS: a ticket a manager closed is gone at once, even before the
+        // queue projection has caught up with the closure.
+        const closed = await listClosedKitchenTickets(tx, authority, [
+          ...new Set(result.items.map((item) => item.ticketReference)),
+        ]);
+        const items = result.items.filter((item) => !closed.has(item.ticketReference));
+        const preparation = await kitchenPreparation(tx, authority, items);
+        const canCloseEarlierDayTickets =
+          (await scope.authorizeAction(kitchenStaleTicketClosePermission))?.effect === "Allow";
         return {
           ...result,
           operatorStatus: operatorStatus(result),
           storeReference: authority.storeReference,
-          items: result.items.map((item) =>
+          canCloseEarlierDayTickets,
+          items: items.map((item) =>
             itemView(item, preparation.get(item.workItemReference) ?? noPreparation),
           ),
         };

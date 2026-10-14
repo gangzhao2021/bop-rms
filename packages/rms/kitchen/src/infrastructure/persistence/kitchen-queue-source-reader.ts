@@ -50,12 +50,36 @@ export function createPostgresKitchenQueueSourceReader(options: {
   readonly lifecycleValidation: KitchenWorkLifecycleEffectValidationPorts;
   readonly nextSnapshotReference: () => string;
   readonly authorize: (transaction: ConsumerTransaction) => Promise<boolean>;
+  /**
+   * DEC-KITCHEN-STALE-TICKETS: when set, a ticket whose work is all finished (cancelled, or
+   * completed and marked ready, with no open remake) and that has not changed for this long leaves
+   * the live board, so finished history never fills the bounded snapshot. Omitted: every open
+   * ticket is read. Production compositions set it (24 hours).
+   */
+  readonly retireFinishedAfterMs?: number;
 }) {
   const brand = parseKitchenTicketReference(options.brandReference);
   const store = parseKitchenTicketReference(options.storeReference);
   const limits = [options.maxTickets, options.maxItemsPerTicket, options.maxOperationsPerTicket];
   if (limits.some((limit) => !Number.isSafeInteger(limit) || limit < 1 || limit > 100000))
     return unavailable();
+  const retireAfter = options.retireFinishedAfterMs;
+  if (
+    retireAfter !== undefined &&
+    (!Number.isSafeInteger(retireAfter) || retireAfter < 3_600_000 || retireAfter > 31 * 86_400_000)
+  )
+    return unavailable();
+  const retirement =
+    retireAfter === undefined
+      ? ""
+      : "AND NOT (k.updated_at < clock_timestamp() - make_interval(secs => $6) " +
+        "AND NOT EXISTS (SELECT 1 FROM rms_kitchen.kitchen_work_item w WHERE w.brand_id=k.brand_id " +
+        "AND w.store_id=k.store_id AND w.kitchen_ticket_id=k.kitchen_ticket_id AND (w.status IN ('Queued','Held','In Progress') " +
+        "OR (w.status='Completed' AND NOT EXISTS (SELECT 1 FROM rms_kitchen.kitchen_order_item_ready_result x " +
+        "WHERE x.brand_id=w.brand_id AND x.store_id=w.store_id AND x.kitchen_ticket_id=w.kitchen_ticket_id " +
+        "AND x.order_item_id=w.order_item_id)))) " +
+        "AND NOT EXISTS (SELECT 1 FROM rms_kitchen.kitchen_rework_item y WHERE y.brand_id=k.brand_id " +
+        "AND y.store_id=k.store_id AND y.kitchen_ticket_id=k.kitchen_ticket_id AND y.status<>'Completed')) ";
   return {
     async read(transaction: ConsumerTransaction) {
       try {
@@ -75,7 +99,12 @@ export function createPostgresKitchenQueueSourceReader(options: {
             "(SELECT COALESCE(jsonb_agg(c),'[]'::jsonb) FROM (SELECT " +
             kitchenWorkCancellationColumns +
             " FROM rms_kitchen.kitchen_work_cancellation WHERE brand_id=$1 AND store_id=$2 AND kitchen_ticket_id=t.kitchen_ticket_id ORDER BY result_ticket_version LIMIT $4) c) AS cancellations " +
-            "FROM (SELECT * FROM rms_kitchen.kitchen_ticket WHERE brand_id=$1 AND store_id=$2 AND status='Open' ORDER BY kitchen_ticket_id LIMIT $3) t " +
+            // DEC-KITCHEN-STALE-TICKETS: a ticket a manager closed leaves the live board.
+            "FROM (SELECT * FROM rms_kitchen.kitchen_ticket k WHERE k.brand_id=$1 AND k.store_id=$2 AND k.status='Open' " +
+            "AND NOT EXISTS (SELECT 1 FROM rms_kitchen.kitchen_ticket_closure c WHERE c.brand_id=k.brand_id " +
+            "AND c.store_id=k.store_id AND c.kitchen_ticket_id=k.kitchen_ticket_id) " +
+            retirement +
+            "ORDER BY k.kitchen_ticket_id LIMIT $3) t " +
             "LEFT JOIN rms_kitchen.kitchen_creation_record r ON r.brand_id=t.brand_id AND r.store_id=t.store_id AND r.kitchen_ticket_id=t.kitchen_ticket_id) s",
           [
             brand,
@@ -83,6 +112,7 @@ export function createPostgresKitchenQueueSourceReader(options: {
             options.maxTickets + 1,
             options.maxItemsPerTicket + 1,
             options.maxOperationsPerTicket + 1,
+            ...(retireAfter === undefined ? [] : [retireAfter / 1000]),
           ],
         );
         if (result.rows.length !== 1 || !result.rows[0]) return unavailable();

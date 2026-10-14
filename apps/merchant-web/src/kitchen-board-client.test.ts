@@ -254,3 +254,24 @@ it("WP-2423 Q3: groups the menu's declared allergens and fails closed on malform
     await expect(f.client.loadQueue()).rejects.toMatchObject({ code: "Unavailable" });
   }
 });
+it("DEC-KITCHEN-STALE-TICKETS: carries each ticket's business day and whether this staff member may close earlier days", async () => {
+  const f = setup();
+  f.fetcher.mockResolvedValue(
+    response({
+      ...metadata,
+      canCloseEarlierDayTickets: true,
+      items: [
+        { ...item(), businessDate: "2026-09-14" },
+        { ...item(7), businessDate: null },
+      ],
+      nextCursor: null,
+    }),
+  );
+  const view = parseKitchenBoardView(await f.client.loadQueue());
+  expect(view.items.map((entry) => entry.businessDate)).toEqual(["2026-09-14", null]);
+  expect(view.canCloseEarlierDayTickets).toBe(true);
+  f.fetcher.mockResolvedValue(
+    response({ ...metadata, items: [{ ...item(), businessDate: "Sep 14" }], nextCursor: null }),
+  );
+  await expect(f.client.loadQueue()).rejects.toThrow();
+});

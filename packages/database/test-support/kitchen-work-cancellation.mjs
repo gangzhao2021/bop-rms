@@ -40,6 +40,8 @@ export async function exerciseKitchenWorkCancellation({ admin, context, role, id
   );
   await admin.query(`GRANT SELECT,INSERT,UPDATE ON platform_audit.audit_chain_head TO ${role}`);
   await admin.query(`GRANT SELECT ON rms_kitchen.kitchen_creation_record TO ${role}`);
+  // DEC-KITCHEN-STALE-TICKETS: the queue source reader leaves closed tickets out.
+  await admin.query(`GRANT SELECT ON rms_kitchen.kitchen_ticket_closure TO ${role}`);
 
   const connection = new Client(context.clientConfig);
   await connection.connect();

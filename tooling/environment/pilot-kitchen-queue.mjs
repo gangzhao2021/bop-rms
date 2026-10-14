@@ -46,6 +46,8 @@ export function createInternalKitchenQueue(resources, { actorReference }) {
       maxTickets: 100,
       maxItemsPerTicket: 100,
       maxOperationsPerTicket: 1000,
+      // DEC-KITCHEN-STALE-TICKETS: finished tickets unchanged for a day leave the live board.
+      retireFinishedAfterMs: 24 * 3_600_000,
       creationValidation: { references: refs, digests: { sha256: hash } },
       lifecycleValidation: { references: refs, digests: { sha256: hash } },
       nextSnapshotReference: next,

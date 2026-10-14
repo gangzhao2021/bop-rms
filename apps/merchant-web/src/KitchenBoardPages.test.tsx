@@ -20,6 +20,8 @@ import {
 import { staleRetryDelayMs } from "./stale-read.js";
 import { kitchenBoardFixture, kitchenItemFixture } from "./kitchen-board.fixtures.js";
 import { parseKitchenBoardView, parseKitchenWorkItemDetailView } from "./kitchen-board.js";
+import { StoreBusinessDayContext } from "./StoreBusinessDay.js";
+import { earlierDayTickets, fromEarlierKitchenDay, kitchenWaitText } from "./KitchenEarlierDays.js";
 describe("WP-1804 Kitchen Board screens", () => {
   it("renders station, safety, age and bounded actions", () => {
     const html = renderToStaticMarkup(
@@ -740,5 +742,93 @@ describe("WP-2423 Q26 kitchen remakes (Handoff Section 26.6)", () => {
       </MemoryRouter>,
     );
     expect(none).not.toContain("Remake");
+  });
+});
+
+describe("DEC-KITCHEN-STALE-TICKETS earlier business days on the kitchen board", () => {
+  const execution = {
+    orderItemReference: "018f0f58-767a-7f3b-a1d0-000000000404",
+    stationReference: "018f0f58-767a-7f3b-a1d0-000000000405",
+    ticketVersion: "3",
+    workItemVersion: "2",
+    acceptedAt: null,
+    readyAt: null,
+  };
+  const today = { ...kitchenItemFixture(), businessDate: "2026-08-12", execution };
+  // The same number 14 from five days earlier, still queued.
+  const old = {
+    ...kitchenItemFixture(),
+    workItemReference: "018f0f58-767a-7f3b-a1d0-000000000421",
+    ticketReference: "018f0f58-767a-7f3b-a1d0-000000000422",
+    orderReference: "018f0f58-767a-7f3b-a1d0-000000000423",
+    displayName: "Old noodle bowl",
+    createdAt: "2026-08-07T18:00:00.000Z",
+    businessDate: "2026-08-07",
+    execution,
+  };
+  const render = (canClose: boolean, businessDate: string | null = "2026-08-12") =>
+    renderToStaticMarkup(
+      <StoreBusinessDayContext.Provider
+        value={businessDate ? { businessDate, startsAt: null, endsAt: null } : null}
+      >
+        <MemoryRouter>
+          <KitchenBoardScreen
+            view={parseKitchenBoardView({
+              ...kitchenBoardFixture(),
+              items: [today, old],
+              canCloseEarlierDayTickets: canClose,
+            })}
+            earlierDays={{ blocked: false, onClose: () => undefined }}
+            onAction={() => undefined}
+            actionsBlocked={false}
+          />
+        </MemoryRouter>
+      </StoreBusinessDayContext.Provider>,
+    );
+  it("keeps an earlier day's open ticket in a collapsed section with its day and age, apart from today's lanes", () => {
+    const html = render(true);
+    expect(html).toContain('<details class="kitchen-earlier-days">');
+    expect(html).not.toContain('<details class="kitchen-earlier-days" open');
+    expect(html).toContain("From earlier days — check and close");
+    expect(html).toContain("1 ticket");
+    expect(html).toContain("From Fri, Aug 7");
+    expect(html).toContain("waiting 4 days");
+    expect(html).toContain("Close ticket");
+    // Today's Order 14 is in the lanes; the old one only in the earlier section.
+    const lanes = html.slice(html.indexOf('class="kitchen-board-lanes"'));
+    expect(lanes).toContain("Mushroom rice bowl");
+    expect(lanes).not.toContain("Old noodle bowl");
+    expect(html.indexOf("Old noodle bowl")).toBeLessThan(
+      html.indexOf('class="kitchen-board-lanes"'),
+    );
+    expect(html).toContain("1 work item");
+  });
+  it("offers the close only to a manager, and shows nothing apart while the business day is unknown", () => {
+    const cook = render(false);
+    expect(cook).toContain("From earlier days — check and close");
+    expect(cook).toContain("Ask a manager to check and close them.");
+    expect(cook).not.toContain("Close ticket");
+    const unknown = render(true, null);
+    expect(unknown).not.toContain("From earlier days");
+    expect(unknown).toContain("Old noodle bowl");
+  });
+  it("groups earlier tickets with their exact version and words waiting time in hours and days", () => {
+    const view = parseKitchenBoardView({ ...kitchenBoardFixture(), items: [today, old] });
+    expect(fromEarlierKitchenDay(old, "2026-08-12")).toBe(true);
+    expect(fromEarlierKitchenDay(today, "2026-08-12")).toBe(false);
+    expect(fromEarlierKitchenDay({ businessDate: null }, "2026-08-12")).toBe(false);
+    const tickets = earlierDayTickets(view.items, "2026-08-12", kitchenOrderLabel);
+    expect(tickets).toEqual([
+      expect.objectContaining({
+        ticketReference: old.ticketReference,
+        businessDate: "2026-08-07",
+        ticketVersion: "3",
+        orderLabel: "Order 14 · Table T4",
+      }),
+    ]);
+    expect(kitchenWaitText(12)).toBe("12 min");
+    expect(kitchenWaitText(125)).toBe("2 h 5 min");
+    expect(kitchenWaitText(60 * 24)).toBe("1 day");
+    expect(kitchenWaitText(60 * 24 * 5 + 30)).toBe("5 days");
   });
 });

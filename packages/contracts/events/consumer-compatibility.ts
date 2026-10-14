@@ -652,6 +652,23 @@ export const eventConsumerContracts = defineEventConsumerContracts([
     "record_kitchen_rework_waste",
     "none",
   ),
+  // DEC-KITCHEN-STALE-TICKETS: Inventory records a closed ticket's served dishes as used.
+  contract(
+    "inventory.kitchen-ticket-closed-consumption",
+    "@rms/inventory",
+    "KitchenTicketClosed",
+    "store",
+    "record_order_line_inventory_consumption",
+    "none",
+  ),
+  contract(
+    "kitchen.queue-ticket-closed-projection",
+    "@rms/kitchen",
+    "KitchenTicketClosed",
+    "store",
+    "replace_kitchen_queue_projection",
+    "none",
+  ),
   contract(
     "kitchen.queue-work-cancelled-projection",
     "@rms/kitchen",

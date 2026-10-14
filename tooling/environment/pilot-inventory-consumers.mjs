@@ -2,10 +2,12 @@ import console from "node:console";
 import { consumeEventInTransaction } from "../../packages/bop/eventing/src/index.ts";
 import {
   parseKitchenReworkCreatedEnvelope,
+  parseKitchenTicketClosedEnvelope,
   parseKitchenWorkLifecycleEnvelope,
 } from "../../packages/rms/kitchen/src/index.ts";
 import { createKitchenInventoryConsumption } from "../../apps/api/dist/kitchen-inventory-consumption.js";
 import { createKitchenReworkWasteConsumption } from "../../apps/api/dist/kitchen-rework-waste.js";
+import { createKitchenTicketClosedConsumption } from "../../apps/api/dist/kitchen-ticket-closed-consumption.js";
 import { isPilotRuntime } from "./pilot-environment.mjs";
 
 const failureLog = (event, error) => {
@@ -61,6 +63,57 @@ function createReworkWasteConsumer(resources) {
         await consume(transaction, authorized(envelope));
       } catch (error) {
         failureLog("INTERNAL_KITCHEN_REWORK_WASTE_FAILED", error);
+        throw error;
+      }
+      return { status: "completed" };
+    },
+  });
+  return {
+    registration,
+    consume: (transaction, value) =>
+      consumeEventInTransaction(transaction, registration, authorized(value)),
+  };
+}
+
+/**
+ * DEC-KITCHEN-STALE-TICKETS: when a manager closes an earlier day's ticket as already served, the
+ * open dishes' ingredients are recorded as used, once per KitchenTicketClosed Event.
+ */
+function createTicketClosedConsumer(resources) {
+  const consume = createKitchenTicketClosedConsumption({
+    scope: {
+      tenantReference: resources.publicProfile.binding.tenantReference,
+      brandReference: resources.scope.brandReference,
+      storeReference: resources.scope.storeReference,
+    },
+    nextReference: () => resources.credentials.reference(),
+    authorize: async () => resources.now() < resources.publicProfile.binding.validUntil,
+    retentionPolicy: { code: "AUDIT_DEFAULT", version: 1 },
+  });
+  const authorized = (value) => {
+    const event = parseKitchenTicketClosedEnvelope(value);
+    if (
+      event.tenantId !== resources.scope.brandReference ||
+      event.storeId !== resources.scope.storeReference
+    )
+      throw new Error("INTERNAL_INVENTORY_SCOPE_DENIED");
+    return event;
+  };
+  const registration = Object.freeze({
+    consumerName: "inventory.kitchen-ticket-closed-consumption:v1",
+    consumerVersion: 1,
+    eventType: "KitchenTicketClosed",
+    schemaVersions: [1],
+    ownerModule: "@rms/inventory",
+    tenantScope: "store",
+    ordering: "none",
+    sideEffect: "record_order_line_inventory_consumption",
+    replaySafe: true,
+    handler: async ({ transaction, envelope }) => {
+      try {
+        await consume(transaction, authorized(envelope));
+      } catch (error) {
+        failureLog("INTERNAL_KITCHEN_TICKET_CLOSED_CONSUMPTION_FAILED", error);
         throw error;
       }
       return { status: "completed" };
@@ -141,5 +194,9 @@ export function createInternalInventoryConsumers(resources) {
         consumeEventInTransaction(transaction, registration, authorized(value)),
     };
   });
-  return [...lifecycle, createReworkWasteConsumer(resources)];
+  return [
+    ...lifecycle,
+    createReworkWasteConsumer(resources),
+    createTicketClosedConsumer(resources),
+  ];
 }

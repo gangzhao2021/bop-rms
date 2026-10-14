@@ -56,6 +56,7 @@ import { createMerchantAllergens } from "../../apps/api/dist/merchant-allergens.
 import { createMerchantMenus } from "../../apps/api/dist/merchant-menus.js";
 import { createMerchantAvailability } from "../../apps/api/dist/merchant-availability.js";
 import { createMerchantKitchenRework } from "../../apps/api/dist/merchant-kitchen-rework.js";
+import { createMerchantKitchenStaleClose } from "../../apps/api/dist/merchant-kitchen-stale-close.js";
 import { createMerchantOptionSets } from "../../apps/api/dist/merchant-option-sets.js";
 import { logUnexpected } from "./pilot-merchant-pickup.mjs";
 import { createMerchantOptionPrices } from "../../apps/api/dist/merchant-option-prices.js";
@@ -822,6 +823,12 @@ export async function createInternalMerchant(
     authentication: service,
     nextReference: () => resources.credentials.reference(),
   });
+  // DEC-KITCHEN-STALE-TICKETS: a manager closes an earlier business day's kitchen ticket.
+  const kitchenStaleClose = createMerchantKitchenStaleClose({
+    persistence,
+    authentication: service,
+    nextReference: () => resources.credentials.reference(),
+  });
   const kitchenRelease = createMerchantKitchenRelease({
     persistence,
     authentication: service,
@@ -1155,6 +1162,7 @@ export async function createInternalMerchant(
       kitchenCommand,
       kitchenRelease,
       kitchenRework,
+      kitchenStaleClose,
       roleAdministration,
       staffAdministration: {
         ...staffAdministration,

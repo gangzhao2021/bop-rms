@@ -17,11 +17,13 @@ import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js"
 
 /** IDR-0039 least-privilege named KDS Operator profile: whatever the Actor's roles allow,
  * a NamedKdsOperator Session can only enter the workspace and operate the Kitchen (WP-2423 Q26:
- * including a remake, which the Actor's roles must still allow). */
+ * including a remake; DEC-KITCHEN-STALE-TICKETS: a manager signed in at the kitchen screen closing
+ * an earlier day's ticket — the Actor's roles must still allow each). */
 export const kdsOperatorProfileActions: ReadonlySet<string> = new Set([
   "merchant.access",
   "kitchen.operate",
   "kitchen.work_item.rework",
+  "kitchen.ticket.close_stale",
 ]);
 
 /** Current Workforce session, selected Tenant/Brand/Store and per-action policy.

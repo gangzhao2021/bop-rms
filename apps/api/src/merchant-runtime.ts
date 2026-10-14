@@ -55,6 +55,7 @@ import { createMerchantPickupHandoff } from "./merchant-pickup-handoff.js";
 import { createMerchantKitchenQuery } from "./merchant-kitchen-query.js";
 import { createMerchantKitchenCommand } from "./merchant-kitchen-command.js";
 import { createMerchantKitchenRework } from "./merchant-kitchen-rework.js";
+import { createMerchantKitchenStaleClose } from "./merchant-kitchen-stale-close.js";
 import { createMerchantProductDraftCommand } from "./merchant-product-draft-command.js";
 import { createMerchantOrdinaryRefundCommand } from "./merchant-ordinary-refund-command.js";
 import { createMerchantMenuPublicationCommand } from "./merchant-menu-publication-command.js";
@@ -122,6 +123,11 @@ export interface MerchantRuntimeOptions {
   >;
   /** WP-2423 Q26: Kitchen remakes (Handoff Section 26.6). */
   readonly kitchenRework?: Pick<Parameters<typeof createMerchantKitchenRework>[0], "nextReference">;
+  /** DEC-KITCHEN-STALE-TICKETS: close an earlier business day's kitchen ticket. */
+  readonly kitchenStaleClose?: Pick<
+    Parameters<typeof createMerchantKitchenStaleClose>[0],
+    "nextReference"
+  >;
   /** Explicit administration authority; never derived from Active Store navigation. */
   readonly brandLifecycle?: MerchantBffRouterOptions["brandLifecycle"];
   readonly ordinaryRefund?: Omit<
@@ -421,6 +427,15 @@ export function createMerchantRuntime(options: MerchantRuntimeOptions): Merchant
       : {
           kitchenRework: createMerchantKitchenRework({
             ...options.kitchenRework,
+            persistence: options.persistence,
+            authentication: service,
+          }),
+        }),
+    ...(options.kitchenStaleClose === undefined
+      ? {}
+      : {
+          kitchenStaleClose: createMerchantKitchenStaleClose({
+            ...options.kitchenStaleClose,
             persistence: options.persistence,
             authentication: service,
           }),
