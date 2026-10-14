@@ -105,6 +105,32 @@ describe("customer entry browser boundary", () => {
     await expect(client.start()).resolves.toEqual({ kind: "EntryUnavailable" });
   });
 
+  it("WP-2423 Q11: reads a replaced or turned-off table code as ask-staff guidance", async () => {
+    const body = (messageKey: string) => ({
+      schemaVersion: 1,
+      code: "entry_qr_retired",
+      messageKey,
+      recovery: { action: "AskStaff", storeSelection: "Hidden" },
+    });
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(response(410, body("customer.entry.qr_replaced")))
+      .mockResolvedValueOnce(response(410, body("customer.entry.qr_turned_off")))
+      .mockResolvedValueOnce(response(410, body("customer.entry.other")));
+    const start = () =>
+      createCustomerEntryClient({
+        fetch,
+        hash: "#qr=aaa.bbb.ccc",
+        pathname: "/",
+        search: "",
+        replaceState: vi.fn(),
+        online: () => true,
+      }).start();
+    await expect(start()).resolves.toEqual({ kind: "TableCodeRetired", replaced: true });
+    await expect(start()).resolves.toEqual({ kind: "TableCodeRetired", replaced: false });
+    await expect(start()).resolves.toEqual({ kind: "ServiceUnavailable" });
+  });
+
   it("WP-2423 Q4: reads a closed or paused Store with today's hours", async () => {
     const body = (operatingState: string) => ({
       schemaVersion: 1,

@@ -188,7 +188,66 @@ export function createInternalQrLoaders({ file, loadProfile, expectedDatabaseNam
       },
     });
   }
-  return { provisionInternalQr, loadInternalPickupQr, loadInternalDiningQr };
+  /**
+   * WP-2423 Q11 (DEC-TABLE-QR-ISSUANCE): signing and verification for the table codes staff issue
+   * from DIN-TABLE-LIST. TEST-ONLY: the key is the locally generated internal-test key file; the
+   * managed QR key ("Secrets" capability gap) replaces this source without changing stored codes'
+   * format (a new kid joins the key set as Current, the old one stays as Overlap until its codes
+   * are reprinted). The private key never leaves this process and is never logged.
+   */
+  async function loadIssuedTableQrKeys(profile) {
+    if (
+      !["development", "test"].includes(process.env.NODE_ENV ?? "development") ||
+      profile.environment !== "InternalTest"
+    )
+      throw new Error("INTERNAL_QR_UNAVAILABLE");
+    const key = await privateKey(),
+      publicKey = createPublicKey(key),
+      kid = "internal-test-v1",
+      publicKeyReference = id(3);
+    const validFrom = profile.createdAt;
+    const validUntil = new Date(
+      Date.parse(validFrom) + 2 * 366 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    return Object.freeze({
+      keys: {
+        load: async () =>
+          parseQrVerificationKeySetEvidence({
+            registryVersion: 1,
+            registryEvidenceReference: id(2),
+            validUntil: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+            keys: [
+              {
+                kid,
+                algorithm: "ES256",
+                state: "Current",
+                publicKeyReference,
+                validFrom,
+                validUntil,
+                compromisedAt: null,
+              },
+            ],
+          }),
+      },
+      verifier: createQrSignatureVerifier(async (reference) =>
+        String(reference) === publicKeyReference ? publicKey : null,
+      ),
+      telemetry: { record: () => undefined },
+      signer: {
+        async sign(payload) {
+          const input = [{ alg: "ES256", kid, typ: "BOP-QR" }, payload]
+            .map((value) => Buffer.from(JSON.stringify(value)).toString("base64url"))
+            .join(".");
+          const signature = sign("sha256", Buffer.from(input), {
+            key,
+            dsaEncoding: "ieee-p1363",
+          }).toString("base64url");
+          return { keyId: kid, token: input + "." + signature };
+        },
+      },
+    });
+  }
+  return { provisionInternalQr, loadInternalPickupQr, loadInternalDiningQr, loadIssuedTableQrKeys };
 }
 
 function unavailable() {

@@ -51,6 +51,8 @@ export interface StaffDiningTable {
   aggregateVersion: number;
   currentDiningSessionReference: string | null;
   elapsedMinutes: number | null;
+  /** WP-2423 Q11: until when the table's printed code works; null when it has none. */
+  qrCodeValidUntil: string | null;
 }
 export interface StaffDiningJoinState {
   diningSessionReference: string;
@@ -150,6 +152,13 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
           r.currentDiningSessionReference === null ? null : ref(r.currentDiningSessionReference);
         const elapsedMinutes = elapsed(r.elapsedMinutes);
         if ((currentDiningSessionReference === null) !== (elapsedMinutes === null)) return fail();
+        const qrCodeValidUntil =
+          r.qrCodeValidUntil === null
+            ? null
+            : typeof r.qrCodeValidUntil === "string" &&
+                /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(r.qrCodeValidUntil)
+              ? r.qrCodeValidUntil
+              : fail();
         return {
           tableReference: reference,
           stableLabel: label(r.stableLabel),
@@ -160,6 +169,7 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
           aggregateVersion: num(r.aggregateVersion),
           currentDiningSessionReference,
           elapsedMinutes,
+          qrCodeValidUntil,
         } as StaffDiningTable;
       });
       const next = data.nextAfterTableReference === null ? null : ref(data.nextAfterTableReference);

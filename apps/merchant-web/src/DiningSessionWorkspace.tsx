@@ -20,6 +20,15 @@ const tableBlockReasons = [
 ] as const;
 const stateLabel = (state: string) =>
   state === "TemporarilyBlocked" ? "Temporarily unavailable" : state;
+/** WP-2423 Q11: warn on the floor when guests can't scan in, or soon won't be able to. */
+export function tableCodeNotice(table: StaffDiningTable, now = Date.now()): string | null {
+  if (table.lifecycle !== "Published") return null;
+  if (table.qrCodeValidUntil === null) return "No table QR code. Ask a manager to print one.";
+  const days = Math.ceil((Date.parse(table.qrCodeValidUntil) - now) / 86_400_000);
+  return days <= 30
+    ? `Table QR code stops working in ${String(Math.max(days, 0))} day${days === 1 ? "" : "s"}. Ask a manager to print a new one.`
+    : null;
+}
 
 export function DiningSessionWorkspace({
   csrf,
@@ -350,6 +359,9 @@ export function DiningSessionWorkspace({
                           </div>
                           <hr className="dining-table-tile__divider" />
                           <p className="dining-table-tile__capacity">Seats {table.capacity}</p>
+                          {tableCodeNotice(table) ? (
+                            <p className="dining-table-tile__notice">{tableCodeNotice(table)}</p>
+                          ) : null}
                           <p className="dining-table-tile__session">
                             {table.currentDiningSessionReference
                               ? table.elapsedMinutes === null

@@ -54,6 +54,7 @@ test("@production staff confirms Host transfer and retains unknown operation acr
             aggregateVersion: 2,
             currentDiningSessionReference: id(3),
             elapsedMinutes: 8,
+            qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
           },
         ],
         nextAfterTableReference: null,

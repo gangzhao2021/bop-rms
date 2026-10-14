@@ -180,6 +180,7 @@ import type { createMerchantDiningOrderCloseCommand } from "./merchant-dining-or
 import type { createMerchantTaskInboxRead } from "./merchant-task-inbox-read.js";
 import type { createMerchantDiningServeCommand } from "./merchant-dining-serve-command.js";
 import type { createMerchantDiningTableCommand } from "./merchant-dining-table-command.js";
+import type { createMerchantDiningTableQr } from "./merchant-dining-table-qr.js";
 import type { createMerchantDiningOrderProgress } from "./merchant-dining-order-progress.js";
 import type { createMerchantPickupQuery } from "./merchant-pickup-query.js";
 import { FulfillmentReadinessError } from "@rms/fulfillment";
@@ -348,6 +349,8 @@ const merchantNavigation = Object.freeze({
   "FUL-PICKUP-QUEUE": ["/operations/pickup", "fulfillment.operate"],
   // WP-2423 Q8: the dining tables board (Section 88 DIN-FLOOR-BOARD).
   "DIN-FLOOR-BOARD": ["/operations/dining", "dining.operate"],
+  // WP-2423 Q11: print, replace and turn off table QR codes (Section 88 DIN-TABLE-LIST).
+  "DIN-TABLE-LIST": ["/app/operations/tables", "dining.table.qr.manage"],
   "DEV-KDS-PROFILE": ["/app/integrations/kds-profiles", "integration.manage"],
   "IAM-ROLE-LIST": ["/app/organization/roles", "identity.role.read"],
   "IAM-USER-LIST": ["/app/organization/users", "organization.staff.read"],
@@ -604,6 +607,8 @@ export interface MerchantBffRouterOptions {
   readonly diningServe?: ReturnType<typeof createMerchantDiningServeCommand>;
   readonly diningTables?: ReturnType<typeof createMerchantDiningTables>;
   readonly diningTableCommand?: ReturnType<typeof createMerchantDiningTableCommand>;
+  /** WP-2423 Q11: table QR codes (DIN-TABLE-LIST). */
+  readonly diningTableQr?: ReturnType<typeof createMerchantDiningTableQr>;
   readonly diningOrderProgress?: ReturnType<typeof createMerchantDiningOrderProgress>;
   readonly diningItemService?: ReturnType<typeof createMerchantDiningItemService>;
   readonly serviceControl?: (
@@ -7231,6 +7236,50 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       })
       .catch(() => denied(response));
   });
+
+  // WP-2423 Q11: table QR codes. Unknown failures stay denied; a changed table answers 409 so the
+  // page refreshes instead of telling staff they lack permission.
+  const tableQrRoute = (
+    path: string,
+    run: (
+      port: NonNullable<MerchantBffRouterOptions["diningTableQr"]>,
+      input: { sessionCookie: string; csrf: string; body: unknown },
+    ) => Promise<unknown>,
+  ) =>
+    router.post(path, sameOriginMutation(options), (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant"),
+        csrf = exactHeader(request, "x-bop-csrf");
+      response.setHeader("Cache-Control", "no-store");
+      if (
+        sessionCookie === null ||
+        csrf === null ||
+        csrf.length === 0 ||
+        Object.keys(request.query).length !== 0
+      ) {
+        denied(response);
+        return;
+      }
+      if (!options.diningTableQr) {
+        response.status(503).json({ error: "dining_table_qr_unavailable" });
+        return;
+      }
+      void run(options.diningTableQr, { sessionCookie, csrf, body: request.body })
+        .then((result) => response.json(result))
+        .catch((error: unknown) => {
+          if (error instanceof Error && error.message === "TABLE_QR_CONFLICT")
+            response.status(409).json({ error: "dining_table_qr_changed" });
+          else denied(response);
+        });
+    });
+  tableQrRoute("/dining/table-qr", (port, input) =>
+    port.list({ sessionCookie: input.sessionCookie, csrf: input.csrf, query: input.body }),
+  );
+  tableQrRoute("/dining/table-qr/command", (port, input) =>
+    port.command({ sessionCookie: input.sessionCookie, csrf: input.csrf, command: input.body }),
+  );
+  tableQrRoute("/dining/table-qr/sheet", (port, input) =>
+    port.sheet({ sessionCookie: input.sessionCookie, csrf: input.csrf, query: input.body }),
+  );
 
   router.post("/dining/order-progress", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");

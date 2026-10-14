@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readClosedRecord } from "@bop/identity";
 import {
   createPostgresDiningSessionReadStore,
+  createPostgresDiningTableQrStore,
   createPostgresDiningTableStore,
   parseDiningInstant,
   parseDiningReference,
@@ -89,6 +90,18 @@ export function createMerchantDiningTables(options: {
           );
         }
       }
+      // WP-2423 Q11: each table's printed code, so staff see a missing or soon-ending code here.
+      const codes = await createPostgresDiningTableQrStore(tx, {
+        tenantReference: current.selected.tenantReference,
+        brandReference: current.context.brand.brandReference,
+        storeReference: current.store.storeReference,
+      }).loadLatestForTables(page.items.map((table) => table.tableReference));
+      const codeUntil = (table: (typeof page.items)[number]) => {
+        const issue = codes.get(table.tableReference);
+        return table.qrStatus === "Active" && issue?.qrVersion === table.qrVersion
+          ? issue.expiresAt
+          : null;
+      };
       if (!(await authorize())) throw new Error("DINING_TABLES_PERMISSION_DENIED");
       return Object.freeze({
         canOperateTables,
@@ -107,6 +120,7 @@ export function createMerchantDiningTables(options: {
                 table.activeDiningSessionReference === null
                   ? null
                   : (elapsedMinutes.get(table.activeDiningSessionReference) ?? null),
+              qrCodeValidUntil: codeUntil(table),
             }),
           ),
         ),

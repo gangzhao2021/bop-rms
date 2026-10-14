@@ -19,6 +19,8 @@ export type CustomerEntryScreenState =
   | Readonly<{ kind: "Missing" }>
   | Readonly<{ kind: "RequestInvalid" }>
   | Readonly<{ kind: "EntryUnavailable" }>
+  /** WP-2423 Q11: staff replaced or turned off this table's code; no session was started. */
+  | Readonly<{ kind: "TableCodeRetired"; replaced: boolean }>
   /** WP-2423 Q4: the Store is closed or paused; no session was started. */
   | Readonly<{
       kind: "NotAccepting";

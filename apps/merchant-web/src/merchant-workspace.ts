@@ -38,6 +38,7 @@ export interface MerchantNavigationItem {
     | "KIT-KITCHEN-QUEUE"
     | "FUL-PICKUP-QUEUE"
     | "DIN-FLOOR-BOARD"
+    | "DIN-TABLE-LIST"
     | "DEV-KDS-PROFILE"
     | "IAM-ROLE-LIST"
     | "IAM-USER-LIST"
@@ -91,6 +92,8 @@ const NAVIGATION = Object.freeze({
   "FUL-PICKUP-QUEUE": ["/operations/pickup", "fulfillment.operate"],
   // WP-2423 Q8: the dining tables board (Section 88 DIN-FLOOR-BOARD).
   "DIN-FLOOR-BOARD": ["/operations/dining", "dining.operate"],
+  // WP-2423 Q11: print, replace and turn off table QR codes (Section 88 DIN-TABLE-LIST).
+  "DIN-TABLE-LIST": ["/app/operations/tables", "dining.table.qr.manage"],
   "DEV-KDS-PROFILE": ["/app/integrations/kds-profiles", "integration.manage"],
   "IAM-ROLE-LIST": ["/app/organization/roles", "identity.role.read"],
   "IAM-USER-LIST": ["/app/organization/users", "organization.staff.read"],

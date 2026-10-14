@@ -124,7 +124,7 @@ const ProductionBatchPage = lazyPage(
   () => import("./ProductionBatchPage.js"),
   "ProductionBatchPage",
 );
-const DiningTableListPage = lazyPage(() => import("./DiningPages.js"), "DiningTableListPage");
+const TableQrCodesPage = lazyPage(() => import("./TableQrCodesPage.js"), "TableQrCodesPage");
 const ReservationCalendarPage = lazyPage(
   () => import("./ReservationPages.js"),
   "ReservationCalendarPage",
@@ -1402,7 +1402,26 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           }
         />
         <Route path="/app/integrations/kds-profiles" element={<KdsProfilePage />} />
-        <Route path="/app/operations/tables" element={<DiningTableListPage />} />
+        {/* WP-2423 Q11: table QR codes (Section 88 DIN-TABLE-LIST). */}
+        <Route
+          path="/app/operations/tables"
+          element={
+            demo === null && state.kind === "Ready" && !state.switching ? (
+              <TableQrCodesPage
+                key={state.workspace.selectedScope.storeReference + state.csrf}
+                csrf={state.csrf}
+                storeLabel={state.workspace.selectedScope.storeLabel}
+                timeZone={state.workspace.selectedScope.timeZone}
+              />
+            ) : (
+              <WorkspacePage title="Table QR codes">
+                <StatePanel heading="Table QR codes unavailable" tone="error" status>
+                  <p>A current merchant session and Store are required.</p>
+                </StatePanel>
+              </WorkspacePage>
+            )
+          }
+        />
         {/* WP-2423 Q5: Section 88 APPROVAL-INBOX — refunds awaiting an Owner/Finance approval. */}
         <Route
           path="/app/approvals"

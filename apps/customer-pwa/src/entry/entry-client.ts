@@ -219,6 +219,17 @@ function parseError(
   )
     return Object.freeze({ kind: "EntryUnavailable" });
   if (
+    status === 410 &&
+    raw.code === "entry_qr_retired" &&
+    (raw.messageKey === "customer.entry.qr_replaced" ||
+      raw.messageKey === "customer.entry.qr_turned_off") &&
+    recovery.action === "AskStaff"
+  )
+    return Object.freeze({
+      kind: "TableCodeRetired",
+      replaced: raw.messageKey === "customer.entry.qr_replaced",
+    });
+  if (
     status === 429 &&
     raw.code === "entry_rate_limited" &&
     raw.messageKey === "customer.entry.rate_limited" &&

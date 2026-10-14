@@ -5,12 +5,14 @@ const mock = vi.hoisted(() => ({
   list: vi.fn(),
   store: vi.fn(),
   loadSessions: vi.fn(),
+  codes: vi.fn(),
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => mock.resolve }));
 vi.mock("@rms/dining", async (original) => ({
   ...(await original<typeof import("@rms/dining")>()),
   createPostgresDiningTableStore: mock.store,
   createPostgresDiningSessionReadStore: vi.fn(() => ({ loadSessions: mock.loadSessions })),
+  createPostgresDiningTableQrStore: vi.fn(() => ({ loadLatestForTables: mock.codes })),
 }));
 const id = (n: number) => "01909988-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 type Options = Parameters<typeof createMerchantDiningTables>[0];
@@ -30,6 +32,7 @@ function setup() {
   });
   mock.store.mockReturnValue({ listTables: mock.list });
   mock.loadSessions.mockResolvedValue([]);
+  mock.codes.mockResolvedValue(new Map());
   mock.list.mockResolvedValue({
     items: [
       {
@@ -181,4 +184,36 @@ it("denies before data read and on authority loss", async () => {
   expect(mock.list).not.toHaveBeenCalled();
   f.allowed.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
   await expect(f.read(f.input)).rejects.toThrow();
+});
+it("WP-2423 Q11: shows until when each table's current printed code works, or none", async () => {
+  const f = setup();
+  mock.list.mockResolvedValueOnce({
+    items: [4, 5, 6].map((n) => ({
+      tableReference: id(n),
+      stableLabel: "T" + String(n),
+      areaCode: "MAIN",
+      capacity: 4,
+      lifecycle: "Published",
+      operationalState: "Available",
+      aggregateVersion: 2,
+      activeDiningSessionReference: null,
+      qrStatus: n === 6 ? "Revoked" : "Active",
+      qrVersion: 2,
+    })),
+    nextAfterTableReference: null,
+  });
+  mock.codes.mockResolvedValueOnce(
+    new Map([
+      [id(4), { qrVersion: 2, expiresAt: "2027-04-12T13:00:00.000Z" }],
+      [id(5), { qrVersion: 1, expiresAt: "2027-01-01T00:00:00.000Z" }],
+      [id(6), { qrVersion: 1, expiresAt: "2027-01-01T00:00:00.000Z" }],
+    ]),
+  );
+  const view = await f.read(f.input);
+  expect(mock.codes).toHaveBeenCalledWith([id(4), id(5), id(6)]);
+  expect(view.items.map((item) => item.qrCodeValidUntil)).toEqual([
+    "2027-04-12T13:00:00.000Z",
+    null,
+    null,
+  ]);
 });

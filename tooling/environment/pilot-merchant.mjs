@@ -102,6 +102,7 @@ export async function createInternalMerchant(
     cancellationRefundProvider,
     staffTotpVerifier,
     createInternalCounterOrder,
+    createInternalTableQr,
   },
 ) {
   const session = await createInternalMerchantSession(resources);
@@ -211,6 +212,17 @@ export async function createInternalMerchant(
           href: "/operations/dining",
           permission: "dining.operate",
         },
+        // WP-2423 Q11: print, replace and turn off table QR codes (Store Manager, Owner).
+        ...(createInternalTableQr === undefined
+          ? []
+          : [
+              {
+                screenId: "DIN-TABLE-LIST",
+                label: "Table QR codes",
+                href: "/app/operations/tables",
+                permission: "dining.table.qr.manage",
+              },
+            ]),
         // WP-2423 P1: day-end settlement for the Store Manager (Section 88 PAY-RECONCILIATION).
         {
           screenId: "PAY-RECONCILIATION",
@@ -1053,6 +1065,9 @@ export async function createInternalMerchant(
       diningSessionStart,
       diningTables,
       diningTableCommand,
+      ...(createInternalTableQr === undefined
+        ? {}
+        : { diningTableQr: createInternalTableQr(resources, persistence, service) }),
       diningClosing,
       orderClosure,
       taskInbox,

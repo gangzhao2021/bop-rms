@@ -17,8 +17,10 @@
  * v8 (2026-10-10): Store hours and holiday editing (WP-2423 Q4). The Store Manager drafts and
  * submits hours (organization.store.update); the Owner approves and publishes them
  * (organization.store.publish), so a different person approves every change.
+ * v9 (2026-10-14): dining.table.qr.manage (WP-2423 Q11): issue, print, replace and turn off table
+ * QR codes. Owner and Store Manager hold it; Front of House does not.
  */
-export const storePermissionCatalogVersion = 8 as const;
+export const storePermissionCatalogVersion = 9 as const;
 export type PermissionRisk = "Low" | "Medium" | "High";
 export interface StorePermissionDefinition {
   readonly code: string;
@@ -249,6 +251,7 @@ const catalog: readonly StorePermissionDefinition[] = Object.freeze([
   ]),
   ...define("dining", [
     ["dining.table.read", "Read tables and their availability", "Low"],
+    ["dining.table.qr.manage", "Issue, print, replace and turn off table QR codes", "Medium"],
     ["dining.session.manage", "Start, join, move and regenerate dining sessions", "Medium"],
     ["dining.host.transfer", "Transfer the dining host", "Medium"],
     ["dining.item.serve", "Record items served", "Low"],

@@ -1,6 +1,9 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { fixture, id } from "../test-support/customer-entry-composition-fixture.js";
-import { createPersistentCustomerEntryComposition } from "./persistent-customer-entry.js";
+import {
+  RetiredTableQrError,
+  createPersistentCustomerEntryComposition,
+} from "./persistent-customer-entry.js";
 const owner = vi.hoisted(() => ({ profile: vi.fn(), session: vi.fn() }));
 vi.mock("./persistent-public-store-profile.js", () => ({
   createPersistentPublicStoreProfilePorts: (...args: unknown[]) => owner.profile(...args),
@@ -107,4 +110,19 @@ it("WP-2423 Q4: rolls back a closed Store's entry but keeps its not-accepting an
   expect(x.events).toEqual(["begin", "sources", "rollback"]);
   expect(x.f.admission).not.toHaveBeenCalled();
   expect(x.f.create).not.toHaveBeenCalled();
+});
+it("WP-2423 Q11: answers a replaced or turned-off table code without a session", async () => {
+  for (const reason of ["Replaced", "TurnedOff"] as const) {
+    const x = setup();
+    x.sources.mockImplementationOnce(async () => {
+      x.events.push("sources");
+      throw new RetiredTableQrError(reason);
+    });
+    expect(await x.service.establish(x.f.input())).toEqual({ status: "QrRetired", reason });
+    expect(x.events).toEqual(["begin", "sources", "rollback"]);
+    expect(x.f.create).not.toHaveBeenCalled();
+  }
+  const other = setup();
+  other.sources.mockRejectedValueOnce(new Error("ENTRY_UNAVAILABLE"));
+  expect(await other.service.establish(other.f.input())).toEqual({ status: "EntryUnavailable" });
 });

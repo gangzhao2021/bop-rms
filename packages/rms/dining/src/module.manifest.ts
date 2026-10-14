@@ -58,6 +58,7 @@ const moduleManifestInput =
         "dining_exception_task",
         "dining_table_release_operation",
         "dining_host_transfer_operation",
+        "dining_table_qr_issue",
       ],
     },
     ownedJobs: [],

@@ -124,6 +124,17 @@ describe("WP-2423 Q4 not accepting orders", () => {
   });
 });
 
+describe("WP-2423 Q11 replaced table code", () => {
+  it("tells the guest in plain words to ask staff, with no retry or internal code", () => {
+    const replaced = render({ kind: "TableCodeRetired", replaced: true });
+    expect(replaced).toContain("This table code was replaced. Please ask a staff member.");
+    expect(replaced).not.toContain("Try again");
+    expect(replaced).not.toMatch(/qr_|entry_|410/u);
+    const off = render({ kind: "TableCodeRetired", replaced: false });
+    expect(off).toContain("This table code is no longer in use. Please ask a staff member.");
+  });
+});
+
 describe("WP-2423 Q10 continue the order in progress", () => {
   const order = Object.freeze({
     orderReference: "018f2a1b-7c3d-7a4e-8b5c-1234567890ac",

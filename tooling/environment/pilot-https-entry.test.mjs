@@ -134,6 +134,8 @@ it("preserves configured refund roles, provider and Pickup workstation without g
       "refundUnmatchedCapture",
       // WP-2423 Q5: TEST-ONLY authenticator step-up verifier over the private runtime directory.
       "staffTotpVerifier",
+      // WP-2423 Q11: table QR codes signed with the TEST-ONLY local QR key.
+      "createInternalTableQr",
     ].sort(),
   );
   expect(typeof dependencies.refundUnmatchedCapture).toBe("function");

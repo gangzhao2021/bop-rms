@@ -65,6 +65,7 @@ test("@production staff starts a table and recovers a lost entry code without du
             aggregateVersion: 2,
             currentDiningSessionReference: null,
             elapsedMinutes: null,
+            qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
           },
           {
             tableReference: id(2),
@@ -76,6 +77,7 @@ test("@production staff starts a table and recovers a lost entry code without du
             aggregateVersion: 4,
             currentDiningSessionReference: id(4),
             elapsedMinutes: 17,
+            qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
           },
           {
             tableReference: id(5),
@@ -87,6 +89,7 @@ test("@production staff starts a table and recovers a lost entry code without du
             aggregateVersion: 1,
             currentDiningSessionReference: null,
             elapsedMinutes: null,
+            qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
           },
           {
             tableReference: id(6),
@@ -98,6 +101,7 @@ test("@production staff starts a table and recovers a lost entry code without du
             aggregateVersion: 1,
             currentDiningSessionReference: null,
             elapsedMinutes: null,
+            qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
           },
         ],
         nextAfterTableReference: null,
@@ -439,6 +443,7 @@ test("@production Dining reloads tables after an authorized Store switch", async
             aggregateVersion: 1,
             currentDiningSessionReference: null,
             elapsedMinutes: null,
+            qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
           },
         ],
         nextAfterTableReference: null,

@@ -878,6 +878,8 @@ export async function verifyPersistentMerchantBff({
       role,
   );
   await admin.query("GRANT SELECT,INSERT,UPDATE ON rms_dining.dining_table TO " + role);
+  // WP-2423 Q11 (proposed pilot grant): the tables board reads each table's printed code.
+  await admin.query("GRANT SELECT ON rms_dining.dining_table_qr_issue TO " + role);
   await admin.query(
     "GRANT SELECT,INSERT ON rms_dining.dining_table_operation,rms_dining.dining_session,rms_dining.dining_join_capability,rms_dining.dining_session_start_operation,platform_audit.audit_record TO " +
       role,

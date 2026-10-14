@@ -2615,6 +2615,66 @@ it("keeps an unconfigured Dining table command unavailable", async () => {
   }
 });
 
+it("WP-2423 Q11: protects table QR routes, answers a changed table with 409 and stays unavailable unconfigured", async () => {
+  const port = {
+    list: vi.fn(async () => ({ items: [] })),
+    command: vi.fn(async () => {
+      throw new Error("TABLE_QR_CONFLICT");
+    }),
+    sheet: vi.fn(async () => {
+      throw new Error("TABLE_QR_PERMISSION_DENIED");
+    }),
+  } as unknown as NonNullable<MerchantBffRouterOptions["diningTableQr"]>;
+  const serve = async (diningTableQr?: MerchantBffRouterOptions["diningTableQr"]) => {
+    const app = express();
+    app.use(
+      "/merchant",
+      createMerchantBffRouter({
+        service: fakeService(),
+        exactOrigin: "https://merchant.invalid",
+        acceptedHost: "merchant.invalid",
+        ...(diningTableQr ? { diningTableQr } : {}),
+      }),
+    );
+    const server = app.listen(0, "127.0.0.1");
+    await new Promise<void>((resolve) => server.once("listening", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("server unavailable");
+    return { server, url: `http://127.0.0.1:${address.port}` };
+  };
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const post = (url: string, path: string, extra: Record<string, string> = {}) =>
+    request(url, "/merchant/dining/table-qr" + path, {
+      method: "POST",
+      body: "{}",
+      headers: { ...headers, ...extra },
+    });
+  const root = await serve(port),
+    bare = await serve();
+  try {
+    const listed = await post(root.url, "");
+    expect(listed.status).toBe(200);
+    expect(listed.headers.get("cache-control")).toBe("no-store");
+    expect(await listed.json()).toEqual({ items: [] });
+    expect((await post(root.url, "/command")).status).toBe(409);
+    expect((await post(root.url, "/sheet")).status).toBe(403);
+    for (const bad of [{ "X-BOP-CSRF": "" }, { Origin: "https://foreign.invalid" }, { Cookie: "" }])
+      expect((await post(root.url, "", bad)).status).toBe(403);
+    expect(port.list).toHaveBeenCalledTimes(1);
+    expect((await post(bare.url, "")).status).toBe(503);
+  } finally {
+    for (const { server } of [root, bare])
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+  }
+});
+
 it("protects session start and returns one-time credentials only for Issued", async () => {
   const result = {
     status: "Issued" as const,

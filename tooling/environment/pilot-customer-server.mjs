@@ -48,7 +48,6 @@ export async function startInternalCustomerServer({
     res.setHeader("X-Content-Type-Options", "nosniff");
     next();
   });
-  registerInternalDiningEntry(app, { profile, tables: diningEntries });
   const pickupQr = await loadInternalPickupQr(profile);
   app.get("/bff/internal-test/pickup-entry", (req, res) => {
     res.setHeader("Cache-Control", "no-store");
@@ -66,6 +65,19 @@ export async function startInternalCustomerServer({
     simulator = await createInternalSimulatedProvider();
     const entry = await createInternalCustomerEntry(resources),
       items = await createInternalTestItems(resources);
+    // WP-2423 Q11: each DEMO launcher table opens its current issued code; none issued → 503.
+    registerInternalDiningEntry(app, {
+      profile,
+      tables: diningEntries.map(({ selector, label, tableReference }) => ({
+        selector,
+        label,
+        loadQr: async () => {
+          const token = await entry.dining.currentToken(tableReference);
+          if (typeof token !== "string") throw new Error("INTERNAL_DINING_QR_UNAVAILABLE");
+          return { token: () => token };
+        },
+      })),
+    });
     const checkout = createInternalCheckout(resources, entry, items.catalogCartItems);
     const orders = await createInternalOrder(resources, checkout, items.catalogCartItems);
     const diningCheckout = createInternalDiningCheckout(resources, entry, checkout);

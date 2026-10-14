@@ -45,13 +45,14 @@ export async function startConfiguredPilotHttps(
     loadProfile: installation.loadProfile,
     expectedDatabaseName: installation.database,
   });
+  // WP-2423 Q11: the DEMO launcher opens each listed table's current issued code (DIN-TABLE-LIST).
   const diningEntries = await Promise.all(
     customerConfig.diningTableFiles.map(async (name, index) => {
       const table = await installation.loadCustomerData(name);
       return {
         selector: "table-" + (index + 1),
         label: table.label,
-        loadQr: async () => qr.loadInternalDiningQr(await installation.loadProfile(), table),
+        tableReference: table.tableReference,
       };
     }),
   );

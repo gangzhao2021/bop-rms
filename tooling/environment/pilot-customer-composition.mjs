@@ -18,8 +18,7 @@ import { createInternalInventoryEvidence, createInternalTestItems } from "./pilo
 import { createInternalTestCart } from "./pilot-cart.mjs";
 import { createInternalCustomerEntry } from "./pilot-customer-entry.mjs";
 import { createInternalPickupEntry } from "./pilot-entry.mjs";
-import { createInternalDiningEntries } from "./pilot-dining-entry.mjs";
-import { createInternalDiningEntry } from "./pilot-dining-entry.mjs";
+import { createIssuedDiningEntries } from "./pilot-dining-issued-entry.mjs";
 import { createInternalDiningSession } from "./pilot-dining-session.mjs";
 import { createInternalMerchantSession } from "./pilot-merchant-session.mjs";
 import { createInternalQrLoaders } from "./pilot-qr.mjs";
@@ -91,18 +90,11 @@ export function composeCustomerDependencies(directory, installation, config) {
           loadProfile: installation.loadProfile,
           loadQr: qr.loadInternalPickupQr,
         }),
+      // WP-2423 Q11: dine-in entry uses the table codes staff issued on DIN-TABLE-LIST.
       createInternalDiningEntries: (resources) =>
-        createInternalDiningEntries(resources, {
-          loadEntries: () =>
-            Promise.all(
-              config.diningTableFiles.map((name) =>
-                createInternalDiningEntry(resources, {
-                  loadProfile: installation.loadProfile,
-                  loadTable: () => installation.loadCustomerData(name),
-                  loadQr: qr.loadInternalDiningQr,
-                }),
-              ),
-            ),
+        createIssuedDiningEntries(resources, {
+          loadProfile: installation.loadProfile,
+          loadKeys: qr.loadIssuedTableQrKeys,
         }),
       createInternalDiningSession: (resources, m) =>
         createInternalDiningSession(resources, m, {

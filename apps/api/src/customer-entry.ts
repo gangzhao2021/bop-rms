@@ -55,9 +55,16 @@ export interface CustomerEntryNotAccepting {
   }[];
 }
 
+/** WP-2423 Q11: a genuine table code that staff replaced or turned off; no Session is issued. */
+export interface CustomerEntryQrRetired {
+  readonly status: "QrRetired";
+  readonly reason: "Replaced" | "TurnedOff";
+}
+
 export type CustomerEntryPortResult =
   | CustomerEntryEstablished
   | CustomerEntryNotAccepting
+  | CustomerEntryQrRetired
   | { readonly status: "InvalidRequest" }
   | { readonly status: "EntryUnavailable" };
 
@@ -328,6 +335,7 @@ function parsePortResult(
 ):
   | { readonly status: "InvalidRequest" }
   | { readonly status: "EntryUnavailable" }
+  | CustomerEntryQrRetired
   | CustomerEntryNotAccepting
   | CustomerEntryEstablished {
   const statusRecord =
@@ -344,6 +352,12 @@ function parsePortResult(
   }
   if (status === "Established") {
     return Object.freeze({ status, ...parseEstablished(value, requestedAt) });
+  }
+  if (status === "QrRetired") {
+    const raw = closedRecord(value, ["status", "reason"]);
+    if (raw.reason !== "Replaced" && raw.reason !== "TurnedOff")
+      throw new TypeError("invalid retired result");
+    return Object.freeze({ status: "QrRetired", reason: raw.reason });
   }
   if (status === "NotAccepting") {
     const raw = closedRecord(value, ["status", "storeDisplayName", "operatingState", "todayHours"]);
@@ -487,6 +501,19 @@ export class CustomerEntryHandler {
         }
         if (result.status === "EntryUnavailable") {
           sendError(response, "entry_unavailable");
+          return;
+        }
+        // WP-2423 Q11: a replaced or turned-off table code; the customer asks staff for help.
+        if (result.status === "QrRetired") {
+          response.status(410).json({
+            schemaVersion: 1,
+            code: "entry_qr_retired",
+            messageKey:
+              result.reason === "Replaced"
+                ? "customer.entry.qr_replaced"
+                : "customer.entry.qr_turned_off",
+            recovery: { action: "AskStaff", storeSelection: "Hidden" },
+          });
           return;
         }
         // WP-2423 Q4: tell the customer the Store is not taking orders, and today's hours.

@@ -371,6 +371,28 @@ separate. In particular, this does not resolve the known unlinked capture except
 Include this status plus the current exception workbench and service health in an
 operator handover; a Matched day alone is not a complete handover acceptance.
 
+## Table QR codes (WP-2423 Q11)
+
+Store Managers and Owners manage table codes on **Table QR codes** (`/app/operations/tables`,
+permission `dining.table.qr.manage`); see
+[DEC-TABLE-QR-ISSUANCE](../spec/design/table-qr-issuance-pilot.md).
+
+- **First setup**: Create code for each table, then Print all codes. Print the downloaded page at
+  100% scale (each code 6 cm); cut and place each code on its table.
+- **Damaged sticker**: Print that table again. The code does not change.
+- **Lost, stolen or copied code**: Replace that table's code at once, then print it. The old code
+  stops admitting guests immediately; other tables are unaffected. If guests are seated, their phones
+  must scan the new code and enter the table's joining code again; their orders and bill stay.
+- **Table out of service**: Turn off its code. Guests who scan it are asked to see staff.
+- **Before codes end** (180 days): the Table QR codes page and the Tables board warn 30 days ahead.
+  Replace and print before the date under each code.
+- **Network, server or printer down**: codes already on the tables keep working once service
+  returns. Take orders at the counter or on paper meanwhile (Q7/Q9 procedure). The downloaded print
+  page works offline and can be printed from any computer or saved as PDF.
+- **TEST-ONLY until the Secrets and Tls gates close**: codes are signed with the local internal-test
+  key and point at `https://127.0.0.1:4443`, so phones cannot scan them. After the managed QR key and
+  the public customer domain arrive, replace and reprint every code.
+
 ## Current demo handover snapshot (2026-09-22)
 
 Batch602 reads existing authenticated staff queries between14:40:53Z and14:41:06Z.

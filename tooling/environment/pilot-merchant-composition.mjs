@@ -16,6 +16,7 @@ import { refreshInternalOrderReceiptObservations } from "./pilot-receipt-observa
 import { createInternalStaffTotpVerifier } from "./pilot-staff-totp.mjs";
 import { createInternalCounterOrder } from "./pilot-counter-order.mjs";
 import { createInternalQrLoaders } from "./pilot-qr.mjs";
+import { createMerchantDiningTableQr } from "../../apps/api/dist/merchant-dining-table-qr.js";
 const factories = {
   createInternalRefundReconciliation,
   createInternalRefundSend,
@@ -32,6 +33,7 @@ const factories = {
   refreshInternalOrderReceiptObservations,
   createInternalCounterOrder,
   createInternalQrLoaders,
+  createMerchantDiningTableQr,
 };
 export function composeMerchantDependencies(
   directory,
@@ -142,6 +144,34 @@ export function composeMerchantDependencies(
         loadPickupQrToken: async () =>
           (await qr.loadInternalPickupQr(await installation.loadProfile())).token(),
         expectedDatabaseName: installation.database,
+      });
+    },
+    // WP-2423 Q11 (DEC-TABLE-QR-ISSUANCE): table QR codes signed with the TEST-ONLY local QR key
+    // and opening the TEST-ONLY local customer origin. Both are replaced by the managed QR key and
+    // the public customer domain (capability gaps "Secrets" and "Tls") without changing this flow.
+    createInternalTableQr: (resources, persistence, authentication) => {
+      const qr = f.createInternalQrLoaders({
+        file: join(directory, "internal-test-qr-key.pem"),
+        loadProfile: installation.loadProfile,
+        expectedDatabaseName: installation.database,
+      });
+      return f.createMerchantDiningTableQr({
+        persistence,
+        authentication,
+        newReference: () => resources.credentials.reference(),
+        retentionPolicyCode: "AUDIT_DEFAULT",
+        retentionPolicyVersion: 1,
+        signer: {
+          sign: async (payload) =>
+            (await qr.loadIssuedTableQrKeys(await installation.loadProfile())).signer.sign(payload),
+        },
+        publicStore: async (storeReference) => {
+          const profile = await installation.loadProfile();
+          return storeReference === profile.binding.storeReference
+            ? { publicStoreReference: profile.binding.publicStoreReference, locale: "en-CA" }
+            : null;
+        },
+        customerOrigin: "https://127.0.0.1:4443",
       });
     },
     createInternalDiningCredentials: dining.createInternalDiningCredentials,

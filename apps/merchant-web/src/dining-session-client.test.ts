@@ -11,6 +11,7 @@ const table: StaffDiningTable = {
   aggregateVersion: 2,
   currentDiningSessionReference: null,
   elapsedMinutes: null,
+  qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
 };
 const response = (r: unknown) =>
   new Response(JSON.stringify(r), {
@@ -138,4 +139,24 @@ it("binds replacement generation and kind", async () => {
     id(4),
   );
   await expect(op.execute("A".repeat(43))).rejects.toMatchObject({ code: "Unknown" });
+});
+it("WP-2423 Q11: reads until when each table's printed code works, or that it has none", async () => {
+  const f = vi.fn(async () =>
+    response({
+      canOperateTables: false,
+      items: [{ ...table, qrCodeValidUntil: null }],
+      nextAfterTableReference: null,
+    }),
+  );
+  expect(
+    (await createDiningSessionClient(f).tables("A".repeat(43))).items[0]?.qrCodeValidUntil,
+  ).toBe(null);
+  const malformed = vi.fn(async () =>
+    response({
+      canOperateTables: false,
+      items: [{ ...table, qrCodeValidUntil: "soon" }],
+      nextAfterTableReference: null,
+    }),
+  );
+  await expect(createDiningSessionClient(malformed).tables("A".repeat(43))).rejects.toThrow();
 });

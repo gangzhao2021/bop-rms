@@ -684,6 +684,7 @@ describe("migration catalog", () => {
       "2000_039_create_counter_order_entry",
       "2000_040_create_checkout_contact_redaction",
       "2000_041_create_customer_order_notification",
+      "2000_042_create_dining_table_qr_issue",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

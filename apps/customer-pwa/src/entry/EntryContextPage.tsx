@@ -345,6 +345,20 @@ function EntryState({
       </div>
     );
 
+  if (state.kind === "TableCodeRetired")
+    return (
+      <div className="entry-state entry-state--warning" role="alert">
+        <StateHeading headingRef={headingRef}>
+          {state.replaced ? "This table code was replaced" : "This table code is no longer in use"}
+        </StateHeading>
+        <p>
+          {state.replaced
+            ? "This table code was replaced. Please ask a staff member."
+            : "This table code is no longer in use. Please ask a staff member."}
+        </p>
+      </div>
+    );
+
   if (state.kind === "RateLimited")
     return (
       <RateLimitedState

@@ -7585,3 +7585,85 @@ body:has(.product-complete-draft) .bop-shell__header,
   margin: 0;
   font-variant-numeric: tabular-nums;
 }
+/* WP-2423 Q11: table QR codes (DIN-TABLE-LIST). */
+.table-qr__intro {
+  max-width: 48rem;
+  color: var(--bop-color-text-muted);
+}
+.table-qr__confirm {
+  margin: 16px 0;
+  padding: 16px 20px;
+  border: 1px solid var(--bop-color-border-strong);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+}
+.table-qr__confirm h2 {
+  font-size: 20px;
+}
+.table-qr__warning {
+  padding: 8px 12px;
+  border-left: 3px solid var(--bop-color-text-default);
+  background: var(--bop-color-surface-raised);
+}
+.table-qr__confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.table-qr__confirm-actions button + button {
+  margin-left: 0;
+}
+.table-qr__list th[scope="row"] {
+  color: var(--bop-color-text-default);
+  font-size: 15px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  border-bottom: 1px solid var(--bop-color-border-default);
+}
+.table-qr__actions {
+  white-space: nowrap;
+  text-align: end;
+}
+@media (max-width: 767px) {
+  .table-qr__list thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .table-qr__list tr {
+    display: grid;
+    gap: 4px;
+    padding: 12px 0;
+    border-top: 1px solid var(--bop-color-border-default);
+  }
+  .table-qr__list th[scope="row"],
+  .table-qr__list td {
+    padding: 0;
+    border: 0;
+  }
+  .table-qr__list td[data-label]::before {
+    content: attr(data-label) " · ";
+    color: var(--bop-color-text-muted);
+    font-size: 13px;
+  }
+  .table-qr__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    white-space: normal;
+    text-align: start;
+  }
+  .table-qr__actions button + button {
+    margin-left: 0;
+  }
+}
+/* WP-2423 Q11: a table without a working printed code, or one ending soon. */
+.dining-table-tile__notice {
+  margin: 4px 0;
+  padding-left: 8px;
+  border-left: 3px solid var(--bop-color-text-default);
+  font-size: 13px;
+}

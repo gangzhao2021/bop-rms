@@ -2249,6 +2249,14 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/dining-table-store.ts";
+        // WP-2423 Q11 admits only the table QR issue adapter (issue rows written with IssueQr).
+        const acceptedDiningTableQrAsset =
+          module.packageName === "@rms/dining" &&
+          module.manifest.ownedDatabase?.schema === "rms_dining" &&
+          ["dining_table", "dining_table_operation", "dining_table_qr_issue"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/dining-table-qr-store.ts";
         // WP-2275 admits only the initial Session transaction over Dining-owned storage.
         const acceptedDiningSessionStartAsset =
           module.packageName === "@rms/dining" &&
@@ -3427,6 +3435,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedPriceQuoteWriterAsset &&
           !acceptedPriceQuoteRequestAsset &&
           !acceptedDiningTableAsset &&
+          !acceptedDiningTableQrAsset &&
           !acceptedDiningSessionStartAsset &&
           !acceptedDiningJoinRegenerationAsset &&
           !acceptedDiningSessionJoinAsset &&
