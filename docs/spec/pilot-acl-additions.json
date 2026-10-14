@@ -2618,7 +2618,7 @@
       "column": null,
       "privilege": "SELECT",
       "principal": "api",
-      "approval": "PENDING OWNER APPROVAL (WP-2423 Q11): table QR codes — record each code staff issue (INSERT, append-only, with its IssueQr table operation) and read codes for the Table QR codes page, printing and guest entry (SELECT); see DEC-TABLE-QR-ISSUANCE"
+      "approval": "Owner approved 2026-10-14 in session (\"批准\") (WP-2423 Q11): table QR codes — record each code staff issue (INSERT, append-only, with its IssueQr table operation) and read codes for the Table QR codes page, printing and guest entry (SELECT); see DEC-TABLE-QR-ISSUANCE"
     },
     {
       "type": "table",
@@ -2627,7 +2627,7 @@
       "column": null,
       "privilege": "INSERT",
       "principal": "api",
-      "approval": "PENDING OWNER APPROVAL (WP-2423 Q11): table QR codes — record each code staff issue (INSERT, append-only, with its IssueQr table operation) and read codes for the Table QR codes page, printing and guest entry (SELECT); see DEC-TABLE-QR-ISSUANCE"
+      "approval": "Owner approved 2026-10-14 in session (\"批准\") (WP-2423 Q11): table QR codes — record each code staff issue (INSERT, append-only, with its IssueQr table operation) and read codes for the Table QR codes page, printing and guest entry (SELECT); see DEC-TABLE-QR-ISSUANCE"
     }
   ]
 }
