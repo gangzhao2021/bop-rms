@@ -30,7 +30,6 @@ export function createPostgresOrderRevisionPosition(options: {
         orderReference: parseOrderingReference(input.orderReference),
         observedAt: parseOrderingInstant(input.observedAt),
       };
-      if ((await options.authorize(tx, query)) !== true) return fail();
       const scope = {
         brandReference: brand,
         storeReference: store,
@@ -44,6 +43,8 @@ export function createPostgresOrderRevisionPosition(options: {
       await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
         "OrderingOrderDisposition:" + values.join(":"),
       ]);
+      // WP-2423 lock order: fence before the guest authorization's Dining row reads.
+      if ((await options.authorize(tx, query)) !== true) return fail();
       const header = await tx.query(
         "SELECT order_id::text,created_at FROM rms_ordering.order_header WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 FOR UPDATE",
         values,

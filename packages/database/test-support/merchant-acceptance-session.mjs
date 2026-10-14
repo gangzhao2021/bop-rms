@@ -10,6 +10,8 @@ export async function seedMerchantAcceptanceSession({
   at,
   kitchenPermission = false,
   pickupPermission = false,
+  /** Further actions the role grants (appended after the fixed ones, so their grant ids stay). */
+  extraPermissions = [],
   authenticationPolicyCode = "WorkforceStandard",
   referencePrefix = "01909968",
   sessionReferencePrefix = "01909967",
@@ -55,6 +57,7 @@ export async function seedMerchantAcceptanceSession({
     "ordering.operate",
     ...(kitchenPermission ? ["kitchen.operate"] : []),
     ...(pickupPermission ? ["fulfillment.pickup.complete", "fulfillment.operate"] : []),
+    ...extraPermissions,
   ].entries()) {
     let permission = (
       await admin.query(

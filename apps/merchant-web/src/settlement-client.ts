@@ -2,7 +2,7 @@ import { createContractParsers } from "./contract-parsers.js";
 
 /** WP-2423 P1 (PAY-RECONCILIATION): the day-end settlement view and its strict reader. */
 export class SettlementClientError extends Error {
-  constructor(readonly code: "PermissionDenied" | "Unavailable") {
+  constructor(readonly code: "PermissionDenied" | "Busy" | "Unavailable") {
     super(code);
     this.name = "SettlementClientError";
   }
@@ -333,6 +333,14 @@ export function createSettlementClient(fetcher: typeof fetch = fetch) {
         );
         if (response.status === 401 || response.status === 403)
           throw new SettlementClientError("PermissionDenied");
+        // The Store's records were busy with live work for a moment; the page tries again.
+        if (response.status === 503) {
+          const busy = await response
+            .json()
+            .then((value: unknown) => (value as { error?: unknown } | null)?.error)
+            .catch(() => null);
+          if (busy === "settlement_busy") throw new SettlementClientError("Busy");
+        }
         if (
           !response.ok ||
           response.headers.get("cache-control") !== "no-store" ||

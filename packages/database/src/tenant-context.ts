@@ -15,13 +15,53 @@ const safeMessages: Readonly<Record<TenantContextDatabaseErrorCode, string>> = {
   TENANT_DATABASE_TRANSACTION_CONFLICT: "tenant database transaction conflicted; it may be retried",
 };
 
+/**
+ * Safe diagnostic identifiers of the underlying failure (never SQL, values or messages): the
+ * PostgreSQL SQLSTATE, the violated constraint and the table, each only when it is a plain
+ * identifier; `closed` when a query arrived after its transaction had ended.
+ */
+export interface TenantContextDatabaseDiagnostic {
+  readonly sqlState: string | null;
+  readonly constraint: string | null;
+  readonly table: string | null;
+  readonly closed: boolean;
+}
+const identifier = /^[a-z_][a-z0-9_]{0,62}$/u;
+const state = /^[0-9A-Z]{5}$/u;
+function own(error: unknown, key: string): unknown {
+  return error !== null && typeof error === "object"
+    ? Object.getOwnPropertyDescriptor(error, key)?.value
+    : undefined;
+}
+/** Extract only safe identifiers from a driver error. */
+export function tenantContextDatabaseDiagnostic(
+  error: unknown,
+  closed = false,
+): TenantContextDatabaseDiagnostic {
+  const pick = (key: string, pattern: RegExp) => {
+    const value = own(error, key);
+    return typeof value === "string" && pattern.test(value) ? value : null;
+  };
+  return Object.freeze({
+    sqlState: pick("code", state),
+    constraint: pick("constraint", identifier),
+    table: pick("table", identifier),
+    closed,
+  });
+}
+
 export class TenantContextDatabaseError extends Error {
   readonly code: TenantContextDatabaseErrorCode;
+  readonly diagnostic: TenantContextDatabaseDiagnostic | null;
 
-  constructor(code: TenantContextDatabaseErrorCode) {
+  constructor(
+    code: TenantContextDatabaseErrorCode,
+    diagnostic: TenantContextDatabaseDiagnostic | null = null,
+  ) {
     super(safeMessages[code]);
     this.name = "TenantContextDatabaseError";
     this.code = code;
+    this.diagnostic = diagnostic;
   }
 }
 

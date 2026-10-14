@@ -74,12 +74,29 @@ export async function createInternalAdditionalSubmission(
             try {
               return await tx.query(sql, values);
             } catch (error) {
+              // Safe identifiers only (SQLSTATE, constraint, table, statement kind); never values.
+              const diagnostic = error?.diagnostic ?? null;
               console.error(
                 JSON.stringify({
                   event: "INTERNAL_ADDITIONAL_SQL_UNAVAILABLE",
-                  code: /^[A-Z0-9]{5}$/.test(error?.code ?? "") ? error.code : "UNAVAILABLE",
+                  code: /^[A-Z0-9]{5}$/.test(error?.code ?? "")
+                    ? error.code
+                    : /^[0-9A-Z]{5}$/.test(diagnostic?.sqlState ?? "")
+                      ? diagnostic.sqlState
+                      : diagnostic?.closed === true
+                        ? "TRANSACTION_CLOSED"
+                        : "UNAVAILABLE",
+                  constraint: diagnostic?.constraint ?? null,
                   table:
-                    sql.match(/(?:INTO|FROM|UPDATE|JOIN)\s+([a-z_]+\.[a-z_]+)/)?.[1] ?? "unknown",
+                    diagnostic?.table ??
+                    sql.match(/(?:INTO|FROM|UPDATE|JOIN)\s+([a-z_]+\.[a-z_]+)/)?.[1] ??
+                    (/^\s*SELECT pg_advisory_xact_lock/u.test(sql)
+                      ? "advisory_lock"
+                      : /^\s*SELECT set_config/u.test(sql)
+                        ? "set_config"
+                        : /^\s*(SAVEPOINT|RELEASE|ROLLBACK)/u.test(sql)
+                          ? "savepoint"
+                          : "unknown"),
                 }),
               );
               throw error;

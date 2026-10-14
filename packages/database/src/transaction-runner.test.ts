@@ -108,6 +108,43 @@ describe("WP-2212 pooled transaction runner", () => {
       expect(f.query.mock.calls.some(([sql]) => sql === "COMMIT")).toBe(false);
     },
   );
+  it("names only safe identifiers of a failed statement (SQLSTATE, constraint, table)", async () => {
+    const f = fixture();
+    f.query.mockImplementation(async (sql: string) => {
+      if (sql === "INSERT x")
+        throw Object.assign(new Error("private value 'secret'"), {
+          code: "23505",
+          constraint: "order_revision_pk",
+          table: "order_revision",
+          detail: "Key (id)=(secret) already exists.",
+        });
+      return { rows: [] };
+    });
+    let seen: unknown;
+    let escaped: DatabaseTransaction | undefined;
+    await f.runner
+      .run(async (t) => {
+        escaped = t;
+        await t.query("INSERT x", []).catch((error: unknown) => {
+          seen = error;
+          throw error;
+        });
+      })
+      .catch(() => undefined);
+    expect(seen).toMatchObject({
+      code: "TENANT_DATABASE_TRANSACTION_FAILED",
+      diagnostic: {
+        sqlState: "23505",
+        constraint: "order_revision_pk",
+        table: "order_revision",
+        closed: false,
+      },
+    });
+    expect(JSON.stringify(seen)).not.toContain("secret");
+    await expect(escaped?.query("SELECT 1", [])).rejects.toMatchObject({
+      diagnostic: { sqlState: null, constraint: null, table: null, closed: true },
+    });
+  });
   it("keeps other failures non-retryable", async () => {
     const f = fixture("SELECT secret");
     const failure = await f.runner

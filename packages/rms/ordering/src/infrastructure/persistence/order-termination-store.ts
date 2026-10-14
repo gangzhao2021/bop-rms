@@ -67,6 +67,23 @@ async function setScope(
   ]);
 }
 
+/**
+ * WP-2423 lock order: an Order's disposition fence is the first lock a transaction takes on that
+ * Order, before any Identity/Dining row lock (a dine-in guest's identity check reads the table row
+ * FOR SHARE; acceptance and payment outcomes lock it FOR UPDATE after this fence). Composition
+ * roots that check identity in the same transaction take this fence first. Re-entrant.
+ */
+export async function acquireOrderDispositionFence(
+  tx: ConsumerTransaction,
+  scope: Readonly<{ brandReference: string; storeReference: string; orderReference: string }>,
+) {
+  await fence(tx, {
+    brandReference: parseOrderingReference(scope.brandReference),
+    storeReference: parseOrderingReference(scope.storeReference),
+    orderReference: parseOrderingReference(scope.orderReference),
+  });
+}
+
 async function fence(tx: ConsumerTransaction, scope: Omit<Scope, "orderBatchReference">) {
   await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
     "OrderingOrderDisposition:" +
@@ -574,8 +591,9 @@ export function createPostgresDiningOrderPreparationSource(options: {
       if (scope.brandReference !== brand || scope.storeReference !== store) return fail();
       const tx = input.transaction;
       await setScope(tx, scope);
-      if ((await options.authorize(tx, scope)) !== true) return fail();
+      // Fence before authorization: a dine-in authorization reads Dining rows (lock order above).
       await fence(tx, scope);
+      if ((await options.authorize(tx, scope)) !== true) return fail();
       const found = await tx.query(
         "SELECT h.order_type,h.dining_session_id,b.order_batch_id FROM rms_ordering.order_header h " +
           "JOIN rms_ordering.order_batch b ON b.order_id=h.order_id AND b.brand_id=h.brand_id AND b.store_id=h.store_id " +

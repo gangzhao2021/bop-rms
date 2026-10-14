@@ -33,13 +33,14 @@ export function createPostgresOrderPricedAmountSource(
           orderReference: String(parseOrderingReference(input.orderReference)),
           observedAt: String(parseOrderingInstant(input.observedAt)),
         };
-      if ((await options.authorize(tx, { ...query, brandReference, storeReference })) !== true)
-        return fail();
-      // Match revision writers: disposition fence precedes parent/item locks.
+      // Match revision writers: disposition fence precedes parent/item locks and (WP-2423 lock
+      // order) the guest authorization's Dining row reads.
       await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
         "OrderingOrderDisposition:" +
           [brandReference, storeReference, query.orderReference].join(":"),
       ]);
+      if ((await options.authorize(tx, { ...query, brandReference, storeReference })) !== true)
+        return fail();
       const base = await submitted(tx, query),
         changes = await amendments.load(tx, query);
       for (const source of [base, changes])

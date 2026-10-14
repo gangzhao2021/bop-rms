@@ -114,10 +114,11 @@ export function createPostgresAdditionalDiningBatchStore(options: {
         "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
         [brand, store],
       );
-      if ((await options.authorize(tx, snapshot)) !== true) return fail();
+      // WP-2423 lock order: disposition fence before the guest authorization's Dining reads.
       await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
         "OrderingOrderDisposition:" + brand + ":" + store + ":" + snapshot.orderReference,
       ]);
+      if ((await options.authorize(tx, snapshot)) !== true) return fail();
       await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
         "OrderingAdditionalSubmission:" + brand + ":" + store + ":" + batch.submissionReference,
       ]);

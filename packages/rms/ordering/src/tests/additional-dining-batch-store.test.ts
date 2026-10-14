@@ -243,8 +243,11 @@ it.each([1, 2, 3])("rejects authorization revocation on check %i", async (denyAt
   const f = fixture();
   f.state.denyAt = denyAt;
   await expect(f.append()).rejects.toThrow();
-  if (denyAt === 1) expect(f.calls).toHaveLength(1);
-  else expect(f.calls.at(-2)?.sql).toBe("ROLLBACK TO SAVEPOINT ordering_additional_batch");
+  // WP-2423 lock order: scope and the disposition fence precede the first authorization.
+  if (denyAt === 1) {
+    expect(f.calls).toHaveLength(2);
+    expect(f.calls[1]?.values?.[0]).toMatch(/^OrderingOrderDisposition:/u);
+  } else expect(f.calls.at(-2)?.sql).toBe("ROLLBACK TO SAVEPOINT ordering_additional_batch");
 });
 it("rejects missing write result and rolls back", async () => {
   const f = fixture();

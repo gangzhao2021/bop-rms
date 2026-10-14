@@ -40,14 +40,15 @@ export function createPostgresOrderStatusProjectionStore(options: {
       brand,
       store,
     ]);
-    if ((await options.authorize(tx, { ...scope, access })) !== true)
-      throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
+    // WP-2423 lock order: Order fences before the guest authorization's Dining row reads.
     await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
       "OrderingOrderDisposition:" + brand + ":" + store + ":" + scope.orderReference,
     ]);
     await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
       "OrderingStatusProjection:" + brand + ":" + store + ":" + scope.orderReference,
     ]);
+    if ((await options.authorize(tx, { ...scope, access })) !== true)
+      throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
   }
   async function current(tx: ConsumerTransaction, scope: Scope) {
     const result = await tx.query(

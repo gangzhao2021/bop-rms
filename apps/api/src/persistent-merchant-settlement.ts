@@ -25,6 +25,10 @@ import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js"
 const unavailable = (): never => {
   throw new Error("MERCHANT_SETTLEMENT_UNAVAILABLE");
 };
+/** A retryable database conflict outlasted the read's own retries; the caller should retry later. */
+export const merchantSettlementBusy = "MERCHANT_SETTLEMENT_BUSY" as const;
+const conflicted = (error: unknown) =>
+  (error as { code?: unknown } | null)?.code === "TENANT_DATABASE_TRANSACTION_CONFLICT";
 const matches = (a: MerchantSettlementScope, b: MerchantSettlementScope) =>
   a.tenantReference === b.tenantReference &&
   a.brandReference === b.brandReference &&
@@ -48,6 +52,11 @@ export function createPersistentMerchantSettlement(options: {
     scope: MerchantSettlementScope,
     window: MerchantSettlementWindow,
   ): Promise<string | null>;
+  /**
+   * Waits before each rerun of a read that lost a lock wait (lock timeout, deadlock or
+   * serialization failure). The read writes nothing, so rerunning it is safe.
+   */
+  retryDelaysMs?: readonly number[];
 }) {
   const persistence = options.persistence,
     resolve = createMerchantStoreScope(persistence);
@@ -346,6 +355,22 @@ export function createPersistentMerchantSettlement(options: {
           };
         }),
     });
-    return read(input);
+    // A Store's records are shared with live ordering and payment work; a read that waited too
+    // long for one of them is rerun a few times before staff are told to try again shortly.
+    const delays = options.retryDelaysMs ?? [250, 1000, 2500];
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await read(input);
+      } catch (error) {
+        if (!conflicted(error)) throw error;
+        const delay = delays[attempt];
+        if (delay === undefined) {
+          const busy = new Error(merchantSettlementBusy);
+          Object.assign(busy, { code: merchantSettlementBusy });
+          throw busy;
+        }
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
   };
 }

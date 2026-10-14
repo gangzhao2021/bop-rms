@@ -8,6 +8,7 @@ import {
 import { createPostgresDiningGuestBindingStore } from "@rms/dining";
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
+  acquireOrderDispositionFence,
   createAdditionalDiningBatchSnapshot,
   parseAdditionalDiningBatchSnapshot,
   AdditionalDiningBatchStoreError,
@@ -66,6 +67,14 @@ export function createCustomerAdditionalDiningSubmissionRuntime(
         throw new AdditionalDiningBatchStoreError();
       return retryTransactionConflict(() =>
         options.transactions.run(async (transaction) => {
+          // WP-2423 lock order: the Order's disposition fence comes before the guest identity
+          // check below, which reads the Dining table row FOR SHARE (acceptance and payment
+          // outcomes take the fence, then lock that row FOR UPDATE).
+          await transaction.query(
+            "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+            [options.brandReference, options.storeReference],
+          );
+          await acquireOrderDispositionFence(transaction, snapshot);
           const bound = {
             run: async <T>(work: (tx: ConsumerTransaction) => Promise<T>) => work(transaction),
           };

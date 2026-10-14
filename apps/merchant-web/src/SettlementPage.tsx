@@ -359,8 +359,22 @@ export function SettlementReport({
 }
 
 type State =
-  | { readonly kind: "Loading" | "PermissionDenied" | "Unavailable" }
+  | { readonly kind: "Loading" | "PermissionDenied" | "Busy" | "Unavailable" }
   | { readonly kind: "Ready"; readonly view: SettlementView };
+
+/** Today's date where the Store is (the latest business day staff can ask for). */
+export function storeToday(timeZone: string | undefined, now = new Date()): string {
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(now);
+  } catch {
+    return new Intl.DateTimeFormat("en-CA").format(now);
+  }
+}
 
 /** WP-2423 P1 (PAY-RECONCILIATION): the Store's day-end page. */
 export function SettlementPage({
@@ -377,6 +391,7 @@ export function SettlementPage({
   const [draft, setDraft] = useState("");
   const [state, setState] = useState<State>({ kind: "Loading" });
   const [revision, setRevision] = useState(0);
+  const [busyRetries, setBusyRetries] = useState(0);
   const active = useRef<AbortController | null>(null);
   const load = useCallback(
     (businessDate: string | null) => {
@@ -402,6 +417,19 @@ export function SettlementPage({
     load(requested);
     return () => active.current?.abort();
   }, [load, requested, revision]);
+  // Records busy with live ordering and payment work: try again on our own a few times.
+  useEffect(() => {
+    if (state.kind !== "Busy") {
+      if (state.kind === "Ready") setBusyRetries(0);
+      return;
+    }
+    if (busyRetries >= 3) return;
+    const timer = setTimeout(() => {
+      setBusyRetries((value) => value + 1);
+      setRevision((value) => value + 1);
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [state.kind, busyRetries]);
   const refresh = () => setRevision((value) => value + 1);
   const view = state.kind === "Ready" ? state.view : null;
   return (
@@ -428,7 +456,7 @@ export function SettlementPage({
             type="date"
             name="businessDate"
             value={draft}
-            max={new Date().toISOString().slice(0, 10)}
+            max={storeToday(timeZone)}
             onChange={(event) => setDraft(event.currentTarget.value)}
           />
         </label>
@@ -450,6 +478,14 @@ export function SettlementPage({
       ) : state.kind === "PermissionDenied" ? (
         <StatePanel heading="Permission denied" tone="error" status>
           <p>Your permissions do not allow the settlement view for this Store.</p>
+        </StatePanel>
+      ) : state.kind === "Busy" ? (
+        <StatePanel heading="Busy for a moment" tone="neutral" status>
+          <p>
+            {busyRetries >= 3
+              ? "The store's records are still busy with orders and payments. Refresh in a minute."
+              : "The store's records are busy with orders and payments. Trying again in a few seconds…"}
+          </p>
         </StatePanel>
       ) : state.kind === "Unavailable" ? (
         <StatePanel heading="Settlement unavailable" tone="error" status>

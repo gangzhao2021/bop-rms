@@ -1,7 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
-import { SettlementReport, formatSettlementMoney, summarizeOutcomes } from "./SettlementPage.js";
+import {
+  SettlementReport,
+  formatSettlementMoney,
+  storeToday,
+  summarizeOutcomes,
+} from "./SettlementPage.js";
 import { parseSettlementView } from "./settlement-client.js";
 import {
   emptySettlementReconciliationFixture,
@@ -154,5 +159,13 @@ describe("WP-2423 Q19 current day beside a closed day", () => {
         },
       }),
     ).not.toContain("Today so far");
+  });
+});
+
+describe("WP-2423 Q7 v15: the latest day staff can ask for is today where the Store is", () => {
+  it("uses the Store's date, not UTC (a Toronto evening is already tomorrow in UTC)", () => {
+    const evening = new Date("2026-10-14T02:43:00.000Z");
+    expect(storeToday("America/Toronto", evening)).toBe("2026-10-13");
+    expect(storeToday("Asia/Tokyo", evening)).toBe("2026-10-14");
   });
 });

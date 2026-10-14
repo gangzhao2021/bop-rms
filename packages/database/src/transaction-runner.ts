@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 import {
   TenantContextDatabaseError,
+  tenantContextDatabaseDiagnostic,
   withTenantContextTransaction,
   type TenantDatabaseScope,
 } from "./tenant-context.js";
@@ -66,7 +67,10 @@ export function createTenantTransactionRunner(
             Object.freeze({
               async query(sql: string, values: readonly unknown[]) {
                 if (!active)
-                  throw new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_FAILED");
+                  throw new TenantContextDatabaseError(
+                    "TENANT_DATABASE_TRANSACTION_FAILED",
+                    tenantContextDatabaseDiagnostic(undefined, true),
+                  );
                 pending += 1;
                 try {
                   return await client.query(sql, [...values]);
@@ -79,6 +83,7 @@ export function createTenantTransactionRunner(
                     conflicted
                       ? "TENANT_DATABASE_TRANSACTION_CONFLICT"
                       : "TENANT_DATABASE_TRANSACTION_FAILED",
+                    tenantContextDatabaseDiagnostic(error),
                   );
                 } finally {
                   pending -= 1;

@@ -10,12 +10,15 @@ import {
   createDiningGuestBindingQuery,
   createPostgresDiningCheckoutCommitmentStore,
   createPostgresDiningCheckoutHoldSource,
+  createPostgresDiningPublicTableReader,
   createPostgresDiningGuestBindingStore,
   createPostgresDiningParticipationStore,
 } from "../../rms/dining/src/index.ts";
 import {
+  acquireOrderDispositionFence,
   CartError,
   createDiningCartSelectionService,
+  createPostgresDiningOrderPreparationSource,
   createOrderNumberAllocation,
   createPostgresAdditionalDiningExecutionReader,
   createPostgresDiningCartReplacementStore,
@@ -1200,6 +1203,63 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         await holdOf(dining.host.participantReference, R3.batch.sourceCartVersion + 1),
         null,
       );
+
+      // ── 5c'. WP-2423 lock order (v15 deadlocks 2026-10-13/14): two connections at once. Staff
+      // acceptance and payment outcomes take the Order's disposition fence and then lock the
+      // table row FOR UPDATE through Dining's checkout commitment; a guest's next-round read of
+      // the current Order authorizes through the guest's table (the identity check reads the row
+      // FOR SHARE). The guest side must take the fence first, so the two wait instead of
+      // deadlocking. Real Ordering fence, Ordering preparation source, Dining stores; the guest's
+      // identity check is stood in by Dining's public table reader it uses (test-only).
+      let fenced, proceed;
+      const holdsFence = new Promise((resolve) => (fenced = resolve)),
+        go = new Promise((resolve) => (proceed = resolve));
+      const staffSide = transactions(api).run(async (tx) => {
+        await tx.query(
+          "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+          [scope.brandReference, scope.storeReference],
+        );
+        await acquireOrderDispositionFence(tx, { ...scope, orderReference });
+        fenced();
+        await go;
+        return createPostgresDiningCheckoutCommitmentStore(
+          { run: (work) => work(tx) },
+          ownerScope,
+          {
+            now,
+          },
+        ).withCurrentFacts(link3.commitmentReference, async (_tx, facts) => facts.commitment.state);
+      });
+      await holdsFence;
+      const guestSide = transactions(api).run((tx) =>
+        createPostgresDiningOrderPreparationSource({
+          ...scope,
+          authorize: async (inner) =>
+            (await createPostgresDiningPublicTableReader({
+              transaction: inner,
+              scope: ownerScope,
+              authorize: async () => true,
+            }).read({
+              tableReference: dining.table.tableReference,
+              purpose: "GuestSessionBinding",
+              observedAt: now(),
+            })) !== null,
+        }).resolve({
+          transaction: tx,
+          ...scope,
+          orderReference,
+          diningSessionReference: dining.session.diningSessionReference,
+          guestSessionReference: guestSessionP,
+          observedAt: now(),
+        }),
+      );
+      await delay(500); // the guest side is now waiting
+      proceed();
+      const [staffResult, guestResult] = await Promise.allSettled([staffSide, guestSide]);
+      assert.equal(staffResult.status, "fulfilled", String(staffResult.reason?.code));
+      assert.equal(staffResult.value, "PaymentPending");
+      assert.equal(guestResult.status, "fulfilled", String(guestResult.reason?.code));
+      assert.equal(guestResult.value.orderReference, orderReference);
       // Round 3 reserves the same stock round 2 had reserved (round 2's was returned).
       assert.equal(await stockReserved(stock.accountReference), reservedRound2);
       assert.deepEqual(await cartState(R3cart), {

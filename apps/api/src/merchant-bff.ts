@@ -1792,7 +1792,18 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
     void options
       .settlement({ sessionCookie, businessDate: businessDate === undefined ? null : businessDate })
       .then((view) => response.json(view))
-      .catch(() => denied(response));
+      .catch((error: unknown) => {
+        // WP-2423 Q7 (v15): records busy with live work is a retry-later, not a refusal.
+        if ((error as { code?: unknown } | null)?.code === "MERCHANT_SETTLEMENT_BUSY") {
+          response
+            .status(503)
+            .set("Cache-Control", NO_STORE)
+            .set("Retry-After", "5")
+            .json({ error: "settlement_busy" });
+          return;
+        }
+        denied(response);
+      });
   });
 
   router.get("/order-exceptions", safeRead(options), (request, response) => {

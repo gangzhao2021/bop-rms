@@ -2000,6 +2000,18 @@ describe("WP-2423 P1 merchant settlement read route", () => {
     expect(result.status).toBe(403);
     expect(await result.text()).not.toContain("SETTLEMENT");
   });
+  it("answers records busy with live work as retry-later, never as denied (WP-2423 Q7 v15)", async () => {
+    const root = await serveSettlement(async () => {
+      throw Object.assign(new Error("MERCHANT_SETTLEMENT_BUSY"), {
+        code: "MERCHANT_SETTLEMENT_BUSY",
+      });
+    });
+    const result = await request(root, "/merchant/settlement", { headers });
+    expect(result.status).toBe(503);
+    expect(result.headers.get("retry-after")).toBe("5");
+    expect(result.headers.get("cache-control")).toBe("no-store");
+    expect(await result.json()).toEqual({ error: "settlement_busy" });
+  });
 });
 async function serveOrderClose(orderClosure?: MerchantBffRouterOptions["orderClosure"]) {
   const app = express();

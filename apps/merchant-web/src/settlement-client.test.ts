@@ -38,6 +38,17 @@ describe("WP-2423 P1 settlement client", () => {
     await expect(denied.load(null, new AbortController().signal)).rejects.toMatchObject({
       code: "PermissionDenied",
     });
+    const busy = createSettlementClient((async () =>
+      Response.json({ error: "settlement_busy" }, { status: 503 })) as unknown as typeof fetch);
+    await expect(busy.load(null, new AbortController().signal)).rejects.toMatchObject({
+      code: "Busy",
+    });
+    const down = createSettlementClient(
+      (async () => new Response("{}", { status: 503 })) as unknown as typeof fetch,
+    );
+    await expect(down.load(null, new AbortController().signal)).rejects.toMatchObject({
+      code: "Unavailable",
+    });
     const cached = createSettlementClient(
       (async () =>
         new Response("{}", {
