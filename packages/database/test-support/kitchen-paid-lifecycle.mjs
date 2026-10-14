@@ -43,6 +43,8 @@ export async function exercisePaidKitchenLifecycle({
   await admin.query("GRANT SELECT ON rms_kitchen.kitchen_work_cancellation TO " + role);
   // DEC-KITCHEN-STALE-TICKETS: the queue source reader leaves closed tickets out.
   await admin.query("GRANT SELECT ON rms_kitchen.kitchen_ticket_closure TO " + role);
+  // WP-2423 Q26 DEC-KITCHEN-REWORK: the customer order status read shows open remakes (api SELECT).
+  await admin.query("GRANT SELECT ON rms_kitchen.kitchen_rework_item TO " + role);
   const queryFailures = [];
   let next = 30000;
   let allowed = true;

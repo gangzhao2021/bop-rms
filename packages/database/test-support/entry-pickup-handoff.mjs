@@ -285,7 +285,16 @@ export async function exerciseEntryPickupHandoff({
       currentQueue.items[0].publicOrderReference,
     );
     assert.deepEqual(httpQueue.body.items[0].proof, currentQueue.items[0].proof);
-    assert.deepEqual(httpQueue.body.items[0].items, currentQueue.items[0].items);
+    // WP-2423 Q26: Order items only match remakes; the pickup screen contract omits them.
+    assert.deepEqual(
+      httpQueue.body.items[0].items,
+      currentQueue.items[0].items.map((line) => {
+        const { orderItemReference, ...shown } = line;
+        assert.equal(typeof orderItemReference, "string");
+        return shown;
+      }),
+    );
+    assert.equal(httpQueue.body.items[0].remakeInProgress, 0);
     assert.equal(typeof httpQueue.body.items[0].publicOrderReference, "string");
     assert.deepEqual(Object.keys(httpQueue.body.items[0].proof).sort(), [
       "expiresAt",
