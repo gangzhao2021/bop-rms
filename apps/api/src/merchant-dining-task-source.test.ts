@@ -79,12 +79,26 @@ function fixture() {
   const read = createMerchantDiningTaskSource({ now: () => at } as Parameters<
     typeof createMerchantDiningTaskSource
   >[0]);
+  /** One authorized inbox transaction (withMerchantTransactionAuthorization's authority). */
+  const run = () => {
+    const rechecks: (() => Promise<boolean>)[] = [];
+    return {
+      rechecks,
+      scope: null,
+      guard: vi.fn(async (transaction?: unknown) => transaction === tx),
+      bind: vi.fn(),
+      recheckBeforeReply: vi.fn((check: () => Promise<boolean>) => {
+        rechecks.push(check);
+      }),
+    };
+  };
   return {
     scope,
     allowed,
     current,
     tx,
-    read: () => read(tx, scope, task, "synthetic-cookie"),
+    run,
+    read: (authority = run()) => read(tx, scope, task, "synthetic-cookie", authority),
     authorize: read,
   };
 }
@@ -99,9 +113,33 @@ it.each(["Active", "Closing", "Closed", "Cancelled"])(
     expect(mock.load).toHaveBeenCalledWith(id(4));
     const runner = mock.owner.mock.calls[0]?.[0];
     expect(await runner.run(async (tx: unknown) => tx)).toBe(f.tx);
-    expect(f.allowed).toHaveBeenCalledTimes(2);
+    expect(f.allowed).toHaveBeenCalledTimes(1);
   },
 );
+it("resolves dining.session.close once per inbox transaction and re-checks it before the reply", async () => {
+  const f = fixture(),
+    run = f.run();
+  expect(await f.read(run)).toBe(true);
+  expect(await f.read(run)).toBe(true);
+  expect(await f.read(run)).toBe(true);
+  expect(mock.resolve).toHaveBeenCalledTimes(1);
+  expect(f.allowed).toHaveBeenCalledTimes(1);
+  expect(run.guard).toHaveBeenCalledWith(f.tx);
+  expect(run.rechecks).toHaveLength(1);
+  f.allowed.mockResolvedValue(false);
+  expect(await run.rechecks[0]?.()).toBe(false);
+  // A new transaction resolves it again.
+  expect(await f.read()).toBe(false);
+  expect(mock.resolve).toHaveBeenCalledTimes(2);
+});
+it("reads no source outside its authorized transaction", async () => {
+  const f = fixture(),
+    run = f.run();
+  run.guard.mockResolvedValue(false);
+  expect(await f.read(run)).toBe(false);
+  expect(mock.resolve).not.toHaveBeenCalled();
+  expect(mock.load).not.toHaveBeenCalled();
+});
 it("denies foreign actor and Store before source lookup", async () => {
   const f = fixture();
   f.current.actorReference = id(99);
@@ -121,9 +159,12 @@ it("trims missing sources and current permission revocation", async () => {
   const f = fixture();
   mock.load.mockResolvedValue(null);
   expect(await f.read()).toBe(false);
+  // Revoked during the read: the source is kept, and the re-check before the reply refuses.
   mock.load.mockResolvedValue(session);
+  const run = f.run();
   f.allowed.mockResolvedValueOnce(true).mockResolvedValue(false);
-  expect(await f.read()).toBe(false);
+  expect(await f.read(run)).toBe(true);
+  expect(await run.rechecks[0]?.()).toBe(false);
 });
 it("fails unavailable on owner errors or inconsistent source binding", async () => {
   const f = fixture();
@@ -140,6 +181,7 @@ it("trims unsupported source types before authority or owner reads", async () =>
       f.scope,
       createTaskRecord({ ...task, source: { ...task.source, sourceType: "OTHER_SOURCE" } }),
       "synthetic-cookie",
+      f.run(),
     ),
   ).toBe(false);
   expect(mock.resolve).not.toHaveBeenCalled();

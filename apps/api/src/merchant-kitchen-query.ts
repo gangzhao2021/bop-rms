@@ -14,6 +14,7 @@ import {
 import { listPublishedSellableAllergenDisclosures, sellableDisclosureKey } from "@rms/catalog";
 import { listStoreKitchenOrderLabels, listStoreOrderBusinessDates } from "@rms/ordering";
 import { listDiningSessionTableLabels } from "@rms/dining";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -254,131 +255,148 @@ export function createMerchantKitchenQuery(options: {
     } catch {
       throw new KitchenQueueProjectionError("KITCHEN_QUEUE_INPUT_INVALID");
     }
-    return options.persistence.transactions.run(async (transaction) => {
-      const scope = await resolveScope(
-        transaction,
-        input.sessionCookie,
-        "kitchen.operate",
-        session.sessionReference,
-      );
-      if (!(await scope.allowed()))
-        throw new KitchenQueueProjectionError("KITCHEN_QUEUE_PERMISSION_DENIED");
-      const authority = {
-        actorReference: scope.actorReference,
-        brandReference: scope.context.brand.brandReference,
-        storeReference: scope.store.storeReference,
-        observedAt: options.persistence.now(),
-      };
-      const tx: ConsumerTransaction = {
-        async query<Row = Record<string, unknown>>(sql: string, values: readonly unknown[]) {
-          const result = await transaction.query(sql, values);
-          if (!result || typeof result !== "object") return unavailable();
-          const rows = Object.getOwnPropertyDescriptor(result, "rows"),
-            count = Object.getOwnPropertyDescriptor(result, "rowCount");
-          if (
-            !rows ||
-            !("value" in rows) ||
-            !Array.isArray(rows.value) ||
-            !count ||
-            !("value" in count) ||
-            (count.value !== null && (!Number.isSafeInteger(count.value) || count.value < 0))
-          )
-            return unavailable();
-          return { rows: rows.value as readonly Row[], rowCount: count.value as number | null };
-        },
-      };
-      await lockPostgresKitchenQueueRead({ ...authority, transaction: tx });
-      const service = createKitchenQueueProjectionService({
-        authorization: {
-          authorize: async (candidate) =>
-            candidate.brandReference === authority.brandReference &&
-            candidate.storeReference === authority.storeReference &&
-            "actorReference" in candidate &&
-            candidate.actorReference === authority.actorReference &&
-            (await scope.allowed()),
-        },
-        trustedContext: { resolveQueryAuthority: async () => authority },
-        transactions: { withTransaction: (work) => work(tx) },
-        tenantContext: {
-          install: async (candidate) => {
-            if (
-              candidate.brandReference !== authority.brandReference ||
-              candidate.storeReference !== authority.storeReference ||
-              !(await scope.allowed())
-            )
-              throw new KitchenQueueProjectionError("KITCHEN_QUEUE_PERMISSION_DENIED");
+    const denied = (): never => {
+      throw new KitchenQueueProjectionError("KITCHEN_QUEUE_PERMISSION_DENIED");
+    };
+    return options.persistence.transactions.run((transaction) =>
+      // WP-2423: the caller is resolved in full at the start and once before the reply; the owner
+      // reads in between only confirm they run in this authorized transaction.
+      withMerchantTransactionAuthorization(
+        {
+          transaction,
+          resolve: async () => {
+            const scope = await resolveScope(
+              transaction,
+              input.sessionCookie,
+              "kitchen.operate",
+              session.sessionReference,
+            );
+            if (!(await scope.allowed())) return denied();
+            return scope;
           },
+          recheck: async (scope) => (await scope.allowed()) === true,
+          denied,
         },
-        queries: createPostgresKitchenQueueQueries({
-          ...authority,
-          authorize: async () => scope.allowed(),
-        }),
-        locks: { acquireStoreProjection: unavailable },
-        checkpoints: {
-          compareIncremental: unavailable,
-          compareRebuild: unavailable,
-          compareLifecycleIncremental: unavailable,
+        async (authorized) => {
+          const scope = authorized.scope;
+          const authority = {
+            actorReference: scope.actorReference,
+            brandReference: scope.context.brand.brandReference,
+            storeReference: scope.store.storeReference,
+            observedAt: options.persistence.now(),
+          };
+          const tx: ConsumerTransaction = {
+            async query<Row = Record<string, unknown>>(sql: string, values: readonly unknown[]) {
+              const result = await transaction.query(sql, values);
+              if (!result || typeof result !== "object") return unavailable();
+              const rows = Object.getOwnPropertyDescriptor(result, "rows"),
+                count = Object.getOwnPropertyDescriptor(result, "rowCount");
+              if (
+                !rows ||
+                !("value" in rows) ||
+                !Array.isArray(rows.value) ||
+                !count ||
+                !("value" in count) ||
+                (count.value !== null && (!Number.isSafeInteger(count.value) || count.value < 0))
+              )
+                return unavailable();
+              return { rows: rows.value as readonly Row[], rowCount: count.value as number | null };
+            },
+          };
+          await lockPostgresKitchenQueueRead({ ...authority, transaction: tx });
+          const service = createKitchenQueueProjectionService({
+            authorization: {
+              authorize: async (candidate) =>
+                candidate.brandReference === authority.brandReference &&
+                candidate.storeReference === authority.storeReference &&
+                "actorReference" in candidate &&
+                candidate.actorReference === authority.actorReference &&
+                (await authorized.guard()),
+            },
+            trustedContext: { resolveQueryAuthority: async () => authority },
+            transactions: { withTransaction: (work) => work(tx) },
+            tenantContext: {
+              install: async (candidate) => {
+                if (
+                  candidate.brandReference !== authority.brandReference ||
+                  candidate.storeReference !== authority.storeReference ||
+                  !(await authorized.guard())
+                )
+                  throw new KitchenQueueProjectionError("KITCHEN_QUEUE_PERMISSION_DENIED");
+              },
+            },
+            queries: createPostgresKitchenQueueQueries({
+              ...authority,
+              authorize: async () => authorized.guard(),
+            }),
+            locks: { acquireStoreProjection: unavailable },
+            checkpoints: {
+              compareIncremental: unavailable,
+              compareRebuild: unavailable,
+              compareLifecycleIncremental: unavailable,
+            },
+            sources: {
+              loadIncremental: unavailable,
+              loadRebuild: unavailable,
+              loadLifecycleIncremental: unavailable,
+            },
+            projections: {
+              loadActive: unavailable,
+              loadByRebuildReference: unavailable,
+              replaceActive: unavailable,
+            },
+            references: {
+              nextGenerationReference: () => {
+                throw new KitchenQueueProjectionError("KITCHEN_QUEUE_DEPENDENCY_UNAVAILABLE");
+              },
+            },
+            clock: { now: () => authority.observedAt },
+            digests: { sha256: options.sha256 },
+          });
+          const operatorStatus = (projection: ProjectionMetadata) =>
+            kdsOperatorStatus({ session, ...authority, projection });
+          if (query.kind === "List") {
+            const result = await service.list({
+              ...authority,
+              filters: query.filters,
+              cursor: query.cursor,
+              limit: query.limit,
+            });
+            // DEC-KITCHEN-STALE-TICKETS: a ticket a manager closed is gone at once, even before the
+            // queue projection has caught up with the closure.
+            const closed = await listClosedKitchenTickets(tx, authority, [
+              ...new Set(result.items.map((item) => item.ticketReference)),
+            ]);
+            const items = result.items.filter((item) => !closed.has(item.ticketReference));
+            const preparation = await kitchenPreparation(tx, authority, items);
+            const canCloseEarlierDayTickets =
+              (await scope.authorizeAction(kitchenStaleTicketClosePermission))?.effect === "Allow";
+            return {
+              ...result,
+              operatorStatus: operatorStatus(result),
+              storeReference: authority.storeReference,
+              canCloseEarlierDayTickets,
+              items: items.map((item) =>
+                itemView(item, preparation.get(item.workItemReference) ?? noPreparation),
+              ),
+            };
+          }
+          const result = await service.get({
+            ...authority,
+            workItemReference: query.workItemReference,
+          });
+          const preparation = await kitchenPreparation(tx, authority, [result.item]);
+          return {
+            ...result,
+            operatorStatus: operatorStatus(result),
+            storeReference: authority.storeReference,
+            item: itemView(
+              result.item,
+              preparation.get(result.item.workItemReference) ?? noPreparation,
+            ),
+          };
         },
-        sources: {
-          loadIncremental: unavailable,
-          loadRebuild: unavailable,
-          loadLifecycleIncremental: unavailable,
-        },
-        projections: {
-          loadActive: unavailable,
-          loadByRebuildReference: unavailable,
-          replaceActive: unavailable,
-        },
-        references: {
-          nextGenerationReference: () => {
-            throw new KitchenQueueProjectionError("KITCHEN_QUEUE_DEPENDENCY_UNAVAILABLE");
-          },
-        },
-        clock: { now: () => authority.observedAt },
-        digests: { sha256: options.sha256 },
-      });
-      const operatorStatus = (projection: ProjectionMetadata) =>
-        kdsOperatorStatus({ session, ...authority, projection });
-      if (query.kind === "List") {
-        const result = await service.list({
-          ...authority,
-          filters: query.filters,
-          cursor: query.cursor,
-          limit: query.limit,
-        });
-        // DEC-KITCHEN-STALE-TICKETS: a ticket a manager closed is gone at once, even before the
-        // queue projection has caught up with the closure.
-        const closed = await listClosedKitchenTickets(tx, authority, [
-          ...new Set(result.items.map((item) => item.ticketReference)),
-        ]);
-        const items = result.items.filter((item) => !closed.has(item.ticketReference));
-        const preparation = await kitchenPreparation(tx, authority, items);
-        const canCloseEarlierDayTickets =
-          (await scope.authorizeAction(kitchenStaleTicketClosePermission))?.effect === "Allow";
-        return {
-          ...result,
-          operatorStatus: operatorStatus(result),
-          storeReference: authority.storeReference,
-          canCloseEarlierDayTickets,
-          items: items.map((item) =>
-            itemView(item, preparation.get(item.workItemReference) ?? noPreparation),
-          ),
-        };
-      }
-      const result = await service.get({
-        ...authority,
-        workItemReference: query.workItemReference,
-      });
-      const preparation = await kitchenPreparation(tx, authority, [result.item]);
-      return {
-        ...result,
-        operatorStatus: operatorStatus(result),
-        storeReference: authority.storeReference,
-        item: itemView(
-          result.item,
-          preparation.get(result.item.workItemReference) ?? noPreparation,
-        ),
-      };
-    });
+      ),
+    );
   };
 }

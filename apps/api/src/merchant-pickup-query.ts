@@ -12,6 +12,10 @@ import {
 } from "@rms/ordering";
 import { listOpenKitchenReworkItems } from "@rms/kitchen";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import {
+  withMerchantTransactionAuthorization,
+  type MerchantTransactionAuthority,
+} from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 type StoreOptions = Parameters<typeof createPostgresFulfillmentReadinessStore>[0];
@@ -65,15 +69,36 @@ export function createMerchantPickupQuery(options: {
       return invalid();
     const limit = raw.limit,
       includeCompleted = raw.includeCompleted;
-    return options.persistence.transactions.run(async (transaction) => {
-      const scope = await resolveScope(
-        transaction,
-        input.sessionCookie,
-        "fulfillment.operate",
-        session.sessionReference,
-      );
-      if (!(await scope.allowed()))
-        throw new FulfillmentReadinessError("FULFILLMENT_READINESS_PERMISSION_DENIED");
+    const denied = (): never => {
+      throw new FulfillmentReadinessError("FULFILLMENT_READINESS_PERMISSION_DENIED");
+    };
+    return options.persistence.transactions.run((transaction) =>
+      // WP-2423: the caller is resolved in full at the start and once before the reply; the owner
+      // reads in between only confirm they run in this authorized transaction.
+      withMerchantTransactionAuthorization(
+        {
+          transaction,
+          resolve: async () => {
+            const scope = await resolveScope(
+              transaction,
+              input.sessionCookie,
+              "fulfillment.operate",
+              session.sessionReference,
+            );
+            if (!(await scope.allowed())) return denied();
+            return scope;
+          },
+          recheck: async (scope) => (await scope.allowed()) === true,
+          denied,
+        },
+        (authority) => read(transaction, authority),
+      ),
+    );
+    async function read(
+      transaction: Parameters<Parameters<typeof options.persistence.transactions.run>[0]>[0],
+      authority: MerchantTransactionAuthority<Awaited<ReturnType<typeof resolveScope>>>,
+    ) {
+      const scope = authority.scope;
       const tx: ConsumerTransaction = {
         async query<Row = Record<string, unknown>>(sql: string, values: readonly unknown[]) {
           const result = await transaction.query(sql, values);
@@ -102,8 +127,8 @@ export function createMerchantPickupQuery(options: {
         ...options.store,
         ...selected,
         now: options.persistence.now,
-        authorizeQueue: () => scope.allowed(),
-        authorize: async (_tx, access) => access.access === "Current" && (await scope.allowed()),
+        authorizeQueue: () => authority.guard(),
+        authorize: async (_tx, access) => access.access === "Current" && (await authority.guard()),
       });
       const result = await store.listPickupQueue({
         transaction: tx,
@@ -165,8 +190,6 @@ export function createMerchantPickupQuery(options: {
           )
           .reduce((sum, remake) => sum + remake.openQuantity, 0);
       };
-      if (!(await scope.allowed()))
-        throw new FulfillmentReadinessError("FULFILLMENT_READINESS_PERMISSION_DENIED");
       return Object.freeze({
         ...result,
         workstation,
@@ -192,6 +215,6 @@ export function createMerchantPickupQuery(options: {
             }),
           ),
       });
-    });
+    }
   };
 }

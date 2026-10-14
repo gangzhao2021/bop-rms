@@ -180,8 +180,10 @@ it("rejects non-Manager role before reading financial information", async () => 
 });
 it("denies a scope change before returning data", async () => {
   const f = setup();
-  f.allowed.mockResolvedValueOnce(true).mockResolvedValueOnce(true).mockResolvedValue(false);
+  // WP-2423: allowed at the start, refused by the one full re-check before the reply.
+  f.allowed.mockResolvedValueOnce(true).mockResolvedValue(false);
   await expect(f.operation(f.input)).rejects.toThrow();
+  expect(f.allowed).toHaveBeenCalledTimes(2);
 });
 it.each([[1, 1], [4]])("rejects inconsistent unit occupancy %j", async (...ordinals: unknown[]) => {
   const f = setup();

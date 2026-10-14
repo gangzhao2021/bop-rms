@@ -144,9 +144,11 @@ it("does not return data if permission changes during the read", async () => {
   const f = setup();
   doubles.load.mockImplementationOnce(async () => {
     f.allowed.mockResolvedValue(false);
-    return { phase: "Fulfilled" };
+    return { phase: "Fulfilled", items: [] };
   });
   await expect(f.operation(f.input)).rejects.toThrow("PERMISSION_DENIED");
+  // WP-2423: resolved in full at the start and re-checked in full once before the reply only.
+  expect(f.allowed).toHaveBeenCalledTimes(2);
 });
 it("preserves unavailable owner facts instead of reporting no work remaining", async () => {
   const f = setup();

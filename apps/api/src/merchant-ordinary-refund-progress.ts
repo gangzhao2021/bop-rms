@@ -6,6 +6,7 @@ import {
 } from "@rms/payment";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import { createMerchantWorkforcePermissionSource } from "./merchant-workforce-authority-source.js";
 import { refundReadAccess } from "./merchant-refund-read-authority.js";
 import { businessTransaction } from "./merchant-ordinary-refund-approval.js";
@@ -53,61 +54,78 @@ export function createMerchantOrdinaryRefundProgress(options: {
     const raw = readClosedRecord(input.query, ["orderReference", "requestReference"]);
     const orderReference = ref(raw.orderReference),
       requestReference = ref(raw.requestReference);
-    return options.persistence.transactions.run(async (transaction) => {
-      const current = await resolve(
-        transaction,
-        input.sessionCookie,
-        "merchant.access",
-        authenticated.sessionReference,
-      );
-      if (!(await current.allowed())) return deny();
-      const tx = businessTransaction(transaction);
-      const scope = {
-        tenantReference: current.selected.tenantReference,
-        brandReference: String(current.context.brand.brandReference),
-        storeReference: String(current.store.storeReference),
-      };
-      const configuration = await options.resolveConfiguration(tx, scope);
-      const role = createOrdinaryRefundRoleResolver(configuration.roleMapping);
-      const workforce = createMerchantWorkforcePermissionSource({
-        resolveContext: async () => ({
-          tenantReference: scope.tenantReference,
-          context: current.context,
-        }),
-      });
-      const observedAt = String(current.context.resolvedAt);
-      const allowed = async () =>
-        (await current.allowed()) &&
-        (
-          await refundReadAccess(
-            workforce,
-            tx,
-            { ...scope, actorReference: String(current.actorReference), observedAt },
-            role,
-          )
-        ).canRead;
-      if (!(await allowed())) return deny();
-      const context = await createPostgresOrdinaryRefundRequestContextSource({
-        scope,
-        authorize: () => allowed(),
-      })(tx, { orderReference, operationReference: ref(options.newReference()), observedAt });
-      const request = context.history.find((entry) => entry.requestReference === requestReference);
-      if (!request || context.existing !== null) return deny();
-      let progress: OrdinaryRefundProgress = "Declined";
-      if (!context.declines.has(requestReference)) {
-        const status = await createPostgresOrdinaryRefundRequestStatusSource({
-          scope,
-          providerAccountReference: configuration.providerAccountReference,
-          environment: configuration.environment,
-          authorize: () => allowed(),
-        })(tx, { orderReference, operationReference: request.operationReference, observedAt });
-        progress = ordinaryRefundProgress(
-          false,
-          status.payments.map((payment) => payment.state),
-        );
-      }
-      if (!(await allowed())) return deny();
-      return Object.freeze({ requestReference, progress, observedAt });
-    });
+    return options.persistence.transactions.run((transaction) =>
+      // WP-2423: the caller is resolved in full at the start and once before the reply; the owner
+      // reads in between only confirm they run in this authorized transaction.
+      withMerchantTransactionAuthorization(
+        {
+          transaction,
+          resolve: async () => {
+            const current = await resolve(
+              transaction,
+              input.sessionCookie,
+              "merchant.access",
+              authenticated.sessionReference,
+            );
+            if (!(await current.allowed())) return deny();
+            return current;
+          },
+          recheck: async (current) => (await current.allowed()) === true,
+          denied: deny,
+        },
+        async (authorized) => {
+          const current = authorized.scope;
+          const tx = businessTransaction(transaction);
+          const scope = {
+            tenantReference: current.selected.tenantReference,
+            brandReference: String(current.context.brand.brandReference),
+            storeReference: String(current.store.storeReference),
+          };
+          const configuration = await options.resolveConfiguration(tx, scope);
+          const role = createOrdinaryRefundRoleResolver(configuration.roleMapping);
+          const workforce = createMerchantWorkforcePermissionSource({
+            resolveContext: async () => ({
+              tenantReference: scope.tenantReference,
+              context: current.context,
+            }),
+          });
+          const observedAt = String(current.context.resolvedAt);
+          const readable = async () =>
+            (
+              await refundReadAccess(
+                workforce,
+                tx,
+                { ...scope, actorReference: String(current.actorReference), observedAt },
+                role,
+              )
+            ).canRead;
+          if (!(await readable())) return deny();
+          authorized.recheckBeforeReply(readable);
+          const allowed = () => authorized.guard();
+          const context = await createPostgresOrdinaryRefundRequestContextSource({
+            scope,
+            authorize: () => allowed(),
+          })(tx, { orderReference, operationReference: ref(options.newReference()), observedAt });
+          const request = context.history.find(
+            (entry) => entry.requestReference === requestReference,
+          );
+          if (!request || context.existing !== null) return deny();
+          let progress: OrdinaryRefundProgress = "Declined";
+          if (!context.declines.has(requestReference)) {
+            const status = await createPostgresOrdinaryRefundRequestStatusSource({
+              scope,
+              providerAccountReference: configuration.providerAccountReference,
+              environment: configuration.environment,
+              authorize: () => allowed(),
+            })(tx, { orderReference, operationReference: request.operationReference, observedAt });
+            progress = ordinaryRefundProgress(
+              false,
+              status.payments.map((payment) => payment.state),
+            );
+          }
+          return Object.freeze({ requestReference, progress, observedAt });
+        },
+      ),
+    );
   };
 }

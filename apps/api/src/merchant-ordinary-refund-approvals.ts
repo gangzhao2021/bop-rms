@@ -4,6 +4,7 @@ import { MemberDirectoryError, loadStoreMember } from "@bop/membership";
 import { createPostgresReceiptOrderSource } from "@rms/ordering";
 import { createPostgresOrdinaryRefundApprovalQueueRuntime } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import { createMerchantOrdinaryRefundAuthority } from "./merchant-ordinary-refund-authority.js";
 import { createMerchantSoleOperatorApproval } from "./merchant-sole-operator.js";
 import {
@@ -33,140 +34,156 @@ export function createMerchantOrdinaryRefundApprovals(options: {
 }) {
   const resolve = createMerchantStoreScope(options.persistence);
   return async (input: { sessionCookie: unknown }) =>
-    options.persistence.transactions.run(async (transaction) => {
-      const current = await resolve(transaction, input.sessionCookie, "merchant.access");
-      const can = async (action: string) =>
-        (await current.authorizeAction(action))?.effect === "Allow";
-      const canApprove = await can("payment.refund.approve");
-      const canRequest = await can("payment.refund.request");
-      if (!canApprove && !canRequest) return denied();
-      const still = async () =>
-        (canApprove && (await can("payment.refund.approve"))) ||
-        (canRequest && (await can("payment.refund.request")));
-      const tx = businessTransaction(transaction);
-      const actorReference = String(current.actorReference);
-      const scope = {
-        tenantReference: current.selected.tenantReference,
-        brandReference: String(current.context.brand.brandReference),
-        storeReference: String(current.store.storeReference),
-      };
-      const configuration = await options.resolveConfiguration(
-        tx,
-        { ...scope, actorReference },
-        Object.freeze({ context: current.context as TenantContext, authorize: still }),
-      );
-      const authorize = async (
-        _tx: ConsumerTransaction,
-        query: { tenantReference?: string; brandReference: string; storeReference: string },
-      ) =>
-        (query.tenantReference === undefined || query.tenantReference === scope.tenantReference) &&
-        query.brandReference === scope.brandReference &&
-        query.storeReference === scope.storeReference &&
-        (await still());
-      const observedAt = String(current.context.resolvedAt);
-      const entries = await createPostgresOrdinaryRefundApprovalQueueRuntime({
-        scope,
-        providerAccountReference: configuration.providerAccountReference,
-        environment: configuration.environment,
-        authorize,
-        businessDate: configuration.businessDate,
-      })(tx, { observedAt });
-      const authority = createMerchantOrdinaryRefundAuthority(configuration.workforce);
-      const order = createPostgresReceiptOrderSource({ ...scope, authorize });
-      // The same server-computed recency for every person (Identity enrollment and step-ups).
-      const verifiedUntil = async (
-        actor: string,
-        permissionCode: string,
-        orderReference: string,
-      ) => {
-        try {
-          const facts = await authority(tx, {
-            ...scope,
-            orderReference,
-            actorReference: actor,
-            permissionCode,
-            observedAt,
-          });
-          return facts.allowed && recentEnough(facts.recentMfaAt, observedAt)
-            ? new Date(
-                Date.parse(String(facts.recentMfaAt)) + refundMfaRecencyMilliseconds,
-              ).toISOString()
-            : null;
-        } catch {
-          return null;
-        }
-      };
-      const names = new Map<string, string | null>();
-      const name = async (actor: string) => {
-        if (!names.has(actor))
-          try {
-            names.set(actor, (await loadStoreMember(tx, scope, actor)).displayName);
-          } catch (error) {
-            if (!(error instanceof MemberDirectoryError)) throw error;
-            names.set(actor, null);
-          }
-        return names.get(actor) ?? null;
-      };
-      // WP-2423 Q19: whether this approver may approve their own requests (sole operator in
-      // effect now). Read only when one of the entries is theirs; approval rechecks it.
-      const soleOperator =
-        canApprove && entries.some((entry) => entry.requesterReference === actorReference)
-          ? (
-              await createMerchantSoleOperatorApproval({
-                resolveContext: configuration.workforce.resolveContext,
-                authorize: still,
-              })(tx, {
+    options.persistence.transactions.run((transaction) =>
+      // WP-2423: the caller is resolved in full at the start and once before the reply; the owner
+      // reads in between (several per request listed) only confirm they run in this authorized
+      // transaction.
+      withMerchantTransactionAuthorization(
+        {
+          transaction,
+          resolve: async () => {
+            const current = await resolve(transaction, input.sessionCookie, "merchant.access");
+            const can = async (action: string) =>
+              (await current.authorizeAction(action))?.effect === "Allow";
+            const canApprove = await can("payment.refund.approve");
+            const canRequest = await can("payment.refund.request");
+            if (!canApprove && !canRequest) return denied();
+            return Object.freeze({ current, can, canApprove, canRequest });
+          },
+          recheck: async ({ can, canApprove, canRequest }) =>
+            (canApprove && (await can("payment.refund.approve"))) ||
+            (canRequest && (await can("payment.refund.request"))),
+          denied,
+        },
+        async (authorized) => {
+          const { current, canApprove } = authorized.scope;
+          const still = () => authorized.guard();
+          const tx = businessTransaction(transaction);
+          const actorReference = String(current.actorReference);
+          const scope = {
+            tenantReference: current.selected.tenantReference,
+            brandReference: String(current.context.brand.brandReference),
+            storeReference: String(current.store.storeReference),
+          };
+          const configuration = await options.resolveConfiguration(
+            tx,
+            { ...scope, actorReference },
+            Object.freeze({ context: current.context as TenantContext, authorize: still }),
+          );
+          const authorize = async (
+            _tx: ConsumerTransaction,
+            query: { tenantReference?: string; brandReference: string; storeReference: string },
+          ) =>
+            (query.tenantReference === undefined ||
+              query.tenantReference === scope.tenantReference) &&
+            query.brandReference === scope.brandReference &&
+            query.storeReference === scope.storeReference &&
+            (await still());
+          const observedAt = String(current.context.resolvedAt);
+          const entries = await createPostgresOrdinaryRefundApprovalQueueRuntime({
+            scope,
+            providerAccountReference: configuration.providerAccountReference,
+            environment: configuration.environment,
+            authorize,
+            businessDate: configuration.businessDate,
+          })(tx, { observedAt });
+          const authority = createMerchantOrdinaryRefundAuthority(configuration.workforce);
+          const order = createPostgresReceiptOrderSource({ ...scope, authorize });
+          // The same server-computed recency for every person (Identity enrollment and step-ups).
+          const verifiedUntil = async (
+            actor: string,
+            permissionCode: string,
+            orderReference: string,
+          ) => {
+            try {
+              const facts = await authority(tx, {
                 ...scope,
-                permissionCode: "payment.refund.approve",
-                actorReference,
+                orderReference,
+                actorReference: actor,
+                permissionCode,
                 observedAt,
-              })
-            ).status
-          : null;
-      const result = [];
-      for (const entry of entries) {
-        const requesterVerifiedUntil = await verifiedUntil(
-          entry.requesterReference,
-          "payment.refund.request",
-          entry.orderReference,
-        );
-        const placed = await order(tx, { orderReference: entry.orderReference, observedAt });
-        result.push(
-          Object.freeze({
-            orderReference: entry.orderReference,
-            orderNumber: placed.orderNumber,
-            requestReference: entry.requestReference,
-            paymentIntentReferences: entry.paymentIntentReferences,
-            currencyCode: entry.currencyCode,
-            amountMinor: entry.amountMinor.toString(),
-            reasonCode: entry.reasonCode,
-            note: entry.note,
-            escalationReasons: entry.escalationReasons,
-            requestedAt: entry.requestedAt,
-            requesterName: await name(entry.requesterReference),
-            requestedByYou: entry.requesterReference === actorReference,
-            requesterVerifiedUntil,
-            state: entry.state,
-            approvalReference: entry.approval?.approvalReference ?? null,
-            approvedAt: entry.approval?.approvedAt ?? null,
-            approverName:
-              entry.approval === null ? null : await name(entry.approval.approverReference),
-            canApprove:
-              canApprove &&
-              (entry.requesterReference !== actorReference || soleOperator === "Effective") &&
-              (entry.approval === null || entry.approval.approverReference === actorReference),
-            /** WP-2423 Q19: approving this one is the Owner approving their own request. */
-            soleOperatorApproval:
-              entry.requesterReference === actorReference && soleOperator === "Effective",
-          }),
-        );
-      }
-      if (!(await still())) return denied();
-      return Object.freeze({
-        observedAt,
-        canApprove,
-        soleOperator,
-        entries: Object.freeze(result),
-      });
-    });
+              });
+              return facts.allowed && recentEnough(facts.recentMfaAt, observedAt)
+                ? new Date(
+                    Date.parse(String(facts.recentMfaAt)) + refundMfaRecencyMilliseconds,
+                  ).toISOString()
+                : null;
+            } catch {
+              return null;
+            }
+          };
+          const names = new Map<string, string | null>();
+          const name = async (actor: string) => {
+            if (!names.has(actor))
+              try {
+                names.set(actor, (await loadStoreMember(tx, scope, actor)).displayName);
+              } catch (error) {
+                if (!(error instanceof MemberDirectoryError)) throw error;
+                names.set(actor, null);
+              }
+            return names.get(actor) ?? null;
+          };
+          // WP-2423 Q19: whether this approver may approve their own requests (sole operator in
+          // effect now). Read only when one of the entries is theirs; approval rechecks it.
+          const soleOperator =
+            canApprove && entries.some((entry) => entry.requesterReference === actorReference)
+              ? (
+                  await createMerchantSoleOperatorApproval({
+                    resolveContext: configuration.workforce.resolveContext,
+                    authorize: still,
+                  })(tx, {
+                    ...scope,
+                    permissionCode: "payment.refund.approve",
+                    actorReference,
+                    observedAt,
+                  })
+                ).status
+              : null;
+          const result = [];
+          for (const entry of entries) {
+            const requesterVerifiedUntil = await verifiedUntil(
+              entry.requesterReference,
+              "payment.refund.request",
+              entry.orderReference,
+            );
+            const placed = await order(tx, { orderReference: entry.orderReference, observedAt });
+            result.push(
+              Object.freeze({
+                orderReference: entry.orderReference,
+                orderNumber: placed.orderNumber,
+                requestReference: entry.requestReference,
+                paymentIntentReferences: entry.paymentIntentReferences,
+                currencyCode: entry.currencyCode,
+                amountMinor: entry.amountMinor.toString(),
+                reasonCode: entry.reasonCode,
+                note: entry.note,
+                escalationReasons: entry.escalationReasons,
+                requestedAt: entry.requestedAt,
+                requesterName: await name(entry.requesterReference),
+                requestedByYou: entry.requesterReference === actorReference,
+                requesterVerifiedUntil,
+                state: entry.state,
+                approvalReference: entry.approval?.approvalReference ?? null,
+                approvedAt: entry.approval?.approvedAt ?? null,
+                approverName:
+                  entry.approval === null ? null : await name(entry.approval.approverReference),
+                canApprove:
+                  canApprove &&
+                  (entry.requesterReference !== actorReference || soleOperator === "Effective") &&
+                  (entry.approval === null || entry.approval.approverReference === actorReference),
+                /** WP-2423 Q19: approving this one is the Owner approving their own request. */
+                soleOperatorApproval:
+                  entry.requesterReference === actorReference && soleOperator === "Effective",
+              }),
+            );
+          }
+          return Object.freeze({
+            observedAt,
+            canApprove,
+            soleOperator,
+            entries: Object.freeze(result),
+          });
+        },
+      ),
+    );
 }

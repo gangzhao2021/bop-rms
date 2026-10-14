@@ -113,8 +113,11 @@ it("composes current scope, public queue and source authorization in one transac
     expect.anything(),
     expect.anything(),
     "synthetic-cookie",
+    expect.objectContaining({ guard: expect.any(Function) }),
   );
-  expect(f.allowed).toHaveBeenCalledTimes(4);
+  // WP-2423: resolved in full at the start and once before the reply, not per queue read.
+  expect(f.allowed).toHaveBeenCalledTimes(2);
+  expect(f.authorizeAction).toHaveBeenCalledTimes(2);
   expect(await tx.query("SELECT 1", [])).toEqual({ rows: [], rowCount: 0 });
   expect(f.tx.query).toHaveBeenCalledWith("SELECT 1", []);
 });
@@ -184,13 +187,33 @@ it("rejects duplicate Store Queue configuration and permission denial", async ()
   );
   expect(mocks.queue).not.toHaveBeenCalled();
 });
-it("rechecks authority during queue loading and fails on revocation", async () => {
+it("re-checks authority in full before the reply and fails on revocation", async () => {
   const f = fixture();
   f.allowed.mockResolvedValueOnce(true).mockResolvedValue(false);
   await expect(f.read("synthetic-cookie", { afterTaskReference: null })).rejects.toThrow(
     "MERCHANT_TASK_INBOX_UNAVAILABLE",
   );
-  expect(f.authorizeSource).not.toHaveBeenCalled();
+  expect(f.allowed).toHaveBeenCalledTimes(2);
+});
+it("fails when the claim affordance changes during the read", async () => {
+  const f = fixture();
+  f.authorizeAction
+    .mockResolvedValueOnce({ effect: "Allow" })
+    .mockResolvedValue({ effect: "Deny" });
+  await expect(f.read("synthetic-cookie", { afterTaskReference: null })).rejects.toThrow(
+    "MERCHANT_TASK_INBOX_UNAVAILABLE",
+  );
+});
+it("fails when a source re-check registered during the read refuses", async () => {
+  const f = fixture();
+  f.authorizeSource.mockImplementation(async (...args: unknown[]) => {
+    const run = args[4] as { recheckBeforeReply(check: () => Promise<boolean>): void };
+    run.recheckBeforeReply(async () => false);
+    return true;
+  });
+  await expect(f.read("synthetic-cookie", { afterTaskReference: null })).rejects.toThrow(
+    "MERCHANT_TASK_INBOX_UNAVAILABLE",
+  );
 });
 it("does not treat claim permission as source access", async () => {
   const f = fixture();

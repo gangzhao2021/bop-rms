@@ -8,6 +8,7 @@ import {
   parseDiningReference,
 } from "@rms/dining";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 export function createMerchantDiningTables(options: {
@@ -31,101 +32,117 @@ export function createMerchantDiningTables(options: {
     )
       throw new Error("DINING_TABLES_UNAVAILABLE");
     const limit = raw.limit;
-    return options.persistence.transactions.run(async (tx) => {
-      const current = await resolve(
-        tx,
-        input.sessionCookie,
-        "dining.operate",
-        authenticated.sessionReference,
-      );
-      const authorize = () => current.allowed();
-      if (!(await authorize())) throw new Error("DINING_TABLES_PERMISSION_DENIED");
-      const tableOperationPermission = await current.authorizeAction("dining.operate");
-      const canOperateTables =
-        options.tableAvailabilityCommandEnabled === true &&
-        tableOperationPermission?.effect === "Allow";
-      const store = createPostgresDiningTableStore(
-        { run: (work) => work(tx) },
+    const denied = (): never => {
+      throw new Error("DINING_TABLES_PERMISSION_DENIED");
+    };
+    return options.persistence.transactions.run((tx) =>
+      // WP-2423: the caller is resolved in full at the start and once before the reply; the owner
+      // reads in between only confirm they run in this authorized transaction.
+      withMerchantTransactionAuthorization(
         {
-          tenantReference: current.selected.tenantReference,
-          brandReference: current.context.brand.brandReference,
-          storeReference: current.store.storeReference,
+          transaction: tx,
+          resolve: async () => {
+            const current = await resolve(
+              tx,
+              input.sessionCookie,
+              "dining.operate",
+              authenticated.sessionReference,
+            );
+            if (!(await current.allowed())) return denied();
+            return current;
+          },
+          recheck: async (current) => (await current.allowed()) === true,
+          denied,
         },
-        {
-          hashIntent: (v) => "sha256:" + createHash("sha256").update(v).digest("hex"),
-          equals: (a, b) => a === b,
-        },
-      );
-      const page = await store.listTables({ afterTableReference, limit, authorize });
-      if (!(await authorize())) throw new Error("DINING_TABLES_PERMISSION_DENIED");
-      const activeReferences = page.items.flatMap((table) =>
-        table.activeDiningSessionReference === null ? [] : [table.activeDiningSessionReference],
-      );
-      const elapsedMinutes = new Map<string, number>();
-      if (activeReferences.length > 0) {
-        const observedAt = Date.parse(parseDiningInstant(options.persistence.now()));
-        const sessions = await createPostgresDiningSessionReadStore(
-          { run: (work) => work(tx) },
-          {
+        async (authority) => {
+          const current = authority.scope;
+          const authorize = () => authority.guard();
+          const tableOperationPermission = await current.authorizeAction("dining.operate");
+          const canOperateTables =
+            options.tableAvailabilityCommandEnabled === true &&
+            tableOperationPermission?.effect === "Allow";
+          const store = createPostgresDiningTableStore(
+            { run: (work) => work(tx) },
+            {
+              tenantReference: current.selected.tenantReference,
+              brandReference: current.context.brand.brandReference,
+              storeReference: current.store.storeReference,
+            },
+            {
+              hashIntent: (v) => "sha256:" + createHash("sha256").update(v).digest("hex"),
+              equals: (a, b) => a === b,
+            },
+          );
+          const page = await store.listTables({ afterTableReference, limit, authorize });
+          const activeReferences = page.items.flatMap((table) =>
+            table.activeDiningSessionReference === null ? [] : [table.activeDiningSessionReference],
+          );
+          const elapsedMinutes = new Map<string, number>();
+          if (activeReferences.length > 0) {
+            const observedAt = Date.parse(parseDiningInstant(options.persistence.now()));
+            const sessions = await createPostgresDiningSessionReadStore(
+              { run: (work) => work(tx) },
+              {
+                tenantReference: current.selected.tenantReference,
+                brandReference: current.context.brand.brandReference,
+                storeReference: current.store.storeReference,
+              },
+            ).loadSessions(activeReferences);
+            if (sessions.length !== activeReferences.length)
+              throw new Error("DINING_TABLES_UNAVAILABLE");
+            for (const [index, session] of sessions.entries()) {
+              if (
+                !session ||
+                (session.phase !== "Active" && session.phase !== "Closing") ||
+                session.diningSessionReference !== activeReferences[index]
+              )
+                throw new Error("DINING_TABLES_UNAVAILABLE");
+              const startedAt = Date.parse(session.startedAt);
+              if (!Number.isFinite(observedAt) || startedAt > observedAt)
+                throw new Error("DINING_TABLES_UNAVAILABLE");
+              elapsedMinutes.set(
+                session.diningSessionReference,
+                Math.floor((observedAt - startedAt) / 60_000),
+              );
+            }
+          }
+          // WP-2423 Q11: each table's printed code, so staff see a missing or soon-ending code here.
+          const codes = await createPostgresDiningTableQrStore(tx, {
             tenantReference: current.selected.tenantReference,
             brandReference: current.context.brand.brandReference,
             storeReference: current.store.storeReference,
-          },
-        ).loadSessions(activeReferences);
-        if (sessions.length !== activeReferences.length)
-          throw new Error("DINING_TABLES_UNAVAILABLE");
-        for (const [index, session] of sessions.entries()) {
-          if (
-            !session ||
-            (session.phase !== "Active" && session.phase !== "Closing") ||
-            session.diningSessionReference !== activeReferences[index]
-          )
-            throw new Error("DINING_TABLES_UNAVAILABLE");
-          const startedAt = Date.parse(session.startedAt);
-          if (!Number.isFinite(observedAt) || startedAt > observedAt)
-            throw new Error("DINING_TABLES_UNAVAILABLE");
-          elapsedMinutes.set(
-            session.diningSessionReference,
-            Math.floor((observedAt - startedAt) / 60_000),
-          );
-        }
-      }
-      // WP-2423 Q11: each table's printed code, so staff see a missing or soon-ending code here.
-      const codes = await createPostgresDiningTableQrStore(tx, {
-        tenantReference: current.selected.tenantReference,
-        brandReference: current.context.brand.brandReference,
-        storeReference: current.store.storeReference,
-      }).loadLatestForTables(page.items.map((table) => table.tableReference));
-      const codeUntil = (table: (typeof page.items)[number]) => {
-        const issue = codes.get(table.tableReference);
-        return table.qrStatus === "Active" && issue?.qrVersion === table.qrVersion
-          ? issue.expiresAt
-          : null;
-      };
-      if (!(await authorize())) throw new Error("DINING_TABLES_PERMISSION_DENIED");
-      return Object.freeze({
-        canOperateTables,
-        items: Object.freeze(
-          page.items.map((table) =>
-            Object.freeze({
-              tableReference: table.tableReference,
-              stableLabel: table.stableLabel,
-              areaCode: table.areaCode,
-              capacity: table.capacity,
-              lifecycle: table.lifecycle,
-              operationalState: table.operationalState,
-              aggregateVersion: table.aggregateVersion,
-              currentDiningSessionReference: table.activeDiningSessionReference,
-              elapsedMinutes:
-                table.activeDiningSessionReference === null
-                  ? null
-                  : (elapsedMinutes.get(table.activeDiningSessionReference) ?? null),
-              qrCodeValidUntil: codeUntil(table),
-            }),
-          ),
-        ),
-        nextAfterTableReference: page.nextAfterTableReference,
-      });
-    });
+          }).loadLatestForTables(page.items.map((table) => table.tableReference));
+          const codeUntil = (table: (typeof page.items)[number]) => {
+            const issue = codes.get(table.tableReference);
+            return table.qrStatus === "Active" && issue?.qrVersion === table.qrVersion
+              ? issue.expiresAt
+              : null;
+          };
+          return Object.freeze({
+            canOperateTables,
+            items: Object.freeze(
+              page.items.map((table) =>
+                Object.freeze({
+                  tableReference: table.tableReference,
+                  stableLabel: table.stableLabel,
+                  areaCode: table.areaCode,
+                  capacity: table.capacity,
+                  lifecycle: table.lifecycle,
+                  operationalState: table.operationalState,
+                  aggregateVersion: table.aggregateVersion,
+                  currentDiningSessionReference: table.activeDiningSessionReference,
+                  elapsedMinutes:
+                    table.activeDiningSessionReference === null
+                      ? null
+                      : (elapsedMinutes.get(table.activeDiningSessionReference) ?? null),
+                  qrCodeValidUntil: codeUntil(table),
+                }),
+              ),
+            ),
+            nextAfterTableReference: page.nextAfterTableReference,
+          });
+        },
+      ),
+    );
   };
 }

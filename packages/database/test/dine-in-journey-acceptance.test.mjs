@@ -37,6 +37,13 @@ import { createCustomerDiningSessionRead } from "../../../apps/api/src/customer-
 import { createInternalBatchCancellationDispatcher } from "../../../tooling/environment/pilot-batch-cancellation-dispatcher.mjs";
 import { applyWorkflowRelease } from "../../../tooling/environment/workflow-release-install.mjs";
 import { createPersistentMerchantOrderQueue } from "../../../apps/api/src/persistent-merchant-order-queue.ts";
+import { createMerchantDiningTables } from "../../../apps/api/src/merchant-dining-tables.ts";
+import { createMerchantDiningOrderProgress } from "../../../apps/api/src/merchant-dining-order-progress.ts";
+import { createMerchantKitchenQuery } from "../../../apps/api/src/merchant-kitchen-query.ts";
+import { createMerchantPickupQuery } from "../../../apps/api/src/merchant-pickup-query.ts";
+import { createPersistentMerchantTaskInbox } from "../../../apps/api/src/persistent-merchant-task-inbox.ts";
+import { createMerchantDiningTaskSource } from "../../../apps/api/src/merchant-dining-task-source.ts";
+import { createTaskRecord } from "../../bop/task/src/index.ts";
 import { parseOrderStatusView } from "../../../apps/customer-pwa/src/order-status/order-status-controller.ts";
 import { seedMerchantAcceptanceSession } from "../test-support/merchant-acceptance-session.mjs";
 import { createGuestSession } from "../../bop/identity/src/index.ts";
@@ -51,7 +58,7 @@ import {
   unpaidCancelledTotal,
 } from "../../../apps/merchant-web/src/CurrentOrderQueuePage.tsx";
 import { createInternalCartExpiryPorts } from "../../../tooling/environment/pilot-cart-expiry.mjs";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
   createIdentityActor,
   generateHotp,
@@ -186,6 +193,8 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       const guestSession = R1.f.request.record.guestSessionReference;
       const paymentScope = { ...scope, providerAccountReference: provider, environment: "Test" };
 
+      /** Statements the restricted role ran (the merchant reads' query budgets below). */
+      const queryCount = { value: 0 };
       /**
        * One restricted-role transaction on its own connection. The pilot runs the API and the
        * business worker under the rendered `api` grants (the `worker` principal holds a handful of
@@ -217,6 +226,7 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
                       code: "TENANT_DATABASE_TRANSACTION_CONCURRENT_QUERY",
                     });
                   inFlight += 1;
+                  queryCount.value += 1;
                   try {
                     return await client.query(sql, values === undefined ? [] : [...values]);
                   } finally {
@@ -842,6 +852,16 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         scope: ownerScope,
         actor: id(0x700),
         at: now(),
+        // The other merchant reads store tablets poll, measured below (query budgets).
+        extraPermissions: [
+          "dining.operate",
+          "dining.item.serve",
+          "kitchen.operate",
+          "fulfillment.operate",
+          "workflow.operate",
+          "task.claim",
+          "dining.session.close",
+        ],
       });
       const queue = createPersistentMerchantOrderQueue({
         persistence: { ...queueSession.persistence, now },
@@ -880,6 +900,178 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         cancelled: { amountMinor: String(roundTotal), currencyCode: "CAD" },
         remaining: { amountMinor: String(roundTotal), currencyCode: "CAD" },
       });
+
+      // ── 3c. Query budgets (WP-2423) for the merchant reads store tablets poll every few
+      // seconds: the caller's Session, Store and permission are resolved in full at the start of
+      // the read and once more before the reply, never again inside every owner read (that cost
+      // ~30 queries per owner read and grew with every order, table and task on the screen).
+      const staffSession = {
+        sessionCookie: queueSession.sessionCookie,
+        csrf: queueSession.csrf,
+      };
+      const merchantPersistence = { ...queueSession.persistence, now };
+      const sha256 = (value) => "sha256:" + createHash("sha256").update(value).digest("hex");
+      // Test-only: Dining unpaid-batch exception Tasks on the table's session, in the Store's
+      // Task queue (Task owner rows; the Task inbox reads them through its real owner reads).
+      const taskQueue = fresh(),
+        taskAt = new Date(Date.now() - minutes(1)).toISOString();
+      const insertTask = (record, operation, expectedVersion) =>
+        admin.query(
+          "INSERT INTO bop_task.task_version(task_id,brand_id,store_id,version,expected_version,operation_code,idempotency_key,request_digest,mutation_digest,audit_id,source_type,source_id,task_type,status,occurred_at,record_json) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$8,$9,'DINING_SESSION',$10,$11,$12,$13,$14::jsonb)",
+          [
+            record.taskReference,
+            scope.brandReference,
+            scope.storeReference,
+            record.version,
+            expectedVersion,
+            operation,
+            fresh(),
+            "sha256:" + "a".repeat(64),
+            fresh(),
+            dining.session.diningSessionReference,
+            record.taskType,
+            record.status,
+            record.updatedAt,
+            JSON.stringify(record),
+          ],
+        );
+      for (let n = 0; n < 5; n += 1) {
+        const open = createTaskRecord({
+          taskReference: fresh(),
+          scope: { kind: "Store", ...scope },
+          source: {
+            sourceType: "DINING_SESSION",
+            sourceReference: dining.session.diningSessionReference,
+            snapshotDigest: "sha256:" + "a".repeat(64),
+          },
+          taskType: "DINING_UNPAID_BATCH_EXCEPTION",
+          severityCode: "CRITICAL",
+          priorityCode: "NORMAL",
+          status: "Open",
+          assignmentHistory: [],
+          currentAssignment: null,
+          claimHistory: [],
+          currentClaim: null,
+          dueAt: new Date(Date.now() + minutes(60)).toISOString(),
+          escalationPolicyReference: fresh(),
+          escalationHistory: [],
+          terminalOutcome: null,
+          version: 1,
+          createdAt: taskAt,
+          updatedAt: taskAt,
+        });
+        await insertTask(open, "Create", 1);
+        const assignment = {
+          assignmentReference: fresh(),
+          target: { kind: "Queue", reference: taskQueue },
+          assignedBy: id(0x700),
+          assignedAt: taskAt,
+          reasonCode: "TEST_ASSIGNMENT",
+        };
+        await insertTask(
+          createTaskRecord({
+            ...open,
+            status: "Assigned",
+            version: 2,
+            assignmentHistory: [assignment],
+            currentAssignment: assignment,
+          }),
+          "Assign",
+          1,
+        );
+      }
+      const merchantReads = {
+        orderQueue: () =>
+          queue({ sessionCookie: staffSession.sessionCookie, afterOrderReference: null }),
+        orderDetail: () =>
+          queue({
+            sessionCookie: staffSession.sessionCookie,
+            afterOrderReference: null,
+            orderReference,
+          }),
+        diningTables: () =>
+          createMerchantDiningTables({
+            persistence: merchantPersistence,
+            authentication: queueSession.authentication,
+            tableAvailabilityCommandEnabled: true,
+          })({ ...staffSession, query: { afterTableReference: null, limit: 100 } }),
+        diningOrderProgress: () =>
+          createMerchantDiningOrderProgress({
+            persistence: merchantPersistence,
+            authentication: queueSession.authentication,
+            locale: "en-CA",
+          })({ ...staffSession, query: { orderReference } }),
+        // The journey builds no kitchen queue projection (the pilot worker does), so the board's
+        // read is measured up to its projection read, which answers "no active queue" here.
+        kitchenUntilProjection: () =>
+          createMerchantKitchenQuery({
+            persistence: merchantPersistence,
+            authentication: queueSession.authentication,
+            sha256,
+          })({
+            ...staffSession,
+            query: {
+              kind: "List",
+              filters: {
+                orderReference: null,
+                ticketReference: null,
+                workItemReference: null,
+                stationReference: null,
+                status: null,
+              },
+              cursor: null,
+              limit: 50,
+            },
+          }).then(
+            () => assert.fail("no kitchen queue projection in the journey"),
+            (error) => assert.equal(error.code, "KITCHEN_QUEUE_DEPENDENCY_UNAVAILABLE"),
+          ),
+        pickup: () =>
+          createMerchantPickupQuery({
+            persistence: merchantPersistence,
+            authentication: queueSession.authentication,
+            // Test-only: this dine-in Store has no pickups, so no source is ever validated.
+            store: { sha256, validateCurrentSource: async () => false },
+            installContext: async () => undefined,
+          })({
+            ...staffSession,
+            query: { afterFulfillmentReference: null, limit: 50, includeCompleted: false },
+          }),
+        taskInbox: () =>
+          createPersistentMerchantTaskInbox({
+            persistence: merchantPersistence,
+            queues: [
+              {
+                ...ownerScope,
+                queueReference: taskQueue,
+                effectiveFrom: time(-minutes(600)),
+                effectiveUntil: time(minutes(600)),
+              },
+            ],
+            authorizeSource: createMerchantDiningTaskSource(merchantPersistence),
+          })(staffSession.sessionCookie, { afterTaskReference: null }),
+      };
+      const queries = {};
+      for (const [name, read] of Object.entries(merchantReads)) {
+        queryCount.value = 0;
+        const value = await read();
+        queries[name] = queryCount.value;
+        if (name === "taskInbox") assert.equal(value.items.length, 5, "task inbox items");
+      }
+      // Measured 2026-10-14 (before → after): order queue 349 → 168, order detail 384 → 170,
+      // tables 156 → 87, dining order progress 652 → 100, kitchen up to its projection read
+      // 130 → 38, pickup 105 → 59, Task inbox with five Dining Tasks 486 → 170.
+      const budgets = {
+        orderQueue: 200,
+        orderDetail: 200,
+        diningTables: 110,
+        diningOrderProgress: 130,
+        kitchenUntilProjection: 60,
+        pickup: 75,
+        taskInbox: 210,
+      };
+      for (const [name, budget] of Object.entries(budgets))
+        assert.ok(queries[name] <= budget, "merchant read queries " + JSON.stringify(queries));
 
       // ── 4b. Redelivery of round 2's event after the cancellation is a completed duplicate.
       assert.deepEqual(await consume(event2), { status: "duplicate_completed" });

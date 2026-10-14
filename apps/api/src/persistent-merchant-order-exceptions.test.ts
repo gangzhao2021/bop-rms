@@ -91,8 +91,10 @@ it("denies unavailable authority and scope changed during source read", async ()
     f.state.store = id(99);
     return { items: [], nextAfterSourceReference: null };
   });
+  // WP-2423: the owner reads only confirm the authorized transaction; the full re-check before
+  // the reply refuses the changed Store.
   await expect(f.read("synthetic-cookie")).rejects.toThrow();
-  expect(f.metadata).not.toHaveBeenCalled();
+  expect(d.scope).toHaveBeenCalledTimes(3);
 });
 it("denies session changes before response and authorization after transaction lifetime", async () => {
   const f = fixture();

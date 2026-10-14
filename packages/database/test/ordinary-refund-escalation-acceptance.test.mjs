@@ -26,6 +26,8 @@ import {
 import { createMerchantOrdinaryRefundApprovals } from "../../../apps/api/src/merchant-ordinary-refund-approvals.ts";
 import { createMerchantOrdinaryRefundDecline } from "../../../apps/api/src/merchant-ordinary-refund-decline.ts";
 import { createMerchantOrdinaryRefundItems } from "../../../apps/api/src/merchant-ordinary-refund-items.ts";
+import { createMerchantOrdinaryRefundStatus } from "../../../apps/api/src/merchant-ordinary-refund-status.ts";
+import { createMerchantOrdinaryRefundProgress } from "../../../apps/api/src/merchant-ordinary-refund-progress.ts";
 import { createMerchantOrdinaryRefundCommand } from "../../../apps/api/src/merchant-ordinary-refund-command.ts";
 import { createMerchantOrdinaryRefundSendCommand } from "../../../apps/api/src/merchant-ordinary-refund-send-command.ts";
 import { createInternalRefundWorkforceContext } from "../../../tooling/environment/pilot-refund-workforce.mjs";
@@ -98,6 +100,8 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
       );
       await admin.query(renderPilotAclSql(matrices, { api: role, worker }));
 
+      /** Statements the restricted role ran (the refund reads' query budgets). */
+      const queryCount = { value: 0 };
       function transactions() {
         return {
           async run(work) {
@@ -109,7 +113,10 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
               await client.query("SET LOCAL lock_timeout='10s'");
               await client.query("SET LOCAL statement_timeout='20s'");
               const result = await work({
-                query: (sql, values) => client.query(sql, values === undefined ? [] : [...values]),
+                query: (sql, values) => {
+                  queryCount.value += 1;
+                  return client.query(sql, values === undefined ? [] : [...values]);
+                },
               });
               await client.query("COMMIT");
               return result;
@@ -870,7 +877,17 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
       );
 
       // ── 4. Both see it awaiting approval; only a different approver may approve.
-      const approverView = await approvals({ sessionCookie: "approver" });
+      /** WP-2423 query budgets: statements each refund read ran (asserted after step 7). */
+      const queries = {};
+      const counted = async (name, read) => {
+        queryCount.value = 0;
+        const value = await read();
+        queries[name] = queryCount.value;
+        return value;
+      };
+      const approverView = await counted("approvals", () =>
+        approvals({ sessionCookie: "approver" }),
+      );
       assert.equal(approverView.canApprove, true);
       assert.equal(approverView.entries.length, 1);
       const entry = approverView.entries[0];
@@ -1062,10 +1079,12 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
       assert.equal(position.pendingMinor, 0n);
 
       // The Owner reads the payment's refunds (not as a requester); progress reads "Refunded".
-      const ownerView = await items({
-        ...session("approver"),
-        query: { orderReference: first.order },
-      });
+      const ownerView = await counted("items", () =>
+        items({
+          ...session("approver"),
+          query: { orderReference: first.order },
+        }),
+      );
       assert.equal(ownerView.canRequest, false);
       assert.deepEqual(
         ownerView.recentRequests.map((r) => [r.requestReference, r.progress]),
@@ -1076,6 +1095,50 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
           .canRequest,
         true,
       );
+
+      // The request's status and progress, as the Approvals page follows them after an approval.
+      const statusOf = await counted("status", () =>
+        createMerchantOrdinaryRefundStatus({
+          persistence,
+          authentication,
+          resolveConfiguration: async () => ({
+            providerAccountReference: provider,
+            environment: "Test",
+            roleMapping,
+          }),
+        })({
+          ...session("approver"),
+          query: {
+            orderReference: first.order,
+            operationReference: firstRequest.operationReference,
+          },
+        }),
+      );
+      assert.ok(statusOf.payments.length > 0);
+      const progressOf = await counted("progress", () =>
+        createMerchantOrdinaryRefundProgress({
+          persistence,
+          authentication,
+          resolveConfiguration: async () => ({
+            providerAccountReference: provider,
+            environment: "Test",
+            roleMapping,
+          }),
+          newReference: fresh,
+        })({
+          ...session("approver"),
+          query: {
+            orderReference: first.order,
+            requestReference: firstRequest.requestReference,
+          },
+        }),
+      );
+      assert.equal(progressOf.progress, "Refunded");
+      // Measured 2026-10-14 (before → after): approvals with one request 451 → 126, the order's
+      // refund items 865 → 111, request status 537 → 95, request progress 660 → 101.
+      const budgets = { approvals: 160, items: 140, status: 120, progress: 130 };
+      for (const [name, budget] of Object.entries(budgets))
+        assert.ok(queries[name] <= budget, "refund read queries " + JSON.stringify(queries));
 
       // ── 8. Another Manager's request with no recent verification: approval names the requester,
       // a step-up older than 15 minutes does not count, and nobody approves their own request.

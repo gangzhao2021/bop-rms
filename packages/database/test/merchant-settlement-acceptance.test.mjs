@@ -8,6 +8,7 @@ import { createPersistentMerchantSettlement } from "../../../apps/api/src/persis
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { seedMerchantAcceptanceSession } from "../test-support/merchant-acceptance-session.mjs";
+import { createPersistentMerchantOrderExceptions } from "../../../apps/api/src/persistent-merchant-order-exceptions.ts";
 import { seedJourneyStorePublication } from "../test-support/dine-in-journey-seed.mjs";
 
 const { Client } = pg;
@@ -216,6 +217,25 @@ it("loads the open business day's settlement with card-machine payments, also wh
       assert.equal(day.businessDate, today);
       assert.equal(day.window.status, "Open");
       assert.deepEqual(day.cardMachine, expected);
+
+      // The Store's order exceptions (same staff permission), measured here as the nearest
+      // acceptance with a real staff session (WP-2423 query budget): the scope is resolved at the
+      // start and once before the reply, not inside each owner read.
+      queryLog.length = 0;
+      const exceptions = await createPersistentMerchantOrderExceptions({
+        persistence: { ...session.persistence, transactions, now },
+        // Test-only: the projection metadata the pilot reads from the Store and Payment owners.
+        metadata: async (_tx, { storeLabel }) => ({
+          storeLabel,
+          businessDate: today,
+          checkpointReference: id(400),
+          projectedAt: now(),
+          freshnessStatus: "Stale",
+        }),
+      })(session.sessionCookie);
+      assert.equal(exceptions.screenId, "OPS-ORDER-EXCEPTION");
+      // Measured 2026-10-14: 200 queries before, 68 after.
+      assert.ok(queryLog.length <= 90, "the order exceptions took " + queryLog.length + " queries");
 
       /**
        * Live work holds a lock the read needs (here: a writer on the Store's launch gate, which

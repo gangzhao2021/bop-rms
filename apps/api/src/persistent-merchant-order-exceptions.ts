@@ -7,6 +7,10 @@ import {
 } from "@bop/projection";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import {
+  withMerchantTransactionAuthorization,
+  type MerchantTransactionAuthority,
+} from "./merchant-transaction-authorization.js";
+import {
   createMerchantOrderExceptionRead,
   type MerchantExceptionScope,
 } from "./merchant-order-exception-read.js";
@@ -28,27 +32,28 @@ export function createPersistentMerchantOrderExceptions(options: {
   const persistence = options.persistence,
     resolve = createMerchantStoreScope(persistence);
   return async (cookie: unknown) => {
-    type Original = Parameters<Parameters<typeof persistence.transactions.run>[0]>[0];
-    const originals = new Map<ConsumerTransaction, Original>();
     const unavailable = (): never => {
       throw new Error("MERCHANT_ORDER_EXCEPTION_UNAVAILABLE");
     };
+    type Resolved = Awaited<ReturnType<typeof resolve>>;
+    /** Each running transaction's authorized run (resolved in full at its start). */
+    const runs = new Map<ConsumerTransaction, MerchantTransactionAuthority<Resolved>>();
+    // The caller's Session, Store and permission are resolved in full at the start of the
+    // transaction and once more before the reply; the owner reads in between only confirm they
+    // run in that transaction for that scope (re-resolving it for each cost ~30 queries a read).
     const current = async (tx: ConsumerTransaction) => {
-      const original = originals.get(tx);
-      if (!original) return unavailable();
-      const value = await resolve(original, cookie, "operations.order-exception.manage");
-      if (!(await value.allowed())) return unavailable();
-      return value;
+      const run = runs.get(tx);
+      if (!run || !(await run.guard(tx))) return unavailable();
+      return run.scope;
     };
-    const authorize = async (tx: ConsumerTransaction) => {
-      const value = await current(tx);
-      return Object.freeze({
+    const scopeOf = (value: Resolved): MerchantExceptionScope =>
+      Object.freeze({
         tenantReference: value.selected.tenantReference,
         brandReference: String(value.context.brand.brandReference),
         storeReference: String(value.store.storeReference),
         sessionReference: String(value.sessionReference),
       });
-    };
+    const authorize = async (tx: ConsumerTransaction) => scopeOf(await current(tx));
     const matches = (a: MerchantExceptionScope, b: MerchantExceptionScope) =>
       a.tenantReference === b.tenantReference &&
       a.brandReference === b.brandReference &&
@@ -75,12 +80,29 @@ export function createPersistentMerchantOrderExceptions(options: {
               return { rows: rows.value as readonly Row[], rowCount: count.value as number | null };
             },
           };
-          originals.set(tx, original);
-          try {
-            return await work(tx);
-          } finally {
-            originals.delete(tx);
-          }
+          return withMerchantTransactionAuthorization(
+            {
+              transaction: tx,
+              resolve: async () => {
+                const value = await resolve(original, cookie, "operations.order-exception.manage");
+                if (!(await value.allowed())) return unavailable();
+                return value;
+              },
+              recheck: async (value) => {
+                const again = await resolve(original, cookie, "operations.order-exception.manage");
+                return matches(scopeOf(again), scopeOf(value)) && (await again.allowed()) === true;
+              },
+              denied: unavailable,
+            },
+            async (run) => {
+              runs.set(tx, run);
+              try {
+                return await work(tx);
+              } finally {
+                runs.delete(tx);
+              }
+            },
+          );
         }),
     };
     return createMerchantOrderExceptionRead({

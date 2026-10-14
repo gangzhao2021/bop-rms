@@ -10,6 +10,10 @@ import {
 import { createMerchantBusinessDayWindows } from "./merchant-business-day-window.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import {
+  withMerchantTransactionAuthorization,
+  type MerchantTransactionAuthority,
+} from "./merchant-transaction-authorization.js";
+import {
   createMerchantSettlementRead,
   type MerchantSettlementScope,
   type MerchantSettlementWindow,
@@ -58,42 +62,33 @@ export function createPersistentMerchantSettlement(options: {
     readonly sessionCookie: unknown;
     readonly businessDate: string | null;
   }) => {
-    type Original = Parameters<Parameters<typeof persistence.transactions.run>[0]>[0];
-    const originals = new Map<ConsumerTransaction, Original>();
-    const stores = new Map<ConsumerTransaction, { displayName: string; timeZone: string }>();
-    /** The scope resolved in full for each running transaction. */
-    const resolved = new Map<ConsumerTransaction, MerchantSettlementScope>();
-    const current = async (tx: ConsumerTransaction) => {
-      const original = originals.get(tx);
-      if (!original) return unavailable();
-      const value = await resolve(
-        original,
-        input.sessionCookie,
-        "operations.order-exception.manage",
-      );
-      if (!(await value.allowed())) return unavailable();
-      return value;
-    };
-    const authorize = async (tx: ConsumerTransaction): Promise<MerchantSettlementScope> => {
-      const value = await current(tx);
-      stores.set(tx, { displayName: value.store.displayName, timeZone: value.store.timeZone });
-      const scope = Object.freeze({
+    const settlementScope = (value: Awaited<ReturnType<typeof resolve>>): MerchantSettlementScope =>
+      Object.freeze({
         tenantReference: value.selected.tenantReference,
         brandReference: String(value.context.brand.brandReference),
         storeReference: String(value.store.storeReference),
         sessionReference: String(value.sessionReference),
       });
-      resolved.set(tx, scope);
-      return scope;
-    };
+    interface Resolved {
+      readonly settlement: MerchantSettlementScope;
+      readonly store: { readonly displayName: string; readonly timeZone: string };
+    }
+    /** Each running transaction's authorized run (resolved in full at its start). */
+    const runs = new Map<ConsumerTransaction, MerchantTransactionAuthority<Resolved>>();
+    const storeOf = (tx: ConsumerTransaction) => (runs.get(tx) ?? unavailable()).scope.store;
     // The caller's Session, Store and permission are resolved in full at the start of the
-    // transaction and once more before the reply (createMerchantSettlementRead). In between, the
-    // owner reads only confirm they run in that same transaction for that same scope:
+    // transaction and once more before the reply (withMerchantTransactionAuthorization). In
+    // between, the owner reads only confirm they run in that same transaction for that same scope:
     // re-resolving the scope inside every owner read (a Session, membership and permission-policy
     // read of ~30 queries each) cost ~750 queries for an open day and ~1,700 for a closed one.
     const guard = (scope: MerchantSettlementScope) => async (tx: ConsumerTransaction) => {
-      const known = resolved.get(tx);
-      return known !== undefined && matches(known, scope);
+      const run = runs.get(tx);
+      return run !== undefined && (await run.guard(tx)) && matches(run.scope.settlement, scope);
+    };
+    const authorize = async (tx: ConsumerTransaction): Promise<MerchantSettlementScope> => {
+      const run = runs.get(tx);
+      if (!run || !(await run.guard(tx))) return unavailable();
+      return run.scope.settlement;
     };
     const transactions = {
       run: <T>(work: (tx: ConsumerTransaction) => Promise<T>) =>
@@ -116,14 +111,45 @@ export function createPersistentMerchantSettlement(options: {
               return { rows: rows.value as readonly Row[], rowCount: count.value as number | null };
             },
           };
-          originals.set(tx, original);
-          try {
-            return await work(tx);
-          } finally {
-            originals.delete(tx);
-            stores.delete(tx);
-            resolved.delete(tx);
-          }
+          return withMerchantTransactionAuthorization(
+            {
+              transaction: tx,
+              resolve: async (): Promise<Resolved> => {
+                const value = await resolve(
+                  original,
+                  input.sessionCookie,
+                  "operations.order-exception.manage",
+                );
+                if (!(await value.allowed())) return unavailable();
+                return Object.freeze({
+                  settlement: settlementScope(value),
+                  store: Object.freeze({
+                    displayName: value.store.displayName,
+                    timeZone: value.store.timeZone,
+                  }),
+                });
+              },
+              recheck: async ({ settlement }) => {
+                const again = await resolve(
+                  original,
+                  input.sessionCookie,
+                  "operations.order-exception.manage",
+                );
+                return (
+                  matches(settlementScope(again), settlement) && (await again.allowed()) === true
+                );
+              },
+              denied: unavailable,
+            },
+            async (run) => {
+              runs.set(tx, run);
+              try {
+                return await work(tx);
+              } finally {
+                runs.delete(tx);
+              }
+            },
+          );
         }),
     };
     // WP-2423 Q14: the business-day window definition shared with the sales reports.
@@ -131,7 +157,7 @@ export function createPersistentMerchantSettlement(options: {
       createMerchantBusinessDayWindows({
         persistence,
         scope,
-        timeZone: (stores.get(tx) ?? unavailable()).timeZone,
+        timeZone: storeOf(tx).timeZone,
         authorize: async (t) => guard(scope)(t),
       });
     /** Owner reads answer null when their source cannot; our own scope refusal still propagates. */
@@ -147,7 +173,7 @@ export function createPersistentMerchantSettlement(options: {
     const read = createMerchantSettlementRead({
       transactions,
       authorize: async (tx) => authorize(tx),
-      storeLabel: async (tx) => (stores.get(tx) ?? unavailable()).displayName,
+      storeLabel: async (tx) => storeOf(tx).displayName,
       now: () => persistence.now(),
       window: async (tx, scope, businessDate): Promise<MerchantSettlementWindow> =>
         days(tx, scope).window(tx, businessDate),

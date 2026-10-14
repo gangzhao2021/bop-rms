@@ -3,6 +3,7 @@ import { createPostgresStoreSalesOrderSource } from "@rms/ordering";
 import { createPostgresStoreSalesPaymentLedger } from "@rms/payment";
 import { createMerchantBusinessDayWindows } from "./merchant-business-day-window.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import {
   computeStoreSalesReport,
@@ -78,88 +79,99 @@ export function createPersistentMerchantStoreReports(options: {
           return { rows: rows as readonly Row[], rowCount: count as number | null };
         },
       };
-      const value = await resolve(original, input.sessionCookie, input.permission);
-      if (!(await value.allowed())) return unavailable();
-      const scope = Object.freeze({
-        tenantReference: String(value.selected.tenantReference),
-        brandReference: String(value.context.brand.brandReference),
-        storeReference: String(value.store.storeReference),
-      });
-      const session = String(value.sessionReference);
-      const storeLabel = String(value.store.displayName),
-        timeZone = String(value.store.timeZone);
-      if (!/^[^\p{Cc}\p{Cf}]{1,100}$/u.test(storeLabel)) return unavailable();
-      // The caller's Session, Store and permission were resolved above in this transaction and
-      // are re-resolved in full once more before the reply. In between, the owner reads only
-      // confirm they run in this same transaction: re-resolving the scope for every owner read
-      // (each one a Session, membership and permission-policy read of ~30 queries) made a range
-      // cost ~900 queries per business day and a week's report ~16 s on the pilot.
-      const sameTransaction = async (t: ConsumerTransaction) => t === tx;
-      const stillAllowed = async () => {
-        const again = await resolve(original, input.sessionCookie, input.permission);
-        return (
-          String(again.sessionReference) === session &&
-          String(again.store.storeReference) === scope.storeReference &&
-          String(again.context.brand.brandReference) === scope.brandReference &&
-          (await again.allowed())
-        );
-      };
-      const windows = createMerchantBusinessDayWindows({
-        persistence,
-        scope,
-        timeZone,
-        authorize: sameTransaction,
-      });
-      const now = persistence.now();
-      const current = await windows.today(tx, now);
-      const today = current.businessDate;
-      const to = input.to ?? today,
-        from = input.from ?? to;
-      if (to > today) return unavailable();
-      const days = await windows.range(
-        tx,
-        businessDatesBetween(from, to, storeReportsMaximumDays),
-        { now, current },
+      // The caller's Session, Store and permission are resolved in full at the start of the
+      // transaction and re-resolved in full once more before the reply. In between, the owner
+      // reads only confirm they run in this same authorized transaction: re-resolving the scope
+      // for every owner read (each one a Session, membership and permission-policy read of ~30
+      // queries) made a range cost ~900 queries per business day and a week's report ~16 s.
+      return withMerchantTransactionAuthorization(
+        {
+          transaction: tx,
+          resolve: async () => {
+            const value = await resolve(original, input.sessionCookie, input.permission);
+            if (!(await value.allowed())) return unavailable();
+            return value;
+          },
+          recheck: async (value) => {
+            const again = await resolve(original, input.sessionCookie, input.permission);
+            return (
+              String(again.sessionReference) === String(value.sessionReference) &&
+              String(again.store.storeReference) === String(value.store.storeReference) &&
+              String(again.context.brand.brandReference) ===
+                String(value.context.brand.brandReference) &&
+              (await again.allowed())
+            );
+          },
+          denied: unavailable,
+        },
+        async (authority) => {
+          const value = authority.scope;
+          const scope = Object.freeze({
+            tenantReference: String(value.selected.tenantReference),
+            brandReference: String(value.context.brand.brandReference),
+            storeReference: String(value.store.storeReference),
+          });
+          const storeLabel = String(value.store.displayName),
+            timeZone = String(value.store.timeZone);
+          if (!/^[^\p{Cc}\p{Cf}]{1,100}$/u.test(storeLabel)) return unavailable();
+          const sameTransaction = (t: ConsumerTransaction) => authority.guard(t);
+          const windows = createMerchantBusinessDayWindows({
+            persistence,
+            scope,
+            timeZone,
+            authorize: sameTransaction,
+          });
+          const now = persistence.now();
+          const current = await windows.today(tx, now);
+          const today = current.businessDate;
+          const to = input.to ?? today,
+            from = input.from ?? to;
+          if (to > today) return unavailable();
+          const days = await windows.range(
+            tx,
+            businessDatesBetween(from, to, storeReportsMaximumDays),
+            { now, current },
+          );
+          const first = days[0] ?? unavailable(),
+            last = days.at(-1) ?? unavailable();
+          if (days.some((day, index) => index > 0 && day.startsAt !== days[index - 1]?.endsAt))
+            return unavailable();
+          const configuration = await options.resolveConfiguration(tx, scope);
+          const ledger = await createPostgresStoreSalesPaymentLedger({
+            scope: { ...scope, ...configuration },
+            authorize: sameTransaction,
+          })(tx, { startsAt: first.startsAt, endsAt: last.endsAt, observedAt: persistence.now() });
+          const orderReferences = [
+            ...ledger.payments.map((payment) => payment.orderReference),
+            ...ledger.refunds.map((refund) => refund.orderReference),
+          ];
+          const locale = /^[a-z]{2}-[A-Z]{2}$/u.test(String(value.store.locale))
+            ? String(value.store.locale)
+            : "en-CA";
+          const orders = await createPostgresStoreSalesOrderSource({
+            brandReference: scope.brandReference,
+            storeReference: scope.storeReference,
+            locale,
+            authorize: sameTransaction,
+          })(tx, orderReferences);
+          const mayExport =
+            input.permission === storeReportsExportPermission ||
+            (await value.authorizeAction(storeReportsExportPermission))?.effect === "Allow";
+          return computeStoreSalesReport({
+            storeLabel,
+            timeZone,
+            days,
+            payments: ledger.payments,
+            refundedPayments: ledger.refundedPayments,
+            refunds: ledger.refunds,
+            settlement: ledger.settlement,
+            unresolvedOnlineRefundCount: ledger.unresolvedOnlineRefundCount,
+            orders,
+            mayExport,
+            generatedAt: persistence.now(),
+          });
+        },
       );
-      const first = days[0] ?? unavailable(),
-        last = days.at(-1) ?? unavailable();
-      if (days.some((day, index) => index > 0 && day.startsAt !== days[index - 1]?.endsAt))
-        return unavailable();
-      const configuration = await options.resolveConfiguration(tx, scope);
-      const ledger = await createPostgresStoreSalesPaymentLedger({
-        scope: { ...scope, ...configuration },
-        authorize: sameTransaction,
-      })(tx, { startsAt: first.startsAt, endsAt: last.endsAt, observedAt: persistence.now() });
-      const orderReferences = [
-        ...ledger.payments.map((payment) => payment.orderReference),
-        ...ledger.refunds.map((refund) => refund.orderReference),
-      ];
-      const locale = /^[a-z]{2}-[A-Z]{2}$/u.test(String(value.store.locale))
-        ? String(value.store.locale)
-        : "en-CA";
-      const orders = await createPostgresStoreSalesOrderSource({
-        brandReference: scope.brandReference,
-        storeReference: scope.storeReference,
-        locale,
-        authorize: sameTransaction,
-      })(tx, orderReferences);
-      const mayExport =
-        input.permission === storeReportsExportPermission ||
-        (await value.authorizeAction(storeReportsExportPermission))?.effect === "Allow";
-      if (!(await stillAllowed())) return unavailable();
-      return computeStoreSalesReport({
-        storeLabel,
-        timeZone,
-        days,
-        payments: ledger.payments,
-        refundedPayments: ledger.refundedPayments,
-        refunds: ledger.refunds,
-        settlement: ledger.settlement,
-        unresolvedOnlineRefundCount: ledger.unresolvedOnlineRefundCount,
-        orders,
-        mayExport,
-        generatedAt: persistence.now(),
-      });
     });
   const retrying = async <T>(work: () => Promise<T>): Promise<T> => {
     // Live ordering and payment work shares these records; a read that lost a lock wait is rerun

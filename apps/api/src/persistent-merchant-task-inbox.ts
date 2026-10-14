@@ -1,7 +1,14 @@
 import { createPostgresTaskQueueReader, parseTaskReference, parseTaskInstant } from "@bop/task";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
-import { createMerchantTaskInboxRead } from "./merchant-task-inbox-read.js";
+import {
+  createMerchantTaskInboxRead,
+  type MerchantTaskInboxAuthority,
+} from "./merchant-task-inbox-read.js";
+import {
+  withMerchantTransactionAuthorization,
+  type MerchantTransactionAuthority,
+} from "./merchant-transaction-authorization.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 
 type ReadOptions = Parameters<typeof createMerchantTaskInboxRead>[0];
@@ -22,8 +29,16 @@ const fail = (): never => {
 export function createPersistentMerchantTaskInbox(options: {
   persistence: PersistentMerchantBffOptions;
   queues: readonly PersistentMerchantTaskInboxQueueConfiguration[];
+  /**
+   * A Task's source check; `run` is this read's authorized transaction: a permission the source
+   * resolves in full is resolved once per transaction and re-checked before the reply.
+   */
   authorizeSource(
-    ...args: [...Parameters<ReadOptions["authorizeSource"]>, cookie: unknown]
+    ...args: [
+      ...Parameters<ReadOptions["authorizeSource"]>,
+      cookie: unknown,
+      run: MerchantTransactionAuthority<unknown>,
+    ]
   ): Promise<boolean>;
 }) {
   const queues = options.queues.map((q) =>
@@ -56,12 +71,17 @@ export function createPersistentMerchantTaskInbox(options: {
     cookie: unknown,
     input: Parameters<ReturnType<typeof createMerchantTaskInboxRead>>[1],
   ) => {
+    type Authority = MerchantTransactionAuthority<{
+      readonly authority: MerchantTaskInboxAuthority;
+      readonly queue: (typeof queues)[number];
+      recheck(): Promise<boolean>;
+    }>;
     // Request-local authority cannot be replaced by another concurrent request.
-    let current: Awaited<ReturnType<typeof resolve>> | null = null;
-    let selectedQueue: (typeof queues)[number] | null = null;
-    const authorize: ReadOptions["authorize"] = async (tx) => {
+    const runs = new Map<ConsumerTransaction, Authority>();
+    /** The caller's Session, Store, workflow.operate and task.claim, resolved in full. */
+    const resolveInbox = async (tx: ConsumerTransaction) => {
       const at = parseTaskInstant(source.now());
-      current ??= await resolve(tx, cookie, "workflow.operate");
+      const current = await resolve(tx, cookie, "workflow.operate");
       const queue = queueByScope.get(
         `${current.selected.tenantReference}:${current.context.brand.brandReference}:${current.store.storeReference}`,
       );
@@ -72,9 +92,8 @@ export function createPersistentMerchantTaskInbox(options: {
         (await current.allowed()) !== true
       )
         return fail();
-      selectedQueue = queue;
       const claim = await current.authorizeAction("task.claim");
-      return Object.freeze({
+      const authority: MerchantTaskInboxAuthority = Object.freeze({
         tenantReference: queue.tenantReference,
         brandReference: queue.brandReference,
         storeReference: queue.storeReference,
@@ -83,6 +102,26 @@ export function createPersistentMerchantTaskInbox(options: {
         storeLabel: current.store.displayName,
         canClaim: claim?.effect === "Allow",
       });
+      const recheck = async () => {
+        const later = parseTaskInstant(source.now());
+        if (
+          later < queue.effectiveFrom ||
+          later >= queue.effectiveUntil ||
+          (await current.allowed()) !== true
+        )
+          return false;
+        const again = await current.authorizeAction("task.claim");
+        return (again?.effect === "Allow") === authority.canClaim;
+      };
+      return Object.freeze({ authority, queue, recheck });
+    };
+    // The caller's scope is resolved in full at the start of the transaction and once more before
+    // the reply; the Task queue and source reads in between only confirm they run in this
+    // authorized transaction (re-resolving it for each Task cost ~100 queries per Task).
+    const authorize: ReadOptions["authorize"] = async (tx) => {
+      const run = runs.get(tx);
+      if (!run || !(await run.guard(tx))) return fail();
+      return run.scope.authority;
     };
     return createMerchantTaskInboxRead({
       now: source.now,
@@ -110,27 +149,46 @@ export function createPersistentMerchantTaskInbox(options: {
                 };
               },
             };
-            return work(transaction);
+            return withMerchantTransactionAuthorization(
+              {
+                transaction,
+                resolve: () => resolveInbox(transaction),
+                recheck: (resolved) => resolved.recheck(),
+                denied: fail,
+              },
+              async (run) => {
+                runs.set(transaction, run);
+                try {
+                  return await work(transaction);
+                } finally {
+                  runs.delete(transaction);
+                }
+              },
+            );
           }),
       },
       authorize,
       queue: (tx, authority) => {
-        const queue = selectedQueue;
-        if (!queue || queue.queueReference !== authority.queueReference) return fail();
+        const run = runs.get(tx);
+        const queue = run?.scope.queue;
+        if (!run || !queue || queue.queueReference !== authority.queueReference) return fail();
         return createPostgresTaskQueueReader({
           scope: {
             kind: "Store",
             brandReference: queue.brandReference,
             storeReference: queue.storeReference,
           },
-          authorizeAndFence: async (transaction, query) => {
-            if (transaction !== tx || query.queueReference !== queue.queueReference) return false;
-            const fresh = await authorize(tx, cookie);
-            return JSON.stringify(fresh) === JSON.stringify(authority);
-          },
+          authorizeAndFence: async (transaction, query) =>
+            transaction === tx &&
+            query.queueReference === queue.queueReference &&
+            (await run.guard(transaction)),
         });
       },
-      authorizeSource: (tx, scope, task) => authorizeSource(tx, scope, task, cookie),
+      authorizeSource: (tx, scope, task) => {
+        const run = runs.get(tx);
+        if (!run) return fail();
+        return authorizeSource(tx, scope, task, cookie, run);
+      },
     })(cookie, input);
   };
 }

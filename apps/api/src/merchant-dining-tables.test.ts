@@ -135,7 +135,8 @@ it("adds elapsed minutes from the current scoped Active Session", async () => {
   const view = await f.read(f.input);
   expect(view.items[0]?.elapsedMinutes).toBe(18);
   expect(mock.loadSessions).toHaveBeenCalledWith([id(5)]);
-  expect(f.allowed).toHaveBeenCalledTimes(3);
+  // WP-2423: resolved in full at the start and re-checked in full once before the reply only.
+  expect(f.allowed).toHaveBeenCalledTimes(2);
 });
 it("does not return elapsed Session data if Store authority changes during the owner read", async () => {
   const f = setup();
@@ -163,7 +164,8 @@ it("does not return elapsed Session data if Store authority changes during the o
       startedAt: "2026-09-25T11:42:00.000Z",
     },
   ]);
-  f.allowed.mockResolvedValueOnce(true).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+  // Allowed at the start; refused by the full re-check before the reply.
+  f.allowed.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
   await expect(f.read(f.input)).rejects.toThrow("DINING_TABLES_PERMISSION_DENIED");
   expect(mock.loadSessions).toHaveBeenCalledWith([id(5)]);
 });
