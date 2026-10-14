@@ -112,6 +112,8 @@ export async function exercisePublishedOrderConfirmation({
         );
         return reader.withCurrentSubmission(preparation.submissionReference, async (_, order) => ({
           order,
+          // The Quote version this synthetic Order was created and read with.
+          quoteVersion: 1,
           acceptance,
           initialExecution,
           observedAt: at,

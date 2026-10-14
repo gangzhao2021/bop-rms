@@ -329,6 +329,12 @@ it("persists scoped failure and Audit atomically with parallel original replay",
         "GRANT SELECT ON rms_ordering.order_termination_record,rms_ordering.order_fulfillment_completion_record TO " +
           role,
       );
+      // Pilot api grants read by the acceptance-record cancellation guard triggers.
+      await admin.query(
+        "GRANT SELECT ON rms_ordering.order_header,rms_ordering.order_batch_checkout_cancellation,rms_ordering.order_staff_cancellation TO " +
+          role,
+      );
+      await admin.query("GRANT UPDATE (order_id) ON rms_ordering.order_header TO " + role);
       let acceptanceAuthorized = true,
         acceptanceSourceCurrent = true;
       let acceptanceSourceCalls = 0;
@@ -602,7 +608,8 @@ it("persists scoped failure and Audit atomically with parallel original replay",
           await acceptanceScope(tx, id(99));
           return insertAcceptance(tx, 1630, 2, 3);
         }),
-        { code: "42501" },
+        // The guard trigger runs before RLS WITH CHECK and cannot see the other Store's Order.
+        { code: "23514", message: "acceptance order unavailable" },
       );
       await run(async (tx) => {
         await acceptanceScope(tx);
