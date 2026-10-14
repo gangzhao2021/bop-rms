@@ -15,6 +15,9 @@ vi.mock("../../packages/rms/ordering/src/index.ts", () => ({
   parseCartAggregate: (value) => value,
   parseCartQuoteAttachment: mocks.v1,
   parseConfiguredCartQuoteAttachment: mocks.v2,
+  // The real dispatcher picks the parser by quoteVersion (tested in Ordering).
+  parseAnyCartQuoteAttachment: (value) =>
+    value?.quoteVersion === 2 ? mocks.v2(value) : mocks.v1(value),
 }));
 vi.mock("../../apps/api/dist/customer-additional-dining-preparation.js", () => ({
   createPersistentAdditionalDiningPreparation: () => ({ prepareForOrdering: mocks.prepare }),
