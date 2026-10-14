@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { tableCodeNotice } from "./DiningSessionWorkspace.js";
+import { elapsedText, longOpenSessionMinutes, tableCodeNotice } from "./DiningSessionWorkspace.js";
 import type { StaffDiningTable } from "./dining-session-client.js";
 
 const table: StaffDiningTable = {
@@ -28,4 +28,14 @@ it("WP-2423 Q11: warns on the floor when a table has no printed code or it ends 
     "Table QR code stops working in 1 day. Ask a manager to print a new one.",
   );
   expect(tableCodeNotice({ ...table, lifecycle: "Draft", qrCodeValidUntil: null }, now)).toBeNull();
+});
+
+it("WP-2423 follow-up: says how long a table has been open in minutes, hours or days", () => {
+  expect(elapsedText(0)).toBe("0 min");
+  expect(elapsedText(59)).toBe("59 min");
+  expect(elapsedText(180)).toBe("3 h");
+  expect(elapsedText(200)).toBe("3 h 20 min");
+  expect(elapsedText(1440)).toBe("1 day");
+  expect(elapsedText(34992)).toBe("24 days");
+  expect(longOpenSessionMinutes).toBe(720);
 });

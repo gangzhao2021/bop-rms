@@ -57,6 +57,8 @@ export function summarizeExceptions(view: OrderExceptionView): ExceptionsSummary
 }
 
 export type OverviewRead<T> =
+  /** WP-2423 Q11 follow-up: the staff member's role has no screen for this; it is not read. */
+  | { readonly kind: "Hidden" }
   | { readonly kind: "Loading" }
   | { readonly kind: "Ready"; readonly value: T }
   | { readonly kind: "Unavailable" };
@@ -89,6 +91,7 @@ function Count<T>({
   readonly href: string;
   readonly linkLabel: string;
 }) {
+  if (read.kind === "Hidden") return null;
   return (
     <li aria-busy={read.kind === "Loading"}>
       <span className="overview-count__label">{label}</span>
@@ -121,6 +124,8 @@ export function OverviewToday({
 }) {
   const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
   const count = (n: number, more: boolean) => (more ? `${n}+` : String(n));
+  if ([state.orders, state.pickups, state.exceptions].every((read) => read.kind === "Hidden"))
+    return null;
   return (
     <section className="overview-card overview-card--today" aria-labelledby="today-summary-heading">
       <header>
@@ -169,13 +174,22 @@ export function OverviewToday({
 }
 
 /** Reads the three pilot projections for the selected Store and keeps them current on demand. */
+/** Home summary screens, each read only when the role's workspace includes its screen. */
+export const overviewScreens = Object.freeze({
+  orders: "OPS-ORDER-QUEUE",
+  pickups: "FUL-PICKUP-QUEUE",
+  exceptions: "OPS-ORDER-EXCEPTION",
+} as const);
 export function StoreOverview({
   csrf,
   storeReference,
   storeLabel,
   timeZone,
+  screens,
   fetcher,
 }: {
+  /** Screen IDs the workspace permits this staff member (the navigation list). */
+  readonly screens: readonly string[];
   readonly csrf: string;
   readonly storeReference: string;
   readonly storeLabel: string;
@@ -195,7 +209,23 @@ export function StoreOverview({
     }),
     [csrf, storeReference, storeLabel, fetcher],
   );
-  const [state, setState] = useState<OverviewTodayState>(initialOverviewState);
+  // A new array each render must not restart reading: depend on its content only.
+  const screenKey = screens.join("|");
+  const permitted = useMemo(() => {
+    const ids = screenKey.split("|");
+    return {
+      orders: ids.includes(overviewScreens.orders),
+      pickups: ids.includes(overviewScreens.pickups),
+      exceptions: ids.includes(overviewScreens.exceptions),
+    };
+  }, [screenKey]);
+  const hidden = { kind: "Hidden" } as const;
+  const [state, setState] = useState<OverviewTodayState>(() => ({
+    ...initialOverviewState,
+    orders: permitted.orders ? initialOverviewState.orders : hidden,
+    pickups: permitted.pickups ? initialOverviewState.pickups : hidden,
+    exceptions: permitted.exceptions ? initialOverviewState.exceptions : hidden,
+  }));
   const [busy, setBusy] = useState(false);
   const active = useRef<AbortController | null>(null);
   const load = useCallback(async () => {
@@ -215,28 +245,35 @@ export function StoreOverview({
       }
     };
     await Promise.all([
-      read(
-        async () => summarizeOrders(await clients.orders.load(null, controller.signal)),
-        (orders) => setState((s) => ({ ...s, orders })),
-      ),
-      read(
-        async () => summarizePickups(parsePickupQueueView(await clients.pickups.loadQueue())),
-        (pickups) => setState((s) => ({ ...s, pickups })),
-      ),
-      read(
-        async () =>
-          summarizeExceptions(
-            parseOrderExceptionView(await clients.exceptions.load(controller.signal)),
-          ),
-        (exceptions) => setState((s) => ({ ...s, exceptions })),
-      ),
+      permitted.orders
+        ? read(
+            async () => summarizeOrders(await clients.orders.load(null, controller.signal)),
+            (orders) => setState((s) => ({ ...s, orders })),
+          )
+        : null,
+      permitted.pickups
+        ? read(
+            async () => summarizePickups(parsePickupQueueView(await clients.pickups.loadQueue())),
+            (pickups) => setState((s) => ({ ...s, pickups })),
+          )
+        : null,
+      permitted.exceptions
+        ? read(
+            async () =>
+              summarizeExceptions(
+                parseOrderExceptionView(await clients.exceptions.load(controller.signal)),
+              ),
+            (exceptions) => setState((s) => ({ ...s, exceptions })),
+          )
+        : null,
     ]);
     if (!controller.signal.aborted) {
       setState((s) => ({ ...s, updatedAt: new Date().toISOString() }));
       setBusy(false);
     }
-  }, [clients]);
+  }, [clients, permitted]);
   useEffect(() => {
+    if (!permitted.orders && !permitted.pickups && !permitted.exceptions) return;
     void load();
     // WP-2423 Q1: keep "Right now" current while the home page is open and visible.
     const timer = setInterval(() => {
@@ -246,7 +283,7 @@ export function StoreOverview({
       clearInterval(timer);
       active.current?.abort();
     };
-  }, [load]);
+  }, [load, permitted]);
   return (
     <OverviewToday state={state} timeZone={timeZone} busy={busy} onRefresh={() => void load()} />
   );

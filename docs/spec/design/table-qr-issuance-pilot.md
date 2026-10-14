@@ -48,8 +48,10 @@
 8. **顾客端说明**：扫到已更换的码显示"This table code was replaced. Please ask a staff member."；已停用的码显示"This table code is no
    longer in use. Please ask a staff member."。只有码与本店存储的某张已签发码完全一致时才这样说（其他无效码仍是通用的"无法使用"，
    不提供探测）；不签发会话、不设 Cookie（HTTP 410 `entry_qr_retired`）。
-9. **审计**：签发 `DINING_TABLE_ISSUEQR`（原因 `TABLE_QR_ISSUED` / `TABLE_QR_REPLACED`）、停用 `DINING_TABLE_REVOKEQR`
-   （`TABLE_QR_TURNED_OFF`）、打印 `DINING_TABLE_QR_PRINTED`，均记录具名员工，与桌台变更同一事务。
+9. **审计**：签发 `DINING_TABLE_ISSUEQR`（原因：该桌首次签发 `TABLE_QR_CREATED`；替换一张可打印的现行码 `TABLE_QR_REPLACED`；
+   停用后或替换测试码时重新签发 `TABLE_QR_REISSUED`）、停用 `DINING_TABLE_REVOKEQR`（`TABLE_QR_TURNED_OFF`）、打印
+   `DINING_TABLE_QR_PRINTED`，均记录具名员工，与桌台变更同一事务。变更前后摘要只记桌号、码状态、码版本、是否有可打印码与是否有客人入座，
+   从不记录码本身（2026-10-14 v15 实测后修正：首次签发原记为 REPLACED 且摘要为空）。
 10. **DEMO 启动页**：`/internal-test/dining`（仅 InternalTest）改为打开各 DEMO 桌当前已签发的码；未签发时返回不可用。顾客进入只认
     已签发的码，DEMO 文件不再提供桌码。
 

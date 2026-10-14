@@ -148,6 +148,19 @@ test("@production Table QR codes: print one, replace a lost code at a seated tab
     expectedAggregateVersion: 3,
   });
 
+  // Turning off a seated table's code: no new code, guests ask staff (not "scan the new code").
+  await page.getByRole("row", { name: /T2/u }).getByRole("button", { name: "Turn off" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Turn off the code for table T2?" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/there is no new code to scan: they ask a staff member/u),
+  ).toBeVisible();
+  await expect(page.getByText(/scan the new code/u)).toHaveCount(0);
+  await expect(page.getByLabel("I understand this table's code stops working")).toBeVisible();
+  await page.getByRole("button", { name: "Cancel" }).click();
+  expect(commands).toHaveLength(1);
+
   // A table without a code gets one; it can be printed at once.
   await page
     .getByRole("row", { name: /Patio 3/u })

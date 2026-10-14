@@ -41,6 +41,18 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
               href: "/operations/orders",
               permission: "ordering.operate",
             },
+            {
+              screenId: "FUL-PICKUP-QUEUE",
+              label: "Pickup",
+              href: "/operations/pickup",
+              permission: "fulfillment.operate",
+            },
+            {
+              screenId: "OPS-ORDER-EXCEPTION",
+              label: "Exceptions",
+              href: "/operations/order-exceptions",
+              permission: "operations.order-exception.manage",
+            },
           ],
         },
       },
@@ -180,4 +192,74 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
     ).toBe(true);
     await page.screenshot({ path: `test-results/home-overview-${width}.png` });
   }
+});
+
+test("@production Home reads only the summaries the staff member's screens permit (WP-2423 Q11 follow-up)", async ({
+  page,
+}) => {
+  const scope = {
+    brandLabel: "Synthetic Brand",
+    storeLabel: "Training Store",
+    storeReference: "01909968-0000-7000-8000-000000000099",
+  };
+  const navigation = (screens: readonly [string, string, string, string][]) =>
+    screens.map(([screenId, label, href, permission]) => ({ screenId, label, href, permission }));
+  let screens = navigation([
+    ["HOME-OVERVIEW", "Overview", "/app", "merchant.access"],
+    ["OPS-ORDER-ENTRY", "Counter order", "/operations/order-entry", "ordering.order.create_staff"],
+    ["DIN-FLOOR-BOARD", "Tables", "/operations/dining", "dining.operate"],
+  ]);
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers: { "cache-control": "no-store" },
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-09-23",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: screens,
+        },
+      },
+    }),
+  );
+  const requested: string[] = [];
+  for (const path of [
+    "**/merchant/orders*",
+    "**/merchant/pickup/query",
+    "**/merchant/order-exceptions",
+  ])
+    await page.route(path, (route) => {
+      requested.push(new URL(route.request().url()).pathname);
+      return route.fulfill({ status: 403, json: { error: "request_denied" } });
+    });
+  const errors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+
+  // A cashier: no order queue, pickup or exception screen — Home reads none of them.
+  await page.goto("/app");
+  await expect(page.getByRole("heading", { level: 1, name: "Training Store" })).toBeVisible();
+  await page.waitForTimeout(500);
+  expect(requested).toEqual([]);
+  expect(errors).toEqual([]);
+  await expect(page.getByRole("region", { name: "Right now" })).toHaveCount(0);
+
+  // With the order queue screen only, Home reads the orders summary and nothing else.
+  screens = navigation([
+    ["HOME-OVERVIEW", "Overview", "/app", "merchant.access"],
+    ["OPS-ORDER-QUEUE", "Orders", "/operations/orders", "ordering.operate"],
+  ]);
+  await page.reload();
+  await expect(page.getByRole("region", { name: "Right now" })).toBeVisible();
+  await expect(page.getByText("Open orders")).toBeVisible();
+  await expect(page.getByText("Pickups waiting")).toHaveCount(0);
+  await expect(page.getByText("Open exceptions")).toHaveCount(0);
+  expect(new Set(requested)).toEqual(new Set(["/merchant/orders"]));
 });

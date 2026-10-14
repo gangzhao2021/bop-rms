@@ -440,17 +440,31 @@ it("WP-2423 Q11: staff issue, print, replace and turn off one table's code; old 
       assert.equal((await enter(codes.at(-1).qr_token)).status, "Verified");
 
       // 6. Audit: every change names the staff member and why.
-      const reasons = [
+      const changes = [
         ...(await audits("DINING_TABLE_ISSUEQR")).rows,
         ...(await audits("DINING_TABLE_REVOKEQR")).rows,
-      ].map((audit) => [audit.reason_code, audit.actor]);
+      ];
+      const reasons = changes.map((audit) => [audit.reason_code, audit.actor]);
       assert.deepEqual(reasons.map(([reason]) => reason).sort(), [
-        "TABLE_QR_ISSUED",
-        "TABLE_QR_ISSUED",
+        "TABLE_QR_CREATED",
+        "TABLE_QR_REISSUED",
         "TABLE_QR_REPLACED",
         "TABLE_QR_TURNED_OFF",
       ]);
       assert.ok(reasons.every(([, actor]) => actor === staff));
+      // The summary says what changed (label, status, version) and never carries the code.
+      const createdAudit = changes.find((audit) => audit.reason_code === "TABLE_QR_CREATED");
+      assert.deepEqual(createdAudit.after, {
+        tableLabel: "T 12",
+        qrStatus: "Active",
+        qrVersion: 1,
+        printableCode: true,
+      });
+      const turnedOff = changes.find((audit) => audit.reason_code === "TABLE_QR_TURNED_OFF");
+      assert.equal(turnedOff.after.qrStatus, "Revoked");
+      assert.equal(turnedOff.after.printableCode, false);
+      for (const audit of changes)
+        assert.ok(!JSON.stringify(audit.after).includes(firstToken.split(".")[1].slice(0, 20)));
 
       // 7. History is append-only, a forged code is refused, a code from elsewhere is not entry.
       await assert.rejects(

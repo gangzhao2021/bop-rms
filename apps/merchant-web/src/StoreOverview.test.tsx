@@ -105,3 +105,22 @@ describe("WP-2423 P2 store overview", () => {
     expect(loading).not.toContain("Refresh");
   });
 });
+
+describe("WP-2423 Q11 follow-up: Home reads only what the role's screens permit", () => {
+  const render = (state: Parameters<typeof OverviewToday>[0]["state"]) =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <OverviewToday state={state} />
+      </MemoryRouter>,
+    );
+  it("leaves out counts for screens the role does not have, and the card when none remain", () => {
+    const hidden = { kind: "Hidden" } as const;
+    const ordersOnly = render({ ...initialOverviewState, pickups: hidden, exceptions: hidden });
+    expect(ordersOnly).toContain("Open orders");
+    expect(ordersOnly).not.toContain("Pickups waiting");
+    expect(ordersOnly).not.toContain("Open exceptions");
+    expect(
+      render({ ...initialOverviewState, orders: hidden, pickups: hidden, exceptions: hidden }),
+    ).toBe("");
+  });
+});

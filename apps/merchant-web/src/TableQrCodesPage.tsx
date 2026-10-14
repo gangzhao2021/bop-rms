@@ -205,9 +205,9 @@ export function TableQrCodesPage({
       </p>
       {pending.table.seated && pending.table.codeState === "Active" ? (
         <p className="table-qr__warning" role="note">
-          Guests are seated at this table now. Their phones stop working with the old code: they
-          scan the new code and enter the table&apos;s joining code again. Their orders and bill are
-          not affected.
+          {pending.action === "TurnOff"
+            ? "Guests are seated at this table now. Their phones stop working with this table's code and there is no new code to scan: they ask a staff member to order or pay. Their orders and bill are not affected."
+            : "Guests are seated at this table now. Their phones stop working with the old code: they scan the new code and enter the table's joining code again. Their orders and bill are not affected."}
         </p>
       ) : null}
       {pending.table.codeState === "Active" ? (
@@ -218,7 +218,9 @@ export function TableQrCodesPage({
             disabled={busy || pending.unknown}
             onChange={(event) => setUnderstood(event.currentTarget.checked)}
           />
-          I understand the old code stops working
+          {pending.action === "TurnOff"
+            ? "I understand this table's code stops working"
+            : "I understand the old code stops working"}
         </label>
       ) : null}
       <div className="table-qr__confirm-actions">

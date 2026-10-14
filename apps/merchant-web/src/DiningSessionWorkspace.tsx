@@ -20,6 +20,19 @@ const tableBlockReasons = [
 ] as const;
 const stateLabel = (state: string) =>
   state === "TemporarilyBlocked" ? "Temporarily unavailable" : state;
+/** WP-2423 follow-up: how long a session has been open, in words staff read at a glance. */
+export function elapsedText(minutes: number): string {
+  if (minutes < 60) return `${String(minutes)} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    const rest = minutes % 60;
+    return rest === 0 ? `${String(hours)} h` : `${String(hours)} h ${String(rest)} min`;
+  }
+  const days = Math.floor(hours / 24);
+  return `${String(days)} day${days === 1 ? "" : "s"}`;
+}
+/** A session open longer than this is most likely a table nobody closed. */
+export const longOpenSessionMinutes = 12 * 60;
 /** WP-2423 Q11: warn on the floor when guests can't scan in, or soon won't be able to. */
 export function tableCodeNotice(table: StaffDiningTable, now = Date.now()): string | null {
   if (table.lifecycle !== "Published") return null;
@@ -366,9 +379,17 @@ export function DiningSessionWorkspace({
                             {table.currentDiningSessionReference
                               ? table.elapsedMinutes === null
                                 ? "Session elapsed time unavailable"
-                                : `${table.elapsedMinutes} min elapsed`
+                                : `Open ${elapsedText(table.elapsedMinutes)}`
                               : "No active session"}
                           </p>
+                          {table.currentDiningSessionReference &&
+                          table.elapsedMinutes !== null &&
+                          table.elapsedMinutes > longOpenSessionMinutes ? (
+                            <p className="dining-table-tile__notice">
+                              Open for a long time — check the table and close the session if the
+                              guests have left.
+                            </p>
+                          ) : null}
                           <button
                             disabled={locked}
                             aria-pressed={selected?.tableReference === table.tableReference}
@@ -414,7 +435,7 @@ export function DiningSessionWorkspace({
                       {selected.currentDiningSessionReference
                         ? selected.elapsedMinutes === null
                           ? "Linked · elapsed time unavailable"
-                          : `Linked · ${selected.elapsedMinutes} min elapsed`
+                          : `Linked · open ${elapsedText(selected.elapsedMinutes)}`
                         : "None"}
                     </dd>
                   </div>

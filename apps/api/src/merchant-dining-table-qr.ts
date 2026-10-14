@@ -191,7 +191,17 @@ export function createMerchantDiningTableQr(options: Options) {
           authenticated.sessionReference,
         );
         const prior = await tables.resolveTableOperation(operationReference);
-        let candidate: DiningTable, observedAt: string, replacing: boolean;
+        type Reason =
+          "TABLE_QR_CREATED" | "TABLE_QR_REPLACED" | "TABLE_QR_REISSUED" | "TABLE_QR_TURNED_OFF";
+        const reasons: readonly Reason[] = [
+          "TABLE_QR_CREATED",
+          "TABLE_QR_REPLACED",
+          "TABLE_QR_REISSUED",
+          "TABLE_QR_TURNED_OFF",
+        ];
+        let candidate: DiningTable, observedAt: string, reasonCode: Reason;
+        let beforeSummary: Record<string, string | number | boolean>,
+          afterSummary: Record<string, string | number | boolean>;
         if (prior !== null) {
           if (
             prior.table.tableReference !== tableReference ||
@@ -201,7 +211,12 @@ export function createMerchantDiningTableQr(options: Options) {
             return fail("TABLE_QR_CONFLICT");
           candidate = createDiningTable(prior.table);
           observedAt = candidate.observedAt;
-          replacing = prior.audit.reasonCode === "TABLE_QR_REPLACED";
+          // A retry repeats the recorded audit exactly.
+          const recorded = prior.audit.reasonCode as Reason;
+          if (!reasons.includes(recorded)) return fail("TABLE_QR_CONFLICT");
+          reasonCode = recorded;
+          beforeSummary = { ...(prior.audit.beforeSummary ?? {}) } as typeof beforeSummary;
+          afterSummary = { ...(prior.audit.afterSummary ?? {}) } as typeof afterSummary;
         } else {
           const table = await tables.loadTable(tableReference);
           if (!table || table.aggregateVersion !== expectedAggregateVersion)
@@ -211,15 +226,33 @@ export function createMerchantDiningTableQr(options: Options) {
           if (action === "RevokeQr" && table.qrStatus !== "Active")
             return fail("TABLE_QR_CONFLICT");
           observedAt = parseDiningInstant(current.context.resolvedAt);
-          replacing = action === "IssueQr" && table.qrStatus === "Active";
           candidate = transitionDiningTable(table, action, parseDiningInstant(observedAt));
+          // First code ever, a printed code superseded, or a new code after turn-off / a test code.
+          const earlier = await codes.loadLatestForTable(tableReference);
+          const printable = table.qrStatus === "Active" && earlier?.qrVersion === table.qrVersion;
+          reasonCode =
+            action === "RevokeQr"
+              ? "TABLE_QR_TURNED_OFF"
+              : earlier === null
+                ? "TABLE_QR_CREATED"
+                : printable
+                  ? "TABLE_QR_REPLACED"
+                  : "TABLE_QR_REISSUED";
+          // What changed, never the code itself.
+          beforeSummary = {
+            tableLabel: table.stableLabel,
+            qrStatus: table.qrStatus,
+            qrVersion: table.qrVersion,
+            printableCode: printable,
+            seated: table.activeDiningSessionReference !== null,
+          };
+          afterSummary = {
+            tableLabel: candidate.stableLabel,
+            qrStatus: candidate.qrStatus,
+            qrVersion: candidate.qrVersion,
+            printableCode: action === "IssueQr",
+          };
         }
-        const reasonCode =
-          action === "RevokeQr"
-            ? "TABLE_QR_TURNED_OFF"
-            : replacing
-              ? "TABLE_QR_REPLACED"
-              : "TABLE_QR_ISSUED";
         const service = createDiningTableService({
           references: { hashIntent, equals: (left, right) => left === right },
           authorization: {
@@ -253,6 +286,8 @@ export function createMerchantDiningTableQr(options: Options) {
                   targetType: "DiningTable",
                   targetId: tableReference,
                   reasonCode,
+                  beforeSummary,
+                  afterSummary,
                   correlationId: operationReference,
                   occurredAt: observedAt,
                   sourceChannel: "MERCHANT_WEB",

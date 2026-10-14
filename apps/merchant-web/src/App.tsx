@@ -502,6 +502,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                       storeReference={state.workspace.selectedScope.storeReference}
                       storeLabel={state.workspace.selectedScope.storeLabel}
                       timeZone={state.workspace.selectedScope.timeZone}
+                      screens={state.workspace.navigation.map((item) => item.screenId)}
                     />
                   ) : undefined
                 }

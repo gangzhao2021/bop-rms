@@ -192,7 +192,7 @@ test("@production staff starts a table and recovers a lost entry code without du
   const elapsedTile = page
     .locator(".dining-table-tile")
     .filter({ has: page.getByRole("button", { name: "Select T2", exact: true }) });
-  await expect(elapsedTile).toContainText("17 min elapsed");
+  await expect(elapsedTile).toContainText("Open 17 min");
   await elapsedTile.screenshot({ path: "test-results/dining-elapsed-1440.png" });
   expect(tableReads).toBe(1);
   const assertConfirmationTarget = async () => {
