@@ -86,9 +86,8 @@ test("@production receipt navigation removes inaccessible history and fits commo
     }, reference);
   await navigate(id(1));
   await expect(page.getByText("Synthetic Operating Entity", { exact: true })).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "Live receipt status is unavailable" }),
-  ).toBeVisible();
+  // No permanent technical notice: the receipt is the record, payment amounts are checked live.
+  await expect(page.getByText(/Live receipt status|delivery and support status/u)).toHaveCount(0);
   await expect(page.getByText("$11.30", { exact: true })).toBeVisible();
   // WP-2423 Q10: no inactive email stub; printing or saving is the working way to keep a copy.
   await expect(page.getByRole("button", { name: "Request email receipt" })).toHaveCount(0);

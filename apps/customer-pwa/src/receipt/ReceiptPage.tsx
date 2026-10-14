@@ -8,7 +8,7 @@ import {
 import type { ReceiptMoneyView, ReceiptRecordView, ReceiptView } from "./types.js";
 
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
-import { formatDateTime, formatMoney } from "../journey/format.js";
+import { formatDateTime, formatLocalityLine, formatMoney } from "../journey/format.js";
 import { StoreContactCard } from "../journey/StoreContact.js";
 import { PrivacyNoticeLink } from "../journey/PrivacyNotice.js";
 
@@ -23,6 +23,15 @@ const paymentStatusText: Record<ReceiptRecordView["snapshot"]["paymentStatus"], 
   PartiallyRefunded: "Partly refunded",
   Refunded: "Refunded",
 };
+/**
+ * The receipt prints the tax name the Store's tax configuration gives each tax ("HST", "GST",
+ * "PST", "QST"). The internal test configuration's placeholder "SYNTHETIC TAX" is not a real tax,
+ * so it is shown as a labelled test value instead of looking like one.
+ */
+export function receiptTaxLabel(label: string): string {
+  return /^SYNTHETIC(?: |$)/u.test(label) ? "Test tax (internal testing only)" : label;
+}
+
 const kindText: Record<ReceiptRecordView["kind"], string> = {
   Original: "Receipt",
   Correction: "Corrected receipt",
@@ -75,7 +84,8 @@ function ReceiptVersion({ record }: { readonly record: ReceiptRecordView }) {
           snapshot.taxDetails.taxLines.map((line) => (
             <div key={line.label + line.ratePercent + String(line.included)}>
               <dt>
-                {line.label} {line.ratePercent}%{line.included ? " (included in prices)" : ""}
+                {receiptTaxLabel(line.label)} {line.ratePercent}%
+                {line.included ? " (included in prices)" : ""}
               </dt>
               <dd>{money(line.amount)}</dd>
             </div>
@@ -132,11 +142,7 @@ function ReceiptContent({
             {current.taxDetails.businessAddress.addressLines.map((line) => (
               <span key={line}>{line}</span>
             ))}
-            <span>
-              {current.taxDetails.businessAddress.locality}{" "}
-              {current.taxDetails.businessAddress.regionCode}{" "}
-              {current.taxDetails.businessAddress.postalCode}
-            </span>
+            <span>{formatLocalityLine(current.taxDetails.businessAddress)}</span>
           </address>
         ) : null}
         {current.taxDetails?.taxRegistrations.map((registration) => (
@@ -147,24 +153,11 @@ function ReceiptContent({
         <p>Order {current.orderNumber}</p>
         <p>Issued {formatDateTime(current.issuedAt, current.locale)}</p>
       </section>
-      {view.freshnessStatus === "Stale" ? (
-        <section className="receipt-page__stale" role="status">
-          <h2>Live receipt status is unavailable</h2>
-          <p>
-            {financial
-              ? "The receipt below is saved history. Payment amounts are shown separately; delivery and support status remain unavailable."
-              : "The receipt below is saved history. Current payment, delivery and support status is not available here."}
-          </p>
-        </section>
-      ) : null}
       <section className="receipt-page__financial" aria-labelledby="receipt-financial-heading">
         <h2 id="receipt-financial-heading">Payment and refunds</h2>
         {financial ? (
           <>
-            <p>
-              Checked {formatDateTime(financial.observedAt, current.locale)}. Refresh to check
-              again.
-            </p>
+            <p>Last checked {formatDateTime(financial.observedAt, current.locale)}</p>
             <dl className="receipt-page__totals">
               <div>
                 <dt>Captured</dt>
@@ -201,7 +194,9 @@ function ReceiptContent({
           </>
         ) : (
           <p>
-            Current payment and refund amounts are unavailable{online ? "." : " while offline."}
+            {online
+              ? "Payment and refund amounts could not be checked just now. Refresh the receipt to try again."
+              : "Payment and refund amounts can't be checked while you're offline."}
           </p>
         )}
       </section>

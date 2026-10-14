@@ -68,8 +68,9 @@ export async function createRuntime(
         readiness: ready.storeOptions,
         proof: proof.storeOptions,
         credentials: resources.credentials.pickup,
-        storeDisplayName: "DEMO Store - Simulated payments only",
-        pickupInstruction: "Show this pickup confirmation to DEMO staff at the pickup counter.",
+        // The Store record's own name, the same one the receipt and order pages show.
+        storeDisplayName: resources.store.displayName,
+        pickupInstruction: "Show this pickup confirmation to staff at the pickup counter.",
       },
       ...createInternalTestCart(resources),
       ...items,

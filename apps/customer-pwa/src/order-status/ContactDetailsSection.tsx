@@ -1,6 +1,17 @@
 import { useState } from "react";
 import { PrivacyNoticeLink } from "../journey/PrivacyNotice.js";
-import { ContactRemovalError, type ContactRemovalClient } from "./contact-removal-client.js";
+import {
+  ContactRemovalError,
+  type ContactRemovalClient,
+  type ContactRemovalResult,
+} from "./contact-removal-client.js";
+
+const outcomeText: Record<ContactRemovalResult, string> = {
+  Removed: "Your contact details have been removed from this order.",
+  AlreadyRemoved:
+    "Your contact details had already been removed from this order. There is nothing more to remove.",
+  NotGiven: "There were no contact details on this order.",
+};
 
 /**
  * WP-2423 Q16 (DEC-RECEIPT-TAX-AND-PRIVACY): the customer's own contact details on the order page —
@@ -24,33 +35,28 @@ export function ContactDetailsSection({
 }) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<{ tone: "status" | "alert"; text: string } | null>(null);
+  // What this page's own removal request found; replaces the section's static text so the guest
+  // reads one sentence, and a repeat request says plainly that nothing was left to remove.
+  const [outcome, setOutcome] = useState<ContactRemovalResult | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
   const store = storeName ?? "The store";
   if (contactDetails === undefined || (contactDetails === "NotGiven" && !privacyNoticeUrl))
     return null;
   const remove = async () => {
     if (busy || client === undefined) return;
     setBusy(true);
-    setMessage(null);
+    setFailure(null);
     try {
       const result = await client.remove(orderReference);
       setConfirming(false);
-      setMessage({
-        tone: "status",
-        text:
-          result === "NotGiven"
-            ? "There were no contact details on this order."
-            : "Your contact details were removed from this order.",
-      });
+      setOutcome(result);
       onChanged();
     } catch (error) {
-      setMessage({
-        tone: "alert",
-        text:
-          error instanceof ContactRemovalError && error.code === "VisitEnded"
-            ? "Your visit on this phone has ended, so this can't be changed here. Ask a staff member to remove your contact details."
-            : "Your contact details could not be removed right now. Check your connection and try again.",
-      });
+      setFailure(
+        error instanceof ContactRemovalError && error.code === "VisitEnded"
+          ? "Your visit on this phone has ended, so this can't be changed here. Ask a staff member to remove your contact details."
+          : "Your contact details could not be removed right now. Check your connection and try again.",
+      );
     } finally {
       setBusy(false);
     }
@@ -58,7 +64,9 @@ export function ContactDetailsSection({
   return (
     <section className="contact-details" aria-labelledby="contact-details-heading">
       <h2 id="contact-details-heading">Your contact details</h2>
-      {contactDetails === "Stored" ? (
+      {outcome !== null ? (
+        <p role="status">{outcomeText[outcome]}</p>
+      ) : contactDetails === "Stored" ? (
         <>
           <p>
             {store} keeps the phone number or email you gave only to contact you about this order,
@@ -89,7 +97,7 @@ export function ContactDetailsSection({
       ) : contactDetails === "Removed" ? (
         <p>Your contact details have been removed from this order.</p>
       ) : null}
-      {message ? <p role={message.tone === "alert" ? "alert" : "status"}>{message.text}</p> : null}
+      {failure ? <p role="alert">{failure}</p> : null}
       {privacyNoticeUrl ? (
         <p>
           <PrivacyNoticeLink url={privacyNoticeUrl} />

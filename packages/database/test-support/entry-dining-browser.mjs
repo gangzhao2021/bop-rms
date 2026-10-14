@@ -146,7 +146,7 @@ export async function verifyEntryDiningBrowser({ base, order, orderType = "DineI
         ).toBeVisible();
         await history();
         await expect(
-          page.getByText("Current payment and refund amounts are unavailable while offline.", {
+          page.getByText("Payment and refund amounts can't be checked while you're offline.", {
             exact: true,
           }),
         ).toBeVisible();
@@ -158,11 +158,12 @@ export async function verifyEntryDiningBrowser({ base, order, orderType = "DineI
         await expect(
           page.getByRole("heading", { name: "Offline read-only", exact: true }),
         ).toHaveCount(0);
+        await expect(page.getByText(/Live receipt status/u)).toHaveCount(0);
         await expect(
-          page.getByRole("heading", { name: "Live receipt status is unavailable", exact: true }),
-        ).toBeVisible();
-        await expect(
-          page.getByText("Current payment and refund amounts are unavailable.", { exact: true }),
+          page.getByText(
+            "Payment and refund amounts could not be checked just now. Refresh the receipt to try again.",
+            { exact: true },
+          ),
         ).toBeVisible();
         assert.equal(reads.length, readsBeforeOffline);
         const refreshed = page.waitForResponse(
@@ -173,7 +174,10 @@ export async function verifyEntryDiningBrowser({ base, order, orderType = "DineI
         await refreshed;
         await history();
         await expect(
-          page.getByText("Current payment and refund amounts are unavailable.", { exact: true }),
+          page.getByText(
+            "Payment and refund amounts could not be checked just now. Refresh the receipt to try again.",
+            { exact: true },
+          ),
         ).toHaveCount(0);
         await expect(amounts).toHaveText(["CAD 22.60", "CAD 22.60", "CAD 0.00"]);
         assert.equal(await page.locator(".receipt-page__history").innerText(), acceptedHistory);

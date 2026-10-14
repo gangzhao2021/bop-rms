@@ -15,6 +15,15 @@ export function formatMoney(amountMinor: string | bigint, currency: string): str
   return currency === "CAD" ? `${sign}$${amount}` : `${sign}${currency} ${amount}`;
 }
 
+/** "Toronto, ON M5V 1A1": the one locality line for every postal address shown to customers. */
+export function formatLocalityLine(address: {
+  readonly locality: string;
+  readonly regionCode: string;
+  readonly postalCode: string;
+}): string {
+  return `${address.locality}, ${address.regionCode} ${address.postalCode}`;
+}
+
 /** "5:10 p.m." in the device's own zone: the customer is standing at the Store. */
 export function formatClockTime(instant: string, locale = "en-CA"): string {
   const ms = Date.parse(instant);

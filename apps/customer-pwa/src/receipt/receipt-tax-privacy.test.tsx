@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { describe, expect, it } from "vitest";
-import { ReceiptPage } from "./ReceiptPage.js";
+import { ReceiptPage, receiptTaxLabel } from "./ReceiptPage.js";
 import { parseReceiptView, type ReceiptController } from "./receipt-controller.js";
 import type { ReceiptState } from "./types.js";
 import { ContactDetailsSection } from "../order-status/ContactDetailsSection.js";
@@ -95,7 +95,7 @@ describe("WP-2423 Q15 tax receipt", () => {
     );
     const html = render({ status: "ready", view });
     expect(html).toContain("1 Test-only Street");
-    expect(html).toContain("Toronto ON M5V 0A0");
+    expect(html).toContain("Toronto, ON M5V 0A0");
     expect(html).toContain("GST/HST registration no. 000000000RT0001");
     expect(html).toContain("GST 5%");
     expect(html).toContain("$0.50");
@@ -117,6 +117,47 @@ describe("WP-2423 Q15 tax receipt", () => {
     expect(html).toContain("GST 5%");
     const old = render({ status: "ready", view: parseReceiptView(payload({}), id(1)) });
     expect(old).toContain("<dt>Tax</dt>");
+  });
+  it("labels the internal test configuration's placeholder tax as a test value, not a real tax", () => {
+    expect(receiptTaxLabel("HST")).toBe("HST");
+    expect(receiptTaxLabel("QST")).toBe("QST");
+    expect(receiptTaxLabel("SYNTHETIC TAX")).toBe("Test tax (internal testing only)");
+    const html = render({
+      status: "ready",
+      view: parseReceiptView(
+        payload({
+          taxDetails: {
+            ...taxDetails,
+            taxLines: [
+              { label: "SYNTHETIC TAX", ratePercent: "12", included: false, amount: wire("120") },
+            ],
+          },
+        }),
+        id(1),
+      ),
+    });
+    expect(html).toContain("Test tax (internal testing only) 12%");
+    expect(html).not.toContain("SYNTHETIC");
+  });
+  it("shows no permanent status notice and no double period after the check time", () => {
+    const view = parseReceiptView(payload({ taxDetails }), id(1));
+    const html = render({
+      status: "ready",
+      view: {
+        ...view,
+        financial: {
+          observedAt: "2026-10-14T23:28:00.000Z",
+          currencyCode: "CAD",
+          capturedMinor: 1120n,
+          confirmedRefundMinor: 0n,
+          pendingRefundMinor: 0n,
+          unresolvedAttemptCount: 0,
+        },
+      },
+    });
+    expect(html).not.toMatch(/unavailable|Live receipt status|delivery and support/u);
+    expect(html).toContain("Last checked");
+    expect(html).not.toContain("..");
   });
   it("rejects tax lines that do not add up and unsafe privacy links", () => {
     expect(() =>

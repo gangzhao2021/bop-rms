@@ -1,3 +1,5 @@
+import { formatLocalityLine } from "./format.js";
+
 /**
  * WP-2423 Q10: how a customer reaches the Store about an order — the Store's published business
  * phone and address. Shown on the order status page and the receipt.
@@ -85,7 +87,7 @@ export function StoreContactCard({
             <br />
           </span>
         ))}
-        {contact.locality}, {contact.regionCode} {contact.postalCode}
+        {formatLocalityLine(contact)}
       </address>
     </section>
   );

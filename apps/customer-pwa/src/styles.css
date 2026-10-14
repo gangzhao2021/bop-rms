@@ -1479,7 +1479,6 @@
     grid-template-areas:
       "state state"
       "merchant merchant"
-      "stale stale"
       "history financial"
       "actions support";
     align-items: start;
@@ -1489,9 +1488,6 @@
   }
   .receipt-page__merchant {
     grid-area: merchant;
-  }
-  .receipt-page__stale {
-    grid-area: stale;
   }
   .receipt-page__history {
     grid-area: history;

@@ -285,7 +285,7 @@ for (const viewport of [
       const merchant = page.getByRole("region", { name: "Merchant and order" });
       await expect(merchant.getByText("Synthetic Issuer Ltd. (TEST-ONLY)")).toBeVisible();
       await expect(merchant.getByText("1 Test-only Street")).toBeVisible();
-      await expect(merchant.getByText("Toronto ON M5V 0A0")).toBeVisible();
+      await expect(merchant.getByText("Toronto, ON M5V 0A0", { exact: true })).toBeVisible();
       await expect(
         merchant.getByText("GST/HST registration no. 000000000RT0001", { exact: true }),
       ).toBeVisible();
@@ -360,17 +360,45 @@ for (const viewport of [
       expect(removals).toHaveLength(0);
       await section.getByRole("button", { name: "Remove my contact details" }).click();
       await section.getByRole("button", { name: "Remove now" }).click();
-      await expect(
-        section.getByText("Your contact details were removed from this order."),
-      ).toBeVisible();
+      // One sentence after removal, not the action message and the refreshed state together.
       await expect(
         section.getByText("Your contact details have been removed from this order."),
       ).toBeVisible();
+      await expect(section.getByText(/removed from this order/u)).toHaveCount(1);
       await expect(section.getByRole("button", { name: "Remove my contact details" })).toHaveCount(
         0,
       );
       expect(removals).toHaveLength(1);
       expect(removals[0]?.["x-csrf-token"]).toBe(csrf);
+      await noOverflowOrBlockingAxe(page);
+    });
+
+    test("a repeat removal says the details were already removed", async ({ page }) => {
+      // The page still shows the details as kept (for example opened before another tab removed
+      // them); the server finds them already gone and changes nothing.
+      await bootstrap(page);
+      await page.route("**/api/v1/orders/*/status", (route) =>
+        route.fulfill({ headers: json, body: JSON.stringify(status("Stored")) }),
+      );
+      await page.route("**/api/v1/orders/*/contact-removal", (route) =>
+        route.fulfill({
+          headers: json,
+          body: JSON.stringify({ schemaVersion: 1, removal: { status: "AlreadyRemoved" } }),
+        }),
+      );
+      await page.goto("/orders/" + orderReference);
+      const section = page.getByRole("region", { name: "Your contact details" });
+      await section.getByRole("button", { name: "Remove my contact details" }).click();
+      await section.getByRole("button", { name: "Remove now" }).click();
+      await expect(
+        section.getByText(
+          "Your contact details had already been removed from this order. There is nothing more to remove.",
+        ),
+      ).toBeVisible();
+      await expect(section.getByText(/removed from this order/u)).toHaveCount(1);
+      await expect(section.getByRole("button", { name: "Remove my contact details" })).toHaveCount(
+        0,
+      );
       await noOverflowOrBlockingAxe(page);
     });
   });

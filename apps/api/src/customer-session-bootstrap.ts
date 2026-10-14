@@ -149,6 +149,12 @@ export function createCustomerSessionBootstrapHandler(options?: {
         .split(";")
         .map((part) => part.trim().split("="))
         .filter(([name]) => name === "__Host-bop-guest");
+      // A first visit has no Guest Session yet: that is an ordinary state, not a bad request.
+      // Nothing is issued (no CSRF token, no cookie) and every other check above still applies.
+      if (cookies.length === 0) {
+        response.status(204).end();
+        return;
+      }
       if (cookies.length !== 1 || cookies[0]?.length !== 2) throw new Error();
       credential = parseGuestRawCredential(cookies[0]?.[1]);
     } catch {

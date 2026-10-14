@@ -180,3 +180,13 @@ it("WP-2423 Q10: restores the Session's current order and rejects malformed or p
     expect(getCustomerCsrfCredential()).toBeNull();
   }
 });
+
+it("treats a first visit (204, no Guest Session yet) as nothing to restore", async () => {
+  const fetcher = vi
+    .fn()
+    .mockResolvedValue(
+      new Response(null, { status: 204, headers: { "cache-control": "no-store" } }),
+    );
+  expect(await restoreCustomerSession(fetcher)).toBe(false);
+  expect(getCustomerCsrfCredential()).toBeNull();
+});

@@ -61,6 +61,20 @@ it("rejects cross-origin, navigation, missing marker, duplicate cookie and query
   expect((await f.request({}, "?session=untrusted")).status).toBe(400);
   expect(f.read).not.toHaveBeenCalled();
 });
+it("answers a first visit without a Guest Session cookie with an empty 204, issuing nothing", async () => {
+  const f = await setup();
+  const r = await f.request({ cookie: "" });
+  expect(r.status).toBe(204);
+  expect(r.headers.get("cache-control")).toBe("no-store");
+  expect(r.headers.get("set-cookie")).toBeNull();
+  expect(await r.text()).toBe("");
+  expect(f.read).not.toHaveBeenCalled();
+  // Without a cookie the request-shape checks still apply first.
+  expect((await f.request({ cookie: "", "sec-fetch-site": "cross-site" })).status).toBe(400);
+  expect((await f.request({ cookie: "", "x-bop-session-bootstrap": "" })).status).toBe(400);
+  expect((await f.request({ cookie: "other=1" })).status).toBe(204);
+  expect((await f.request({ cookie: "__Host-bop-guest=short" })).status).toBe(400);
+});
 it("conceals absent sessions and fails safely without configuration", async () => {
   const f = await setup();
   f.read.mockRejectedValue(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));

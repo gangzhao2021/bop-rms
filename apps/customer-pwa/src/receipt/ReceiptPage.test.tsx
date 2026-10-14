@@ -156,7 +156,7 @@ it("separates current pending refunds from immutable history and hides them offl
   expect(html).toContain("Receipt history");
   const offline = render({ status: "offline", view });
   expect(offline).not.toContain("$6.00");
-  expect(offline).toContain("unavailable while offline");
+  expect(offline).toContain("be checked while you");
 });
 
 describe("WP-2423 Q10 store contact on the receipt", () => {
