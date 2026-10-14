@@ -61,6 +61,8 @@ export function createPersistentMerchantSettlement(options: {
     type Original = Parameters<Parameters<typeof persistence.transactions.run>[0]>[0];
     const originals = new Map<ConsumerTransaction, Original>();
     const stores = new Map<ConsumerTransaction, { displayName: string; timeZone: string }>();
+    /** The scope resolved in full for each running transaction. */
+    const resolved = new Map<ConsumerTransaction, MerchantSettlementScope>();
     const current = async (tx: ConsumerTransaction) => {
       const original = originals.get(tx);
       if (!original) return unavailable();
@@ -75,15 +77,24 @@ export function createPersistentMerchantSettlement(options: {
     const authorize = async (tx: ConsumerTransaction): Promise<MerchantSettlementScope> => {
       const value = await current(tx);
       stores.set(tx, { displayName: value.store.displayName, timeZone: value.store.timeZone });
-      return Object.freeze({
+      const scope = Object.freeze({
         tenantReference: value.selected.tenantReference,
         brandReference: String(value.context.brand.brandReference),
         storeReference: String(value.store.storeReference),
         sessionReference: String(value.sessionReference),
       });
+      resolved.set(tx, scope);
+      return scope;
     };
-    const guard = (scope: MerchantSettlementScope) => async (tx: ConsumerTransaction) =>
-      matches(await authorize(tx), scope);
+    // The caller's Session, Store and permission are resolved in full at the start of the
+    // transaction and once more before the reply (createMerchantSettlementRead). In between, the
+    // owner reads only confirm they run in that same transaction for that same scope:
+    // re-resolving the scope inside every owner read (a Session, membership and permission-policy
+    // read of ~30 queries each) cost ~750 queries for an open day and ~1,700 for a closed one.
+    const guard = (scope: MerchantSettlementScope) => async (tx: ConsumerTransaction) => {
+      const known = resolved.get(tx);
+      return known !== undefined && matches(known, scope);
+    };
     const transactions = {
       run: <T>(work: (tx: ConsumerTransaction) => Promise<T>) =>
         persistence.transactions.run(async (original) => {
@@ -111,6 +122,7 @@ export function createPersistentMerchantSettlement(options: {
           } finally {
             originals.delete(tx);
             stores.delete(tx);
+            resolved.delete(tx);
           }
         }),
     };

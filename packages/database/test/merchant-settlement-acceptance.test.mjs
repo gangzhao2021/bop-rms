@@ -54,6 +54,7 @@ it("loads the open business day's settlement with card-machine payments, also wh
        * transaction reports the whole transaction as a retryable conflict, whatever the caller made
        * of the error.
        */
+      const queryLog = [];
       const transactions = {
         async run(work) {
           const client = new Client(context.clientConfig);
@@ -66,6 +67,7 @@ it("loads the open business day's settlement with card-machine payments, also wh
             await client.query("SET LOCAL lock_timeout = '2s'");
             const result = await work({
               query: async (sql, values) => {
+                queryLog.push(sql);
                 try {
                   return await client.query(sql, values === undefined ? [] : [...values]);
                 } catch (error) {
@@ -199,7 +201,18 @@ it("loads the open business day's settlement with card-machine payments, also wh
       };
 
       // The open day so far, with the counter's card-machine takings apart from online ones.
+      queryLog.length = 0;
       const day = await read(compose());
+      // Query budget (regression for the 16 s reports on v15): the caller's scope is resolved at
+      // the start and once before the reply, not inside every owner read (~750 queries a day).
+      assert.ok(
+        queryLog.length <= 160,
+        "the day's settlement took " + queryLog.length + " queries",
+      );
+      const scopeResolutions = queryLog.filter((sql) =>
+        sql.includes("FROM bop_identity.browser_session_selection"),
+      ).length;
+      assert.ok(scopeResolutions <= 6, "scope resolved " + scopeResolutions + " times");
       assert.equal(day.businessDate, today);
       assert.equal(day.window.status, "Open");
       assert.deepEqual(day.cardMachine, expected);

@@ -139,8 +139,8 @@ export function createMerchantSettlementRead(options: {
         (window.status !== "Closed" && window.status !== "Open")
       )
         return unavailable();
-      // One transaction, one read at a time: the owner sources re-authorize as they go and
-      // their re-entrancy guards refuse interleaved authorization on a shared connection.
+      // One transaction, one read at a time: the owner sources check their authorization as they
+      // go and their re-entrancy guards refuse interleaved authorization on a shared connection.
       const captured = await options.captured(tx, scope, window);
       const refunded = await options.refunded(tx, scope, window);
       const reconciliation = await options.reconciliation(tx, scope, window);
