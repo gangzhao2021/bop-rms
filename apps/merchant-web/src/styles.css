@@ -8293,3 +8293,41 @@ body:has(.product-complete-draft) .bop-shell__header,
     font-size: 13px;
   }
 }
+
+/* WP-2423 Q15/Q16: Store setup → Receipts and privacy. */
+.receipt-privacy {
+  display: grid;
+  gap: var(--bop-space-3);
+  margin-block: var(--bop-space-4);
+  padding: var(--bop-space-4);
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-card);
+  background: var(--bop-color-surface-default);
+  min-width: 0;
+}
+.receipt-privacy form {
+  display: grid;
+  gap: var(--bop-space-4);
+  max-width: 40rem;
+}
+.receipt-privacy__field {
+  display: grid;
+  gap: var(--bop-space-1);
+  min-width: 0;
+}
+.receipt-privacy__field label {
+  font-weight: 600;
+}
+.receipt-privacy__field input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.receipt-privacy__hint {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+}
+.receipt-privacy__error {
+  margin: 0;
+  color: var(--bop-color-danger);
+}

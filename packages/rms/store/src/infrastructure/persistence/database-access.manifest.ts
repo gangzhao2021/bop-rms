@@ -3,6 +3,14 @@ const databaseAccessManifestInput = {
   module: { moduleName: "store", packageName: "@rms/store", layer: "RMS" },
   tables: [
     {
+      table: "store_receipt_profile",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/store" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "store_presence_session",
       classification: "technical-control-record",
       writeOwner: { kind: "module", id: "@rms/store" },

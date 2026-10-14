@@ -15,6 +15,44 @@ export interface ReceiptLineSnapshot {
   readonly lineTotal: ReceiptMoney;
 }
 
+/** WP-2423 Q15: the Store address printed on the receipt (its published address at issue). */
+export interface ReceiptBusinessAddress {
+  readonly addressLines: readonly string[];
+  readonly locality: string;
+  readonly regionCode: string;
+  readonly postalCode: string;
+  readonly countryCode: string;
+}
+
+/** WP-2423 Q15: a sales-tax registration the Store's Owner entered ("GST/HST", "QST", "PST"). */
+export interface ReceiptTaxRegistration {
+  readonly label: "GST/HST" | "QST" | "PST";
+  readonly number: string;
+}
+
+/** WP-2423 Q15: one tax type and rate on its own line, summed from the order's tax snapshot. */
+export interface ReceiptTaxLine {
+  readonly label: string;
+  /** Percent as a plain decimal ("13", "9.975"), from the frozen rate; never recomputed. */
+  readonly ratePercent: string;
+  /** The tax was included in item prices rather than added to them. */
+  readonly included: boolean;
+  readonly amount: ReceiptMoney;
+}
+
+/**
+ * WP-2423 Q15 (DEC-RECEIPT-TAX-AND-PRIVACY): the tax-receipt facts frozen at issue. Absent on
+ * receipts issued before Q15 (they are never rewritten). `businessAddress` is null when the Store
+ * had no published address; `taxRegistrations` is empty when the Owner had entered none.
+ */
+export interface ReceiptTaxDetails {
+  readonly businessAddress: ReceiptBusinessAddress | null;
+  readonly taxRegistrations: readonly ReceiptTaxRegistration[];
+  readonly taxLines: readonly ReceiptTaxLine[];
+  /** How the order was paid: every digital receipt covers online card payments. */
+  readonly paymentMethod: "Card";
+}
+
 export interface DigitalReceiptSnapshot {
   readonly receiptReference: string;
   readonly orderReference: string;
@@ -32,6 +70,7 @@ export interface DigitalReceiptSnapshot {
   readonly subtotal: ReceiptMoney;
   readonly adjustments?: { readonly discount: ReceiptMoney; readonly fee: ReceiptMoney };
   readonly tax: ReceiptMoney;
+  readonly taxDetails?: ReceiptTaxDetails;
   readonly tip: ReceiptMoney;
   readonly total: ReceiptMoney;
   readonly paymentStatus: ReceiptPaymentStatus;
@@ -154,11 +193,86 @@ function line(value: unknown): ReceiptLineSnapshot {
   });
 }
 
+const registrationLabels = ["GST/HST", "QST", "PST"] as const;
+const registrationPatterns: Readonly<Record<ReceiptTaxRegistration["label"], RegExp>> = {
+  "GST/HST": /^[0-9]{9}RT[0-9]{4}$/u,
+  QST: /^[0-9]{10}TQ[0-9]{4}$/u,
+  PST: /^[A-Z0-9][A-Z0-9 -]{2,30}[A-Z0-9]$/u,
+};
+const ratePercentPattern = /^(?:0|[1-9][0-9]{0,7})(?:\.[0-9]{0,9}[1-9])?$/u;
+
+function businessAddress(value: unknown): ReceiptBusinessAddress | null {
+  if (value === null) return null;
+  const raw = exact(value, ["addressLines", "locality", "regionCode", "postalCode", "countryCode"]);
+  if (
+    !Array.isArray(raw.addressLines) ||
+    raw.addressLines.length < 1 ||
+    raw.addressLines.length > 3
+  )
+    return fail();
+  return Object.freeze({
+    addressLines: Object.freeze(raw.addressLines.map((item: unknown) => text(item, 160))),
+    locality: text(raw.locality, 120),
+    regionCode: text(raw.regionCode, 16),
+    postalCode: text(raw.postalCode, 16),
+    countryCode:
+      typeof raw.countryCode === "string" && /^[A-Z]{2}$/u.test(raw.countryCode)
+        ? raw.countryCode
+        : fail(),
+  });
+}
+
+function taxDetails(value: unknown): ReceiptTaxDetails {
+  const raw = exact(value, ["businessAddress", "taxRegistrations", "taxLines", "paymentMethod"]);
+  if (
+    !Array.isArray(raw.taxRegistrations) ||
+    raw.taxRegistrations.length > 3 ||
+    !Array.isArray(raw.taxLines) ||
+    raw.taxLines.length > 20 ||
+    raw.paymentMethod !== "Card"
+  )
+    return fail();
+  const taxRegistrations = raw.taxRegistrations.map((item: unknown) => {
+    const entry = exact(item, ["label", "number"]);
+    const label = entry.label as ReceiptTaxRegistration["label"];
+    if (
+      !registrationLabels.includes(label) ||
+      typeof entry.number !== "string" ||
+      !registrationPatterns[label].test(entry.number)
+    )
+      return fail();
+    return Object.freeze({ label, number: entry.number });
+  });
+  if (new Set(taxRegistrations.map((item) => item.label)).size !== taxRegistrations.length)
+    return fail();
+  const taxLines = raw.taxLines.map((item: unknown) => {
+    const entry = exact(item, ["label", "ratePercent", "included", "amount"]);
+    if (
+      typeof entry.ratePercent !== "string" ||
+      !ratePercentPattern.test(entry.ratePercent) ||
+      typeof entry.included !== "boolean"
+    )
+      return fail();
+    return Object.freeze({
+      label: text(entry.label, 64),
+      ratePercent: entry.ratePercent,
+      included: entry.included,
+      amount: money(entry.amount),
+    });
+  });
+  return Object.freeze({
+    businessAddress: businessAddress(raw.businessAddress),
+    taxRegistrations: Object.freeze(taxRegistrations),
+    taxLines: Object.freeze(taxLines),
+    paymentMethod: "Card" as const,
+  });
+}
+
 export function parseDigitalReceiptSnapshot(value: unknown): DigitalReceiptSnapshot {
-  const hasAdjustments =
-    value !== null &&
-    typeof value === "object" &&
-    Object.prototype.hasOwnProperty.call(value, "adjustments");
+  const has = (key: string) =>
+    value !== null && typeof value === "object" && Object.prototype.hasOwnProperty.call(value, key);
+  const hasAdjustments = has("adjustments");
+  const hasTaxDetails = has("taxDetails");
   const raw = exact(value, [
     "receiptReference",
     "orderReference",
@@ -180,6 +294,7 @@ export function parseDigitalReceiptSnapshot(value: unknown): DigitalReceiptSnaps
     "paymentStatus",
     "refundedTotal",
     ...(hasAdjustments ? ["adjustments"] : []),
+    ...(hasTaxDetails ? ["taxDetails"] : []),
   ]);
   if (!Array.isArray(raw.lines) || raw.lines.length < 1 || raw.lines.length > 200) return fail();
   if (typeof raw.locale !== "string" || !localePattern.test(raw.locale)) return fail();
@@ -191,7 +306,9 @@ export function parseDigitalReceiptSnapshot(value: unknown): DigitalReceiptSnaps
   )
     return fail();
   const adjustments = hasAdjustments ? exact(raw.adjustments, ["discount", "fee"]) : null;
+  const parsedTaxDetails = hasTaxDetails ? taxDetails(raw.taxDetails) : null;
   const parsed = Object.freeze({
+    ...(parsedTaxDetails === null ? {} : { taxDetails: parsedTaxDetails }),
     ...(adjustments === null
       ? {}
       : {
@@ -229,7 +346,11 @@ export function parseDigitalReceiptSnapshot(value: unknown): DigitalReceiptSnaps
       parsed.refundedTotal,
       ...(parsed.adjustments ? [parsed.adjustments.discount, parsed.adjustments.fee] : []),
       ...parsed.lines.map((item) => item.lineTotal),
+      ...(parsed.taxDetails?.taxLines.map((item) => item.amount) ?? []),
     ].some((amount) => amount.currencyCode !== currency) ||
+    (parsed.taxDetails !== undefined &&
+      parsed.taxDetails.taxLines.reduce((sum, item) => sum + item.amount.amountMinor, 0n) !==
+        parsed.tax.amountMinor) ||
     (parsed.adjustments?.discount.amountMinor ?? 0n) > parsed.subtotal.amountMinor ||
     parsed.subtotal.amountMinor -
       (parsed.adjustments?.discount.amountMinor ?? 0n) +

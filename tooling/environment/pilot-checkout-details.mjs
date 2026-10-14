@@ -3,6 +3,7 @@ import {
   createCustomerDiningCheckoutDetailsComposition,
 } from "../../apps/api/dist/customer-checkout-details-composition.js";
 import { createPostgresGuestSessionEntryStore } from "../../packages/bop/identity/src/index.ts";
+import { createStorePrivacyNoticeReader } from "../../apps/api/dist/store-receipt-details-source.js";
 export function createInternalCheckoutDetails(resources, entry, diningIdentity) {
   const { scope, transactions, now, credentials } = resources;
   const common = {
@@ -22,6 +23,8 @@ export function createInternalCheckoutDetails(resources, entry, diningIdentity) 
         required: [],
       }),
     },
+    // WP-2423 Q16: the Store's privacy notice link next to the contact fields (none until entered).
+    privacyNotice: createStorePrivacyNoticeReader({ scope, transactions }),
     audit: async (input) => ({
       auditId: credentials.reference(),
       brandId: scope.brandReference,

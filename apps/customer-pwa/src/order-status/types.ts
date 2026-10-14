@@ -41,6 +41,10 @@ export interface OrderStatusSources {
   readonly unpaidCancellations?: readonly UnpaidBatchCancellation[];
   /** WP-2423 Q10: the Store's published phone and address. */
   readonly storeContact?: StoreContactView;
+  /** WP-2423 Q16: whether this order still holds the contact the customer gave (never the value). */
+  readonly contactDetails?: "Stored" | "Removed" | "NotGiven";
+  /** WP-2423 Q16: the Store's privacy notice (absent until its Owner enters one). */
+  readonly privacyNoticeUrl?: string;
   /** WP-2423 Q26: items the kitchen is remaking (open portions per Order item). */
   readonly remakes?: readonly {
     readonly orderItemReference: string;

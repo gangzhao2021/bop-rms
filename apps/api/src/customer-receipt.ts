@@ -21,6 +21,8 @@ interface ReceiptPort {
     financial: CustomerReceiptFinancialView | null;
     /** WP-2423 Q10: the Store's published phone and address (absent when not published). */
     storeContact?: CustomerStoreContact | null;
+    /** WP-2423 Q16: the Store's privacy notice link (absent until the Owner enters one). */
+    privacyNoticeUrl?: string | null;
   }>;
 }
 function financialJson(value: CustomerReceiptFinancialView | null) {
@@ -126,6 +128,10 @@ export class CustomerReceiptHandler {
           orderReference: chain.orderReference,
           ...(view ? { financial: financialJson(view.financial) } : {}),
           ...(view?.storeContact ? { storeContact: storeContactJson(view.storeContact) } : {}),
+          ...(typeof view?.privacyNoticeUrl === "string" &&
+          /^https:\/\/[A-Za-z0-9.-]+(:[0-9]{1,5})?(\/[^\s<>"]*)?$/u.test(view.privacyNoticeUrl)
+            ? { privacyNoticeUrl: view.privacyNoticeUrl }
+            : {}),
           // No current financial, delivery or support source is inferred from immutable history.
           freshnessStatus: "Stale",
           deliveryStatus: "Unavailable",
@@ -158,6 +164,33 @@ export class CustomerReceiptHandler {
                 total: money(snapshot.total),
                 refundedTotal: money(snapshot.refundedTotal),
                 paymentStatus: snapshot.paymentStatus,
+                // WP-2423 Q15: issuer address, registrations, one line per tax type and rate.
+                ...(snapshot.taxDetails
+                  ? {
+                      taxDetails: {
+                        businessAddress: snapshot.taxDetails.businessAddress
+                          ? {
+                              addressLines: [...snapshot.taxDetails.businessAddress.addressLines],
+                              locality: snapshot.taxDetails.businessAddress.locality,
+                              regionCode: snapshot.taxDetails.businessAddress.regionCode,
+                              postalCode: snapshot.taxDetails.businessAddress.postalCode,
+                              countryCode: snapshot.taxDetails.businessAddress.countryCode,
+                            }
+                          : null,
+                        taxRegistrations: snapshot.taxDetails.taxRegistrations.map((item) => ({
+                          label: item.label,
+                          number: item.number,
+                        })),
+                        taxLines: snapshot.taxDetails.taxLines.map((item) => ({
+                          label: item.label,
+                          ratePercent: item.ratePercent,
+                          included: item.included,
+                          amount: money(item.amount),
+                        })),
+                        paymentMethod: snapshot.taxDetails.paymentMethod,
+                      },
+                    }
+                  : {}),
                 ...(snapshot.adjustments
                   ? {
                       adjustments: {

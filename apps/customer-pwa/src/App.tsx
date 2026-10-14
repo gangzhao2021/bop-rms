@@ -1,3 +1,4 @@
+import { createHttpContactRemovalClient } from "./order-status/contact-removal-client.js";
 import { createHttpReceiptClient } from "./receipt/receipt-client.js";
 import { createReceiptController } from "./receipt/receipt-controller.js";
 import type { DiningAdmissionUi } from "./dining/DiningAdmissionPanel.js";
@@ -45,7 +46,8 @@ function HttpOrderStatusRoute({
   const [controller] = useState(() =>
     createOrderStatusController(orderReference, createHttpOrderStatusClient()),
   );
-  return <OrderStatusPage controller={controller} store={store} />;
+  const [contactRemoval] = useState(() => createHttpContactRemovalClient());
+  return <OrderStatusPage controller={controller} store={store} contactRemoval={contactRemoval} />;
 }
 
 function CustomerOrderStatusRoute({

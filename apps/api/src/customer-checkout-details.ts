@@ -40,7 +40,7 @@ export interface CustomerCheckoutDetailsPort {
       csrfCredential: string;
       query: Readonly<{ cartReference: string; cartVersion: number }>;
     }>,
-  ): Promise<CheckoutPolicyPresentation>;
+  ): Promise<CheckoutPolicyPresentation & { readonly privacyNoticeUrl?: string | null }>;
   read?(
     input: Readonly<{
       sessionCredential: string;
@@ -230,7 +230,7 @@ export class CustomerCheckoutDetailsHandler {
         reject(response, "details_service_unavailable");
         return;
       }
-      let result: CheckoutPolicyPresentation;
+      let result: CheckoutPolicyPresentation & { readonly privacyNoticeUrl?: string | null };
       try {
         result = await this.#port.policy(input);
       } catch (error) {
@@ -238,6 +238,7 @@ export class CustomerCheckoutDetailsHandler {
         return;
       }
       try {
+        const hasPrivacy = Object.prototype.hasOwnProperty.call(result, "privacyNoticeUrl");
         const view = readClosedRecord(result, [
           "cartReference",
           "cartVersion",
@@ -245,7 +246,15 @@ export class CustomerCheckoutDetailsHandler {
           "checkedAt",
           "validUntil",
           "documents",
+          ...(hasPrivacy ? ["privacyNoticeUrl"] : []),
         ]);
+        // WP-2423 Q16: only a well-formed https link reaches the customer; otherwise none.
+        const privacyNoticeUrl =
+          typeof view.privacyNoticeUrl === "string" &&
+          view.privacyNoticeUrl.length <= 500 &&
+          /^https:\/\/[A-Za-z0-9.-]+(:[0-9]{1,5})?(\/[^\s<>"]*)?$/u.test(view.privacyNoticeUrl)
+            ? view.privacyNoticeUrl
+            : null;
         const instant = (value: unknown) => {
           if (
             typeof value !== "string" ||
@@ -304,6 +313,7 @@ export class CustomerCheckoutDetailsHandler {
             checkedAt,
             validUntil,
             documents,
+            ...(privacyNoticeUrl === null ? {} : { privacyNoticeUrl }),
           },
         });
       } catch {

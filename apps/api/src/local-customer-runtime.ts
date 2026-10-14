@@ -559,6 +559,20 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
             now,
             allowedOrigin: options.allowedOrigin,
           },
+          // WP-2423 Q16: the order page offers removal of the customer's own contact.
+          ...(options.orderStatus.contactPrivacy === true
+            ? {
+                customerContactRemoval: {
+                  transactions: options.orderStatus.transactions,
+                  binding: options.orderStatus.binding,
+                  scope,
+                  credentials: entry.session.credentials,
+                  now,
+                  newReference: options.uuidV7Factory,
+                  allowedOrigin: options.allowedOrigin,
+                },
+              }
+            : {}),
           customerOrderStatus: {
             ...options.orderStatus,
             // WP-2423 Q10: status shows the Store's published phone and address.

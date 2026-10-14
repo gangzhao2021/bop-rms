@@ -26,6 +26,10 @@ import type { PlatformAuthenticationHttpOptions } from "./platform-authenticatio
 import type { PlatformTemplateAdministrationHttpOptions } from "./platform-template-administration-http.js";
 import { createCustomerReceiptRead } from "./customer-receipt-read.js";
 import { CustomerReceiptHandler } from "./customer-receipt.js";
+import {
+  createCustomerContactRemoval,
+  createCustomerContactRemovalHandler,
+} from "./customer-contact-removal.js";
 import { createCustomerOrderStatusRead } from "./customer-order-status-read.js";
 import { createCustomerDiningSessionRead } from "./customer-dining-session-read.js";
 import { CustomerDiningSessionHandler } from "./customer-dining-session.js";
@@ -126,6 +130,10 @@ export interface ApiServerRuntimeOptions {
   customerPaymentHandoff?: CustomerPaymentHandoffRuntimeOptions;
   customerPaymentResult?: CustomerPaymentResultRuntimeOptions;
   customerReceipt?: Parameters<typeof createCustomerReceiptRead>[0] & { allowedOrigin: string };
+  /** WP-2423 Q16: "Remove my contact details" on the customer's own order page. */
+  customerContactRemoval?: Parameters<typeof createCustomerContactRemoval>[0] & {
+    allowedOrigin: string;
+  };
   customerSessionBootstrap?: Parameters<typeof createCustomerSessionBootstrapRead>[0] & {
     allowedOrigin: string;
   };
@@ -204,6 +212,7 @@ export function createApiServerRuntime({
   customerSessionBootstrap,
   customerPickupCode,
   customerReceipt,
+  customerContactRemoval,
   healthReadiness = new HealthReadinessController(),
   host = "127.0.0.1",
   logger = createApiRuntimeLogger(),
@@ -334,6 +343,14 @@ export function createApiServerRuntime({
           customerReceipt: new CustomerReceiptHandler({
             allowedOrigin: customerReceipt.allowedOrigin,
             port: createCustomerReceiptRead(customerReceipt),
+          }),
+        }),
+    ...(customerContactRemoval === undefined
+      ? {}
+      : {
+          customerContactRemoval: createCustomerContactRemovalHandler({
+            allowedOrigin: customerContactRemoval.allowedOrigin,
+            port: createCustomerContactRemoval(customerContactRemoval),
           }),
         }),
     ...(customerSessionBootstrap === undefined

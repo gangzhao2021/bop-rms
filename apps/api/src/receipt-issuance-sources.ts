@@ -48,6 +48,15 @@ export function createReceiptIssuanceSources(options: {
     tx: ConsumerTransaction,
     request: Scope & Request & { currencyCode: string },
   ): Promise<Evidence & { template: OriginalReceiptSources["template"] }>;
+  /**
+   * WP-2423 Q15: the Store's published address and the registration numbers its Owner entered,
+   * frozen into the receipt (`createStoreReceiptDetailsSource`). Absent only in compositions that
+   * predate Q15; their receipts carry no tax details block.
+   */
+  receiptDetails?(
+    tx: ConsumerTransaction,
+    request: { observedAt: string; locale: string },
+  ): Promise<NonNullable<OriginalReceiptSources["receiptDetails"]>>;
 }) {
   const scope = {
     brandReference: String(parseOrderingReference(options.scope.brandReference)),
@@ -108,7 +117,16 @@ export function createReceiptIssuanceSources(options: {
       const template = evidence(
         await options.template(tx, { ...request, currencyCode: store.currencyCode }),
       );
+      const receiptDetails =
+        options.receiptDetails === undefined
+          ? undefined
+          : await options.receiptDetails(tx, {
+              observedAt: request.observedAt,
+              locale: template.template.locale,
+            });
+      await authorize();
       const snapshot = createOriginalReceiptSnapshotFromCurrentOrder({
+        ...(receiptDetails === undefined ? {} : { receiptDetails }),
         order,
         receiptReference: request.receiptReference,
         issuedAt: request.observedAt,
@@ -131,8 +149,9 @@ export function createReceiptIssuanceSources(options: {
       });
       await authorize();
       const content = JSON.parse(
-        JSON.stringify({ snapshot, issuer, store, financial, template }, (_key, item) =>
-          typeof item === "bigint" ? item.toString() : item,
+        JSON.stringify(
+          { snapshot, issuer, store, financial, template, receiptDetails },
+          (_key, item) => (typeof item === "bigint" ? item.toString() : item),
         ),
       );
       return Object.freeze({

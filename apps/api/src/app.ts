@@ -1,4 +1,8 @@
 import {
+  createCustomerContactRemovalHandler,
+  customerContactRemovalRoute,
+} from "./customer-contact-removal.js";
+import {
   createCustomerSessionBootstrapHandler,
   customerSessionBootstrapRoute,
 } from "./customer-session-bootstrap.js";
@@ -149,6 +153,8 @@ export interface AppOptions {
   customerSessionBootstrap?: ReturnType<typeof createCustomerSessionBootstrapHandler>;
   customerPickupCode?: CustomerPickupCodeHandler;
   customerReceipt?: CustomerReceiptHandler;
+  /** WP-2423 Q16: the customer removes their own pickup contact from the order page. */
+  customerContactRemoval?: RequestHandler;
   customerCheckoutDetails?: CustomerCheckoutDetailsHandler;
   deploymentEnvironment?: DeploymentEnvironment;
   errorLogger?: RequestErrorLogger;
@@ -224,6 +230,7 @@ export function createApp({
   customerSessionBootstrap,
   customerPickupCode,
   customerReceipt,
+  customerContactRemoval,
   customerCheckoutDetails,
   deploymentEnvironment = "development",
   errorLogger,
@@ -370,6 +377,11 @@ export function createApp({
     customerPickupCode?.handler() ?? unavailableCustomerPickupCodeHandler,
   );
   app.get(customerReceiptRoute, customerReceipt?.handler() ?? unavailableCustomerReceiptHandler);
+  app.post(
+    customerContactRemovalRoute,
+    customerContactRemoval ??
+      createCustomerContactRemovalHandler({ allowedOrigin: "https://127.0.0.1" }),
+  );
   app.get(
     customerOrderStatusRoute,
     customerOrderStatus?.handler() ?? unavailableCustomerOrderStatusHandler,

@@ -97,6 +97,8 @@ export async function createRuntime(
         },
         transactions: resources.transactions,
         binding: (tx) => configuredEntry.binding({ run: (work) => work(tx) }),
+        // WP-2423 Q16: the receipt links the Store's privacy notice once its Owner entered one.
+        privacyNotice: true,
       },
       orderStatus: {
         diningScope: {
@@ -106,6 +108,8 @@ export async function createRuntime(
         transactions: resources.transactions,
         binding: (tx) => configuredEntry.binding({ run: (work) => work(tx) }),
         paymentScope: { ...resources.scope, providerAccountReference, environment: "Test" },
+        // WP-2423 Q16: the order page offers "Remove my contact details" and the privacy notice.
+        contactPrivacy: true,
         itemRefundScope: {
           tenantReference: resources.publicProfile.binding.tenantReference,
           providerAccountReference,

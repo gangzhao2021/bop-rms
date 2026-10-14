@@ -30,8 +30,11 @@ import {
   createPostgresOrderStatusProjectionStore,
   OrderStatusProjectionError,
   parseOrderingReference,
+  readCheckoutContactPresence,
   type CartQueryTransactionRunner,
+  type CheckoutContactPresence,
 } from "@rms/ordering";
+import { readCurrentStoreReceiptProfile } from "@rms/store";
 import type { CustomerCheckoutSessionAuthorizationOptions } from "./customer-checkout-session-authorization.js";
 import type { PersistentPublicStoreProfileOptions } from "./persistent-public-store-profile.js";
 import { readCustomerStoreContact, type CustomerStoreContact } from "./customer-store-contact.js";
@@ -73,6 +76,11 @@ export function createCustomerOrderStatusRead(
     };
     /** WP-2423 Q10: the Store's published phone and address, shown with the order. */
     readonly publicProfile?: PersistentPublicStoreProfileOptions;
+    /**
+     * WP-2423 Q16: say whether this Session's order still holds a contact the customer can remove,
+     * and link the Store's privacy notice (Store receipt profile) when its Owner entered one.
+     */
+    readonly contactPrivacy?: boolean;
     readonly transactions: {
       run<T>(work: (transaction: ConsumerTransaction) => Promise<T>): Promise<T>;
     };
@@ -416,6 +424,17 @@ export function createCustomerOrderStatusRead(
               },
               now(),
             );
+          let contactDetails: CheckoutContactPresence | null = null;
+          let privacyNoticeUrl: string | null = null;
+          if (options.contactPrivacy === true && (await stillAuthorized())) {
+            contactDetails = await readCheckoutContactPresence(transaction, options.scope, {
+              orderReference,
+              guestSessionReference: String(guest.sessionReference),
+            });
+            privacyNoticeUrl =
+              (await readCurrentStoreReceiptProfile(transaction, options.scope))
+                ?.privacyNoticeUrl ?? null;
+          }
           if (!(await stillAuthorized()))
             throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
           const checkedAt = now();
@@ -449,6 +468,8 @@ export function createCustomerOrderStatusRead(
               ...(batchPayments.length === 0 ? {} : { batchPayments }),
               ...(unpaidCancellations.length === 0 ? {} : { unpaidCancellations }),
               ...(storeContact === null ? {} : { storeContact }),
+              ...(contactDetails === null ? {} : { contactDetails }),
+              ...(privacyNoticeUrl === null ? {} : { privacyNoticeUrl }),
               ...(storeAcceptance === null ? {} : { storeAcceptance }),
             },
           };

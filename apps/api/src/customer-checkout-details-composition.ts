@@ -33,6 +33,11 @@ export interface CustomerCheckoutDetailsOptions {
   readonly detailsTransactions: CartQueryTransactionRunner;
   readonly policies: CheckoutDetailsPorts["policies"];
   readonly policyDocuments?: CheckoutPolicyDocumentPort;
+  /**
+   * WP-2423 Q16: the Store's privacy notice link (Store receipt profile), shown next to the contact
+   * fields; `null` until the Owner enters one (the checkout then shows no link).
+   */
+  readonly privacyNotice?: () => Promise<string | null>;
   readonly audit: (
     input: Readonly<{
       brandReference: string;
@@ -101,7 +106,9 @@ function composition(
         },
       }).read(envelope.query);
     },
-    async policy(value: unknown): Promise<CheckoutPolicyPresentation> {
+    async policy(
+      value: unknown,
+    ): Promise<CheckoutPolicyPresentation & { readonly privacyNoticeUrl?: string | null }> {
       const initial = await result.read(value);
       const view = await createCheckoutPolicyPresentationSource({
         now: options.now,
@@ -121,7 +128,9 @@ function composition(
         options.now() >= view.validUntil
       )
         throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
-      return view;
+      return options.privacyNotice === undefined
+        ? view
+        : { ...view, privacyNoticeUrl: await options.privacyNotice() };
     },
     async save(value: unknown) {
       const envelope = readClosedRecord(value, ["sessionCredential", "csrfCredential", "command"]);

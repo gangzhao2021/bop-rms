@@ -21,6 +21,7 @@ import {
 import type { CustomerCheckoutSessionAuthorizationOptions } from "./customer-checkout-session-authorization.js";
 import type { PersistentPublicStoreProfileOptions } from "./persistent-public-store-profile.js";
 import { readCustomerStoreContact, type CustomerStoreContact } from "./customer-store-contact.js";
+import { readCurrentStoreReceiptProfile } from "@rms/store";
 
 /** Side-effect-free receipt retrieval under the same current Guest transaction. */
 export function createCustomerReceiptRead(
@@ -28,6 +29,8 @@ export function createCustomerReceiptRead(
     readonly financial?: CustomerReceiptFinancialOptions;
     /** WP-2423 Q10: the Store's published phone and address for questions about the receipt. */
     readonly publicProfile?: PersistentPublicStoreProfileOptions;
+    /** WP-2423 Q16: link the Store's privacy notice (Store receipt profile) from the receipt. */
+    readonly privacyNotice?: boolean;
     readonly transactions: {
       run<T>(work: (transaction: ConsumerTransaction) => Promise<T>): Promise<T>;
     };
@@ -132,9 +135,14 @@ export function createCustomerReceiptRead(
             },
             now(),
           );
+        let privacyNoticeUrl: string | null = null;
+        if (includeFinancial && options.privacyNotice === true && (await stillAuthorized()))
+          privacyNoticeUrl =
+            (await readCurrentStoreReceiptProfile(transaction, options.scope))?.privacyNoticeUrl ??
+            null;
         if (!(await stillAuthorized()))
           throw new DigitalReceiptError("DIGITAL_RECEIPT_PERMISSION_DENIED");
-        return { chain, financial, storeContact };
+        return { chain, financial, storeContact, privacyNoticeUrl };
       });
     } catch (error) {
       if (error instanceof DigitalReceiptError) throw error;

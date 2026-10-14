@@ -25,7 +25,7 @@ import {
   type StoreSetupReferencePendingJournal,
 } from "./store-setup-reference-pending-journal.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useParams } from "react-router";
 import {
   createStoreSetupClient,
@@ -219,11 +219,14 @@ export function StoreSetupDraftPage({
   csrf,
   client: injected,
   journalFactory = createStoreSetupPendingJournal,
+  children,
 }: {
   readonly storeReference: string;
   readonly csrf: string;
   readonly client?: ReturnType<typeof createStoreSetupClient>;
   readonly journalFactory?: (scope: StoreSetupScope) => StoreSetupPendingJournal;
+  /** Store-level sections shown above the setup steps (WP-2423 Q15/Q16 receipts and privacy). */
+  readonly children?: ReactNode;
 }) {
   const { id } = useParams(),
     client = useMemo(() => injected ?? createStoreSetupClient(), [injected]),
@@ -525,6 +528,7 @@ export function StoreSetupDraftPage({
           <p>Choose this Store in the workspace before opening its setup.</p>
         </StatePanel>
       )}
+      {id === storeReference ? children : null}
       {!online && (
         <p role="status">
           Offline. Your local edits are retained. Reconnect and refresh before saving.

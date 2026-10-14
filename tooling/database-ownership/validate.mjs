@@ -2132,6 +2132,16 @@ async function scanUnsupported(root, module, diagnostics) {
             owner: "ordering",
             tables: ["checkout_details_record", "checkout_contact_redaction"],
           },
+          // WP-2423 Q16: a customer removes their own pickup contact from their order page.
+          "src/infrastructure/persistence/checkout-contact-customer-removal-store.ts": {
+            owner: "ordering",
+            tables: [
+              "order_submission_record",
+              "order_checkout_details_link",
+              "checkout_details_record",
+              "checkout_contact_redaction",
+            ],
+          },
           // WP-2423 Q12: unpaid pickup Orders closed after the payment window (System termination).
           "src/infrastructure/persistence/pickup-payment-window-closure-store.ts": {
             owner: "ordering",
@@ -3214,6 +3224,12 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "rms_store" &&
           module.manifest.ownedDatabase?.tables?.includes("store_presence_session") &&
           moduleRelative === "src/infrastructure/persistence/store-presence-store.ts";
+        // WP-2423 Q15/Q16: the Store's receipt registration numbers and privacy notice link.
+        const acceptedStoreReceiptProfileAsset =
+          module.packageName === "@rms/store" &&
+          module.manifest.ownedDatabase?.schema === "rms_store" &&
+          module.manifest.ownedDatabase?.tables?.includes("store_receipt_profile") &&
+          moduleRelative === "src/infrastructure/persistence/store-receipt-profile-store.ts";
         const acceptedOrderPaymentWaitAsset =
           module.packageName === "@rms/ordering" &&
           module.manifest.ownedDatabase?.schema === "rms_ordering" &&
@@ -3496,6 +3512,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedDiningTableQrAsset &&
           !acceptedOrderAcceptanceHoldAsset &&
           !acceptedStorePresenceAsset &&
+          !acceptedStoreReceiptProfileAsset &&
           !acceptedDiningSessionStartAsset &&
           !acceptedDiningJoinRegenerationAsset &&
           !acceptedDiningSessionJoinAsset &&

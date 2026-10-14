@@ -21,6 +21,8 @@ describe("receipt issuance source boundary", () => {
       authorize: async () => false,
       order: read,
       template: read,
+      // WP-2423 Q15: the Store's receipt details are an owner read like the others.
+      receiptDetails: read,
     });
     await expect(source({ query }, request)).rejects.toMatchObject({
       code: "DIGITAL_RECEIPT_PERMISSION_DENIED",

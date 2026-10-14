@@ -1,3 +1,4 @@
+import { PrivacyNoticeLink } from "../journey/PrivacyNotice.js";
 import {
   useCallback,
   useEffect,
@@ -252,7 +253,14 @@ export function CheckoutDetailsForm({
           {selection.orderType === "Pickup" ? (
             <p className="checkout-details-form__hint">
               The store uses this only to contact you about this order, for example if an item sold
-              out.
+              out. It is deleted 30 days after your order, and you can remove it sooner from your
+              order page.
+              {policy.privacyNoticeUrl ? (
+                <>
+                  {" "}
+                  <PrivacyNoticeLink url={policy.privacyNoticeUrl} />
+                </>
+              ) : null}
             </p>
           ) : null}
           {draft.pickupContact !== null ? (

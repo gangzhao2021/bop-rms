@@ -4,6 +4,7 @@ import {
   type ProductLifecycleTransaction,
 } from "@rms/catalog";
 import { listStoreTaxClassifications, loadStoreTaxConfigurationSummary } from "@rms/pricing";
+import { readCurrentStoreReceiptProfile, storeReceiptProfileSetupGaps } from "@rms/store";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -101,9 +102,14 @@ export function createMerchantStoreTax(options: {
                 { kind: "ProfessionalEvidence", at: configuration.professionalEvidenceValidUntil },
               ].filter((end): end is { kind: string; at: string } => end.at !== null);
         const firstEnd = ends.sort((a, b) => (a.at < b.at ? -1 : 1))[0] ?? null;
+        // WP-2423 Q15/Q16: what customer receipts and checkout still lack (never the numbers).
+        const receiptSetup = storeReceiptProfileSetupGaps(
+          await readCurrentStoreReceiptProfile(tx as never, owner),
+        );
         return {
           screenId: "TAX-STORE-REVIEW" as const,
           sourceAsOf: at,
+          receiptSetup,
           configuration:
             configuration === null
               ? null

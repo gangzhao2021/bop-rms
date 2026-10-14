@@ -1633,3 +1633,37 @@
 .pickup-code__wait {
   font-weight: 600;
 }
+
+/* ---------- WP-2423 Q15/Q16 receipt tax details and privacy link ---------- */
+.receipt-page__address {
+  display: grid;
+  font-style: normal;
+  margin: 0 0 var(--bop-space-2);
+}
+.receipt-page__privacy {
+  margin: var(--bop-space-3) 0;
+}
+.privacy-notice-link {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}
+.contact-details {
+  display: grid;
+  gap: var(--bop-space-2);
+  margin-block: var(--bop-space-4);
+}
+.contact-details h2 {
+  margin: 0;
+  font-size: 1.0625rem;
+}
+.contact-details p {
+  margin: 0;
+}
+.contact-details__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--bop-space-2);
+  margin-top: var(--bop-space-2);
+}

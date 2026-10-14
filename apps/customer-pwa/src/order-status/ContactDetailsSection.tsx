@@ -1,0 +1,100 @@
+import { useState } from "react";
+import { PrivacyNoticeLink } from "../journey/PrivacyNotice.js";
+import { ContactRemovalError, type ContactRemovalClient } from "./contact-removal-client.js";
+
+/**
+ * WP-2423 Q16 (DEC-RECEIPT-TAX-AND-PRIVACY): the customer's own contact details on the order page —
+ * what the Store keeps, for how long, and a way to remove it now. Shown only while this visit can
+ * still act on the order; never shows the phone number or email itself.
+ */
+export function ContactDetailsSection({
+  orderReference,
+  contactDetails,
+  privacyNoticeUrl,
+  storeName,
+  client,
+  onChanged,
+}: {
+  readonly orderReference: string;
+  readonly contactDetails: "Stored" | "Removed" | "NotGiven" | undefined;
+  readonly privacyNoticeUrl: string | undefined;
+  readonly storeName: string | undefined;
+  readonly client: ContactRemovalClient | undefined;
+  readonly onChanged: () => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ tone: "status" | "alert"; text: string } | null>(null);
+  const store = storeName ?? "The store";
+  if (contactDetails === undefined || (contactDetails === "NotGiven" && !privacyNoticeUrl))
+    return null;
+  const remove = async () => {
+    if (busy || client === undefined) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const result = await client.remove(orderReference);
+      setConfirming(false);
+      setMessage({
+        tone: "status",
+        text:
+          result === "NotGiven"
+            ? "There were no contact details on this order."
+            : "Your contact details were removed from this order.",
+      });
+      onChanged();
+    } catch (error) {
+      setMessage({
+        tone: "alert",
+        text:
+          error instanceof ContactRemovalError && error.code === "VisitEnded"
+            ? "Your visit on this phone has ended, so this can't be changed here. Ask a staff member to remove your contact details."
+            : "Your contact details could not be removed right now. Check your connection and try again.",
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="contact-details" aria-labelledby="contact-details-heading">
+      <h2 id="contact-details-heading">Your contact details</h2>
+      {contactDetails === "Stored" ? (
+        <>
+          <p>
+            {store} keeps the phone number or email you gave only to contact you about this order,
+            and deletes it 30 days after your order.
+          </p>
+          {client !== undefined && !confirming ? (
+            <button type="button" onClick={() => setConfirming(true)}>
+              Remove my contact details
+            </button>
+          ) : null}
+          {confirming ? (
+            <div className="contact-details__confirm" role="group" aria-label="Confirm removal">
+              <p>
+                Remove them now? The store won't be able to call or email you about this order. You
+                can still collect it by showing your order number.
+              </p>
+              <div className="contact-details__actions">
+                <button type="button" disabled={busy} onClick={() => void remove()}>
+                  {busy ? "Removing…" : "Remove now"}
+                </button>
+                <button type="button" disabled={busy} onClick={() => setConfirming(false)}>
+                  Keep them
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </>
+      ) : contactDetails === "Removed" ? (
+        <p>Your contact details have been removed from this order.</p>
+      ) : null}
+      {message ? <p role={message.tone === "alert" ? "alert" : "status"}>{message.text}</p> : null}
+      {privacyNoticeUrl ? (
+        <p>
+          <PrivacyNoticeLink url={privacyNoticeUrl} />
+        </p>
+      ) : null}
+    </section>
+  );
+}

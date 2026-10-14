@@ -1,4 +1,5 @@
 import { createPersistentReceiptRuntime } from "../../apps/api/dist/persistent-receipt-runtime.js";
+import { createStoreReceiptDetailsSource } from "../../apps/api/dist/store-receipt-details-source.js";
 import { isPilotRuntime, matchesPilotEnvironment } from "./pilot-environment.mjs";
 export async function createInternalReceipt(
   resources,
@@ -21,7 +22,15 @@ export async function createInternalReceipt(
     r.storeReference === scope.storeReference;
   return createPersistentReceiptRuntime({
     transactions,
-    sources: { scope, authorize },
+    sources: {
+      scope,
+      authorize,
+      // WP-2423 Q15: the Store's published address and the registrations its Owner entered.
+      receiptDetails: createStoreReceiptDetailsSource({
+        scope: resources.scope,
+        publicProfile: resources.publicProfile,
+      }),
+    },
     template: {
       store: { ...resources.operating, authorize: async () => active() },
       templatePublication: {

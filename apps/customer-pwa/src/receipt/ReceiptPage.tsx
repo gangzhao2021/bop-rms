@@ -10,10 +10,26 @@ import type { ReceiptMoneyView, ReceiptRecordView, ReceiptView } from "./types.j
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import { formatDateTime, formatMoney } from "../journey/format.js";
 import { StoreContactCard } from "../journey/StoreContact.js";
+import { PrivacyNoticeLink } from "../journey/PrivacyNotice.js";
 
 function money(value: ReceiptMoneyView): string {
   return formatMoney(value.amountMinor, value.currencyCode);
 }
+
+/** Customer words for the payment state, never the internal code. */
+const paymentStatusText: Record<ReceiptRecordView["snapshot"]["paymentStatus"], string> = {
+  Paid: "Paid",
+  RefundPending: "Refund in progress",
+  PartiallyRefunded: "Partly refunded",
+  Refunded: "Refunded",
+};
+const kindText: Record<ReceiptRecordView["kind"], string> = {
+  Original: "Receipt",
+  Correction: "Corrected receipt",
+  Void: "Voided",
+  Refund: "Refund",
+  Reissue: "Reissued receipt",
+};
 
 function ReceiptVersion({ record }: { readonly record: ReceiptRecordView }) {
   const snapshot = record.snapshot;
@@ -23,7 +39,7 @@ function ReceiptVersion({ record }: { readonly record: ReceiptRecordView }) {
       aria-labelledby={`receipt-version-${record.version}`}
     >
       <h2 id={`receipt-version-${record.version}`}>
-        Version {record.version}: {record.kind}
+        Version {record.version}: {kindText[record.kind]}
       </h2>
       <p>Recorded {formatDateTime(record.recordedAt, snapshot.locale)}</p>
       {record.reasonCode ? <p>Reason: {record.reasonCode.replaceAll("_", " ")}</p> : null}
@@ -54,10 +70,22 @@ function ReceiptVersion({ record }: { readonly record: ReceiptRecordView }) {
           <dt>Subtotal</dt>
           <dd>{money(snapshot.subtotal)}</dd>
         </div>
-        <div>
-          <dt>Tax</dt>
-          <dd>{money(snapshot.tax)}</dd>
-        </div>
+        {/* WP-2423 Q15: each tax type and rate on its own line, from the order's tax snapshot. */}
+        {snapshot.taxDetails && snapshot.taxDetails.taxLines.length > 0 ? (
+          snapshot.taxDetails.taxLines.map((line) => (
+            <div key={line.label + line.ratePercent + String(line.included)}>
+              <dt>
+                {line.label} {line.ratePercent}%{line.included ? " (included in prices)" : ""}
+              </dt>
+              <dd>{money(line.amount)}</dd>
+            </div>
+          ))
+        ) : (
+          <div>
+            <dt>Tax</dt>
+            <dd>{money(snapshot.tax)}</dd>
+          </div>
+        )}
         <div>
           <dt>Tip</dt>
           <dd>{money(snapshot.tip)}</dd>
@@ -68,7 +96,10 @@ function ReceiptVersion({ record }: { readonly record: ReceiptRecordView }) {
         </div>
         <div>
           <dt>Payment</dt>
-          <dd>{snapshot.paymentStatus}</dd>
+          <dd>
+            {snapshot.taxDetails?.paymentMethod === "Card" ? "Card · " : ""}
+            {paymentStatusText[snapshot.paymentStatus]}
+          </dd>
         </div>
         <div>
           <dt>Refunded</dt>
@@ -95,6 +126,24 @@ function ReceiptContent({
         <h2 id="receipt-merchant-heading">Merchant and order</h2>
         <p>{current.operatingEntityDisplayName}</p>
         <p>{current.storeDisplayName}</p>
+        {/* WP-2423 Q15: the address and registrations frozen when the receipt was issued. */}
+        {current.taxDetails?.businessAddress ? (
+          <address className="receipt-page__address">
+            {current.taxDetails.businessAddress.addressLines.map((line) => (
+              <span key={line}>{line}</span>
+            ))}
+            <span>
+              {current.taxDetails.businessAddress.locality}{" "}
+              {current.taxDetails.businessAddress.regionCode}{" "}
+              {current.taxDetails.businessAddress.postalCode}
+            </span>
+          </address>
+        ) : null}
+        {current.taxDetails?.taxRegistrations.map((registration) => (
+          <p key={registration.label}>
+            {registration.label} registration no. {registration.number}
+          </p>
+        ))}
         <p>Order {current.orderNumber}</p>
         <p>Issued {formatDateTime(current.issuedAt, current.locale)}</p>
       </section>
@@ -171,6 +220,13 @@ function ReceiptContent({
           <p>Ask a staff member at {current.storeDisplayName}.</p>
         </section>
       )}
+      {/* WP-2423 Q16: the Store's own privacy notice, only once its Owner has entered one. */}
+      {view.privacyNoticeUrl ? (
+        <p className="receipt-page__privacy">
+          How {current.storeDisplayName} handles your contact details:{" "}
+          <PrivacyNoticeLink url={view.privacyNoticeUrl} />
+        </p>
+      ) : null}
       <section className="receipt-page__action-card" aria-labelledby="receipt-actions-heading">
         <h2 id="receipt-actions-heading">Keep a copy</h2>
         <div className="receipt-page__actions">

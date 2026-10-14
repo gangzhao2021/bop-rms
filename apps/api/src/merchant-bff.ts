@@ -222,6 +222,10 @@ import {
   type createMerchantSoleOperator,
   MerchantSoleOperatorError,
 } from "./merchant-sole-operator-setting.js";
+import {
+  MerchantStoreReceiptProfileError,
+  type createMerchantStoreReceiptProfile,
+} from "./merchant-store-receipt-profile.js";
 import type { createMerchantOrdinaryRefundDecline } from "./merchant-ordinary-refund-decline.js";
 import type { createMerchantOrdinaryRefundProgress } from "./merchant-ordinary-refund-progress.js";
 import type { createMerchantKitchenCommand } from "./merchant-kitchen-command.js";
@@ -589,6 +593,8 @@ export interface MerchantBffRouterOptions {
   readonly ordinaryRefundApprovals?: ReturnType<typeof createMerchantOrdinaryRefundApprovals>;
   /** WP-2423 Q19: the Brand Owner's sole-operator setting (read and turn on/off). */
   readonly soleOperator?: ReturnType<typeof createMerchantSoleOperator>;
+  /** WP-2423 Q15/Q16: the Store's receipt registration numbers and privacy notice link. */
+  readonly storeReceiptProfile?: ReturnType<typeof createMerchantStoreReceiptProfile>;
   readonly kitchenQuery?: ReturnType<typeof createMerchantKitchenQuery>;
   readonly kitchenCommand?: ReturnType<typeof createMerchantKitchenCommand>;
   readonly kitchenRelease?: ReturnType<typeof createMerchantKitchenRelease>;
@@ -4846,6 +4852,80 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           return;
         }
         denied(response);
+      });
+  });
+
+  // WP-2423 Q15/Q16 (DEC-RECEIPT-TAX-AND-PRIVACY): receipt registrations and privacy link.
+  router.get("/store/receipt-profile", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    if (
+      request.method !== "GET" ||
+      request.body !== undefined ||
+      sessionCookie === null ||
+      Object.keys(request.query).length !== 0 ||
+      rawHeaderValues(request, "origin").length > 1 ||
+      rawHeaderValues(request, "sec-fetch-site").length !== 1
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.storeReceiptProfile) {
+      response.status(503).json({ error: "receipt_profile_unavailable" });
+      return;
+    }
+    const port = options.storeReceiptProfile;
+    void retryTransactionConflict(() => port.read({ sessionCookie }))
+      .then((view) => response.set("Cache-Control", NO_STORE).json(view))
+      .catch((error: unknown) => {
+        if (error instanceof MerchantStoreReceiptProfileError && error.code === "Denied") {
+          denied(response);
+          return;
+        }
+        response
+          .status(503)
+          .set("Cache-Control", NO_STORE)
+          .set("Retry-After", "5")
+          .json({ error: "receipt_profile_unavailable" });
+      });
+  });
+  router.post("/store/receipt-profile", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    const command = options.storeReceiptProfile;
+    if (!command) {
+      response.status(503).json({ error: "receipt_profile_unavailable" });
+      return;
+    }
+    void command({ sessionCookie, csrf, command: request.body })
+      .then((result) =>
+        response.set("Cache-Control", NO_STORE).json({
+          status: result.status,
+          version: result.version,
+          recordedAt: result.recordedAt,
+          gaps: result.gaps,
+        }),
+      )
+      .catch((error: unknown) => {
+        response.set("Cache-Control", NO_STORE);
+        if (!(error instanceof MerchantStoreReceiptProfileError)) {
+          response.status(503).json({ error: "receipt_profile_unavailable" });
+          return;
+        }
+        if (error.code === "Denied") response.status(403).json({ error: "owner_required" });
+        else if (error.code === "VersionConflict")
+          response.status(409).json({ error: "profile_changed" });
+        else if (error.code === "NoChange") response.status(409).json({ error: "no_change" });
+        else if (error.code === "Invalid") response.status(422).json({ error: "invalid_details" });
+        else response.status(503).json({ error: "receipt_profile_unavailable" });
       });
   });
 

@@ -77,6 +77,9 @@ it("reviews the Store's tax classes per product and refuses menus with untaxable
         "CREATE ROLE " + role + " NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
       );
       for (const sql of productApiGrants) await admin.query(sql.replaceAll("ROLE_", role));
+      // WP-2423 Q15/Q16 pilot grant: the review says what customer receipts still lack.
+      await admin.query("GRANT USAGE ON SCHEMA rms_store TO " + role);
+      await admin.query("GRANT SELECT ON rms_store.store_receipt_profile TO " + role);
       const persistence = {
         now,
         transactions: {
@@ -143,6 +146,11 @@ it("reviews the Store's tax classes per product and refuses menus with untaxable
 
       const review = await tax.query(session);
       assert.equal(review.screenId, "TAX-STORE-REVIEW");
+      // Nothing entered yet: receipts lack a registration and checkout lacks a privacy link.
+      assert.deepEqual(review.receiptSetup, {
+        taxRegistrationMissing: true,
+        privacyNoticeMissing: true,
+      });
       assert.equal(review.configuration.stableCode, "TEST_STORE_TAX");
       assert.equal(review.configuration.jurisdictionCode, "CA-ON");
       assert.equal(review.configuration.testOnly, true);

@@ -4,6 +4,7 @@ import {
 } from "../session/customer-transaction-context.js";
 import { requestCheckoutMutation } from "./checkout-client.js";
 import { CheckoutDetailsClientError, type DetailsFailure } from "./details-client.js";
+import { parsePrivacyNoticeUrl } from "../journey/PrivacyNotice.js";
 import type { CheckoutDetailsReadSelection } from "./details-read-client.js";
 
 export interface CheckoutPolicyDocument {
@@ -18,6 +19,8 @@ export interface CheckoutPolicyView extends CheckoutDetailsReadSelection {
   readonly checkedAt: string;
   readonly validUntil: string;
   readonly documents: readonly CheckoutPolicyDocument[];
+  /** WP-2423 Q16: the Store's privacy notice link (absent until its Owner enters one). */
+  readonly privacyNoticeUrl?: string;
 }
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 function exact(value: unknown, fields: readonly string[]): Record<string, unknown> {
@@ -105,6 +108,10 @@ export function createCheckoutPolicyClient(now: () => number = Date.now) {
           throw new Error("policy unavailable");
         }
         const root = exact(payload, ["schemaVersion", "policy"]);
+        const hasPrivacy =
+          root.policy !== null &&
+          typeof root.policy === "object" &&
+          Object.hasOwn(root.policy, "privacyNoticeUrl");
         const view = exact(root.policy, [
           "cartReference",
           "cartVersion",
@@ -112,7 +119,11 @@ export function createCheckoutPolicyClient(now: () => number = Date.now) {
           "checkedAt",
           "validUntil",
           "documents",
+          ...(hasPrivacy ? ["privacyNoticeUrl"] : []),
         ]);
+        const privacyNoticeUrl = hasPrivacy
+          ? parsePrivacyNoticeUrl(view.privacyNoticeUrl)
+          : undefined;
         const checkedAt = instant(view.checkedAt),
           validUntil = instant(view.validUntil);
         const observed = now();
@@ -173,6 +184,7 @@ export function createCheckoutPolicyClient(now: () => number = Date.now) {
           checkedAt,
           validUntil,
           documents: Object.freeze(documents),
+          ...(privacyNoticeUrl === undefined ? {} : { privacyNoticeUrl }),
         });
       } catch {
         throw new CheckoutDetailsClientError(failure);

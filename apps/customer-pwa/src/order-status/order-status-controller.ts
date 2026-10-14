@@ -1,3 +1,4 @@
+import { parsePrivacyNoticeUrl } from "../journey/PrivacyNotice.js";
 import { parseStoreContact } from "../journey/StoreContact.js";
 import type {
   OrderStatusSources,
@@ -178,6 +179,12 @@ function parseSources(
       : []),
     ...(value !== null && typeof value === "object" && Object.hasOwn(value, "storeAcceptance")
       ? ["storeAcceptance"]
+      : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "contactDetails")
+      ? ["contactDetails"]
+      : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "privacyNoticeUrl")
+      ? ["privacyNoticeUrl"]
       : []),
     ...(value !== null && typeof value === "object" && Object.hasOwn(value, "remakes")
       ? ["remakes"]
@@ -539,6 +546,25 @@ function parseSources(
     ...(batchPayments === undefined ? {} : { batchPayments }),
     ...(unpaidCancellations === undefined ? {} : { unpaidCancellations }),
     ...(storeAcceptance === undefined ? {} : { storeAcceptance }),
+    // WP-2423 Q16: contact still held (never its value) and the Store's privacy notice.
+    ...(Object.hasOwn(raw, "contactDetails")
+      ? {
+          contactDetails: ["Stored", "Removed", "NotGiven"].includes(String(raw.contactDetails))
+            ? (raw.contactDetails as "Stored" | "Removed" | "NotGiven")
+            : invalid(),
+        }
+      : {}),
+    ...(Object.hasOwn(raw, "privacyNoticeUrl")
+      ? {
+          privacyNoticeUrl: (() => {
+            try {
+              return parsePrivacyNoticeUrl(raw.privacyNoticeUrl);
+            } catch {
+              return invalid();
+            }
+          })(),
+        }
+      : {}),
     // WP-2423 Q10: the Store's published phone and address.
     ...(Object.hasOwn(raw, "storeContact")
       ? {

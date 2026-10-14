@@ -28,6 +28,26 @@ export interface ReceiptSnapshotView {
   readonly total: ReceiptMoneyView;
   readonly paymentStatus: ReceiptPaymentStatus;
   readonly refundedTotal: ReceiptMoneyView;
+  /** WP-2423 Q15: issuer address, registrations and one line per tax (absent on older receipts). */
+  readonly taxDetails?: ReceiptTaxDetailsView;
+}
+
+export interface ReceiptTaxDetailsView {
+  readonly businessAddress: {
+    readonly addressLines: readonly string[];
+    readonly locality: string;
+    readonly regionCode: string;
+    readonly postalCode: string;
+    readonly countryCode: string;
+  } | null;
+  readonly taxRegistrations: readonly { readonly label: string; readonly number: string }[];
+  readonly taxLines: readonly {
+    readonly label: string;
+    readonly ratePercent: string;
+    readonly included: boolean;
+    readonly amount: ReceiptMoneyView;
+  }[];
+  readonly paymentMethod: "Card";
 }
 
 export interface ReceiptRecordView {
@@ -51,6 +71,8 @@ export interface ReceiptView {
   readonly financial?: ReceiptFinancialView | null;
   /** WP-2423 Q10: the Store's published phone and address. */
   readonly storeContact?: StoreContactView;
+  /** WP-2423 Q16: the Store's privacy notice (absent until its Owner enters one). */
+  readonly privacyNoticeUrl?: string;
   readonly orderReference: string;
   readonly freshnessStatus: "Fresh" | "Stale";
   readonly deliveryStatus:

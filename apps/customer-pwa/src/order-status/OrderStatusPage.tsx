@@ -16,6 +16,8 @@ import type { PickupCodeController } from "../pickup-code/pickup-code-controller
 import { CustomerPage, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import { formatClockTime, formatMoney } from "../journey/format.js";
 import { StoreContactCard } from "../journey/StoreContact.js";
+import { ContactDetailsSection } from "./ContactDetailsSection.js";
+import type { ContactRemovalClient } from "./contact-removal-client.js";
 
 /** How often an active order re-reads its status when no live connection is available. */
 export const orderStatusPollIntervalMs = 15_000;
@@ -514,10 +516,13 @@ export function OrderStatusPage({
   controller: provided,
   pickupController,
   store,
+  contactRemoval,
 }: {
   readonly controller?: OrderStatusController;
   readonly pickupController?: PickupCodeController | undefined;
   readonly store?: CustomerStoreContext | undefined;
+  /** WP-2423 Q16: removes the customer's own contact details (absent: no removal button). */
+  readonly contactRemoval?: ContactRemovalClient | undefined;
 }) {
   const { orderReference = "" } = useParams();
   const [controller] = useState(
@@ -660,6 +665,16 @@ export function OrderStatusPage({
       ) : null}
       {view?.sources?.storeContact ? (
         <StoreContactCard contact={view.sources.storeContact} storeName={store?.storeName} />
+      ) : null}
+      {view && state.status === "ready" ? (
+        <ContactDetailsSection
+          orderReference={view.order.orderReference}
+          contactDetails={view.sources?.contactDetails}
+          privacyNoticeUrl={view.sources?.privacyNoticeUrl}
+          storeName={store?.storeName}
+          client={contactRemoval}
+          onChanged={() => void controller.refresh()}
+        />
       ) : null}
       {view?.order.orderType === "DineIn" ? (
         // WP-2423 Q8: every round at the table, including other guests', and what is still due.

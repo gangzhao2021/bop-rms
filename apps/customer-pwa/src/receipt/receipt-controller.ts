@@ -1,5 +1,11 @@
 import { parseStoreContact } from "../journey/StoreContact.js";
-import type { ReceiptRecordKind, ReceiptState, ReceiptView } from "./types.js";
+import { parsePrivacyNoticeUrl } from "../journey/PrivacyNotice.js";
+import type {
+  ReceiptRecordKind,
+  ReceiptState,
+  ReceiptTaxDetailsView,
+  ReceiptView,
+} from "./types.js";
 
 export type ReceiptClientErrorCode =
   "permission_denied" | "not_found" | "feature_disabled" | "service_unavailable";
@@ -100,6 +106,7 @@ function record(value: unknown, expectedVersion: number) {
     "paymentStatus",
     "refundedTotal",
     ...(Object.hasOwn(raw.snapshot, "adjustments") ? ["adjustments"] : []),
+    ...(Object.hasOwn(raw.snapshot, "taxDetails") ? ["taxDetails"] : []),
   ]);
   const amount = (candidate: unknown) => {
     const money = exact(candidate, ["amountMinor", "currencyCode"]);
@@ -169,7 +176,84 @@ function record(value: unknown, expectedVersion: number) {
         fee: amount(adjustmentRaw.fee),
       })
     : undefined;
+  const text = (candidate: unknown, maximum: number) =>
+    typeof candidate === "string" && candidate.length >= 1 && candidate.length <= maximum
+      ? candidate
+      : invalid();
+  const taxDetailsRaw = Object.hasOwn(snapshot, "taxDetails")
+    ? exact(snapshot.taxDetails, [
+        "businessAddress",
+        "taxRegistrations",
+        "taxLines",
+        "paymentMethod",
+      ])
+    : undefined;
+  let taxDetails: ReceiptTaxDetailsView | undefined;
+  if (taxDetailsRaw) {
+    const address =
+      taxDetailsRaw.businessAddress === null
+        ? null
+        : exact(taxDetailsRaw.businessAddress, [
+            "addressLines",
+            "locality",
+            "regionCode",
+            "postalCode",
+            "countryCode",
+          ]);
+    if (
+      !Array.isArray(taxDetailsRaw.taxRegistrations) ||
+      taxDetailsRaw.taxRegistrations.length > 3 ||
+      !Array.isArray(taxDetailsRaw.taxLines) ||
+      taxDetailsRaw.taxLines.length > 20 ||
+      taxDetailsRaw.paymentMethod !== "Card" ||
+      (address !== null &&
+        (!Array.isArray(address.addressLines) ||
+          address.addressLines.length < 1 ||
+          address.addressLines.length > 3))
+    )
+      return invalid();
+    taxDetails = Object.freeze({
+      businessAddress:
+        address === null
+          ? null
+          : Object.freeze({
+              addressLines: Object.freeze(
+                (address.addressLines as unknown[]).map((line) => text(line, 160)),
+              ),
+              locality: text(address.locality, 120),
+              regionCode: text(address.regionCode, 16),
+              postalCode: text(address.postalCode, 16),
+              countryCode: text(address.countryCode, 2),
+            }),
+      taxRegistrations: Object.freeze(
+        taxDetailsRaw.taxRegistrations.map((candidate: unknown) => {
+          const entry = exact(candidate, ["label", "number"]);
+          if (!["GST/HST", "QST", "PST"].includes(String(entry.label))) return invalid();
+          return Object.freeze({ label: String(entry.label), number: text(entry.number, 32) });
+        }),
+      ),
+      taxLines: Object.freeze(
+        taxDetailsRaw.taxLines.map((candidate: unknown) => {
+          const entry = exact(candidate, ["label", "ratePercent", "included", "amount"]);
+          if (
+            typeof entry.ratePercent !== "string" ||
+            !/^(?:0|[1-9][0-9]{0,7})(?:\.[0-9]{1,10})?$/u.test(entry.ratePercent) ||
+            typeof entry.included !== "boolean"
+          )
+            return invalid();
+          return Object.freeze({
+            label: text(entry.label, 64),
+            ratePercent: entry.ratePercent,
+            included: entry.included,
+            amount: amount(entry.amount),
+          });
+        }),
+      ),
+      paymentMethod: "Card" as const,
+    });
+  }
   const amounts = [
+    ...(taxDetails ? taxDetails.taxLines.map((line) => line.amount) : []),
     subtotal,
     tax,
     tip,
@@ -180,6 +264,9 @@ function record(value: unknown, expectedVersion: number) {
   ];
   if (
     amounts.some((entry) => entry.currencyCode !== total.currencyCode) ||
+    (taxDetails &&
+      taxDetails.taxLines.reduce((sum, line) => sum + line.amount.amountMinor, 0n) !==
+        tax.amountMinor) ||
     (adjustments && adjustments.discount.amountMinor > subtotal.amountMinor) ||
     subtotal.amountMinor -
       (adjustments?.discount.amountMinor ?? 0n) +
@@ -208,6 +295,7 @@ function record(value: unknown, expectedVersion: number) {
       tip,
       total,
       ...(adjustments ? { adjustments } : {}),
+      ...(taxDetails ? { taxDetails } : {}),
       paymentStatus: snapshot.paymentStatus as (typeof payments)[number],
       refundedTotal,
     }),
@@ -273,10 +361,16 @@ export function parseReceiptView(value: unknown, expectedReference: string): Rec
     ...(value !== null && typeof value === "object" && Object.hasOwn(value, "storeContact")
       ? ["storeContact"]
       : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "privacyNoticeUrl")
+      ? ["privacyNoticeUrl"]
+      : []),
   ]);
   let storeContact: ReceiptView["storeContact"];
+  let privacyNoticeUrl: string | undefined;
   try {
     if (Object.hasOwn(raw, "storeContact")) storeContact = parseStoreContact(raw.storeContact);
+    if (Object.hasOwn(raw, "privacyNoticeUrl"))
+      privacyNoticeUrl = parsePrivacyNoticeUrl(raw.privacyNoticeUrl);
   } catch {
     return invalid();
   }
@@ -294,6 +388,7 @@ export function parseReceiptView(value: unknown, expectedReference: string): Rec
     orderReference: expectedReference,
     ...(Object.hasOwn(raw, "financial") ? { financial: financial(raw.financial) } : {}),
     ...(storeContact === undefined ? {} : { storeContact }),
+    ...(privacyNoticeUrl === undefined ? {} : { privacyNoticeUrl }),
     freshnessStatus: raw.freshnessStatus as "Fresh" | "Stale",
     deliveryStatus: raw.deliveryStatus as ReceiptView["deliveryStatus"],
     supportEligible: raw.supportEligible,

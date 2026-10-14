@@ -261,6 +261,14 @@ export class CustomerOrderStatusHandler {
                   ...(sources.storeContact === undefined
                     ? {}
                     : { storeContact: storeContactJson(sources.storeContact) }),
+                  // WP-2423 Q16: whether a contact is still held (never the contact itself) and
+                  // the Store's privacy notice link.
+                  ...(sources.contactDetails === undefined
+                    ? {}
+                    : { contactDetails: sources.contactDetails }),
+                  ...(sources.privacyNoticeUrl === undefined
+                    ? {}
+                    : { privacyNoticeUrl: sources.privacyNoticeUrl }),
                 },
               };
         response.status(200).json({ schemaVersion: 1, status: { ...status, ...publicSources } });

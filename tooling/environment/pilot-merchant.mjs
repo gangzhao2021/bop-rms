@@ -77,6 +77,7 @@ import { createInternalStoreConfiguration } from "./pilot-store-configuration.mj
 import { createMerchantMfaStepUp } from "../../apps/api/dist/merchant-mfa-step-up.js";
 import { createMerchantRefundSoleOperatorResolver } from "../../apps/api/dist/merchant-sole-operator.js";
 import { createMerchantSoleOperator } from "../../apps/api/dist/merchant-sole-operator-setting.js";
+import { createMerchantStoreReceiptProfile } from "../../apps/api/dist/merchant-store-receipt-profile.js";
 import { createMerchantOrdinaryRefundApproval } from "../../apps/api/dist/merchant-ordinary-refund-approval.js";
 import { createMerchantOrdinaryRefundApprovals } from "../../apps/api/dist/merchant-ordinary-refund-approvals.js";
 import { createMerchantOrdinaryRefundDecline } from "../../apps/api/dist/merchant-ordinary-refund-decline.js";
@@ -1140,6 +1141,13 @@ export async function createInternalMerchant(
         });
         return Object.assign(logUnexpected("INTERNAL_SOLE_OPERATOR_UNAVAILABLE", soleOperator), {
           read: logUnexpected("INTERNAL_SOLE_OPERATOR_READ_UNAVAILABLE", soleOperator.read),
+        });
+      })(),
+      // WP-2423 Q15/Q16: Store setup → receipt registrations and privacy notice link.
+      storeReceiptProfile: (() => {
+        const profile = createMerchantStoreReceiptProfile({ persistence, authentication: service });
+        return Object.assign(logUnexpected("INTERNAL_RECEIPT_PROFILE_UNAVAILABLE", profile), {
+          read: logUnexpected("INTERNAL_RECEIPT_PROFILE_READ_UNAVAILABLE", profile.read),
         });
       })(),
       diningJoinState,

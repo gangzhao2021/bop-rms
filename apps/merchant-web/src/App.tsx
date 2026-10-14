@@ -1,3 +1,4 @@
+import { StoreReceiptPrivacyPanel } from "./StoreReceiptPrivacyPanel.js";
 import { createOptionSetClient } from "./store-option-set-page.js";
 import { createOptionPriceClient } from "./store-option-prices-page.js";
 import { createTaxReviewClient } from "./StoreTaxReviewPage.js";
@@ -559,7 +560,10 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                   key={state.workspace.selectedScope.storeReference + state.csrf}
                   storeReference={state.workspace.selectedScope.storeReference}
                   csrf={state.csrf}
-                />
+                >
+                  {/* WP-2423 Q15/Q16: receipt registrations and the privacy notice link. */}
+                  <StoreReceiptPrivacyPanel csrf={state.csrf} />
+                </StoreSetupDraftPage>
               ) : (
                 <StatePanel heading="Store setup unavailable" status>
                   <p>A current merchant session and selected Store are required.</p>
@@ -786,6 +790,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
               <StoreTaxReviewPage
                 key={state.workspace.selectedScope.storeReference + state.csrf}
                 client={createTaxReviewClient(state.csrf)}
+                storeSetupHref={`/app/organization/stores/${state.workspace.selectedScope.storeReference}/setup#receipts-and-privacy`}
               />
             ) : (
               <StoreTaxReviewPage />

@@ -71,3 +71,7 @@ export * from "./infrastructure/persistence/store-configuration-original-store.j
 
 // WP-2423 Q9-G1 (DEC-OUTAGE-ACCEPTANCE-HOLD): whether the Store's staff are online.
 export * from "./infrastructure/persistence/store-presence-store.js";
+
+// WP-2423 Q15/Q16 (DEC-RECEIPT-TAX-AND-PRIVACY): receipt registration numbers and privacy link.
+export * from "./contracts/store-receipt-profile.js";
+export * from "./infrastructure/persistence/store-receipt-profile-store.js";

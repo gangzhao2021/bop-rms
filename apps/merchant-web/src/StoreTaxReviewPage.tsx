@@ -7,6 +7,11 @@ import { Link } from "react-router";
 export interface TaxReviewView {
   readonly screenId: "TAX-STORE-REVIEW";
   readonly sourceAsOf: string;
+  /** WP-2423 Q15/Q16: what customer receipts and checkout still lack (absent from older APIs). */
+  readonly receiptSetup?: {
+    readonly taxRegistrationMissing: boolean;
+    readonly privacyNoticeMissing: boolean;
+  };
   readonly configuration: {
     readonly stableCode: string;
     readonly versionNumber: number;
@@ -111,10 +116,51 @@ const endText = {
 const orderTypeText: Record<string, string> = { Pickup: "Pickup", DineIn: "Dine-in" };
 const day = (instant: string) => instant.slice(0, 10);
 
+/**
+ * WP-2423 Q15/Q16: tells staff, where they review tax, that customer receipts print no GST/HST
+ * registration number or that checkout links no privacy notice, and where the Owner enters them.
+ */
+export function ReceiptSetupNotice({
+  gaps,
+  storeSetupHref,
+}: {
+  readonly gaps:
+    | { readonly taxRegistrationMissing: boolean; readonly privacyNoticeMissing: boolean }
+    | undefined;
+  /** Omitted on the Store setup page itself, where the form is right below. */
+  readonly storeSetupHref?: string;
+}) {
+  if (gaps === undefined || (!gaps.taxRegistrationMissing && !gaps.privacyNoticeMissing))
+    return null;
+  return (
+    <StatePanel heading="Receipts and privacy need the Owner's details" tone="error" status>
+      <ul>
+        {gaps.taxRegistrationMissing ? (
+          <li>
+            Customer receipts show no GST/HST registration number. If the business is registered for
+            GST/HST (or QST/PST), the Owner adds the number so receipts can be used as tax receipts.
+          </li>
+        ) : null}
+        {gaps.privacyNoticeMissing ? (
+          <li>Add your privacy notice link before going live. Checkout and receipts show none.</li>
+        ) : null}
+      </ul>
+      {storeSetupHref ? (
+        <p>
+          <Link to={storeSetupHref}>Enter them in Store setup → Receipts and privacy</Link>
+        </p>
+      ) : null}
+    </StatePanel>
+  );
+}
+
 export function StoreTaxReviewPage({
   client = unavailable,
+  storeSetupHref,
 }: {
   readonly client?: TaxReviewClient;
+  /** Where the Owner enters receipt registrations and the privacy notice link. */
+  readonly storeSetupHref?: string;
 }) {
   const [state, setState] = useState<
     { readonly kind: keyof typeof copy } | { readonly kind: "Found"; readonly view: TaxReviewView }
@@ -161,6 +207,10 @@ export function StoreTaxReviewPage({
         </div>
         <Link to="/app/commerce/products">Products</Link>
       </header>
+      <ReceiptSetupNotice
+        gaps={view.receiptSetup}
+        {...(storeSetupHref === undefined ? {} : { storeSetupHref })}
+      />
       {c === null ? (
         <StatePanel heading="No tax configuration in effect" tone="error" status>
           <p>

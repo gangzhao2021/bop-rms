@@ -7,8 +7,61 @@ import {
   DigitalReceiptError,
   parseDigitalReceiptSnapshot,
   type DigitalReceiptSnapshot,
+  type ReceiptBusinessAddress,
   type ReceiptMoney,
+  type ReceiptTaxLine,
+  type ReceiptTaxRegistration,
 } from "../domain/digital-receipt.js";
+import type { OrderTaxComponentSnapshot } from "../domain/order-item-snapshot.js";
+
+/** "0.13" → "13", "0.09975" → "9.975": the frozen decimal rate as a percent, by digit shift. */
+export function receiptRatePercent(rate: string): string {
+  if (!/^(?:0|[1-9][0-9]{0,5})(?:\.[0-9]{0,12})?$/u.test(rate))
+    throw new DigitalReceiptError("DIGITAL_RECEIPT_INPUT_INVALID");
+  const [whole = "0", fraction = ""] = rate.split(".");
+  const padded = fraction.padEnd(2, "0");
+  const integer = (whole + padded.slice(0, 2)).replace(/^0+(?=[0-9])/u, "");
+  const rest = padded.slice(2).replace(/0+$/u, "");
+  return rest === "" ? integer : integer + "." + rest;
+}
+
+/**
+ * WP-2423 Q15: one receipt line per tax type and rate (and whether it was included in prices),
+ * summed from the order items' frozen tax components; exempt and zero-rated parts print no line.
+ */
+export function receiptTaxLines(
+  components: readonly OrderTaxComponentSnapshot[],
+  currencyCode: string,
+): readonly ReceiptTaxLine[] {
+  const lines = new Map<string, { line: ReceiptTaxLine; order: number }>();
+  for (const component of components) {
+    if (component.treatment !== "Taxable") continue;
+    if (component.taxAmount.currencyCode !== currencyCode)
+      throw new DigitalReceiptError("DIGITAL_RECEIPT_INPUT_INVALID");
+    const label = component.taxComponentCode.replaceAll("_", " ");
+    const ratePercent = receiptRatePercent(component.rate);
+    const included = component.priceInclusion === "Inclusive";
+    const key = label + "|" + ratePercent + "|" + String(included);
+    const prior = lines.get(key);
+    lines.set(key, {
+      order: Math.min(prior?.order ?? component.calculationOrder, component.calculationOrder),
+      line: Object.freeze({
+        label,
+        ratePercent,
+        included,
+        amount: Object.freeze({
+          amountMinor: (prior?.line.amount.amountMinor ?? 0n) + component.taxAmount.amountMinor,
+          currencyCode,
+        }),
+      }),
+    });
+  }
+  return Object.freeze(
+    [...lines.values()]
+      .sort((a, b) => a.order - b.order || (a.line.label < b.line.label ? -1 : 1))
+      .map((entry) => entry.line),
+  );
+}
 
 export interface OriginalReceiptSources {
   readonly order: unknown;
@@ -42,6 +95,14 @@ export interface OriginalReceiptSources {
     readonly tip: ReceiptMoney;
     readonly refunded: ReceiptMoney;
     readonly refundDisposition: "NonePending" | "Pending";
+  };
+  /**
+   * WP-2423 Q15: the Store's published address and the registrations its Owner entered, read at
+   * issue under the caller's fences. Omitted only by callers that predate Q15.
+   */
+  readonly receiptDetails?: {
+    readonly businessAddress: ReceiptBusinessAddress | null;
+    readonly taxRegistrations: readonly ReceiptTaxRegistration[];
   };
 }
 
@@ -155,6 +216,19 @@ export function createOriginalReceiptSnapshotFromCurrentOrder(
       subtotal: sum("subtotal"),
       adjustments: { discount: sum("discount"), fee: sum("fee") },
       tax: sum("tax"),
+      ...(input.receiptDetails === undefined
+        ? {}
+        : {
+            taxDetails: {
+              businessAddress: input.receiptDetails.businessAddress,
+              taxRegistrations: input.receiptDetails.taxRegistrations,
+              taxLines: receiptTaxLines(
+                items.flatMap((item) => item.pricing.taxComponents),
+                currencyCode,
+              ),
+              paymentMethod: "Card",
+            },
+          }),
       tip: financial.tip,
       total: financial.captured,
       refundedTotal: financial.refunded,
