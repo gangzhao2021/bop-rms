@@ -52,6 +52,7 @@ it("reports a business day's sales, items, hours and tips, matches the settlemen
       );
       await admin.query(renderPilotAclSql(matrices, { api, worker }));
 
+      const queryLog = [];
       const transactions = {
         async run(work) {
           const client = new Client(context.clientConfig);
@@ -62,7 +63,10 @@ it("reports a business day's sales, items, hours and tips, matches the settlemen
             await client.query("SET LOCAL statement_timeout = '20s'");
             await client.query("SET LOCAL lock_timeout = '5s'");
             const result = await work({
-              query: (sql, values) => client.query(sql, values === undefined ? [] : [...values]),
+              query: (sql, values) => {
+                queryLog.push(sql);
+                return client.query(sql, values === undefined ? [] : [...values]);
+              },
             });
             await client.query("COMMIT");
             return result;
@@ -750,6 +754,36 @@ it("reports a business day's sales, items, hours and tips, matches the settlemen
           netAfterRefundsMinor: "400",
         },
       );
+      // ── Query budget (regression for the 16 s week report on v15): the caller's scope is
+      // resolved at the start and once before the reply, not inside every owner read, and a
+      // longer range adds only the Store's window for each extra closed day — never per-day
+      // payment, refund or order reads, nor per-order queries.
+      const counted = async (from, to) => {
+        queryLog.length = 0;
+        await reports.read({ sessionCookie: cookie, from, to });
+        return {
+          total: queryLog.length,
+          scopeResolutions: queryLog.filter((sql) =>
+            sql.includes("FROM bop_identity.browser_session_selection"),
+          ).length,
+          paymentAndOrderReads: queryLog.filter((sql) => /\brms_(payment|ordering)\./u.test(sql))
+            .length,
+        };
+      };
+      const oneDay = await counted(today, today),
+        twoDays = await counted(yesterday, today);
+      assert.ok(oneDay.total <= 160, "one day's report took " + oneDay.total + " queries");
+      assert.ok(
+        oneDay.scopeResolutions <= 6,
+        "scope resolved " + oneDay.scopeResolutions + " times",
+      );
+      assert.equal(twoDays.scopeResolutions, oneDay.scopeResolutions);
+      assert.equal(twoDays.paymentAndOrderReads, oneDay.paymentAndOrderReads);
+      assert.ok(
+        twoDays.total - oneDay.total <= 40,
+        "an extra closed day cost " + (twoDays.total - oneDay.total) + " queries",
+      );
+
       // A future day, a reversed range and more than 31 days are refused.
       await assert.rejects(reports.read({ sessionCookie: cookie, from: today, to: "2999-01-01" }));
       await assert.rejects(reports.read({ sessionCookie: cookie, from: today, to: yesterday }));

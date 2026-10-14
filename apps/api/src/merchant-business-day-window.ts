@@ -74,6 +74,41 @@ export function createMerchantBusinessDayWindows(options: {
       timeZone: day.timeZone,
     };
   };
+  /** A business day's window against an already resolved current day. */
+  const windowOf = async (
+    tx: ConsumerTransaction,
+    businessDate: string | null,
+    now: string,
+    current: Awaited<ReturnType<typeof today>>,
+  ): Promise<MerchantBusinessDayWindow> => {
+    if (businessDate === current.businessDate)
+      return {
+        businessDate: current.businessDate,
+        startsAt: current.startsAt,
+        endsAt: now,
+        timeZone: current.timeZone,
+        status: "Open",
+      };
+    if (businessDate !== null && businessDate > current.businessDate) return unavailable();
+    let date = businessDate;
+    if (date === null) {
+      const priorAt = new Date(Date.parse(current.startsAt) - 1).toISOString();
+      date = (await today(tx, priorAt)).businessDate;
+    }
+    // Every configuration in force on that day (UTC noon anchors the day's boundaries);
+    // versions may change within the day only with identical boundaries.
+    const window = await createPostgresStoreClosedBusinessDateWindowSource(configurationOptions())(
+      tx,
+      { businessDate: date, anchorAt: `${date}T12:00:00.000Z`, observedAt: now },
+    );
+    return {
+      businessDate: String(window.businessDate),
+      startsAt: String(window.startsAt),
+      endsAt: String(window.endsAt),
+      timeZone: window.timeZone,
+      status: "Closed",
+    };
+  };
   return Object.freeze({
     today,
     /** A business day's window; null asks for the last closed day. Refuses a future date. */
@@ -82,33 +117,23 @@ export function createMerchantBusinessDayWindows(options: {
       businessDate: string | null,
     ): Promise<MerchantBusinessDayWindow> {
       const now = persistence.now();
-      const current = await today(tx, now);
-      if (businessDate === current.businessDate)
-        return {
-          businessDate: current.businessDate,
-          startsAt: current.startsAt,
-          endsAt: now,
-          timeZone: current.timeZone,
-          status: "Open",
-        };
-      if (businessDate !== null && businessDate > current.businessDate) return unavailable();
-      let date = businessDate;
-      if (date === null) {
-        const priorAt = new Date(Date.parse(current.startsAt) - 1).toISOString();
-        date = (await today(tx, priorAt)).businessDate;
-      }
-      // Every configuration in force on that day (UTC noon anchors the day's boundaries);
-      // versions may change within the day only with identical boundaries.
-      const window = await createPostgresStoreClosedBusinessDateWindowSource(
-        configurationOptions(),
-      )(tx, { businessDate: date, anchorAt: `${date}T12:00:00.000Z`, observedAt: now });
-      return {
-        businessDate: String(window.businessDate),
-        startsAt: String(window.startsAt),
-        endsAt: String(window.endsAt),
-        timeZone: window.timeZone,
-        status: "Closed",
-      };
+      return windowOf(tx, businessDate, now, await today(tx, now));
+    },
+    /**
+     * WP-2423 Q14: the windows of consecutive business dates, with the current day resolved once
+     * for the whole range (not once per day); `resolved` reuses the caller's own `today` read at
+     * `now`. Refuses a future date.
+     */
+    async range(
+      tx: ConsumerTransaction,
+      businessDates: readonly string[],
+      resolved?: { readonly now: string; readonly current: Awaited<ReturnType<typeof today>> },
+    ): Promise<readonly MerchantBusinessDayWindow[]> {
+      const now = resolved?.now ?? persistence.now();
+      const current = resolved?.current ?? (await today(tx, now));
+      const windows: MerchantBusinessDayWindow[] = [];
+      for (const date of businessDates) windows.push(await windowOf(tx, date, now, current));
+      return windows;
     },
   });
 }

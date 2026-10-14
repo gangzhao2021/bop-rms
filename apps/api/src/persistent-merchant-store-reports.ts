@@ -1,10 +1,7 @@
 import type { ConsumerTransaction } from "@bop/eventing";
 import { createPostgresStoreSalesOrderSource } from "@rms/ordering";
 import { createPostgresStoreSalesPaymentLedger } from "@rms/payment";
-import {
-  createMerchantBusinessDayWindows,
-  type MerchantBusinessDayWindow,
-} from "./merchant-business-day-window.js";
+import { createMerchantBusinessDayWindows } from "./merchant-business-day-window.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import {
@@ -92,8 +89,13 @@ export function createPersistentMerchantStoreReports(options: {
       const storeLabel = String(value.store.displayName),
         timeZone = String(value.store.timeZone);
       if (!/^[^\p{Cc}\p{Cf}]{1,100}$/u.test(storeLabel)) return unavailable();
-      const still = async (t: ConsumerTransaction) => {
-        if (t !== tx) return false;
+      // The caller's Session, Store and permission were resolved above in this transaction and
+      // are re-resolved in full once more before the reply. In between, the owner reads only
+      // confirm they run in this same transaction: re-resolving the scope for every owner read
+      // (each one a Session, membership and permission-policy read of ~30 queries) made a range
+      // cost ~900 queries per business day and a week's report ~16 s on the pilot.
+      const sameTransaction = async (t: ConsumerTransaction) => t === tx;
+      const stillAllowed = async () => {
         const again = await resolve(original, input.sessionCookie, input.permission);
         return (
           String(again.sessionReference) === session &&
@@ -106,16 +108,19 @@ export function createPersistentMerchantStoreReports(options: {
         persistence,
         scope,
         timeZone,
-        authorize: still,
+        authorize: sameTransaction,
       });
       const now = persistence.now();
-      const today = (await windows.today(tx, now)).businessDate;
+      const current = await windows.today(tx, now);
+      const today = current.businessDate;
       const to = input.to ?? today,
         from = input.from ?? to;
       if (to > today) return unavailable();
-      const days: MerchantBusinessDayWindow[] = [];
-      for (const date of businessDatesBetween(from, to, storeReportsMaximumDays))
-        days.push(await windows.window(tx, date));
+      const days = await windows.range(
+        tx,
+        businessDatesBetween(from, to, storeReportsMaximumDays),
+        { now, current },
+      );
       const first = days[0] ?? unavailable(),
         last = days.at(-1) ?? unavailable();
       if (days.some((day, index) => index > 0 && day.startsAt !== days[index - 1]?.endsAt))
@@ -123,7 +128,7 @@ export function createPersistentMerchantStoreReports(options: {
       const configuration = await options.resolveConfiguration(tx, scope);
       const ledger = await createPostgresStoreSalesPaymentLedger({
         scope: { ...scope, ...configuration },
-        authorize: still,
+        authorize: sameTransaction,
       })(tx, { startsAt: first.startsAt, endsAt: last.endsAt, observedAt: persistence.now() });
       const orderReferences = [
         ...ledger.payments.map((payment) => payment.orderReference),
@@ -136,12 +141,12 @@ export function createPersistentMerchantStoreReports(options: {
         brandReference: scope.brandReference,
         storeReference: scope.storeReference,
         locale,
-        authorize: still,
+        authorize: sameTransaction,
       })(tx, orderReferences);
       const mayExport =
         input.permission === storeReportsExportPermission ||
         (await value.authorizeAction(storeReportsExportPermission))?.effect === "Allow";
-      if (!(await still(tx))) return unavailable();
+      if (!(await stillAllowed())) return unavailable();
       return computeStoreSalesReport({
         storeLabel,
         timeZone,
