@@ -14,6 +14,7 @@ import {
   createPostgresCustomerOrderNotificationRecords,
 } from "../../bop/notification/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+import { createContactRetentionDispatcher } from "../../../tooling/environment/pilot-contact-retention.mjs";
 
 const { Client } = pg;
 const id = (n) => "0190aa10-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -51,18 +52,18 @@ it("WP-2423 Q10: order continuity reads, staff contact, retention removal and pa
             role,
         );
       }
-      // The pilot api role's existing grants for these reads (docs/spec/pilot-acl-matrix.json),
-      // plus SELECT on the new evidence table (PENDING OWNER APPROVAL).
+      // The pilot api role's grants (docs/spec/pilot-acl-matrix.json and the Owner-approved WP-2423
+      // Q10 additions): these reads, plus appending removal evidence and the guarded removal itself.
       await admin.query(
         "GRANT SELECT ON rms_ordering.order_header,rms_ordering.order_submission_record,rms_ordering.order_checkout_details_link,rms_ordering.checkout_details_record,rms_ordering.checkout_contact_redaction,rms_payment.payment_terminal_fact TO " +
           apiRole,
       );
-      // Retention role (PENDING OWNER APPROVAL): read/redact details, append evidence.
+      await admin.query("GRANT UPDATE ON rms_ordering.checkout_details_record TO " + apiRole);
+      await admin.query("GRANT INSERT ON rms_ordering.checkout_contact_redaction TO " + apiRole);
+      // A role with only the read grants cannot remove anything.
       await admin.query(
-        "GRANT SELECT,UPDATE ON rms_ordering.checkout_details_record TO " + retentionRole,
-      );
-      await admin.query(
-        "GRANT SELECT,INSERT ON rms_ordering.checkout_contact_redaction TO " + retentionRole,
+        "GRANT SELECT ON rms_ordering.checkout_details_record,rms_ordering.checkout_contact_redaction TO " +
+          retentionRole,
       );
 
       // Seed history as the owner without parent rows (FKs are not under test here).
@@ -296,9 +297,9 @@ it("WP-2423 Q10: order continuity reads, staff contact, retention removal and pa
         ),
         { status: "NotGiven" },
       );
-      // The api role cannot change checkout details at all.
+      // Without the approved write grants nothing can be removed.
       await assert.rejects(
-        runAs(apiRole, (tx) =>
+        runAs(retentionRole, (tx) =>
           redactExpiredCheckoutContacts(tx, scope, {
             observedAt: now,
             limit: 10,
@@ -366,12 +367,27 @@ it("WP-2423 Q10: order continuity reads, staff contact, retention removal and pa
         );
       // Another Store's scope finds nothing of this Store's to clear (RLS).
       assert.deepEqual(
-        await redact(retentionRole, { brandReference: brand, storeReference: otherStore }),
+        await redact(apiRole, { brandReference: brand, storeReference: otherStore }),
         {
           redacted: 0,
         },
       );
-      assert.deepEqual(await redact(retentionRole), { redacted: 1 });
+      // The pilot business worker's daily removal (tooling/environment/pilot-contact-retention.mjs),
+      // under the api role, in batches: a full batch continues, a partial one ends the day.
+      const dispatcher = createContactRetentionDispatcher({
+        resources: {
+          now: () => now,
+          scope,
+          transactions: { run: (work) => runAs(apiRole, work) },
+          credentials: { reference: () => id(references++) },
+          publicProfile: { binding: { validUntil: at(day) } },
+        },
+        batchSize: 1,
+        allowed: () => true,
+      });
+      assert.equal(await dispatcher.runOnce(), 1);
+      assert.equal(await dispatcher.runOnce(), 0);
+      assert.equal(await dispatcher.runOnce(), 0);
       const after = await snapshotOf(id(0x201));
       assert.equal(after.pickupContact, null);
       assert.deepEqual(after.receipt, { choice: "InSession", email: null });
@@ -395,10 +411,10 @@ it("WP-2423 Q10: order continuity reads, staff contact, retention removal and pa
       assert.equal(removed.status, "Removed");
       assert.equal(Date.parse(removed.removedAt), Date.parse(now));
       // Idempotent: nothing left to clear.
-      assert.deepEqual(await redact(retentionRole), { redacted: 0 });
+      assert.deepEqual(await redact(apiRole), { redacted: 0 });
 
       // 5. The details stay append-only for anything else.
-      const tamper = await runAs(retentionRole, (tx) =>
+      const tamper = await runAs(apiRole, (tx) =>
         tx.query(
           "UPDATE rms_ordering.checkout_details_record SET snapshot_json=snapshot_json||'{\"cartVersion\":2}'::jsonb WHERE details_id=$1",
           [id(0x202)],
@@ -406,7 +422,7 @@ it("WP-2423 Q10: order continuity reads, staff contact, retention removal and pa
       ).catch((error) => error);
       // (No scope GUC: RLS hides the row; with scope the guard skips it.)
       assert.equal(tamper.rowCount ?? 0, 0);
-      const scopedTamper = await runAs(retentionRole, async (tx) => {
+      const scopedTamper = await runAs(apiRole, async (tx) => {
         await tx.query(
           "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
           [brand, store],
@@ -426,7 +442,7 @@ it("WP-2423 Q10: order continuity reads, staff contact, retention removal and pa
       assert.equal((await snapshotOf(id(0x201))).cartVersion, 1);
       // Evidence before the retention period is refused; evidence itself cannot change.
       await assert.rejects(
-        runAs(retentionRole, async (tx) => {
+        runAs(apiRole, async (tx) => {
           await tx.query(
             "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
             [brand, store],

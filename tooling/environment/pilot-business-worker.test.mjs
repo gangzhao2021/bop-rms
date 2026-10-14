@@ -199,3 +199,19 @@ it("always composes the unpaid pickup closure with the paid outcome System actor
     providerAccountReference: config.providerAccountReference,
   });
 });
+it("WP-2423 Q10: always composes the daily contact retention removal with its health observer", async () => {
+  const retention = vi.fn(() => "workload");
+  const compose = composeConfiguredBusinessWorker({
+    directory: "/synthetic",
+    config,
+    installation: {},
+    implementations: {
+      createInternalWorker: async (r, observers, _options, dependencies) =>
+        dependencies.createInternalContactRetentionWorkload(r, observers.contactRetention),
+      createInternalContactRetentionWorkload: retention,
+    },
+  });
+  // Not behind a workloads option: the Owner approved the 30-day retention for the pilot.
+  expect(await compose("resources", { contactRetention: "observer" }, {})).toBe("workload");
+  expect(retention).toHaveBeenCalledWith("resources", "observer");
+});

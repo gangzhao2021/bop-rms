@@ -48,6 +48,10 @@ export async function startPilotBusinessWorker({
           directory,
           "business-dining-checkout-expiry",
         ),
+        contactRetention: createPilotWorkloadHealthObserver(
+          directory,
+          "business-contact-retention",
+        ),
       },
       {
         cartExpiry: true,

@@ -26,6 +26,7 @@ import { createInternalDiningCheckoutExpiryWorkload } from "./pilot-dining-check
 import { createInternalCartExpiryWorkload } from "./pilot-cart-expiry.mjs";
 import { createInternalPaidWithoutFulfillableInventoryWorkload } from "./pilot-paid-without-fulfillable-inventory.mjs";
 import { createInternalPickupPaymentExpiryWorkload } from "./pilot-pickup-payment-expiry.mjs";
+import { createInternalContactRetentionWorkload } from "./pilot-contact-retention.mjs";
 import { createInternalWorkerServices } from "./pilot-worker-services.mjs";
 import { createInternalWorker } from "./pilot-worker.mjs";
 
@@ -57,6 +58,7 @@ const factories = {
   createInternalCartExpiryWorkload,
   createInternalPaidWithoutFulfillableInventoryWorkload,
   createInternalPickupPaymentExpiryWorkload,
+  createInternalContactRetentionWorkload,
   createInternalWorkerServices,
   createInternalWorker,
 };
@@ -168,6 +170,9 @@ export function composeConfiguredBusinessWorker({
         }),
       createInternalDiningCheckoutExpiryWorkload: (r, observer) =>
         f.createInternalDiningCheckoutExpiryWorkload(r, observer, account),
+      // WP-2423 Q10: always on; daily removal of checkout contacts past the 30-day retention.
+      createInternalContactRetentionWorkload: (r, observer) =>
+        f.createInternalContactRetentionWorkload(r, observer),
     });
   };
 }
