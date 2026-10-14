@@ -2035,6 +2035,116 @@ describe("WP-2423 P1 merchant settlement read route", () => {
     expect(await result.json()).toEqual({ error: "settlement_busy" });
   });
 });
+describe("WP-2423 Q14 store reports routes", () => {
+  type Reports = NonNullable<MerchantBffRouterOptions["storeReports"]>;
+  const headers = {
+    host: "merchant.invalid",
+    cookie: "__Host-bop-merchant=" + sessionCookie,
+    "sec-fetch-site": "same-origin",
+  };
+  async function serveReports(reports?: Reports) {
+    const app = express();
+    app.use(
+      "/merchant",
+      createMerchantBffRouter({
+        service: fakeService(),
+        exactOrigin: "https://merchant.invalid",
+        acceptedHost: "merchant.invalid",
+        ...(reports ? { storeReports: reports } : {}),
+      }),
+    );
+    const server = app.listen(0, "127.0.0.1");
+    servers.push(server);
+    await new Promise<void>((resolve) => server.once("listening", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("listener unavailable");
+    return `http://127.0.0.1:${address.port}`;
+  }
+  const fake = () => {
+    const view = { screenId: "RPT-OPS-DASHBOARD", from: "2026-10-13", to: "2026-10-14" };
+    return {
+      read: vi.fn(async () => view as unknown as Awaited<ReturnType<Reports["read"]>>),
+      export: vi.fn(async () => ({
+        fileName: "items-2026-10-13-to-2026-10-14.csv",
+        body: "﻿business_date,item\r\n2026-10-14,Muffin\r\n",
+      })),
+    } satisfies Reports;
+  };
+  it("reads a range with the session cookie and no caching", async () => {
+    const reports = fake();
+    const root = await serveReports(reports);
+    const today = await request(root, "/merchant/reports", { headers });
+    expect(today.status).toBe(200);
+    expect(today.headers.get("cache-control")).toBe("no-store");
+    expect(reports.read).toHaveBeenLastCalledWith({ sessionCookie, from: null, to: null });
+    await request(root, "/merchant/reports?from=2026-10-13&to=2026-10-14", { headers });
+    expect(reports.read).toHaveBeenLastCalledWith({
+      sessionCookie,
+      from: "2026-10-13",
+      to: "2026-10-14",
+    });
+  });
+  it("downloads one report as a UTF-8 CSV attachment under the export permission", async () => {
+    const reports = fake();
+    const root = await serveReports(reports);
+    const file = await request(
+      root,
+      "/merchant/reports/export?report=items&from=2026-10-13&to=2026-10-14",
+      { headers },
+    );
+    expect(file.status).toBe(200);
+    expect(file.headers.get("content-type")).toBe("text/csv; charset=utf-8");
+    expect(file.headers.get("content-disposition")).toBe(
+      'attachment; filename="items-2026-10-13-to-2026-10-14.csv"',
+    );
+    expect(file.headers.get("cache-control")).toBe("no-store");
+    expect(await file.text()).toContain("business_date,item");
+    expect(reports.export).toHaveBeenLastCalledWith({
+      sessionCookie,
+      from: "2026-10-13",
+      to: "2026-10-14",
+      report: "items",
+    });
+  });
+  it("refuses malformed ranges, unknown reports, extra parameters, no session and cross-site", async () => {
+    const reports = fake();
+    const root = await serveReports(reports);
+    for (const [path, extra] of [
+      ["/merchant/reports?from=2026-10-1", {}],
+      ["/merchant/reports?from=2026-10-13&store=x", {}],
+      ["/merchant/reports/export?report=customers", {}],
+      ["/merchant/reports/export", {}],
+      ["/merchant/reports", { cookie: "" }],
+      ["/merchant/reports", { "sec-fetch-site": "cross-site" }],
+    ] as const) {
+      const result = await request(root, path, { headers: { ...headers, ...extra } });
+      expect(result.status).toBe(403);
+    }
+    expect(reports.read).not.toHaveBeenCalled();
+    expect(reports.export).not.toHaveBeenCalled();
+    const absent = await serveReports();
+    expect((await request(absent, "/merchant/reports", { headers })).status).toBe(503);
+  });
+  it("answers a refusal as denied and busy records as retry-later", async () => {
+    const denied = fake();
+    denied.read.mockRejectedValue(new Error("MERCHANT_STORE_REPORTS_UNAVAILABLE"));
+    const refused = await request(await serveReports(denied), "/merchant/reports", { headers });
+    expect(refused.status).toBe(403);
+    expect(await refused.text()).not.toContain("REPORTS");
+    const busy = fake();
+    busy.export.mockRejectedValue(
+      Object.assign(new Error("MERCHANT_STORE_REPORTS_BUSY"), {
+        code: "MERCHANT_STORE_REPORTS_BUSY",
+      }),
+    );
+    const later = await request(await serveReports(busy), "/merchant/reports/export?report=tips", {
+      headers,
+    });
+    expect(later.status).toBe(503);
+    expect(later.headers.get("retry-after")).toBe("5");
+    expect(await later.json()).toEqual({ error: "reports_busy" });
+  });
+});
 describe("WP-2423 Q21 merchant business-day read route", () => {
   const day = {
     businessDate: "2026-10-14",

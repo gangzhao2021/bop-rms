@@ -264,3 +264,13 @@ export * from "./infrastructure/persistence/unmatched-capture-refund-store.js";
 // WP-2423 Q7 (DEC-COUNTER-PAYMENT-RECORD): payments and refunds on the Store's own card machine.
 export * from "./application/card-machine-payment.js";
 export { createPostgresCardMachinePaymentStore } from "./infrastructure/persistence/card-machine-payment-store.js";
+
+// WP-2423 Q14: the payments and refunds behind the Store sales reports, as day-end settlement counts them.
+export {
+  createPostgresStoreSalesPaymentLedger,
+  type StoreSalesPayment,
+  type StoreSalesPaymentChannel,
+  type StoreSalesRefund,
+  type StoreSalesRefundItemShare,
+  type StoreSalesSettlementTotals,
+} from "./infrastructure/persistence/store-sales-payment-ledger.js";

@@ -1,5 +1,8 @@
 import { createDiningOrderDeliveryProgress } from "./dining-order-delivery-progress.js";
-import { createPostgresKitchenCustomerStatusReader } from "@rms/kitchen";
+import {
+  createPostgresKitchenCustomerStatusReader,
+  listOpenKitchenReworkItems,
+} from "@rms/kitchen";
 import {
   createPostgresPaymentStatusStore,
   listOrderPaymentTerminalOutcomes,
@@ -352,6 +355,17 @@ export function createCustomerOrderStatusRead(
                   currencyCode: record.currencyCode,
                 },
               });
+          // WP-2423 Q26: dishes the kitchen is remaking (Kitchen's public Query, by Order item), so
+          // the customer is not told the order is ready while part of it is being made again.
+          const remakes: { orderItemReference: string; quantity: number }[] = [];
+          if (await stillAuthorized())
+            for (const entry of await listOpenKitchenReworkItems(transaction, options.scope, [
+              orderReference,
+            ]))
+              remakes.push({
+                orderItemReference: entry.orderItemReference,
+                quantity: entry.openQuantity,
+              });
           // WP-2423: a dine-in round whose payment failed is cancelled automatically when its payment
           // window ends; the customer is told when before it happens, and that it was not charged.
           let batchPayments: readonly CustomerBatchPayment[] = [];
@@ -431,6 +445,7 @@ export function createCustomerOrderStatusRead(
                   }),
               ...(staffCancellations.length === 0 ? {} : { staffCancellations }),
               ...(itemCancellations.length === 0 ? {} : { itemCancellations }),
+              ...(remakes.length === 0 ? {} : { remakes }),
               ...(batchPayments.length === 0 ? {} : { batchPayments }),
               ...(unpaidCancellations.length === 0 ? {} : { unpaidCancellations }),
               ...(storeContact === null ? {} : { storeContact }),

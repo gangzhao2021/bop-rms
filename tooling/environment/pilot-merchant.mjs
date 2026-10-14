@@ -17,6 +17,7 @@ import { createInternalExceptionSnapshotTransactions } from "./pilot-exception-s
 import { readInternalExceptionCoverage } from "./pilot-exception-coverage.mjs";
 import { createPersistentMerchantOrderExceptions } from "../../apps/api/dist/persistent-merchant-order-exceptions.js";
 import { createPersistentMerchantSettlement } from "../../apps/api/dist/persistent-merchant-settlement.js";
+import { createPersistentMerchantStoreReports } from "../../apps/api/dist/persistent-merchant-store-reports.js";
 import { dailySettlementRunReference } from "./pilot-daily-settlement-reference.mjs";
 import { createPostgresPublishedStoreOperatingStatusReader } from "../../packages/rms/store/src/index.ts";
 import { createMerchantCompensationReconciliationQuery } from "../../apps/api/dist/merchant-compensation-reconciliation-query.js";
@@ -232,6 +233,13 @@ export async function createInternalMerchant(
           label: "Settlement",
           href: "/app/operations/payment-reconciliation",
           permission: "operations.order-exception.manage",
+        },
+        // WP-2423 Q14: sales, item, hourly and tip reports with CSV export (Owner, Store Manager).
+        {
+          screenId: "RPT-OPS-DASHBOARD",
+          label: "Reports",
+          href: "/app/reports/operations",
+          permission: "reporting.sales.read",
         },
         {
           screenId: "INV-ITEM-LIST",
@@ -507,6 +515,21 @@ export async function createInternalMerchant(
       },
     }),
   );
+  // WP-2423 Q14: the Store's sales reports, over the same payment sources as the settlement.
+  const reports = createPersistentMerchantStoreReports({
+    persistence,
+    resolveConfiguration: async (tx, scope) => {
+      const configuration = await refundConfiguration(tx, scope);
+      return {
+        providerAccountReference: configuration.providerAccountReference,
+        environment: configuration.environment,
+      };
+    },
+  });
+  const storeReports = {
+    read: logUnexpected("INTERNAL_STORE_REPORTS_UNAVAILABLE", reports.read),
+    export: logUnexpected("INTERNAL_STORE_REPORTS_EXPORT_UNAVAILABLE", reports.export),
+  };
   const refundPaymentContext = createMerchantRefundPaymentContext({
     persistence,
     authentication: service,
@@ -1047,6 +1070,7 @@ export async function createInternalMerchant(
       reconciliationFollowUpQuery,
       orderExceptions,
       settlement,
+      storeReports,
       compensationReconciliation,
       compensationQuery,
       ...(unmatchedCaptureRefund === undefined ? {} : { unmatchedCaptureRefund }),

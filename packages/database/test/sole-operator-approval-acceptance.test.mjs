@@ -37,6 +37,8 @@ import {
   createMerchantSoleOperator,
   MerchantSoleOperatorError,
 } from "../../../apps/api/src/merchant-sole-operator-setting.ts";
+import { createPersistentMerchantSettlement } from "../../../apps/api/src/persistent-merchant-settlement.ts";
+import { createPersistentMerchantStoreReports } from "../../../apps/api/src/persistent-merchant-store-reports.ts";
 import { createInternalRefundWorkforceContext } from "../../../tooling/environment/pilot-refund-workforce.mjs";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { standardRefundRoleMapping } from "../../../tooling/environment/pilot-refund-role-mapping.mjs";
@@ -218,6 +220,10 @@ it("sole operator: set by the Brand Owner, self-approval with MFA, lapse on a se
             "payment.refund.request",
             "payment.refund.approve",
             "payment.refund.execute",
+            // WP-2423 Q14: the day-end settlement and the Store sales reports (step 12).
+            "operations.order-exception.manage",
+            "reporting.sales.read",
+            "reporting.sales.export",
           ],
         },
         brandOwner: {
@@ -1007,6 +1013,66 @@ it("sole operator: set by the Brand Owner, self-approval with MFA, lapse on a se
           [firstApproval.approvalReference, id(986), id(987), id(988), noah],
         ),
         /ordinary_refund_approval_sole_operator_same_person/u,
+      );
+
+      // ── 12. WP-2423 Q14: the Store sales reports place the self-approved online refund on its
+      // Order's items and agree with the day-end settlement for the business day.
+      const reportPersistence = {
+        ...persistence,
+        publication: {
+          configurationType: "STORE_CONFIGURATION",
+          purposeCode: "STORE_CONFIGURATION",
+          requiredLiveGateRequirementCodes: ["SYNTHETIC_STORE_READY"],
+        },
+      };
+      const reportConfiguration = async () => ({
+        providerAccountReference: provider,
+        environment: "Test",
+      });
+      const reports = createPersistentMerchantStoreReports({
+        persistence: reportPersistence,
+        resolveConfiguration: reportConfiguration,
+      });
+      const report = await reports.read({ sessionCookie: "owner", from: null, to: null });
+      const day = await createPersistentMerchantSettlement({
+        persistence: reportPersistence,
+        resolveConfiguration: reportConfiguration,
+        settlementRunReference: async () => null,
+      })({ sessionCookie: "owner", businessDate: report.from });
+      const online = report.byChannel.find((entry) => entry.channel === "Online");
+      // Four paid pickups (CAD 116.00 each, tip 3.00) and the one confirmed full refund.
+      assert.deepEqual(
+        [online.paymentCount, online.collectedMinor, online.tipsMinor, online.refundsMinor],
+        [4, String(4n * CAPTURED_MINOR), String(4n * TIP_MINOR), String(CAPTURED_MINOR)],
+      );
+      assert.deepEqual(report.summary.refunds, {
+        salesMinor: "10000",
+        taxMinor: "1300",
+        tipsMinor: "300",
+        serviceChargesMinor: "0",
+        notItemizedMinor: "0",
+      });
+      assert.deepEqual(
+        report.items.map((row) => [
+          row.name,
+          row.quantitySold,
+          row.refundedQuantity,
+          row.refundsMinor,
+        ]),
+        [
+          ["Synthetic item 1", 16, 4, "8000"],
+          ["Synthetic item 2", 8, 2, "2000"],
+        ],
+      );
+      assert.equal(report.reconciliation.matchesSettlement, true);
+      assert.deepEqual(
+        [
+          day.captured.count,
+          day.captured.amountMinor,
+          day.refunded.count,
+          day.refunded.amountMinor,
+        ],
+        [online.paymentCount, online.collectedMinor, online.refundCount, online.refundsMinor],
       );
     } finally {
       await admin.end();

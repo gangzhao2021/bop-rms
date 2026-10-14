@@ -4,6 +4,7 @@ import {
   KitchenRemakeDialog,
   KitchenRemakeLane,
   KitchenReworkStatus,
+  remakeOffered,
   useKitchenRework,
   type RemakeChoice,
 } from "./KitchenRework.js";
@@ -462,7 +463,7 @@ function WorkCard({
                     Mark ready
                   </button>
                 ) : null}
-                {item.status === "Completed" && onRemake ? (
+                {onRemake && remakeOffered(item, observedAt) ? (
                   <button
                     className="kitchen-remake-button"
                     disabled={readOnly}
@@ -1248,6 +1249,24 @@ function KitchenBoardContent(props: KitchenPageProps) {
     view: state.kind === "Found" ? state.view : null,
     revision,
   });
+  // WP-2423 Q26: a confirmed command re-reads the board at once (not at the next 10 s refresh), so
+  // an accepted ticket does not keep showing "Accept".
+  // The queue projection may lag the command by a moment: re-read a few more times, 1.5 s apart.
+  const confirmedState = actions.state.kind === "Confirmed" ? actions.state : null;
+  const followUps = useRef(0);
+  useEffect(() => {
+    followUps.current = 0;
+    if (confirmedState !== null) setRevision((value) => value + 1);
+  }, [confirmedState]);
+  const awaitingProjection = confirmedState !== null && !actions.reflected;
+  useEffect(() => {
+    if (!awaitingProjection || followUps.current >= 4 || typeof window === "undefined") return;
+    const timer = window.setTimeout(() => {
+      followUps.current += 1;
+      setRevision((value) => value + 1);
+    }, 1_500);
+    return () => window.clearTimeout(timer);
+  }, [awaitingProjection, revision]);
   // WP-2423 Q26: remakes are read with the board and refresh it after a change.
   const rework = useKitchenRework({
     csrf: props.csrf,

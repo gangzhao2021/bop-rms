@@ -112,6 +112,10 @@ function RoundCard({ round }: { readonly round: DiningRound }) {
             <span className="order-status__item-amount">{money(item.lineTotal)}</span>
             {item.cancelled ? (
               <span className="order-status__item-cancelled">Cancelled</span>
+            ) : item.beingRemade ? (
+              <span className="order-status__item-remake">
+                Being remade · we&apos;ll bring it to your table shortly
+              </span>
             ) : round.payment === "Paid" ? (
               <span>
                 Served {item.servedQuantity} of {item.quantity}

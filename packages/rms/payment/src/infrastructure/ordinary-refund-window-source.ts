@@ -49,7 +49,18 @@ export function createPostgresOrdinaryRefundWindowSource(options: {
     });
     const operations = new Set<string>(),
       refunds = new Set<string>(),
-      evidence = [];
+      evidence = [],
+      // WP-2423 Q14: every confirmed refund seen by the scan (in or before the window), so a report
+      // can place each one on its business day and its Order without a second definition.
+      confirmedRefunds: {
+        readonly operationReference: string;
+        readonly requestReference: string;
+        readonly orderReference: string;
+        readonly paymentIntentReference: string;
+        readonly paymentAttemptReference: string;
+        readonly amountMinor: bigint;
+        readonly providerCreatedAt: string;
+      }[] = [];
     let afterOperationReference: string | null = null;
     let refundedAmountMinor = 0n,
       refundCount = 0,
@@ -104,6 +115,17 @@ export function createPostgresOrdinaryRefundWindowSource(options: {
         )
           return fail();
         refunds.add(position.providerRefundReference);
+        confirmedRefunds.push(
+          Object.freeze({
+            operationReference: candidate.operationReference,
+            requestReference: candidate.requestReference,
+            orderReference: candidate.orderReference,
+            paymentIntentReference: String(recovered.operation.paymentIntentReference),
+            paymentAttemptReference: String(recovered.operation.paymentAttemptReference),
+            amountMinor: position.confirmedMinor,
+            providerCreatedAt: position.providerCreatedAt,
+          }),
+        );
         if (
           position.providerCreatedAt >= input.startsAt &&
           position.providerCreatedAt < input.endsAt
@@ -130,6 +152,7 @@ export function createPostgresOrdinaryRefundWindowSource(options: {
       refundCount,
       unresolvedOperationCount,
       scannedOperationCount: operations.size,
+      confirmedRefunds: Object.freeze(confirmedRefunds),
       evidenceDigest:
         "sha256:" +
         createHash("sha256")

@@ -411,6 +411,7 @@ export {
   kitchenReworkMaximumPerOriginal,
   kitchenReworkNoteMaximumLength,
   kitchenReworkNotReadyWindowMs,
+  kitchenReworkOriginalWindowMs,
   kitchenReworkPermission,
   kitchenReworkReasons,
   kitchenReworkRecentWindowMs,
@@ -435,4 +436,5 @@ export {
 export {
   createPostgresKitchenReworkStore,
   listOpenKitchenReworkByOrder,
+  listOpenKitchenReworkItems,
 } from "./infrastructure/persistence/kitchen-rework-store.js";

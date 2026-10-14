@@ -198,6 +198,10 @@ function StatusContent({
         ),
       );
   const someServed = diningItems?.some((item) => item.servedQuantity > 0) === true;
+  // WP-2423 Q26: the kitchen is making part of the order again (dropped, made wrong, sent back).
+  const remakes = view.sources?.remakes ?? [];
+  const remaking = (orderItemReference: string) =>
+    remakes.find((entry) => entry.orderItemReference === orderItemReference);
   const [progressHeading, progressMessage] = storeCancelled
     ? ["Order cancelled by the store", staffCancellationReasonText[storeCancelled.reason]]
     : notAccepted
@@ -228,23 +232,33 @@ function StatusContent({
                       "Not collected",
                       "The store closed this pickup after the pickup time ended. Contact the store about your order or a refund.",
                     ]
-                  : allServed
-                    ? ["Items served", "All listed items have been served."]
-                    : someServed
+                  : remakes.length > 0
+                    ? view.order.orderType === "Pickup"
                       ? [
-                          "Serving your order",
-                          "Some items have been served. Check the remaining items below.",
+                          "Remaking part of your order",
+                          "We're remaking part of your order. We'll have it ready shortly — please wait before collecting it.",
                         ]
-                      : kitchenLabel === "Ready"
-                        ? view.order.orderType === "Pickup"
-                          ? [
-                              "Ready for pickup",
-                              "Your order is ready. Show your pickup code at the counter.",
-                            ]
-                          : ["Kitchen preparation complete", "All listed batches are ready."]
-                        : kitchenLabel === "Preparing"
-                          ? ["Preparing your order", "The kitchen is preparing your order."]
-                          : ["Order submitted", "We have your order."];
+                      : [
+                          "Remaking an item",
+                          "We're remaking an item for you. It will be brought to your table shortly.",
+                        ]
+                    : allServed
+                      ? ["Items served", "All listed items have been served."]
+                      : someServed
+                        ? [
+                            "Serving your order",
+                            "Some items have been served. Check the remaining items below.",
+                          ]
+                        : kitchenLabel === "Ready"
+                          ? view.order.orderType === "Pickup"
+                            ? [
+                                "Ready for pickup",
+                                "Your order is ready. Show your pickup code at the counter.",
+                              ]
+                            : ["Kitchen preparation complete", "All listed batches are ready."]
+                          : kitchenLabel === "Preparing"
+                            ? ["Preparing your order", "The kitchen is preparing your order."]
+                            : ["Order submitted", "We have your order."];
   const payments = view.sources?.payments;
   const paid = payments?.find((payment) => payment.status === "Succeeded" && payment.amount);
   const paymentLabel =
@@ -293,11 +307,13 @@ function StatusContent({
             <dd>
               {storeCancelled || notAccepted
                 ? "Cancelled"
-                : kitchenLabel === "Unknown"
-                  ? "Not available yet"
-                  : kitchenLabel === "Queued"
-                    ? "In the queue"
-                    : kitchenLabel}
+                : remakes.length > 0 && !complete
+                  ? "Remaking an item"
+                  : kitchenLabel === "Unknown"
+                    ? "Not available yet"
+                    : kitchenLabel === "Queued"
+                      ? "In the queue"
+                      : kitchenLabel}
             </dd>
           </div>
           <div>
@@ -318,6 +334,7 @@ function StatusContent({
           orderNumber={view.order.orderNumber}
           controller={pickupController}
           autoReveal={kitchenLabel === "Ready" || view.order.canonicalPhase === "Ready"}
+          remaking={remakes.length > 0}
           refreshToken={view.sources?.checkedAt ?? view.projectedAt}
         />
       ) : null}
@@ -427,6 +444,8 @@ function StatusContent({
                         <span className="order-status__item-cancelled">Cancelled</span>
                       ) : notPaid.has(batch.orderBatchReference) ? (
                         <span className="order-status__item-cancelled">Not paid</span>
+                      ) : remaking(item.orderItemReference) && !complete ? (
+                        <span className="order-status__item-remake">Being remade</span>
                       ) : view.sources?.dining ? (
                         <span>
                           Served{" "}

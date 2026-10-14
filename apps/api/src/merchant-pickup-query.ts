@@ -5,8 +5,12 @@ import {
   parseReadinessReference,
   FulfillmentReadinessError,
 } from "@rms/fulfillment";
-import { createPostgresStaffOrderCancellationReader, listStoreOrderNumbers } from "@rms/ordering";
-import { listOpenKitchenReworkByOrder } from "@rms/kitchen";
+import {
+  createPostgresStaffOrderCancellationReader,
+  listStoreOrderBusinessDates,
+  listStoreOrderNumbers,
+} from "@rms/ordering";
+import { listOpenKitchenReworkItems } from "@rms/kitchen";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -127,6 +131,13 @@ export function createMerchantPickupQuery(options: {
         selected,
         result.items.map((item) => String(item.orderReference)),
       );
+      // WP-2423 Q26: the business day of each order (numbers restart daily), so an earlier day's
+      // order is never mistaken for today's order with the same number.
+      const businessDates = await listStoreOrderBusinessDates(
+        tx,
+        selected,
+        result.items.map((item) => String(item.orderReference)),
+      );
       // WP-2423 Q6: an order the Store cancelled before the kitchen started is never handed over.
       const cancelled = new Set(
         result.items.length === 0
@@ -139,10 +150,21 @@ export function createMerchantPickupQuery(options: {
             ).map((record) => String(record.orderReference)),
       );
       // WP-2423 Q26: a dish the kitchen is remaking (dropped, wrong, marked done too early) is
-      // flagged so staff wait before handing the order over. Kitchen's public Query; counts only.
-      const remakes = await listOpenKitchenReworkByOrder(tx, selected, [
+      // flagged so staff wait before handing the order over. Kitchen's public Query, matched on the
+      // Order and on this pickup's own Order items (never on the order number, which repeats daily).
+      const remakes = await listOpenKitchenReworkItems(tx, selected, [
         ...new Set(result.items.map((item) => String(item.orderReference))),
       ]);
+      const remakeQuantity = (item: (typeof result.items)[number]) => {
+        const lines = new Set(item.items.map((line) => String(line.orderItemReference)));
+        return remakes
+          .filter(
+            (remake) =>
+              remake.orderReference === String(item.orderReference) &&
+              lines.has(remake.orderItemReference),
+          )
+          .reduce((sum, remake) => sum + remake.openQuantity, 0);
+      };
       if (!(await scope.allowed()))
         throw new FulfillmentReadinessError("FULFILLMENT_READINESS_PERMISSION_DENIED");
       return Object.freeze({
@@ -156,7 +178,17 @@ export function createMerchantPickupQuery(options: {
               ...item,
               aggregateVersion: item.aggregateVersion.toString(),
               orderNumber: numbers.get(String(item.orderReference)) ?? null,
-              remakeInProgress: remakes.get(String(item.orderReference))?.openQuantity ?? 0,
+              businessDate: businessDates.get(String(item.orderReference)) ?? null,
+              remakeInProgress: remakeQuantity(item),
+              // Order items are only for matching remakes; the pickup screen's contract omits them.
+              items: item.items.map((line) =>
+                Object.freeze({
+                  fulfillmentItemReference: line.fulfillmentItemReference,
+                  orderedQuantity: line.orderedQuantity,
+                  readyQuantity: line.readyQuantity,
+                  handedOverQuantity: line.handedOverQuantity,
+                }),
+              ),
             }),
           ),
       });

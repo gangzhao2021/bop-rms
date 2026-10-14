@@ -348,3 +348,26 @@ describe("WP-2423 Q8 createCustomerDiningSessionRead authorization", () => {
     });
   });
 });
+
+describe("WP-2423 Q26 a dish being remade at the table", () => {
+  it("marks the item and keeps the round from reading served or ready", () => {
+    const view = (phase: string, delivered: number) =>
+      composeCustomerDiningSession(
+        facts({
+          batches: [
+            { orderBatchReference: id(30), submittedAt: at, items: [item(31, "Ramen", 2, 3000n)] },
+          ],
+          authorship: new Map([[id(30), true]]),
+          delivery: new Map([[id(31), { phase: phase as never, deliveredQuantity: delivered }]]),
+          paymentDeadlines: new Map(),
+          remakes: new Set([id(31)]),
+        }),
+      ).rounds[0];
+    const served = view("Fulfilled", 2);
+    expect(served?.status).toBe("Serving");
+    expect(served?.items[0]).toMatchObject({ beingRemade: true });
+    expect(view("Ready", 0)?.status).toBe("Preparing");
+    const plain = composeCustomerDiningSession(facts()).rounds[0]?.items[0];
+    expect(plain).not.toHaveProperty("beingRemade");
+  });
+});

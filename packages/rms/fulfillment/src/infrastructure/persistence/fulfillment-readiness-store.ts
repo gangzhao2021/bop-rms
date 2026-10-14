@@ -400,6 +400,13 @@ export function createPostgresFulfillmentReadinessStore(options: {
               source.items.map((item) =>
                 Object.freeze({
                   fulfillmentItemReference: item.fulfillmentItemReference,
+                  orderItemReference: String(
+                    result.readiness.items.find(
+                      (line) =>
+                        String(line.fulfillmentItemReference) ===
+                        String(item.fulfillmentItemReference),
+                    )?.orderItemReference ?? unavailable(),
+                  ),
                   orderedQuantity: item.orderedQuantity,
                   readyQuantity: item.readyQuantity,
                   handedOverQuantity: item.handedOverQuantity,

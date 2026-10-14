@@ -428,5 +428,50 @@ export function createPostgresCardMachinePaymentStore(options: {
         refundedMinor: integer(refunds.total),
       });
     },
+    /**
+     * WP-2423 Q14 (store reports): the payments taken in the window and every refund made before its
+     * end, with the payments those refunds belong to — the same `taken_at`/`refunded_at` rules as
+     * `summarize`, so a report built from these records agrees with the day-end settlement.
+     */
+    async listWindow(tx: AuditTransaction, window: { from: string; to: string }) {
+      const from = parsePaymentInstant(window.from),
+        to = parsePaymentInstant(window.to);
+      if (to <= from) return fail("CARD_MACHINE_INPUT_INVALID");
+      const tenant = requireTenant();
+      await context(tx);
+      const payments = rows(
+        await tx.query(
+          `${selectPayment} AND p.tenant_id=$3 AND ((p.taken_at>=$4::timestamptz AND p.taken_at<$5::timestamptz)
+ OR p.card_machine_payment_id IN (SELECT x.card_machine_payment_id FROM rms_payment.card_machine_refund x
+ WHERE x.brand_id=$1 AND x.store_id=$2 AND x.tenant_id=$3 AND x.refunded_at<$5::timestamptz))
+ ORDER BY p.taken_at,p.card_machine_payment_id LIMIT 100001`,
+          [brand, store, tenant, from, to],
+        ),
+      ).map((row) => paymentFrom(row));
+      const refunds = rows(
+        await tx.query(
+          `${selectRefund} AND r.tenant_id=$3 AND r.refunded_at<$4::timestamptz
+ ORDER BY r.refunded_at,r.card_machine_refund_id LIMIT 100001`,
+          [brand, store, tenant, to],
+        ),
+      ).map((row) => refundFrom(row));
+      if (payments.length > 100000 || refunds.length > 100000) return fail();
+      const known = new Set(payments.map((payment) => payment.cardMachinePaymentReference));
+      for (const payment of payments)
+        if (
+          payment.tenantReference !== tenant ||
+          payment.brandReference !== brand ||
+          payment.storeReference !== store
+        )
+          return fail();
+      for (const refund of refunds)
+        if (
+          refund.tenantReference !== tenant ||
+          !known.has(refund.cardMachinePaymentReference) ||
+          refund.refundedAt >= to
+        )
+          return fail();
+      return Object.freeze({ payments: Object.freeze(payments), refunds: Object.freeze(refunds) });
+    },
   });
 }

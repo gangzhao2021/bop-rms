@@ -26,6 +26,12 @@ export const kitchenReworkNotReadyWindowMs = 120_000;
 /** Recent finished dishes the board offers for a remake. */
 export const kitchenReworkRecentWindowMs = 2 * 60 * 60 * 1000;
 export const kitchenReworkMaximumPerOriginal = 20;
+/**
+ * A dish is remade while the guest is still being served: within 12 hours of the dish reaching
+ * the kitchen. An earlier business day's dish (e.g. a ticket left open and finished today) is
+ * closed with its order, never remade.
+ */
+export const kitchenReworkOriginalWindowMs = 12 * 60 * 60 * 1000;
 export const kitchenReworkNoteMaximumLength = 200;
 export const kitchenReworkSourceChannel = "MERCHANT_WEB" as const;
 export const kitchenReworkCreatedEventConsumer = "inventory.kitchen-rework-waste:v1" as const;

@@ -1,6 +1,7 @@
 import { PickupProofForm } from "./PickupProofForm.js";
 import { PickupHandoffForm } from "./PickupHandoffForm.js";
 import { PickupNotCollectedAction, pickupHoldMinutes } from "./PickupNotCollectedAction.js";
+import { businessDateText, useStoreBusinessDay } from "./StoreBusinessDay.js";
 import { StatePanel } from "@bop-rms/ui";
 import { Freshness } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
@@ -84,6 +85,21 @@ export function waitTier(waitMinutes: number, completed: boolean): "ok" | "warni
   if (completed) return "ok";
   return waitMinutes >= pickupHoldMinutes ? "late" : waitMinutes >= 15 ? "warning" : "ok";
 }
+/** "20 min", "3 h 5 min", "5 days" — long waits in hours or days, never thousands of minutes. */
+export function pickupWaitText(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  if (minutes < 24 * 60) {
+    const rest = minutes % 60;
+    return `${Math.floor(minutes / 60)} h${rest ? ` ${rest} min` : ""}`;
+  }
+  const days = Math.floor(minutes / (24 * 60));
+  return days === 1 ? "1 day" : `${days} days`;
+}
+/** WP-2423 Q26: an order from an earlier business day (its number may repeat today). */
+export function fromEarlierDay(item: PickupQueueItem, today: string | null | undefined): boolean {
+  return Boolean(item.businessDate && today && item.businessDate < today);
+}
+
 function PickupCard({
   item,
   observedAt,
@@ -92,6 +108,7 @@ function PickupCard({
   proofContext,
   workstation,
   hidden,
+  earlier = false,
 }: {
   /** IDR-0039: offline or stale; actions stay on screen but cannot be used. */
   readonly paused: boolean;
@@ -101,6 +118,8 @@ function PickupCard({
   readonly readOnly: boolean;
   readonly proofContext?: { csrf: string; storeReference: string } | undefined;
   readonly hidden: boolean;
+  /** WP-2423 Q26: the order belongs to an earlier business day. */
+  readonly earlier?: boolean;
 }) {
   const completed = item.phase === "Completed";
   const wait = Math.max(
@@ -118,17 +137,25 @@ function PickupCard({
       <header>
         <div>
           <p className="bop-eyebrow pickup-queue__phase" data-wait={waitTier(wait, completed)}>
-            {completed ? "Completed" : `Ready for ${wait} min`}
+            {completed ? "Completed" : `Ready for ${pickupWaitText(wait)}`}
           </p>
           <h3>
             Order{" "}
             {item.publicOrderNumber ?? item.execution?.publicOrderReference ?? "number unavailable"}
           </h3>
+          {earlier && item.businessDate ? (
+            <p className="pickup-queue__day">From {businessDateText(item.businessDate)}</p>
+          ) : null}
         </div>
         <strong className="pickup-queue__status" data-completed={completed}>
           {completed ? "Handed over" : "Waiting"}
         </strong>
       </header>
+      {earlier && !completed ? (
+        <p className="pickup-queue__earlier" role="note">
+          From an earlier business day. Check whether it was collected, then close it.
+        </p>
+      ) : null}
       {!completed && item.remakeQuantity ? (
         <p className="pickup-queue__remake" role="status">
           Kitchen is remaking{" "}
@@ -253,6 +280,11 @@ export function PickupQueueScreen({
   const hasLocalFilters =
     Boolean(query) || filter !== "All" || claimFilter !== "All" || exceptionFilter !== "All";
   const visibleReferences = new Set(items.map((item) => item.fulfillmentReference));
+  // WP-2423 Q26: earlier business days' orders are grouped apart so their repeated numbers are not
+  // mistaken for today's orders.
+  const today = useStoreBusinessDay()?.businessDate ?? null;
+  const earlierItems = view.items.filter((item) => fromEarlierDay(item, today));
+  const todayItems = view.items.filter((item) => !fromEarlierDay(item, today));
   return (
     <WorkspacePage
       className="pickup-queue"
@@ -348,9 +380,9 @@ export function PickupQueueScreen({
             Next page
           </button>
         </nav>
-        {view.items.length ? (
+        {todayItems.length ? (
           <div className="store-card-grid pickup-queue__cards">
-            {view.items.map((item) => (
+            {todayItems.map((item) => (
               <PickupCard
                 key={item.fulfillmentReference}
                 item={item}
@@ -363,6 +395,34 @@ export function PickupQueueScreen({
               />
             ))}
           </div>
+        ) : null}
+        {earlierItems.some((item) => visibleReferences.has(item.fulfillmentReference)) ? (
+          <section
+            className="pickup-queue__earlier-section"
+            aria-labelledby="pickup-earlier-heading"
+          >
+            <h2 id="pickup-earlier-heading">From earlier days — check and close</h2>
+            <p>
+              These orders are from an earlier business day. Their numbers may repeat today&apos;s.
+              If the customer collected the order, hand it over with the code or in person; if not,
+              a manager closes it as not collected.
+            </p>
+            <div className="store-card-grid pickup-queue__cards">
+              {earlierItems.map((item) => (
+                <PickupCard
+                  key={item.fulfillmentReference}
+                  item={item}
+                  observedAt={view.projectedAt}
+                  readOnly={readOnly}
+                  paused={stale !== undefined}
+                  proofContext={proofContext}
+                  workstation={view.workstation}
+                  hidden={!visibleReferences.has(item.fulfillmentReference)}
+                  earlier
+                />
+              ))}
+            </div>
+          </section>
         ) : null}
         {items.length === 0 ? (
           <StatePanel heading="No pickups waiting" status>

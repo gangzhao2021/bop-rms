@@ -302,6 +302,7 @@ export { createRefundReceiptSnapshot } from "./application/refund-receipt-snapsh
 export {
   createPostgresMerchantOrderIndex,
   listStoreOrderNumbers,
+  listStoreOrderBusinessDates,
   listStoreUnfulfillablePaidOrders,
   loadOrderNotAcceptedClosure,
   listStorePaidOrderBatches,
@@ -436,3 +437,5 @@ export {
   createPostgresOrderAcceptanceHoldStore,
   listStoreOrderAcceptanceHolds,
 } from "./infrastructure/persistence/order-acceptance-hold-store.js";
+// WP-2423 Q14: the priced items of the Store's Orders behind the Store sales reports.
+export * from "./infrastructure/persistence/store-sales-order-source.js";

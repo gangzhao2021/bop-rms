@@ -273,6 +273,8 @@ export interface MerchantRuntimeOptions {
   };
   readonly orderExceptions?: MerchantBffRouterOptions["orderExceptions"];
   readonly settlement?: MerchantBffRouterOptions["settlement"];
+  /** WP-2423 Q14: Store sales reports and CSV export. */
+  readonly storeReports?: MerchantBffRouterOptions["storeReports"];
   readonly diningItemService?: Omit<
     Parameters<typeof createMerchantDiningItemService>[0],
     "persistence" | "authentication"
@@ -922,5 +924,6 @@ export function createMerchantRuntime(options: MerchantRuntimeOptions): Merchant
         }),
     ...(options.orderExceptions === undefined ? {} : { orderExceptions: options.orderExceptions }),
     ...(options.settlement === undefined ? {} : { settlement: options.settlement }),
+    ...(options.storeReports === undefined ? {} : { storeReports: options.storeReports }),
   };
 }

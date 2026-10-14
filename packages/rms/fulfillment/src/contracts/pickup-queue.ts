@@ -13,6 +13,8 @@ export interface PickupQueueReadItem {
   } | null;
   readonly items: readonly {
     readonly fulfillmentItemReference: string;
+    /** WP-2423 Q26: the Order item this pickup line fulfils (Kitchen remakes are matched on it). */
+    readonly orderItemReference?: string;
     readonly orderedQuantity: number;
     readonly readyQuantity: number;
     readonly handedOverQuantity: number;

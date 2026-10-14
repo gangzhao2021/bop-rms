@@ -9,6 +9,7 @@ import {
   type GuestSession,
 } from "@bop/identity";
 import { listDiningSessionTableLabels } from "@rms/dining";
+import { listOpenKitchenReworkItems } from "@rms/kitchen";
 import {
   createOrderStatusQueryService,
   createPostgresDiningSessionOrderLookup,
@@ -90,6 +91,8 @@ export interface CustomerDiningSessionFacts {
       readonly refunded: boolean;
       readonly refundAmount: CustomerMoney;
     }[];
+    /** WP-2423 Q26: Order items the kitchen is remaking (Kitchen's public Query). */
+    readonly remakes?: ReadonlySet<string>;
     readonly payments: readonly {
       readonly status: "Succeeded" | "Failed";
       readonly amount: CustomerMoney | null;
@@ -135,6 +138,8 @@ export interface CustomerDiningSessionView {
       readonly servedQuantity: number;
       readonly cancelled: boolean;
       readonly lineTotal: CustomerMoney;
+      /** WP-2423 Q26: present (true) only while the kitchen is making this item again. */
+      readonly beingRemade?: true;
     }[];
     readonly itemsTotal: CustomerMoney;
   }[];
@@ -197,6 +202,7 @@ export function composeCustomerDiningSession(
         cancelled,
         lineTotal: money(item.lineTotal.amountMinor),
         phase: delivery.phase,
+        beingRemade: !cancelled && order.remakes?.has(item.orderItemReference) === true,
       });
     });
     const itemsTotal = items.reduce((sum, item) => sum + item.lineTotal.amountMinor, 0n);
@@ -237,6 +243,9 @@ export function composeCustomerDiningSession(
         status = "Preparing";
       else if (active.some((item) => item.phase === "Accepted")) status = "Queued";
       else status = "Received";
+      // WP-2423 Q26: a dish being made again is neither served nor ready yet.
+      if (active.some((item) => item.beingRemade))
+        status = status === "Served" ? "Serving" : status === "Ready" ? "Preparing" : status;
     }
     return Object.freeze({
       roundNumber: index + 1,
@@ -254,6 +263,7 @@ export function composeCustomerDiningSession(
             servedQuantity: item.servedQuantity,
             cancelled: item.cancelled,
             lineTotal: item.lineTotal,
+            ...(item.beingRemade ? { beingRemade: true as const } : {}),
           }),
         ),
       ),
@@ -494,6 +504,12 @@ function postgresDependencies(
             currencyCode: record.currencyCode,
           },
         });
+      // WP-2423 Q26: items the kitchen is remaking for this table's order.
+      const remakes = new Set(
+        (await listOpenKitchenReworkItems(transaction, scope, [orderReference])).map(
+          (entry) => entry.orderItemReference,
+        ),
+      );
       // Refund positions per captured payment, as the receipt reads them (Payment owner sources).
       const refunds = { confirmedMinor: 0n, pendingMinor: 0n };
       for (const projection of payments) {
@@ -557,6 +573,7 @@ function postgresDependencies(
           unpaidCancellations,
           staffCancellations,
           itemCancellations,
+          remakes,
           payments: payments.map((projection) => ({
             status: projection.snapshot.terminalStatus,
             amount: projection.snapshot.amount,

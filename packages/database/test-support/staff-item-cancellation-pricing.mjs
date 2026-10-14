@@ -9,7 +9,8 @@ import { orderSnapshotInput } from "../../rms/ordering/src/tests/order-item-snap
  * Prices and tax are synthetic (13% exclusive test-only tax); the quote is computed by the Pricing
  * owner (createPriceQuote) and persisted through its owner store, never hand-written.
  *
- * lines: [{ cartLineReference, orderItemReference, sellableReference, unitAmountMinor, quantity }]
+ * lines: [{ cartLineReference, orderItemReference, sellableReference, unitAmountMinor, quantity,
+ *   name? }] (name: the sellable's display name, default "Synthetic item N")
  */
 export async function seedStaffItemCancellationQuote({
   runner,
@@ -130,7 +131,7 @@ export async function seedStaffItemCancellationQuote({
         sellableReference: line.sellableReference,
         productVersionReference: priced.productVersionReference,
         menuVersionReference: priced.menuVersionReference,
-        localizedNames: { "en-CA": "Synthetic item " + (index + 1) },
+        localizedNames: { "en-CA": line.name ?? "Synthetic item " + (index + 1) },
         taxClassificationReference: classification,
         options: [],
         capturedAt,

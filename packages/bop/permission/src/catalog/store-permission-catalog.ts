@@ -26,8 +26,11 @@
  * v11 (2026-10-14): kitchen.work_item.rework (WP-2423 Q26, Handoff Section 26.6): remake a finished
  * dish (wrong, dropped, returned, quality) or put a dish marked done by mistake back in progress;
  * the first dish's ingredients are recorded as waste. Kitchen, Store Manager and Owner hold it.
+ * v12 (2026-10-14): reporting.sales.read and reporting.sales.export (WP-2423 Q14, Section 88
+ * RPT-OPS-DASHBOARD): the Store's sales, item, hourly and tip reports, and downloading them as CSV
+ * (reading never implies exporting). Owner and Store Manager hold both.
  */
-export const storePermissionCatalogVersion = 11 as const;
+export const storePermissionCatalogVersion = 12 as const;
 export type PermissionRisk = "Low" | "Medium" | "High";
 export interface StorePermissionDefinition {
   readonly code: string;
@@ -286,6 +289,11 @@ const catalog: readonly StorePermissionDefinition[] = Object.freeze([
     // v7 (WP-2423 Q4): the shift's busy mode — pause and resume taking new online orders.
     ["operations.ordering.pause", "Pause and resume online ordering for the Store", "Medium"],
   ]),
+  // v12 (WP-2423 Q14): Store sales reports and their CSV export.
+  ...define("reporting", [
+    ["reporting.sales.read", "Read the Store's sales, item, hourly and tip reports", "Medium"],
+    ["reporting.sales.export", "Download the Store's sales reports as CSV files", "Medium"],
+  ]),
   ...define("task", [
     ["task.read", "Read the Store task inbox", "Low"],
     ["task.create", "Create a Store task", "Medium"],
@@ -430,6 +438,8 @@ export const storeRoleTemplates: Readonly<Record<StoreRoleTemplateCode, readonly
         "operations.",
         "task.",
         "workflow.",
+        // v12 (WP-2423 Q14): sales reports and their CSV export.
+        "reporting.",
       ]),
       "payment.refund.request",
       "payment.refund.execute",

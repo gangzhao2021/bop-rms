@@ -12,6 +12,8 @@ export interface PickupQueueItem {
   readonly allergenCue: "None" | "Present" | "Unavailable";
   /** WP-2423 Q26: portions the kitchen is remaking for this order; wait before handing over. */
   readonly remakeQuantity?: number;
+  /** WP-2423 Q26: the order's business day (order numbers restart every business day). */
+  readonly businessDate?: string;
   readonly execution?: PickupExecution;
 }
 export interface PickupExecution {
@@ -94,6 +96,7 @@ function instant(value: unknown): string {
 function item(value: unknown): PickupQueueItem {
   const hasExecution = !!value && typeof value === "object" && Object.hasOwn(value, "execution");
   const hasRemake = !!value && typeof value === "object" && Object.hasOwn(value, "remakeQuantity");
+  const hasDay = !!value && typeof value === "object" && Object.hasOwn(value, "businessDate");
   const input = closed(value, [
     "fulfillmentReference",
     "orderReference",
@@ -107,6 +110,7 @@ function item(value: unknown): PickupQueueItem {
     "packageCount",
     "allergenCue",
     ...(hasRemake ? ["remakeQuantity"] : []),
+    ...(hasDay ? ["businessDate"] : []),
     ...(hasExecution ? ["execution"] : []),
   ]);
   if (
@@ -125,7 +129,9 @@ function item(value: unknown): PickupQueueItem {
     (hasRemake &&
       (!Number.isSafeInteger(input.remakeQuantity) ||
         Number(input.remakeQuantity) < 1 ||
-        Number(input.remakeQuantity) > 999))
+        Number(input.remakeQuantity) > 999)) ||
+    (hasDay &&
+      (typeof input.businessDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(input.businessDate)))
   )
     throw new Error("PICKUP_VIEW_INVALID");
   return Object.freeze({
@@ -141,6 +147,7 @@ function item(value: unknown): PickupQueueItem {
     packageCount: input.packageCount === null ? null : Number(input.packageCount),
     allergenCue: input.allergenCue as PickupQueueItem["allergenCue"],
     ...(hasRemake ? { remakeQuantity: Number(input.remakeQuantity) } : {}),
+    ...(hasDay ? { businessDate: input.businessDate as string } : {}),
     ...(hasExecution ? { execution: parsePickupExecution(input.execution) } : {}),
   });
 }

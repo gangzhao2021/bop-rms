@@ -448,6 +448,29 @@ describe("independent order status sources", () => {
       ),
     ).toThrow();
   });
+  it("WP-2423 Q26: admits the order's items being remade, once each", () => {
+    const input = sourced();
+    const item = input.order.batches[0]?.items[0];
+    if (!item) throw new Error("fixture");
+    const entry = { orderItemReference: item.orderItemReference, quantity: 1 };
+    const parsed = parseOrderStatusView(
+      { ...input, sources: { ...input.sources, remakes: [entry] } },
+      id(1),
+    );
+    expect(parsed.sources?.remakes).toEqual([entry]);
+    expect(parseOrderStatusView(input, id(1)).sources).not.toHaveProperty("remakes");
+    for (const remakes of [
+      [],
+      [entry, entry],
+      [{ ...entry, orderItemReference: id(99) }],
+      [{ ...entry, quantity: 0 }],
+      [{ ...entry, reason: "DROPPED" }],
+      null,
+    ])
+      expect(() =>
+        parseOrderStatusView({ ...input, sources: { ...input.sources, remakes } }, id(1)),
+      ).toThrow();
+  });
   it("WP-2423 Q6 step 2: admits items the store cancelled with their refund", () => {
     const input = sourced();
     const batch = input.order.batches[0];

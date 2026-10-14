@@ -34,6 +34,21 @@
    取餐队列对仍有未完成重做的订单显示"Kitchen is remaking N items — wait for it before handing this order over"。
 7. **不变的部分**：Ordering、Payment、Pricing 不变；顾客订单状态不变（不会出现同一菜两次）；Fulfillment 的就绪结果只追加、不撤销。
 
+## v15 实测后修正（2026-10-14）
+
+- **顾客端**：取餐订单有未完成重做时，订单页标题为"Remaking part of your order"，说明"We're remaking part of your order.
+  We'll have it ready shortly — please wait before collecting it."，厨房状态"Remaking an item"，该菜"Being remade"；
+  取餐码保留（不隐藏，避免顾客以为订单出错），码卡片改为"Almost ready"并提示重做完成后再出示。堂食桌页该菜显示
+  "Being remade · we'll bring it to your table shortly"，该轮不再显示 Served/Ready（改为 Serving/Preparing）。
+  读取经 Kitchen 公开查询 `listOpenKitchenReworkItems`（按订单与订单项引用，只含未完成份数）。
+- **取餐页匹配**：重做提示按订单引用并且按该取餐单自身的订单项引用匹配，从不按单号（单号每营业日重置）。
+  实测中旧"Order 2"卡片的原因：5 天前的厨房单一直留在看板上，当天被点完成并"Not ready yet"，重做确实属于那张旧订单。
+  因此重做只允许在菜品进入厨房后 12 小时内（应用层 `KITCHEN_REWORK_WINDOW_CLOSED`；看板对更早的菜不显示 Remake）；
+  取餐页对早于当前营业日的订单标"From Fri, Oct 9"，单独放在"From earlier days — check and close"区，等待时长按小时/天显示。
+  这类旧单可用已有"未取餐关闭"流程：取餐码过期或未发出且就绪满 60 分钟后，店长关闭为未取餐（不自动退款，可另行普通退款）。
+  旧厨房单在看板上滞留仍是已知问题，本次未处理。
+- **看板**：命令确认后立即重读看板；投影未跟上时每 1.5 秒再读，最多 4 次（不再等 10 秒自动刷新）。
+
 ## 与 Handoff 的差异与未做
 
 - §26.6"重新计算 ETA"：试点无 ETA 计算，未实现。

@@ -9,6 +9,7 @@ export function PickupCodePanel({
   controller: provided,
   autoReveal = false,
   refreshToken,
+  remaking = false,
 }: {
   readonly orderReference: string;
   readonly orderNumber: string;
@@ -17,6 +18,8 @@ export function PickupCodePanel({
   readonly autoReveal?: boolean;
   /** Changes when the parent status refreshed; triggers a re-check of a missing or expired code. */
   readonly refreshToken?: string | undefined;
+  /** WP-2423 Q26: the kitchen is remaking part of the order; the code is kept, with a wait note. */
+  readonly remaking?: boolean;
 }) {
   const [controller] = useState(
     () =>
@@ -130,7 +133,13 @@ export function PickupCodePanel({
       ) : null}
       {state.status === "ready" ? (
         <div className="pickup-code__ready" role="status">
-          <p className="bop-eyebrow">Ready for pickup</p>
+          <p className="bop-eyebrow">{remaking ? "Almost ready" : "Ready for pickup"}</p>
+          {remaking ? (
+            <p className="pickup-code__wait">
+              Part of your order is being remade. Please wait until it&apos;s ready before showing
+              this code.
+            </p>
+          ) : null}
           <h3>{state.view.storeDisplayName}</h3>
           <p>{state.view.pickupInstruction}</p>
           <div

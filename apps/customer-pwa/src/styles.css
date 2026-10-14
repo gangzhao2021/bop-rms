@@ -1623,3 +1623,13 @@
 .order-status__visit-ended .order-status__retry {
   margin-top: var(--bop-space-2);
 }
+/* WP-2423 Q26: an item the kitchen is making again. */
+.order-status__batch li > .order-status__item-remake {
+  grid-column: 1 / -1;
+  color: var(--bop-color-text-default);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.pickup-code__wait {
+  font-weight: 600;
+}

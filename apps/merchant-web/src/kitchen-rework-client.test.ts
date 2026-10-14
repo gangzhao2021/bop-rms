@@ -93,3 +93,15 @@ describe("WP-2423 Q26 kitchen rework client", () => {
     expect(notReadyOffered(item, "2026-10-14T12:02:01.000Z")).toBe(false);
   });
 });
+
+describe("WP-2423 Q26 remakes stay with today's dishes", () => {
+  it("offers a remake only for a finished dish of the last 12 hours", async () => {
+    const { remakeOffered } = await import("./KitchenRework.js");
+    const dish = (createdAt: string, status = "Completed") =>
+      ({ status, createdAt }) as unknown as Parameters<typeof remakeOffered>[0];
+    const now = "2026-10-14T18:00:00.000Z";
+    expect(remakeOffered(dish("2026-10-14T17:00:00.000Z"), now)).toBe(true);
+    expect(remakeOffered(dish("2026-10-09T17:00:00.000Z"), now)).toBe(false);
+    expect(remakeOffered(dish("2026-10-14T17:00:00.000Z", "In Progress"), now)).toBe(false);
+  });
+});

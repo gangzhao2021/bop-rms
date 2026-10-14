@@ -305,6 +305,11 @@ import type { createMerchantStoreConfiguration } from "./merchant-store-configur
 import type { createMerchantServiceControl } from "./merchant-service-control.js";
 import type { createMerchantOrderExceptionRead } from "./merchant-order-exception-read.js";
 import type { createMerchantSettlementRead } from "./merchant-settlement-read.js";
+import type { createPersistentMerchantStoreReports } from "./persistent-merchant-store-reports.js";
+import {
+  storeSalesReportExportKinds,
+  type StoreSalesReportExportKind,
+} from "./store-sales-report.js";
 import type {
   AuthenticationSession,
   BrowserCookieMutation,
@@ -354,6 +359,8 @@ const merchantNavigation = Object.freeze({
     "/app/operations/payment-reconciliation",
     "operations.order-exception.manage",
   ],
+  // WP-2423 Q14: sales, item, hourly and tip reports with CSV export (Section 88 RPT-OPS-DASHBOARD).
+  "RPT-OPS-DASHBOARD": ["/app/reports/operations", "reporting.sales.read"],
   "KIT-KITCHEN-QUEUE": ["/operations/kitchen", "kitchen.operate"],
   "FUL-PICKUP-QUEUE": ["/operations/pickup", "fulfillment.operate"],
   // WP-2423 Q8: the dining tables board (Section 88 DIN-FLOOR-BOARD).
@@ -660,6 +667,8 @@ export interface MerchantBffRouterOptions {
   readonly orderExceptions?: ReturnType<typeof createMerchantOrderExceptionRead>;
   /** WP-2423 P1: the day-end settlement view for one business day. */
   readonly settlement?: ReturnType<typeof createMerchantSettlementRead>;
+  /** WP-2423 Q14: the Store's sales, item, hourly and tip reports and their CSV export. */
+  readonly storeReports?: ReturnType<typeof createPersistentMerchantStoreReports>;
   readonly service: MerchantBffService;
   readonly exactOrigin: string;
   readonly acceptedHost: string;
@@ -1890,6 +1899,84 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         }
         denied(response);
       });
+  });
+
+  // WP-2423 Q14: the Store's reports for a range of business days, and one report as CSV.
+  const reportRange = (request: express.Request, extra: readonly string[]) => {
+    const { from, to } = request.query;
+    const date = (value: unknown) =>
+      value === undefined || (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/u.test(value));
+    if (
+      request.method !== "GET" ||
+      request.body !== undefined ||
+      Object.keys(request.query).some((key) => !["from", "to", ...extra].includes(key)) ||
+      !date(from) ||
+      !date(to) ||
+      rawHeaderValues(request, "origin").length > 1 ||
+      rawHeaderValues(request, "sec-fetch-site").length !== 1
+    )
+      return null;
+    return {
+      from: typeof from === "string" ? from : null,
+      to: typeof to === "string" ? to : null,
+    };
+  };
+  const reportFailure = (response: express.Response) => (error: unknown) => {
+    if ((error as { code?: unknown } | null)?.code === "MERCHANT_STORE_REPORTS_BUSY") {
+      response
+        .status(503)
+        .set("Cache-Control", NO_STORE)
+        .set("Retry-After", "5")
+        .json({ error: "reports_busy" });
+      return;
+    }
+    denied(response);
+  };
+  router.get("/reports", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const range = reportRange(request, []);
+    if (sessionCookie === null || range === null) {
+      denied(response);
+      return;
+    }
+    if (!options.storeReports) {
+      response.status(503).set("Cache-Control", NO_STORE).json({ error: "reports_unavailable" });
+      return;
+    }
+    void options.storeReports
+      .read({ sessionCookie, ...range })
+      .then((view) => response.set("Cache-Control", NO_STORE).json(view))
+      .catch(reportFailure(response));
+  });
+  router.get("/reports/export", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const range = reportRange(request, ["report"]);
+    const report = request.query.report;
+    if (
+      sessionCookie === null ||
+      range === null ||
+      typeof report !== "string" ||
+      !(storeSalesReportExportKinds as readonly string[]).includes(report)
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.storeReports) {
+      response.status(503).set("Cache-Control", NO_STORE).json({ error: "reports_unavailable" });
+      return;
+    }
+    void options.storeReports
+      .export({ sessionCookie, ...range, report: report as StoreSalesReportExportKind })
+      .then((file) =>
+        response
+          .status(200)
+          .set("Cache-Control", NO_STORE)
+          .set("Content-Type", "text/csv; charset=utf-8")
+          .set("Content-Disposition", `attachment; filename="${file.fileName}"`)
+          .set("X-Content-Type-Options", "nosniff")
+          .send(file.body),
+      )
+      .catch(reportFailure(response));
   });
 
   router.get("/order-exceptions", safeRead(options), (request, response) => {

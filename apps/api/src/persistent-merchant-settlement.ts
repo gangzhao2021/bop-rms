@@ -1,4 +1,3 @@
-import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
   createPostgresCardMachinePaymentStore,
@@ -8,12 +7,7 @@ import {
   createPostgresPaymentReconciliationDaySource,
   createPostgresSoleOperatorRefundSummaryReader,
 } from "@rms/payment";
-import {
-  createPostgresAsPublishedStorePublicationProof,
-  createPostgresStoreBusinessDateConfigurationSource,
-  createPostgresStoreClosedBusinessDateWindowSource,
-  resolveStoreBusinessDate,
-} from "@rms/store";
+import { createMerchantBusinessDayWindows } from "./merchant-business-day-window.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import {
   createMerchantSettlementRead,
@@ -120,36 +114,14 @@ export function createPersistentMerchantSettlement(options: {
           }
         }),
     };
-    const configurationOptions = (
-      tx: ConsumerTransaction,
-      scope: MerchantSettlementScope,
-    ): Parameters<typeof createPostgresStoreBusinessDateConfigurationSource>[0] => {
-      const store = stores.get(tx) ?? unavailable();
-      return {
-        brandReference: scope.brandReference,
-        storeReference: scope.storeReference,
-        timeZone: store.timeZone,
-        authorize: async (t) => guard(scope)(t as ConsumerTransaction),
-        // Settlement reads past business days: verify against the as-published release.
-        publicationProof: async (t, candidate, at) => {
-          const proof = await createPostgresAsPublishedStorePublicationProof({
-            ...persistence.publication,
-            tenantReference: scope.tenantReference,
-            brandReference: scope.brandReference,
-            storeReference: scope.storeReference,
-            authorize: async () => guard(scope)(t as ConsumerTransaction),
-            configurationReference: candidate.configurationReference,
-            hashContent: (value) => "sha256:" + sha256Hex(canonicalizeRfc8785(value)),
-          })(t, at);
-          return {
-            contentDigest: proof.contentDigest,
-            businessDayStartSource: proof.businessDayStartSource,
-          };
-        },
-      };
-    };
-    const configurationSource = (tx: ConsumerTransaction, scope: MerchantSettlementScope) =>
-      createPostgresStoreBusinessDateConfigurationSource(configurationOptions(tx, scope));
+    // WP-2423 Q14: the business-day window definition shared with the sales reports.
+    const days = (tx: ConsumerTransaction, scope: MerchantSettlementScope) =>
+      createMerchantBusinessDayWindows({
+        persistence,
+        scope,
+        timeZone: (stores.get(tx) ?? unavailable()).timeZone,
+        authorize: async (t) => guard(scope)(t),
+      });
     /** Owner reads answer null when their source cannot; our own scope refusal still propagates. */
     const optional = async <T>(work: () => Promise<T>): Promise<T | null> => {
       try {
@@ -165,48 +137,8 @@ export function createPersistentMerchantSettlement(options: {
       authorize: async (tx) => authorize(tx),
       storeLabel: async (tx) => (stores.get(tx) ?? unavailable()).displayName,
       now: () => persistence.now(),
-      window: async (tx, scope, businessDate): Promise<MerchantSettlementWindow> => {
-        const now = persistence.now();
-        const source = configurationSource(tx, scope);
-        const today = resolveStoreBusinessDate({
-          occurredAt: now,
-          configuration: await source(tx, now),
-        });
-        const currentDate = String(today.businessDate);
-        if (businessDate === currentDate)
-          return {
-            businessDate: currentDate,
-            startsAt: String(today.businessDateBoundaryAt),
-            endsAt: now,
-            timeZone: today.timeZone,
-            status: "Open",
-          };
-        if (businessDate !== null && businessDate > currentDate) return unavailable();
-        let date = businessDate;
-        if (date === null) {
-          const priorAt = new Date(
-            Date.parse(String(today.businessDateBoundaryAt)) - 1,
-          ).toISOString();
-          date = String(
-            resolveStoreBusinessDate({
-              occurredAt: priorAt,
-              configuration: await source(tx, priorAt),
-            }).businessDate,
-          );
-        }
-        // Every configuration in force on that day (UTC noon anchors the day's boundaries);
-        // versions may change within the day only with identical boundaries.
-        const window = await createPostgresStoreClosedBusinessDateWindowSource(
-          configurationOptions(tx, scope),
-        )(tx, { businessDate: date, anchorAt: `${date}T12:00:00.000Z`, observedAt: now });
-        return {
-          businessDate: String(window.businessDate),
-          startsAt: String(window.startsAt),
-          endsAt: String(window.endsAt),
-          timeZone: window.timeZone,
-          status: "Closed",
-        };
-      },
+      window: async (tx, scope, businessDate): Promise<MerchantSettlementWindow> =>
+        days(tx, scope).window(tx, businessDate),
       captured: (tx, scope, window) =>
         optional(async () => {
           const configuration = await options.resolveConfiguration(tx, scope);
@@ -275,11 +207,8 @@ export function createPersistentMerchantSettlement(options: {
       currentDaySelfApprovedRefunds: (tx, scope) =>
         optional(async () => {
           const now = persistence.now();
-          const today = resolveStoreBusinessDate({
-            occurredAt: now,
-            configuration: await configurationSource(tx, scope)(tx, now),
-          });
-          const startsAt = String(today.businessDateBoundaryAt);
+          const today = await days(tx, scope).today(tx, now);
+          const startsAt = today.startsAt;
           if (startsAt >= now) return null;
           const summary = await createPostgresSoleOperatorRefundSummaryReader({
             scope: {
@@ -290,7 +219,7 @@ export function createPersistentMerchantSettlement(options: {
             authorize: async (t) => guard(scope)(t),
           })(tx, { startsAt, endsAt: now });
           return {
-            businessDate: String(today.businessDate),
+            businessDate: today.businessDate,
             count: summary.count,
             amountMinor: summary.amountMinor.toString(),
             currencyCode: summary.currencyCode,

@@ -125,6 +125,15 @@ export interface RemakeChoice {
   readonly quantity: number;
 }
 
+/** Remakes are offered for dishes of the last 12 hours, never an earlier day's lingering ticket. */
+export const kitchenRemakeOfferedMs = 12 * 60 * 60 * 1000;
+export function remakeOffered(item: KitchenBoardItem, observedAt: string): boolean {
+  return (
+    item.status === "Completed" &&
+    Date.parse(observedAt) - Date.parse(item.createdAt) <= kitchenRemakeOfferedMs
+  );
+}
+
 /** "Not ready yet" is offered only while the mistake can still be corrected (two minutes). */
 export function notReadyOffered(item: KitchenBoardItem, observedAt: string): boolean {
   const readyAt = item.execution?.readyAt ?? null;
@@ -164,7 +173,9 @@ export function KitchenReworkStatus({
               ? "The first dish is recorded as waste. The guest is not charged again."
               : "The board now shows the remake's current state."
           : state.code === "WindowClosed"
-            ? "More than two minutes have passed since it was marked done. Choose another reason to remake it."
+            ? state.body.action === "CreateKitchenRework" && state.body.reasonCode === "NOT_READY"
+              ? "More than two minutes have passed since it was marked done. Choose another reason to remake it."
+              : "This dish was finished too long ago to remake. Close the old order instead."
             : state.code === "PermissionDenied"
               ? "Your role does not allow remakes. Ask a manager or kitchen lead."
               : state.code === "Conflict"

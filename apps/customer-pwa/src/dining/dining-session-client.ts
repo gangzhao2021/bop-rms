@@ -39,6 +39,8 @@ export interface DiningRound {
     readonly servedQuantity: number;
     readonly cancelled: boolean;
     readonly lineTotal: DiningMoney;
+    /** WP-2423 Q26: the kitchen is making this item again. */
+    readonly beingRemade?: boolean;
   }[];
   readonly itemsTotal: DiningMoney;
 }
@@ -180,13 +182,17 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
           : oneOf(round.storeCancellationReason, reasons),
       items: Object.freeze(
         round.items.map((value: unknown) => {
+          const remade =
+            value !== null && typeof value === "object" && Object.hasOwn(value, "beingRemade");
           const item = record(value, [
             "displayName",
             "quantity",
             "servedQuantity",
             "cancelled",
             "lineTotal",
+            ...(remade ? ["beingRemade"] : []),
           ]);
+          if (remade && item.beingRemade !== true) return invalid();
           const quantity = count(item.quantity, 1);
           const servedQuantity = count(item.servedQuantity, 0);
           if (servedQuantity > quantity || typeof item.cancelled !== "boolean") return invalid();
@@ -196,6 +202,7 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
             servedQuantity,
             cancelled: item.cancelled,
             lineTotal: money(item.lineTotal),
+            ...(remade ? { beingRemade: true } : {}),
           });
         }),
       ),

@@ -2202,6 +2202,22 @@ async function scanUnsupported(root, module, diagnostics) {
             owner: "payment",
             tables: ["card_machine_payment", "card_machine_refund"],
           },
+          // WP-2423 Q14: payments and refunds behind the Store sales reports (read only).
+          "src/infrastructure/persistence/store-sales-payment-ledger.ts": {
+            owner: "payment",
+            tables: [
+              "payment_intent",
+              "payment_terminal_fact",
+              "ordinary_refund_request",
+              "card_machine_payment",
+              "card_machine_refund",
+            ],
+          },
+          // WP-2423 Q14: the priced items of paid Orders behind the Store sales reports (read only).
+          "src/infrastructure/persistence/store-sales-order-source.ts": {
+            owner: "ordering",
+            tables: ["order_header", "order_batch", "order_item"],
+          },
           // WP-2423 Q7: the staff member and command behind a counter pickup order.
           "src/infrastructure/persistence/counter-order-entry-store.ts": {
             owner: "ordering",

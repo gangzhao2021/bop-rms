@@ -215,6 +215,15 @@ export class CustomerOrderStatusHandler {
                           },
                         })),
                       }),
+                  // WP-2423 Q26: items the kitchen is remaking (Order item and open portions).
+                  ...(sources.remakes === undefined
+                    ? {}
+                    : {
+                        remakes: sources.remakes.map((remake) => ({
+                          orderItemReference: remake.orderItemReference,
+                          quantity: remake.quantity,
+                        })),
+                      }),
                   // WP-2423 Q6: dine-in rounds whose payment failed (with when they are cancelled)
                   // and rounds cancelled because their payment did not go through.
                   ...(sources.batchPayments === undefined

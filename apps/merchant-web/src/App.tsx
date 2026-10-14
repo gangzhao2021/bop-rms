@@ -26,6 +26,7 @@ import { StoreBusinessDayProvider } from "./StoreBusinessDay.js";
 import { MerchantShell } from "./MerchantShell.js";
 import { StoreOverview } from "./StoreOverview.js";
 import { SettlementPage } from "./SettlementPage.js";
+import { StoreReportsPage } from "./StoreReportsPage.js";
 import { RefundApprovalsPage } from "./RefundApprovalsPage.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { KitchenBoardPage, KitchenWorkItemPage } from "./KitchenBoardPages.js";
@@ -1154,7 +1155,27 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         <Route path="/app/supply/purchase-orders/:id" element={<PurchaseOrderDetailPage />} />
         <Route path="/app/supply/discrepancies" element={<DiscrepancyPage />} />
         <Route path="/app/supply/performance" element={<SupplierPerformancePage />} />
-        <Route path="/app/reports/operations" element={<OperationalDashboardPage />} />
+        {/* WP-2423 Q14: the Store's sales reports for a signed-in Owner or Store Manager; the
+            Phase 3 dashboard contract stays for the local demo only. */}
+        <Route
+          path="/app/reports/operations"
+          element={
+            demo === null && state.kind === "Ready" && !state.switching ? (
+              <StoreReportsPage
+                key={state.workspace.selectedScope.storeReference + state.csrf}
+                storeLabel={state.workspace.selectedScope.storeLabel}
+              />
+            ) : demo !== null ? (
+              <OperationalDashboardPage />
+            ) : (
+              <WorkspacePage title="Reports">
+                <StatePanel heading="Reports unavailable" tone="error" status>
+                  <p>A current merchant session and Store are required.</p>
+                </StatePanel>
+              </WorkspacePage>
+            )
+          }
+        />
         <Route path="/app/reports/metrics" element={<MetricCatalogPage />} />
         <Route path="/app/reports/metrics/:id" element={<MetricDetailPage />} />
         <Route path="/app/reports" element={<ReportCatalogPage />} />

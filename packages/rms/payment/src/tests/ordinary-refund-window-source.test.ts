@@ -25,6 +25,7 @@ function fixture() {
   const operation = {
     ...candidate,
     paymentAttemptReference: id(9),
+    paymentIntentReference: id(10),
     preparedAt: "2026-09-19T00:00:00.000Z",
     amountMinor: 1250n,
   };
@@ -62,6 +63,18 @@ it("counts a prior-operation refund by Provider-created time, not confirmation o
     refundedAmountMinor: 1250n,
     unresolvedOperationCount: 0,
   });
+  // WP-2423 Q14: each confirmed refund, for the sales reports' business day and Order.
+  expect((await f.read(f.tx, input)).confirmedRefunds).toEqual([
+    {
+      operationReference: id(6),
+      requestReference: id(8),
+      orderReference: id(7),
+      paymentIntentReference: id(10),
+      paymentAttemptReference: id(9),
+      amountMinor: 1250n,
+      providerCreatedAt: input.startsAt,
+    },
+  ]);
   expect(mocks.outcome).toHaveBeenCalledWith(f.tx, {
     orderReference: id(7),
     requestReference: id(8),

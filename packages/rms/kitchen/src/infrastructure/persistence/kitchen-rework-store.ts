@@ -8,6 +8,7 @@ import {
   KitchenReworkError,
   kitchenReworkMaximumPerOriginal,
   kitchenReworkNotReadyWindowMs,
+  kitchenReworkOriginalWindowMs,
   kitchenReworkReasons,
   kitchenReworkRecentWindowMs,
   kitchenReworkSourceChannel,
@@ -242,7 +243,7 @@ export function createPostgresKitchenReworkStore(options: {
       if (command.action === "CreateKitchenRework") {
         const found = await tx.query<Record<string, unknown>>(
           "SELECT w.kitchen_ticket_id::text AS ticket,w.order_id::text AS order_id,w.order_batch_id::text AS batch," +
-            "w.order_item_id::text AS order_item,w.status,w.required_quantity,w.updated_at," +
+            "w.order_item_id::text AS order_item,w.status,w.required_quantity,w.updated_at,w.created_at," +
             "(SELECT max(r.ready_at) FROM rms_kitchen.kitchen_order_item_ready_result r WHERE r.brand_id=w.brand_id " +
             "AND r.store_id=w.store_id AND r.kitchen_ticket_id=w.kitchen_ticket_id AND r.order_item_id=w.order_item_id) AS ready_at," +
             "(SELECT count(*)::int FROM rms_kitchen.kitchen_rework_item k WHERE k.brand_id=w.brand_id AND k.store_id=w.store_id " +
@@ -264,6 +265,13 @@ export function createPostgresKitchenReworkStore(options: {
           original.ready_at === null ? 0 : Date.parse(iso(original.ready_at) as string),
         );
         if (Date.parse(occurredAt) < finishedAt) return fail("KITCHEN_REWORK_PRECONDITION_FAILED");
+        // Measured from when the dish reached the kitchen: an earlier day's ticket finished today
+        // (a ticket left open) is closed with its order, never remade.
+        if (
+          Date.parse(occurredAt) - Date.parse(iso(original.created_at) as string) >
+          kitchenReworkOriginalWindowMs
+        )
+          return fail("KITCHEN_REWORK_WINDOW_CLOSED");
         const notReady = command.reasonCode === "NOT_READY";
         if (notReady && Date.parse(occurredAt) - finishedAt > kitchenReworkNotReadyWindowMs)
           return fail("KITCHEN_REWORK_WINDOW_CLOSED");
@@ -456,36 +464,64 @@ export function createPostgresKitchenReworkStore(options: {
 }
 
 /**
- * WP-2423 Q26 public owner Query: open rework per Order, so the order and pickup screens can say
- * a dish is being remade before it is handed over. Kitchen facts only (counts and reasons).
+ * WP-2423 Q26 public owner Query: open remakes of the given Orders, per Order item (open portions
+ * and whether the first dish was only marked done too early), so pickup, order and table screens
+ * can say a dish is being remade. Matched by Order and Order item reference, never by number.
+ * Kitchen facts only.
  */
-export async function listOpenKitchenReworkByOrder(
+export async function listOpenKitchenReworkItems(
   tx: ConsumerTransaction,
   scope: { readonly brandReference: string; readonly storeReference: string },
   orderReferences: readonly string[],
-): Promise<ReadonlyMap<string, { readonly openQuantity: number }>> {
-  if (orderReferences.length === 0) return new Map();
+): Promise<
+  readonly {
+    readonly orderReference: string;
+    readonly orderItemReference: string;
+    readonly openQuantity: number;
+  }[]
+> {
+  if (orderReferences.length === 0) return Object.freeze([]);
   if (orderReferences.length > 200) return fail("KITCHEN_REWORK_INPUT_INVALID");
   const brand = parseKitchenTicketReference(scope.brandReference),
     store = parseKitchenTicketReference(scope.storeReference);
-  const orders = orderReferences.map((reference) => parseKitchenTicketReference(reference));
+  const orders = [
+    ...new Set(orderReferences.map((reference) => parseKitchenTicketReference(reference))),
+  ];
   try {
     await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
       brand,
       store,
     ]);
     const result = await tx.query<Record<string, unknown>>(
-      "SELECT order_id::text AS order_id,sum(quantity)::int AS open FROM rms_kitchen.kitchen_rework_item " +
-        "WHERE brand_id=$1 AND store_id=$2 AND order_id=ANY($3::uuid[]) AND status<>'Completed' GROUP BY order_id",
+      "SELECT order_id::text AS order_id,order_item_id::text AS order_item_id,sum(quantity)::int AS open " +
+        "FROM rms_kitchen.kitchen_rework_item WHERE brand_id=$1 AND store_id=$2 AND order_id=ANY($3::uuid[]) " +
+        "AND status<>'Completed' GROUP BY order_id,order_item_id ORDER BY order_id,order_item_id",
       [brand, store, orders],
     );
-    return new Map(
-      result.rows.map((row) => [
-        parseKitchenTicketReference(row.order_id),
-        Object.freeze({ openQuantity: Number(row.open) }),
-      ]),
+    return Object.freeze(
+      result.rows.map((row) =>
+        Object.freeze({
+          orderReference: parseKitchenTicketReference(row.order_id),
+          orderItemReference: parseKitchenTicketReference(row.order_item_id),
+          openQuantity: Number(row.open),
+        }),
+      ),
     );
   } catch (error) {
     return databaseFailure(error);
   }
+}
+
+/** Open remake portions per Order (sum over its items); see `listOpenKitchenReworkItems`. */
+export async function listOpenKitchenReworkByOrder(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReferences: readonly string[],
+): Promise<ReadonlyMap<string, { readonly openQuantity: number }>> {
+  const totals = new Map<string, { openQuantity: number }>();
+  for (const entry of await listOpenKitchenReworkItems(tx, scope, orderReferences))
+    totals.set(entry.orderReference, {
+      openQuantity: (totals.get(entry.orderReference)?.openQuantity ?? 0) + entry.openQuantity,
+    });
+  return totals;
 }

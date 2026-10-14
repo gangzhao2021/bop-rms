@@ -17,6 +17,7 @@ import {
   createPostgresKitchenReworkStore,
   KitchenReworkError,
   listOpenKitchenReworkByOrder,
+  listOpenKitchenReworkItems,
 } from "../../rms/kitchen/src/index.ts";
 import { createKitchenReworkWasteConsumption } from "../../../apps/api/src/kitchen-rework-waste.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
@@ -179,7 +180,8 @@ it("remakes a finished dish once, keeps the original, records waste once and cor
         execution_snapshot_digest: sha("8"),
         created_by_actor_type: "System",
         updated_by_actor_type: "System",
-        created_at: at,
+        // Reached the kitchen 10 minutes before it last changed (fixed instants for old facts).
+        created_at: updatedAt === at ? at : new Date(Date.parse(updatedAt) - 600_000).toISOString(),
         updated_at: updatedAt,
       });
       const A = id(0x20),
@@ -200,6 +202,11 @@ it("remakes a finished dish once, keeps the original, records waste once and cor
         "rms_kitchen.kitchen_work_item",
         workItem(0x40, 3, "In Progress", 1, 0, at),
       );
+      // An earlier day's dish left on the board and only finished now is never remade.
+      await insertRow(admin, "rms_kitchen.kitchen_work_item", {
+        ...workItem(0x50, 4, "Completed", 1, 1, instant(-60_000)),
+        created_at: instant(-13 * 3_600_000),
+      });
       const original = async (workItemId) =>
         (
           await rows(
@@ -302,6 +309,10 @@ it("remakes a finished dish once, keeps the original, records waste once and cor
       await refused(
         run(create({ originalWorkItemReference: id(0x99) })),
         "KITCHEN_REWORK_NOT_FOUND",
+      );
+      await refused(
+        run(create({ originalWorkItemReference: id(0x50) })),
+        "KITCHEN_REWORK_WINDOW_CLOSED",
       );
 
       // ── 4. Marked done by mistake: A (30 s ago) goes back in progress, nothing wasted; B (10 min
@@ -484,6 +495,12 @@ it("remakes a finished dish once, keeps the original, records waste once and cor
         listOpenKitchenReworkByOrder(tx, kitchenScope, [order, id(0x77)]),
       );
       assert.deepEqual([...open.entries()], [[order, { openQuantity: 3 }]]);
+      // Per Order item, matched by reference (pickup, order and table screens use this).
+      const perItem = await asApi((tx) => listOpenKitchenReworkItems(tx, kitchenScope, [order]));
+      assert.deepEqual(perItem, [
+        { orderReference: order, orderItemReference: id(0x21), openQuantity: 2 },
+        { orderReference: order, orderItemReference: id(0x31), openQuantity: 1 },
+      ]);
 
       // ── 8. Inventory: Order line of A (quantity 2) reserved two ingredients and consumed them on
       // completion; the dropped portion is recorded as waste once per event.

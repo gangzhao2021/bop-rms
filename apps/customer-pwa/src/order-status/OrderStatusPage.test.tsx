@@ -837,3 +837,32 @@ it("WP-2423 Q10: shows how to call and find the Store under the order", () => {
   expect(html).toContain('href="tel:+14165550123"');
   expect(html).toContain("Toronto, ON M5V 1A1");
 });
+
+it("WP-2423 Q26: a ready pickup with a dish being remade says to wait, not that it is ready", () => {
+  const state = readyState();
+  if (state.status !== "ready") throw new Error("fixture");
+  const html = render({
+    ...state,
+    view: {
+      ...state.view,
+      sources: {
+        checkedAt: "2026-08-11T14:00:00.000Z",
+        kitchen: {
+          batches: [
+            { orderBatchReference: id(3), status: "Ready", updatedAt: "2026-08-11T13:59:00.000Z" },
+          ],
+        },
+        payments: null,
+        remakes: [{ orderItemReference: id(4), quantity: 1 }],
+      },
+    },
+  });
+  expect(html).toContain("Remaking part of your order");
+  expect(html).toContain(
+    "We&#x27;re remaking part of your order. We&#x27;ll have it ready shortly",
+  );
+  expect(html).toContain("Being remade");
+  expect(html).not.toContain("Your order is ready. Show your pickup code at the counter.");
+  // The pickup code stays available.
+  expect(html).toContain("Checking your pickup code");
+});

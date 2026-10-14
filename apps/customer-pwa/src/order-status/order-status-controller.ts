@@ -179,6 +179,9 @@ function parseSources(
     ...(value !== null && typeof value === "object" && Object.hasOwn(value, "storeAcceptance")
       ? ["storeAcceptance"]
       : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "remakes")
+      ? ["remakes"]
+      : []),
   ]);
   const checkedAt = parseInstant(raw.checkedAt);
   if (Date.parse(checkedAt) < Date.parse(submittedAt)) return invalid();
@@ -495,10 +498,39 @@ function parseSources(
       }),
     );
   }
+  // WP-2423 Q26: items of this order the kitchen is remaking; each item at most once.
+  let remakes: OrderStatusSources["remakes"];
+  if (Object.hasOwn(raw, "remakes")) {
+    const items = new Map(
+      batches.flatMap((batch) =>
+        batch.items.map((item) => [item.orderItemReference, item] as const),
+      ),
+    );
+    if (!Array.isArray(raw.remakes) || raw.remakes.length < 1 || raw.remakes.length > items.size)
+      return invalid();
+    const seen = new Set<string>();
+    remakes = Object.freeze(
+      raw.remakes.map((value: unknown) => {
+        const entry = exact(value, ["orderItemReference", "quantity"]);
+        const orderItemReference = parseReference(entry.orderItemReference);
+        if (
+          !items.has(orderItemReference) ||
+          seen.has(orderItemReference) ||
+          !Number.isSafeInteger(entry.quantity) ||
+          Number(entry.quantity) < 1 ||
+          Number(entry.quantity) > 999
+        )
+          return invalid();
+        seen.add(orderItemReference);
+        return Object.freeze({ orderItemReference, quantity: Number(entry.quantity) });
+      }),
+    );
+  }
   return Object.freeze({
     checkedAt,
     kitchen,
     payments,
+    ...(remakes === undefined ? {} : { remakes }),
     ...(dining ? { dining } : {}),
     ...(pickup === undefined ? {} : { pickup }),
     ...(unpaidCancellation === undefined ? {} : { unpaidCancellation }),

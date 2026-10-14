@@ -173,6 +173,38 @@ export async function listStoreOrderNumbers(
   );
 }
 
+/**
+ * WP-2423 Q26: the business day each Order belongs to (order numbers restart every business day),
+ * so staff screens can tell an earlier day's order from today's with the same number.
+ */
+export async function listStoreOrderBusinessDates(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReferences: readonly string[],
+): Promise<ReadonlyMap<string, string>> {
+  if (orderReferences.length === 0) return new Map();
+  if (orderReferences.length > 100) throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+  const orders = orderReferences.map((reference) => parseOrderingReference(reference));
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [scope.brandReference, scope.storeReference],
+  );
+  const rows = (
+    await transaction.query(
+      "SELECT order_id::text order_id,business_date::text business_date FROM rms_ordering.order_header WHERE brand_id=$1 AND store_id=$2 AND order_id=ANY($3::uuid[])",
+      [scope.brandReference, scope.storeReference, orders],
+    )
+  ).rows as readonly { order_id: string; business_date: unknown }[];
+  return new Map(
+    rows
+      .filter(
+        (row) =>
+          typeof row.business_date === "string" && /^\d{4}-\d{2}-\d{2}$/u.test(row.business_date),
+      )
+      .map((row) => [row.order_id, row.business_date as string]),
+  );
+}
+
 export interface MerchantOrderLineMoney {
   readonly amountMinor: string;
   readonly currencyCode: string;

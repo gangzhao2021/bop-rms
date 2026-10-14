@@ -195,3 +195,39 @@ it("WP-2423 Q26: tells staff to wait when the kitchen is remaking part of the or
     }),
   ).toThrow();
 });
+
+it("WP-2423 Q26: long waits read in hours or days and earlier days' orders are set apart", async () => {
+  const { pickupWaitText, fromEarlierDay } = await import("./PickupPages.js");
+  expect([
+    pickupWaitText(20),
+    pickupWaitText(185),
+    pickupWaitText(120),
+    pickupWaitText(7766),
+  ]).toEqual(["20 min", "3 h 5 min", "2 h", "5 days"]);
+  const { StoreBusinessDayContext } = await import("./StoreBusinessDay.js");
+  const fixture = pickupQueueFixture();
+  const today = { ...fixture.items[0], businessDate: "2026-08-12" };
+  const earlier = {
+    ...fixture.items[0],
+    fulfillmentReference: "018f0f58-767a-7f3b-a1d0-000000000511",
+    orderReference: "018f0f58-767a-7f3b-a1d0-000000000512",
+    readyAt: "2026-08-07T15:00:00.000Z",
+    businessDate: "2026-08-07",
+  };
+  const parsedEarlier = parsePickupQueueView({ ...fixture, items: [earlier] }).items[0];
+  if (!parsedEarlier) throw new Error("fixture");
+  expect(fromEarlierDay(parsedEarlier, "2026-08-12")).toBe(true);
+  const html = renderToStaticMarkup(
+    <StoreBusinessDayContext.Provider
+      value={{ businessDate: "2026-08-12", startsAt: null, endsAt: null }}
+    >
+      <MemoryRouter>
+        <PickupQueueScreen view={parsePickupQueueView({ ...fixture, items: [today, earlier] })} />
+      </MemoryRouter>
+    </StoreBusinessDayContext.Provider>,
+  );
+  expect(html).toContain("From earlier days — check and close");
+  expect(html).toContain("From Fri, Aug 7");
+  expect(html).toContain("Ready for 5 days");
+  expect(html.indexOf("Ready for 20 min")).toBeLessThan(html.indexOf("From earlier days"));
+});

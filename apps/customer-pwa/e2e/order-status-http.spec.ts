@@ -320,4 +320,69 @@ test.describe("@production order status HTTP continuity", () => {
       });
     }
   });
+
+  test("WP-2423 Q26: tells the customer to wait while part of a ready pickup is remade", async ({
+    page,
+  }) => {
+    const csrf = "g".repeat(43);
+    await page.route("**/bff/customer/entry", (route) =>
+      route.fulfill({
+        status: 201,
+        headers: { "cache-control": "no-store" },
+        json: {
+          schemaVersion: 2,
+          status: "Established",
+          brandDisplayName: "Synthetic Brand",
+          storeDisplayName: "Synthetic Status Store",
+          publicStoreReference: id(6),
+          publicTableReference: null,
+          channel: "Pickup",
+          operatingState: "Open",
+          availableServiceModes: ["Pickup"],
+          locale: "en-CA",
+          contextExpiresAt: new Date(Date.now() + 600_000).toISOString(),
+          csrfToken: csrf,
+        },
+      }),
+    );
+    await page.route("**/api/v1/orders/*/status", async (route) => {
+      const body = status(id(1), "1001", "2598");
+      const kitchenBatch = body.status.sources.kitchen.batches[0];
+      if (kitchenBatch) kitchenBatch.status = "Ready";
+      await route.fulfill({
+        json: {
+          ...body,
+          status: {
+            ...body.status,
+            sources: {
+              ...body.status.sources,
+              remakes: [{ orderItemReference: id(4), quantity: 1 }],
+            },
+          },
+        },
+      });
+    });
+    await page.goto("/#qr=aaa.bbb.ccc");
+    await expect(
+      page.getByRole("heading", { name: "Synthetic Status Store", exact: true }),
+    ).toBeVisible();
+    await page.evaluate((reference) => {
+      history.pushState(null, "", "/orders/" + reference);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }, id(1));
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { name: "Remaking part of your order" })).toBeVisible();
+    await expect(main.getByText("Being remade", { exact: true })).toBeVisible();
+    await expect(main).not.toContainText("Your order is ready. Show your pickup code");
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await page.screenshot({
+        path: `test-results/order-status-remake-${width}.png`,
+        fullPage: true,
+      });
+    }
+  });
 });

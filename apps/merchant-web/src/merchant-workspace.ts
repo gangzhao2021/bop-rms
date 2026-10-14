@@ -35,6 +35,7 @@ export interface MerchantNavigationItem {
     | "OPS-ORDER-ENTRY"
     | "OPS-ORDER-EXCEPTION"
     | "PAY-RECONCILIATION"
+    | "RPT-OPS-DASHBOARD"
     | "KIT-KITCHEN-QUEUE"
     | "FUL-PICKUP-QUEUE"
     | "DIN-FLOOR-BOARD"
@@ -88,6 +89,8 @@ const NAVIGATION = Object.freeze({
     "/app/operations/payment-reconciliation",
     "operations.order-exception.manage",
   ],
+  // WP-2423 Q14: sales, item, hourly and tip reports with CSV export (Section 88 RPT-OPS-DASHBOARD).
+  "RPT-OPS-DASHBOARD": ["/app/reports/operations", "reporting.sales.read"],
   "KIT-KITCHEN-QUEUE": ["/operations/kitchen", "kitchen.operate"],
   "FUL-PICKUP-QUEUE": ["/operations/pickup", "fulfillment.operate"],
   // WP-2423 Q8: the dining tables board (Section 88 DIN-FLOOR-BOARD).

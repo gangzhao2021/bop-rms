@@ -123,6 +123,7 @@ export function createPickupClient(options: {
               ...(Number.isSafeInteger(raw.remakeInProgress) && Number(raw.remakeInProgress) > 0
                 ? { remakeQuantity: Number(raw.remakeInProgress) }
                 : {}),
+              ...(typeof raw.businessDate === "string" ? { businessDate: raw.businessDate } : {}),
               execution,
             };
           }),
