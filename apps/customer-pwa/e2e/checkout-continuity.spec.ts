@@ -562,7 +562,7 @@ for (const screen of [
             await expect(page.getByText("Checking again automatically…")).toBeVisible();
             if (terminal === "payment-failed") {
               await expect(
-                page.getByRole("heading", { name: "Payment failed", exact: true }),
+                page.getByRole("heading", { name: "Payment declined", exact: true }),
               ).toBeVisible({ timeout: 15_000 });
               await expect(
                 page.getByRole("link", { name: "View order status", exact: true }),

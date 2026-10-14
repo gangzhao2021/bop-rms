@@ -126,7 +126,7 @@ export const availabilityPermission = "catalog.sku.availability.manage";
 export const soldOutMarkPermission = "catalog.sku.sold_out.mark";
 /** Reason code of a Store's sold-out mark. */
 export const soldOutReasonCode = "SOLD_OUT";
-/** A business day ends at most 25 hours ahead (local midnight across a daylight-saving change). */
+/** A Store business day ends at most 25 hours ahead (its start across a daylight-saving change). */
 const soldOutMarkMaxMs = 25 * 3_600_000;
 /** Store authority covers only unavailability at its own Store; the sold-out mark only today's marks. */
 function withinStore(

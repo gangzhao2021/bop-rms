@@ -12,6 +12,10 @@ import {
   createPostgresStoreBusinessDateSource,
 } from "@rms/store";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import {
+  createMerchantStoreBusinessDay,
+  merchantBusinessDayView,
+} from "./merchant-store-business-day.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 
@@ -174,5 +178,24 @@ export function createMerchantServiceControl(options: {
         ...state,
       });
     });
-  return Object.assign(write, { read });
+  // WP-2423 Q21: the selected Store's current business day, for every staff member who may enter.
+  const businessDay = async (sessionCookie: unknown) =>
+    source.transactions.run(async (tx) => {
+      const { selected, context, store, allowed } = await resolveScope(
+        tx,
+        sessionCookie,
+        "merchant.access",
+      );
+      const day = await createMerchantStoreBusinessDay({
+        publication: source.publication,
+        tenantReference: selected.tenantReference,
+        brandReference: context.brand.brandReference,
+        storeReference: store.storeReference,
+        timeZone: store.timeZone,
+        authorize: allowed,
+      })(tx, context.resolvedAt);
+      if (!(await allowed())) throw new Error("STORE_SERVICE_PERMISSION_DENIED");
+      return merchantBusinessDayView(day);
+    });
+  return Object.assign(write, { read, businessDay });
 }

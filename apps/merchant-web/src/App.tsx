@@ -22,6 +22,7 @@ import { usesWorkspaceLayout, WorkspaceLayout } from "./WorkspaceLayout.js";
 import { StaffSessionGuard, StaffSignedOutPanel, StaffSwitchButton } from "./StaffSession.js";
 import { isOperationalScreen } from "./staff-session.js";
 import { StoreTimeZoneContext } from "./StoreTime.js";
+import { StoreBusinessDayProvider } from "./StoreBusinessDay.js";
 import { MerchantShell } from "./MerchantShell.js";
 import { StoreOverview } from "./StoreOverview.js";
 import { SettlementPage } from "./SettlementPage.js";
@@ -1491,31 +1492,39 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
     <StoreTimeZoneContext.Provider
       value={state.kind === "Ready" ? state.workspace.selectedScope.timeZone : undefined}
     >
-      {state.kind === "Ready" && usesWorkspaceLayout(pathname) ? (
-        <WorkspaceLayout
-          items={state.workspace.navigation}
-          path={pathname}
-          storeLabel={state.workspace.selectedScope.storeLabel}
-          footer={demo === null ? <StaffSwitchButton /> : null}
-        >
-          {routes}
-        </WorkspaceLayout>
-      ) : state.kind === "SignedOut" && demo === null && staffPage ? (
-        <AppFrame title="Operations" description="Store workspace">
-          <StaffSignedOutPanel />
-        </AppFrame>
-      ) : (
-        routes
-      )}
-      {/* WP-2423 Q18: keep the Session alive while staff work; warn before it ends. */}
-      {state.kind === "Ready" && demo === null ? (
-        <StaffSessionGuard
-          key={state.csrf}
-          csrf={state.csrf}
-          path={pathname}
-          timeZone={state.workspace.selectedScope.timeZone}
-        />
-      ) : null}
+      <StoreBusinessDayProvider
+        initialBusinessDate={state.kind === "Ready" ? state.workspace.businessDate : null}
+        scopeKey={
+          state.kind === "Ready" ? state.workspace.selectedScope.storeReference + state.csrf : ""
+        }
+        enabled={state.kind === "Ready" && !state.switching && demo === null}
+      >
+        {state.kind === "Ready" && usesWorkspaceLayout(pathname) ? (
+          <WorkspaceLayout
+            items={state.workspace.navigation}
+            path={pathname}
+            storeLabel={state.workspace.selectedScope.storeLabel}
+            footer={demo === null ? <StaffSwitchButton /> : null}
+          >
+            {routes}
+          </WorkspaceLayout>
+        ) : state.kind === "SignedOut" && demo === null && staffPage ? (
+          <AppFrame title="Operations" description="Store workspace">
+            <StaffSignedOutPanel />
+          </AppFrame>
+        ) : (
+          routes
+        )}
+        {/* WP-2423 Q18: keep the Session alive while staff work; warn before it ends. */}
+        {state.kind === "Ready" && demo === null ? (
+          <StaffSessionGuard
+            key={state.csrf}
+            csrf={state.csrf}
+            path={pathname}
+            timeZone={state.workspace.selectedScope.timeZone}
+          />
+        ) : null}
+      </StoreBusinessDayProvider>
     </StoreTimeZoneContext.Provider>
   );
 }

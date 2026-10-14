@@ -17,6 +17,8 @@ const row = (n: number) => ({
   guest_session_id: id(12),
   source_channel: "Web",
   created_at: new Date("2026-09-14T00:00:00.000Z"),
+  // WP-2423 Q21: 20:00 on Sep 13 in Toronto — the Store's business date, not the UTC date.
+  business_date: "2026-09-13",
   submission_id: id(10),
   order_batch_id: id(11),
 });
@@ -40,25 +42,30 @@ it("paginates scoped identities without exposing initial version or private fiel
     "orderNumber",
     "orderType",
     "sourceChannel",
+    "businessDate",
     "submittedAt",
     "initialSubmissionReference",
     "initialBatchReference",
   ]);
+  expect(result.items[0]?.businessDate).toBe("2026-09-13");
+  expect(query.mock.calls[1]?.[0]).toContain("h.business_date::text AS business_date");
   expect(query.mock.calls[1]?.[0]).toContain("h.brand_id=$1 AND h.store_id=$2");
 });
-it.each([{ rows: [row(3), row(3)] }, { rows: [{ ...row(3), store_id: id(8) }] }])(
-  "rejects duplicate or foreign source rows",
-  async ({ rows }) => {
-    const { tx } = fixture(rows);
-    await expect(
-      createPostgresMerchantOrderIndex({ ...scope, authorize: async () => true }).list({
-        transaction: tx,
-        limit: 10,
-        afterOrderReference: null,
-      }),
-    ).rejects.toThrow("MERCHANT_ORDER_INDEX_UNAVAILABLE");
-  },
-);
+it.each([
+  { rows: [row(3), row(3)] },
+  { rows: [{ ...row(3), store_id: id(8) }] },
+  { rows: [{ ...row(3), business_date: null }] },
+  { rows: [{ ...row(3), business_date: new Date("2026-09-13T00:00:00.000Z") }] },
+])("rejects duplicate or foreign source rows", async ({ rows }) => {
+  const { tx } = fixture(rows);
+  await expect(
+    createPostgresMerchantOrderIndex({ ...scope, authorize: async () => true }).list({
+      transaction: tx,
+      limit: 10,
+      afterOrderReference: null,
+    }),
+  ).rejects.toThrow("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+});
 it("rejects revoked access after reading", async () => {
   const { tx } = fixture([row(3)]);
   const authorize = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false);

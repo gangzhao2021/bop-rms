@@ -855,6 +855,16 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       });
       const [queuedOrder] = queued.items;
       assert.equal(queuedOrder.orderReference, orderReference);
+      // WP-2423 Q21: the queue carries the Store business date the Order was submitted under.
+      assert.equal(
+        queuedOrder.businessDate,
+        (
+          await one(
+            "SELECT business_date::text AS business_date FROM rms_ordering.order_header WHERE order_id=$1",
+            [orderReference],
+          )
+        )[0].business_date,
+      );
       assert.deepEqual(
         queuedOrder.batches.map((b) => [b.orderBatchReference, b.acceptanceStatus, b.paymentDue]),
         [

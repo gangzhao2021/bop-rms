@@ -18,38 +18,8 @@ import {
 } from "./session-payment-client.js";
 import { SessionPaymentResultPage } from "./SessionPaymentResultPage.js";
 import { StripeCardForm } from "./StripeCardForm.js";
+import { paymentConfiguration } from "./payment-configuration.js";
 
-function configuration() {
-  if (
-    import.meta.env.VITE_BOP_INTERNAL_SIMULATED_PAYMENT === "1" &&
-    typeof window !== "undefined" &&
-    window.location.origin === "https://127.0.0.1:4443"
-  )
-    return { mode: "simulation" as const };
-  const key: unknown = import.meta.env.VITE_BOP_STRIPE_PUBLISHABLE_KEY;
-  const target: unknown = import.meta.env.VITE_BOP_PAYMENT_RETURN_URL;
-  if (
-    typeof key !== "string" ||
-    typeof target !== "string" ||
-    !/^pk_(?:test|live)_[A-Za-z0-9]+$/u.test(key)
-  )
-    return null;
-  try {
-    const url = new URL(target);
-    if (
-      url.protocol !== "https:" ||
-      url.username ||
-      url.password ||
-      url.search ||
-      url.hash ||
-      (typeof window !== "undefined" && url.hostname === window.location.hostname)
-    )
-      return null;
-    return { mode: "stripe" as const, publishableKey: key, returnUrl: url.href };
-  } catch {
-    return null;
-  }
-}
 /**
  * WP-2423 Q10: only a checkout the server no longer recognises ends the payment page; a timeout,
  * outage or other failure keeps the customer here with a retry.
@@ -80,7 +50,7 @@ function PreparedSessionPaymentPage({
   readonly store?: CustomerStoreContext | undefined;
 }) {
   const navigate = useNavigate();
-  const [config] = useState(configuration);
+  const [config] = useState(paymentConfiguration);
   const [sessionReference] = useState(getCheckoutSessionReference);
   const [client] = useState(createSessionPaymentClient);
   const [current] = useState(() => captureCustomerCsrfContext());
@@ -200,7 +170,7 @@ function PreparedSessionPaymentPage({
     void prepare();
     // prepare reads refs and page-memory selections; the status transition is the trigger.
   }, [status, online]);
-  const simulate = async () => {
+  const simulate = async (outcome: "approve" | "decline" = "approve") => {
     if (
       config?.mode !== "simulation" ||
       !sessionReference ||
@@ -213,7 +183,7 @@ function PreparedSessionPaymentPage({
     flight.current = true;
     setStatus("creating");
     try {
-      await client.simulate(
+      await (outcome === "approve" ? client.simulate : client.simulateDecline)(
         sessionReference,
         selectedTip.selectionReference,
         selectedTip.amountMinor,
@@ -312,9 +282,15 @@ function PreparedSessionPaymentPage({
         </section>
       ) : null}
       {status === "card" && demo ? (
-        <button type="button" disabled={!online} onClick={() => void simulate()}>
-          Confirm simulated payment
-        </button>
+        <>
+          <button type="button" disabled={!online} onClick={() => void simulate()}>
+            Confirm simulated payment
+          </button>
+          {/* WP-2423 Q20: internal testing of a declined card and paying with another card. */}
+          <button type="button" disabled={!online} onClick={() => void simulate("decline")}>
+            Simulate a declined card (test only)
+          </button>
+        </>
       ) : null}
       {status === "card" && secret && config?.mode === "stripe" ? (
         <StripeCardForm {...config} clientSecret={secret} onSubmitted={submitted} />

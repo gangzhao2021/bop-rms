@@ -38,7 +38,7 @@ for (const status of ["Failed", "Succeeded", "Pending", "Unknown", "Unprepared"]
     const assertView = async () => {
       await expect(page.getByRole("heading", { name: "Check your payment" })).toBeVisible();
       const message = {
-        Failed: "Payment failed",
+        Failed: "Payment declined",
         Succeeded: "Payment confirmed",
         Pending: "Payment confirmation is pending. Do not submit another payment.",
         Unknown: "Neither success nor failure is confirmed.",
@@ -85,6 +85,13 @@ for (const status of ["Failed", "Succeeded", "Pending", "Unknown", "Unprepared"]
       await expect(
         page.getByRole("link", { name: "View order status", exact: true }),
       ).toHaveAttribute("href", "/orders/0190fa21-0000-7000-8000-000000000003");
+    } else if (status === "Failed") {
+      // WP-2423 Q20: a declined card shows what is still owed for another card, never "Paid".
+      await expect(page.getByText("Amount to pay: $11.30", { exact: true })).toBeVisible();
+      await expect(page.getByText("Paid:", { exact: false })).toHaveCount(0);
+      await expect(page.getByRole("link", { name: "View order status", exact: true })).toHaveCount(
+        0,
+      );
     } else {
       await expect(page.locator("body")).not.toContainText("$11.30");
       await expect(page.getByRole("link", { name: "View order status", exact: true })).toHaveCount(

@@ -55,6 +55,9 @@ export async function createInternalChannelPayment(
     async create(input) {
       return (await select(input)).create(input);
     },
+    async retry(input) {
+      return (await select(input)).retry(input);
+    },
     async resolveRequest(input) {
       return (await select(input)).resolveRequest(input);
     },

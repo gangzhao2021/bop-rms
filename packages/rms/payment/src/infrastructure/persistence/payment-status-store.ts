@@ -210,13 +210,33 @@ export function createPostgresPaymentStatusStore(options: {
         });
         if (!equivalentPaymentStatus(expected, candidate)) return unavailable();
         const prior = await read(tx, snapshot.paymentIntentReference);
-        if (prior) {
+        // WP-2423 Q20: a later attempt (another card after a decline) supersedes the failed
+        // attempt's projection; the earlier snapshot row stays, only no longer active.
+        const superseded =
+          prior !== null &&
+          prior.snapshot.paymentAttemptReference !== snapshot.paymentAttemptReference &&
+          prior.snapshot.terminalStatus === "Failed" &&
+          prior.snapshot.terminalOccurredAt <= snapshot.terminalOccurredAt;
+        if (prior && !superseded) {
           if (!equivalentPaymentStatus(prior, candidate))
             throw new PaymentStatusProjectionError("PAYMENT_STATUS_VERSION_CONFLICT");
           return { status: "Duplicate" as const, projection: prior };
         }
         await tx.query("SAVEPOINT payment_status_initial", []);
         try {
+          if (prior && superseded) {
+            const retired = await tx.query(
+              "UPDATE rms_payment.payment_status_projection SET is_active=false WHERE brand_id=$1 AND store_id=$2 AND payment_intent_id=$3 AND projection_generation_id=$4 AND source_event_id=$5 AND is_active",
+              [
+                scope.brandReference,
+                scope.storeReference,
+                snapshot.paymentIntentReference,
+                prior.generationReference,
+                prior.sourceCheckpoint,
+              ],
+            );
+            if (retired.rowCount !== 1) return unavailable();
+          }
           const saved = await tx.query(
             `INSERT INTO rms_payment.payment_status_projection (
               projection_generation_id,brand_id,store_id,payment_intent_id,payment_transaction_id,

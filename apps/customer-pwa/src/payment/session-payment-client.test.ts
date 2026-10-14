@@ -99,3 +99,46 @@ it("WP-2423 Q4: reports a Store that stopped taking orders before payment starte
     code: "store_closed",
   });
 });
+
+it("WP-2423 Q20: asks for another card on the same payment without a tip or selection", async () => {
+  const payment = {
+    checkoutSessionReference: id(1),
+    paymentIntentReference: id(2),
+    orderReference: id(3),
+    creationStatus: "Created",
+    total: { amountMinor: "2260", currency: "CAD" },
+  };
+  const fetch = vi
+    .fn()
+    .mockResolvedValue(Response.json({ schemaVersion: 1, payment }, { status: 201 }));
+  vi.stubGlobal("fetch", fetch);
+  expect(await createSessionPaymentClient().retry(id(1))).toEqual(payment);
+  expect(fetch.mock.calls[0]?.[0]).toBe("/api/v1/checkout-sessions/" + id(1) + "/payment-intents");
+  const init = fetch.mock.calls[0]?.[1] as RequestInit & { headers: Record<string, string> };
+  expect(init.body).toBe(JSON.stringify({ retry: true }));
+  expect(init.headers).not.toHaveProperty("idempotency-key");
+
+  const again = { ...payment, creationStatus: "AlreadyCreated" };
+  fetch.mockResolvedValue(Response.json({ schemaVersion: 1, payment: again }));
+  expect(await createSessionPaymentClient().simulateRetry(id(1), "decline")).toEqual(again);
+  expect(fetch.mock.calls[1]?.[0]).toBe("/api/v1/checkout-sessions/" + id(1) + "/simulation-fail");
+  expect(fetch.mock.calls[1]?.[1]).toMatchObject({
+    headers: { "x-bop-simulation-confirmation": "SIMULATE_FAILURE" },
+    body: JSON.stringify({ retry: true }),
+  });
+});
+it.each([
+  ["payment_retry_limit", 409, "retry_limit"],
+  ["payment_retry_pending", 409, "retry_pending"],
+  ["payment_already_paid", 409, "already_paid"],
+  ["payment_window_ended", 422, "window_ended"],
+  ["payment_intent_conflict", 409, "conflict"],
+] as const)("WP-2423 Q20: reports %s as %s", async (code, status, expected) => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(Response.json({ schemaVersion: 1, error: { code } }, { status })),
+  );
+  await expect(createSessionPaymentClient().retry(id(1))).rejects.toMatchObject({
+    code: expected,
+  });
+});

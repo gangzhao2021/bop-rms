@@ -89,7 +89,7 @@ export function createPostgresMerchantOrderIndex(options: {
         [scope.brandReference, scope.storeReference],
       );
       const result = await tx.query(
-        "SELECT h.order_id,h.brand_id,h.store_id,h.order_number,h.order_type,h.source_channel,h.created_at," +
+        "SELECT h.order_id,h.brand_id,h.store_id,h.order_number,h.order_type,h.source_channel,h.created_at,h.business_date::text AS business_date," +
           "s.submission_id,b.order_batch_id FROM rms_ordering.order_header h " +
           "JOIN rms_ordering.order_submission_record s ON s.order_id=h.order_id AND s.brand_id=h.brand_id AND s.store_id=h.store_id AND s.submission_kind='Initial' " +
           "JOIN rms_ordering.order_batch b ON b.order_id=h.order_id AND b.brand_id=h.brand_id AND b.store_id=h.store_id AND b.submission_id=s.submission_id " +
@@ -111,7 +111,9 @@ export function createPostgresMerchantOrderIndex(options: {
           typeof row.order_number !== "string" ||
           !/^[A-Z0-9][A-Z0-9-]{0,39}$/.test(row.order_number) ||
           (row.order_type !== "DineIn" && row.order_type !== "Pickup") ||
-          !["Api", "Pos", "Qr", "Web"].includes(String(row.source_channel))
+          !["Api", "Pos", "Qr", "Web"].includes(String(row.source_channel)) ||
+          typeof row.business_date !== "string" ||
+          !/^\d{4}-\d{2}-\d{2}$/u.test(row.business_date)
         )
           return unavailable();
         previous = orderReference;
@@ -120,6 +122,8 @@ export function createPostgresMerchantOrderIndex(options: {
           orderNumber: row.order_number,
           orderType: row.order_type as "DineIn" | "Pickup",
           sourceChannel: row.source_channel as "Api" | "Pos" | "Qr" | "Web",
+          /** WP-2423 Q21: the Store business date the Store resolved when the Order was submitted. */
+          businessDate: row.business_date as string,
           submittedAt: parseOrderingInstant(
             row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
           ),

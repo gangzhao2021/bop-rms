@@ -76,13 +76,31 @@ export function createPaymentStatusEventConsumerService(ports: PaymentStatusEven
     event.eventType === "PaymentSucceeded" &&
     ports.cardMachine !== undefined &&
     (await ports.cardMachine.isCardMachinePayment(tx, event)) === true;
+  /**
+   * The active projection of the event's own attempt. WP-2423 Q20: another attempt's projection
+   * is either an earlier failed try this event supersedes (`Earlier`, written as new) or a later
+   * try this event precedes (`Later`, nothing to write).
+   */
   const load = async (tx: ConsumerTransaction, event: PaymentTerminalEnvelope) => {
     const value = await ports.projections.load({
       transaction: tx,
       paymentIntentReference: event.aggregateId,
     });
-    return value === null ? null : bound(value, event);
+    if (value === null) return null;
+    const current = parsePaymentStatusProjection(value);
+    if (current.snapshot.paymentAttemptReference === event.payload.paymentAttemptReference)
+      return bound(value, event);
+    return current.snapshot.terminalStatus === "Failed" &&
+      current.snapshot.terminalOccurredAt <= event.payload.terminalOccurredAt
+      ? ("Earlier" as const)
+      : ("Later" as const);
   };
+  const hash = (projection: PaymentStatusProjection) =>
+    ports.sha256(
+      JSON.stringify(projection.snapshot, (_, value) =>
+        typeof value === "bigint" ? value.toString() : value,
+      ),
+    );
   const registration = (eventType: "PaymentSucceeded" | "PaymentFailed"): ConsumerRegistration => ({
     consumerName: "payment.status-projection:v1",
     consumerVersion: 1,
@@ -102,7 +120,20 @@ export function createPaymentStatusEventConsumerService(ports: PaymentStatusEven
         if (!/^[0-9a-f]{64}$/.test(resultHash)) return unavailable();
         return { status: "completed", resultHash };
       }
-      let projection = await load(transaction, event);
+      const loaded = await load(transaction, event);
+      if (loaded === "Later") {
+        // A later attempt is already projected; this earlier outcome stays history only.
+        const resultHash = hash(
+          buildPaymentStatusProjection({
+            event,
+            generationReference: ports.references.generateGeneration(),
+            projectedAt: ports.references.now(),
+          }),
+        );
+        if (!/^[0-9a-f]{64}$/.test(resultHash)) return unavailable();
+        return { status: "completed", resultHash };
+      }
+      let projection = loaded === "Earlier" ? null : loaded;
       if (projection === null) {
         const candidate = buildPaymentStatusProjection({
           event,
@@ -121,11 +152,7 @@ export function createPaymentStatusEventConsumerService(ports: PaymentStatusEven
         )
           return unavailable();
       }
-      const resultHash = ports.sha256(
-        JSON.stringify(projection.snapshot, (_, value) =>
-          typeof value === "bigint" ? value.toString() : value,
-        ),
-      );
+      const resultHash = hash(projection);
       if (!/^[0-9a-f]{64}$/.test(resultHash)) return unavailable();
       return { status: "completed", resultHash };
     },
@@ -146,12 +173,10 @@ export function createPaymentStatusEventConsumerService(ports: PaymentStatusEven
       await transaction.query("SAVEPOINT payment_status_event_consumer", []);
       try {
         const result = await consumeEventInTransaction(transaction, selected, event);
-        if (
-          result.status === "duplicate_completed" &&
-          !card &&
-          (await load(transaction, event)) === null
-        )
-          return unavailable();
+        if (result.status === "duplicate_completed" && !card) {
+          const projected = await load(transaction, event);
+          if (projected === null || projected === "Earlier") return unavailable();
+        }
         await transaction.query("RELEASE SAVEPOINT payment_status_event_consumer", []);
         return result;
       } catch (error) {

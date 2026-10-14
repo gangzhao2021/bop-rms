@@ -275,3 +275,64 @@ it("rejects an Additional resolver result for Pickup before owner mutations", as
     }),
   ).toThrow();
 });
+
+it("WP-2423 Q20: opens another card on the existing payment without preparing an Order again", async () => {
+  const f = await fixture();
+  const later = "2026-08-03T15:05:00.000Z";
+  const h = harness({ prior: f.original.record, clockNow: later });
+  const claims: unknown[] = [];
+  const service = createCustomerSessionPaymentIntent({
+    access: { now: () => later } as unknown as CustomerCheckoutSessionAuthorizationOptions,
+    tenantReference: id(40),
+    resolveSubmission: f.unused,
+    orders: { create: f.unused, preparePaymentClock: f.unused },
+    tips: { select: f.unused },
+    inventory: { load: f.unused },
+    nextPreparationReference: () => {
+      throw new Error("unused");
+    },
+    history: f.history,
+    payment: () => ({
+      ...h.ports,
+      references: { ...h.ports.references, generate: () => id(60) },
+      audit: {
+        create: async (value) => ({
+          auditId: id(61),
+          brandId: refs.brand,
+          storeId: refs.store,
+          actor: { type: "System" },
+          actionCode: "PAYMENT_INTENT_CREATE",
+          targetType: "PaymentIntent",
+          targetId: value.paymentIntentReference,
+          reasonCode: "AUTHORIZED_PAYMENT_INTENT_CREATE",
+          correlationId: id(62),
+          occurredAt: value.observedAt,
+          sourceChannel: "CUSTOMER_PWA",
+          dataClassification: "Restricted",
+          retentionPolicyCode: "AUDIT_STANDARD",
+          retentionPolicyVersion: 1,
+        }),
+      },
+      repository: {
+        ...h.ports.repository,
+        claimRetry: async (input) => {
+          claims.push(input);
+          return { status: "Claimed" as const, record: input.record };
+        },
+      },
+    }),
+  });
+  const { selectionReference: _selection, tip: _tip, ...input } = f.input;
+  void _selection;
+  void _tip;
+  const result = await service.retry(input);
+  expect(result.status).toBe("Created");
+  expect(result.record.intent).toEqual(f.original.record.intent);
+  expect(result.record.attempt).toMatchObject({ attemptNumber: 2, createdAt: later });
+  expect(claims).toHaveLength(1);
+  expect(h.providerCalls()).toBe(1);
+  expect(f.unused).not.toHaveBeenCalled();
+  await expect(service.retry({ ...input, tip: f.input.tip })).rejects.toMatchObject({
+    code: "INPUT_INVALID",
+  });
+});

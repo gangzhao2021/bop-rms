@@ -26,14 +26,23 @@ export interface CustomerPaymentIntentInput {
   readonly selectionReference: string;
   readonly tip: Money;
 }
+/** WP-2423 Q20: another card for the checkout's existing payment after a decline. */
+export interface CustomerPaymentRetryInput {
+  readonly sessionCredential: string;
+  readonly csrfCredential: string;
+  readonly checkoutSessionReference: string;
+}
 export interface CustomerPaymentIntentPort {
   create(input: CustomerPaymentIntentInput): Promise<unknown>;
+  retry?(input: CustomerPaymentRetryInput): Promise<unknown>;
 }
 function protect(response: Response) {
   response.setHeader("Cache-Control", "no-store");
   response.setHeader("Referrer-Policy", "no-referrer");
 }
-function reject(response: Response, status: number, explicit?: "store_closed") {
+type ExplicitRejection =
+  "store_closed" | "retry_limit" | "retry_pending" | "already_paid" | "window_ended";
+function reject(response: Response, status: number, explicit?: ExplicitRejection) {
   const code =
     explicit ??
     (status === 400
@@ -65,7 +74,10 @@ function readCredentials(request: Request) {
   return { sessionCredential: parts[0]?.[1] as string, csrfCredential: csrf };
 }
 
-function parse(request: Request, origin: string): CustomerPaymentIntentInput {
+function parse(
+  request: Request,
+  origin: string,
+): CustomerPaymentIntentInput | (CustomerPaymentRetryInput & { readonly retry: true }) {
   if (
     request.get("origin") !== origin ||
     request.get("sec-fetch-site") !== "same-origin" ||
@@ -73,6 +85,22 @@ function parse(request: Request, origin: string): CustomerPaymentIntentInput {
     Object.keys(request.query).length !== 0
   )
     throw new Error("invalid request");
+  const params = request.params as Record<string, unknown>;
+  // WP-2423 Q20: `{"retry":true}` asks for another card on the existing payment; the amount and
+  // tip come from that payment, never from this request.
+  if (
+    request.body !== null &&
+    typeof request.body === "object" &&
+    Object.hasOwn(request.body as object, "retry")
+  ) {
+    const body = readClosedRecord(request.body, ["retry"]);
+    if (body.retry !== true || request.headers["idempotency-key"] !== undefined)
+      throw new Error("invalid retry");
+    const checkoutSessionReference = params.checkout_session_id;
+    if (typeof checkoutSessionReference !== "string" || !uuid.test(checkoutSessionReference))
+      throw new Error("invalid reference");
+    return { ...readCredentials(request), checkoutSessionReference, retry: true };
+  }
   const body = readClosedRecord(request.body, ["tip"]);
   const tip = readClosedRecord(body.tip, ["amountMinor", "currency"]);
   if (
@@ -163,9 +191,24 @@ function failure(error: unknown) {
         PAYMENT_INTENT_PROVIDER_DISABLED: 503,
         PAYMENT_INTENT_DEPENDENCY_UNAVAILABLE: 503,
         PAYMENT_INTENT_PROVIDER_RESULT_INVALID: 503,
+        PAYMENT_INTENT_RETRY_NOT_ALLOWED: 409,
+        PAYMENT_INTENT_RETRY_LIMIT_REACHED: 409,
+        PAYMENT_INTENT_ALREADY_PAID: 409,
       } as const
     )[error.code];
   return 503;
+}
+/** WP-2423 Q20: what the customer needs to know when another card cannot be tried. */
+function retryRejection(error: unknown): ExplicitRejection | undefined {
+  if (!(error instanceof PaymentIntentCreationError)) return undefined;
+  return (
+    {
+      PAYMENT_INTENT_RETRY_LIMIT_REACHED: "retry_limit",
+      PAYMENT_INTENT_RETRY_NOT_ALLOWED: "retry_pending",
+      PAYMENT_INTENT_ALREADY_PAID: "already_paid",
+      PAYMENT_INTENT_PREPARATION_EXPIRED: "window_ended",
+    } as const satisfies Partial<Record<PaymentIntentCreationError["code"], ExplicitRejection>>
+  )[error.code as never];
 }
 export class CustomerPaymentIntentHandler {
   readonly #port: CustomerPaymentIntentPort;
@@ -177,23 +220,35 @@ export class CustomerPaymentIntentHandler {
   handler(): RequestHandler {
     return async (request, response) => {
       protect(response);
-      let input: CustomerPaymentIntentInput;
+      let input: ReturnType<typeof parse>;
       try {
         input = parse(request, this.#origin);
       } catch {
         reject(response, 400);
         return;
       }
+      const retry = "retry" in input;
       let result: unknown;
       try {
-        result = await this.#port.create(input);
+        if ("retry" in input) {
+          if (this.#port.retry === undefined) {
+            reject(response, 503);
+            return;
+          }
+          result = await this.#port.retry({
+            sessionCredential: input.sessionCredential,
+            csrfCredential: input.csrfCredential,
+            checkoutSessionReference: input.checkoutSessionReference,
+          });
+        } else result = await this.#port.create(input);
       } catch (error) {
         // WP-2423 Q4: the Store stopped taking orders before payment started; nothing was charged.
         if (error instanceof CustomerStoreClosedError) {
           reject(response, 409, "store_closed");
           return;
         }
-        reject(response, failure(error));
+        const explicit = retry ? retryRejection(error) : undefined;
+        reject(response, failure(error), explicit);
         return;
       }
       try {
@@ -218,8 +273,9 @@ export class CustomerPaymentIntentHandler {
           String(prepared.guestSessionReference) !== v.guestSessionReference ||
           String(prepared.brandReference) !== v.brandReference ||
           String(prepared.storeReference) !== v.storeReference ||
-          prepared.tip.amountMinor !== input.tip.amountMinor ||
-          prepared.tip.currencyCode !== input.tip.currencyCode
+          ("tip" in input &&
+            (prepared.tip.amountMinor !== input.tip.amountMinor ||
+              prepared.tip.currencyCode !== input.tip.currencyCode))
         )
           throw new Error("invalid binding");
         response

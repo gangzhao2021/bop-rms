@@ -1,6 +1,7 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
+import { StaffTime } from "./StoreTime.js";
 import {
   InventoryCountClientError,
   parseInventoryCountView,
@@ -268,11 +269,12 @@ function CountCard({ count }: { readonly count: InventoryCountViewRow }) {
         </strong>
       </header>
       <p>
-        {count.assigneeDisplay ?? "Unassigned"} · due {count.dueAt ?? "Not set"}
+        {count.assigneeDisplay ?? "Unassigned"} · due{" "}
+        {count.dueAt === null ? "Not set" : <StaffTime instant={count.dueAt} />}
       </p>
       <p>
         {count.expectedQuantityVisibility} · {count.movementControl} · snapshot{" "}
-        {count.snapshotCapturedAt}
+        <StaffTime instant={count.snapshotCapturedAt} />
       </p>
       <p>
         Variance lines: {count.varianceLines ?? "Hidden until submit"} · {count.approvalPolicy}

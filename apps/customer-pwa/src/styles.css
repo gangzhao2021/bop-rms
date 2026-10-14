@@ -147,6 +147,8 @@
 .customer-page .menu-action,
 .customer-page .order-status__retry,
 .customer-page .payment-result-page__refresh,
+.customer-page .payment-result-page__retry,
+.customer-page .payment-retry__secondary,
 .customer-page .shell-action,
 .customer-page .checkout-details-form__save,
 .customer-page .receipt-page__toolbar button,
@@ -170,6 +172,7 @@
 .customer-page .checkout-details-form__save,
 .customer-page .receipt-page__toolbar button,
 .customer-page .order-status__actions button,
+.customer-page .payment-retry__secondary,
 .customer-page .entry-secondary-action {
   color: var(--bop-color-text-default);
   background: var(--bop-color-surface-default);
@@ -1179,6 +1182,26 @@
 }
 .payment-result-page__refresh {
   margin-top: var(--bop-space-2);
+}
+/* WP-2423 Q20: paying the same order with another card after a decline. */
+.payment-retry {
+  margin-top: var(--bop-space-4);
+  padding-top: var(--bop-space-4);
+  border-top: 1px solid var(--bop-color-border-default);
+}
+.payment-retry h3 {
+  margin: 0 0 var(--bop-space-2);
+  font-size: 1rem;
+  font-weight: 600;
+}
+.payment-retry__simulated,
+.payment-retry__stopped {
+  display: grid;
+  gap: var(--bop-space-2);
+}
+.payment-result-page__retry,
+.payment-retry__secondary {
+  width: 100%;
 }
 .payment-page__operation {
   color: var(--bop-color-text-muted);

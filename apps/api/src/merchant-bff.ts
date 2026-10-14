@@ -648,6 +648,8 @@ export interface MerchantBffRouterOptions {
   ) => ReturnType<ReturnType<typeof createMerchantStoreConfiguration>>;
   readonly storeConfigurationState?: ReturnType<typeof createMerchantStoreConfiguration>["read"];
   readonly serviceControlState?: ReturnType<typeof createMerchantServiceControl>["read"];
+  /** WP-2423 Q21: the selected Store's current business day (date, start, end). */
+  readonly businessDay?: ReturnType<typeof createMerchantServiceControl>["businessDay"];
   readonly orderExceptions?: ReturnType<typeof createMerchantOrderExceptionRead>;
   /** WP-2423 P1: the day-end settlement view for one business day. */
   readonly settlement?: ReturnType<typeof createMerchantSettlementRead>;
@@ -1650,6 +1652,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             orderNumber: item.orderNumber,
             orderType: item.orderType,
             sourceChannel: item.sourceChannel,
+            // WP-2423 Q21: the Store business day the Order belongs to (order numbers restart daily).
+            businessDate: item.businessDate,
             submittedAt: item.submittedAt,
             initialBatchReference: item.initialBatchReference,
             canRequestAcceptance: item.canRequestAcceptance,
@@ -1737,6 +1741,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             orderNumber: item.orderNumber,
             orderType: item.orderType,
             sourceChannel: item.sourceChannel,
+            // WP-2423 Q21: the Store business day the Order belongs to (order numbers restart daily).
+            businessDate: item.businessDate,
             submittedAt: item.submittedAt,
             initialBatchReference: item.initialBatchReference,
             canRequestAcceptance: item.canRequestAcceptance,
@@ -2017,6 +2023,38 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       .then((session) => {
         response.set("Cache-Control", NO_STORE).json(sessionDeadlines(session));
       })
+      .catch(() => denied(response));
+  });
+
+  // WP-2423 Q21: "today" for this Store — its business day, not the calendar day.
+  router.get("/business-day", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    if (
+      request.method !== "GET" ||
+      sessionCookie === null ||
+      Object.keys(request.query).length !== 0 ||
+      request.body !== undefined ||
+      rawHeaderValues(request, "origin").length > 1 ||
+      rawHeaderValues(request, "sec-fetch-site").length !== 1
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.businessDay) {
+      response.status(503).json({ error: "business_day_unavailable" });
+      return;
+    }
+    void options
+      .businessDay(sessionCookie)
+      .then((day) =>
+        response.set("Cache-Control", NO_STORE).json({
+          businessDate: day.businessDate,
+          startsAt: day.startsAt,
+          endsAt: day.endsAt,
+          timeZone: day.timeZone,
+          observedAt: day.observedAt,
+        }),
+      )
       .catch(() => denied(response));
   });
 

@@ -6929,6 +6929,16 @@ body:has(.product-complete-draft) .bop-shell__header,
   font-size: 13px;
   border-bottom: 1px solid var(--bop-color-border-default);
 }
+/* WP-2423 Q21: one heading per Store business day (order numbers restart each day). */
+.order-workbench-day {
+  margin: 0;
+  padding: 18px 0 8px;
+  color: var(--bop-color-text-default);
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid var(--bop-color-border-strong);
+}
 .order-workbench-entry {
   border-bottom: 1px solid var(--bop-color-border-default);
 }

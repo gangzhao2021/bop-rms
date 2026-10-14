@@ -87,12 +87,15 @@ async function setup(enabled = true) {
 
   const result = { ...original, session };
   const create = vi.fn<CustomerPaymentIntentPort["create"]>().mockResolvedValue(result);
+  const retry = vi
+    .fn<NonNullable<CustomerPaymentIntentPort["retry"]>>()
+    .mockResolvedValue({ ...result, status: "Created" });
   const server = createServer(
     createApp(
       enabled
         ? {
             customerPaymentIntent: new CustomerPaymentIntentHandler({
-              port: { create },
+              port: { create, retry },
               allowedOrigin: "https://customer.example",
             }),
           }
@@ -122,7 +125,16 @@ async function setup(enabled = true) {
       headers: { ...headers, ...overrides },
       body: JSON.stringify(payload),
     });
-  return { result, create, body, send };
+  /** WP-2423 Q20: a retry request carries no tip and no selection key. */
+  const { "idempotency-key": _key, ...retryHeaders } = headers;
+  void _key;
+  const sendRetry = (payload: unknown = { retry: true }, extra: Record<string, string> = {}) =>
+    fetch(url, {
+      method: "POST",
+      headers: { ...retryHeaders, ...extra },
+      body: JSON.stringify(payload),
+    });
+  return { result, create, retry, body, send, sendRetry };
 }
 it.each([
   ["Created", 201],
@@ -227,3 +239,46 @@ it("WP-2423 Q4: says the Store stopped taking orders when payment would start af
     error: { code: "payment_store_closed", messageKey: "customer.payment.store_closed" },
   });
 });
+
+it("WP-2423 Q20: opens another card on the existing payment for {retry:true} only", async () => {
+  const f = await setup();
+  const response = await f.sendRetry();
+  expect(response.status).toBe(201);
+  expect(((await response.json()) as { payment: unknown }).payment).toMatchObject({
+    paymentIntentReference: refs.intent,
+    creationStatus: "Created",
+    total: { amountMinor: "2200", currency: "CAD" },
+  });
+  expect(f.retry).toHaveBeenCalledWith({
+    sessionCredential: "s".repeat(43),
+    csrfCredential: "c".repeat(43),
+    checkoutSessionReference: id(31),
+  });
+  expect(f.create).not.toHaveBeenCalled();
+  f.retry.mockClear();
+  for (const [payload, extra] of [
+    [{ retry: false }, {}],
+    [{ retry: true, tip: f.body.tip }, {}],
+    [{ retry: "true" }, {}],
+    [{ retry: true }, { "idempotency-key": id(30) }],
+    [{ retry: true }, { origin: "https://foreign.example" }],
+  ] as const)
+    expect((await f.sendRetry(payload, extra)).status).toBe(400);
+  expect(f.retry).not.toHaveBeenCalled();
+});
+it.each([
+  ["PAYMENT_INTENT_RETRY_LIMIT_REACHED", 409, "payment_retry_limit"],
+  ["PAYMENT_INTENT_RETRY_NOT_ALLOWED", 409, "payment_retry_pending"],
+  ["PAYMENT_INTENT_ALREADY_PAID", 409, "payment_already_paid"],
+  ["PAYMENT_INTENT_PREPARATION_EXPIRED", 422, "payment_window_ended"],
+  ["PAYMENT_INTENT_PERMISSION_DENIED", 404, "payment_not_found"],
+] as const)(
+  "WP-2423 Q20: tells the customer why %s stops another card",
+  async (code, status, named) => {
+    const f = await setup();
+    f.retry.mockRejectedValue(new PaymentIntentCreationError(code));
+    const response = await f.sendRetry();
+    expect(response.status).toBe(status);
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe(named);
+  },
+);

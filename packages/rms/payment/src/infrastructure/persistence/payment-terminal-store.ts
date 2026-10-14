@@ -129,7 +129,10 @@ const selectFact = `SELECT to_jsonb(f) || jsonb_build_object(
  FROM rms_payment.payment_terminal_fact f
  JOIN rms_payment.payment_intent i ON i.payment_intent_id=f.payment_intent_id
  AND i.brand_id=f.brand_id AND i.store_id=f.store_id
- WHERE f.brand_id=$1 AND f.store_id=$2 AND f.payment_intent_id=$3`;
+ WHERE f.brand_id=$1 AND f.store_id=$2 AND f.payment_intent_id=$3
+ AND f.payment_attempt_id=COALESCE($4::uuid,(SELECT a.payment_attempt_id FROM rms_payment.payment_attempt a
+  WHERE a.brand_id=$1 AND a.store_id=$2 AND a.payment_intent_id=$3
+  ORDER BY a.attempt_number DESC LIMIT 1))`;
 
 export function createPostgresPaymentTerminalStore(
   runner: PaymentIntentTransactionRunner,
@@ -162,8 +165,9 @@ export function createPostgresPaymentTerminalStore(
       return fail("PAYMENT_TERMINAL_SCOPE_MISMATCH");
     return fact;
   };
-  const read = async (tx: AuditTransaction, intent: string) => {
-    const found = rows(await tx.query(selectFact, [brand, store, intent]));
+  /** The terminal fact of the intent's latest attempt (or of `attempt`); null while it is open. */
+  const read = async (tx: AuditTransaction, intent: string, attempt: string | null = null) => {
+    const found = rows(await tx.query(selectFact, [brand, store, intent, attempt]));
     if (found.length === 0) return null;
     const row = exactPaymentObject(found[0], ["fact", "coherent"]);
     if (row.coherent !== true || row.fact === null || typeof row.fact !== "object") return fail();
@@ -209,8 +213,24 @@ export function createPostgresPaymentTerminalStore(
         }),
       }),
     );
-    if (fact.paymentIntentReference !== intent) return fail();
+    if (
+      fact.paymentIntentReference !== intent ||
+      (attempt !== null && fact.paymentAttemptReference !== attempt)
+    )
+      return fail();
     return fact;
+  };
+  /** An intent is paid at most once: another attempt's success conflicts with a new success. */
+  const succeeded = async (tx: AuditTransaction, intent: string) => {
+    const found = rows(
+      await tx.query(
+        "SELECT payment_attempt_id::text AS attempt FROM rms_payment.payment_terminal_fact WHERE brand_id=$1 AND store_id=$2 AND payment_intent_id=$3 AND terminal_outcome='Succeeded'",
+        [brand, store, intent],
+      ),
+    );
+    if (found.length === 0) return null;
+    const attempt = exactPaymentObject(found[0], ["attempt"]).attempt;
+    return read(tx, intent, parsePaymentReference(attempt));
   };
   const safe = async <T>(action: () => Promise<T>) => {
     try {
@@ -221,7 +241,11 @@ export function createPostgresPaymentTerminalStore(
     }
   };
   return Object.freeze({
-    /** Caller must establish current Guest/Actor permission before exposing any result. */
+    /**
+     * The terminal outcome of the intent's latest attempt; null while that attempt is open
+     * (WP-2423 Q20: a retry after a decline is a later attempt of the same intent).
+     * Caller must establish current Guest/Actor permission before exposing any result.
+     */
     read(paymentIntentReference: unknown) {
       return safe(() =>
         runner.run(async (tx) => {
@@ -275,7 +299,11 @@ export function createPostgresPaymentTerminalStore(
             source.paymentOperationReference !== event.correlationId
           )
             return fail("PAYMENT_TERMINAL_SCOPE_MISMATCH");
-          const existing = await read(tx, fact.paymentIntentReference);
+          const existing =
+            (await read(tx, fact.paymentIntentReference, fact.paymentAttemptReference)) ??
+            (fact.outcome === "Succeeded"
+              ? await succeeded(tx, fact.paymentIntentReference)
+              : null);
           if (existing !== null) {
             const same =
               canonical(observationOf(existing)) === canonical(observationOf(fact)) &&
@@ -325,7 +353,7 @@ export function createPostgresPaymentTerminalStore(
             { query: async (sql, values) => ({ rowCount: count(await tx.query(sql, values)) }) },
             event,
           );
-          const saved = await read(tx, fact.paymentIntentReference);
+          const saved = await read(tx, fact.paymentIntentReference, fact.paymentAttemptReference);
           if (saved === null || canonical(saved) !== canonical(fact)) return fail();
           return Object.freeze({ status: "Created" as const, fact: saved });
         }),
@@ -370,8 +398,11 @@ export async function listOrderPaymentTerminalOutcomes(
     const result: unknown = await transaction.query(
       "SELECT payment_intent_id::text AS payment_intent_id,terminal_outcome,amount_minor::text AS amount_minor,currency_code," +
         "to_char(occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS occurred_at " +
-        "FROM rms_payment.payment_terminal_fact WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 " +
-        "AND provider_account_id=$4 AND provider_environment=$5 ORDER BY occurred_at,payment_intent_id LIMIT 101",
+        "FROM (SELECT DISTINCT ON (payment_intent_id) * FROM rms_payment.payment_terminal_fact " +
+        "WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 AND provider_account_id=$4 AND provider_environment=$5 " +
+        // WP-2423 Q20: a retry after a decline is a later outcome of the same intent.
+        "ORDER BY payment_intent_id,occurred_at DESC,recorded_at DESC) latest " +
+        "ORDER BY occurred_at,payment_intent_id LIMIT 101",
       [brand, store, order, account, scope.environment],
     );
     const found: unknown =

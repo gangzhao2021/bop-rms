@@ -66,6 +66,7 @@ export const apiRouteTemplates = Object.freeze([
   "/merchant/session/expiry",
   "/merchant/session/activity",
   "/merchant/sign-in-entry",
+  "/merchant/business-day",
   "/merchant/store-configuration/ordinary",
   "/merchant/store-configuration/ordinary-command",
   "/merchant/store-configuration/ordinary-state",

@@ -219,6 +219,7 @@ export function createMerchantOrderQueueRead(options: {
             orderNumber: item.orderNumber,
             orderType: item.orderType,
             sourceChannel: item.sourceChannel,
+            businessDate: item.businessDate,
             submittedAt: item.submittedAt,
             initialBatchReference: item.initialBatchReference,
             batches: Object.freeze(current.batches.map((batch) => Object.freeze(batch))),

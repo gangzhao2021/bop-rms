@@ -120,6 +120,10 @@ export async function startInternalCustomerServer({
             await terminal.confirm(input, confirmation);
             return intents.create(input);
           },
+          // WP-2423 Q20: another (simulated) card after a decline, on the same payment.
+          async retry(input) {
+            return (await terminal.confirm(input, confirmation, { retry: true })).created;
+          },
         },
       });
       app.post(

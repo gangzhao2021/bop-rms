@@ -416,7 +416,9 @@ it("WP-2423 Q9-G1: says a paid pickup the store couldn't accept is refunded, and
       freshnessStatus: "Fresh" as const,
     },
   ];
-  const at = (storeAcceptance: NonNullable<OrderStatusView["sources"]>["storeAcceptance"]) => ({
+  const at = (
+    storeAcceptance: NonNullable<NonNullable<OrderStatusView["sources"]>["storeAcceptance"]>,
+  ): OrderStatusView => ({
     ...state.view,
     sources: {
       checkedAt: "2026-08-11T14:00:00.000Z",

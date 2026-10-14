@@ -195,3 +195,57 @@ describe("Payment terminal event projection consumer", () => {
     ]);
   });
 });
+
+describe("Payment status projection after another card (WP-2423 Q20)", () => {
+  /** The same intent's second attempt: a different attempt, transaction and event, later. */
+  function retryEvent(outcome: "Succeeded" | "Failed", occurredAt: string) {
+    const first = terminalEvent("Failed");
+    return parsePaymentTerminalEnvelope({
+      ...first,
+      eventId: id(70),
+      eventType: outcome === "Succeeded" ? "PaymentSucceeded" : "PaymentFailed",
+      occurredAt,
+      payload: {
+        paymentTransactionReference: id(71),
+        paymentIntentReference: first.payload.paymentIntentReference,
+        paymentAttemptReference: id(72),
+        orderReference: first.payload.orderReference,
+        terminalOccurredAt: occurredAt,
+        ...(outcome === "Succeeded"
+          ? { amountMinor: "1250", currencyCode: "CAD", evidenceKind: "Captured" }
+          : { reason: "Declined", retryDisposition: "NewOperation" }),
+      },
+    });
+  }
+  const failedFirst = () =>
+    buildPaymentStatusProjection({
+      event: terminalEvent("Failed"),
+      generationReference: id(90),
+      projectedAt: at,
+    });
+
+  it("projects a later successful attempt over the earlier declined one", async () => {
+    const event = retryEvent("Succeeded", "2026-08-03T18:03:00.000Z");
+    const f = fixture(event);
+    f.setProjection(failedFirst());
+    expect(await f.service.consume(f.tx, event)).toEqual({ status: "processed" });
+    expect(f.write).toHaveBeenCalledTimes(1);
+    expect(f.projection()?.snapshot).toMatchObject({
+      paymentAttemptReference: id(72),
+      terminalStatus: "Succeeded",
+    });
+  });
+
+  it("keeps the later attempt when an earlier outcome is delivered afterwards", async () => {
+    const later = buildPaymentStatusProjection({
+      event: retryEvent("Succeeded", "2026-08-03T18:03:00.000Z"),
+      generationReference: id(91),
+      projectedAt: "2026-08-03T18:03:00.000Z",
+    });
+    const f = fixture(terminalEvent("Failed"));
+    f.setProjection(later);
+    expect(await f.service.consume(f.tx, f.event)).toEqual({ status: "processed" });
+    expect(f.write).not.toHaveBeenCalled();
+    expect(f.projection()).toBe(later);
+  });
+});

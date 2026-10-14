@@ -26,10 +26,18 @@ export interface PaymentIntentAggregate {
   readonly createdAt: PaymentInstant;
 }
 
+/**
+ * WP-2423 Q20 (DEC-PAYMENT-CARD-RETRY): a customer may try another card after a decline. Every try
+ * is a new append-only attempt on the same intent; this many tries in total, within the payment
+ * window, then the customer pays staff at the counter.
+ */
+export const paymentAttemptLimit = 5;
+
 export interface PaymentAttempt {
   readonly paymentAttemptReference: PaymentReference;
   readonly paymentIntentReference: PaymentReference;
-  readonly attemptNumber: 1;
+  /** 1 is the first try; each later number is a retry after the previous attempt failed. */
+  readonly attemptNumber: number;
   readonly provider: "Stripe" | "StoreCardMachine";
   readonly providerEnvironment: "Test" | "Live";
   readonly providerIdempotencyDigest: PaymentDigest;
@@ -56,6 +64,12 @@ export const paymentIntentCreationErrorCodes = [
   "PAYMENT_INTENT_PROVIDER_DISABLED",
   "PAYMENT_INTENT_DEPENDENCY_UNAVAILABLE",
   "PAYMENT_INTENT_PROVIDER_RESULT_INVALID",
+  /** WP-2423 Q20: the latest attempt has not failed (it is still open or being confirmed). */
+  "PAYMENT_INTENT_RETRY_NOT_ALLOWED",
+  /** WP-2423 Q20: this payment already has the maximum number of attempts. */
+  "PAYMENT_INTENT_RETRY_LIMIT_REACHED",
+  /** WP-2423 Q20: an attempt of this payment succeeded; nothing is left to pay. */
+  "PAYMENT_INTENT_ALREADY_PAID",
 ] as const;
 export type PaymentIntentCreationErrorCode = (typeof paymentIntentCreationErrorCodes)[number];
 
@@ -167,15 +181,19 @@ function parseAttempt(value: unknown): PaymentAttempt {
     "createdAt",
   ]);
   if (
-    raw.attemptNumber !== 1 ||
+    typeof raw.attemptNumber !== "number" ||
+    !Number.isSafeInteger(raw.attemptNumber) ||
+    raw.attemptNumber < 1 ||
+    raw.attemptNumber > paymentAttemptLimit ||
     (raw.provider !== "Stripe" && raw.provider !== "StoreCardMachine") ||
+    (raw.provider === "StoreCardMachine" && raw.attemptNumber !== 1) ||
     (raw.providerEnvironment !== "Test" && raw.providerEnvironment !== "Live")
   )
     return invalid();
   return Object.freeze({
     paymentAttemptReference: parsePaymentReference(raw.paymentAttemptReference),
     paymentIntentReference: parsePaymentReference(raw.paymentIntentReference),
-    attemptNumber: 1,
+    attemptNumber: raw.attemptNumber,
     provider: raw.provider,
     providerEnvironment: raw.providerEnvironment,
     providerIdempotencyDigest: parsePaymentDigest(raw.providerIdempotencyDigest),
@@ -221,7 +239,11 @@ export function parsePaymentIntentCreationRecord(value: unknown): PaymentIntentC
   const attempt = parseAttempt(raw.attempt);
   if (
     attempt.paymentIntentReference !== intent.paymentIntentReference ||
-    attempt.createdAt !== intent.createdAt ||
+    // The first attempt starts with its intent; a retry starts later, inside the payment window.
+    (attempt.attemptNumber === 1
+      ? attempt.createdAt !== intent.createdAt
+      : attempt.createdAt <= intent.createdAt ||
+        String(attempt.createdAt) >= String(intent.preparation.capacityExpiresAt)) ||
     (intent.paymentMethod === "StoreCardMachine") !== (attempt.provider === "StoreCardMachine") ||
     (intent.paymentMethod === "StoreCardMachine" && raw.providerOutcome !== null)
   )

@@ -24,6 +24,57 @@ export function storeTime(instant: string, timeZone: string | undefined, withDat
   return withDate ? `${parts.year}-${parts.month}-${parts.day} ${time}` : time;
 }
 
+/**
+ * WP-2423 Q21: a Store wall-clock time ("2026-10-13T14:05", as staff read it off a slip or the
+ * Store's clock) as the instant it names in the Store's time zone, whatever the device's zone.
+ * A time skipped by a spring-forward change resolves to the same wall time after the change; a
+ * repeated (fall-back) time resolves to its first occurrence. Null when the text is not a time.
+ */
+export function storeLocalInstant(localDateTime: string, timeZone: string): string | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/u.exec(localDateTime);
+  if (match === null) return null;
+  const [, y, mo, d, h, mi] = match.map(Number) as [number, number, number, number, number, number];
+  const wall = Date.UTC(y, mo - 1, d, h, mi);
+  const check = new Date(wall);
+  if (check.getUTCMonth() !== mo - 1 || check.getUTCDate() !== d || h > 23 || mi > 59) return null;
+  let format: Intl.DateTimeFormat;
+  try {
+    format = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    });
+  } catch {
+    return null;
+  }
+  const offset = (at: number) => {
+    const parts = Object.fromEntries(
+      format.formatToParts(new Date(at)).map((part) => [part.type, Number(part.value)]),
+    );
+    return (
+      Date.UTC(
+        parts.year ?? 0,
+        (parts.month ?? 1) - 1,
+        parts.day ?? 1,
+        parts.hour ?? 0,
+        parts.minute ?? 0,
+        parts.second ?? 0,
+      ) - at
+    );
+  };
+  // Offsets either side of the wall time; the earlier candidate that reads back exactly wins.
+  const candidates = [wall - offset(wall - 86_400_000), wall - offset(wall + 86_400_000)]
+    .filter((at) => at + offset(at) === wall)
+    .sort((a, b) => a - b);
+  const at = candidates[0] ?? wall - offset(wall);
+  return new Date(at).toISOString();
+}
+
 /** A source/record instant as Store-local date and time; the exact UTC instant stays in the title. */
 export function SourceTime({
   instant,

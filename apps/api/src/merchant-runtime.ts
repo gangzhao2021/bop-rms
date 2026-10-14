@@ -897,6 +897,7 @@ export function createMerchantRuntime(options: MerchantRuntimeOptions): Merchant
     service,
     serviceControl: control,
     serviceControlState: control.read,
+    businessDay: control.businessDay,
     storeConfiguration: configuration,
     storeConfigurationState: configuration.read,
     ...(ordinaryConfiguration === undefined

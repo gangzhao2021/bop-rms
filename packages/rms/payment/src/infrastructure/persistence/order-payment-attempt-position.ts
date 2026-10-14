@@ -20,7 +20,8 @@ function amount(value: unknown) {
   if (result > 9223372036854775807n) return fail();
   return result;
 }
-/** Complete current Payment attempt inventory, not receivable or financial finality.
+/** Complete current Payment attempt inventory (each intent's latest attempt; WP-2423 Q20),
+ * not receivable or financial finality.
  * Existing Order creation fence protects absent intents; each existing Terminal fence
  * protects its outcome. Caller retains all fences until the enclosing commit. */
 export function createPostgresOrderPaymentAttemptPosition(options: {
@@ -80,8 +81,8 @@ export function createPostgresOrderPaymentAttemptPosition(options: {
         f.recorded_at,f.provider_account_id::text,f.provider_environment AS terminal_environment,
         (f.order_id=i.order_id AND f.payment_attempt_id=a.payment_attempt_id) AS terminal_bound
         FROM rms_payment.payment_intent i
-        LEFT JOIN rms_payment.payment_attempt a ON a.brand_id=i.brand_id AND a.store_id=i.store_id AND a.payment_intent_id=i.payment_intent_id
-        LEFT JOIN rms_payment.payment_terminal_fact f ON f.brand_id=i.brand_id AND f.store_id=i.store_id AND f.payment_intent_id=i.payment_intent_id
+        LEFT JOIN LATERAL (SELECT * FROM rms_payment.payment_attempt pa WHERE pa.brand_id=i.brand_id AND pa.store_id=i.store_id AND pa.payment_intent_id=i.payment_intent_id ORDER BY pa.attempt_number DESC LIMIT 1) a ON true
+        LEFT JOIN rms_payment.payment_terminal_fact f ON f.brand_id=i.brand_id AND f.store_id=i.store_id AND f.payment_intent_id=i.payment_intent_id AND f.payment_attempt_id=a.payment_attempt_id
         WHERE i.brand_id=$1 AND i.store_id=$2 AND i.order_id=$3 ORDER BY i.payment_intent_id LIMIT 1001`,
           [scope.brandReference, scope.storeReference, query.orderReference],
         );

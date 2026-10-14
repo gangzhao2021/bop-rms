@@ -1,5 +1,5 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
-import { SourceTime } from "./StoreTime.js";
+import { SourceTime, StaffTime } from "./StoreTime.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./RoleAdministrationPages.js";
@@ -135,7 +135,7 @@ export function StoreWasteListPage({
                   <tr key={record.wasteReference}>
                     <td>
                       <Link to={`/operations/inventory/waste/${record.wasteReference}`}>
-                        {record.recordedAt}
+                        <StaffTime instant={record.recordedAt} />
                       </Link>
                     </td>
                     <td>
@@ -467,7 +467,9 @@ export function StoreWasteDetailPage({
       <header className="screen-heading">
         <div>
           <p className="bop-eyebrow">Waste record · {statusOf(record)}</p>
-          <h2>Waste recorded {record.recordedAt}</h2>
+          <h2>
+            Waste recorded <StaffTime instant={record.recordedAt} />
+          </h2>
           <p>
             By {person(record.recordedBy)} · value CAD {centsText(record.valueMinor)}
             {record.costUnknown ? " (some costs unknown)" : ""}

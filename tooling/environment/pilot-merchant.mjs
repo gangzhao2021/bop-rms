@@ -967,7 +967,12 @@ export async function createInternalMerchant(
             retentionPolicyVersion: 1,
           },
         });
-        return { serviceControl: control, serviceControlState: control.read };
+        return {
+          serviceControl: control,
+          serviceControlState: control.read,
+          // WP-2423 Q21: the Store's current business day for every merchant "today".
+          businessDay: control.businessDay,
+        };
       })(),
       // WP-2423 Q4: refusals are answered to staff; unexpected failures are logged as codes only.
       storeConfiguration: logUnexpected(

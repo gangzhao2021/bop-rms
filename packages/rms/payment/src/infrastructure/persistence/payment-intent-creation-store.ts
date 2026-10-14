@@ -7,6 +7,7 @@ import {
   exactPaymentObject,
   parsePaymentInstant,
   parsePaymentIntentCreationRecord,
+  paymentAttemptLimit,
   PaymentIntentCreationError,
   type PaymentIntentCreationRecord,
 } from "../../application/payment-intent-creation.js";
@@ -80,10 +81,14 @@ const selectRecord = `SELECT jsonb_build_object('intent',jsonb_build_object('pay
  AND i.created_at=date_trunc('milliseconds',i.created_at)
  AND i.prepared_at=date_trunc('milliseconds',i.prepared_at)
  AND i.capacity_expires_at=date_trunc('milliseconds',i.capacity_expires_at)
- AND a.created_at=i.created_at
+ AND ((a.attempt_number=1 AND a.created_at=i.created_at)
+  OR (a.attempt_number>1 AND a.created_at>i.created_at AND a.created_at<i.capacity_expires_at
+   AND a.created_at=date_trunc('milliseconds',a.created_at)))
  AND (o.provider_observed_at IS NULL OR o.provider_observed_at=date_trunc('milliseconds',o.provider_observed_at))) AS coherent
 FROM rms_payment.payment_intent i
-LEFT JOIN rms_payment.payment_attempt a ON a.payment_intent_id=i.payment_intent_id AND a.brand_id=i.brand_id AND a.store_id=i.store_id AND a.attempt_number=1
+LEFT JOIN LATERAL (SELECT * FROM rms_payment.payment_attempt pa
+ WHERE pa.payment_intent_id=i.payment_intent_id AND pa.brand_id=i.brand_id AND pa.store_id=i.store_id
+ ORDER BY pa.attempt_number DESC LIMIT 1) a ON true
 LEFT JOIN rms_payment.payment_intent_operation_record op ON op.payment_intent_id=i.payment_intent_id AND op.brand_id=i.brand_id AND op.store_id=i.store_id
 LEFT JOIN LATERAL (SELECT * FROM rms_payment.payment_provider_observation obs
  WHERE obs.payment_intent_id=i.payment_intent_id AND obs.payment_attempt_id=a.payment_attempt_id
@@ -155,6 +160,7 @@ export function createPostgresPaymentIntentCreationStore(
     }
   };
   return Object.freeze({
+    /** The intent with its latest attempt (WP-2423 Q20: a retry is a later attempt). */
     resolveOperation(value: unknown) {
       return safe(async () => {
         const operation = parsePaymentReference(value);
@@ -286,6 +292,137 @@ export function createPostgresPaymentIntentCreationStore(
               p.guestSessionReference,
               intent.intentDigest,
               intent.createdAt,
+            ],
+          );
+          await appendAuditRecordInTransaction(tx, audit);
+          const saved = await read(tx, intent.paymentOperationReference);
+          if (saved === null || canonical(saved) !== canonical(record)) return fail();
+          await checkClock();
+          return Object.freeze({ status: "Claimed" as const, record: saved });
+        });
+      });
+    },
+    /**
+     * WP-2423 Q20 (DEC-PAYMENT-CARD-RETRY): append the next attempt after the previous one failed.
+     * Serialized with terminal recording and the payment-window decisions (same fences as
+     * `createPostgresPaymentOperationFence`). When another request already appended the next
+     * attempt, that attempt is returned as Existing; nothing is ever changed or removed.
+     */
+    claimRetry(value: unknown) {
+      return safe(async () => {
+        const raw = exactPaymentObject(value, ["previousAttemptReference", "record", "audit"]);
+        const previous = parsePaymentReference(raw.previousAttemptReference);
+        const record = scoped(parsePaymentIntentCreationRecord(raw.record));
+        const { intent, attempt } = record,
+          p = intent.preparation;
+        const at = parsePaymentInstant(options.now());
+        if (
+          record.providerOutcome !== null ||
+          attempt.attemptNumber < 2 ||
+          attempt.createdAt > at ||
+          attempt.paymentAttemptReference === previous
+        )
+          return fail("PAYMENT_INTENT_INPUT_INVALID");
+        const audit = validateAuditRecord(raw.audit as never, Date.parse(at));
+        if (
+          audit.brandId !== brand ||
+          audit.storeId !== store ||
+          audit.actor.type !== "System" ||
+          audit.actionCode !== "PAYMENT_ATTEMPT_RETRY" ||
+          audit.targetType !== "PaymentIntent" ||
+          audit.targetId !== intent.paymentIntentReference ||
+          audit.reasonCode !== "CUSTOMER_RETRY_AFTER_DECLINE" ||
+          audit.occurredAt !== attempt.createdAt ||
+          audit.sourceChannel !== "CUSTOMER_PWA" ||
+          audit.dataClassification !== "Restricted" ||
+          audit.beforeSummary !== undefined ||
+          canonical(audit.afterSummary) !== canonical({ attemptNumber: attempt.attemptNumber })
+        )
+          return fail("PAYMENT_INTENT_PERMISSION_DENIED");
+        return runner.run(async (tx) => {
+          await tx.query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED", []);
+          await context(tx);
+          await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+            "PaymentReceiptOrder:" + brand + ":" + store + ":" + p.orderReference,
+          ]);
+          await lock(tx, intent.paymentOperationReference);
+          await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+            "PaymentTerminal:" + brand + ":" + store + ":" + intent.paymentIntentReference,
+          ]);
+          const prior = await read(tx, intent.paymentOperationReference);
+          if (prior === null) return fail("PAYMENT_INTENT_ORDER_NOT_READY");
+          sameOriginal(prior, record);
+          if (canonical(prior.intent) !== canonical(intent))
+            return fail("PAYMENT_INTENT_IDEMPOTENCY_CONFLICT");
+          const facts = await tx.query(
+            "SELECT payment_attempt_id::text AS attempt,terminal_outcome AS outcome FROM rms_payment.payment_terminal_fact WHERE brand_id=$1 AND store_id=$2 AND payment_intent_id=$3 LIMIT 11",
+            [brand, store, intent.paymentIntentReference],
+          );
+          const outcomes = (Object.getOwnPropertyDescriptor(facts, "rows")?.value ??
+            fail()) as readonly { attempt: unknown; outcome: unknown }[];
+          if (!Array.isArray(outcomes) || outcomes.length > 10) return fail();
+          if (outcomes.some((row) => row.outcome === "Succeeded"))
+            return fail("PAYMENT_INTENT_ALREADY_PAID");
+          // Another request already started the next try: that try is the result.
+          if (prior.attempt.paymentAttemptReference !== previous) {
+            if (prior.attempt.attemptNumber < attempt.attemptNumber - 1) return fail();
+            return Object.freeze({ status: "Existing" as const, record: prior });
+          }
+          if (prior.attempt.attemptNumber + 1 !== attempt.attemptNumber)
+            return fail("PAYMENT_INTENT_INPUT_INVALID");
+          // The latest try is still open (no outcome yet): that try is the result.
+          if (!outcomes.some((row) => row.attempt === previous))
+            return Object.freeze({ status: "Existing" as const, record: prior });
+          if (!outcomes.some((row) => row.attempt === previous && row.outcome === "Failed"))
+            return fail("PAYMENT_INTENT_RETRY_NOT_ALLOWED");
+          if (prior.attempt.attemptNumber >= paymentAttemptLimit)
+            return fail("PAYMENT_INTENT_RETRY_LIMIT_REACHED");
+          if (
+            attempt.providerEnvironment !== prior.attempt.providerEnvironment ||
+            attempt.provider !== prior.attempt.provider
+          )
+            return fail("PAYMENT_INTENT_IDEMPOTENCY_CONFLICT");
+          let validUntil: string = p.capacityExpiresAt;
+          if (admit !== undefined) {
+            const decision = await admit(tx, record, parsePaymentInstant(options.now()));
+            if (decision !== true) {
+              if (decision === false) return fail("PAYMENT_INTENT_PERMISSION_DENIED");
+              const deadline = parsePaymentInstant(
+                exactPaymentObject(decision, ["validUntil"]).validUntil,
+              );
+              if (deadline < validUntil) validUntil = deadline;
+            }
+            await context(tx);
+          }
+          const checkClock = async () => {
+            const clock = exactPaymentObject(
+              single(
+                await tx.query(
+                  "SELECT clock_timestamp() >= $1::timestamptz AND clock_timestamp() < $2::timestamptz AS live",
+                  [attempt.createdAt, validUntil],
+                ),
+              ),
+              ["live"],
+            );
+            if (
+              clock.live !== true ||
+              Date.parse(parsePaymentInstant(options.now())) >= Date.parse(validUntil)
+            )
+              return fail("PAYMENT_INTENT_PREPARATION_EXPIRED");
+          };
+          await checkClock();
+          await affected(
+            tx,
+            "INSERT INTO rms_payment.payment_attempt (payment_attempt_id,brand_id,store_id,payment_intent_id,attempt_number,provider,provider_environment,provider_idempotency_digest,created_at) VALUES ($1,$2,$3,$4,$5,'Stripe',$6,$7,$8)",
+            [
+              attempt.paymentAttemptReference,
+              brand,
+              store,
+              intent.paymentIntentReference,
+              attempt.attemptNumber,
+              attempt.providerEnvironment,
+              attempt.providerIdempotencyDigest,
+              attempt.createdAt,
             ],
           );
           await appendAuditRecordInTransaction(tx, audit);

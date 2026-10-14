@@ -172,18 +172,25 @@ export function createInternalPaymentTerminal(
       );
       return reader.read(input);
     },
-    async confirm(input, confirmation) {
+    /**
+     * WP-2423 Q20: `retry` confirms another card after a decline: the Payment owner first opens
+     * the next attempt on the same intent (or returns the one already open), then the simulated
+     * Provider declines or approves that attempt. Returns the attempt's creation result.
+     */
+    async confirm(input, confirmation, { retry = false } = {}) {
       if (!["SIMULATE_CAPTURE", "SIMULATE_FAILURE"].includes(confirmation))
         throw new Error("SIMULATION_CONFIRMATION_REQUIRED");
       const expected = confirmation === "SIMULATE_CAPTURE" ? "Captured" : "Failed";
       const prepared = await intents.resolveRequest(input);
-      const created = await prepared.service.create(input),
+      const created = retry
+          ? await prepared.service.retry(input)
+          : await prepared.service.create(input),
         record = created.record;
       const prior = await terminal.read(record.intent.paymentIntentReference);
       if (prior !== null) {
         if (prior.outcome !== (expected === "Captured" ? "Succeeded" : "Failed"))
           throw new Error("SIMULATION_OUTCOME_CONFLICT");
-        return { status: "AlreadyCommitted", fact: prior };
+        return { status: "AlreadyCommitted", fact: prior, created };
       }
       const snapshot = record.providerOutcome;
       if (snapshot?.kind !== "Snapshot") throw new Error("SIMULATION_INTENT_UNAVAILABLE");
@@ -239,7 +246,7 @@ export function createInternalPaymentTerminal(
       });
       if (result.status !== (expected === "Captured" ? "Succeeded" : "Failed"))
         throw new Error("SIMULATION_RESULT_UNAVAILABLE");
-      return fact;
+      return { ...fact, created };
     },
   };
 }

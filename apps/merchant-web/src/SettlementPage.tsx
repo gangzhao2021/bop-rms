@@ -9,6 +9,7 @@ import {
   type SettlementReconciliation,
   type SettlementView,
 } from "./settlement-client.js";
+import { useStoreBusinessDay } from "./StoreBusinessDay.js";
 import { Freshness, storeTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 
@@ -362,20 +363,6 @@ type State =
   | { readonly kind: "Loading" | "PermissionDenied" | "Busy" | "Unavailable" }
   | { readonly kind: "Ready"; readonly view: SettlementView };
 
-/** Today's date where the Store is (the latest business day staff can ask for). */
-export function storeToday(timeZone: string | undefined, now = new Date()): string {
-  try {
-    return new Intl.DateTimeFormat("en-CA", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(now);
-  } catch {
-    return new Intl.DateTimeFormat("en-CA").format(now);
-  }
-}
-
 /** WP-2423 P1 (PAY-RECONCILIATION): the Store's day-end page. */
 export function SettlementPage({
   storeLabel,
@@ -387,6 +374,9 @@ export function SettlementPage({
   readonly fetcher?: typeof fetch | undefined;
 }) {
   const client = useMemo(() => createSettlementClient(fetcher), [fetcher]);
+  // WP-2423 Q21: the latest day staff can ask for is the Store's current business day (after
+  // midnight, before the business-day start, that is still the previous calendar date).
+  const latestDay = useStoreBusinessDay()?.businessDate;
   const [requested, setRequested] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [state, setState] = useState<State>({ kind: "Loading" });
@@ -456,7 +446,7 @@ export function SettlementPage({
             type="date"
             name="businessDate"
             value={draft}
-            max={storeToday(timeZone)}
+            max={latestDay}
             onChange={(event) => setDraft(event.currentTarget.value)}
           />
         </label>

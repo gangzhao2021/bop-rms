@@ -20,6 +20,51 @@ export function createCustomerAdmittedAdditionalDiningPayment(options: {
     ): Omit<ReturnType<Flow["payment"]["payment"]>, "repository" | "authorization">;
   };
 }) {
+  function payment(raw: Readonly<Record<string, unknown>>) {
+    const credentials = Object.freeze({
+      sessionCredential: parseGuestRawCredential(raw.sessionCredential),
+      csrfCredential: parseGuestRawCredential(raw.csrfCredential),
+    });
+    const authorizeHistory = createCustomerAdditionalDiningHistoryAuthorization(
+      {
+        scope: options.flow.submission.runtime.inventory.scope,
+        identity: (transaction) => options.flow.submission.runtime.identity(transaction),
+      },
+      credentials,
+    );
+    const authorization = createPersistentAdditionalDiningPaymentAuthorization(
+      {
+        preparation: options.flow.tip.preparation,
+        history: {
+          brandReference: options.flow.submission.runtime.inventory.scope.brandReference,
+          storeReference: options.flow.submission.runtime.inventory.scope.storeReference,
+          transactions: options.flow.submission.runtime.transactions,
+          authorize: authorizeHistory,
+        },
+      },
+      credentials,
+    );
+    const repository = createCustomerAdditionalDiningPaymentStore({
+      ...options.admission(credentials),
+      authorizeHistory,
+      transactions: options.transactions,
+      scope: options.flow.submission.runtime.inventory.scope,
+      quoteVersion: options.flow.tip.quoteVersion ?? 1,
+      clock: {
+        now: () => options.flow.submission.source.clock.now(),
+        generateObservationReference: options.generateObservationReference,
+      },
+    });
+    return createCustomerPersistentAdditionalDiningPayment({
+      ...options.flow,
+      payment: {
+        inventory: options.payment.inventory,
+        nextPreparationReference: options.payment.nextPreparationReference,
+        history: repository,
+        payment: (context) => ({ ...options.payment.ports(context), authorization, repository }),
+      },
+    });
+  }
   return Object.freeze({
     async create(value: unknown) {
       const raw = readClosedRecord(value, [
@@ -29,49 +74,16 @@ export function createCustomerAdmittedAdditionalDiningPayment(options: {
         "selectionReference",
         "tip",
       ]);
-      const credentials = Object.freeze({
-        sessionCredential: parseGuestRawCredential(raw.sessionCredential),
-        csrfCredential: parseGuestRawCredential(raw.csrfCredential),
-      });
-      const authorizeHistory = createCustomerAdditionalDiningHistoryAuthorization(
-        {
-          scope: options.flow.submission.runtime.inventory.scope,
-          identity: (transaction) => options.flow.submission.runtime.identity(transaction),
-        },
-        credentials,
-      );
-      const authorization = createPersistentAdditionalDiningPaymentAuthorization(
-        {
-          preparation: options.flow.tip.preparation,
-          history: {
-            brandReference: options.flow.submission.runtime.inventory.scope.brandReference,
-            storeReference: options.flow.submission.runtime.inventory.scope.storeReference,
-            transactions: options.flow.submission.runtime.transactions,
-            authorize: authorizeHistory,
-          },
-        },
-        credentials,
-      );
-      const repository = createCustomerAdditionalDiningPaymentStore({
-        ...options.admission(credentials),
-        authorizeHistory,
-        transactions: options.transactions,
-        scope: options.flow.submission.runtime.inventory.scope,
-        quoteVersion: options.flow.tip.quoteVersion ?? 1,
-        clock: {
-          now: () => options.flow.submission.source.clock.now(),
-          generateObservationReference: options.generateObservationReference,
-        },
-      });
-      return createCustomerPersistentAdditionalDiningPayment({
-        ...options.flow,
-        payment: {
-          inventory: options.payment.inventory,
-          nextPreparationReference: options.payment.nextPreparationReference,
-          history: repository,
-          payment: (context) => ({ ...options.payment.ports(context), authorization, repository }),
-        },
-      }).create(value);
+      return payment(raw).create(value);
+    },
+    /** WP-2423 Q20: another card for this round's existing payment after a decline. */
+    async retry(value: unknown) {
+      const raw = readClosedRecord(value, [
+        "sessionCredential",
+        "csrfCredential",
+        "checkoutSessionReference",
+      ]);
+      return payment(raw).retry(value);
     },
   });
 }

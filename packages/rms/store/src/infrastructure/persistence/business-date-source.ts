@@ -2,6 +2,7 @@ import { parseBrandReference, parseStoreReference, parseCanonicalInstant } from 
 import {
   BusinessDateError,
   resolveStoreBusinessDate,
+  resolveStoreBusinessDay,
   resolveStoreBusinessDateBounds,
   resolveClosedStoreBusinessDateWindowAcross,
   parseStoreBusinessDateConfiguration,
@@ -152,6 +153,15 @@ export function createPostgresStoreBusinessDateSource(
   const read = createPostgresStoreBusinessDateConfigurationSource(options);
   return async (tx: Transaction, at: string) =>
     resolveStoreBusinessDate({ occurredAt: at, configuration: await read(tx, at) });
+}
+
+/** WP-2423 Q21: the current Store business day (date, start and end) over the same source. */
+export function createPostgresStoreBusinessDaySource(
+  options: Parameters<typeof createPostgresStoreBusinessDateConfigurationSource>[0],
+) {
+  const read = createPostgresStoreBusinessDateConfigurationSource(options);
+  return async (tx: Transaction, at: string) =>
+    resolveStoreBusinessDay({ occurredAt: at, configuration: await read(tx, at) });
 }
 
 /** Closed Store business day read for settlement: every configuration in force at any

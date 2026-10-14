@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import pg from "pg";
 import { it } from "vitest";
 import { createMerchantAvailability } from "../../../apps/api/src/merchant-availability.ts";
+import { readFile } from "node:fs/promises";
+import { URL } from "node:url";
+import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+import { seedOrdinaryRefundStorePublication } from "../test-support/ordinary-refund-store-publication.mjs";
 import { productApiGrants } from "../test-support/merchant-api-grants.mjs";
 import { syntheticMerchantBrandScope } from "../test-support/merchant-brand-scope.mjs";
 
@@ -20,7 +24,8 @@ it("manages which items a Store sells with Brand and Store authority", async () 
   await withIsolatedDatabase({ caseId: "wp2423_availability" }, async (context) => {
     const admin = new Client(context.clientConfig);
     await admin.connect();
-    const role = "wp2423_avail_" + context.runId;
+    const role = "wp2423_avail_" + context.runId,
+      worker = "wp2423_avail_w_" + context.runId;
     const tenantReference = id(1),
       brandReference = id(2),
       storeReference = id(3),
@@ -31,7 +36,8 @@ it("manages which items a Store sells with Brand and Store authority", async () 
       sku = id(12),
       at = "2026-09-20T00:00:00.000Z",
       names = JSON.stringify({ "en-CA": "Mocha" });
-    // 2026-10-07 21:00 in Toronto; the business day ends at 2026-10-08T04:00Z.
+    // 2026-10-07 21:00 in Toronto. WP-2423 Q21: the Store's business day starts at 04:00 local, so
+    // the Oct 7 business day ends at 2026-10-08T08:00Z (not at local midnight, 04:00Z).
     let clock = Date.parse("2026-10-08T01:00:00.000Z");
     const now = () => new Date((clock += 1000)).toISOString();
     let reference = 0x9000;
@@ -49,13 +55,33 @@ it("manages which items a Store sells with Brand and Store authority", async () 
         `INSERT INTO rms_catalog.sku(sku_id,product_id,brand_id,product_version_id,sku_code,lifecycle,localized_names_json,variant_selections_json,variant_digest,unit_of_sale,unit_quantity,created_at,created_by_actor_id) VALUES($1,$2,$3,$4,'MOCHA-REGULAR-12-OZ','Active','{"en-CA":"Regular (12 oz)"}'::jsonb,'[]'::jsonb,$5,'EACH',1,$6,$7)`,
         [sku, id(10), brandReference, id(11), "sha256:" + "a".repeat(64), at, owner],
       );
-      await admin.query(
-        "CREATE ROLE " + role + " NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
+      // WP-2423 Q21: the Store's published configuration (America/Toronto, day starts 04:00).
+      await seedOrdinaryRefundStorePublication({
+        client: admin,
+        scope: { tenantReference, brandReference, storeReference },
+        firstCapturedAt: "2026-10-08T00:00:00.000Z",
+      });
+      for (const name of [role, worker])
+        await admin.query(
+          "CREATE ROLE " + name + " NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
+        );
+      // The rendered pilot API grants (matrix plus additions), as on the pilot host.
+      const root = new URL("../../../docs/spec/", import.meta.url);
+      const matrices = await Promise.all(
+        ["pilot-acl-matrix.json", "pilot-acl-additions.json"].map(async (file) =>
+          JSON.parse(await readFile(new URL(file, root), "utf8")),
+        ),
       );
+      await admin.query(renderPilotAclSql(matrices, { api: role, worker }));
       for (const sql of [...productApiGrants, ...availabilityApiGrants])
         await admin.query(sql.replaceAll("ROLE_", role));
       const persistence = {
         now,
+        publication: {
+          configurationType: "STORE_CONFIGURATION",
+          purposeCode: "STORE_CONFIGURATION",
+          requiredLiveGateRequirementCodes: ["SYNTHETIC_STORE_READY"],
+        },
         transactions: {
           async run(work) {
             await admin.query("BEGIN");
@@ -135,7 +161,7 @@ it("manages which items a Store sells with Brand and Store authority", async () 
             until: "EndOfDay",
           })
         ).item,
-        { status: "SoldOut", soldOutUntil: "2026-10-08T04:00:00.000Z" },
+        { status: "SoldOut", soldOutUntil: "2026-10-08T08:00:00.000Z" },
       );
       assert.equal(
         (await call({ action: "BackInStock", operationReference: next(), skuReference: sku })).item
@@ -176,13 +202,13 @@ it("manages which items a Store sells with Brand and Store authority", async () 
             change: "SoldOutToday",
             ruleStep: "RuleActivated",
             ...common,
-            soldOutUntil: "2026-10-08T04:00:00.000Z",
+            soldOutUntil: "2026-10-08T08:00:00.000Z",
           },
           {
             change: "SoldOutToday",
             ruleStep: "RuleCreated",
             ...common,
-            soldOutUntil: "2026-10-08T04:00:00.000Z",
+            soldOutUntil: "2026-10-08T08:00:00.000Z",
           },
         ]
           .map((value) => JSON.stringify(Object.fromEntries(Object.entries(value).sort())))
@@ -206,7 +232,7 @@ it("manages which items a Store sells with Brand and Store authority", async () 
       });
       assert.deepEqual(soldOut.item, {
         status: "SoldOut",
-        soldOutUntil: "2026-10-08T04:00:00.000Z",
+        soldOutUntil: "2026-10-08T08:00:00.000Z",
       });
       await assert.rejects(
         call({ action: "StopOffering", operationReference: next(), skuReference: sku }),
@@ -237,6 +263,24 @@ it("manages which items a Store sells with Brand and Store authority", async () 
       );
       scope.as(manager);
       await call({ action: "BackInStock", operationReference: next(), skuReference: sku });
+      // WP-2423 Q21: at 01:30 on Oct 9 (after midnight, before the 04:00 business-day start) it is
+      // still the Oct 8 business day: sold out for today ends at 04:00 local, not next midnight.
+      clock = Date.parse("2026-10-09T05:30:00.000Z");
+      scope.as(cook);
+      assert.deepEqual(
+        (
+          await call({
+            action: "SoldOut",
+            operationReference: next(),
+            skuReference: sku,
+            until: "EndOfDay",
+          })
+        ).item,
+        { status: "SoldOut", soldOutUntil: "2026-10-09T08:00:00.000Z" },
+      );
+      // Once the business day has ended, the item is back on sale by itself.
+      clock = Date.parse("2026-10-09T08:00:00.000Z");
+      assert.equal((await status()).status, "Available");
       scope.as(owner);
       assert.equal(
         (await call({ action: "StopOffering", operationReference: next(), skuReference: sku })).item
@@ -260,6 +304,7 @@ it("manages which items a Store sells with Brand and Store authority", async () 
           ["SOLD_OUT", "Unavailable", 900, "Inactive", storeReference],
           ["SOLD_OUT", "Unavailable", 900, "Inactive", storeReference],
           ["SOLD_OUT", "Unavailable", 900, "Inactive", storeReference],
+          ["SOLD_OUT", "Unavailable", 900, "Active", storeReference],
         ],
       );
       const audits = (
@@ -267,20 +312,20 @@ it("manages which items a Store sells with Brand and Store authority", async () 
           "SELECT action_code,store_id::text store FROM platform_audit.audit_record WHERE action_code LIKE 'CATALOG_AVAILABILITY_%' ORDER BY occurred_at,audit_id",
         )
       ).rows;
-      assert.equal(audits.length, 12);
-      assert.equal(audits.filter((a) => a.store === storeReference).length, 9);
+      assert.equal(audits.length, 14);
+      assert.equal(audits.filter((a) => a.store === storeReference).length, 11);
       assert.equal(
         (
           await admin.query(
             "SELECT count(*)::int n FROM platform_eventing.outbox_event WHERE event_type LIKE 'AvailabilityRule%'",
           )
         ).rows[0].n,
-        12,
+        14,
       );
       const snapshots = await admin.query(
         "SELECT count(*)::int n FROM rms_catalog.availability_rule_operation_snapshot",
       );
-      assert.equal(snapshots.rows[0].n, 12);
+      assert.equal(snapshots.rows[0].n, 14);
       await admin.query(
         "UPDATE rms_catalog.availability_rule_operation_snapshot SET record_json='{}'",
       );
@@ -291,11 +336,13 @@ it("manages which items a Store sells with Brand and Store authority", async () 
             "SELECT count(*)::int n FROM rms_catalog.availability_rule_operation_snapshot WHERE record_json<>'{}'",
           )
         ).rows[0].n,
-        12,
+        14,
       );
     } finally {
-      await admin.query("DROP OWNED BY " + role).catch(() => undefined);
-      await admin.query("DROP ROLE IF EXISTS " + role).catch(() => undefined);
+      for (const name of [role, worker]) {
+        await admin.query("DROP OWNED BY " + name).catch(() => undefined);
+        await admin.query("DROP ROLE IF EXISTS " + name).catch(() => undefined);
+      }
       await admin.end();
     }
   });

@@ -2,6 +2,7 @@ import { AppFrame, StatePanel } from "@bop-rms/ui";
 import type { ReactNode } from "react";
 import type { MerchantWorkspaceSnapshot } from "./merchant-workspace.js";
 import { StaffSignInLink } from "./StaffSession.js";
+import { useStoreBusinessDay } from "./StoreBusinessDay.js";
 import { Freshness } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 
@@ -56,6 +57,7 @@ export function MerchantShell({
   overview = null,
   today,
 }: MerchantShellProps) {
+  const liveBusinessDay = useStoreBusinessDay();
   if (state.kind !== "Ready")
     return (
       <AppFrame title="Operations" description="Store workspace">
@@ -64,12 +66,14 @@ export function MerchantShell({
     );
   const ready = state;
   const scope = ready.workspace.selectedScope;
+  // WP-2423 Q21: the Store's current business day, kept current on a screen left open overnight.
+  const businessDate = liveBusinessDay?.businessDate ?? ready.workspace.businessDate;
   const multiStore = ready.workspace.authorizedStores.length > 1;
   return (
     <WorkspacePage
       className="workspace-page--overview"
       title={scope.storeLabel}
-      meta={`${scope.brandLabel} · Business date ${ready.workspace.businessDate}`}
+      meta={`${scope.brandLabel} · Business date ${businessDate}`}
       status={<Freshness status={ready.workspace.freshness} />}
       actions={
         multiStore ? (
@@ -121,7 +125,7 @@ export function MerchantShell({
               <p className="overview-status-value">
                 <span>{ready.workspace.storeStatus}</span>
               </p>
-              <p>Business date {ready.workspace.businessDate}</p>
+              <p>Business date {businessDate}</p>
             </section>
             {today ?? (
               <section className="overview-card" aria-labelledby="today-summary-heading">

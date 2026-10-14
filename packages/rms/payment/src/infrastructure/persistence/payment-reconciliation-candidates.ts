@@ -59,8 +59,9 @@ export function createPostgresPaymentReconciliationCandidates(options: {
         // payment is rechecked every 13 minutes on its first day, then daily; a matched one daily;
         // after 30 days only new facts bring it back. Rechecking every payment every 13 minutes
         // forever grew this history by thousands of rows a day for a single Store.
+        // WP-2423 Q20: the check follows the intent's latest attempt (a retry after a decline).
         `SELECT i.brand_id::text AS brand,i.store_id::text AS store,i.payment_intent_id::text AS intent,i.payment_operation_id::text AS operation,i.order_id::text AS order_reference,a.payment_attempt_id::text AS attempt,a.provider_environment AS environment,i.created_at,d.due_at
-FROM rms_payment.payment_intent i JOIN rms_payment.payment_attempt a ON a.brand_id=i.brand_id AND a.store_id=i.store_id AND a.payment_intent_id=i.payment_intent_id AND a.attempt_number=1
+FROM rms_payment.payment_intent i CROSS JOIN LATERAL (SELECT * FROM rms_payment.payment_attempt la WHERE la.brand_id=i.brand_id AND la.store_id=i.store_id AND la.payment_intent_id=i.payment_intent_id ORDER BY la.attempt_number DESC LIMIT 1) a
 LEFT JOIN LATERAL (SELECT r.checked_at,r.outcome FROM rms_payment.payment_reconciliation_record r WHERE r.brand_id=i.brand_id AND r.store_id=i.store_id AND r.payment_intent_id=i.payment_intent_id AND r.mode='Operational' ORDER BY r.checked_at DESC,r.reconciliation_check_id DESC LIMIT 1) c ON true
 LEFT JOIN LATERAL (SELECT max(f.at) AS fact_at FROM (
   SELECT t.recorded_at AS at FROM rms_payment.payment_terminal_fact t WHERE t.brand_id=i.brand_id AND t.store_id=i.store_id AND t.payment_intent_id=i.payment_intent_id

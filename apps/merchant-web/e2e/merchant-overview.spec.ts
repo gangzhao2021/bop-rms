@@ -240,6 +240,19 @@ test("@production Home reads only the summaries the staff member's screens permi
       },
     }),
   );
+  // WP-2423 Q21: the Store's current business day (read by every Store workspace page).
+  await page.route("**/merchant/business-day", (route) =>
+    route.fulfill({
+      headers: { "cache-control": "no-store" },
+      json: {
+        businessDate: "2026-09-23",
+        startsAt: "2026-09-23T08:00:00.000Z",
+        endsAt: "2026-09-24T08:00:00.000Z",
+        timeZone: "America/Toronto",
+        observedAt: "2026-09-23T16:00:00.000Z",
+      },
+    }),
+  );
   const requested: string[] = [];
   for (const path of [
     "**/merchant/orders*",

@@ -306,6 +306,53 @@ export function resolveStoreBusinessDate(
   });
 }
 
+/** The Store business day an instant falls in: its date and both local boundaries. */
+export interface StoreBusinessDay {
+  readonly brandReference: BrandReference;
+  readonly storeReference: StoreReference;
+  readonly observedAt: CanonicalInstant;
+  readonly businessDate: StoreBusinessDate;
+  /** The day's start (inclusive) and end (exclusive), each at the business-day start time. */
+  readonly startsAt: CanonicalInstant;
+  readonly endsAt: CanonicalInstant;
+  readonly timeZone: string;
+  readonly businessDayStartLocalTime: BusinessDayStartLocalTime;
+  readonly configurationReference: BusinessDateConfigurationReference;
+  readonly configurationVersion: number;
+  readonly contentDigest: BusinessDateContentDigest;
+}
+
+/**
+ * WP-2423 Q21: the one definition of "today" for a Store — the business day the instant falls in,
+ * from the Store's published IANA time zone and business-day start (not the calendar day), with
+ * both boundaries resolved across daylight-saving changes (a day may last 23 or 25 hours). The end
+ * is placed by the configuration in force at observedAt; a later version taking effect within the
+ * day is read when that day is closed (resolveClosedStoreBusinessDateWindowAcross).
+ */
+export function resolveStoreBusinessDay(input: ResolveStoreBusinessDateInput): StoreBusinessDay {
+  const resolution = resolveStoreBusinessDate(input);
+  const configuration = parseStoreBusinessDateConfiguration(input.configuration);
+  const { start, end } = closedBounds(configuration, resolution.businessDate);
+  if (
+    start.epochMilliseconds !== Date.parse(resolution.businessDateBoundaryAt) ||
+    end.epochMilliseconds <= Date.parse(resolution.occurredAt)
+  )
+    return fail();
+  return Object.freeze({
+    brandReference: resolution.brandReference,
+    storeReference: resolution.storeReference,
+    observedAt: resolution.occurredAt,
+    businessDate: resolution.businessDate,
+    startsAt: resolution.businessDateBoundaryAt,
+    endsAt: new Date(end.epochMilliseconds).toISOString() as CanonicalInstant,
+    timeZone: resolution.timeZone,
+    businessDayStartLocalTime: resolution.businessDayStartLocalTime,
+    configurationReference: resolution.configurationReference,
+    configurationVersion: resolution.configurationVersion,
+    contentDigest: resolution.contentDigest,
+  });
+}
+
 export interface ClosedStoreBusinessDateWindow {
   readonly brandReference: BrandReference;
   readonly storeReference: StoreReference;

@@ -1,10 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
+import { StoreBusinessDayContext } from "./StoreBusinessDay.js";
 import {
+  SettlementPage,
   SettlementReport,
   formatSettlementMoney,
-  storeToday,
   summarizeOutcomes,
 } from "./SettlementPage.js";
 import { parseSettlementView } from "./settlement-client.js";
@@ -162,10 +163,22 @@ describe("WP-2423 Q19 current day beside a closed day", () => {
   });
 });
 
-describe("WP-2423 Q7 v15: the latest day staff can ask for is today where the Store is", () => {
-  it("uses the Store's date, not UTC (a Toronto evening is already tomorrow in UTC)", () => {
-    const evening = new Date("2026-10-14T02:43:00.000Z");
-    expect(storeToday("America/Toronto", evening)).toBe("2026-10-13");
-    expect(storeToday("Asia/Tokyo", evening)).toBe("2026-10-14");
+describe("WP-2423 Q21: the latest day staff can ask for is the Store's business day", () => {
+  it("caps the day picker at the Store's current business day, not the calendar date", () => {
+    // 01:30 on Oct 15 in Toronto is still the Oct 14 business day (it starts at 04:00).
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <StoreBusinessDayContext.Provider
+          value={{
+            businessDate: "2026-10-14",
+            startsAt: "2026-10-14T08:00:00.000Z",
+            endsAt: "2026-10-15T08:00:00.000Z",
+          }}
+        >
+          <SettlementPage storeLabel="Synthetic Store" timeZone="America/Toronto" />
+        </StoreBusinessDayContext.Provider>
+      </MemoryRouter>,
+    );
+    expect(markup).toContain('max="2026-10-14"');
   });
 });

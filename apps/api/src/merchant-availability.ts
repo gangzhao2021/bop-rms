@@ -17,10 +17,9 @@ import {
   type AvailabilityRuleAggregate,
   type ProductLifecycleTransaction,
 } from "@rms/catalog";
-import { storeDayEndExpiryCutoff } from "@rms/inventory";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
-import { localBoundary } from "./merchant-prices.js";
+import { createMerchantStoreBusinessDay } from "./merchant-store-business-day.js";
 import { derivedReference } from "./merchant-products.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
@@ -264,10 +263,25 @@ export function createMerchantAvailability(options: {
           (candidate) => candidate.skuReference === body.skuReference && candidate.active,
         );
         if (sku === undefined) return fail("NotFound");
-        const today = localBoundary(at, s.timeZone).localDateTime.slice(0, 10);
+        // Q21: "today" is the Store's business day — sold out until it ends at the Store's
+        // business-day start (e.g. 04:00 after a late service), never at calendar midnight.
         const soldOutUntil =
           body.action === "SoldOut" && body.until === "EndOfDay"
-            ? storeDayEndExpiryCutoff(today, s.timeZone)
+            ? String(
+                (
+                  await createMerchantStoreBusinessDay({
+                    publication: options.persistence.publication,
+                    tenantReference: s.owner.tenantReference,
+                    brandReference: s.owner.brandReference,
+                    storeReference: s.owner.storeReference,
+                    timeZone: s.timeZone,
+                    authorize: async () =>
+                      (await s.markDecision()) !== null ||
+                      (await s.storeDecision()) !== null ||
+                      (await s.brandDecision()) !== null,
+                  })(tx, at).catch(() => fail("Conflict"))
+                ).endsAt,
+              )
             : null;
         // Audit summary per rule step: what changed, for which item and Store (no personal data).
         const steps = new Map<string, string>();

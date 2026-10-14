@@ -37,6 +37,16 @@ function instant(value: unknown): string {
     return fail();
   return value;
 }
+function date(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(value) ||
+    !Number.isFinite(Date.parse(`${value}T00:00:00.000Z`)) ||
+    new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) !== value
+  )
+    return fail();
+  return value;
+}
 /** WP-2423 Q6: why the Store cancelled a paid order or batch before the kitchen started. */
 export const staffCancellationReasons = [
   "CUSTOMER_REQUEST",
@@ -179,9 +189,13 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       value !== null && typeof value === "object" && Object.hasOwn(value, "counter");
     const withHold =
       value !== null && typeof value === "object" && Object.hasOwn(value, "acceptanceHold");
+    // WP-2423 Q21: the Store business day the Order belongs to (order numbers restart daily).
+    const withBusinessDate =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "businessDate");
     const item = exact(value, [
       ...(withCounter ? ["counter"] : []),
       ...(withHold ? ["acceptanceHold"] : []),
+      ...(withBusinessDate ? ["businessDate"] : []),
       "orderReference",
       "orderNumber",
       "orderType",
@@ -236,6 +250,7 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       return fail();
     const submittedAt = instant(item.submittedAt),
       observedAt = instant(item.observedAt);
+    const businessDate = withBusinessDate ? date(item.businessDate) : null;
     if (observedAt < submittedAt) return fail();
     // WP-2423 Q1: only a paid pickup still awaiting acceptance has a deadline.
     const acceptBy = item.acceptBy === null ? null : instant(item.acceptBy);
@@ -367,6 +382,8 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       orderNumber: item.orderNumber,
       orderType: item.orderType,
       sourceChannel: item.sourceChannel as string,
+      /** WP-2423 Q21: the Store business date of the Order (null from an older server). */
+      businessDate,
       submittedAt,
       observedAt,
       initialBatchReference: reference(item.initialBatchReference),

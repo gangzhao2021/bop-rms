@@ -65,6 +65,15 @@ export interface PaymentIntentCreationPorts {
       readonly status: "Claimed" | "Existing";
       readonly record: PaymentIntentCreationRecord;
     }>;
+    /** WP-2423 Q20: append the next attempt after `previousAttemptReference` failed. */
+    claimRetry?(input: {
+      readonly previousAttemptReference: string;
+      readonly record: PaymentIntentCreationRecord;
+      readonly audit: AppendAuditRecordInput;
+    }): Promise<{
+      readonly status: "Claimed" | "Existing";
+      readonly record: PaymentIntentCreationRecord;
+    }>;
     recordObservation(input: {
       readonly record: PaymentIntentCreationRecord;
     }): Promise<PaymentIntentCreationRecord>;

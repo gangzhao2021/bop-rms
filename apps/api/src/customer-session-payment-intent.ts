@@ -158,6 +158,77 @@ export function createCustomerSessionPaymentIntent(options: CustomerSessionPayme
       sameSession(await reader.read(input));
       return pay(preparation);
     },
+    /**
+     * WP-2423 Q20 (DEC-PAYMENT-CARD-RETRY): after a declined card, open the next attempt on this
+     * checkout's existing payment (same order batch, amount and payment window). Never submits an
+     * Order, records a tip or starts a payment clock.
+     */
+    async retry(value: unknown) {
+      let input: {
+        sessionCredential: string;
+        csrfCredential: string;
+        checkoutSessionReference: string;
+      };
+      try {
+        const raw = readClosedRecord(value, [
+          "sessionCredential",
+          "csrfCredential",
+          "checkoutSessionReference",
+        ]);
+        input = {
+          sessionCredential: parseGuestRawCredential(raw.sessionCredential),
+          csrfCredential: parseGuestRawCredential(raw.csrfCredential),
+          checkoutSessionReference: String(parseOrderingReference(raw.checkoutSessionReference)),
+        };
+      } catch {
+        throw new CheckoutSessionServiceError("INPUT_INVALID");
+      }
+      const session = parseCheckoutSession(await reader.read(input));
+      if (options.submissionKind === "Additional" && session.validation.orderType !== "DineIn")
+        throw new CheckoutSessionServiceError("INTENT_CONFLICT");
+      const existingValue = await options.history.resolveOperation(
+        session.paymentOperationReference,
+      );
+      if (existingValue === null) throw new CheckoutSessionServiceError("INTENT_CONFLICT");
+      const existing = parsePaymentIntentCreationRecord(existingValue);
+      if (
+        String(existing.intent.paymentOperationReference) !== session.paymentOperationReference ||
+        String(existing.intent.preparation.submissionReference) !== session.submissionReference
+      )
+        throw new CheckoutSessionServiceError("INTENT_CONFLICT");
+      const ports = options.payment({
+        credentials: {
+          sessionCredential: input.sessionCredential,
+          csrfCredential: input.csrfCredential,
+        },
+        session,
+        preparation: existing.intent.preparation,
+      });
+      const result = await createPaymentIntentCreationService({
+        ...ports,
+        ordering: {
+          preparePayment: async () => {
+            throw new CheckoutSessionServiceError("INTENT_CONFLICT");
+          },
+        },
+      }).retry({
+        paymentOperationReference: session.paymentOperationReference,
+        submissionReference: session.submissionReference,
+        requestedAt: options.access.now(),
+      });
+      const record = parsePaymentIntentCreationRecord(result.record);
+      if (
+        String(record.intent.paymentIntentReference) !==
+          String(existing.intent.paymentIntentReference) ||
+        String(record.intent.paymentOperationReference) !== session.paymentOperationReference
+      )
+        throw new CheckoutSessionServiceError("DEPENDENCY_UNAVAILABLE");
+      if (
+        JSON.stringify(parseCheckoutSession(await reader.read(input))) !== JSON.stringify(session)
+      )
+        throw new CheckoutSessionServiceError("INTENT_CONFLICT");
+      return Object.freeze({ status: result.status, record, session });
+    },
   });
 }
 

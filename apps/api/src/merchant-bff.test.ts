@@ -2034,6 +2034,71 @@ describe("WP-2423 P1 merchant settlement read route", () => {
     expect(await result.json()).toEqual({ error: "settlement_busy" });
   });
 });
+describe("WP-2423 Q21 merchant business-day read route", () => {
+  const day = {
+    businessDate: "2026-10-14",
+    startsAt: "2026-10-14T08:00:00.000Z",
+    endsAt: "2026-10-15T08:00:00.000Z",
+    timeZone: "America/Toronto",
+    observedAt: "2026-10-15T05:30:00.000Z",
+  };
+  const headers = {
+    cookie: "__Host-bop-merchant=" + sessionCookie,
+    "sec-fetch-site": "same-origin",
+    host: "merchant.invalid",
+  };
+  async function serveDay(businessDay?: MerchantBffRouterOptions["businessDay"]) {
+    const app = express();
+    app.use(
+      "/merchant",
+      createMerchantBffRouter({
+        service: fakeService(),
+        exactOrigin: "https://merchant.invalid",
+        acceptedHost: "merchant.invalid",
+        ...(businessDay ? { businessDay } : {}),
+      }),
+    );
+    const server = app.listen(0, "127.0.0.1");
+    servers.push(server);
+    await new Promise<void>((resolve) => server.once("listening", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("listener unavailable");
+    return `http://127.0.0.1:${address.port}`;
+  }
+  it("answers the Store's current business day without configuration identity", async () => {
+    const read = vi.fn<NonNullable<MerchantBffRouterOptions["businessDay"]>>(async () =>
+      Object.freeze({ ...day }),
+    );
+    const root = await serveDay(read);
+    const result = await request(root, "/merchant/business-day", { headers });
+    expect(result.status).toBe(200);
+    expect(result.headers.get("cache-control")).toBe("no-store");
+    expect(await result.json()).toEqual(day);
+    expect(read).toHaveBeenCalledExactlyOnceWith(sessionCookie);
+  });
+  it("refuses parameters, a missing session and cross-site reads; hides reader failures", async () => {
+    const read = vi.fn<NonNullable<MerchantBffRouterOptions["businessDay"]>>(async () => day);
+    const root = await serveDay(read);
+    for (const [path, extra] of [
+      ["/merchant/business-day?store=x", {}],
+      ["/merchant/business-day", { cookie: "" }],
+      ["/merchant/business-day", { "sec-fetch-site": "cross-site" }],
+    ] as const) {
+      const result = await request(root, path, { headers: { ...headers, ...extra } });
+      expect(result.status).toBe(403);
+    }
+    expect(read).not.toHaveBeenCalled();
+    expect((await request(await serveDay(), "/merchant/business-day", { headers })).status).toBe(
+      503,
+    );
+    const failing = await serveDay(async () => {
+      throw new Error("STORE_BUSINESS_DATE_UNAVAILABLE");
+    });
+    const denied = await request(failing, "/merchant/business-day", { headers });
+    expect(denied.status).toBe(403);
+    expect(await denied.text()).not.toContain("BUSINESS_DATE");
+  });
+});
 async function serveOrderClose(orderClosure?: MerchantBffRouterOptions["orderClosure"]) {
   const app = express();
   app.use(

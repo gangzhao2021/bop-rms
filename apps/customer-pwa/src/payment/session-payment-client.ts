@@ -13,7 +13,18 @@ export interface SessionPaymentView {
 }
 export class SessionPaymentClientError extends Error {
   constructor(
-    readonly code: "invalid" | "denied" | "conflict" | "not_ready" | "store_closed" | "unknown",
+    readonly code:
+      | "invalid"
+      | "denied"
+      | "conflict"
+      | "not_ready"
+      | "store_closed"
+      /** WP-2423 Q20: why another card cannot be tried for this payment. */
+      | "retry_limit"
+      | "retry_pending"
+      | "already_paid"
+      | "window_ended"
+      | "unknown",
   ) {
     super("Payment unavailable.");
     this.name = "SessionPaymentClientError";
@@ -47,6 +58,13 @@ function amount(value: unknown): string {
   return value;
 }
 export function createSessionPaymentClient() {
+  const explicit = {
+    payment_store_closed: "store_closed",
+    payment_retry_limit: "retry_limit",
+    payment_retry_pending: "retry_pending",
+    payment_already_paid: "already_paid",
+    payment_window_ended: "window_ended",
+  } as const;
   async function post(session: string, suffix: string, body: object, key?: string) {
     if (!uuid.test(session)) throw new SessionPaymentClientError("invalid");
     const current = captureCustomerCsrfContext(),
@@ -63,7 +81,9 @@ export function createSessionPaymentClient() {
             "x-csrf-token": csrf,
             ...(suffix === "simulation-confirm"
               ? { "x-bop-simulation-confirmation": "SIMULATE_CAPTURE" }
-              : {}),
+              : suffix === "simulation-fail"
+                ? { "x-bop-simulation-confirmation": "SIMULATE_FAILURE" }
+                : {}),
             ...(key === undefined ? {} : { "idempotency-key": key }),
           },
           body: JSON.stringify(body),
@@ -71,15 +91,17 @@ export function createSessionPaymentClient() {
         current,
       );
       if (!current()) throw new SessionPaymentClientError("unknown");
+      const named = errorCode(result.payload);
       if (![200, 201, 202].includes(result.response.status))
         throw new SessionPaymentClientError(
           result.response.status === 400
             ? "invalid"
             : result.response.status === 404
               ? "denied"
-              : result.response.status === 409 &&
-                  errorCode(result.payload) === "payment_store_closed"
-                ? "store_closed"
+              : (result.response.status === 409 || result.response.status === 422) &&
+                  named !== null &&
+                  Object.hasOwn(explicit, named)
+                ? explicit[named as keyof typeof explicit]
                 : result.response.status === 409
                   ? "conflict"
                   : result.response.status === 422
@@ -100,12 +122,20 @@ export function createSessionPaymentClient() {
   ): Promise<SessionPaymentView> {
     if (!uuid.test(selectionReference)) throw new SessionPaymentClientError("invalid");
     const tip = amount(tipAmountMinor);
-    const { response, payload } = await post(
+    return view(
       session,
-      suffix,
-      { tip: { amountMinor: tip, currency: "CAD" } },
-      selectionReference,
+      await post(
+        session,
+        suffix,
+        { tip: { amountMinor: tip, currency: "CAD" } },
+        selectionReference,
+      ),
     );
+  }
+  function view(
+    session: string,
+    { response, payload }: Awaited<ReturnType<typeof post>>,
+  ): SessionPaymentView {
     try {
       const root = exact(payload, ["schemaVersion", "payment"]);
       const raw = exact(root.payment, [
@@ -152,6 +182,25 @@ export function createSessionPaymentClient() {
     /** Explicit local simulation only; navigate to the authoritative result reader afterward. */
     simulate: (session: string, selection: string, tip: string) =>
       create(session, selection, tip, "simulation-confirm"),
+    /** Internal testing only: the simulated card is declined. */
+    simulateDecline: (session: string, selection: string, tip: string) =>
+      create(session, selection, tip, "simulation-fail"),
+    /**
+     * WP-2423 Q20: another card for this checkout's existing payment after a decline. The server
+     * keeps the amount, tip and payment window; repeating it returns the same open attempt.
+     */
+    async retry(session: string): Promise<SessionPaymentView> {
+      return view(session, await post(session, "payment-intents", { retry: true }));
+    },
+    /** Internal testing only: another simulated card, approved or declined. */
+    async simulateRetry(session: string, outcome: "approve" | "decline") {
+      return view(
+        session,
+        await post(session, outcome === "approve" ? "simulation-confirm" : "simulation-fail", {
+          retry: true,
+        }),
+      );
+    },
     /** The caller passes this ephemeral value directly to the secure Provider component. */
     async handoff(session: string): Promise<string> {
       const { response, payload } = await post(session, "payment-handoff", {});

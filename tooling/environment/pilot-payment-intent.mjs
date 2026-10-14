@@ -205,5 +205,9 @@ export async function createInternalPaymentIntent(
     async create(input) {
       return (await resolveRequest(input)).service.create(input);
     },
+    // WP-2423 Q20: another card for the existing payment after a decline.
+    async retry(input) {
+      return (await resolveRequest(input)).service.retry(input);
+    },
   };
 }

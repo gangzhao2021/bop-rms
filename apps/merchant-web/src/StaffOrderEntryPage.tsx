@@ -5,7 +5,7 @@ import { validSlipReference } from "./CardMachineRefundAction.js";
 import { createOrderAcceptanceClient } from "./order-acceptance-client.js";
 import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
-import { storeTime } from "./StoreTime.js";
+import { storeLocalInstant, storeTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 import {
   CounterOrderClientError,
@@ -118,11 +118,19 @@ function payErrorText(error: CounterOrderClientError) {
   }
 }
 
-/** A local date-time input value ("2026-10-13T14:05") as an instant, or null. */
-export function paidAtInstant(value: string, now = Date.now()): string | null {
+/**
+ * A date-time input value ("2026-10-13T14:05") read as Store time (WP-2423 Q21: the slip's time
+ * where the Store is, not the device's zone) as an instant, or null.
+ */
+export function paidAtInstant(
+  value: string,
+  now = Date.now(),
+  timeZone?: string | undefined,
+): string | null {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/u.test(value)) return null;
-  const at = new Date(value);
-  const time = at.getTime();
+  const local = timeZone === undefined ? null : storeLocalInstant(value, timeZone);
+  if (timeZone !== undefined && local === null) return null;
+  const time = (local === null ? new Date(value) : new Date(local)).getTime();
   if (!Number.isFinite(time) || time > now || now - time > 72 * 60 * 60 * 1000) return null;
   return new Date(Math.floor(time / 1000) * 1000).toISOString();
 }
@@ -210,7 +218,7 @@ export function StaffOrderEntryPage({
       amountMinor: String(Number(match[1]) * 100 + Number((match[2] ?? "0").padEnd(2, "0"))),
     };
   };
-  const paperInstant = paper ? paidAtInstant(paidAt) : null;
+  const paperInstant = paper ? paidAtInstant(paidAt, Date.now(), timeZone) : null;
   const estimate = lines.reduce<bigint | null>((sum, line) => {
     const value = estimatedLineMinor(line);
     return sum === null || value === null ? null : sum + value;
