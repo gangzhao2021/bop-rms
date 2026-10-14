@@ -387,11 +387,338 @@ permission `dining.table.qr.manage`); see
 - **Before codes end** (180 days): the Table QR codes page and the Tables board warn 30 days ahead.
   Replace and print before the date under each code.
 - **Network, server or printer down**: codes already on the tables keep working once service
-  returns. Take orders at the counter or on paper meanwhile (Q7/Q9 procedure). The downloaded print
+  returns. Take orders at the counter or on paper meanwhile
+  ([outage procedure](#store-outage-procedure-wp-2423-q9)). The downloaded print
   page works offline and can be printed from any computer or saved as PDF.
 - **TEST-ONLY until the Secrets and Tls gates close**: codes are signed with the local internal-test
   key and point at `https://127.0.0.1:4443`, so phones cannot scan them. After the managed QR key and
   the public customer domain arrive, replace and reprint every code.
+
+## Store outage procedure (WP-2423 Q9)
+
+What staff do when the store network, the pilot host, the payment Provider, the card machine or a
+store tablet fails. Authority: IDR-0039 (Handoff Package §87.11.1: no printer, no offline command
+queue; continuity pauses new orders and payments; staff fulfil only already-paid work from evidence
+they can see; never write down card numbers, key a card by hand, take cash or invent a success
+state; card-machine receipts taken during an outage go on an incident sheet and are entered after
+recovery with reference, reason and a duplicate check) and
+[DEC-COUNTER-PAYMENT-RECORD](../spec/design/counter-payment-record.md) (store card machine, no
+cash, "Recorded after outage" within 72 hours). Every step below names a screen that exists today;
+where the product cannot do what a real store needs, the step says so and the gap is listed at the
+end. Staff-facing names are the on-screen English labels.
+
+**Status**: procedure written 2026-10-14; **not rehearsed**. The rehearsal below is an external
+gate (it needs the Owner's staff, the store's devices and network, and the card machine).
+
+### Roles during an outage
+
+- **Incident lead**: the Store Manager or Owner on shift. Only they can pause online ordering
+  (`Hours & ordering`, permission `operations.ordering.pause`), record card-machine refunds and see
+  `Settlement` and `Exceptions`.
+- **Counter**: Front of House. Takes paper orders and card-machine payments; after recovery enters
+  them in `Counter order` (Front of House, Store Manager and Owner have it).
+- **Kitchen**: works from paper tickets while the Kitchen board is down.
+- **Pilot operator**: the person who runs the pilot host (today the Owner's machine; P4 cloud host
+  later). Restarts services; not on the shop floor.
+
+### Who to call (Owner input, not yet provided)
+
+Fill in before UAT and keep a printed copy at the counter. Do not commit real numbers to Git.
+
+| Need                           | Contact (Owner fills in) | Notes                                             |
+| ------------------------------ | ------------------------ | ------------------------------------------------- |
+| Incident lead / Owner          | _OWNER INPUT_            | Decides pause, closing early, customer goodwill   |
+| Pilot operator (host restart)  | _OWNER INPUT_            | No automatic alert exists (Q13): staff must call  |
+| Internet provider              | _OWNER INPUT_            | Account number kept off Git                       |
+| Card machine provider support  | _OWNER INPUT_            | Ask whether the machine has its own mobile data   |
+| Payment Provider (online card) | _OWNER INPUT_            | Stripe account is an external gate (P2); none yet |
+
+### Kit to keep at the counter (Owner input)
+
+- A backup internet path that does not depend on the store line: a phone hotspot or a mobile router,
+  charged, with its name and password on a card in the drawer. _OWNER INPUT: device and plan._
+- One backup device able to show the Kitchen board (any tablet or phone with a current Chrome or
+  Edge; the board works at phone width), charged, with its charger.
+- Printed copies of this section's checklist, 30 paper order slips, the incident sheet and a sign:
+  "Online ordering is paused — please order at the counter."
+- Confirm with the card machine provider whether the machine keeps working when the store internet
+  is down (built-in mobile data) and write the answer here: _OWNER INPUT_. If it cannot approve
+  cards, the store cannot take payment (no cash, no card numbers on paper, no "pay later" IOUs).
+
+### 1. Detect: what staff see
+
+Check from a phone on mobile data (Wi-Fi off) to tell a store-network fault from a host fault: if the
+customer menu or `Orders` loads on mobile data, the host is up and only the store network is down.
+
+| Failure                       | What staff see                                                                                                                                                                                                                                                                    | What customers see                                                                                                                                                                                                            |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Store network down            | `Orders`: "Orders could not be refreshed. Showing the last update; retrying automatically." (the last list stays). Kitchen board: the cards disappear and "You’re offline — Reconnect and refresh before taking an action." with a `Refresh` button; it does not retry by itself. | Guests on mobile data **can still order and pay online**; the store cannot see those orders. Guests on store Wi-Fi see "You are offline. Transaction and identity actions are unavailable."                                   |
+| Pilot host down               | Same as above on every device, including on mobile data; Kitchen shows "Kitchen unavailable — The kitchen queue could not be loaded. Refresh to try again." `Exceptions`: "Data may be out of date".                                                                              | Pages fail to load or show "Try again"; scanning a table code cannot start a visit. A guest whose payment was in progress may see "Payment confirmation pending. Do not submit another payment." or "Payment result unknown". |
+| Payment Provider down         | Store screens work; new online orders stop arriving as paid ("Awaiting payment").                                                                                                                                                                                                 | Online payment fails. Pilot today uses simulated online payments; the real Provider behaviour is an external gate (P2/Q22).                                                                                                   |
+| Card machine down             | Nothing in the product.                                                                                                                                                                                                                                                           | Counter and paper orders cannot be paid.                                                                                                                                                                                      |
+| Kitchen tablet dead or frozen | Only that device. `Orders` on the counter tablet still works.                                                                                                                                                                                                                     | Nothing, unless orders stop being made.                                                                                                                                                                                       |
+
+### 2. Immediate actions (first 5 minutes)
+
+1. **Counter**: tell the incident lead; note the start time on the incident sheet.
+2. **Store network down**: join every store tablet to the backup hotspot. On each, press `Refresh`
+   on the Kitchen board and reopen `Orders`. If they recover within a few minutes, carry on normally
+   and go to step 5 (check what arrived meanwhile).
+3. **Pause online ordering** if the network does not recover within 5 minutes, the host is down,
+   or the kitchen cannot see orders. Incident lead, from any device that has a connection (their
+   phone on mobile data is fine): `Hours & ordering` → `Pause service` → Service `All services`,
+   `Pause duration (minutes)` long enough to cover the outage (it can be resumed early). New scans
+   then show "<Store> isn't taking orders right now … order with a staff member." If the host is down
+   the pause cannot be set, and nothing can be ordered online anyway.
+   - Pause does **not** stop guests already seated at a table from adding rounds and paying on their
+     phones. Tell each seated table: "Please order with us at the counter for now." Their paid rounds
+     are not lost; they wait in `Orders` until accepted (dine-in rounds do not expire).
+4. Put the sign at the door and on the counter. Switch to paper (section 3).
+5. **Paid pickup orders you cannot see expire.** A paid online pickup order must be accepted within
+   30 minutes of payment ("Accept within N min" in `Orders`). If nobody accepts it, it closes and
+   the customer is refunded automatically ("Expired · refunded"); after a host outage this happens on
+   the first pass after the host returns, even if the kitchen made the food from paper. The
+   only protection is to get `Orders` back (hotspot) and accept within the window, and to pause so no
+   new online orders arrive. See section 6 for what to do afterwards.
+6. **Kitchen tablet failure only**: sign in on the backup device as the kitchen staff member
+   (today the internal-test staff page, "Start kitchen display as …"; real staff accounts wait for the
+   Cognito gate), open `Kitchen`, set the device never to sleep. The board shows the current tickets
+   again; nothing was lost. No paper needed unless no device is available.
+7. **Host down**: call the pilot operator. Operator restarts the pilot (v15:
+   `PILOT_UID=… PILOT_GID=… PILOT_RUNTIME_DIRECTORY=.local/pilot-v15 docker compose -f compose.pilot.yaml up -d pilot`,
+   then confirm `/ready` returns 200; details in
+   [Existing runtime configuration and recovery](#existing-runtime-configuration-and-recovery), which
+   still describes the v14 WSL host).
+
+### 3. Taking orders on paper
+
+- Write one slip per order (template below). Use the menu prices on the printed or on-screen menu;
+  the amount charged must be the menu total **including tax** and the tip the customer chooses, so
+  that the back-entry later shows the same "To charge" (the system recomputes it; see gap G4).
+- **Payment**: on the store card machine only, before the order goes to the kitchen. Write the
+  slip's approval/reference code and the time. Never write a card number, expiry or CVV; never key a
+  card by hand; no cash; no "pay later".
+- If the card machine cannot approve, do not take the order.
+- Pickup: give the customer the slip number (P-01, P-02, …) and call it when ready.
+- Dine-in: write the table number; one slip per round. Seated guests who already paid a round
+  online keep their phone's order number: write it on the incident sheet as "paid online, order N".
+- A customer who says they paid online but you cannot see it: ask for the phone's screen. If it
+  shows "Payment confirmed" (or the order status shows "Payment received") with an order number,
+  write the order number on the incident sheet, make the order and treat it as paid; do **not**
+  charge on the card machine. If it shows "Payment confirmation pending" or "Payment result unknown",
+  **do not take a second payment**: write the order number and the customer's first name on the
+  incident sheet, and ask them to wait or return; settle it once the system is back (section 5).
+  If they will not wait and want the food now, the incident lead decides; if the card machine is
+  used, mark the incident-sheet line "possible duplicate" so it is checked and refunded after
+  recovery.
+
+#### Paper order slip (print and cut)
+
+```text
++---------------------------------------------+
+| PAPER ORDER    Slip no. ______  (P-01...)   |
+| [ ] Pickup  name: ____________              |
+| [ ] Dine-in table: ______  round: ___       |
+| Taken at (time): ____:____  by: _________   |
+|---------------------------------------------|
+| Qty | Item               | Options / note   |
+|  _  | __________________ | ________________ |
+|  _  | __________________ | ________________ |
+|  _  | __________________ | ________________ |
+|  _  | __________________ | ________________ |
+| Allergy asked? [ ] yes -> see manager       |
+|---------------------------------------------|
+| Total incl. tax $______  Tip $______        |
+| Card machine total $______                  |
+| Paid at (time): ____:____                   |
+| Slip ref / approval code: __________        |
+|   (NO card number, NO cash)                 |
+|---------------------------------------------|
+| Kitchen: made [ ]  handed/served [ ] ____   |
+| After recovery: entered as order no. ______ |
+|   by ______ at ____:____                    |
++---------------------------------------------+
+```
+
+Allergy requests are not taken on paper beyond "ask the manager": the Kitchen board's allergen cues
+are not available on paper, so the manager checks the recipe before the item is made (IDR-0041).
+
+#### Incident sheet
+
+```text
+INCIDENT SHEET    Date ________  Lead ____________
+Started ____:____  Paused online ____:____  Resumed ____:____  Ended ____:____
+Cause: [ ] store network [ ] host [ ] Provider [ ] card machine [ ] tablet
+| Time | Slip no. / online order no. | What happened | Paid how (card machine ref / online) | Checked after recovery |
+|      |                             |               |                                      |                        |
+Notes (possible duplicates, refunds, goodwill given):
+```
+
+### 4. Kitchen without the Kitchen board
+
+- The counter passes each paid paper slip to the kitchen; the kitchen keeps slips in time order on a
+  rail and ticks "made" on the slip. There is no printer (IDR-0039).
+- Tickets already on the board when it went down disappear from the screen. Before switching to
+  paper, the counter reads the last `Orders` list (it stays on screen) and writes a slip for each
+  accepted, unfinished order, marked "online order N".
+- When the board returns, older online orders are still there; the kitchen marks them `Mark ready`
+  as it finishes them as usual. Do not remake an online order that a paper slip already covers.
+
+### 5. Recovery (when screens load again)
+
+Do these in order, before resuming online ordering.
+
+1. **Accept what is waiting**: `Orders` shows "N orders are waiting to be accepted" and each paid
+   pickup order's "Accept within N min"; accept every paid order you can make or have made, most
+   urgent first. Dine-in rounds paid during the outage appear here too (Order status `Submitted`).
+2. **Check customers who paid online during the outage** (incident sheet "paid online, order N" and
+   "pending" lines): open each order in `Orders`. Paid and still open → make or confirm it, then
+   hand over / serve. "Awaiting payment" or not found → the online payment did not complete; take
+   payment on the card machine through `Counter order` as a normal counter order. Never charge both.
+3. **Enter paper orders** in `Counter order`, one per paid slip, by the counter staff who took them
+   or the lead:
+   - tick "Recorded after an outage (taken on paper)", enter "Paid at (store time, from the paper
+     order)" from the slip (within the last 3 days), add the same items, options and tip;
+   - check "To charge" equals the card machine total on the slip; if it differs, stop and give the
+     slip to the incident lead (gap G4);
+   - `Send order`, then enter the slip reference and press `Paid on card machine`. The page says
+     "Recorded after the outage and accepted. If it was already made and handed over, mark it ready
+     in Kitchen and handed over in Pickup." Do that for each one (gap G5);
+   - write the order number on the paper slip ("entered as order no.").
+   - Pressing `Send order` again with the same screen never creates a second order; if the screen
+     reports that it did not go through, nothing was charged and it can be sent again.
+4. **Dine-in paper rounds** (interim, gap G3): the product has no staff dine-in entry yet (Q7 slice
+   2). Enter each paid dine-in slip in `Counter order` as a pickup order "Recorded after outage" so
+   that the card-machine payment, tax, tip, sales and stock are recorded and match the card machine
+   batch. Mark it ready in Kitchen and handed over in Pickup. Write the table number on the incident
+   sheet. Known effect: these sales show as Counter/pickup, not dine-in, in the pilot reports.
+5. **Expired online pickup orders** (gap G1): in `Orders` filter "Expired · refunded" for the outage
+   period. For each one the kitchen actually made and handed over from paper: the customer has
+   already been refunded automatically to their card; the order cannot be re-charged online. The
+   incident lead contacts the customer if the order shows contact details, explains, and with their
+   agreement takes payment on the card machine and enters it as a `Counter order` "Recorded after
+   outage" (same items); if they decline or cannot be reached, record it on the incident sheet as a
+   loss. Do not charge without the customer's agreement.
+6. **Possible duplicates**: for every incident-sheet line marked "possible duplicate", open the
+   online order. If it shows paid, the card-machine charge is the duplicate: refund it on the card
+   machine at once, do **not** enter that paper slip in `Counter order`, and write "refunded on
+   machine, ref …" on the incident sheet (the machine batch then shows the charge and its refund).
+   If the online order is not paid, enter the slip as in step 3. If a duplicate was already entered
+   as a counter order, the Store Manager or Owner cancels that counter order in `Orders` (recorded as
+   refunded on card machine, `Record card-machine refund`) after refunding on the machine. Online
+   refunds over CAD 100 or after 24 hours need the approval step (Q5).
+7. **Close stale tables**: `Tables` shows "Open for a long time — check the table and close the
+   session if the guests have left." For each table whose guests have left: close each fulfilled
+   order (`Close order`), then `Begin session closing` and `Finalize session closing`. The system
+   checks orders, payments and exceptions before releasing the table.
+8. **Resume online ordering**: `Hours & ordering` → `Resume …`. Remove the signs.
+9. **Exceptions** (Store Manager/Owner): Home "Open exceptions" → `View exceptions`. Look for
+   "Paid without a fulfillable order" and "Payment reconciliation difference" created during the
+   outage and resolve them as usual.
+
+### 6. Day-end reconciliation after an outage day
+
+- `Settlement` for the day:
+  - **Store card machine**: "Taken on card machine" (count and tips), "Refunded on card machine",
+    "Card machine net", and "N payments were recorded after outage". Compare with the card machine's
+    own batch/settlement report for the same day. Count of paper slips with a reference = count of
+    card-machine payments on the machine. Any difference goes on the incident sheet with the slip.
+  - **Online**: Captured, Refunded, Net. Online and card machine totals are separate and must not be
+    added to each other to match either source.
+- A paper slip paid on the machine and not yet entered can still be entered for 72 hours; after that
+  the system refuses it, and the incident lead records it on the incident sheet for the Owner.
+- The pilot operator reads the daily settlement result for the day (see
+  [Daily settlement handover](#daily-settlement-handover)) on the next day.
+- Keep the incident sheet and paper slips with the day's card machine batch report.
+
+### One-page checklist (print)
+
+```text
+STORE OUTAGE CHECKLIST                       keep at the counter
+[ ] 1  Tell the lead. Write start time on the incident sheet.
+[ ] 2  Phone on mobile data: does the menu / Orders load?  yes = store network, no = host.
+[ ] 3  Store network: tablets onto backup hotspot. Refresh Kitchen, reopen Orders.
+[ ] 4  Not back in 5 min, or host down: lead pauses online ordering
+       (Hours & ordering > Pause service > All services). Sign on door.
+[ ] 5  Tell seated tables: order at the counter for now.
+[ ] 6  Host down: call the pilot operator.     Tablet dead: sign in on backup device.
+[ ] 7  Paper slips. Card machine only, before cooking. Write slip ref + time.
+       NO card numbers. NO cash. NO second payment for "pending" online payments.
+[ ] 8  Kitchen works from slips on the rail; tick "made".
+--- when screens are back ---
+[ ] 9  Orders: accept everything paid and waiting.
+[ ] 10 Check every "paid online / pending" line on the incident sheet.
+[ ] 11 Counter order: enter each paper slip, tick "Recorded after an outage",
+       paid-at time from slip, same items + tip; To charge = slip total.
+       Then Mark ready (Kitchen) and hand over (Pickup).
+[ ] 12 Orders: "Expired · refunded" in the outage period -> lead follows up.
+[ ] 13 Refund any duplicate on the card machine, then record it.
+[ ] 14 Tables: close sessions of guests who left.
+[ ] 15 Resume online ordering. Remove signs.
+[ ] 16 Day end: Settlement "Store card machine" = card machine batch.
+```
+
+### Rehearsal before UAT (external gate: not done)
+
+Run once with the Owner's real staff, devices, network and card machine, on the internal-test
+installation (online payments simulated; TEST-ONLY). Real cards are charged only on the store card
+machine: use one small real charge on the Owner's own card and refund it on the machine, which also
+rehearses the refund record.
+
+- **Roles**: incident lead (Store Manager), counter (Front of House), kitchen, pilot operator,
+  observer (Owner or delegate, keeps time and fills the record sheet; does not help).
+- **Script** (about 60 minutes, during a quiet hour or before opening):
+  1. Normal service: two pickup orders and one dine-in round paid online, accepted, on the board.
+  2. Store network down: unplug the store router. One observer phone on mobile data places and pays
+     a pickup order. Staff detect, switch to hotspot, decide pause; take one paper pickup order and
+     one paper dine-in round paid on the card machine (one real small charge, others with the
+     machine's training mode if it has one, otherwise real and refunded).
+  3. Kitchen tablet failure: power off the kitchen tablet; sign in on the backup device; board
+     shows the same tickets.
+  4. Host down: the operator stops the pilot (`docker compose -f compose.pilot.yaml stop pilot`) for
+     15 minutes while a customer is on the payment page; staff run paper service; the operator
+     restarts it.
+  5. Recovery: steps 5.1–5.9 including entering both paper orders, the observer's online order,
+     closing the table, resuming ordering.
+  6. Day-end check: `Settlement` card machine section against the machine's report.
+- **Pass criteria**: every paid order is either made and recorded once, or refunded with a record;
+  no customer is charged twice; no card number or cash appears anywhere; online ordering is paused
+  within 5 minutes of the decision and resumed after recovery; the backup kitchen device shows the
+  board within 5 minutes; every paper slip has an order number after recovery; `Settlement` "Store
+  card machine" matches the machine's batch; no stale table session remains; staff could follow the
+  checklist without developer help.
+- **Record sheet** (fill in, keep with WP-2423 evidence; no customer data, no card data):
+
+```text
+Date / time: ________  Installation and version: ________  Observer: ________
+Participants (roles only): ________________________________
+| Step | Started | Done | Result (pass/fail) | Problem seen | Follow-up (WP item) |
+|  1   |         |      |                    |              |                     |
+|  2   |         |      |                    |              |                     |
+|  3   |         |      |                    |              |                     |
+|  4   |         |      |                    |              |                     |
+|  5   |         |      |                    |              |                     |
+|  6   |         |      |                    |              |                     |
+Card machine batch total ______  Settlement card machine net ______  Match [ ]
+Overall: [ ] pass  [ ] fail      Owner sign-off: ________
+```
+
+### Product gaps found while writing this procedure
+
+| #   | Gap                                                                                                                                                                                                               | Belongs to                       |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| G1  | Paid online pickup orders that the store cannot see during an outage auto-close and refund 30 minutes after payment, including ones made from paper; no automatic accept and no way to link a paper order to them | Q1 remainder (store auto-accept) |
+| G2  | Kitchen board on a failed read replaces the tickets with "You’re offline"/"Kitchen unavailable" and stops auto-refresh until `Refresh` is pressed; IDR-0039 requires an explicit stale read-only board            | Q9 follow-up (Q2 board)          |
+| G3  | No staff dine-in entry: paper dine-in rounds are back-entered as counter pickup orders, so they report as pickup; no table number or note on the record                                                           | Q7 slice 2                       |
+| G4  | Back-entry charges the current server total; a paper charge that differs (price changed, mistake) cannot be recorded at its real amount, so the card machine section will not match the batch                     | Q7 (follow-up)                   |
+| G5  | Back-entered orders go onto the Kitchen board and Pickup and must be marked ready and handed over one by one                                                                                                      | Q7 (kitchen quick close)         |
+| G6  | Card-machine payments have no partial refund; only whole-order cancellation with "refunded on card machine"                                                                                                       | Q5                               |
+| G7  | No external alert when the host is down; staff must notice and call                                                                                                                                               | Q13                              |
+| G8  | No way to notify pickup customers of a delay or an expired order; only contact details shown on the order                                                                                                         | Q10 (notification Provider)      |
+| G9  | Staff on a backup device sign in through the internal-test staff page; real named accounts wait for the Cognito gate                                                                                              | Step 9 (external)                |
+| G10 | Real Provider behaviour for payments approved while the host was down (late webhook, capture discovery) is unproven; pilot uses simulated payments                                                                | P2/B5, Q22 (external)            |
+| G11 | "Existing runtime configuration and recovery" still describes the v14 WSL host, not the v15 container commands                                                                                                    | P4 (runbook drift)               |
+| G12 | Backup network, backup device, card machine connectivity and contacts are not yet provided                                                                                                                        | Owner inputs (external)          |
 
 ## Current demo handover snapshot (2026-09-22)
 
