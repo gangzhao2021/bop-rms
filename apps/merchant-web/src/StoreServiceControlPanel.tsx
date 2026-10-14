@@ -1,3 +1,4 @@
+import { StatePanel } from "@bop-rms/ui";
 import { StoreConfigurationEditor } from "./StoreConfigurationEditor.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { createStoreConfigurationClient } from "./store-configuration-client.js";
@@ -120,6 +121,8 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
   const [mode, setMode] = useState("All");
   const [online, setOnline] = useState(navigator.onLine);
   const [uncertain, setUncertain] = useState(false);
+  // WP-2423: a role without hours access sees one clear state, not a half-loaded page.
+  const [noAccess, setNoAccess] = useState(false);
   const controller = useRef<AbortController | null>(null);
   const running = useRef(false);
   const pending = useRef<ServiceControlCommand | null>(null);
@@ -146,9 +149,11 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
       const next = await client.load(store, activeController.signal);
       setView(next);
       setMessage("");
-    } catch {
-      if (!activeController.signal.aborted)
-        setMessage("Unable to load current service status. Check access and refresh.");
+    } catch (error) {
+      if (activeController.signal.aborted) return;
+      if (error instanceof Error && error.message.startsWith("Permission denied."))
+        setNoAccess(true);
+      else setMessage("Unable to load current service status. Check your connection and refresh.");
     } finally {
       if (controller.current === activeController) running.current = false;
       if (!activeController.signal.aborted) setBusy(false);
@@ -246,6 +251,17 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
       <section aria-label="Service controls">
         <p role="status">Select this Store in your workspace before changing service.</p>
       </section>
+    );
+  if (noAccess)
+    return (
+      <WorkspacePage title="Hours & ordering">
+        <StatePanel heading="No access" tone="error" status>
+          <p>
+            Your role cannot view or change opening hours and online ordering. Ask a manager or
+            owner.
+          </p>
+        </StatePanel>
+      </WorkspacePage>
     );
   const disabled = busy || !online || uncertain;
   return (

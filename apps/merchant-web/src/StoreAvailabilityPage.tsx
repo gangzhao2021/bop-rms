@@ -180,7 +180,6 @@ export function StoreAvailabilityPage({
     <AppFrame title="Item availability" description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">Item availability · Store</p>
           <h2>Item availability</h2>
           {floorOnly ? (
             <p>
@@ -219,7 +218,6 @@ export function StoreAvailabilityPage({
           <thead>
             <tr>
               <th>Item</th>
-              {floorOnly ? null : <th>Code</th>}
               <th>Status</th>
               <th aria-label="Actions" />
             </tr>
@@ -228,7 +226,6 @@ export function StoreAvailabilityPage({
             {items.map((item) => (
               <tr key={item.skuReference}>
                 <td>{label(item)}</td>
-                {floorOnly ? null : <td data-label="Code">{item.skuCode}</td>}
                 <td data-label="Status">
                   {item.status === "SoldOut"
                     ? soldOutText(item.soldOutUntil, view.timeZone)

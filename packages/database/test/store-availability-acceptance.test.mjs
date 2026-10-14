@@ -144,7 +144,7 @@ it("manages which items a Store sells with Brand and Store authority", async () 
       );
       const cookAudits = (
         await admin.query(
-          "SELECT action_code,store_id::text store FROM platform_audit.audit_record WHERE actor_reference=$1 ORDER BY occurred_at,audit_id",
+          "SELECT action_code,store_id::text store,after_summary_json summary FROM platform_audit.audit_record WHERE actor_reference=$1 ORDER BY occurred_at,audit_id",
           [cook],
         )
       ).rows;
@@ -154,6 +154,48 @@ it("manages which items a Store sells with Brand and Store authority", async () 
         "CATALOG_AVAILABILITY_CHANGELIFECYCLE@" + storeReference,
         "CATALOG_AVAILABILITY_CREATE@" + storeReference,
       ]);
+      // Each audit row says what changed, for which item and Store (no personal data).
+      const summaries = cookAudits
+        .map((a) => {
+          const { commandReference, ...rest } = a.summary;
+          assert.match(commandReference, /^[0-9a-f-]{36}$/u);
+          return JSON.stringify(Object.fromEntries(Object.entries(rest).sort()));
+        })
+        .sort();
+      const common = {
+        item: "Mocha — Regular (12 oz)",
+        itemReference: sku,
+        storeReference,
+        authority: "SoldOutToday",
+      };
+      assert.deepEqual(
+        summaries,
+        [
+          { change: "BackInStock", ruleStep: "RuleEnded", ...common },
+          {
+            change: "SoldOutToday",
+            ruleStep: "RuleActivated",
+            ...common,
+            soldOutUntil: "2026-10-08T04:00:00.000Z",
+          },
+          {
+            change: "SoldOutToday",
+            ruleStep: "RuleCreated",
+            ...common,
+            soldOutUntil: "2026-10-08T04:00:00.000Z",
+          },
+        ]
+          .map((value) => JSON.stringify(Object.fromEntries(Object.entries(value).sort())))
+          .sort(),
+      );
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::int n FROM platform_audit.audit_record WHERE action_code LIKE 'CATALOG_AVAILABILITY_%' AND after_summary_json='{}'::jsonb",
+          )
+        ).rows[0].n,
+        0,
+      );
       // The Store Manager marks it sold out for the rest of the business day, then back in stock.
       scope.as(manager);
       const soldOut = await call({

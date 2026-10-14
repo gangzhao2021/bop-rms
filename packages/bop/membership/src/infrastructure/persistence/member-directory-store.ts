@@ -80,6 +80,33 @@ export async function loadStoreMember(
   return row(found);
 }
 
+/**
+ * Display names of the Brand's members by actor, whether or not they are assigned to the selected
+ * Store (a Brand Owner who requests a Store role change). Actors without a name are left out.
+ */
+export async function memberDisplayNames(
+  tx: MemberDirectoryTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  actorReferences: readonly string[],
+): Promise<ReadonlyMap<string, string>> {
+  if (actorReferences.length === 0) return new Map();
+  await tx.query(scopeSql, [scope.brandReference, scope.storeReference]);
+  const rows = (
+    await tx.query(
+      `SELECT m.actor_id::text actor,p.display_name FROM bop_membership.membership m
+ JOIN LATERAL (SELECT display_name FROM bop_membership.member_profile_version x
+   WHERE x.membership_id=m.membership_id ORDER BY x.version DESC LIMIT 1) p ON true
+ WHERE m.brand_id=$1 AND m.actor_id=ANY($2::uuid[]) AND m.lifecycle<>'Ended'`,
+      [scope.brandReference, [...new Set(actorReferences)]],
+    )
+  ).rows;
+  return new Map(
+    rows
+      .filter((item) => typeof item.display_name === "string")
+      .map((item) => [String(item.actor), String(item.display_name)]),
+  );
+}
+
 const nameText = (value: unknown): string => {
   if (
     typeof value !== "string" ||

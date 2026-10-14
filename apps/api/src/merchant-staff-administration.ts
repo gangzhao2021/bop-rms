@@ -5,6 +5,7 @@ import {
   endStoreMemberAssignment,
   listStoreMembers,
   loadStoreMember,
+  memberDisplayNames,
   MemberDirectoryError,
   setStoreMemberDisplayName,
   type MemberDirectoryTransaction,
@@ -233,8 +234,14 @@ export function createMerchantStaffAdministration(options: {
         member.displayName,
       ]),
     );
+    // A requester may be a Brand member not assigned to this Store (a Brand Owner): name them too.
+    const unnamed = pending
+      .map((item) => item.requestedBy)
+      .filter((reference) => reference !== viewer && !names.get(reference));
+    for (const [reference, name] of await memberDisplayNames(directoryTx(tx), owner, unnamed))
+      names.set(reference, name);
     const label = (reference: string) =>
-      reference === viewer ? "You" : (names.get(reference) ?? "Staff " + reference.slice(-4));
+      reference === viewer ? "You" : (names.get(reference) ?? "Unnamed staff member");
     return {
       screenId: actor === null ? "IAM-USER-LIST" : "IAM-USER-DETAIL",
       sourceAsOf: now,

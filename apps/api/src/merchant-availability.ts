@@ -85,6 +85,9 @@ export function parseAvailabilityCommandBody(value: unknown): AvailabilityComman
   return fail("Invalid");
 }
 
+/** The staff-facing item name: product, and size when it differs. */
+export const itemLabel = (productName: string, sizeName: string) =>
+  sizeName === productName ? productName : productName + " — " + sizeName;
 /** Customer ordering combinations an item's status is shown for. */
 const contexts = [
   ["CUSTOMER_PWA", "PICKUP"],
@@ -261,21 +264,57 @@ export function createMerchantAvailability(options: {
           (candidate) => candidate.skuReference === body.skuReference && candidate.active,
         );
         if (sku === undefined) return fail("NotFound");
-        const service = availabilityService(tx, s, body.operationReference, !brandWide);
+        const today = localBoundary(at, s.timeZone).localDateTime.slice(0, 10);
+        const soldOutUntil =
+          body.action === "SoldOut" && body.until === "EndOfDay"
+            ? storeDayEndExpiryCutoff(today, s.timeZone)
+            : null;
+        // Audit summary per rule step: what changed, for which item and Store (no personal data).
+        const steps = new Map<string, string>();
+        const summary = (operationReference: string) => ({
+          change:
+            body.action === "SoldOut"
+              ? body.until === "EndOfDay"
+                ? "SoldOutToday"
+                : "SoldOutUntilFurtherNotice"
+              : body.action === "BackInStock"
+                ? "BackInStock"
+                : body.action === "Offer"
+                  ? "OfferedAtStore"
+                  : "StoppedOfferingAtStore",
+          ruleStep: steps.get(operationReference) ?? "Unknown",
+          item: itemLabel(
+            name(sku.productLocalizedNames, sku.skuCode),
+            name(sku.localizedNames, sku.skuCode),
+          ),
+          itemReference: sku.skuReference,
+          storeReference: s.owner.storeReference,
+          ...(body.action === "SoldOut" ? { soldOutUntil } : {}),
+          authority: brandWide
+            ? "BrandAvailability"
+            : s.permissions.mayMarkUntilBack
+              ? "StoreAvailability"
+              : "SoldOutToday",
+          commandReference: body.operationReference,
+        });
+        const service = availabilityService(tx, s, body.operationReference, !brandWide, summary);
         const rules = (await listStoreAvailabilityRules(ptx(tx), s.owner)).filter(
           (rule) =>
             rule.sellableReference === sku.skuReference &&
             rule.storeReference === s.owner.storeReference,
         );
         const step = (purpose: string) => derivedReference(body.operationReference, purpose);
-        const setLifecycle = (rule: AvailabilityRuleAggregate, target: "Active" | "Inactive") =>
-          service.changeLifecycle({
+        const setLifecycle = (rule: AvailabilityRuleAggregate, target: "Active" | "Inactive") => {
+          const operationReference = step(target + ":" + rule.ruleReference);
+          steps.set(operationReference, target === "Active" ? "RuleActivated" : "RuleEnded");
+          return service.changeLifecycle({
             ruleReference: rule.ruleReference,
             targetLifecycle: target,
             expectedAggregateVersion: rule.aggregateVersion,
-            operationReference: step(target + ":" + rule.ruleReference),
+            operationReference,
             requestedAt: at,
           });
+        };
         const createActive = async (rule: {
           internalCode: string;
           decision: "Available" | "Unavailable";
@@ -283,6 +322,7 @@ export function createMerchantAvailability(options: {
           reasonCode: string;
           effectiveUntil: string | null;
         }) => {
+          steps.set(step("create"), "RuleCreated");
           const created = await service.create({
             ...rule,
             sellableReference: sku.skuReference,
@@ -324,7 +364,6 @@ export function createMerchantAvailability(options: {
           } else if (body.action === "SoldOut") {
             if (before.status === "SoldOut") return { status: "Unchanged", item: before };
             if (before.status !== "Available" && before.status !== "Varies") fail("Conflict");
-            const today = localBoundary(at, s.timeZone).localDateTime.slice(0, 10);
             await createActive({
               internalCode:
                 "SOLDOUT-" +
@@ -334,8 +373,7 @@ export function createMerchantAvailability(options: {
               decision: "Unavailable",
               priority: 900,
               reasonCode: soldOutReason,
-              effectiveUntil:
-                body.until === "EndOfDay" ? storeDayEndExpiryCutoff(today, s.timeZone) : null,
+              effectiveUntil: soldOutUntil,
             });
           } else {
             const marks = rules.filter(
@@ -372,7 +410,13 @@ export function createMerchantAvailability(options: {
    * The Catalog availability service with the Brand authority, or the Store's for sold-out marks
    * (the Store Manager's availability permission, else the floor staff's today-only sold-out mark).
    */
-  function availabilityService(tx: Tx, s: Scope, operation: string, storeAllowed: boolean) {
+  function availabilityService(
+    tx: Tx,
+    s: Scope,
+    operation: string,
+    storeAllowed: boolean,
+    summary: (operationReference: string) => Record<string, string | null>,
+  ) {
     const authority = async () => {
       const brand = await s.brandDecision();
       if (brand !== null) return { decision: brand, context: s.scope.context, store: null };
@@ -400,6 +444,7 @@ export function createMerchantAvailability(options: {
               actionCode: "CATALOG_AVAILABILITY_" + request.action.toUpperCase(),
               targetType: "CatalogAvailabilityRule",
               targetId: request.ruleReference,
+              afterSummary: summary(request.operationReference),
               correlationId: operation,
               occurredAt: request.observedAt,
               reasonCode: "AUTHORIZED_OPERATION",

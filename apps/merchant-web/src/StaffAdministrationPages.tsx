@@ -1,5 +1,5 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
-import { SourceTime } from "./StoreTime.js";
+import { SourceTime, StaffTime } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./RoleAdministrationPages.js";
@@ -113,7 +113,7 @@ function Member({
             <li key={item.assignmentReference}>
               <strong>{item.roleName}</strong>
               {item.scope === "Brand" ? " (all Stores of the Brand)" : " (this Store)"} · since{" "}
-              {item.since}{" "}
+              <StaffTime instant={item.since} />{" "}
               {item.mayRevoke ? (
                 <button
                   disabled={busy}
@@ -168,7 +168,7 @@ function Member({
             <li key={item.changeReference}>
               <strong>{item.roleName}</strong>
               {item.scope === "Brand" ? " (Brand)" : ""} · requested by {item.requestedBy} at{" "}
-              {item.requestedAt}{" "}
+              <StaffTime instant={item.requestedAt} />{" "}
               {item.mayDecide ? (
                 <>
                   <button

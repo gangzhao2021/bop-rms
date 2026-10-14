@@ -111,3 +111,46 @@ test("@production service controls retry uncertain writes and recover from versi
   await expect(panel.getByText("No active pauses.")).toBeVisible();
   expect(requests).toHaveLength(4);
 });
+
+test("@production Hours & ordering shows one clear state to a role without access", async ({
+  page,
+}) => {
+  const store = "018f8100-0000-7000-8000-000000000001";
+  const scope = {
+    brandLabel: "Synthetic Brand",
+    storeLabel: "Synthetic Store",
+    storeReference: store,
+  };
+  const headers = { "cache-control": "no-store" };
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-10-14",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [],
+        },
+      },
+    }),
+  );
+  await page.route("**/merchant/service-control", (route) =>
+    route.fulfill({ status: 403, headers, json: { error: "request_denied" } }),
+  );
+  await page.route("**/merchant/store-configuration**", (route) =>
+    route.fulfill({ status: 403, headers, json: { error: "request_denied" } }),
+  );
+  await page.goto("/app/organization/stores/" + store + "/service");
+  await expect(page.getByRole("heading", { name: "No access" })).toBeVisible();
+  await expect(page.getByText(/Ask a manager or owner/u)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Service controls" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Refresh service status" })).toHaveCount(0);
+  await expect(page.getByText(/Check access and refresh/u)).toHaveCount(0);
+});

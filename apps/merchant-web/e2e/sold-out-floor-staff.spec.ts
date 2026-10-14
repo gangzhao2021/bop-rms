@@ -198,6 +198,11 @@ test("@production Front of House reaches sold-out marking from the workspace nav
   await page.goto("/app");
   await page.getByRole("link", { name: "Item availability" }).first().click();
   await expect(page).toHaveURL(/\/app\/commerce\/availability$/u);
+  // Plain heading; no internal item codes or screen labels.
+  await expect(page.getByRole("heading", { name: "Item availability", level: 2 })).toBeVisible();
+  await expect(page.locator("main")).not.toContainText("BANANA-BREAD-2");
+  await expect(page.locator("main")).not.toContainText("· Store");
+  await expect(page.getByRole("columnheader", { name: /code/iu })).toHaveCount(0);
   await expectLayout(page, "sold-out-front-of-house");
   await page
     .getByRole("row", { name: /Banana bread/u })

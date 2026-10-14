@@ -41,6 +41,37 @@ export function SourceTime({
   );
 }
 
+/** "Oct 14, 3:00 PM" in the Store's time zone; the year is added when it is not this year. */
+export function friendlyStoreTime(
+  instant: string,
+  timeZone: string | undefined,
+  now: Date = new Date(),
+): string {
+  const zone = timeZone ?? "UTC";
+  const year = (at: Date) =>
+    new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric" }).format(at);
+  const date = new Date(instant);
+  const text = new Intl.DateTimeFormat("en-US", {
+    timeZone: zone,
+    month: "short",
+    day: "numeric",
+    ...(year(date) === year(now) ? {} : { year: "numeric" }),
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+  return timeZone === undefined ? text + " UTC" : text;
+}
+
+/** A staff-facing instant such as "Oct 14, 3:00 PM"; the exact instant stays in the title. */
+export function StaffTime({ instant }: { readonly instant: string }) {
+  const timeZone = useContext(StoreTimeZoneContext);
+  return (
+    <time dateTime={instant} title={instant}>
+      {friendlyStoreTime(instant, timeZone)}
+    </time>
+  );
+}
+
 /** How current a read is: "Updated 14:02" or a visible warning that the data may be out of date. */
 export function Freshness({
   status,

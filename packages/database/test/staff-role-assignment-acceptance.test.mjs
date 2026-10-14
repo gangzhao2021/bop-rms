@@ -7,6 +7,7 @@ import {
   confirmStoreMemberScope,
   endStoreMemberAssignment,
   listStoreMembers,
+  memberDisplayNames,
   setStoreMemberDisplayName,
 } from "../../bop/membership/src/index.ts";
 import { revokeActorSessions } from "../../bop/identity/src/index.ts";
@@ -133,6 +134,23 @@ it("assigns Store roles only after independent approval and keeps an Owner", asy
       assert.deepEqual(
         listed.map((member) => member.displayName),
         ["Mia Chen", "Sam Lee", null],
+      );
+      // WP-2423: a requester is named Brand-wide, even from a Store they are not assigned to.
+      assert.deepEqual(
+        [
+          ...(
+            await memberDisplayNames(admin, { brandReference: brand, storeReference: id(99) }, [
+              manager,
+              cashier,
+              owner,
+              id(98),
+            ])
+          ).entries(),
+        ].sort(),
+        [
+          [cashier, "Sam Lee"],
+          [manager, "Mia Chen"],
+        ].sort(),
       );
       // RLS on audit records needs the Store scope.
       await admin.query(
