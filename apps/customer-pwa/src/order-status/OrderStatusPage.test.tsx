@@ -405,6 +405,57 @@ it("WP-2423 Q12: says an unpaid pickup was cancelled and stops offering the pick
   expect(isOrderSettled(view)).toBe(true);
 });
 
+it("WP-2423 Q9-G1: says a paid pickup the store couldn't accept is refunded, and when it waits for the store", () => {
+  const state = readyState();
+  if (state.status !== "ready") throw new Error("fixture");
+  const payments = [
+    {
+      status: "Succeeded" as const,
+      occurredAt: "2026-08-11T13:30:00.000Z",
+      amount: { amountMinor: 1500n, currencyCode: "CAD" },
+      freshnessStatus: "Fresh" as const,
+    },
+  ];
+  const at = (storeAcceptance: NonNullable<OrderStatusView["sources"]>["storeAcceptance"]) => ({
+    ...state.view,
+    sources: {
+      checkedAt: "2026-08-11T14:00:00.000Z",
+      kitchen: null,
+      payments,
+      storeAcceptance,
+    },
+  });
+  const refunded = at({
+    state: "NotAccepted",
+    closedAt: "2026-08-11T13:59:00.000Z",
+    refundStatus: "Refunded",
+  });
+  let html = render({ ...state, view: refunded });
+  expect(html).toContain(
+    "The store couldn&#x27;t accept your order, so your payment was refunded to your original payment method.",
+  );
+  expect(html).toContain("Refunded $15.00");
+  expect(html).not.toContain("Payment received");
+  expect(html).not.toContain("pickup code");
+  expect(isOrderSettled(refunded)).toBe(true);
+  const refunding = at({
+    state: "NotAccepted",
+    closedAt: "2026-08-11T13:59:00.000Z",
+    refundStatus: "Pending",
+  });
+  html = render({ ...state, view: refunding });
+  expect(html).toContain("so your payment is being refunded to your original payment method.");
+  expect(html).toContain("Refund pending · $15.00");
+  expect(isOrderSettled(refunding)).toBe(false);
+  const waiting = at({ state: "AwaitingStore" });
+  html = render({ ...state, view: waiting });
+  expect(html).toContain(
+    "The store hasn&#x27;t confirmed your order yet. Please wait or contact the store.",
+  );
+  expect(html).not.toContain("Hold");
+  expect(isOrderSettled(waiting)).toBe(false);
+});
+
 it("WP-2423 Q6: says the store cancelled a paid pickup, why, and how the refund is going", () => {
   const state = readyState();
   if (state.status !== "ready") throw new Error("fixture");

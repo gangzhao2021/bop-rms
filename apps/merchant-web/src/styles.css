@@ -7180,6 +7180,24 @@ body:has(.product-complete-draft) .bop-shell__header,
 .order-queue-stale {
   border-color: var(--bop-color-warning);
 }
+/* WP-2423 Q9-G1: orders paid while the store was offline, waiting for a decision. */
+.order-hold-notice {
+  margin: 0 0 12px;
+  padding: 12px;
+  border: 1px solid var(--bop-color-warning);
+  border-radius: var(--bop-radius-control);
+}
+.order-hold-notice h2 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+.order-hold-notice p {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.order-hold-decision .card-actions {
+  flex-wrap: wrap;
+}
 .order-sound-toggle {
   padding: 0 14px;
   border: 1px solid var(--bop-color-border-strong);

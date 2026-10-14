@@ -6,9 +6,11 @@ import {
   listStoreConfirmedOrderBatches,
   listStoreDiningBatchPaymentDeadlines,
   listStorePaidOrderBatches,
+  listStoreOrderAcceptanceHolds,
   listStoreUnfulfillablePaidOrders,
   loadMerchantOrderLines,
   loadOrderPickupContact,
+  type OrderAcceptanceHold,
   type StaffOrderCancellationRecord,
 } from "@rms/ordering";
 import { listStoreKitchenOrderItemStates, listStoreStartedKitchenBatches } from "@rms/kitchen";
@@ -48,6 +50,13 @@ export function createPersistentMerchantOrderQueue(options: {
     transaction: ConsumerTransaction,
     scope: { tenantReference: string; brandReference: string; storeReference: string },
   ): Promise<{ providerAccountReference: string; environment: "Test" | "Live" }>;
+  /**
+   * WP-2423 Q9-G1: staff reading the Orders page are present at the Store. Called after a
+   * successful read, outside its transaction; it never fails the read.
+   */
+  storePresence?: {
+    observe(scope: { brandReference: string; storeReference: string }): Promise<void>;
+  };
 }) {
   const source = options.persistence;
   const currentSession = createPostgresCurrentBrowserSessionSource({
@@ -61,8 +70,11 @@ export function createPersistentMerchantOrderQueue(options: {
     afterOrderReference: string | null;
     /** WP-2423 OPS-ORDER-DETAIL: the one Order the detail shows. */
     orderReference?: string;
-  }) =>
-    source.transactions.run(async (transaction) => {
+  }) => {
+    const observed: { scope: { brandReference: string; storeReference: string } | null } = {
+      scope: null,
+    };
+    const view = await source.transactions.run(async (transaction) => {
       const session = await currentSession(transaction, input.sessionCookie);
       const businessTransaction: ConsumerTransaction = {
         async query<Row = Record<string, unknown>>(sql: string, values: readonly unknown[]) {
@@ -164,6 +176,18 @@ export function createPersistentMerchantOrderQueue(options: {
               ownerScope,
               result.items.map((item) => item.orderReference),
             );
+      // WP-2423 Q9-G1: paid pickup orders held because the Store was offline at their deadline.
+      const held =
+        ownerScope === null || result.items.length === 0
+          ? new Map<string, OrderAcceptanceHold>()
+          : await listStoreOrderAcceptanceHolds(
+              businessTransaction,
+              ownerScope,
+              result.items
+                .filter((item) => item.orderType === "Pickup")
+                .map((item) => item.orderReference),
+            );
+      observed.scope = ownerScope;
       // WP-2423: pickup orders the Store closed as not collected (Fulfillment's public read).
       const uncollected =
         ownerScope === null || result.items.length === 0
@@ -455,12 +479,36 @@ export function createPersistentMerchantOrderQueue(options: {
               0,
             );
             const closed = unfulfillable.get(item.orderReference) ?? null;
+            const hold = closed === null ? (held.get(item.orderReference) ?? null) : null;
+            const decideBy =
+              hold === null || hold.resolutions.length === 0
+                ? null
+                : hold.resolutions
+                    .map((entry) => entry.decideBy)
+                    .reduce((earliest, value) => (value < earliest ? value : earliest));
+            const refundChosen =
+              hold?.resolutions.some((entry) => entry.resolution === "StaffRefund") ?? false;
             return Object.freeze({
               ...item,
               unfulfillable: closed,
               pickupNotCollected: uncollected.has(item.orderReference),
               counter: counter.get(item.orderReference) ?? null,
-              acceptBy: deadlines.get(item.orderReference) ?? null,
+              // A held order's deadline is the decision deadline once staff are back (none while
+              // it is held); otherwise Fulfillment's capacity expiry.
+              acceptBy: hold === null ? (deadlines.get(item.orderReference) ?? null) : decideBy,
+              acceptanceHold:
+                hold === null || item.currentPhase !== "Submitted"
+                  ? null
+                  : Object.freeze({
+                      holdReference: hold.holdReference,
+                      orderBatchReference: hold.orderBatchReference,
+                      heldAt: hold.heldAt,
+                      lapsedDeadline: hold.lapsedDeadline,
+                      storeLastSeenAt: hold.storeLastSeenAt,
+                      decideBy,
+                      refundChosen,
+                      canRefund: cancelAllowed && !refundChosen,
+                    }),
               awaitingPayment:
                 closed === null &&
                 item.currentPhase === "Submitted" &&
@@ -525,4 +573,8 @@ export function createPersistentMerchantOrderQueue(options: {
         ),
       });
     });
+    if (options.storePresence !== undefined && observed.scope !== null)
+      await options.storePresence.observe(observed.scope);
+    return view;
+  };
 }

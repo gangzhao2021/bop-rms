@@ -176,6 +176,9 @@ function parseSources(
     ...(value !== null && typeof value === "object" && Object.hasOwn(value, "storeContact")
       ? ["storeContact"]
       : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "storeAcceptance")
+      ? ["storeAcceptance"]
+      : []),
   ]);
   const checkedAt = parseInstant(raw.checkedAt);
   if (Date.parse(checkedAt) < Date.parse(submittedAt)) return invalid();
@@ -404,6 +407,29 @@ function parseSources(
             cancelledAt: sourceInstant(exact(raw.unpaidCancellation, ["cancelledAt"]).cancelledAt),
           });
   }
+  // WP-2423 Q9-G1: a paid pickup the Store did not accept in time (refunded automatically), or one
+  // held because the Store was offline (Pickup only).
+  let storeAcceptance: OrderStatusSources["storeAcceptance"];
+  if (Object.hasOwn(raw, "storeAcceptance")) {
+    if (orderType !== "Pickup") return invalid();
+    const candidate: unknown = raw.storeAcceptance;
+    const state =
+      candidate !== null && typeof candidate === "object" && !Array.isArray(candidate)
+        ? (candidate as Record<string, unknown>).state
+        : undefined;
+    if (state === "AwaitingStore") {
+      exact(candidate, ["state"]);
+      storeAcceptance = Object.freeze({ state: "AwaitingStore" as const });
+    } else if (state === "NotAccepted") {
+      const entry = exact(candidate, ["state", "closedAt", "refundStatus"]);
+      if (entry.refundStatus !== "Pending" && entry.refundStatus !== "Refunded") return invalid();
+      storeAcceptance = Object.freeze({
+        state: "NotAccepted" as const,
+        closedAt: sourceInstant(entry.closedAt),
+        refundStatus: entry.refundStatus,
+      });
+    } else return invalid();
+  }
   // WP-2423: dine-in rounds cancelled because their payment failed (present only when non-empty).
   let unpaidCancellations: OrderStatusSources["unpaidCancellations"];
   if (Object.hasOwn(raw, "unpaidCancellations")) {
@@ -480,6 +506,7 @@ function parseSources(
     ...(itemCancellations === undefined ? {} : { itemCancellations }),
     ...(batchPayments === undefined ? {} : { batchPayments }),
     ...(unpaidCancellations === undefined ? {} : { unpaidCancellations }),
+    ...(storeAcceptance === undefined ? {} : { storeAcceptance }),
     // WP-2423 Q10: the Store's published phone and address.
     ...(Object.hasOwn(raw, "storeContact")
       ? {

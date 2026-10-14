@@ -1,5 +1,6 @@
 import {
   isPaidOrderWithinAcceptanceWindow,
+  orderAcceptanceDeadlineInstant,
   parsePaymentSucceededEnvelope,
   parseOrderPaymentOutcomeDisposition,
   createOrderPaymentDispositionBinding,
@@ -64,6 +65,7 @@ export function createPendingAcceptanceCandidate(
       ...p,
       terminalOccurredAt: event.payload.terminalOccurredAt,
       observedAt: context.observedAt,
+      ...currentAcceptanceDeadline(context),
     })
   )
     return null;
@@ -91,4 +93,13 @@ export function createPendingAcceptanceCandidate(
       createOrderPaymentDispositionBinding({ event, disposition: pending }),
     ),
   });
+}
+
+/** WP-2423 Q9-G1: the batch's current deadline (held or extended while the Store was offline). */
+export function currentAcceptanceDeadline(context: {
+  readonly acceptanceDeadline?: Parameters<typeof orderAcceptanceDeadlineInstant>[0];
+}): { acceptanceDeadline?: string | null } {
+  return context.acceptanceDeadline === undefined
+    ? {}
+    : { acceptanceDeadline: orderAcceptanceDeadlineInstant(context.acceptanceDeadline) };
 }

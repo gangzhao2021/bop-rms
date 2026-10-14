@@ -3,7 +3,9 @@ import { readOrderPaidCapacity } from "./order-paid-capacity-source.js";
 import { createPostgresSubmissionFinalValidationStore } from "@rms/inventory";
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
+  createPostgresOrderAcceptanceHoldStore,
   createPostgresOrderAcceptanceReader,
+  resolveOrderAcceptanceDeadline,
   createPostgresOrderInitialExecutionReader,
   createPostgresOrderCreationQueryStore,
   readOrderCreationQuoteVersion,
@@ -57,6 +59,20 @@ export function createOrderPaidContextSource(
           transaction,
           orderReference: preparation.orderReference,
           orderBatchReference: preparation.orderBatchReference,
+        });
+        // WP-2423 Q9-G1: the batch's current acceptance deadline (capacity expiry, or the holds
+        // Ordering recorded because the Store was offline when it passed).
+        const acceptanceDeadline = resolveOrderAcceptanceDeadline({
+          capacityExpiresAt: preparation.capacityExpiresAt,
+          holds: await createPostgresOrderAcceptanceHoldStore({
+            ...scope,
+            authorize: (tx) =>
+              options.authorizeOrder(tx, {
+                ...scope,
+                orderReference: preparation.orderReference,
+                orderBatchReference: preparation.orderBatchReference,
+              }),
+          }).listByBatch(transaction, preparation.orderBatchReference),
         });
         const quoteVersion =
           (await readOrderCreationQuoteVersion(
@@ -138,6 +154,7 @@ export function createOrderPaidContextSource(
                 quoteVersion,
                 order,
                 acceptance,
+                acceptanceDeadline,
                 initialExecution,
                 currentDining,
                 observedAt,
@@ -184,6 +201,7 @@ export function createOrderPaidContextSource(
               quoteVersion,
               order,
               acceptance,
+              acceptanceDeadline,
               initialExecution,
               currentDining,
               capacity,

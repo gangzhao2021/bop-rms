@@ -352,6 +352,57 @@ it("WP-2423 Q1: accepts an acceptance deadline only on a paid pickup still await
       parseCurrentOrderQueue({ items: [item], nextAfterOrderReference: null }),
     ).toThrow();
 });
+it("WP-2423 Q9-G1: reads a held order (paid during an outage) and refuses contradictions", () => {
+  const hold = {
+    holdReference: "0190fa46-0000-7000-8000-0000000000a1",
+    orderBatchReference: row().batches[0]?.orderBatchReference,
+    heldAt: "2026-09-14T00:31:00.000Z",
+    lapsedDeadline: "2026-09-14T00:30:00.000Z",
+    storeLastSeenAt: "2026-09-14T00:10:00.000Z",
+    decideBy: null,
+    refundChosen: false,
+    canRefund: true,
+  };
+  const held = {
+    ...row(),
+    currentPhase: "Submitted",
+    currentVersion: 1,
+    canRequestAcceptance: true,
+    batches: [{ ...row().batches[0], acceptanceStatus: "NotAccepted", canRequestAcceptance: true }],
+    acceptBy: null,
+    acceptanceHold: hold,
+    awaitingPayment: false,
+  };
+  expect(
+    parseCurrentOrderQueue({ items: [held], nextAfterOrderReference: null }).items[0]
+      ?.acceptanceHold,
+  ).toEqual(hold);
+  const resumed = {
+    ...held,
+    acceptBy: "2026-09-14T01:15:00.000Z",
+    acceptanceHold: { ...hold, decideBy: "2026-09-14T01:15:00.000Z" },
+  };
+  expect(
+    parseCurrentOrderQueue({ items: [resumed], nextAfterOrderReference: null }).items[0]
+      ?.acceptanceHold?.decideBy,
+  ).toBe("2026-09-14T01:15:00.000Z");
+  expect(
+    parseCurrentOrderQueue({
+      items: [{ ...row(), acceptanceHold: null }],
+      nextAfterOrderReference: null,
+    }).items[0]?.acceptanceHold,
+  ).toBeNull();
+  for (const item of [
+    { ...held, orderType: "DineIn" },
+    { ...held, acceptBy: "2026-09-14T01:15:00.000Z" },
+    { ...held, acceptanceHold: { ...hold, refundChosen: true } },
+    { ...held, acceptanceHold: { ...hold, storeLastSeenAt: "2026-09-14T00:40:00.000Z" } },
+    { ...held, acceptanceHold: { ...hold, extra: 1 } },
+  ])
+    expect(() =>
+      parseCurrentOrderQueue({ items: [item], nextAfterOrderReference: null }),
+    ).toThrow();
+});
 it("WP-2423 Q6: reads staff cancellation and refuses inconsistent cancel capability", () => {
   const cancellation = {
     reasonCode: "CUSTOMER_REQUEST",

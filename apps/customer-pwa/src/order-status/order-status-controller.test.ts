@@ -336,6 +336,32 @@ describe("independent order status sources", () => {
       ),
     ).toThrow();
   });
+  it("WP-2423 Q9-G1: admits the store acceptance outcome only for Pickup and in its exact shapes", () => {
+    const input = sourced();
+    const with_ = (storeAcceptance: unknown) => ({
+      ...input,
+      sources: { ...input.sources, storeAcceptance },
+    });
+    expect(
+      parseOrderStatusView(with_({ state: "AwaitingStore" }), id(1)).sources?.storeAcceptance,
+    ).toEqual({
+      state: "AwaitingStore",
+    });
+    const closed = {
+      state: "NotAccepted",
+      closedAt: "2026-08-11T13:59:30.000Z",
+      refundStatus: "Refunded",
+    };
+    expect(parseOrderStatusView(with_(closed), id(1)).sources?.storeAcceptance).toEqual(closed);
+    for (const bad of [
+      { state: "Held" },
+      { state: "AwaitingStore", since: "2026-08-11T13:59:30.000Z" },
+      { ...closed, refundStatus: "Failed" },
+      { ...closed, closedAt: "2026-08-11T14:01:00.000Z" },
+      null,
+    ])
+      expect(() => parseOrderStatusView(with_(bad), id(1))).toThrow();
+  });
   it("WP-2423 Q12: admits an unpaid pickup cancellation only for Pickup and within the source window", () => {
     const input = sourced();
     const cancelled = {

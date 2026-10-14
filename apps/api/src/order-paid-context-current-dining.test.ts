@@ -25,6 +25,12 @@ vi.mock("@rms/ordering", async (load) => ({
   readOrderCreationQuoteVersion: m.version,
   createPostgresOrderAcceptanceReader: () => ({ loadByBatch: m.acceptance }),
   createPostgresOrderInitialExecutionReader: () => ({ loadByBatch: m.legacy }),
+  // WP-2423 Q9-G1: no outage holds for these batches.
+  createPostgresOrderAcceptanceHoldStore: () => ({ listByBatch: async () => [] }),
+  resolveOrderAcceptanceDeadline: () => ({
+    kind: "Standard",
+    deadline: "2026-01-01T00:30:00.000Z",
+  }),
 }));
 vi.mock("@rms/inventory", async (load) => ({
   ...(await load<object>()),

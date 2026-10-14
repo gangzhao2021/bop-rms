@@ -20,7 +20,9 @@ import {
   createPostgresStaffItemCancellationReader,
   createPostgresStaffOrderCancellationReader,
   listStoreDiningBatchPaymentDeadlines,
+  listStoreOrderAcceptanceHolds,
   listStoreUnpaidBatchCancellations,
+  loadOrderNotAcceptedClosure,
   loadPickupPaymentWindowClosure,
   createPostgresOrderStatusProjectionStore,
   OrderStatusProjectionError,
@@ -274,6 +276,40 @@ export function createCustomerOrderStatusRead(
             result.order.orderType === "Pickup" && (await stillAuthorized())
               ? await loadPickupPaymentWindowClosure(transaction, options.scope, orderReference)
               : undefined;
+          // WP-2423 Q9-G1: a paid pickup the Store did not accept in time is refunded automatically
+          // (with the refund's progress); one held because the Store was offline awaits the Store.
+          let storeAcceptance:
+            | { state: "AwaitingStore" }
+            | { state: "NotAccepted"; closedAt: string; refundStatus: "Pending" | "Refunded" }
+            | null = null;
+          if (result.order.orderType === "Pickup" && (await stillAuthorized())) {
+            const closure = await loadOrderNotAcceptedClosure(
+              transaction,
+              options.scope,
+              orderReference,
+            );
+            if (closure !== null)
+              storeAcceptance = {
+                state: "NotAccepted",
+                closedAt: closure.closedAt,
+                refundStatus: await readStaffCancellationRefundStatus(
+                  transaction,
+                  options.scope,
+                  closure,
+                  stillAuthorized,
+                ),
+              };
+            else {
+              const hold = (
+                await listStoreOrderAcceptanceHolds(transaction, options.scope, [orderReference])
+              ).get(orderReference);
+              if (
+                hold !== undefined &&
+                !hold.resolutions.some((entry) => entry.resolution === "StaffRefund")
+              )
+                storeAcceptance = { state: "AwaitingStore" };
+            }
+          }
           // WP-2423 Q6: batches the Store cancelled after payment, with the refund's progress.
           const staffCancellations = [];
           if (await stillAuthorized())
@@ -398,6 +434,7 @@ export function createCustomerOrderStatusRead(
               ...(batchPayments.length === 0 ? {} : { batchPayments }),
               ...(unpaidCancellations.length === 0 ? {} : { unpaidCancellations }),
               ...(storeContact === null ? {} : { storeContact }),
+              ...(storeAcceptance === null ? {} : { storeAcceptance }),
             },
           };
         });

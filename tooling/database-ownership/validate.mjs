@@ -3156,6 +3156,23 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "rms_ordering" &&
           module.manifest.ownedDatabase?.tables?.includes("order_header") &&
           moduleRelative === "src/infrastructure/persistence/dining-session-order-lookup.ts";
+        // WP-2423 Q9-G1 admits only the order acceptance hold adapter (append-only holds).
+        const acceptedOrderAcceptanceHoldAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          [
+            "order_acceptance_hold",
+            "order_acceptance_hold_resolution",
+            "order_acceptance_record",
+            "order_payment_disposition_record",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/order-acceptance-hold-store.ts";
+        // WP-2423 Q9-G1 admits only the Store presence adapter (bounded staff activity periods).
+        const acceptedStorePresenceAsset =
+          module.packageName === "@rms/store" &&
+          module.manifest.ownedDatabase?.schema === "rms_store" &&
+          module.manifest.ownedDatabase?.tables?.includes("store_presence_session") &&
+          moduleRelative === "src/infrastructure/persistence/store-presence-store.ts";
         const acceptedOrderPaymentWaitAsset =
           module.packageName === "@rms/ordering" &&
           module.manifest.ownedDatabase?.schema === "rms_ordering" &&
@@ -3436,6 +3453,8 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedPriceQuoteRequestAsset &&
           !acceptedDiningTableAsset &&
           !acceptedDiningTableQrAsset &&
+          !acceptedOrderAcceptanceHoldAsset &&
+          !acceptedStorePresenceAsset &&
           !acceptedDiningSessionStartAsset &&
           !acceptedDiningJoinRegenerationAsset &&
           !acceptedDiningSessionJoinAsset &&

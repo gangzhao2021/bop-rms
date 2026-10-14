@@ -234,6 +234,20 @@ export class CustomerOrderStatusHandler {
                           cancelledAt: cancellation.cancelledAt,
                         })),
                       }),
+                  // WP-2423 Q9-G1: not accepted in time and refunded, or awaiting the Store after
+                  // an outage.
+                  ...(sources.storeAcceptance === undefined
+                    ? {}
+                    : {
+                        storeAcceptance:
+                          sources.storeAcceptance.state === "AwaitingStore"
+                            ? { state: "AwaitingStore" }
+                            : {
+                                state: "NotAccepted",
+                                closedAt: sources.storeAcceptance.closedAt,
+                                refundStatus: sources.storeAcceptance.refundStatus,
+                              },
+                      }),
                   // WP-2423 Q10: the Store's published phone and address.
                   ...(sources.storeContact === undefined
                     ? {}

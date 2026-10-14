@@ -18,6 +18,8 @@ export function createOrderExpiredPaymentDisposition(input: {
   observedAt: string;
   dispositionReference: string;
   sha256(value: string): string;
+  /** WP-2423 Q9-G1: the batch's current deadline from Ordering's hold facts (null while held). */
+  acceptanceDeadline?: string | null;
 }) {
   try {
     const execution = parseOrderInitialExecution(input.execution);
@@ -49,6 +51,9 @@ export function createOrderExpiredPaymentDisposition(input: {
         ...p,
         terminalOccurredAt: event.payload.terminalOccurredAt,
         observedAt,
+        ...(input.acceptanceDeadline === undefined
+          ? {}
+          : { acceptanceDeadline: input.acceptanceDeadline }),
       })
     )
       return null;

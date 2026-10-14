@@ -68,3 +68,6 @@ export * from "./infrastructure/configuration-v2-preparation.js";
 
 export * from "./contracts/store-configuration-original.js";
 export * from "./infrastructure/persistence/store-configuration-original-store.js";
+
+// WP-2423 Q9-G1 (DEC-OUTAGE-ACCEPTANCE-HOLD): whether the Store's staff are online.
+export * from "./infrastructure/persistence/store-presence-store.js";

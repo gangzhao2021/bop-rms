@@ -303,6 +303,7 @@ export {
   createPostgresMerchantOrderIndex,
   listStoreOrderNumbers,
   listStoreUnfulfillablePaidOrders,
+  loadOrderNotAcceptedClosure,
   listStorePaidOrderBatches,
   listStoreConfirmedOrderBatches,
   listStoreKitchenOrderLabels,
@@ -428,3 +429,10 @@ export {
 
 // WP-2423 Q7: staff-taken counter pickup orders.
 export * from "./infrastructure/persistence/counter-order-entry-store.js";
+
+// WP-2423 Q9-G1 (DEC-OUTAGE-ACCEPTANCE-HOLD): paid pickup orders held while the Store is offline.
+export * from "./application/order-acceptance-hold.js";
+export {
+  createPostgresOrderAcceptanceHoldStore,
+  listStoreOrderAcceptanceHolds,
+} from "./infrastructure/persistence/order-acceptance-hold-store.js";

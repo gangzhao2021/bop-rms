@@ -2628,6 +2628,69 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner approved 2026-10-14 in session (\"批准\") (WP-2423 Q11): table QR codes — record each code staff issue (INSERT, append-only, with its IssueQr table operation) and read codes for the Table QR codes page, printing and guest entry (SELECT); see DEC-TABLE-QR-ISSUANCE"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_presence_session",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "PENDING OWNER APPROVAL (WP-2423 Q9-G1): DEC-OUTAGE-ACCEPTANCE-HOLD — signed-in staff screens record Store presence (bounded: one period row extended at most once a minute; history kept, no delete) and the pilot worker (api role) records append-only holds of paid pickup orders whose deadline passed while the Store was offline, their back-online deadline and a manager's refund decision; the Orders page and customer order page read them"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_presence_session",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "PENDING OWNER APPROVAL (WP-2423 Q9-G1): DEC-OUTAGE-ACCEPTANCE-HOLD — signed-in staff screens record Store presence (bounded: one period row extended at most once a minute; history kept, no delete) and the pilot worker (api role) records append-only holds of paid pickup orders whose deadline passed while the Store was offline, their back-online deadline and a manager's refund decision; the Orders page and customer order page read them"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_presence_session",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "PENDING OWNER APPROVAL (WP-2423 Q9-G1): DEC-OUTAGE-ACCEPTANCE-HOLD — signed-in staff screens record Store presence (bounded: one period row extended at most once a minute; history kept, no delete) and the pilot worker (api role) records append-only holds of paid pickup orders whose deadline passed while the Store was offline, their back-online deadline and a manager's refund decision; the Orders page and customer order page read them"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_acceptance_hold",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "PENDING OWNER APPROVAL (WP-2423 Q9-G1): DEC-OUTAGE-ACCEPTANCE-HOLD — signed-in staff screens record Store presence (bounded: one period row extended at most once a minute; history kept, no delete) and the pilot worker (api role) records append-only holds of paid pickup orders whose deadline passed while the Store was offline, their back-online deadline and a manager's refund decision; the Orders page and customer order page read them"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_acceptance_hold",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "PENDING OWNER APPROVAL (WP-2423 Q9-G1): DEC-OUTAGE-ACCEPTANCE-HOLD — signed-in staff screens record Store presence (bounded: one period row extended at most once a minute; history kept, no delete) and the pilot worker (api role) records append-only holds of paid pickup orders whose deadline passed while the Store was offline, their back-online deadline and a manager's refund decision; the Orders page and customer order page read them"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_acceptance_hold_resolution",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "PENDING OWNER APPROVAL (WP-2423 Q9-G1): DEC-OUTAGE-ACCEPTANCE-HOLD — signed-in staff screens record Store presence (bounded: one period row extended at most once a minute; history kept, no delete) and the pilot worker (api role) records append-only holds of paid pickup orders whose deadline passed while the Store was offline, their back-online deadline and a manager's refund decision; the Orders page and customer order page read them"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_acceptance_hold_resolution",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "PENDING OWNER APPROVAL (WP-2423 Q9-G1): DEC-OUTAGE-ACCEPTANCE-HOLD — signed-in staff screens record Store presence (bounded: one period row extended at most once a minute; history kept, no delete) and the pilot worker (api role) records append-only holds of paid pickup orders whose deadline passed while the Store was offline, their back-online deadline and a manager's refund decision; the Orders page and customer order page read them"
     }
   ]
 }

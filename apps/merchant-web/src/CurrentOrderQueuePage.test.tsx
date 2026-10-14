@@ -19,6 +19,8 @@ import {
   unpaidCancelledTotal,
 } from "./CurrentOrderQueuePage.js";
 import { parseCurrentOrderDetail, parseCurrentOrderQueue } from "./current-order-queue-client.js";
+import { AcceptanceHoldNotice, acceptanceHoldText } from "./AcceptanceHoldActions.js";
+import { currentOrderQueueFixture } from "./current-order-queue.fixtures.js";
 it("renders actual Accepted version and visibly unresolved state without fabricated summaries", () => {
   const item = {
     orderReference: "01909968-0000-7000-8000-000000000001",
@@ -870,4 +872,52 @@ it("WP-2423 Q10: shows who the pickup is for and how to reach them, only from th
   );
   expect(renderToStaticMarkup(<PickupContactPanel contact={null} />)).toBe("");
   expect(formatContactPhone("+442071234567")).toBe("+442071234567");
+});
+
+it("WP-2423 Q9-G1: shows orders paid during an outage for a decision with accept and refund", () => {
+  const fixture = currentOrderQueueFixture();
+  const base = fixture.items[1];
+  if (base === undefined) throw new Error("fixture");
+  const hold = {
+    holdReference: "0190fa46-0000-7000-8000-0000000000a1",
+    orderBatchReference: base.batches[0]?.orderBatchReference ?? "",
+    heldAt: "2026-08-12T11:31:00.000Z",
+    lapsedDeadline: "2026-08-12T11:30:00.000Z",
+    storeLastSeenAt: "2026-08-12T11:10:00.000Z",
+    decideBy: null as string | null,
+    refundChosen: false,
+    canRefund: true,
+  };
+  const view = parseCurrentOrderQueue({
+    items: [{ ...base, orderType: "Pickup", sourceChannel: "Web", acceptanceHold: hold }],
+    nextAfterOrderReference: null,
+  });
+  const order = view.items[0];
+  const parsed = order?.acceptanceHold;
+  if (!parsed) throw new Error("fixture");
+  const now = Date.parse("2026-08-12T12:00:00.000Z");
+  expect(acceptanceHoldText(parsed, now)).toBe("Paid during an outage · decide");
+  expect(acceptanceHoldText({ ...parsed, decideBy: "2026-08-12T12:10:00.000Z" }, now)).toBe(
+    "Paid during an outage · decide within 10 min",
+  );
+  expect(acceptanceHoldText({ ...parsed, decideBy: "2026-08-12T11:59:00.000Z" }, now)).toBe(
+    "Decision time ended · refund pending",
+  );
+  const notice = renderToStaticMarkup(
+    <AcceptanceHoldNotice view={view} onShow={() => undefined} />,
+  );
+  expect(notice).toContain("Paid during an outage — decide");
+  expect(notice).toContain("1 online order was paid while the store was offline.");
+  expect(
+    filterCurrentOrderItems(view.items, {
+      orderNumber: "",
+      type: "All",
+      channel: "All",
+      phase: "OutageHeld",
+    }),
+  ).toHaveLength(1);
+  const rows = renderToStaticMarkup(<CurrentOrderQueueRows view={view} now={now} timeZone="UTC" />);
+  expect(rows).toContain("Paid during an outage · decide");
+  expect(rows).not.toContain("Acceptance window ended");
+  expect(rows).not.toMatch(/hold_?id|holdReference/u);
 });

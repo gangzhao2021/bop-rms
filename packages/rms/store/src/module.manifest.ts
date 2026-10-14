@@ -39,6 +39,7 @@ const moduleManifestInput = {
       "store_configuration_operation",
       "store_service_pause_content",
       "store_service_resume_content",
+      "store_presence_session",
     ],
   },
   ownedJobs: [],

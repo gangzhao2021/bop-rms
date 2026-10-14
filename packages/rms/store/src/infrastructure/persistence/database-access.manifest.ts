@@ -3,6 +3,14 @@ const databaseAccessManifestInput = {
   module: { moduleName: "store", packageName: "@rms/store", layer: "RMS" },
   tables: [
     {
+      table: "store_presence_session",
+      classification: "technical-control-record",
+      writeOwner: { kind: "module", id: "@rms/store" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "store_configuration_original_operation",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/store" },
@@ -152,6 +160,24 @@ const databaseAccessManifestInput = {
     },
   ],
   accesses: [
+    {
+      id: "store-presence.read.store_presence_session",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_store", table: "store_presence_session" },
+      principal: { kind: "module", id: "@rms/store" },
+      readPattern: "owner-repository",
+      source: "packages/rms/store/src/infrastructure/persistence/store-presence-store.ts",
+    },
+    {
+      id: "store-presence.write.store_presence_session",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_store", table: "store_presence_session" },
+      principal: { kind: "module", id: "@rms/store" },
+      readPattern: null,
+      source: "packages/rms/store/src/infrastructure/persistence/store-presence-store.ts",
+    },
     {
       id: "configuration-original.read.store_configuration_original_operation",
       operation: "read",

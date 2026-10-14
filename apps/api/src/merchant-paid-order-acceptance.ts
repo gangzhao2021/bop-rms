@@ -10,6 +10,7 @@ import {
   parsePaymentSucceededEnvelope,
 } from "@rms/ordering";
 import { createOrderPaidContextSource } from "./order-paid-context-source.js";
+import { currentAcceptanceDeadline } from "./order-pending-acceptance-source.js";
 import { evaluateOrderAcceptanceWorkflow } from "./order-acceptance-workflow.js";
 import { createMerchantOrderAcceptanceComposition } from "./merchant-order-acceptance-composition.js";
 
@@ -56,6 +57,8 @@ export function createMerchantPaidOrderAcceptance(
       ...current.payment.intent.preparation,
       terminalOccurredAt: event.payload.terminalOccurredAt,
       observedAt: current.observedAt,
+      // WP-2423 Q9-G1: a held order stays acceptable; after staff are back, until its new deadline.
+      ...currentAcceptanceDeadline(current),
     });
   // Store a digest only; never expose payment/resource evidence in a response or log.
   const digest = (current: Context, event: unknown) => {

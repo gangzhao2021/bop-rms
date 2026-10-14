@@ -9,6 +9,7 @@ import { createOrderPaidContextSource } from "./order-paid-context-source.js";
 import {
   parseExactPaidOutcomeEvent,
   createPendingAcceptanceCandidate,
+  currentAcceptanceDeadline,
 } from "./order-pending-acceptance-source.js";
 import { evaluateOrderPaidWorkflow } from "./order-paid-workflow.js";
 
@@ -66,6 +67,7 @@ export function createOrderPaidOutcomeSource(options: {
             observedAt: context.observedAt,
             dispositionReference: options.generateDispositionReference(),
             sha256: options.sha256,
+            ...currentAcceptanceDeadline(context),
           });
           if (expired !== null) return expired;
         }

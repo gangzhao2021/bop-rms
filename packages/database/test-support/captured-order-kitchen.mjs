@@ -60,7 +60,7 @@ export async function exerciseCapturedOrderKitchen({
   const actor = next();
   const at = new Date().toISOString();
   await admin.query(
-    "GRANT SELECT,INSERT ON rms_ordering.order_acceptance_record,rms_ordering.order_payment_disposition_record,rms_ordering.order_payment_failure_record,rms_ordering.order_payment_acceptance_wait TO " +
+    "GRANT SELECT,INSERT ON rms_ordering.order_acceptance_record,rms_ordering.order_acceptance_hold,rms_ordering.order_acceptance_hold_resolution,rms_ordering.order_payment_disposition_record,rms_ordering.order_payment_failure_record,rms_ordering.order_payment_acceptance_wait TO " +
       role,
   );
   await admin.query(

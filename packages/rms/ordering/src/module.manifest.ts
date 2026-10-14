@@ -70,6 +70,8 @@ const moduleManifestInput =
         "order_payment_failure_record",
         "order_payment_disposition_record",
         "order_payment_acceptance_wait",
+        "order_acceptance_hold",
+        "order_acceptance_hold_resolution",
         "checkout_session_record",
         "checkout_details_record",
         "checkout_contact_redaction",

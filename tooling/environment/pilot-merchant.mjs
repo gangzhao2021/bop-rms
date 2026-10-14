@@ -68,6 +68,8 @@ import { createMerchantOrderStaffCancellation } from "../../apps/api/dist/mercha
 import { createMerchantOrderItemStaffCancellation } from "../../apps/api/dist/merchant-order-item-staff-cancellation.js";
 import { createMerchantOrdinaryRefundBusinessDate } from "../../apps/api/dist/merchant-ordinary-refund-business-date.js";
 import { createPersistentMerchantOrderQueue } from "../../apps/api/dist/persistent-merchant-order-queue.js";
+import { createMerchantStorePresence } from "../../apps/api/dist/merchant-store-presence.js";
+import { createMerchantOrderAcceptanceHoldRefund } from "../../apps/api/dist/merchant-order-acceptance-hold-refund.js";
 import { createInternalStoreConfiguration } from "./pilot-store-configuration.mjs";
 import { createMerchantMfaStepUp } from "../../apps/api/dist/merchant-mfa-step-up.js";
 import { createMerchantRefundSoleOperatorResolver } from "../../apps/api/dist/merchant-sole-operator.js";
@@ -447,6 +449,24 @@ export async function createInternalMerchant(
       );
     },
   });
+  // WP-2423 Q9-G1 (DEC-OUTAGE-ACCEPTANCE-HOLD): signed-in staff using the Orders page, kitchen
+  // board or counter order mark the Store online (at most one write a minute); a manager may refund
+  // an order paid online while the Store was offline instead of accepting it.
+  const storePresence = createMerchantStorePresence({
+    transactions: persistence.transactions,
+    now: resources.now,
+    newReference: () => resources.credentials.reference(),
+  });
+  const presenceScope = {
+    brandReference: selected.brandReference,
+    storeReference: selected.storeReference,
+  };
+  const orderAcceptanceHoldRefund = createMerchantOrderAcceptanceHoldRefund({
+    persistence,
+    authentication: service,
+    nextReference: () => resources.credentials.reference(),
+    audit: { retentionPolicyCode: "FINANCIAL_COMPLIANCE", retentionPolicyVersion: 1 },
+  });
   const compensationQuery = createMerchantCompensationReconciliationQuery({
     persistence,
     authentication: service,
@@ -764,11 +784,14 @@ export async function createInternalMerchant(
   });
   const diningItemService = createInternalMerchantDining(resources, persistence, service);
   const kitchenCommand = createInternalKitchenCommand(resources, persistence, service);
-  const kitchenQuery = createMerchantKitchenQuery({
-    persistence,
-    authentication: service,
-    sha256: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
-  });
+  const kitchenQuery = storePresence.wrap(
+    presenceScope,
+    createMerchantKitchenQuery({
+      persistence,
+      authentication: service,
+      sha256: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
+    }),
+  );
   const kitchenRelease = createMerchantKitchenRelease({
     persistence,
     authentication: service,
@@ -903,6 +926,7 @@ export async function createInternalMerchant(
       quoteVersion: 2,
       acceptanceConfigured: true,
       locale: "en-CA",
+      storePresence,
       resolveRefundConfiguration: async (tx, scope) => {
         const configuration = await refundConfiguration(tx, scope);
         return {
@@ -1016,7 +1040,19 @@ export async function createInternalMerchant(
       // WP-2423 Q7: counter pickup orders and card-machine payments and refunds.
       ...(createInternalCounterOrder === undefined
         ? {}
-        : await createInternalCounterOrder(resources, persistence, service)),
+        : await (async () => {
+            const counter = await createInternalCounterOrder(resources, persistence, service);
+            return {
+              ...counter,
+              ...(counter.counterMenu === undefined
+                ? {}
+                : { counterMenu: storePresence.wrap(presenceScope, counter.counterMenu) }),
+              ...(counter.counterOrder === undefined
+                ? {}
+                : { counterOrder: storePresence.wrap(presenceScope, counter.counterOrder) }),
+            };
+          })()),
+      orderAcceptanceHoldRefund,
       ordinaryRefundSend,
       ordinaryRefundReconciliation,
       ordinaryRefund,

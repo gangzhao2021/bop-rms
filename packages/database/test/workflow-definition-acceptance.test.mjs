@@ -662,7 +662,10 @@ it("persists synthetic Workflow versions with atomic Audit, original recovery an
       await admin.query(
         "GRANT SELECT,UPDATE ON rms_ordering.order_header,rms_ordering.order_batch TO " + role,
       );
-      await admin.query("GRANT SELECT,INSERT ON rms_ordering.order_acceptance_record TO " + role);
+      await admin.query(
+        "GRANT SELECT,INSERT ON rms_ordering.order_acceptance_record,rms_ordering.order_acceptance_hold,rms_ordering.order_acceptance_hold_resolution TO " +
+          role,
+      );
       await admin.query(
         "GRANT SELECT ON rms_ordering.order_termination_record,rms_ordering.order_fulfillment_completion_record TO " +
           role,

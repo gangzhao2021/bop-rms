@@ -41,6 +41,17 @@ export interface OrderStatusSources {
   readonly unpaidCancellations?: readonly UnpaidBatchCancellation[];
   /** WP-2423 Q10: the Store's published phone and address. */
   readonly storeContact?: StoreContactView;
+  /**
+   * WP-2423 Q9-G1: the Store did not accept this paid pickup in time and it is refunded
+   * automatically, or it is waiting for the Store after an outage (Pickup only).
+   */
+  readonly storeAcceptance?:
+    | { readonly state: "AwaitingStore" }
+    | {
+        readonly state: "NotAccepted";
+        readonly closedAt: string;
+        readonly refundStatus: "Pending" | "Refunded";
+      };
 }
 
 export interface BatchPayment {

@@ -314,6 +314,49 @@ export async function listStoreUnfulfillablePaidOrders(
 }
 
 /**
+ * WP-2423 Q9-G1: a pickup Order closed because it was not accepted in time (Ordering's
+ * PaidWithoutFulfillableOrder / CapacityExpired outcome), with the payment it refunds. Caller
+ * authorizes and owns the transaction.
+ */
+export async function loadOrderNotAcceptedClosure(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReference: string,
+): Promise<{
+  readonly closedAt: string;
+  readonly orderReference: string;
+  readonly paymentTransactionReference: string;
+  readonly paymentAttemptReference: string;
+} | null> {
+  const order = parseOrderingReference(orderReference);
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [scope.brandReference, scope.storeReference],
+  );
+  const rows = (
+    await transaction.query(
+      "SELECT to_char(evaluated_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') closed_at,payment_transaction_id::text payment_transaction_id,payment_attempt_id::text payment_attempt_id " +
+        "FROM rms_ordering.order_payment_disposition_record WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 " +
+        "AND disposition='PaidWithoutFulfillableOrder' AND reason='CapacityExpired' ORDER BY evaluated_at DESC LIMIT 2",
+      [scope.brandReference, scope.storeReference, order],
+    )
+  ).rows as readonly {
+    closed_at: unknown;
+    payment_transaction_id: unknown;
+    payment_attempt_id: unknown;
+  }[];
+  const row = rows[0];
+  if (row === undefined) return null;
+  if (rows.length > 1) throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+  return Object.freeze({
+    closedAt: String(parseOrderingInstant(row.closed_at)),
+    orderReference: String(order),
+    paymentTransactionReference: String(parseOrderingReference(row.payment_transaction_id)),
+    paymentAttemptReference: String(parseOrderingReference(row.payment_attempt_id)),
+  });
+}
+
+/**
  * WP-2423 Q1: which of the Store's Orders have a recorded payment, and which batches are paid and
  * waiting for staff acceptance (payment recorded as awaiting acceptance, no outcome yet). An Order
  * with neither is still awaiting the customer's payment and is not offered for acceptance. Caller

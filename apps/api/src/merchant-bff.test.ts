@@ -8,6 +8,7 @@ import {
   parsePublishingInstant,
 } from "@bop/publishing";
 import { MerchantProductWriteFeatureDisabled } from "./merchant-product-write-authority.js";
+import { AcceptanceHoldRefundError } from "./merchant-order-acceptance-hold-refund.js";
 import { StaffOrderCancellationError } from "./merchant-order-staff-cancellation.js";
 import { StaffItemCancellationError } from "./merchant-order-item-staff-cancellation.js";
 import { CounterOrderError } from "./merchant-counter-order.js";
@@ -2198,6 +2199,67 @@ it("WP-2423 Q6: protects staff cancellation transport and maps owner refusals to
       })
     ).status,
   ).toBe(503);
+});
+
+it("WP-2423 Q9-G1: protects the outage refund decision transport and maps refusals", async () => {
+  const result = {
+    status: "RefundChosen" as const,
+    orderReference: "0190fa01-0000-7000-8000-000000000001",
+    decidedAt: "2026-10-14T12:00:00.000Z",
+  };
+  const refund = vi.fn<NonNullable<MerchantBffRouterOptions["orderAcceptanceHoldRefund"]>>(
+    async () => ({ ...result, privateEvidence: "synthetic-private" }) as typeof result,
+  );
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      orderAcceptanceHoldRefund: refund,
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  const root = `http://127.0.0.1:${address.port}`;
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const submit = (
+    extra: Record<string, string> = {},
+    path = "/merchant/orders/acceptance-hold/refund",
+  ) => request(root, path, { method: "POST", body: '{"a":1}', headers: { ...headers, ...extra } });
+  for (const extra of [{ Origin: "https://foreign.invalid" }, { "X-BOP-CSRF": "" }, { Cookie: "" }])
+    expect((await submit(extra)).status).toBe(403);
+  expect((await submit({}, "/merchant/orders/acceptance-hold/refund?x=1")).status).toBe(403);
+  expect(refund).not.toHaveBeenCalled();
+  const response = await submit();
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual(result);
+  expect(refund).toHaveBeenCalledWith({ sessionCookie, csrf, command: { a: 1 } });
+  for (const [code, status, error] of [
+    ["ACCEPTANCE_HOLD_REFUND_INPUT_INVALID", 400, "acceptance_hold_refund_input_invalid"],
+    ["ACCEPTANCE_HOLD_REFUND_PERMISSION_DENIED", 403, "acceptance_hold_refund_permission_denied"],
+    ["ACCEPTANCE_HOLD_REFUND_NOT_HELD", 409, "order_not_held"],
+    ["ACCEPTANCE_HOLD_REFUND_UNAVAILABLE", 503, "acceptance_hold_refund_unavailable"],
+  ] as const) {
+    refund.mockRejectedValueOnce(new AcceptanceHoldRefundError(code));
+    const refused = await submit();
+    expect(refused.status).toBe(status);
+    expect(await refused.json()).toEqual({ error });
+  }
+  refund.mockRejectedValueOnce(new Error("synthetic-private"));
+  const denied = await submit();
+  expect(denied.status).toBe(403);
+  expect(await denied.text()).not.toContain("synthetic");
 });
 
 async function serveCounter(

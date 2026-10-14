@@ -96,6 +96,8 @@ export function isOrderSettled(view: OrderStatusView): boolean {
     view.order.fulfillmentStatus === "Completed" ||
     Boolean(view.sources?.pickup?.notCollectedAt) ||
     Boolean(view.sources?.unpaidCancellation?.cancelledAt) ||
+    (view.sources?.storeAcceptance?.state === "NotAccepted" &&
+      view.sources.storeAcceptance.refundStatus === "Refunded") ||
     (view.order.orderType === "Pickup" && staffCancelledOrder(view) !== null)
   );
 }
@@ -152,6 +154,11 @@ function StatusContent({
   const unpaidPickupCancelled =
     view.order.orderType === "Pickup" && Boolean(view.sources?.unpaidCancellation?.cancelledAt);
   const storeCancelled = staffCancelledOrder(view);
+  // WP-2423 Q9-G1: not accepted in time (refunded automatically), or waiting after a store outage.
+  const storeAcceptance =
+    view.order.orderType === "Pickup" ? (view.sources?.storeAcceptance ?? null) : null;
+  const notAccepted = storeAcceptance?.state === "NotAccepted" ? storeAcceptance : null;
+  const awaitingStore = storeAcceptance?.state === "AwaitingStore";
   const staffCancellations = view.sources?.staffCancellations ?? [];
   const itemCancellations = view.sources?.itemCancellations ?? [];
   const cancelledItem = (orderItemReference: string) =>
@@ -193,39 +200,51 @@ function StatusContent({
   const someServed = diningItems?.some((item) => item.servedQuantity > 0) === true;
   const [progressHeading, progressMessage] = storeCancelled
     ? ["Order cancelled by the store", staffCancellationReasonText[storeCancelled.reason]]
-    : unpaidPickupCancelled
+    : notAccepted
       ? [
-          "Order cancelled",
-          "Payment wasn't completed within 30 minutes, so this order was cancelled. If a payment still goes through, it will be refunded automatically.",
+          "Order not accepted",
+          notAccepted.refundStatus === "Refunded"
+            ? "The store couldn't accept your order, so your payment was refunded to your original payment method."
+            : "The store couldn't accept your order, so your payment is being refunded to your original payment method.",
         ]
-      : view.order.canonicalPhase === "Cancelled"
-        ? ["Order cancelled", "Your order has been cancelled."]
-        : view.order.canonicalPhase === "Rejected"
-          ? ["Order not accepted", "Your order was not accepted."]
-          : complete
-            ? ["Order collected", "Your order has been collected. Enjoy!"]
-            : notCollected
-              ? [
-                  "Not collected",
-                  "The store closed this pickup after the pickup time ended. Contact the store about your order or a refund.",
-                ]
-              : allServed
-                ? ["Items served", "All listed items have been served."]
-                : someServed
+      : awaitingStore
+        ? [
+            "Waiting for the store",
+            "The store hasn't confirmed your order yet. Please wait or contact the store.",
+          ]
+        : unpaidPickupCancelled
+          ? [
+              "Order cancelled",
+              "Payment wasn't completed within 30 minutes, so this order was cancelled. If a payment still goes through, it will be refunded automatically.",
+            ]
+          : view.order.canonicalPhase === "Cancelled"
+            ? ["Order cancelled", "Your order has been cancelled."]
+            : view.order.canonicalPhase === "Rejected"
+              ? ["Order not accepted", "Your order was not accepted."]
+              : complete
+                ? ["Order collected", "Your order has been collected. Enjoy!"]
+                : notCollected
                   ? [
-                      "Serving your order",
-                      "Some items have been served. Check the remaining items below.",
+                      "Not collected",
+                      "The store closed this pickup after the pickup time ended. Contact the store about your order or a refund.",
                     ]
-                  : kitchenLabel === "Ready"
-                    ? view.order.orderType === "Pickup"
+                  : allServed
+                    ? ["Items served", "All listed items have been served."]
+                    : someServed
                       ? [
-                          "Ready for pickup",
-                          "Your order is ready. Show your pickup code at the counter.",
+                          "Serving your order",
+                          "Some items have been served. Check the remaining items below.",
                         ]
-                      : ["Kitchen preparation complete", "All listed batches are ready."]
-                    : kitchenLabel === "Preparing"
-                      ? ["Preparing your order", "The kitchen is preparing your order."]
-                      : ["Order submitted", "We have your order."];
+                      : kitchenLabel === "Ready"
+                        ? view.order.orderType === "Pickup"
+                          ? [
+                              "Ready for pickup",
+                              "Your order is ready. Show your pickup code at the counter.",
+                            ]
+                          : ["Kitchen preparation complete", "All listed batches are ready."]
+                        : kitchenLabel === "Preparing"
+                          ? ["Preparing your order", "The kitchen is preparing your order."]
+                          : ["Order submitted", "We have your order."];
   const payments = view.sources?.payments;
   const paid = payments?.find((payment) => payment.status === "Succeeded" && payment.amount);
   const paymentLabel =
@@ -235,13 +254,16 @@ function StatusContent({
         ? // WP-2423 Q6: a store-cancelled order says where the money is, not that it was received.
           (storeCancelled.refundStatus === "Refunded" ? "Refunded " : "Refund pending · ") +
           formatMoney(paid.amount.amountMinor, paid.amount.currencyCode)
-        : paid?.amount
-          ? `Payment received ${formatMoney(paid.amount.amountMinor, paid.amount.currencyCode)}`
-          : unpaidPickupCancelled
-            ? "Not paid"
-            : payments.some((payment) => payment.status === "Failed")
-              ? "Payment attempt failed"
-              : "Payment pending";
+        : paid?.amount && notAccepted
+          ? (notAccepted.refundStatus === "Refunded" ? "Refunded " : "Refund pending · ") +
+            formatMoney(paid.amount.amountMinor, paid.amount.currencyCode)
+          : paid?.amount
+            ? `Payment received ${formatMoney(paid.amount.amountMinor, paid.amount.currencyCode)}`
+            : unpaidPickupCancelled
+              ? "Not paid"
+              : payments.some((payment) => payment.status === "Failed")
+                ? "Payment attempt failed"
+                : "Payment pending";
   const multipleBatches = view.order.batches.length > 1;
   // WP-2423: a round whose payment didn't go through is never charged (cancelled, or about to be).
   const total = view.order.batches
@@ -269,7 +291,7 @@ function StatusContent({
           <div>
             <dt>Kitchen status</dt>
             <dd>
-              {storeCancelled
+              {storeCancelled || notAccepted
                 ? "Cancelled"
                 : kitchenLabel === "Unknown"
                   ? "Not available yet"
@@ -289,7 +311,8 @@ function StatusContent({
       !complete &&
       !notCollected &&
       !unpaidPickupCancelled &&
-      !storeCancelled ? (
+      !storeCancelled &&
+      !notAccepted ? (
         <PickupCodePanel
           orderReference={view.order.orderReference}
           orderNumber={view.order.orderNumber}

@@ -1090,7 +1090,7 @@ it.each([
         );
 
         await admin.query(
-          "GRANT SELECT ON rms_ordering.additional_dining_batch_record,rms_ordering.order_acceptance_record,rms_ordering.order_termination_record,rms_ordering.order_fulfillment_completion_record,rms_ordering.order_batch_checkout_cancellation,rms_ordering.order_staff_cancellation,rms_ordering.order_item_staff_cancellation TO " +
+          "GRANT SELECT ON rms_ordering.additional_dining_batch_record,rms_ordering.order_acceptance_record,rms_ordering.order_acceptance_hold,rms_ordering.order_acceptance_hold_resolution,rms_ordering.order_termination_record,rms_ordering.order_fulfillment_completion_record,rms_ordering.order_batch_checkout_cancellation,rms_ordering.order_staff_cancellation,rms_ordering.order_item_staff_cancellation TO " +
             roles[2],
         );
         await admin.query(

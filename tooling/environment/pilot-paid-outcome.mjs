@@ -7,6 +7,7 @@ import { createPostgresOrderBatchIdentitySource } from "../../packages/rms/order
 import { createHash } from "node:crypto";
 import { createOrderPaidContextSource } from "../../apps/api/dist/order-paid-context-source.js";
 import { createOrderPaidOutcomeSource } from "../../apps/api/dist/order-paid-outcome-source.js";
+import { createOrderAcceptanceHoldEvaluator } from "../../apps/api/dist/order-acceptance-hold-evaluator.js";
 import { evaluateIntactReservationPaymentRule } from "../../packages/rms/inventory/src/index.ts";
 import {
   createOrderPaymentOutcomeConsumerService,
@@ -90,6 +91,32 @@ export async function createInternalPaidOutcome(
     authorizeOrder: async (_tx, value) => sameScope(value),
     authorizeInventory: async () => active(),
   });
+  // WP-2423 Q9-G1 (DEC-OUTAGE-ACCEPTANCE-HOLD): before a paid pickup order's outcome is evaluated,
+  // hold it if its deadline passed while the Store was offline, and give it its new deadline once
+  // staff are back (same System transaction). Other orders are left to the ordinary rule.
+  const holdEvaluator = createOrderAcceptanceHoldEvaluator({
+    scope,
+    context,
+    authorize: async () => active(),
+    reference,
+    audit: { retentionPolicyCode: "FINANCIAL_COMPLIANCE", retentionPolicyVersion: 1 },
+  });
+  const evaluateHold = async (tx, event) => {
+    if (event?.eventType !== "PaymentSucceeded") return "NotApplicable";
+    const facts = await captured.resolve(tx, event);
+    const p = facts.payment.intent.preparation;
+    const identity = await createPostgresOrderBatchIdentitySource({
+      ...resources.scope,
+      authorize: async () => active(),
+    }).load(tx, {
+      orderReference: p.orderReference,
+      orderBatchReference: p.orderBatchReference,
+      observedAt: resources.now(),
+    });
+    if (!identity || identity.kind !== "Initial" || identity.orderType !== "Pickup")
+      return "NotApplicable";
+    return holdEvaluator.evaluate(tx, event);
+  };
   function service() {
     let observedAt;
     const initialSource = createOrderPaidOutcomeSource({
@@ -307,7 +334,10 @@ export async function createInternalPaidOutcome(
   }
   return {
     registrations: service().registrations,
-    consume: (tx, event) => service().consume(tx, event),
+    consume: async (tx, event) => {
+      await evaluateHold(tx, event);
+      return service().consume(tx, event);
+    },
     listUnresolved: (tx, limit, after = null) => service().listUnresolved(tx, limit, after),
     resume: async (tx, eventReference) => {
       if (!persistentWaiting) throw new Error("INTERNAL_PAID_WAIT_DISABLED");
@@ -319,6 +349,7 @@ export async function createInternalPaidOutcome(
         event.storeId !== scope.storeReference
       )
         throw new Error("INTERNAL_PAID_WAIT_EVENT_UNAVAILABLE");
+      await evaluateHold(tx, event);
       return service().resumePending(tx, event);
     },
   };

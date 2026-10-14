@@ -322,7 +322,8 @@ it("persists scoped failure and Audit atomically with parallel original replay",
       await admin.query("GRANT SELECT,INSERT ON rms_ordering.order_revision TO " + role);
       // Schema evidence only: these synthetic inserts do not invoke an authorized accept command.
       await admin.query(
-        "GRANT SELECT,INSERT,UPDATE,DELETE ON rms_ordering.order_acceptance_record TO " + role,
+        "GRANT SELECT,INSERT,UPDATE,DELETE ON rms_ordering.order_acceptance_record,rms_ordering.order_acceptance_hold,rms_ordering.order_acceptance_hold_resolution TO " +
+          role,
       );
       await admin.query(
         "GRANT SELECT ON rms_ordering.order_termination_record,rms_ordering.order_fulfillment_completion_record TO " +

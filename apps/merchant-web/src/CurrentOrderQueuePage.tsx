@@ -1,3 +1,9 @@
+import {
+  AcceptanceHoldDecision,
+  AcceptanceHoldNotice,
+  acceptanceHoldText,
+  acceptanceHoldTier,
+} from "./AcceptanceHoldActions.js";
 import { OrderPaymentLinks } from "./RefundPaymentPage.js";
 import { DiningOrderProgress } from "./DiningOrderProgress.js";
 import { OrderAcceptanceAction } from "./OrderAcceptanceAction.js";
@@ -52,16 +58,18 @@ export function filterCurrentOrderItems(
       (filters.type === "All" || order.orderType === filters.type) &&
       (filters.channel === "All" || order.sourceChannel === filters.channel) &&
       (filters.phase === "All" ||
-        (filters.phase === "Expired"
-          ? order.unfulfillable !== null
-          : filters.phase === "NotCollected"
-            ? order.pickupNotCollected
-            : filters.phase === "AwaitingPayment"
-              ? order.awaitingPayment
-              : order.unfulfillable === null &&
-                !order.pickupNotCollected &&
-                !order.awaitingPayment &&
-                (order.currentPhase ?? "Unavailable") === filters.phase)),
+        (filters.phase === "OutageHeld"
+          ? order.acceptanceHold !== null
+          : filters.phase === "Expired"
+            ? order.unfulfillable !== null
+            : filters.phase === "NotCollected"
+              ? order.pickupNotCollected
+              : filters.phase === "AwaitingPayment"
+                ? order.awaitingPayment
+                : order.unfulfillable === null &&
+                  !order.pickupNotCollected &&
+                  !order.awaitingPayment &&
+                  (order.currentPhase ?? "Unavailable") === filters.phase)),
   );
 }
 /** WP-2423 Q6 step 2: what "Check refund" on a cancelled item needs (omitted: not offered). */
@@ -446,6 +454,13 @@ function AcceptanceDeadline({
   readonly order: CurrentOrderQueue["items"][number];
   readonly now: number;
 }) {
+  // WP-2423 Q9-G1: paid while the Store was offline; held for a manager's decision.
+  if (order.acceptanceHold !== null)
+    return (
+      <span className="order-accept-by" data-tier={acceptanceHoldTier(order.acceptanceHold, now)}>
+        {acceptanceHoldText(order.acceptanceHold, now)}
+      </span>
+    );
   const window = order.batches.some((batch) => batch.canRequestAcceptance)
     ? acceptanceWindow(order.acceptBy, now)
     : null;
@@ -1019,6 +1034,9 @@ export function CurrentOrderQueuePage({
                 {soundOn ? "" : " Turn sound on to hear new orders."}
               </p>
             ) : null}
+            {single ? null : (
+              <AcceptanceHoldNotice view={state.view} onShow={() => setPhaseFilter("OutageHeld")} />
+            )}
             <div
               hidden={single}
               className="list-filters order-queue-filters"
@@ -1070,6 +1088,7 @@ export function CurrentOrderQueuePage({
                   <option value="Rejected">Rejected</option>
                   <option value="Cancelled">Cancelled</option>
                   <option value="Fulfilled">Fulfilled</option>
+                  <option value="OutageHeld">Paid during an outage — decide</option>
                   <option value="Expired">Expired · refunded</option>
                   <option value="AwaitingPayment">Awaiting payment</option>
                   <option value="NotCollected">Not collected</option>
@@ -1191,34 +1210,77 @@ export function CurrentOrderQueuePage({
                   </fieldset>
                 ) : batch.canRequestAcceptance ? (
                   <fieldset disabled={servingBusy}>
-                    <OrderAcceptanceAction
-                      key={batch.orderBatchReference}
-                      csrf={csrf}
-                      orderNumber={
-                        batch.sequence === 1
-                          ? order.orderNumber
-                          : order.orderNumber + " · batch " + batch.sequence
-                      }
-                      operation={() => {
-                        let operation = operations.current.get(batch.orderBatchReference);
-                        if (!operation) {
-                          operation = createOrderAcceptanceClient(fetcher).prepare({
-                            acceptanceReference: serviceOperationReference(),
-                            operationReference: serviceOperationReference(),
-                            orderReference: order.orderReference,
-                            orderBatchReference: batch.orderBatchReference,
-                            expectedOrderVersion: order.currentVersion ?? 0,
-                          });
-                          operations.current.set(batch.orderBatchReference, operation);
+                    {order.acceptanceHold !== null &&
+                    order.acceptanceHold.orderBatchReference === batch.orderBatchReference ? (
+                      // WP-2423 Q9-G1: paid during an outage — accept or refund.
+                      <AcceptanceHoldDecision
+                        order={order}
+                        hold={order.acceptanceHold}
+                        csrf={csrf}
+                        timeZone={timeZone}
+                        fetcher={fetcher}
+                        onSettled={() => reload(after)}
+                        accept={
+                          <OrderAcceptanceAction
+                            key={batch.orderBatchReference}
+                            csrf={csrf}
+                            orderNumber={
+                              batch.sequence === 1
+                                ? order.orderNumber
+                                : order.orderNumber + " · batch " + batch.sequence
+                            }
+                            operation={() => {
+                              let operation = operations.current.get(batch.orderBatchReference);
+                              if (!operation) {
+                                operation = createOrderAcceptanceClient(fetcher).prepare({
+                                  acceptanceReference: serviceOperationReference(),
+                                  operationReference: serviceOperationReference(),
+                                  orderReference: order.orderReference,
+                                  orderBatchReference: batch.orderBatchReference,
+                                  expectedOrderVersion: order.currentVersion ?? 0,
+                                });
+                                operations.current.set(batch.orderBatchReference, operation);
+                              }
+                              return operation;
+                            }}
+                            onRejected={() => operations.current.delete(batch.orderBatchReference)}
+                            onAccepted={() => {
+                              operations.current.delete(batch.orderBatchReference);
+                              reload(after);
+                            }}
+                          />
                         }
-                        return operation;
-                      }}
-                      onRejected={() => operations.current.delete(batch.orderBatchReference)}
-                      onAccepted={() => {
-                        operations.current.delete(batch.orderBatchReference);
-                        reload(after);
-                      }}
-                    />
+                      />
+                    ) : (
+                      <OrderAcceptanceAction
+                        key={batch.orderBatchReference}
+                        csrf={csrf}
+                        orderNumber={
+                          batch.sequence === 1
+                            ? order.orderNumber
+                            : order.orderNumber + " · batch " + batch.sequence
+                        }
+                        operation={() => {
+                          let operation = operations.current.get(batch.orderBatchReference);
+                          if (!operation) {
+                            operation = createOrderAcceptanceClient(fetcher).prepare({
+                              acceptanceReference: serviceOperationReference(),
+                              operationReference: serviceOperationReference(),
+                              orderReference: order.orderReference,
+                              orderBatchReference: batch.orderBatchReference,
+                              expectedOrderVersion: order.currentVersion ?? 0,
+                            });
+                            operations.current.set(batch.orderBatchReference, operation);
+                          }
+                          return operation;
+                        }}
+                        onRejected={() => operations.current.delete(batch.orderBatchReference)}
+                        onAccepted={() => {
+                          operations.current.delete(batch.orderBatchReference);
+                          reload(after);
+                        }}
+                      />
+                    )}
                   </fieldset>
                 ) : null
               }

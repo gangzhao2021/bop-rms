@@ -198,6 +198,10 @@ import {
 import { CounterMenuError, type createMerchantCounterMenu } from "./merchant-counter-menu.js";
 import { CounterOrderError, type createMerchantCounterOrder } from "./merchant-counter-order.js";
 import {
+  AcceptanceHoldRefundError,
+  type createMerchantOrderAcceptanceHoldRefund,
+} from "./merchant-order-acceptance-hold-refund.js";
+import {
   CardMachinePaymentCommandError,
   type createMerchantCardMachinePayment,
 } from "./merchant-card-machine-payment.js";
@@ -520,6 +524,8 @@ export interface MerchantBffRouterOptions {
   readonly pickupNotCollected?: ReturnType<typeof createMerchantPickupNotCollected>;
   /** WP-2423 Q6: staff cancel a paid order or batch before the kitchen starts it. */
   readonly orderStaffCancellation?: ReturnType<typeof createMerchantOrderStaffCancellation>;
+  /** WP-2423 Q9-G1: a manager refunds an order paid while the Store was offline. */
+  readonly orderAcceptanceHoldRefund?: ReturnType<typeof createMerchantOrderAcceptanceHoldRefund>;
   /** WP-2423 Q6 step 2a: staff cancel item lines before the kitchen starts them. */
   readonly orderItemStaffCancellation?: ReturnType<typeof createMerchantOrderItemStaffCancellation>;
   /** WP-2423 Q7: the pickup menu staff take a counter order from (as customers see it now). */
@@ -1606,6 +1612,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             unfulfillable: item.unfulfillable,
             pickupNotCollected: item.pickupNotCollected,
             acceptBy: item.acceptBy,
+            // WP-2423 Q9-G1: paid while the Store was offline; held for a manager's decision.
+            acceptanceHold: item.acceptanceHold,
             awaitingPayment: item.awaitingPayment,
             // WP-2423 Q7: a staff-taken counter order and its card-machine payment.
             counter: item.counter,
@@ -1691,6 +1699,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             unfulfillable: item.unfulfillable,
             pickupNotCollected: item.pickupNotCollected,
             acceptBy: item.acceptBy,
+            // WP-2423 Q9-G1: paid while the Store was offline; held for a manager's decision.
+            acceptanceHold: item.acceptanceHold,
             awaitingPayment: item.awaitingPayment,
             // WP-2423 Q7: a staff-taken counter order and its card-machine payment.
             counter: item.counter,
@@ -9887,6 +9897,56 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         response.status(status).set("Cache-Control", NO_STORE).json({ error: code });
       });
   });
+  // WP-2423 Q9-G1: a manager decides to refund an order paid online while the Store was offline.
+  router.post(
+    "/orders/acceptance-hold/refund",
+    sameOriginMutation(options),
+    (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant");
+      const csrf = exactHeader(request, "x-bop-csrf");
+      if (
+        sessionCookie === null ||
+        csrf === null ||
+        csrf.length === 0 ||
+        Object.keys(request.query).length !== 0
+      ) {
+        denied(response);
+        return;
+      }
+      if (!options.orderAcceptanceHoldRefund) {
+        response.status(503).json({ error: "acceptance_hold_refund_unavailable" });
+        return;
+      }
+      void options
+        .orderAcceptanceHoldRefund({ sessionCookie, csrf, command: request.body })
+        .then((result) => {
+          response.set("Cache-Control", NO_STORE);
+          response.json({
+            status: result.status,
+            orderReference: result.orderReference,
+            decidedAt: result.decidedAt,
+          });
+        })
+        .catch((error: unknown) => {
+          if (!(error instanceof AcceptanceHoldRefundError)) {
+            denied(response);
+            return;
+          }
+          const [status, code] = (
+            {
+              ACCEPTANCE_HOLD_REFUND_INPUT_INVALID: [400, "acceptance_hold_refund_input_invalid"],
+              ACCEPTANCE_HOLD_REFUND_PERMISSION_DENIED: [
+                403,
+                "acceptance_hold_refund_permission_denied",
+              ],
+              ACCEPTANCE_HOLD_REFUND_NOT_HELD: [409, "order_not_held"],
+              ACCEPTANCE_HOLD_REFUND_UNAVAILABLE: [503, "acceptance_hold_refund_unavailable"],
+            } as const
+          )[error.code];
+          response.status(status).set("Cache-Control", NO_STORE).json({ error: code });
+        });
+    },
+  );
   // WP-2423 Q6: staff cancel a paid order or batch before the kitchen starts it; refunded in full.
   router.post("/orders/cancel", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");

@@ -125,6 +125,51 @@ function parsePaymentDue(value: unknown, submittedAt: string) {
   if (cancelsAt <= submittedAt) return fail();
   return Object.freeze({ status: "Failed" as const, cancelsAt });
 }
+/** WP-2423 Q9-G1: a held order (paid while the Store was offline). */
+function parseAcceptanceHold(
+  value: unknown,
+  orderType: unknown,
+  currentPhase: unknown,
+  acceptBy: string | null,
+) {
+  if (value === null) return null;
+  const raw = exact(value, [
+    "holdReference",
+    "orderBatchReference",
+    "heldAt",
+    "lapsedDeadline",
+    "storeLastSeenAt",
+    "decideBy",
+    "refundChosen",
+    "canRefund",
+  ]);
+  const decideBy = raw.decideBy === null ? null : instant(raw.decideBy);
+  const lapsedDeadline = instant(raw.lapsedDeadline);
+  const heldAt = instant(raw.heldAt);
+  const storeLastSeenAt = raw.storeLastSeenAt === null ? null : instant(raw.storeLastSeenAt);
+  if (
+    orderType !== "Pickup" ||
+    currentPhase !== "Submitted" ||
+    typeof raw.refundChosen !== "boolean" ||
+    typeof raw.canRefund !== "boolean" ||
+    (raw.refundChosen && raw.canRefund) ||
+    acceptBy !== decideBy ||
+    heldAt < lapsedDeadline ||
+    (storeLastSeenAt !== null && storeLastSeenAt >= lapsedDeadline)
+  )
+    return fail();
+  return Object.freeze({
+    holdReference: reference(raw.holdReference),
+    orderBatchReference: reference(raw.orderBatchReference),
+    heldAt,
+    lapsedDeadline,
+    storeLastSeenAt,
+    /** Null while the Store is still offline; then back online + 15 minutes. */
+    decideBy,
+    refundChosen: raw.refundChosen,
+    canRefund: raw.canRefund,
+  });
+}
 export function parseCurrentOrderQueue(value: unknown, after: string | null = null) {
   const raw = exact(value, ["items", "nextAfterOrderReference"]);
   if (!Array.isArray(raw.items) || raw.items.length > 50) return fail();
@@ -132,8 +177,11 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
   const items = raw.items.map((value) => {
     const withCounter =
       value !== null && typeof value === "object" && Object.hasOwn(value, "counter");
+    const withHold =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "acceptanceHold");
     const item = exact(value, [
       ...(withCounter ? ["counter"] : []),
+      ...(withHold ? ["acceptanceHold"] : []),
       "orderReference",
       "orderNumber",
       "orderType",
@@ -199,6 +247,10 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         acceptBy <= submittedAt)
     )
       return fail();
+    // WP-2423 Q9-G1: paid while the Store was offline and held for a manager's decision.
+    const acceptanceHold = withHold
+      ? parseAcceptanceHold(item.acceptanceHold, item.orderType, item.currentPhase, acceptBy)
+      : null;
     // WP-2423 Q1: no payment recorded yet — the customer has not paid, so nothing is acceptable.
     if (
       typeof item.awaitingPayment !== "boolean" ||
@@ -326,6 +378,8 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       pickupNotCollected: item.pickupNotCollected as boolean,
       /** WP-2423 Q1: when this paid pickup stops being acceptable (then Payment refunds it). */
       acceptBy,
+      /** WP-2423 Q9-G1: paid while the Store was offline; a manager accepts or refunds it. */
+      acceptanceHold,
       /** WP-2423 Q1: submitted but the customer's payment is not recorded yet. */
       awaitingPayment: item.awaitingPayment as boolean,
       currentPhase: item.currentPhase as string | null,
