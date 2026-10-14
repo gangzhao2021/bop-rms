@@ -1,7 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
-import { PickupQueueScreen, PickupStatePanel } from "./PickupPages.js";
+import {
+  pickupOfflineState,
+  pickupRefreshIntervalMs,
+  PickupQueueScreen,
+  PickupStatePanel,
+} from "./PickupPages.js";
 import { pickupQueueFixture } from "./pickup.fixtures.js";
 import { parsePickupQueueView } from "./pickup.js";
 describe("WP-1805 Pickup screens", () => {
@@ -139,5 +144,25 @@ it("IDR-0039: keeps the last pickups on a failed refresh, read-only with no hand
   expect(html).toContain("ORD-1001");
   expect(html).toContain("Offline — showing the last update from");
   expect(html).toContain("Actions are paused until the connection returns.");
-  expect(html).not.toContain("Hand over after checking in person");
+  // The action stays on screen (an unknown result keeps its retry) but cannot be used.
+  expect(html).toContain('<button disabled="">Hand over after checking in person</button>');
+  expect(html).toContain("Paused until the connection returns.");
+});
+it("IDR-0039: the browser going offline turns the loaded queue read-only at once", () => {
+  const view = parsePickupQueueView(pickupQueueFixture());
+  const loadedAt = "2026-08-12T15:12:30.000Z";
+  const live = { key: "k", failures: 0, state: { kind: "Found" as const, view, loadedAt } };
+  const offline = pickupOfflineState(live);
+  expect(offline.failures).toBe(1);
+  expect(offline.state).toEqual({
+    kind: "Found",
+    view,
+    loadedAt,
+    stale: { reason: "Offline", lastLoadedAt: loadedAt, attempts: 1 },
+  });
+  // Already stale or nothing loaded: unchanged, the retry backoff keeps counting from reads.
+  expect(pickupOfflineState(offline)).toBe(offline);
+  const loading = { key: "k", failures: 0, state: { kind: "Loading" as const } };
+  expect(pickupOfflineState(loading)).toBe(loading);
+  expect(pickupRefreshIntervalMs).toBe(10_000);
 });

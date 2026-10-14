@@ -91,6 +91,7 @@ test("@production Tables board shows open time in hours or days and flags long-o
 /** IDR-0039: a failed refresh keeps the last tables on screen, read-only, and recovers on its own. */
 test("@production Tables keeps the last tables read-only after a failed refresh and recovers", async ({
   page,
+  context,
 }) => {
   test.setTimeout(60_000);
   const id = (n: number) => "01909968-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -170,5 +171,16 @@ test("@production Tables keeps the last tables read-only after a failed refresh 
   }
   offline = false;
   await expect(notice).toHaveCount(0, { timeout: 15_000 });
+  await expect(select).toBeEnabled();
+  // The browser reporting the network gone is enough; back online it re-reads at once.
+  await select.click();
+  await context.setOffline(true);
+  await expect(notice).toBeVisible({ timeout: 2_000 });
+  await expect(select).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "Start dining session", exact: true }),
+  ).toBeDisabled();
+  await context.setOffline(false);
+  await expect(notice).toHaveCount(0, { timeout: 5_000 });
   await expect(select).toBeEnabled();
 });

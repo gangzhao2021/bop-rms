@@ -49,6 +49,31 @@ export function useStaleRetry(attempts: number | null, retry: () => void): void 
   }, [attempts]);
 }
 
+/** True when the browser itself reports no network; a command must not be sent then. */
+export function browserOffline(): boolean {
+  return typeof navigator !== "undefined" && navigator.onLine === false;
+}
+
+/**
+ * A request that never got an answer is "Offline" only when the browser itself has no network;
+ * otherwise the store system did not answer (host down, timeout): "Connection lost".
+ */
+export function readFailureReason(code: ReadFailure): ReadFailure {
+  return code === "Offline" && !browserOffline() ? "Unavailable" : code;
+}
+
+/** Calls `onOffline` as soon as the browser reports the network is gone, before any read fails. */
+export function useBrowserOffline(onOffline: () => void): void {
+  const handler = useRef(onOffline);
+  handler.current = onOffline;
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const offline = () => handler.current();
+    window.addEventListener("offline", offline);
+    return () => window.removeEventListener("offline", offline);
+  }, []);
+}
+
 /** The stale-mode notice: what is on screen, from when, and that actions wait for the connection. */
 export function StaleReadNotice({
   stale,

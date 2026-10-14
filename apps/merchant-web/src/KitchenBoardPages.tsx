@@ -4,8 +4,11 @@ import { createKitchenBoardClient } from "./kitchen-board-client.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { Freshness, SourceTime } from "./StoreTime.js";
 import {
+  browserOffline,
+  readFailureReason,
   replacesLastRead,
   StaleReadNotice,
+  useBrowserOffline,
   useStaleRetry,
   type ReadFailure,
   type StaleRead,
@@ -222,7 +225,9 @@ function useLoad<T>(load: () => Promise<T>, key: string, keepLast = false): Load
       })
       .catch((error: unknown) => {
         if (!active) return;
-        const reason = error instanceof KitchenBoardClientError ? error.code : "Unavailable";
+        const reason = readFailureReason(
+          error instanceof KitchenBoardClientError ? error.code : "Unavailable",
+        );
         setStored((previous) => ({
           key,
           load,
@@ -234,6 +239,19 @@ function useLoad<T>(load: () => Promise<T>, key: string, keepLast = false): Load
       active = false;
     };
   }, [key, load]);
+  // IDR-0039: the browser saying the network is gone is enough to go read-only at once.
+  useBrowserOffline(() => {
+    if (!keepLast) return;
+    setStored((previous) =>
+      previous.state.kind === "Found" && previous.state.stale === undefined
+        ? {
+            ...previous,
+            failures: previous.failures + 1,
+            state: failedLoadState(previous.state, "Offline", previous.failures + 1, true),
+          }
+        : previous,
+    );
+  });
   if (stored.key === key && stored.load === load) return stored.state;
   // A new key whose read has not started yet is already a re-read in flight.
   return stored.state.kind === "Found" ? { ...stored.state, reloading: true } : { kind: "Loading" };
@@ -1174,10 +1192,13 @@ function KitchenBoardContent(props: KitchenPageProps) {
     if (soundOn && arrived.length > 0 && audio.current) playKitchenChime(audio.current);
   }, [soundOn, state]);
   const runAction = (item: KitchenBoardItem, action: KitchenAction) => {
+    // Never send while offline or stale; nothing is queued for later (IDR-0039).
+    if (stale !== undefined || browserOffline()) return;
     restoreRetryFocus.current = document.activeElement instanceof HTMLButtonElement;
     actions.act(item, action);
   };
   const retry = () => {
+    if (stale !== undefined || browserOffline()) return;
     restoreRetryFocus.current = document.activeElement === retryButtonRef.current;
     actions.retry();
   };

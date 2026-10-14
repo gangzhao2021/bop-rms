@@ -7,7 +7,13 @@ import {
   type StaffDiningTable,
 } from "./dining-session-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
-import { StaleReadNotice, useStaleRetry, type StaleRead } from "./stale-read.js";
+import {
+  browserOffline,
+  StaleReadNotice,
+  useBrowserOffline,
+  useStaleRetry,
+  type StaleRead,
+} from "./stale-read.js";
 type Operation = ReturnType<ReturnType<typeof createDiningSessionClient>["prepareStart"]>;
 type AvailabilityOperation = ReturnType<
   ReturnType<typeof createDiningSessionClient>["prepareAvailability"]
@@ -73,20 +79,24 @@ export function DiningSessionWorkspace({
   // IDR-0039: a failed refresh keeps the last loaded tables on screen, read-only, and retries.
   const [stale, setStale] = useState<StaleRead | null>(null);
   const loadedAt = useRef<string | null>(null);
+  const paused = stale !== null;
   const locked = state !== "Idle" || hostLocked;
-  const load = async (more = false) => {
+  /** `background`: an automatic retry; the selected table and any shown entry code stay. */
+  const load = async (more = false, background = false) => {
     if ((pending.current && !pending.current.signal.aborted) || state === "Unknown" || hostLocked)
       return;
     const controller = new AbortController();
     pending.current = controller;
     setState("Loading");
-    setCode(null);
-    setSelected(null);
-    setConfirmed(false);
-    setMessage("");
-    operation.current = null;
-    availabilityOperation.current = null;
-    setUnknownAction(null);
+    if (!background) {
+      setCode(null);
+      setSelected(null);
+      setConfirmed(false);
+      setMessage("");
+      operation.current = null;
+      availabilityOperation.current = null;
+      setUnknownAction(null);
+    }
     try {
       const result = await createDiningSessionClient().tables(
         csrf,
@@ -97,6 +107,11 @@ export function DiningSessionWorkspace({
         loadedAt.current = new Date().toISOString();
         setStale(null);
         setTables((prior) => (more ? [...prior, ...result.items] : result.items));
+        if (background)
+          setSelected(
+            (prior) =>
+              result.items.find((table) => table.tableReference === prior?.tableReference) ?? prior,
+          );
         setNext(result.next);
         setCanOperateTables(result.canOperateTables);
         if (result.items.length === 0 && !more)
@@ -134,7 +149,13 @@ export function DiningSessionWorkspace({
   };
   const loadRef = useRef(load);
   loadRef.current = load;
-  useStaleRetry(stale?.attempts ?? null, () => void loadRef.current());
+  useStaleRetry(stale?.attempts ?? null, () => void loadRef.current(false, true));
+  // IDR-0039: the browser saying the network is gone is enough to go read-only at once.
+  useBrowserOffline(() => {
+    const lastLoadedAt = loadedAt.current;
+    if (lastLoadedAt === null || tables.length === 0) return;
+    setStale((prior) => prior ?? { reason: "Offline", lastLoadedAt, attempts: 1 });
+  });
   useEffect(() => {
     void loadRef.current();
     return () => {
@@ -145,6 +166,8 @@ export function DiningSessionWorkspace({
   }, []);
   const execute = async () => {
     if (
+      paused ||
+      browserOffline() ||
       hostLocked ||
       (state === "Unknown" && unknownAction !== "Session") ||
       !selected ||
@@ -224,6 +247,8 @@ export function DiningSessionWorkspace({
   };
   const executeAvailability = async (action: "SetBlock" | "ClearBlock") => {
     if (
+      paused ||
+      browserOffline() ||
       !canOperateTables ||
       hostLocked ||
       !selected ||
@@ -470,13 +495,14 @@ export function DiningSessionWorkspace({
                     <input
                       type="checkbox"
                       checked={confirmed}
-                      disabled={locked}
+                      disabled={locked || paused}
                       onChange={(event) => setConfirmed(event.target.checked)}
                     />
                     I confirm the selected table and session action
                   </label>
                   <button
                     disabled={
+                      paused ||
                       hostLocked ||
                       state === "Loading" ||
                       state === "Submitting" ||
@@ -498,7 +524,7 @@ export function DiningSessionWorkspace({
                       key={selected.currentDiningSessionReference}
                       diningSessionReference={selected.currentDiningSessionReference}
                       csrf={csrf}
-                      disabled={state !== "Idle"}
+                      disabled={state !== "Idle" || paused}
                       onLocked={setHostLocked}
                     />
                   ) : null}
@@ -513,7 +539,7 @@ export function DiningSessionWorkspace({
                           <select
                             value={blockReasonCode}
                             aria-describedby="dining-table-reason-help"
-                            disabled={locked}
+                            disabled={locked || paused}
                             onChange={(event) => setBlockReasonCode(event.target.value)}
                           >
                             <option value="">Choose a reason</option>
@@ -529,6 +555,7 @@ export function DiningSessionWorkspace({
                         </label>
                         <button
                           disabled={
+                            paused ||
                             hostLocked ||
                             state === "Loading" ||
                             state === "Submitting" ||
@@ -548,6 +575,7 @@ export function DiningSessionWorkspace({
                     ) : (
                       <button
                         disabled={
+                          paused ||
                           hostLocked ||
                           state === "Loading" ||
                           state === "Submitting" ||

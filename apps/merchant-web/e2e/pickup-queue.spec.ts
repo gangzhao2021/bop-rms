@@ -448,3 +448,140 @@ test("@production Pickup reloads the current page after an authorized Store swit
     storeTwo.storeReference,
   ]);
 });
+
+// IDR-0039 (Handoff §87.11.1): Pickup notices an outage on its own, keeps the last queue
+// read-only with handoff paused, sends nothing while offline and recovers when the network returns.
+test("@production Pickup goes read-only offline, sends nothing and recovers on its own", async ({
+  page,
+  context,
+}) => {
+  test.setTimeout(120_000);
+  const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const scope = {
+    brandLabel: "Training Brand",
+    storeLabel: "Training Store",
+    storeReference: id(99),
+  };
+  const headers = { "cache-control": "no-store" };
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-09-19",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "FUL-PICKUP-QUEUE",
+              label: "Pickup",
+              href: "/operations/pickup",
+              permission: "fulfillment.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  let serverDown = false,
+    reads = 0;
+  await page.route("**/merchant/pickup/query", (route) => {
+    reads++;
+    if (serverDown) return route.abort("connectionrefused");
+    const now = Date.now();
+    return route.fulfill({
+      headers,
+      json: {
+        source: "CurrentFulfillment",
+        workstation: { deviceReference: id(10), pickupLocationReference: id(11) },
+        storeReference: scope.storeReference,
+        observedAt: new Date(now).toISOString(),
+        nextAfterFulfillmentReference: null,
+        items: [
+          {
+            fulfillmentReference: id(1),
+            orderReference: id(3),
+            phase: "Ready",
+            aggregateVersion: "7",
+            readyAt: new Date(now - 70 * 60_000).toISOString(),
+            publicOrderReference: "C".repeat(22),
+            proof: {
+              kind: "HumanCode",
+              generation: 1,
+              expiresAt: new Date(now - 10 * 60_000).toISOString(),
+            },
+            items: [
+              {
+                fulfillmentItemReference: id(4),
+                orderedQuantity: 1,
+                readyQuantity: 1,
+                handedOverQuantity: 0,
+              },
+            ],
+          },
+        ],
+      },
+    });
+  });
+  const commands: string[] = [];
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path.startsWith("/merchant/pickup/") && path !== "/merchant/pickup/query")
+      commands.push(path);
+  });
+  const handOver = page.getByRole("button", {
+    name: "Hand over after checking in person",
+    exact: true,
+  });
+  const notCollected = page.getByRole("button", { name: "Mark not collected", exact: true });
+  const notice = page.getByRole("status").filter({ hasText: "Read-only until reconnected" });
+  await page.goto("/operations/pickup");
+  await expect(handOver).toBeEnabled();
+  await expect(notCollected).toBeEnabled();
+
+  // The pilot host stops answering while the device stays online: the 10 s re-read notices it.
+  serverDown = true;
+  await expect(notice).toBeVisible({ timeout: 15_000 });
+  await expect(notice).toContainText("Connection lost — showing the last update from");
+  await expect(handOver).toBeDisabled();
+  serverDown = false;
+  await expect(notice).toHaveCount(0, { timeout: 15_000 });
+  await expect(handOver).toBeEnabled();
+
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 1024, height: 768 },
+    { width: 390, height: 844 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await expect(handOver).toBeEnabled();
+    // The device loses its network: read-only at once, without waiting for a read to fail.
+    await context.setOffline(true);
+    await expect(notice).toBeVisible({ timeout: 2_000 });
+    await expect(notice).toContainText(
+      /Offline — showing the last update from \d\d:\d\d.*\. Actions are paused until the connection returns\./u,
+    );
+    await expect(page.getByText(/^Data may be out of date/u)).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Order " + "C".repeat(22) })).toBeVisible();
+    await expect(handOver).toBeDisabled();
+    await expect(notCollected).toBeDisabled();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      `no horizontal overflow at ${viewport.width}`,
+    ).toBe(true);
+    // Back online: it re-reads at once and returns to normal.
+    const before = reads;
+    await context.setOffline(false);
+    await expect(notice).toHaveCount(0, { timeout: 5_000 });
+    expect(reads).toBeGreaterThan(before);
+    await expect(handOver).toBeEnabled();
+    await expect(notCollected).toBeEnabled();
+  }
+  expect(commands).toEqual([]);
+});

@@ -1183,6 +1183,7 @@ for (const supported of [true, false]) {
 // the board recovers on its own; nothing is queued while offline.
 test("@production Kitchen keeps the last tickets read-only offline and recovers on its own", async ({
   page,
+  context,
 }) => {
   test.setTimeout(120_000);
   const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -1261,28 +1262,39 @@ test("@production Kitchen keeps the last tickets read-only offline and recovers 
       },
     });
   });
-  await page.route("**/merchant/kitchen/work", (route) => {
-    commands++;
-    return route.abort("internetdisconnected");
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/merchant/kitchen/work") commands++;
   });
   const accept = page.getByRole("button", { name: "Accept", exact: true });
   const notice = page.getByRole("status").filter({ hasText: "Read-only until reconnected" });
+  await page.goto("/operations/kitchen");
+  await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
+  await expect(accept).toBeEnabled();
+  await expect(page.getByText("Auto-refresh every 10 s", { exact: true })).toBeVisible();
+
+  // The store system stops answering while the device stays online: the next read fails, the
+  // tickets stay read-only, and it keeps retrying (first after 5 s) until a read succeeds.
+  offline = true;
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(notice).toContainText("Connection lost — showing the last update from");
+  await expect(accept).toBeDisabled();
+  const before = reads;
+  await expect.poll(() => reads, { timeout: 8_000 }).toBeGreaterThan(before);
+  await expect(notice).toBeVisible();
+  offline = false;
+  await expect(notice).toHaveCount(0, { timeout: 15_000 });
+  await expect(accept).toBeEnabled();
+
   for (const viewport of [
     { width: 1440, height: 900 },
     { width: 1024, height: 768 },
     { width: 390, height: 844 },
   ]) {
-    offline = false;
     await page.setViewportSize(viewport);
-    await page.goto("/operations/kitchen");
-    await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
     await expect(accept).toBeEnabled();
-    await expect(page.getByText("Auto-refresh every 10 s", { exact: true })).toBeVisible();
-
-    // The connection drops: the next read fails, the tickets stay, every action is paused.
-    offline = true;
-    await page.getByRole("button", { name: "Refresh", exact: true }).click();
-    await expect(notice).toBeVisible();
+    // The device loses its network: read-only at once, without waiting for a read to fail.
+    await context.setOffline(true);
+    await expect(notice).toBeVisible({ timeout: 2_000 });
     await expect(notice).toContainText(
       /Offline — showing the last update from \d\d:\d\d.*\. Actions are paused until the connection returns\./u,
     );
@@ -1295,13 +1307,9 @@ test("@production Kitchen keeps the last tickets read-only offline and recovers 
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       `no horizontal overflow at ${viewport.width}`,
     ).toBe(true);
-
-    // It keeps trying on its own (first retry after 5 s) and returns to normal once a read succeeds.
-    const before = reads;
-    await expect.poll(() => reads, { timeout: 8_000 }).toBeGreaterThan(before);
-    await expect(notice).toBeVisible();
-    offline = false;
-    await expect(notice).toHaveCount(0, { timeout: 15_000 });
+    // Back online: it re-reads at once and returns to normal.
+    await context.setOffline(false);
+    await expect(notice).toHaveCount(0, { timeout: 5_000 });
     await expect(accept).toBeEnabled();
     await expect(page.getByText("Auto-refresh every 10 s", { exact: true })).toBeVisible();
   }

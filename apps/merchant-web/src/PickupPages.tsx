@@ -8,8 +8,10 @@ import { useCallback, useEffect, useState, useMemo, useRef, type RefObject } fro
 import { createPickupClient } from "./pickup-client.js";
 import { Link } from "react-router";
 import {
+  readFailureReason,
   replacesLastRead,
   StaleReadNotice,
+  useBrowserOffline,
   useStaleRetry,
   type ReadFailure,
   type StaleRead,
@@ -23,6 +25,7 @@ import {
   type PickupQueueView,
   type PickupWorkstation,
 } from "./pickup.js";
+export type PickupLoadState = State;
 type State =
   | { readonly kind: "Loading" }
   | { readonly kind: ReadFailure }
@@ -59,6 +62,23 @@ export function PickupStatePanel({ state }: { readonly state: Exclude<State["kin
     </StatePanel>
   );
 }
+/** WP-2423 Q9: the pickup queue re-reads on its own while it is visible. */
+export const pickupRefreshIntervalMs = 10_000;
+/** The queue the browser just reported offline: the last pickups stay, read-only (IDR-0039). */
+export function pickupOfflineState<
+  T extends { readonly state: PickupLoadState; readonly failures: number },
+>(previous: T): T {
+  if (previous.state.kind !== "Found" || previous.state.stale !== undefined) return previous;
+  const failures = previous.failures + 1;
+  return {
+    ...previous,
+    failures,
+    state: {
+      ...previous.state,
+      stale: { reason: "Offline", lastLoadedAt: previous.state.loadedAt, attempts: failures },
+    },
+  };
+}
 /** Waiting-time tier for the eyebrow colour: a pickup left too long turns visibly late. */
 export function waitTier(waitMinutes: number, completed: boolean): "ok" | "warning" | "late" {
   if (completed) return "ok";
@@ -68,10 +88,13 @@ function PickupCard({
   item,
   observedAt,
   readOnly,
+  paused,
   proofContext,
   workstation,
   hidden,
 }: {
+  /** IDR-0039: offline or stale; actions stay on screen but cannot be used. */
+  readonly paused: boolean;
   readonly workstation?: PickupWorkstation | null | undefined;
   readonly item: PickupQueueItem;
   readonly observedAt: string;
@@ -149,6 +172,7 @@ function PickupCard({
           {inPersonEligible && workstation && proofContext ? (
             <PickupHandoffForm
               key={"in-person:" + (item.execution?.aggregateVersion ?? "")}
+              paused={paused}
               item={item}
               verification={null}
               workstation={workstation}
@@ -158,6 +182,7 @@ function PickupCard({
           ) : canComplete && item.execution && proofContext ? (
             <PickupProofForm
               key={item.execution.aggregateVersion + ":" + item.execution.proof?.generation}
+              paused={paused}
               item={item}
               workstation={workstation}
               csrf={proofContext.csrf}
@@ -166,6 +191,7 @@ function PickupCard({
           ) : null}
           {inPersonEligible && wait >= pickupHoldMinutes && proofContext ? (
             <PickupNotCollectedAction
+              paused={paused}
               item={item}
               csrf={proofContext.csrf}
               storeReference={proofContext.storeReference}
@@ -204,7 +230,7 @@ export function PickupQueueScreen({
   const [claimFilter, setClaimFilter] = useState("All");
   const [exceptionFilter, setExceptionFilter] = useState("All");
   const [orderQuery, setOrderQuery] = useState("");
-  const readOnly = view.freshnessStatus !== "Fresh" || stale !== undefined;
+  const readOnly = view.freshnessStatus !== "Fresh";
   const query = orderQuery.trim().toLocaleLowerCase();
   const items = view.items.filter(
     (item) =>
@@ -323,6 +349,7 @@ export function PickupQueueScreen({
                 item={item}
                 observedAt={view.projectedAt}
                 readOnly={readOnly}
+                paused={stale !== undefined}
                 proofContext={proofContext}
                 workstation={view.workstation}
                 hidden={!visibleReferences.has(item.fulfillmentReference)}
@@ -403,7 +430,9 @@ export function PickupQueuePage(props: {
       })
       .catch((error) => {
         if (!active) return;
-        const reason: ReadFailure = error instanceof PickupClientError ? error.code : "Unavailable";
+        const reason = readFailureReason(
+          error instanceof PickupClientError ? error.code : "Unavailable",
+        );
         setStored((previous) => {
           const failures = previous.failures + 1;
           // IDR-0039: the same queue stays visible, read-only, unless access itself was lost.
@@ -435,6 +464,17 @@ export function PickupQueuePage(props: {
   }, [key, queueKey, load]);
   const stale = state.kind === "Found" ? state.stale : undefined;
   useStaleRetry(stale?.attempts ?? null, () => setRevision((value) => value + 1));
+  // IDR-0039: the browser saying the network is gone is enough to go read-only at once.
+  useBrowserOffline(() => setStored(pickupOfflineState));
+  // Re-read on its own while visible, like the Kitchen board, so an outage is noticed.
+  const live = state.kind === "Found" && stale === undefined;
+  useEffect(() => {
+    if (!live || typeof window === "undefined") return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") setRevision((value) => value + 1);
+    }, pickupRefreshIntervalMs);
+    return () => window.clearInterval(timer);
+  }, [live]);
   useEffect(() => {
     if (current && state.kind !== "Loading" && focusAfterLoad.current) {
       refreshButtonRef.current?.focus();

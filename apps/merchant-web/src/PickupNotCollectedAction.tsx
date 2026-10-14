@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import type { PickupQueueItem } from "./pickup.js";
 import { serviceOperationReference } from "./service-control-client.js";
+import { browserOffline } from "./stale-read.js";
 
 /** One hour after an order is ready the pickup hold ends (pickup code validity). */
 export const pickupHoldMinutes = 60;
@@ -43,7 +44,10 @@ export function PickupNotCollectedAction({
   csrf,
   storeReference,
   fetcher = fetch,
+  paused = false,
 }: {
+  /** IDR-0039: offline or stale; nothing is sent and nothing is queued for later. */
+  readonly paused?: boolean;
   readonly item: PickupQueueItem;
   readonly csrf: string;
   readonly storeReference: string;
@@ -56,7 +60,7 @@ export function PickupNotCollectedAction({
   const [confirmed, setConfirmed] = useState(false);
   const [outcome, setOutcome] = useState<Outcome>("Idle");
   const submit = async () => {
-    if (!item.execution || outcome === "Pending") return;
+    if (!item.execution || outcome === "Pending" || paused || browserOffline()) return;
     intent.current ??= {
       idempotencyReference: serviceOperationReference(),
       correlationReference: serviceOperationReference(),
@@ -85,7 +89,7 @@ export function PickupNotCollectedAction({
   };
   return (
     <>
-      <button disabled={outcome === "Closed"} onClick={() => dialog.current?.showModal()}>
+      <button disabled={outcome === "Closed" || paused} onClick={() => dialog.current?.showModal()}>
         Mark not collected
       </button>
       {outcome === "Closed" ? <p role="status">{message.Closed}</p> : null}
@@ -110,11 +114,12 @@ export function PickupNotCollectedAction({
               />
               I checked the pickup shelf and nobody collected this order
             </label>
-            <button disabled={!confirmed} onClick={() => void submit()}>
+            <button disabled={!confirmed || paused} onClick={() => void submit()}>
               {outcome === "Unknown" ? "Retry same close" : "Close as not collected"}
             </button>
           </>
         ) : null}
+        {paused ? <p role="status">Paused until the connection returns.</p> : null}
         <p role="status">{outcome === "Idle" ? null : message[outcome]}</p>
         <button disabled={outcome === "Pending"} onClick={() => dialog.current?.close()}>
           Close

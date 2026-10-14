@@ -3,6 +3,7 @@ import { createPickupHandoffClient, PickupHandoffClientError } from "./pickup-ha
 import type { PickupVerification } from "./pickup-proof-client.js";
 import type { PickupQueueItem, PickupWorkstation } from "./pickup.js";
 import { serviceOperationReference } from "./service-control-client.js";
+import { browserOffline } from "./stale-read.js";
 const client = createPickupHandoffClient();
 export function PickupHandoffForm({
   item,
@@ -10,7 +11,10 @@ export function PickupHandoffForm({
   workstation,
   csrf,
   storeReference,
+  paused = false,
 }: {
+  /** IDR-0039: offline or stale; nothing is sent and nothing is queued for later. */
+  readonly paused?: boolean;
   readonly item: PickupQueueItem;
   /** Null when staff verify the customer in person (the pickup code expired or was never sent). */
   readonly verification: PickupVerification | null;
@@ -51,6 +55,8 @@ export function PickupHandoffForm({
   }, [locked]);
   const submit = async (retry: boolean) => {
     if (
+      paused ||
+      browserOffline() ||
       controller.current ||
       (!retry &&
         (status !== "Idle" || !confirmed || !recipient || !mask || (inPerson && !identityCheck)))
@@ -98,7 +104,7 @@ export function PickupHandoffForm({
     item.execution?.items.filter((line) => line.readyQuantity > line.handedOverQuantity) ?? [];
   return (
     <>
-      <button disabled={status !== "Idle"} onClick={() => dialog.current?.showModal()}>
+      <button disabled={status !== "Idle" || paused} onClick={() => dialog.current?.showModal()}>
         {inPerson ? "Hand over after checking in person" : "Review pickup handoff"}
       </button>
       {status === "Completed" || status === "InProgress" ? (
@@ -203,12 +209,13 @@ export function PickupHandoffForm({
             </label>
             <button
               type="submit"
-              disabled={!confirmed || !recipient || !mask || (inPerson && !identityCheck)}
+              disabled={paused || !confirmed || !recipient || !mask || (inPerson && !identityCheck)}
             >
               Confirm and record handoff
             </button>
           </form>
         ) : null}
+        {paused ? <p role="status">Paused until the connection returns.</p> : null}
         <div role="status">
           {status === "Pending" ? "Recording handoff…" : null}
           {status === "Unknown"
@@ -222,7 +229,9 @@ export function PickupHandoffForm({
             : null}
         </div>
         {status === "Unknown" ? (
-          <button onClick={() => void submit(true)}>Retry same handoff</button>
+          <button disabled={paused} onClick={() => void submit(true)}>
+            Retry same handoff
+          </button>
         ) : null}
         <button disabled={locked} onClick={() => dialog.current?.close()}>
           Close handoff confirmation

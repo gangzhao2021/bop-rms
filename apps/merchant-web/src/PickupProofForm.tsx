@@ -7,6 +7,7 @@ import {
 } from "./pickup-proof-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import type { PickupQueueItem, PickupWorkstation } from "./pickup.js";
+import { browserOffline } from "./stale-read.js";
 
 const client = createPickupProofClient();
 type Intent = ReturnType<typeof client.prepare>;
@@ -15,7 +16,10 @@ export function PickupProofForm({
   csrf,
   storeReference,
   workstation,
+  paused = false,
 }: {
+  /** IDR-0039: offline or stale; nothing is sent and nothing is queued for later. */
+  readonly paused?: boolean;
   readonly workstation?: PickupWorkstation | null | undefined;
   readonly item: PickupQueueItem;
   readonly csrf: string;
@@ -49,7 +53,14 @@ export function PickupProofForm({
     if (document.activeElement === document.body) retryButtonRef.current?.focus();
   }, [status]);
   const submit = async (retry: boolean) => {
-    if (controller.current || status === "Verified" || status === "Rejected") return;
+    if (
+      paused ||
+      browserOffline() ||
+      controller.current ||
+      status === "Verified" ||
+      status === "Rejected"
+    )
+      return;
     restoreRetryFocus.current = retry
       ? document.activeElement === retryButtonRef.current
       : Boolean(formRef.current?.contains(document.activeElement));
@@ -90,7 +101,12 @@ export function PickupProofForm({
       setStatus("Rejected");
     }
   };
-  if (!open) return <button onClick={() => setOpen(true)}>Open proof verification</button>;
+  if (!open)
+    return (
+      <button disabled={paused} onClick={() => setOpen(true)}>
+        Open proof verification
+      </button>
+    );
   return (
     <section aria-label="Pickup proof verification">
       <p>Verify the code for this exact order. Verification does not complete handoff.</p>
@@ -116,11 +132,12 @@ export function PickupProofForm({
               onChange={(event) => setCredential(event.currentTarget.value)}
             />
           </label>
-          <button type="submit" disabled={!credential}>
+          <button type="submit" disabled={!credential || paused}>
             Verify pickup proof
           </button>
         </form>
       ) : null}
+      {paused ? <p role="status">Paused until the connection returns.</p> : null}
       <div role="status">
         {status === "Pending" ? "Verifying pickup proof…" : null}
         {status === "Verified"
@@ -135,6 +152,7 @@ export function PickupProofForm({
       </div>
       {status === "Verified" && verification && workstation ? (
         <PickupHandoffForm
+          paused={paused}
           item={item}
           verification={verification}
           workstation={workstation}
@@ -143,7 +161,7 @@ export function PickupProofForm({
         />
       ) : null}
       {status === "OutcomeUnknown" ? (
-        <button ref={retryButtonRef} onClick={() => void submit(true)}>
+        <button ref={retryButtonRef} disabled={paused} onClick={() => void submit(true)}>
           Retry same verification
         </button>
       ) : null}

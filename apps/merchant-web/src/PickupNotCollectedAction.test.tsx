@@ -1,5 +1,10 @@
+import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
-import { closeUncollectedBody, closeUncollectedOutcome } from "./PickupNotCollectedAction.js";
+import {
+  closeUncollectedBody,
+  closeUncollectedOutcome,
+  PickupNotCollectedAction,
+} from "./PickupNotCollectedAction.js";
 import { parsePickupQueueView } from "./pickup.js";
 import { pickupQueueFixture } from "./pickup.fixtures.js";
 
@@ -30,4 +35,21 @@ it("WP-2423: sends close intent only and maps the server's answer", () => {
   expect(closeUncollectedOutcome(422)).toBe("NotEligible");
   expect(closeUncollectedOutcome(409)).toBe("NotEligible");
   expect(closeUncollectedOutcome(503)).toBe("Unknown");
+});
+
+it("IDR-0039: paused while offline or stale, so nothing can be sent", () => {
+  const parsed = parsePickupQueueView(pickupQueueFixture()).items[0];
+  if (!parsed) throw new Error("fixture");
+  const render = (paused: boolean) =>
+    renderToStaticMarkup(
+      <PickupNotCollectedAction
+        item={parsed}
+        csrf={"A".repeat(43)}
+        storeReference="01900000-0000-7000-8000-000000000004"
+        paused={paused}
+      />,
+    );
+  expect(render(false)).toContain("<button>Mark not collected</button>");
+  expect(render(true)).toContain('<button disabled="">Mark not collected</button>');
+  expect(render(true)).toContain("Paused until the connection returns.");
 });
