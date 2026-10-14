@@ -107,6 +107,22 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier", "personal", "health"],
     },
     {
+      table: "kitchen_rework_item",
+      classification: "aggregate-root",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier", "personal"],
+    },
+    {
+      table: "kitchen_rework_operation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier", "personal"],
+    },
+    {
       table: "kitchen_work_cancellation",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/kitchen" },

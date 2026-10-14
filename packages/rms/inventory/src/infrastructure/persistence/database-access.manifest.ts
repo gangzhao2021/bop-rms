@@ -740,6 +740,15 @@ const databaseAccessManifestInput = {
       source: "packages/rms/inventory/src/infrastructure/persistence/stock-count-store.ts",
     },
     {
+      id: "kitchen-rework-waste-store.read.store_waste",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_inventory", table: "store_waste" },
+      principal: { kind: "module", id: "@rms/inventory" },
+      readPattern: "owner-repository",
+      source: "packages/rms/inventory/src/infrastructure/persistence/kitchen-rework-waste-store.ts",
+    },
+    {
       id: "store-waste-store.read.store_waste",
       operation: "read",
       mechanism: "repository",

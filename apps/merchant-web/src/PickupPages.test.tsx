@@ -166,3 +166,32 @@ it("IDR-0039: the browser going offline turns the loaded queue read-only at once
   expect(pickupOfflineState(loading)).toBe(loading);
   expect(pickupRefreshIntervalMs).toBe(10_000);
 });
+
+it("WP-2423 Q26: tells staff to wait when the kitchen is remaking part of the order", () => {
+  const fixture = pickupQueueFixture();
+  const render = (remakeQuantity: number | undefined, phase = "Ready") =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <PickupQueueScreen
+          view={parsePickupQueueView({
+            ...fixture,
+            items: fixture.items.map((item) => ({
+              ...item,
+              phase,
+              ...(remakeQuantity === undefined ? {} : { remakeQuantity }),
+            })),
+          })}
+        />
+      </MemoryRouter>,
+    );
+  expect(render(1)).toContain("Kitchen is remaking 1 item");
+  expect(render(2)).toContain("Kitchen is remaking 2 items");
+  expect(render(undefined)).not.toContain("remaking");
+  expect(render(1, "Completed")).not.toContain("remaking");
+  expect(() =>
+    parsePickupQueueView({
+      ...fixture,
+      items: fixture.items.map((item) => ({ ...item, remakeQuantity: 0 })),
+    }),
+  ).toThrow();
+});

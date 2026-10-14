@@ -1495,6 +1495,8 @@ async function scanUnsupported(root, module, diagnostics) {
           [
             "src/infrastructure/persistence/stock-count-store.ts",
             "src/infrastructure/persistence/store-waste-store.ts",
+            // WP-2423 Q26: a Kitchen remake's first dish recorded as Store waste.
+            "src/infrastructure/persistence/kitchen-rework-waste-store.ts",
           ].includes(moduleRelative);
         // WP-2423 / DEC-INV-OPENING: Store opening count posting to the ledger.
         const acceptedOpeningCountAsset =
@@ -2746,6 +2748,17 @@ async function scanUnsupported(root, module, diagnostics) {
             "kitchen_work_cancellation",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/kitchen-work-cancellation-store.ts";
+        // WP-2423 Q26 (Handoff Section 26.6): Rework work items for dishes made again.
+        const acceptedKitchenReworkAsset =
+          module.packageName === "@rms/kitchen" &&
+          module.manifest.ownedDatabase?.schema === "rms_kitchen" &&
+          [
+            "kitchen_work_item",
+            "kitchen_order_item_ready_result",
+            "kitchen_rework_item",
+            "kitchen_rework_operation",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/kitchen-rework-store.ts";
         const acceptedKitchenQueueSourceAsset =
           module.packageName === "@rms/kitchen" &&
           module.manifest.ownedDatabase?.schema === "rms_kitchen" &&
@@ -3540,6 +3553,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedFulfillmentCompletionStoreAsset &&
           !acceptedKitchenLifecycleStoreAsset &&
           !acceptedKitchenWorkCancellationAsset &&
+          !acceptedKitchenReworkAsset &&
           !acceptedKitchenQueueQueriesAsset &&
           !acceptedKitchenQueueSourceAsset &&
           !acceptedKitchenCustomerStatusAsset &&

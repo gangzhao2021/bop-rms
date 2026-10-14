@@ -226,6 +226,7 @@ import type { createMerchantOrdinaryRefundDecline } from "./merchant-ordinary-re
 import type { createMerchantOrdinaryRefundProgress } from "./merchant-ordinary-refund-progress.js";
 import type { createMerchantKitchenCommand } from "./merchant-kitchen-command.js";
 import type { createMerchantKitchenRelease } from "./merchant-kitchen-release.js";
+import type { createMerchantKitchenRework } from "./merchant-kitchen-rework.js";
 import {
   MerchantRoleAdministrationError,
   type createMerchantRoleAdministration,
@@ -275,7 +276,11 @@ import {
   type createMerchantStaffAdministration,
 } from "./merchant-staff-administration.js";
 import type { createMerchantKitchenQuery } from "./merchant-kitchen-query.js";
-import { KitchenQueueProjectionError, KitchenWorkLifecycleError } from "@rms/kitchen";
+import {
+  KitchenQueueProjectionError,
+  KitchenReworkError,
+  KitchenWorkLifecycleError,
+} from "@rms/kitchen";
 import type { createBrandLifecycleCommand } from "./brand-lifecycle-command.js";
 import { BrandAdministrationServiceError } from "@bop/tenant";
 import type { createMerchantProductDraftCommand } from "./merchant-product-draft-command.js";
@@ -576,6 +581,8 @@ export interface MerchantBffRouterOptions {
   readonly kitchenQuery?: ReturnType<typeof createMerchantKitchenQuery>;
   readonly kitchenCommand?: ReturnType<typeof createMerchantKitchenCommand>;
   readonly kitchenRelease?: ReturnType<typeof createMerchantKitchenRelease>;
+  /** WP-2423 Q26 (Handoff Section 26.6): remake a finished dish from the Kitchen board. */
+  readonly kitchenRework?: ReturnType<typeof createMerchantKitchenRework>;
   readonly roleAdministration?: ReturnType<typeof createMerchantRoleAdministration>;
   readonly staffAdministration?: ReturnType<typeof createMerchantStaffAdministration>;
   readonly inventoryItems?: ReturnType<typeof createMerchantInventoryItems>;
@@ -5619,6 +5626,69 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         }[error.code];
         response.status(status).json({ error: error.code });
       });
+  });
+
+  // WP-2423 Q26 (Handoff Section 26.6): Kitchen remakes. Errors carry a code only.
+  const kitchenReworkFailure = (response: express.Response, error: unknown) => {
+    if (!(error instanceof KitchenReworkError)) {
+      denied(response);
+      return;
+    }
+    const status = {
+      KITCHEN_REWORK_INPUT_INVALID: 400,
+      KITCHEN_REWORK_PERMISSION_DENIED: 403,
+      KITCHEN_REWORK_NOT_FOUND: 404,
+      KITCHEN_REWORK_CONFLICT: 409,
+      KITCHEN_REWORK_PRECONDITION_FAILED: 422,
+      KITCHEN_REWORK_WINDOW_CLOSED: 422,
+      KITCHEN_REWORK_UNAVAILABLE: 503,
+    }[error.code];
+    response.status(status).json({ error: error.code });
+  };
+  router.post("/kitchen/rework/query", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    const body = request.body as Record<string, unknown> | undefined;
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0 ||
+      body === undefined ||
+      Object.keys(body).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.kitchenRework) {
+      response.status(503).json({ error: "kitchen_rework_unavailable" });
+      return;
+    }
+    void options.kitchenRework
+      .query({ sessionCookie, csrf })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => kitchenReworkFailure(response, error));
+  });
+  router.post("/kitchen/rework/command", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.kitchenRework) {
+      response.status(503).json({ error: "kitchen_rework_unavailable" });
+      return;
+    }
+    void options.kitchenRework
+      .command({ sessionCookie, csrf, command: request.body })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => kitchenReworkFailure(response, error));
   });
 
   // WP-2423: IAM-ROLE-LIST / IAM-ROLE-EDITOR reads and role administration commands.

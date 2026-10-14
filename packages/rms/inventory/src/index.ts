@@ -224,3 +224,5 @@ export * from "./domain/store-waste.js";
 export * from "./infrastructure/persistence/store-waste-store.js";
 export * from "./infrastructure/persistence/stock-count-store.js";
 export * from "./infrastructure/persistence/ledger-posting.js";
+// WP-2423 Q26: the first dish of a Kitchen remake recorded as Store waste.
+export * from "./infrastructure/persistence/kitchen-rework-waste-store.js";

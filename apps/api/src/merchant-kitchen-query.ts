@@ -91,7 +91,7 @@ export interface KitchenOrderLabel {
   readonly orderType: "Pickup" | "DineIn";
   readonly tableLabel: string | null;
 }
-interface KitchenPreparation {
+export interface KitchenPreparation {
   readonly allergens: KitchenItemAllergens;
   readonly orderLabel: KitchenOrderLabel | null;
   /** Restricted (DEC-KDS-CUSTOMER-NOTE): displayed only; never logged or evented. */
@@ -115,7 +115,7 @@ const itemView = (item: KitchenQueueItemView, preparation: KitchenPreparation) =
  * WP-2423 Q3: Kitchen gives each work item's menu keys, Catalog the disclosure published for them.
  * Product facts only; no Customer note or health fact. Missing sources read as Unavailable.
  */
-async function kitchenPreparation(
+export async function kitchenPreparation(
   transaction: ConsumerTransaction,
   scope: { readonly brandReference: string; readonly storeReference: string },
   items: readonly { readonly workItemReference: string; readonly orderReference: string }[],

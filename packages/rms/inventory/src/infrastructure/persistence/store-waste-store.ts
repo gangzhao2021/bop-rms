@@ -8,6 +8,7 @@ import {
   type PostedStoreWasteLine,
   type StoreWasteLine,
   type StoreWasteRecord,
+  type StoreWasteSource,
 } from "../../domain/store-waste.js";
 import { latestStoreUnitCosts } from "./inventory-recipe-facts-store.js";
 import {
@@ -163,6 +164,8 @@ export async function postStoreWaste(
     readonly occurredAt: string;
     readonly auditReference: string;
     readonly nextReference: () => string;
+    /** WP-2423 Q26: set when the record comes from a Kitchen remake rather than the waste page. */
+    readonly source?: StoreWasteSource;
   },
 ): Promise<{ readonly status: "Applied" | "AlreadyApplied"; readonly record: StoreWasteView }> {
   await scoped(tx, scope);
@@ -281,6 +284,7 @@ export async function postStoreWaste(
     needsReview: costUnknown || valueMinor >= storeWasteReviewThresholdMinor,
     recordedBy: input.actorReference,
     recordedAt: input.occurredAt,
+    ...(input.source === undefined ? {} : { source: input.source }),
     intent,
   };
   await tx.query(
@@ -313,7 +317,7 @@ export async function postStoreWaste(
       valueMinor,
       needsReview: record.needsReview,
     },
-    reasonCode: "STORE_WASTE",
+    reasonCode: input.source === undefined ? "STORE_WASTE" : "KITCHEN_REWORK_WASTE",
     correlationId: input.operationReference,
     occurredAt: input.occurredAt,
     sourceChannel: "MERCHANT_WEB",

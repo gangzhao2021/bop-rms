@@ -1,4 +1,13 @@
 import { useKitchenActions } from "./use-kitchen-actions.js";
+import {
+  KitchenRecentlyFinished,
+  KitchenRemakeDialog,
+  KitchenRemakeLane,
+  KitchenReworkStatus,
+  useKitchenRework,
+  type RemakeChoice,
+} from "./KitchenRework.js";
+import type { KitchenReworkView } from "./kitchen-rework-client.js";
 import type { KitchenAction } from "./kitchen-work-client.js";
 import { createKitchenBoardClient } from "./kitchen-board-client.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
@@ -291,6 +300,7 @@ function WorkCard({
   readOnly,
   observedAt,
   onAction,
+  onRemake,
   showDetails = true,
   showActions = true,
   showModifiers = false,
@@ -300,6 +310,8 @@ function WorkCard({
   readonly readOnly: boolean;
   readonly observedAt: string;
   readonly onAction?: (item: KitchenBoardItem, action: KitchenAction) => void;
+  /** WP-2423 Q26: offered on finished dishes when the operator may remake them. */
+  readonly onRemake?: ((item: KitchenBoardItem) => void) | undefined;
   readonly showDetails?: boolean;
   readonly showActions?: boolean;
   readonly showModifiers?: boolean;
@@ -450,6 +462,15 @@ function WorkCard({
                     Mark ready
                   </button>
                 ) : null}
+                {item.status === "Completed" && onRemake ? (
+                  <button
+                    className="kitchen-remake-button"
+                    disabled={readOnly}
+                    onClick={() => onRemake(item)}
+                  >
+                    Remake
+                  </button>
+                ) : null}
               </>
             ) : (
               <span className="kitchen-work-item__no-actions">
@@ -521,8 +542,20 @@ export function KitchenBoardScreen({
   autoRefresh = false,
   stale,
   soldOutHref,
+  remakes,
 }: {
   readonly view: KitchenBoardView;
+  /** WP-2423 Q26: remakes, when this source offers them. */
+  readonly remakes?:
+    | {
+        readonly items: readonly KitchenReworkView[];
+        readonly canRework: boolean;
+        readonly readFailed: boolean;
+        readonly blocked: boolean;
+        readonly onCreate: (item: KitchenBoardItem, choice: RemakeChoice) => void;
+        readonly onAdvance: (rework: KitchenReworkView) => void;
+      }
+    | undefined;
   readonly onSearch?: (search: KitchenQueueSearch | null) => void;
   readonly searchApplied?: boolean;
   readonly onAction?: (item: KitchenBoardItem, action: KitchenAction) => void;
@@ -549,7 +582,10 @@ export function KitchenBoardScreen({
   const [referenceKind, setReferenceKind] = useState<KitchenQueueSearch["kind"]>("Order");
   const [referenceInput, setReferenceInput] = useState("");
   const filterSheetRef = useRef<HTMLDialogElement>(null);
+  const [remakeTarget, setRemakeTarget] = useState<KitchenBoardItem | null>(null);
   const readOnly = view.freshnessStatus !== "Fresh" || view.operatorStatus !== "Named";
+  const remakeReadOnly = readOnly || stale !== undefined || (remakes?.blocked ?? true);
+  const onRemake = remakes?.canRework ? setRemakeTarget : undefined;
   const stations = [
     ...new Set(
       view.items.flatMap((item) => (item.stationLabel === null ? [] : [item.stationLabel])),
@@ -882,6 +918,20 @@ export function KitchenBoardScreen({
           {renderReferenceSearch("mobile")}
           {renderFilters("mobile")}
         </dialog>
+        {remakes?.readFailed ? (
+          <p className="kitchen-remake-read-failed" role="status">
+            Remakes could not be refreshed. The board keeps trying.
+          </p>
+        ) : null}
+        {remakes ? (
+          <div className="kitchen-board-lanes kitchen-board-remakes">
+            <KitchenRemakeLane
+              items={remakes.items}
+              readOnly={remakeReadOnly}
+              onAdvance={remakes.onAdvance}
+            />
+          </div>
+        ) : null}
         {items.length === 0 ? (
           <StatePanel
             heading={searchApplied || view.items.length > 0 ? "No matching work" : "No active work"}
@@ -933,6 +983,7 @@ export function KitchenBoardScreen({
                             item={item}
                             readOnly={readOnly || actionsBlocked || stale !== undefined}
                             {...(onAction ? { onAction } : {})}
+                            onRemake={onRemake}
                             observedAt={view.projectedAt}
                             detailState={{
                               station: activeStation,
@@ -950,6 +1001,24 @@ export function KitchenBoardScreen({
             })}
           </div>
         )}
+        {remakes && onRemake ? (
+          <KitchenRecentlyFinished
+            items={view.items}
+            reworks={remakes.items}
+            observedAt={view.projectedAt}
+            readOnly={remakeReadOnly}
+            onRemake={setRemakeTarget}
+            orderLabel={kitchenOrderLabel}
+          />
+        ) : null}
+        {remakes && onRemake ? (
+          <KitchenRemakeDialog
+            item={remakeTarget}
+            observedAt={view.projectedAt}
+            onSubmit={remakes.onCreate}
+            onClose={() => setRemakeTarget(null)}
+          />
+        ) : null}
       </div>
     </AppFrame>
   );
@@ -1179,6 +1248,13 @@ function KitchenBoardContent(props: KitchenPageProps) {
     view: state.kind === "Found" ? state.view : null,
     revision,
   });
+  // WP-2423 Q26: remakes are read with the board and refresh it after a change.
+  const rework = useKitchenRework({
+    csrf: props.csrf,
+    storeReference: props.storeReference,
+    revision,
+    onChanged: useCallback(() => setRevision((value) => value + 1), []),
+  });
   const refreshButtonRef = useRef<HTMLButtonElement>(null),
     retryButtonRef = useRef<HTMLButtonElement>(null),
     restoreRetryFocus = useRef(false);
@@ -1270,6 +1346,7 @@ function KitchenBoardContent(props: KitchenPageProps) {
           ) : null}
         </StatePanel>
       ) : null}
+      <KitchenReworkStatus rework={rework} />
       {state.kind === "Found" ? (
         <KitchenBoardScreen
           view={state.view}
@@ -1285,6 +1362,18 @@ function KitchenBoardContent(props: KitchenPageProps) {
           autoRefresh
           stale={stale}
           soldOutHref={props.soldOutHref}
+          remakes={
+            rework.board
+              ? {
+                  items: rework.board.items,
+                  canRework: rework.board.canRework,
+                  readFailed: rework.readFailed,
+                  blocked: rework.busy || browserOffline(),
+                  onCreate: rework.create,
+                  onAdvance: rework.advance,
+                }
+              : undefined
+          }
         />
       ) : (
         <AppFrame

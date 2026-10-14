@@ -6,6 +6,7 @@ import {
   FulfillmentReadinessError,
 } from "@rms/fulfillment";
 import { createPostgresStaffOrderCancellationReader, listStoreOrderNumbers } from "@rms/ordering";
+import { listOpenKitchenReworkByOrder } from "@rms/kitchen";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -137,6 +138,11 @@ export function createMerchantPickupQuery(options: {
               )
             ).map((record) => String(record.orderReference)),
       );
+      // WP-2423 Q26: a dish the kitchen is remaking (dropped, wrong, marked done too early) is
+      // flagged so staff wait before handing the order over. Kitchen's public Query; counts only.
+      const remakes = await listOpenKitchenReworkByOrder(tx, selected, [
+        ...new Set(result.items.map((item) => String(item.orderReference))),
+      ]);
       if (!(await scope.allowed()))
         throw new FulfillmentReadinessError("FULFILLMENT_READINESS_PERMISSION_DENIED");
       return Object.freeze({
@@ -150,6 +156,7 @@ export function createMerchantPickupQuery(options: {
               ...item,
               aggregateVersion: item.aggregateVersion.toString(),
               orderNumber: numbers.get(String(item.orderReference)) ?? null,
+              remakeInProgress: remakes.get(String(item.orderReference))?.openQuantity ?? 0,
             }),
           ),
       });

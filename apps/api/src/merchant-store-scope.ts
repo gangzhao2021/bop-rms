@@ -16,10 +16,12 @@ import { createMerchantSelectedContext } from "./merchant-selected-context.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 
 /** IDR-0039 least-privilege named KDS Operator profile: whatever the Actor's roles allow,
- * a NamedKdsOperator Session can only enter the workspace and operate the Kitchen. */
+ * a NamedKdsOperator Session can only enter the workspace and operate the Kitchen (WP-2423 Q26:
+ * including a remake, which the Actor's roles must still allow). */
 export const kdsOperatorProfileActions: ReadonlySet<string> = new Set([
   "merchant.access",
   "kitchen.operate",
+  "kitchen.work_item.rework",
 ]);
 
 /** Current Workforce session, selected Tenant/Brand/Store and per-action policy.

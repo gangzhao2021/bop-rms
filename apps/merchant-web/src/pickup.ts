@@ -10,6 +10,8 @@ export interface PickupQueueItem {
   readonly exceptionStatus: "None" | "Reported" | "Unavailable";
   readonly packageCount: number | null;
   readonly allergenCue: "None" | "Present" | "Unavailable";
+  /** WP-2423 Q26: portions the kitchen is remaking for this order; wait before handing over. */
+  readonly remakeQuantity?: number;
   readonly execution?: PickupExecution;
 }
 export interface PickupExecution {
@@ -91,6 +93,7 @@ function instant(value: unknown): string {
 }
 function item(value: unknown): PickupQueueItem {
   const hasExecution = !!value && typeof value === "object" && Object.hasOwn(value, "execution");
+  const hasRemake = !!value && typeof value === "object" && Object.hasOwn(value, "remakeQuantity");
   const input = closed(value, [
     "fulfillmentReference",
     "orderReference",
@@ -103,6 +106,7 @@ function item(value: unknown): PickupQueueItem {
     "exceptionStatus",
     "packageCount",
     "allergenCue",
+    ...(hasRemake ? ["remakeQuantity"] : []),
     ...(hasExecution ? ["execution"] : []),
   ]);
   if (
@@ -117,7 +121,11 @@ function item(value: unknown): PickupQueueItem {
     !["None", "Reported", "Unavailable"].includes(String(input.exceptionStatus)) ||
     (input.packageCount !== null &&
       (!Number.isSafeInteger(input.packageCount) || Number(input.packageCount) < 1)) ||
-    !["None", "Present", "Unavailable"].includes(String(input.allergenCue))
+    !["None", "Present", "Unavailable"].includes(String(input.allergenCue)) ||
+    (hasRemake &&
+      (!Number.isSafeInteger(input.remakeQuantity) ||
+        Number(input.remakeQuantity) < 1 ||
+        Number(input.remakeQuantity) > 999))
   )
     throw new Error("PICKUP_VIEW_INVALID");
   return Object.freeze({
@@ -132,6 +140,7 @@ function item(value: unknown): PickupQueueItem {
     exceptionStatus: input.exceptionStatus as PickupQueueItem["exceptionStatus"],
     packageCount: input.packageCount === null ? null : Number(input.packageCount),
     allergenCue: input.allergenCue as PickupQueueItem["allergenCue"],
+    ...(hasRemake ? { remakeQuantity: Number(input.remakeQuantity) } : {}),
     ...(hasExecution ? { execution: parsePickupExecution(input.execution) } : {}),
   });
 }

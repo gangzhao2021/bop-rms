@@ -403,3 +403,36 @@ export { createKitchenQueueRebuildSource } from "./application/kitchen-queue-reb
 
 export { createPostgresKitchenQueueReadModel } from "./infrastructure/kitchen-queue-read-model.js";
 export { createPostgresKdsOperatorShiftStore } from "./infrastructure/persistence/kds-operator-shift-store.js";
+// WP-2423 Q26 (Handoff Section 26.6): Rework work items for dishes that are made again.
+export {
+  KitchenReworkError,
+  kitchenReworkCreatedEventConsumer,
+  kitchenReworkErrorCodes,
+  kitchenReworkMaximumPerOriginal,
+  kitchenReworkNoteMaximumLength,
+  kitchenReworkNotReadyWindowMs,
+  kitchenReworkPermission,
+  kitchenReworkReasons,
+  kitchenReworkRecentWindowMs,
+  kitchenReworkWasteApplies,
+  parseKitchenReworkCommand,
+  type CreateKitchenReworkCommand,
+  type AdvanceKitchenReworkCommand,
+  type KitchenReworkAction,
+  type KitchenReworkCommand,
+  type KitchenReworkCreatedEnvelope,
+  type KitchenReworkCreatedPayload,
+  type KitchenReworkErrorCode,
+  type KitchenReworkItem,
+  type KitchenReworkReason,
+  type KitchenReworkResult,
+  type KitchenReworkStatus,
+} from "./contracts/kitchen-rework.js";
+export {
+  createKitchenReworkCreatedEnvelope,
+  parseKitchenReworkCreatedEnvelope,
+} from "./application/kitchen-rework-created-event.js";
+export {
+  createPostgresKitchenReworkStore,
+  listOpenKitchenReworkByOrder,
+} from "./infrastructure/persistence/kitchen-rework-store.js";

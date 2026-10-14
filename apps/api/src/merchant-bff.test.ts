@@ -23,6 +23,7 @@ import { FulfillmentReadinessError } from "@rms/fulfillment";
 import { PickupHandoffError, PickupProofError } from "@rms/fulfillment";
 import {
   KitchenQueueProjectionError,
+  KitchenReworkError,
   KitchenWorkLifecycleError,
   parseKitchenWorkLifecycleResult,
 } from "@rms/kitchen";
@@ -6114,6 +6115,77 @@ describe("WP-2423 Q18 staff session continuity routes", () => {
     });
     expect(
       (await request(unsafe, "/merchant/sign-in-entry", { headers: safeHeaders })).status,
+    ).toBe(503);
+  });
+});
+
+describe("WP-2423 Q26 Kitchen remake routes", () => {
+  async function serveRework(kitchenRework?: MerchantBffRouterOptions["kitchenRework"]) {
+    const app = express();
+    app.use(
+      "/merchant",
+      createMerchantBffRouter({
+        service: fakeService(),
+        exactOrigin: "https://merchant.invalid",
+        acceptedHost: "merchant.invalid",
+        ...(kitchenRework ? { kitchenRework } : {}),
+      }),
+    );
+    const server = app.listen(0, "127.0.0.1");
+    servers.push(server);
+    await new Promise<void>((resolve) => server.once("listening", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("listener unavailable");
+    return `http://127.0.0.1:${address.port}`;
+  }
+  const headers = () => ({
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  });
+  it("maps typed failures to statuses, never leaks other errors, and is absent when unwired", async () => {
+    const command = vi.fn();
+    const query = vi.fn();
+    const root = await serveRework({ command, query } as unknown as NonNullable<
+      MerchantBffRouterOptions["kitchenRework"]
+    >);
+    const post = (path: string, body = "{}", extra: Record<string, string> = {}) =>
+      request(root, path, { method: "POST", body, headers: { ...headers(), ...extra } });
+    expect(
+      (await post("/merchant/kitchen/rework/command", "{}", { "X-BOP-CSRF": "" })).status,
+    ).toBe(403);
+    expect((await post("/merchant/kitchen/rework/query", '{"store":"x"}')).status).toBe(403);
+    expect(command).not.toHaveBeenCalled();
+    for (const [code, status] of [
+      ["KITCHEN_REWORK_INPUT_INVALID", 400],
+      ["KITCHEN_REWORK_PERMISSION_DENIED", 403],
+      ["KITCHEN_REWORK_NOT_FOUND", 404],
+      ["KITCHEN_REWORK_CONFLICT", 409],
+      ["KITCHEN_REWORK_PRECONDITION_FAILED", 422],
+      ["KITCHEN_REWORK_WINDOW_CLOSED", 422],
+      ["KITCHEN_REWORK_UNAVAILABLE", 503],
+    ] as const) {
+      command.mockRejectedValueOnce(new KitchenReworkError(code));
+      const result = await post("/merchant/kitchen/rework/command");
+      expect(result.status).toBe(status);
+      expect(await result.json()).toEqual({ error: code });
+    }
+    command.mockRejectedValueOnce(new Error("private details"));
+    expect(await (await post("/merchant/kitchen/rework/command")).json()).toEqual({
+      error: "request_denied",
+    });
+    query.mockResolvedValueOnce({ items: [] });
+    expect(await (await post("/merchant/kitchen/rework/query")).json()).toEqual({ items: [] });
+    const unwired = await serveRework();
+    expect(
+      (
+        await request(unwired, "/merchant/kitchen/rework/query", {
+          method: "POST",
+          body: "{}",
+          headers: headers(),
+        })
+      ).status,
     ).toBe(503);
   });
 });

@@ -643,6 +643,15 @@ export const eventConsumerContracts = defineEventConsumerContracts([
     "replace_kitchen_queue_projection",
     "none",
   ),
+  // WP-2423 Q26: Inventory records the remade dish's spoiled first portion as Store waste.
+  contract(
+    "inventory.kitchen-rework-waste",
+    "@rms/inventory",
+    "KitchenReworkCreated",
+    "store",
+    "record_kitchen_rework_waste",
+    "none",
+  ),
   contract(
     "kitchen.queue-work-cancelled-projection",
     "@rms/kitchen",

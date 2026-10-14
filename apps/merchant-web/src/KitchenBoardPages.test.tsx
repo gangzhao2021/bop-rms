@@ -645,3 +645,100 @@ describe("IDR-0039 kitchen stale read-only mode", () => {
     expect(lost).toContain("Connection lost — showing the last update from");
   });
 });
+
+describe("WP-2423 Q26 kitchen remakes (Handoff Section 26.6)", () => {
+  const rework = (overrides: Record<string, unknown> = {}) => ({
+    reworkReference: "018f0f58-767a-7f3b-a1d0-000000000501",
+    originalWorkItemReference: "018f0f58-767a-7f3b-a1d0-000000000401",
+    orderReference: "018f0f58-767a-7f3b-a1d0-000000000403",
+    orderItemReference: "018f0f58-767a-7f3b-a1d0-000000000404",
+    reasonCode: "DROPPED" as const,
+    note: "Slipped off the pass",
+    quantity: 1,
+    wasteApplies: true,
+    status: "Queued" as const,
+    version: 1,
+    createdAt: "2026-08-12T15:10:00.000Z",
+    startedAt: null,
+    completedAt: null,
+    displayName: "Mushroom rice bowl",
+    selectedOptions: [{ displayName: "Extra mushrooms", quantity: 2 }],
+    orderLabel: { orderNumber: "14", orderType: "DineIn" as const, tableLabel: "T4" },
+    customerNote: null,
+    ...overrides,
+  });
+  const finished = {
+    ...kitchenItemFixture(),
+    status: "Completed",
+    completedQuantity: 2,
+    execution: {
+      orderItemReference: "018f0f58-767a-7f3b-a1d0-000000000404",
+      stationReference: "018f0f58-767a-7f3b-a1d0-000000000405",
+      ticketVersion: "5",
+      workItemVersion: "4",
+      acceptedAt: "2026-08-12T15:01:00.000Z",
+      readyAt: "2026-08-12T15:11:00.000Z",
+    },
+  };
+  // Finished but not yet marked ready: still on the active board.
+  const awaitingReady = {
+    ...finished,
+    workItemReference: "018f0f58-767a-7f3b-a1d0-000000000411",
+    displayName: "Garden salad",
+    execution: { ...finished.execution, readyAt: null },
+  };
+  const remakes = (canRework: boolean, items = [rework()]) => ({
+    items,
+    canRework,
+    readFailed: false,
+    blocked: false,
+    onCreate: () => undefined,
+    onAdvance: () => undefined,
+  });
+  const render = (canRework: boolean, items = [rework()]) =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <KitchenBoardScreen
+          view={parseKitchenBoardView({
+            ...kitchenBoardFixture(),
+            items: [finished, awaitingReady],
+          })}
+          remakes={remakes(canRework, items)}
+          actionsBlocked={false}
+        />
+      </MemoryRouter>,
+    );
+  it("marks open remakes in their own lane with the reason in words", () => {
+    const html = render(true);
+    expect(html).toContain('aria-label="Remakes"');
+    expect(html).toContain("Remake · Dropped");
+    expect(html).toContain("Why:</span> Slipped off the pass");
+    expect(html).toContain("Order 14 · Table T4");
+    expect(html).toContain("Start remake");
+    expect(html).not.toContain("DROPPED");
+    const back = render(true, [
+      rework({ reasonCode: "NOT_READY", status: "In Progress", note: null }),
+    ]);
+    expect(back).toContain("Back in progress · Marked done too early");
+    expect(back).toContain("Remake done");
+  });
+  it("offers Remake on finished dishes and the recent list only to those who may remake", () => {
+    const allowed = render(true);
+    expect(allowed).toContain('class="kitchen-remake-button"');
+    expect(allowed).toContain("Recently finished · 1");
+    expect(allowed).toContain('aria-label="Remake Mushroom rice bowl, Order 14 · Table T4"');
+    const denied = render(false);
+    expect(denied).not.toContain('class="kitchen-remake-button"');
+    expect(denied).not.toContain("Recently finished");
+    // Cooks without the remake permission still start and finish remakes.
+    expect(denied).toContain("Start remake");
+    const none = renderToStaticMarkup(
+      <MemoryRouter>
+        <KitchenBoardScreen
+          view={parseKitchenBoardView({ ...kitchenBoardFixture(), items: [finished] })}
+        />
+      </MemoryRouter>,
+    );
+    expect(none).not.toContain("Remake");
+  });
+});

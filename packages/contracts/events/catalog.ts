@@ -190,6 +190,26 @@ const kitchenWorkCancelledPayload = z.strictObject({
   cancelledAt: z.iso.datetime({ offset: false }),
 });
 
+const kitchenReworkCreatedPayload = z.strictObject({
+  kitchenReworkItemReference: z.string().regex(canonicalUuidV7),
+  kitchenTicketReference: z.string().regex(canonicalUuidV7),
+  originalKitchenWorkItemReference: z.string().regex(canonicalUuidV7),
+  orderReference: z.string().regex(canonicalUuidV7),
+  orderBatchReference: z.string().regex(canonicalUuidV7),
+  orderItemReference: z.string().regex(canonicalUuidV7),
+  reasonCode: z.enum([
+    "WRONG_ITEM",
+    "DROPPED",
+    "CUSTOMER_RETURNED",
+    "QUALITY_ISSUE",
+    "NOT_READY",
+    "OTHER",
+  ]),
+  quantity: z.int().min(1).max(999),
+  wasteApplies: z.boolean(),
+  createdAt: z.iso.datetime({ offset: false }),
+});
+
 const kitchenWorkStartedPayload = z.strictObject({
   kitchenTicketReference: z.string().regex(canonicalUuidV7),
   kitchenWorkItemReference: z.string().regex(canonicalUuidV7),
@@ -1563,6 +1583,22 @@ export const eventCatalog = defineEventCatalog([
     deprecated: false,
     replacement: null,
     payloadSchema: kitchenOrderReadyPayload,
+  },
+  {
+    eventType: "KitchenReworkCreated",
+    schemaVersion: 1,
+    ownerModule: "@rms/kitchen",
+    producerModule: "@rms/kitchen",
+    stability: "stable",
+    consumers: ["inventory.kitchen-rework-waste:v1"],
+    tenantScope: "store",
+    dataClassification: "personal",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: kitchenReworkCreatedPayload,
   },
   {
     eventType: "KitchenWorkAccepted",

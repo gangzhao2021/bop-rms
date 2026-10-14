@@ -7803,3 +7803,202 @@ body:has(.product-complete-draft) .bop-shell__header,
     margin-top: 8px;
   }
 }
+/* WP-2423 Q26 (Handoff Section 26.6): remakes are their own lane, marked in words, not colour only. */
+.kitchen-board-remakes {
+  margin-bottom: 16px;
+}
+.kitchen-remake-lane {
+  border-color: var(--bop-color-warning);
+}
+.kitchen-work-item--remake {
+  border-left-color: var(--bop-color-warning);
+}
+.kitchen-remake-badge {
+  justify-self: start;
+  margin: 0;
+  padding: 2px 10px;
+  border: 1px solid var(--bop-color-warning);
+  border-radius: var(--bop-radius-control);
+  color: var(--bop-color-text-default);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+.kitchen-remake-note {
+  border-inline-start-color: var(--bop-color-border-strong);
+}
+.kitchen-work-item__actions button.kitchen-remake-button {
+  border-color: var(--bop-color-border-strong);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+}
+.kitchen-work-item__actions button.kitchen-remake-button:hover:not(:disabled) {
+  background: var(--bop-color-surface-raised);
+}
+.kitchen-remake-read-failed {
+  margin: 0 0 12px;
+  color: var(--bop-color-warning);
+  font-weight: 600;
+}
+.kitchen-rework-status {
+  margin-bottom: 12px;
+}
+.kitchen-rework-status button {
+  min-height: 44px;
+  margin-inline-end: 8px;
+}
+.kitchen-remake-dialog {
+  width: min(100% - 32px, 30rem);
+  max-height: min(90vh, 100%);
+  margin: auto;
+  padding: 20px;
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-surface);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+}
+.kitchen-remake-dialog::backdrop {
+  background: rgb(0 0 0 / 0.45);
+}
+.kitchen-remake-dialog form {
+  display: grid;
+  gap: 14px;
+}
+.kitchen-remake-dialog h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.kitchen-remake-dialog fieldset {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.kitchen-remake-dialog legend {
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+.kitchen-remake-dialog__reason {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-control);
+}
+.kitchen-remake-dialog__reason input {
+  width: 20px;
+  height: 20px;
+}
+.kitchen-remake-dialog__field {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+}
+.kitchen-remake-dialog__field input,
+.kitchen-remake-dialog__field textarea {
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid var(--bop-color-border-strong);
+  border-radius: var(--bop-radius-control);
+  font: inherit;
+  font-weight: 400;
+}
+.kitchen-remake-dialog__effect {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+}
+.kitchen-remake-dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.kitchen-remake-dialog__actions button {
+  min-height: 48px;
+  padding: 0 18px;
+  border: 1px solid var(--bop-color-border-strong);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-weight: 600;
+}
+.kitchen-remake-dialog__actions button[type="submit"] {
+  background: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
+}
+.kitchen-remake-dialog__actions button:disabled {
+  border-color: var(--bop-color-border-default);
+  background: var(--bop-color-surface-raised);
+  color: var(--bop-color-text-muted);
+}
+.kitchen-recent-finished {
+  margin-top: 16px;
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-card);
+  background: var(--bop-color-surface-raised);
+}
+.kitchen-recent-finished summary {
+  min-height: 44px;
+  padding: 12px 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.kitchen-recent-finished ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0 10px 10px;
+  list-style: none;
+}
+.kitchen-recent-finished li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+}
+.kitchen-recent-finished__name {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+.kitchen-recent-finished__name span {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.kitchen-recent-finished button {
+  min-width: 96px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--bop-color-border-strong);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-weight: 600;
+}
+.kitchen-recent-finished button:disabled {
+  border-color: var(--bop-color-border-default);
+  color: var(--bop-color-text-muted);
+}
+/* WP-2423 Q26: an order whose dish the kitchen is remaking waits before handover. */
+.pickup-queue__remake {
+  margin: 0;
+  padding: 8px 10px;
+  border-inline-start: 4px solid var(--bop-color-warning);
+  background: var(--bop-color-surface-raised);
+  font-weight: 600;
+}

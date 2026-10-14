@@ -23,8 +23,11 @@
  * sold out for the rest of today and back in stock; offering items, longer sold-out marks, menus,
  * prices and schedules stay with catalog.sku.availability.manage and the menu permissions. Brand
  * templates keep the broader code and do not take this Store-floor code.
+ * v11 (2026-10-14): kitchen.work_item.rework (WP-2423 Q26, Handoff Section 26.6): remake a finished
+ * dish (wrong, dropped, returned, quality) or put a dish marked done by mistake back in progress;
+ * the first dish's ingredients are recorded as waste. Kitchen, Store Manager and Owner hold it.
  */
-export const storePermissionCatalogVersion = 10 as const;
+export const storePermissionCatalogVersion = 11 as const;
 export type PermissionRisk = "Low" | "Medium" | "High";
 export interface StorePermissionDefinition {
   readonly code: string;
@@ -252,6 +255,12 @@ const catalog: readonly StorePermissionDefinition[] = Object.freeze([
     ["kitchen.work_item.accept", "Accept a Kitchen work item", "Low"],
     ["kitchen.work_item.start", "Start a Kitchen work item", "Low"],
     ["kitchen.work_item.complete", "Record completed quantity and mark items ready", "Low"],
+    // v11 (WP-2423 Q26): records waste for the first dish, so Medium.
+    [
+      "kitchen.work_item.rework",
+      "Remake a finished dish or put a dish marked done by mistake back in progress",
+      "Medium",
+    ],
     ["kitchen.exception.manage", "Report, acknowledge and resolve Kitchen exceptions", "Medium"],
     ["kitchen.production.manage", "Manage production batches", "Medium"],
   ]),
@@ -473,6 +482,8 @@ export const storeRoleTemplates: Readonly<Record<StoreRoleTemplateCode, readonly
       "kitchen.work_item.accept",
       "kitchen.work_item.start",
       "kitchen.work_item.complete",
+      // v11 (WP-2423 Q26): remake a finished dish; the first dish is recorded as waste.
+      "kitchen.work_item.rework",
       "kitchen.exception.manage",
       "inventory.waste.record",
       // v10 (WP-2423 Q17): sold out for today and back in stock.
@@ -519,7 +530,7 @@ export const storeRoleTemplateProfiles: Readonly<
   kitchen: {
     roleCode: "kitchen",
     displayName: "Kitchen",
-    description: "Kitchen display work items, kitchen exceptions and items sold out today",
+    description: "Kitchen display work items, remakes, kitchen exceptions and items sold out today",
   },
   "inventory-manager": {
     roleCode: "inventory_manager",

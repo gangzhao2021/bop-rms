@@ -129,6 +129,13 @@ function PickupCard({
           {completed ? "Handed over" : "Waiting"}
         </strong>
       </header>
+      {!completed && item.remakeQuantity ? (
+        <p className="pickup-queue__remake" role="status">
+          Kitchen is remaking{" "}
+          {item.remakeQuantity === 1 ? "1 item" : `${item.remakeQuantity} items`} — wait for it
+          before handing this order over.
+        </p>
+      ) : null}
       <dl>
         <div>
           <dt>Pickup code</dt>

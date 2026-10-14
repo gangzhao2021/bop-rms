@@ -54,6 +54,16 @@ export interface StoreWasteRecord {
   readonly needsReview: boolean;
   readonly recordedBy: string;
   readonly recordedAt: string;
+  /**
+   * WP-2423 Q26: where the record came from when it was not entered on the waste page. A Kitchen
+   * remake records the first dish's ingredients (reason and rework reference only).
+   */
+  readonly source?: StoreWasteSource;
+}
+export interface StoreWasteSource {
+  readonly kind: "KitchenRework";
+  readonly reworkReference: string;
+  readonly reasonCode: string;
 }
 export class StoreWasteError extends Error {
   constructor(

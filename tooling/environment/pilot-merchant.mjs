@@ -54,6 +54,7 @@ import { createMerchantPrices } from "../../apps/api/dist/merchant-prices.js";
 import { createMerchantAllergens } from "../../apps/api/dist/merchant-allergens.js";
 import { createMerchantMenus } from "../../apps/api/dist/merchant-menus.js";
 import { createMerchantAvailability } from "../../apps/api/dist/merchant-availability.js";
+import { createMerchantKitchenRework } from "../../apps/api/dist/merchant-kitchen-rework.js";
 import { createMerchantOptionSets } from "../../apps/api/dist/merchant-option-sets.js";
 import { logUnexpected } from "./pilot-merchant-pickup.mjs";
 import { createMerchantOptionPrices } from "../../apps/api/dist/merchant-option-prices.js";
@@ -792,6 +793,12 @@ export async function createInternalMerchant(
       sha256: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
     }),
   );
+  // WP-2423 Q26 (Handoff Section 26.6): remake a finished dish from the Kitchen board.
+  const kitchenRework = createMerchantKitchenRework({
+    persistence,
+    authentication: service,
+    nextReference: () => resources.credentials.reference(),
+  });
   const kitchenRelease = createMerchantKitchenRelease({
     persistence,
     authentication: service,
@@ -1123,6 +1130,7 @@ export async function createInternalMerchant(
       kitchenQuery,
       kitchenCommand,
       kitchenRelease,
+      kitchenRework,
       roleAdministration,
       staffAdministration: {
         ...staffAdministration,

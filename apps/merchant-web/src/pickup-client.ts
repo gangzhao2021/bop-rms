@@ -119,6 +119,10 @@ export function createPickupClient(options: {
               exceptionStatus: "Unavailable",
               packageCount: null,
               allergenCue: "Unavailable",
+              // WP-2423 Q26: the kitchen is remaking part of this order.
+              ...(Number.isSafeInteger(raw.remakeInProgress) && Number(raw.remakeInProgress) > 0
+                ? { remakeQuantity: Number(raw.remakeInProgress) }
+                : {}),
               execution,
             };
           }),

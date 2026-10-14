@@ -83,4 +83,18 @@ describe("DEC-PERM-CATALOG Store permission catalog", () => {
     for (const [role, codes] of Object.entries(brandRoleTemplates))
       expect(codes, role).not.toContain("catalog.sku.sold_out.mark");
   });
+  it("lets Kitchen, Store Manager and Owner remake a dish, and nobody on the floor or at Brand level else", () => {
+    for (const role of ["kitchen", "store-manager", "owner"] as const)
+      expect(storeRoleTemplateActions(role), role).toContain("kitchen.work_item.rework");
+    for (const role of ["front-of-house", "inventory-manager"] as const)
+      expect(storeRoleTemplateActions(role), role).not.toContain("kitchen.work_item.rework");
+    for (const [role, codes] of Object.entries(brandRoleTemplates))
+      expect(codes, role).not.toContain("kitchen.work_item.rework");
+    expect(
+      storePermissionCatalog().find((entry) => entry.code === "kitchen.work_item.rework"),
+    ).toMatchObject({
+      module: "kitchen",
+      risk: "Medium",
+    });
+  });
 });

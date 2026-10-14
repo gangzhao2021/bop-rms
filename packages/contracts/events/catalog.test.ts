@@ -251,7 +251,7 @@ describe("Event Catalog source", () => {
     },
   );
   it("registers the authoritative bounded Event facts and metric labels", () => {
-    expect(eventCatalog).toHaveLength(140);
+    expect(eventCatalog).toHaveLength(141);
     const byType = new Map(eventCatalog.map((entry) => [entry.eventType, entry]));
     for (const eventType of [
       "DeviceActivated",
@@ -575,6 +575,7 @@ describe("Event Catalog source", () => {
       "KitchenItemProgressRecorded:v1",
       "KitchenItemReady:v1",
       "KitchenOrderReady:v1",
+      "KitchenReworkCreated:v1",
       "KitchenWorkAccepted:v1",
       "KitchenWorkCancelled:v1",
       "KitchenWorkCreated:v1",
@@ -788,6 +789,42 @@ describe("Event Catalog source", () => {
         detectedAt: "2026-08-14T18:00:00.000Z",
       }).success,
     ).toBe(true);
+  });
+
+  it("keeps the kitchen rework payload closed, reasoned and free of staff notes", () => {
+    const entry = eventCatalog.find((candidate) => candidate.eventType === "KitchenReworkCreated");
+    if (entry === undefined) throw new Error("EVENT_CATALOG_REGISTRATION_MISSING");
+    expect(entry).toMatchObject({
+      ownerModule: "@rms/kitchen",
+      consumers: ["inventory.kitchen-rework-waste:v1"],
+      tenantScope: "store",
+      dataClassification: "personal",
+      replaySemantics: "idempotent",
+    });
+    const reference = (n: number) => `018f9910-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
+    const payload = {
+      kitchenReworkItemReference: reference(1),
+      kitchenTicketReference: reference(2),
+      originalKitchenWorkItemReference: reference(3),
+      orderReference: reference(4),
+      orderBatchReference: reference(5),
+      orderItemReference: reference(6),
+      reasonCode: "DROPPED",
+      quantity: 1,
+      wasteApplies: true,
+      createdAt: "2026-10-14T12:00:00.000Z",
+    };
+    expect(entry.payloadSchema.safeParse(payload).success).toBe(true);
+    for (const invalid of [
+      { ...payload, reasonCode: "CUSTOMER_REQUEST" },
+      { ...payload, quantity: 0 },
+      { ...payload, note: "left on the pass" },
+      { ...payload, actorReference: reference(7) },
+    ])
+      expect(entry.payloadSchema.safeParse(invalid).success).toBe(false);
+    expect(JSON.stringify(payloadJsonSchema(entry.payloadSchema))).not.toMatch(
+      /actor|customerReference|guest|note|health|allergen/iu,
+    );
   });
 
   it("keeps the staff batch cancellation payload closed and item-bounded", () => {
@@ -1221,7 +1258,7 @@ describe("Event consumer compatibility", () => {
   if (firstConsumer === undefined) throw new Error("EVENT_CONSUMER_FIXTURE_MISSING");
 
   it("covers every accepted producer-to-consumer relation exactly", () => {
-    expect(eventConsumerContracts).toHaveLength(149);
+    expect(eventConsumerContracts).toHaveLength(150);
     expect(() =>
       assertEventConsumerCompatibility(eventCatalog, eventConsumerContracts),
     ).not.toThrow();

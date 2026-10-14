@@ -2700,6 +2700,51 @@
       "privilege": "UPDATE",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (WP-2423 Q20): DEC-PAYMENT-CARD-RETRY — when a customer pays with another card after a decline, the payment status projection consumer (api role) retires the failed attempt's projection (is_active only; the immutable snapshot row is kept) and records the later attempt's outcome"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_rework_item",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q26): DEC-KITCHEN-REWORK (Handoff Section 26.6) — kitchen staff remake a finished dish as a new append-only Rework work item linked to the original (which keeps its result) with reason, actor and time; the pilot API (api role) records the rework, its operations, audit and KitchenReworkCreated event, the kitchen board and pickup queue read open remakes, and the Inventory consumer (api role) records the first dish as Store waste"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_rework_item",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q26): DEC-KITCHEN-REWORK (Handoff Section 26.6) — kitchen staff remake a finished dish as a new append-only Rework work item linked to the original (which keeps its result) with reason, actor and time; the pilot API (api role) records the rework, its operations, audit and KitchenReworkCreated event, the kitchen board and pickup queue read open remakes, and the Inventory consumer (api role) records the first dish as Store waste"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_rework_item",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q26): DEC-KITCHEN-REWORK (Handoff Section 26.6) — kitchen staff remake a finished dish as a new append-only Rework work item linked to the original (which keeps its result) with reason, actor and time; the pilot API (api role) records the rework, its operations, audit and KitchenReworkCreated event, the kitchen board and pickup queue read open remakes, and the Inventory consumer (api role) records the first dish as Store waste"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_rework_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q26): DEC-KITCHEN-REWORK (Handoff Section 26.6) — kitchen staff remake a finished dish as a new append-only Rework work item linked to the original (which keeps its result) with reason, actor and time; the pilot API (api role) records the rework, its operations, audit and KitchenReworkCreated event, the kitchen board and pickup queue read open remakes, and the Inventory consumer (api role) records the first dish as Store waste"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_rework_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q26): DEC-KITCHEN-REWORK (Handoff Section 26.6) — kitchen staff remake a finished dish as a new append-only Rework work item linked to the original (which keeps its result) with reason, actor and time; the pilot API (api role) records the rework, its operations, audit and KitchenReworkCreated event, the kitchen board and pickup queue read open remakes, and the Inventory consumer (api role) records the first dish as Store waste"
     }
   ]
 }
