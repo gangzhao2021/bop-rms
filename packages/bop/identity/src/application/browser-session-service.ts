@@ -315,25 +315,44 @@ export class BrowserSessionService {
 
   /**
    * WP-2423 Q18: genuine staff activity (a user action, or an operational screen the browser
-   * reports as visible) on an authorized Session. Returns the Session with its current deadlines;
-   * the idle deadline slides at most once per write interval and never past the absolute deadline.
+   * reports as visible) on a Session; with `extend: false` only its current deadlines are read.
+   * The idle deadline slides at most once per write interval and never past the absolute deadline.
+   * Throws `BROWSER_SESSION_ENDED` only for a Session that has genuinely ended,
+   * `BROWSER_SESSION_DENIED` for a wrong CSRF credential and `BROWSER_SESSION_UNAVAILABLE` when the
+   * Session could not be checked right now.
    */
-  async recordActivity(input: {
-    readonly sessionCookie: unknown;
-    readonly csrf: unknown;
-  }): Promise<AuthenticationSession> {
-    const session = await this.authorize(input);
+  async recordActivity(
+    input: { readonly sessionCookie: unknown; readonly csrf: unknown },
+    extend = true,
+  ): Promise<AuthenticationSession> {
+    const selectorHash = this.#hasher.hash(parseRawBrowserCredential(input.sessionCookie));
+    const csrfSelectorHash = this.#hasher.hash(parseRawBrowserCredential(input.csrf));
+    const observedAt = this.#observedAt();
     const record = this.#store.recordActivity;
-    if (record === undefined) return session;
-    const updated = await record.call(this.#store, {
-      selectorHash: this.#hasher.hash(parseRawBrowserCredential(input.sessionCookie)),
-      expectedSessionReference: session.sessionReference,
-      observedAt: this.#observedAt(),
-    });
-    if (updated.sessionReference !== session.sessionReference) {
-      throw new BrowserSessionError("BROWSER_SESSION_DENIED");
+    if (record !== undefined) {
+      const result = await record.call(this.#store, {
+        selectorHash,
+        csrfSelectorHash,
+        observedAt,
+        extend,
+      });
+      return result.session;
     }
-    return updated;
+    // A store with fixed deadlines: classify the plain read the same way.
+    let current: Awaited<ReturnType<BrowserSessionStorePort["resolveSession"]>>;
+    try {
+      current = await this.#store.resolveSession(selectorHash);
+    } catch {
+      throw new BrowserSessionError("BROWSER_SESSION_UNAVAILABLE");
+    }
+    if (current === null) throw new BrowserSessionError("BROWSER_SESSION_ENDED");
+    if (!this.#hasher.equals(csrfSelectorHash, current.csrfSelectorHash))
+      throw new BrowserSessionError("BROWSER_SESSION_DENIED");
+    try {
+      return assertSessionUsable(current.session, observedAt);
+    } catch {
+      throw new BrowserSessionError("BROWSER_SESSION_ENDED");
+    }
   }
 
   async rotate(

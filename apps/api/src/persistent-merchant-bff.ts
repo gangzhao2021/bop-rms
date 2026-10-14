@@ -465,7 +465,7 @@ export function createPersistentMerchantBffService(
     start: (path) => base.start(path),
     callback: (input) => base.callback(input),
     authorize: (input) => base.authorize(input),
-    recordActivity: (input) => base.recordActivity(input),
+    recordActivity: (input, extend) => base.recordActivity(input, extend),
     logout: (cookie) => base.logout(cookie),
     async bootstrap(cookie) {
       const bootstrap = await base.bootstrap(cookie);

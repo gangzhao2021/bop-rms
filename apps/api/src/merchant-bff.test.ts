@@ -24,6 +24,7 @@ import { PickupHandoffError, PickupProofError } from "@rms/fulfillment";
 import {
   KitchenQueueProjectionError,
   KitchenReworkError,
+  KitchenStaleTicketError,
   KitchenWorkLifecycleError,
   parseKitchenWorkLifecycleResult,
 } from "@rms/kitchen";
@@ -6173,7 +6174,7 @@ describe("WP-2423 Q18 staff session continuity routes", () => {
       idleTimeoutMinutes: 30,
     });
     expect(JSON.stringify(body)).not.toContain(session.sessionReference);
-    expect(service.recordActivity).toHaveBeenCalledWith({ sessionCookie, csrf });
+    expect(service.recordActivity).toHaveBeenCalledWith({ sessionCookie, csrf }, true);
 
     const crossSite = await request(root, "/merchant/session/activity", {
       method: "POST",
@@ -6183,17 +6184,49 @@ describe("WP-2423 Q18 staff session continuity routes", () => {
     expect(service.recordActivity).toHaveBeenCalledTimes(1);
   });
 
-  it("reads deadlines without extending them and refuses an ended Session", async () => {
-    const service = { ...fakeService(), recordActivity: vi.fn(async () => extended) };
+  it("reads deadlines without extending them; only a genuinely ended Session is 401", async () => {
+    const service = { ...fakeService(), recordActivity: vi.fn(async () => session) };
     const root = await serveSessionContinuity(service);
     const response = await request(root, "/merchant/session/expiry", { headers: authorized });
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ idleExpiresAt: session.idleExpiresAt });
-    expect(service.recordActivity).not.toHaveBeenCalled();
-    vi.mocked(service.authorize).mockRejectedValueOnce(new Error("synthetic-expired"));
+    expect(service.recordActivity).toHaveBeenCalledWith({ sessionCookie, csrf }, false);
+    vi.mocked(service.recordActivity).mockRejectedValueOnce(
+      new BrowserSessionError("BROWSER_SESSION_ENDED"),
+    );
     const ended = await request(root, "/merchant/session/expiry", { headers: authorized });
-    expect(ended.status).toBe(403);
-    expect(await ended.text()).toBe('{"error":"request_denied"}');
+    expect(ended.status).toBe(401);
+    expect(await ended.json()).toEqual({ error: "session_ended" });
+    const noCookie = await request(root, "/merchant/session/expiry", {
+      headers: { ...safeHeaders, "X-BOP-CSRF": csrf },
+    });
+    expect(noCookie.status).toBe(401);
+  });
+
+  it("never reports a busy or unreachable Session as ended", async () => {
+    const service = { ...fakeService(), recordActivity: vi.fn(async () => extended) };
+    const root = await serveSessionContinuity(service);
+    for (const failure of [
+      new BrowserSessionError("BROWSER_SESSION_UNAVAILABLE"),
+      new Error("TENANT_DATABASE_TRANSACTION_CONFLICT"),
+    ]) {
+      vi.mocked(service.recordActivity).mockRejectedValueOnce(failure);
+      const busy = await request(root, "/merchant/session/activity", {
+        method: "POST",
+        headers: authorized,
+      });
+      expect(busy.status).toBe(503);
+      expect(busy.headers.get("retry-after")).toBe("30");
+      expect(await busy.json()).toEqual({ error: "session_check_unavailable" });
+    }
+    vi.mocked(service.recordActivity).mockRejectedValueOnce(
+      new BrowserSessionError("BROWSER_SESSION_DENIED"),
+    );
+    const wrongCsrf = await request(root, "/merchant/session/activity", {
+      method: "POST",
+      headers: authorized,
+    });
+    expect(wrongCsrf.status).toBe(403);
   });
 
   it("falls back to authorization where the store keeps a fixed deadline", async () => {
@@ -6291,6 +6324,76 @@ describe("WP-2423 Q26 Kitchen remake routes", () => {
     expect(
       (
         await request(unwired, "/merchant/kitchen/rework/query", {
+          method: "POST",
+          body: "{}",
+          headers: headers(),
+        })
+      ).status,
+    ).toBe(503);
+  });
+});
+
+describe("DEC-KITCHEN-STALE-TICKETS close route", () => {
+  async function serve(kitchenStaleClose?: MerchantBffRouterOptions["kitchenStaleClose"]) {
+    const app = express();
+    app.use(
+      "/merchant",
+      createMerchantBffRouter({
+        service: fakeService(),
+        exactOrigin: "https://merchant.invalid",
+        acceptedHost: "merchant.invalid",
+        ...(kitchenStaleClose ? { kitchenStaleClose } : {}),
+      }),
+    );
+    const server = app.listen(0, "127.0.0.1");
+    servers.push(server);
+    await new Promise<void>((resolve) => server.once("listening", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("listener unavailable");
+    return `http://127.0.0.1:${address.port}`;
+  }
+  const headers = () => ({
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  });
+  it("passes the browser intent only, maps typed failures to codes and is absent when unwired", async () => {
+    const close = vi.fn();
+    const root = await serve(
+      close as unknown as NonNullable<MerchantBffRouterOptions["kitchenStaleClose"]>,
+    );
+    const post = (body = '{"reasonCode":"ALREADY_SERVED"}', extra: Record<string, string> = {}) =>
+      request(root, "/merchant/kitchen/stale-ticket/close", {
+        method: "POST",
+        body,
+        headers: { ...headers(), ...extra },
+      });
+    expect((await post(undefined, { "X-BOP-CSRF": "" })).status).toBe(403);
+    expect(close).not.toHaveBeenCalled();
+    close.mockResolvedValueOnce({ status: "Closed" });
+    expect(await (await post()).json()).toEqual({ status: "Closed" });
+    expect(close.mock.calls[0]?.[0]).toMatchObject({ command: { reasonCode: "ALREADY_SERVED" } });
+    for (const [code, status] of [
+      ["KITCHEN_STALE_TICKET_INPUT_INVALID", 400],
+      ["KITCHEN_STALE_TICKET_PERMISSION_DENIED", 403],
+      ["KITCHEN_STALE_TICKET_NOT_FOUND", 404],
+      ["KITCHEN_STALE_TICKET_CONFLICT", 409],
+      ["KITCHEN_STALE_TICKET_NOT_EARLIER_DAY", 422],
+      ["KITCHEN_STALE_TICKET_NOTHING_OPEN", 422],
+      ["KITCHEN_STALE_TICKET_UNAVAILABLE", 503],
+    ] as const) {
+      close.mockRejectedValueOnce(new KitchenStaleTicketError(code));
+      const result = await post();
+      expect(result.status).toBe(status);
+      expect(await result.json()).toEqual({ error: code });
+    }
+    close.mockRejectedValueOnce(new Error("private details"));
+    expect(await (await post()).json()).toEqual({ error: "request_denied" });
+    const unwired = await serve();
+    expect(
+      (
+        await request(unwired, "/merchant/kitchen/stale-ticket/close", {
           method: "POST",
           body: "{}",
           headers: headers(),

@@ -123,9 +123,25 @@ describe("WP-2423 Q18 staff session client", () => {
     expect(init.headers).toMatchObject({ "X-BOP-CSRF": "c".repeat(43) });
   });
 
-  it("reports an ended Session on 401/403 and rejects malformed or open bodies", async () => {
-    const ended = createStaffSessionClient(vi.fn(async () => response(403)) as typeof fetch);
+  it("reports an ended Session only on the explicit 401 session_ended answer", async () => {
+    const ended = createStaffSessionClient(
+      vi.fn(async () => response(401, { error: "session_ended" })) as typeof fetch,
+    );
     expect(await ended.expiry("c".repeat(43))).toBe("Ended");
+    expect(await ended.activity("c".repeat(43))).toBe("Ended");
+    // A refused, busy or unavailable check is never an ended Session.
+    for (const [status, body] of [
+      [403, { error: "request_denied" }],
+      [401, { error: "request_denied" }],
+      [401, undefined],
+      [503, { error: "session_check_unavailable" }],
+      [500, undefined],
+    ] as const) {
+      const other = createStaffSessionClient(
+        vi.fn(async () => response(status, body)) as typeof fetch,
+      );
+      await expect(other.activity("c".repeat(43))).rejects.toThrow("STAFF_SESSION_UNAVAILABLE");
+    }
     const open = createStaffSessionClient(
       vi.fn(async () => response(200, { ...body, sessionReference: "x" })) as typeof fetch,
     );

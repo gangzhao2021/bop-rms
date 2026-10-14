@@ -242,18 +242,28 @@ class SyntheticStore implements BrowserSessionStorePort {
 
   activityWrites = 0;
 
+  /** Models a row held by a concurrent business read: the write is skipped, never failed. */
+  busy = false;
+
   async recordActivity(command: RecordBrowserSessionActivityCommand) {
-    const record = required(this.sessions.get(command.selectorHash));
-    if (record.session.sessionReference !== command.expectedSessionReference)
+    const record = this.sessions.get(command.selectorHash);
+    if (!record) throw new BrowserSessionError("BROWSER_SESSION_ENDED");
+    if (!hasher.equals(record.csrfSelectorHash, command.csrfSelectorHash))
       throw new BrowserSessionError("BROWSER_SESSION_DENIED");
-    const next = recordSessionActivity(record.session, command.observedAt);
-    if (next === null) return record.session;
+    let next;
+    try {
+      next = recordSessionActivity(record.session, command.observedAt);
+    } catch {
+      throw new BrowserSessionError("BROWSER_SESSION_ENDED");
+    }
+    if (!command.extend || this.busy || next === null)
+      return { session: record.session, recorded: false };
     this.activityWrites += 1;
     this.sessions.set(
       command.selectorHash,
       createBrowserSessionRecord({ ...record, session: next }),
     );
-    return next;
+    return { session: next, recorded: true };
   }
 
   async revokeSession(command: RevokeBrowserSessionCommand) {
@@ -510,15 +520,33 @@ describe("browser Session and same-origin BFF Domain orchestration", () => {
     ).rejects.toMatchObject({ code: "BROWSER_SESSION_DENIED" });
     observedAt = "2026-07-29T12:30:00.000Z";
     await expect(service.recordActivity({ sessionCookie, csrf })).rejects.toMatchObject({
-      code: "BROWSER_SESSION_DENIED",
+      code: "BROWSER_SESSION_ENDED",
     });
     expect(store.activityWrites).toBe(0);
     observedAt = AT;
     await service.logout(sessionCookie);
     await expect(service.recordActivity({ sessionCookie, csrf })).rejects.toMatchObject({
-      code: "BROWSER_SESSION_DENIED",
+      code: "BROWSER_SESSION_ENDED",
     });
     expect(store.activityWrites).toBe(0);
+  });
+
+  it("WP-2423 Q18: a busy Session row skips the write and reads never extend", async () => {
+    let observedAt = AT;
+    const { service, store, sessionCookie, csrf } = await signedInFixture(() => observedAt);
+    observedAt = "2026-07-29T12:20:00.000Z";
+    store.busy = true;
+    expect((await service.recordActivity({ sessionCookie, csrf })).idleExpiresAt).toBe(
+      "2026-07-29T12:30:00.000Z",
+    );
+    store.busy = false;
+    expect((await service.recordActivity({ sessionCookie, csrf }, false)).idleExpiresAt).toBe(
+      "2026-07-29T12:30:00.000Z",
+    );
+    expect(store.activityWrites).toBe(0);
+    expect((await service.recordActivity({ sessionCookie, csrf })).idleExpiresAt).toBe(
+      "2026-07-29T12:50:00.000Z",
+    );
   });
 
   it("creates a one-time PKCE transaction without persisting raw credentials", async () => {

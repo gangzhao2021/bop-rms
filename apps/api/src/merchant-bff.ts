@@ -227,6 +227,7 @@ import type { createMerchantOrdinaryRefundProgress } from "./merchant-ordinary-r
 import type { createMerchantKitchenCommand } from "./merchant-kitchen-command.js";
 import type { createMerchantKitchenRelease } from "./merchant-kitchen-release.js";
 import type { createMerchantKitchenRework } from "./merchant-kitchen-rework.js";
+import type { createMerchantKitchenStaleClose } from "./merchant-kitchen-stale-close.js";
 import {
   MerchantRoleAdministrationError,
   type createMerchantRoleAdministration,
@@ -279,6 +280,7 @@ import type { createMerchantKitchenQuery } from "./merchant-kitchen-query.js";
 import {
   KitchenQueueProjectionError,
   KitchenReworkError,
+  KitchenStaleTicketError,
   KitchenWorkLifecycleError,
 } from "@rms/kitchen";
 import type { createBrandLifecycleCommand } from "./brand-lifecycle-command.js";
@@ -433,12 +435,14 @@ export interface MerchantBffService {
   logout(sessionCookie: unknown): Promise<BrowserCookieMutation>;
   /**
    * WP-2423 Q18: genuine staff activity slides the Session's idle deadline (bounded writes, never
-   * past the absolute deadline). Absent where the Session store keeps a fixed deadline.
+   * past the absolute deadline); `extend: false` only reads the deadlines. Throws
+   * `BROWSER_SESSION_ENDED` only for a genuinely ended Session and `BROWSER_SESSION_UNAVAILABLE`
+   * when it cannot be checked now. Absent where the Session store keeps a fixed deadline.
    */
-  recordActivity?(input: {
-    readonly sessionCookie: unknown;
-    readonly csrf: unknown;
-  }): Promise<AuthenticationSession>;
+  recordActivity?(
+    input: { readonly sessionCookie: unknown; readonly csrf: unknown },
+    extend?: boolean,
+  ): Promise<AuthenticationSession>;
   switchStore(input: {
     readonly sessionCookie: unknown;
     readonly csrf: unknown;
@@ -590,6 +594,8 @@ export interface MerchantBffRouterOptions {
   readonly kitchenRelease?: ReturnType<typeof createMerchantKitchenRelease>;
   /** WP-2423 Q26 (Handoff Section 26.6): remake a finished dish from the Kitchen board. */
   readonly kitchenRework?: ReturnType<typeof createMerchantKitchenRework>;
+  /** DEC-KITCHEN-STALE-TICKETS: a manager closes an earlier business day's kitchen ticket. */
+  readonly kitchenStaleClose?: ReturnType<typeof createMerchantKitchenStaleClose>;
   readonly roleAdministration?: ReturnType<typeof createMerchantRoleAdministration>;
   readonly staffAdministration?: ReturnType<typeof createMerchantStaffAdministration>;
   readonly inventoryItems?: ReturnType<typeof createMerchantInventoryItems>;
@@ -2091,34 +2097,54 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
     response.set("Cache-Control", NO_STORE).json({ path: entry.path, testOnly: entry.testOnly });
   });
 
-  // WP-2423 Q18: read the current deadlines without extending them (e.g. before warning staff).
-  router.get("/session/expiry", safeRead(options), (request, response) => {
-    void options.service
-      .authorize({
-        sessionCookie: cookie(request, "__Host-bop-merchant"),
-        csrf: request.header("x-bop-csrf"),
-      })
-      .then((session) => {
-        response.set("Cache-Control", NO_STORE).json(sessionDeadlines(session));
-      })
-      .catch(() => denied(response));
-  });
-
-  // WP-2423 Q18: genuine staff activity (user action, or a visible operational screen).
-  router.post("/session/activity", sameOriginMutation(options), (request, response) => {
-    const record = options.service.recordActivity;
-    const input = {
-      sessionCookie: cookie(request, "__Host-bop-merchant"),
-      csrf: request.header("x-bop-csrf"),
+  // WP-2423 Q18: the Session deadlines. 401 `session_ended` only when the Session has genuinely
+  // ended (the browser then signs staff out); 503 when it could not be checked now (retry later);
+  // 403 for a refused request (origin, CSRF). A busy Session row never fails the request.
+  function sessionDeadlineRoute(extend: boolean): express.RequestHandler {
+    return (request, response) => {
+      response.set("Cache-Control", NO_STORE);
+      const sessionCookie = cookie(request, "__Host-bop-merchant");
+      if (sessionCookie === null || sessionCookie === "") {
+        response.status(401).json({ error: "session_ended" });
+        return;
+      }
+      const input = { sessionCookie, csrf: request.header("x-bop-csrf") };
+      const record = options.service.recordActivity;
+      void (
+        record === undefined
+          ? options.service.authorize(input)
+          : record.call(options.service, input, extend)
+      )
+        .then((session) => {
+          response.json(sessionDeadlines(session));
+        })
+        .catch((error: unknown) => {
+          if (error instanceof BrowserSessionError && error.code === "BROWSER_SESSION_ENDED") {
+            response.status(401).json({ error: "session_ended" });
+            return;
+          }
+          if (
+            record !== undefined &&
+            !(
+              error instanceof BrowserSessionError &&
+              (error.code === "BROWSER_SESSION_DENIED" ||
+                error.code === "BROWSER_SESSION_INPUT_INVALID")
+            )
+          ) {
+            response
+              .status(503)
+              .set("Retry-After", "30")
+              .json({ error: "session_check_unavailable" });
+            return;
+          }
+          denied(response);
+        });
     };
-    void (
-      record === undefined ? options.service.authorize(input) : record.call(options.service, input)
-    )
-      .then((session) => {
-        response.set("Cache-Control", NO_STORE).json(sessionDeadlines(session));
-      })
-      .catch(() => denied(response));
-  });
+  }
+  // Read the current deadlines without extending them (e.g. before warning staff).
+  router.get("/session/expiry", safeRead(options), sessionDeadlineRoute(false));
+  // Genuine staff activity (user action, or a visible operational screen).
+  router.post("/session/activity", sameOriginMutation(options), sessionDeadlineRoute(true));
 
   // WP-2423 Q21: "today" for this Store — its business day, not the calendar day.
   router.get("/business-day", safeRead(options), (request, response) => {
@@ -5776,6 +5802,44 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       .command({ sessionCookie, csrf, command: request.body })
       .then((result) => response.json(result))
       .catch((error: unknown) => kitchenReworkFailure(response, error));
+  });
+
+  // DEC-KITCHEN-STALE-TICKETS: close an earlier business day's kitchen ticket. Errors carry a code only.
+  router.post("/kitchen/stale-ticket/close", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.kitchenStaleClose) {
+      response.status(503).json({ error: "kitchen_stale_close_unavailable" });
+      return;
+    }
+    void options
+      .kitchenStaleClose({ sessionCookie, csrf, command: request.body })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => {
+        if (!(error instanceof KitchenStaleTicketError)) {
+          denied(response);
+          return;
+        }
+        const status = {
+          KITCHEN_STALE_TICKET_INPUT_INVALID: 400,
+          KITCHEN_STALE_TICKET_PERMISSION_DENIED: 403,
+          KITCHEN_STALE_TICKET_NOT_FOUND: 404,
+          KITCHEN_STALE_TICKET_CONFLICT: 409,
+          KITCHEN_STALE_TICKET_NOT_EARLIER_DAY: 422,
+          KITCHEN_STALE_TICKET_NOTHING_OPEN: 422,
+          KITCHEN_STALE_TICKET_UNAVAILABLE: 503,
+        }[error.code];
+        response.status(status).json({ error: error.code });
+      });
   });
 
   // WP-2423: IAM-ROLE-LIST / IAM-ROLE-EDITOR reads and role administration commands.

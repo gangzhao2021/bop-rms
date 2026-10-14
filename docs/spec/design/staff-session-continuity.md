@@ -73,6 +73,22 @@
 建议采用 A（真实门店多人共用一台平板、每班多次换人时唯一实用的方式），作为单独的安全设计与工作包实施。需要 Owner 决定：是否采用 A；
 PIN 位数（建议 6 位）与锁定阈值；哪些操作在 PIN 会话下仍需完整登录。决定前试点用"Switch staff"。
 
+## 修正（2026-10-14，v15 实测）：活动上报与业务读取冲突导致误退出
+
+现象：店长与 Mia 打开报表（`/app/reports/operations`）或日结（`/app/operations/payment-reconciliation`）即被整屏"You’ve been signed out"
+覆盖，会话行实际仍为 Active。根因：业务事务（门店范围、报表、日结）开始时对会话行加 `FOR SHARE` 并持有到事务结束；活动上报用
+`FOR UPDATE` 等待该行，超过试点事务 `lock_timeout`（2 秒）后失败，存储把一切失败归为"拒绝"，路由返回 403，浏览器把任何 401/403 当作会话结束。
+
+决定：
+
+1. 活动是建议性的：先以 `FOR NO KEY UPDATE SKIP LOCKED` 取行锁，行被业务读取占用时**跳过本次写入**（不等待、不失败），返回当前期限；
+   下次上报再写。读取期限（`extend: false`）只用 `FOR SHARE`，与业务读取兼容。
+2. 只有真正结束的会话（已撤销、已过期、不存在、无 Cookie）返回 `401 {"error":"session_ended"}`；CSRF 不符为 403；数据库或来源暂时失败为
+   `503 session_check_unavailable`（`Retry-After: 30`）。新增 `BROWSER_SESSION_ENDED`/`BROWSER_SESSION_UNAVAILABLE` 区分。
+3. 浏览器只在明确的 `session_ended` 时才考虑退出，并且先用一次新的期限读取确认后才覆盖；403/5xx/断网一律静默稍后重试（15 秒后），
+   本地时钟到期而服务器无法确认时只显示"Your sign-in may have ended"提示条，不覆盖页面。
+4. 覆盖层增加"Check again"：重新读取期限，若会话仍有效即移除覆盖并恢复上报，页面保持可用。
+
 ## 其他影响
 
 - 厨房屏换班（IDR-0039）：开始班次时记录的 `session_valid_until` 是开始时刻的期限；未"Release"就离开的操作员，其班次结束时间按

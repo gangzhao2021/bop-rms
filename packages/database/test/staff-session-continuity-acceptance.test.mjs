@@ -57,8 +57,9 @@ it("WP-2423 Q18: activity slides the staff idle deadline within the absolute lif
           try {
             await client.query("BEGIN");
             await client.query("SET LOCAL ROLE " + name);
-            await client.query("SET LOCAL lock_timeout='10s'");
-            await client.query("SET LOCAL statement_timeout='20s'");
+            // The pilot tenant transaction runner's limits.
+            await client.query("SET LOCAL lock_timeout='2s'");
+            await client.query("SET LOCAL statement_timeout='5s'");
             const result = await work({ query: (sql, values) => client.query(sql, [...values]) });
             await client.query("COMMIT");
             return result;
@@ -132,14 +133,18 @@ it("WP-2423 Q18: activity slides the staff idle deadline within the absolute lif
             [sessionReference],
           )
         ).rows[0];
-      const activity = (n, sessionReference, at, using = store) => {
+      const result = (n, at, { using = store, extend = true, csrf = selector(n + 100) } = {}) => {
         clock = at;
         return using.recordActivity({
           selectorHash: selector(n),
-          expectedSessionReference: sessionReference,
+          csrfSelectorHash: csrf,
           observedAt: at,
+          extend,
         });
       };
+      const activity = async (n, _sessionReference, at, using = store) =>
+        (await result(n, at, { using })).session;
+      const ENDED = { code: "BROWSER_SESSION_ENDED" };
 
       // --- Sliding with bounded writes --------------------------------------------------------
       const first = await issue(1, T(0));
@@ -174,7 +179,7 @@ it("WP-2423 Q18: activity slides the staff idle deadline within the absolute lif
       const cappedRow = await row(first);
       assert.equal(cappedRow.idle_expires_at.toISOString(), T(12 * 60));
       assert.equal(cappedRow.absolute_expires_at.toISOString(), T(12 * 60));
-      await assert.rejects(activity(1, first, T(12 * 60)), { code: "BROWSER_SESSION_DENIED" });
+      await assert.rejects(activity(1, first, T(12 * 60)), ENDED);
       assert.equal((await row(first)).idle_expires_at.toISOString(), T(12 * 60));
 
       // --- Revoked and idle-expired Sessions are never revived ---------------------------------
@@ -187,25 +192,76 @@ it("WP-2423 Q18: activity slides the staff idle deadline within the absolute lif
         observedAt: T(5),
       });
       const revokedRow = await row(revoked);
-      await assert.rejects(activity(2, revoked, T(10)), { code: "BROWSER_SESSION_DENIED" });
+      await assert.rejects(activity(2, revoked, T(10)), ENDED);
       assert.deepEqual(await row(revoked), revokedRow);
       assert.equal(revokedRow.status, "Revoked");
 
       const idle = await issue(3, T(0));
       const idleRow = await row(idle);
-      await assert.rejects(activity(3, idle, T(30)), { code: "BROWSER_SESSION_DENIED" });
-      await assert.rejects(activity(3, idle, T(31)), { code: "BROWSER_SESSION_DENIED" });
+      await assert.rejects(activity(3, idle, T(30)), ENDED);
+      await assert.rejects(activity(3, idle, T(31)), ENDED);
+      await assert.rejects(result(3, T(31), { extend: false }), ENDED);
+      await assert.rejects(result(99, T(1)), ENDED, "an unknown Session has ended");
       assert.deepEqual(await row(idle), idleRow);
 
-      // --- A different Session's reference and a role without UPDATE are refused --------------
+      // --- A wrong CSRF is refused (not "ended"); a role without UPDATE is "unavailable" ------
       const other = await issue(4, T(0));
-      await assert.rejects(activity(4, first, T(10)), { code: "BROWSER_SESSION_DENIED" });
+      await assert.rejects(result(4, T(10), { csrf: selector(101) }), {
+        code: "BROWSER_SESSION_DENIED",
+      });
       const otherRow = await row(other);
       await assert.rejects(activity(4, other, T(10), storeAs(readOnly)), {
-        code: "BROWSER_SESSION_DENIED",
+        code: "BROWSER_SESSION_UNAVAILABLE",
       });
       assert.deepEqual(await row(other), otherRow);
       assert.equal((await activity(4, other, T(10))).idleExpiresAt, T(40));
+
+      // --- Business reads hold FOR SHARE on the Session row (merchant scope, reports, settlement)
+      // for longer than the 2 s lock timeout. Activity neither waits nor fails: it skips the write,
+      // returns the live deadlines, and records on the next report once the row is free.
+      const busy = await issue(6, T(0));
+      const holder = new Client(context.clientConfig);
+      await holder.connect();
+      try {
+        await holder.query("BEGIN");
+        await holder.query("SET LOCAL ROLE " + role);
+        await holder.query(
+          "SELECT session_id FROM bop_identity.authentication_session WHERE session_id=$1 FOR SHARE",
+          [busy],
+        );
+        const before = await row(busy);
+        const started = Date.now();
+        const skipped = await Promise.all([
+          result(6, T(10)),
+          result(6, T(10)),
+          result(6, T(10), { extend: false }),
+        ]);
+        assert.ok(Date.now() - started < 2_000, "activity does not wait for business reads");
+        assert.ok(skipped.every((value) => value.recorded === false));
+        assert.ok(skipped.every((value) => value.session.idleExpiresAt === T(30)));
+        assert.deepEqual(await row(busy), before);
+        // Many concurrent business readers and activity reports together: none fails.
+        const readers = await Promise.all(
+          Array.from({ length: 6 }, (_, index) =>
+            index % 2 === 0
+              ? transactionsAs(role).run((tx) =>
+                  tx.query(
+                    "SELECT session_id FROM bop_identity.authentication_session WHERE session_id=$1 FOR SHARE",
+                    [busy],
+                  ),
+                )
+              : result(6, T(11)),
+          ),
+        );
+        assert.equal(readers.length, 6);
+      } finally {
+        await holder.query("ROLLBACK");
+        await holder.end();
+      }
+      const recorded = await result(6, T(12));
+      assert.equal(recorded.recorded, true);
+      assert.equal(recorded.session.idleExpiresAt, T(42));
+      assert.equal((await row(busy)).idle_expires_at.toISOString(), T(42));
 
       // --- The named KDS policy slides by its own 60-minute idle timeout ----------------------
       const kds = await issue(5, T(0), "NamedKdsOperator");

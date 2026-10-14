@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { timingSafeEqual } from "node:crypto";
 import { canonicalizeRfc8785 } from "@bop/audit";
 import {
   assertSessionUsable,
@@ -617,39 +618,74 @@ function createStore(options: Options, profile: Profile) {
       });
     },
     /**
-     * WP-2423 Q18: slides the idle deadline of a usable Workforce Session. The row is locked, the
-     * Actor is re-read, and the update only matches the exact Active row that was read, so a
-     * concurrent revocation wins and an expired or revoked Session is never revived. Version and
-     * status are untouched: activity is not a lifecycle change (logout/revocation keep their
-     * expected-version checks). At most one write per interval per Session.
+     * WP-2423 Q18: reads (and, with `extend`, slides) the idle deadline of a usable Workforce
+     * Session. Business transactions hold FOR SHARE on this row while they run, so activity never
+     * waits for or conflicts with them: it takes the row lock with SKIP LOCKED and simply skips the
+     * write when the row is busy (the next report retries). The update only matches the exact
+     * Active row that was read, so a concurrent revocation wins and an expired or revoked Session
+     * is never revived. Version, status and audit are untouched: activity is not a lifecycle
+     * change. At most one write per interval per Session. Only a Session that has genuinely ended
+     * is reported as ended; any database or source failure is "unavailable".
      */
     async recordActivity(
       command: Parameters<NonNullable<BrowserSessionStorePort["recordActivity"]>>[0],
     ) {
       if (strong) return denied();
-      return safe(async (tx) => {
-        const observedAt = parseCanonicalInstant(command.observedAt);
-        const current = await load(tx, command.selectorHash, observedAt, true);
-        if (!current || current.session.sessionReference !== command.expectedSessionReference)
-          return denied();
-        const next = recordSessionActivity(current.session, observedAt);
-        if (next === null) return current.session;
-        const updated = rows(
-          await tx.query(
-            "UPDATE bop_identity.authentication_session SET last_seen_at=$2,idle_expires_at=$3 WHERE session_id=$1 AND status='Active' AND version=$4 AND last_seen_at=$5 AND idle_expires_at=$6 AND idle_expires_at>$2 AND absolute_expires_at>$2 AND $3<=absolute_expires_at RETURNING session_id",
-            [
-              next.sessionReference,
-              next.lastSeenAt,
-              next.idleExpiresAt,
-              current.session.version,
-              current.session.lastSeenAt,
-              current.session.idleExpiresAt,
-            ],
-          ),
-        );
-        if (updated.length !== 1) return denied();
-        return next;
-      });
+      const selector = parseSelectorHash(command.selectorHash);
+      const csrf = parseSelectorHash(command.csrfSelectorHash);
+      const observedAt = parseCanonicalInstant(command.observedAt);
+      const ended = (): never => {
+        throw new BrowserSessionError("BROWSER_SESSION_ENDED");
+      };
+      try {
+        return await options.transactions.run(async (tx) => {
+          const claimed =
+            command.extend === true &&
+            rows(
+              await tx.query(
+                "SELECT session_id FROM bop_identity.authentication_session WHERE session_selector_hash=decode($1,'hex') AND status='Active' FOR NO KEY UPDATE SKIP LOCKED",
+                [selector],
+              ),
+            ).length === 1;
+          const current = await load(tx, selector, observedAt, false);
+          if (!current) return ended();
+          if (
+            !timingSafeEqual(Buffer.from(current.csrfSelectorHash, "hex"), Buffer.from(csrf, "hex"))
+          )
+            return denied();
+          let next: AuthenticationSession | null;
+          try {
+            next = recordSessionActivity(current.session, observedAt);
+          } catch {
+            return ended();
+          }
+          if (!claimed || next === null)
+            return Object.freeze({ session: current.session, recorded: false });
+          const updated = rows(
+            await tx.query(
+              "UPDATE bop_identity.authentication_session SET last_seen_at=$2,idle_expires_at=$3 WHERE session_id=$1 AND status='Active' AND version=$4 AND last_seen_at=$5 AND idle_expires_at=$6 AND idle_expires_at>$2 AND absolute_expires_at>$2 AND $3<=absolute_expires_at RETURNING session_id",
+              [
+                next.sessionReference,
+                next.lastSeenAt,
+                next.idleExpiresAt,
+                current.session.version,
+                current.session.lastSeenAt,
+                current.session.idleExpiresAt,
+              ],
+            ),
+          );
+          return updated.length === 1
+            ? Object.freeze({ session: next, recorded: true })
+            : Object.freeze({ session: current.session, recorded: false });
+        });
+      } catch (error) {
+        if (
+          error instanceof BrowserSessionError &&
+          (error.code === "BROWSER_SESSION_ENDED" || error.code === "BROWSER_SESSION_DENIED")
+        )
+          throw error;
+        throw new BrowserSessionError("BROWSER_SESSION_UNAVAILABLE");
+      }
     },
     async revokeSession(command: Parameters<BrowserSessionStorePort["revokeSession"]>[0]) {
       return safe(async (tx) => {

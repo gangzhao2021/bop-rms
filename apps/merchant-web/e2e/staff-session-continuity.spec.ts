@@ -69,6 +69,10 @@ async function identity(page: Page, absoluteAt = T0 + 12 * 60 * minute) {
     expiry: 0,
     loggedOut: 0,
     pending: 0,
+    /** Activity answers while a business read holds the Session row (WP-2423 Q18 live defect). */
+    activityFailure: null as null | { status: number; error: string },
+    /** Deadline reads answer "ended" although the Session is live (must be re-checked). */
+    expiryEnded: false,
   };
   const now = () => page.evaluate(() => Date.now());
   const body = (at: number) => ({
@@ -84,8 +88,13 @@ async function identity(page: Page, absoluteAt = T0 + 12 * 60 * minute) {
     server.activity++;
     server.pending++;
     try {
+      if (server.activityFailure)
+        return await route.fulfill({
+          status: server.activityFailure.status,
+          json: { error: server.activityFailure.error },
+        });
       const at = await now();
-      if (!live(at)) return await route.fulfill({ status: 403, json: { error: "request_denied" } });
+      if (!live(at)) return await route.fulfill({ status: 401, json: { error: "session_ended" } });
       if (at - server.lastSeen >= minute) {
         server.lastSeen = at;
         server.idle = Math.min(at + 30 * minute, server.absolute);
@@ -100,7 +109,8 @@ async function identity(page: Page, absoluteAt = T0 + 12 * 60 * minute) {
     server.pending++;
     try {
       const at = await now();
-      if (!live(at)) return await route.fulfill({ status: 403, json: { error: "request_denied" } });
+      if (server.expiryEnded || !live(at))
+        return await route.fulfill({ status: 401, json: { error: "session_ended" } });
       return await route.fulfill({ headers, json: body(at) });
     } finally {
       server.pending--;
@@ -301,4 +311,98 @@ test("@production a signed-out staff page offers the sign-in that works here", a
     "/merchant/login?returnTo=/app",
   );
   await expect(page.getByText("TEST-ONLY", { exact: true })).toHaveCount(0);
+});
+
+test("@production Reports and Settlement never sign staff out when an activity report is busy or refused", async ({
+  page,
+}) => {
+  await page.clock.install({ time: T0 });
+  await workspace(page, [
+    { screenId: "HOME-OVERVIEW", label: "Overview", href: "/app", permission: "merchant.access" },
+    {
+      screenId: "RPT-OPS-DASHBOARD",
+      label: "Reports",
+      href: "/app/reports/operations",
+      permission: "reporting.sales.read",
+    },
+    {
+      screenId: "PAY-RECONCILIATION",
+      label: "Settlement",
+      href: "/app/operations/payment-reconciliation",
+      permission: "operations.order-exception.manage",
+    },
+  ]);
+  const server = await identity(page);
+  const signedOut = page.getByRole("dialog", { name: "You’ve been signed out" });
+  for (const path of ["/app/reports/operations", "/app/operations/payment-reconciliation"]) {
+    // The live defect: the Session row is held by the page's own reads, so activity is refused or
+    // reported busy. Staff stay signed in and the page keeps working.
+    for (const failure of [
+      { status: 503, error: "session_check_unavailable" },
+      { status: 403, error: "request_denied" },
+    ]) {
+      server.activityFailure = failure;
+      const before = server.activity;
+      await page.goto(path);
+      await expect.poll(() => server.activity).toBeGreaterThan(before);
+      await advance(page, server, 0);
+      await page.mouse.click(5, 5);
+      await advance(page, server, 3 * minute);
+      expect(server.activity).toBeGreaterThan(before + 1);
+      await expect(signedOut).toHaveCount(0);
+      await expect(page.getByRole("alert", { name: "Signing out soon" })).toHaveCount(0);
+    }
+    // Activity says "ended" but a fresh deadline read shows the Session is live: no sign-out.
+    server.activityFailure = { status: 401, error: "session_ended" };
+    await page.goto(path);
+    await expect.poll(() => server.expiry).toBeGreaterThan(0);
+    await advance(page, server, 30_000);
+    await expect(signedOut).toHaveCount(0);
+    server.activityFailure = null;
+    // Recovered: the next report records activity again and the page still responds.
+    await page.mouse.click(5, 5);
+    await advance(page, server, 2 * minute);
+    await expect(signedOut).toHaveCount(0);
+    await page.getByRole("link", { name: "Home" }).first().click();
+    await expect(page).toHaveURL(/\/app$/u);
+    await page.goto(path);
+  }
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await expect(signedOut).toHaveCount(0);
+    await noOverflow(page);
+  }
+});
+
+test("@production a wrongly shown sign-out can be re-checked and leaves the page usable", async ({
+  page,
+}) => {
+  await page.clock.install({ time: T0 });
+  await workspace(page, [
+    { screenId: "HOME-OVERVIEW", label: "Overview", href: "/app", permission: "merchant.access" },
+    {
+      screenId: "OPS-ORDER-QUEUE",
+      label: "Orders",
+      href: "/operations/orders",
+      permission: "ordering.operate",
+    },
+  ]);
+  const server = await identity(page);
+  await page.goto("/app");
+  await expect.poll(() => server.activity).toBe(1);
+  await advance(page, server, 0);
+  // The server answers "ended" for a moment (both reads): the cover appears.
+  server.activityFailure = { status: 401, error: "session_ended" };
+  server.expiryEnded = true;
+  await page.mouse.click(5, 5);
+  await advance(page, server, 70_000);
+  const signedOut = page.getByRole("dialog", { name: "You’ve been signed out" });
+  await expect(signedOut).toBeVisible();
+  // The Session is live after all: "Check again" removes the cover and the page works.
+  server.activityFailure = null;
+  server.expiryEnded = false;
+  await signedOut.getByRole("button", { name: "Check again" }).click();
+  await expect(signedOut).toHaveCount(0);
+  await page.getByRole("link", { name: "Orders" }).first().click();
+  await expect(page).toHaveURL(/\/operations\/orders$/u);
 });

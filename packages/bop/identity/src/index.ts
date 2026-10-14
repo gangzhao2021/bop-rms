@@ -141,6 +141,7 @@ export {
   type SelectorHash,
 } from "./contracts/browser-session.js";
 export {
+  type BrowserSessionActivityResult,
   type BrowserSessionStorePort,
   type ConsumeAuthorizationTransactionCommand,
   type CreateBrowserSessionCommand,

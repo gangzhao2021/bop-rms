@@ -2,6 +2,7 @@ import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { storeTime } from "./StoreTime.js";
 import {
+  ACTIVITY_INTERVAL_MS,
   createStaffSessionClient,
   isOperationalScreen,
   remaining,
@@ -135,6 +136,8 @@ export function StaffSessionGuard({
   const [current, setCurrent] = useState<SessionDeadlines | null>(null);
   const [ended, setEnded] = useState<"Idle" | "Absolute" | "SignedOut" | null>(null);
   const [staying, setStaying] = useState(false);
+  const [unconfirmed, setUnconfirmed] = useState(false);
+  const [checking, setChecking] = useState(false);
   const lastInput = useRef(Date.now());
   const lastReport = useRef(Number.NEGATIVE_INFINITY);
   const lastVerify = useRef(Number.NEGATIVE_INFINITY);
@@ -146,13 +149,43 @@ export function StaffSessionGuard({
   const now = useNow(notice.kind !== "None");
   const dialog = useRef<HTMLHeadingElement>(null);
 
-  const apply = useCallback((read: SessionRead) => {
-    if (read === "Ended") {
-      setEnded("SignedOut");
-      return;
-    }
-    setCurrent(read);
-  }, []);
+  /**
+   * Covers the screen only after the server has explicitly said the Session ended
+   * (`401 session_ended`) on a fresh deadline read. Busy, refused or unreachable checks never sign
+   * staff out; the next report or check retries.
+   */
+  const confirmEnded = useCallback(
+    async (reason: "Idle" | "Absolute" | "SignedOut") => {
+      if (verifying.current) return;
+      verifying.current = true;
+      try {
+        const read = await source.expiry(csrf);
+        if (read === "Ended") {
+          setEnded(reason);
+          return;
+        }
+        setCurrent(read);
+        setUnconfirmed(false);
+        verifiedEnd.current = false;
+      } catch {
+        setUnconfirmed(true);
+      } finally {
+        verifying.current = false;
+      }
+    },
+    [csrf, source],
+  );
+  const apply = useCallback(
+    (read: SessionRead) => {
+      if (read === "Ended") {
+        void confirmEnded("SignedOut");
+        return;
+      }
+      setCurrent(read);
+      setUnconfirmed(false);
+    },
+    [confirmEnded],
+  );
   const report = useCallback(
     async (force = false) => {
       if (inFlight.current) return;
@@ -169,11 +202,13 @@ export function StaffSessionGuard({
       )
         return;
       inFlight.current = true;
-      lastReport.current = at;
       try {
         apply(await source.activity(csrf));
+        lastReport.current = at;
       } catch {
-        // Offline or unavailable: keep the last known deadlines; warnings still follow the clock.
+        // Busy, refused or offline: keep the last known deadlines and retry on a later tick
+        // (allow the next attempt after 15 s rather than a full minute).
+        lastReport.current = at - ACTIVITY_INTERVAL_MS + 15_000;
       } finally {
         inFlight.current = false;
       }
@@ -205,46 +240,64 @@ export function StaffSessionGuard({
     };
   }, [report]);
 
-  // Each tick: report activity if due. Before warning or ending, re-read the deadlines once (another
-  // tab may have extended them); re-read at most every 30 s while a warning is shown.
+  // Each tick: report activity if due. Before warning, re-read the deadlines (another tab may have
+  // extended them) at most every 30 s; when the clock says the Session ended, confirm with the
+  // server before covering the screen.
   useEffect(() => {
     if (ended !== null) return;
     void report();
     if (current === null) return;
     const local = sessionNotice(current, now);
     if (local.kind === "None" || verifying.current) return;
-    const due =
-      now - lastVerify.current >= 30_000 || (local.kind === "Ended" && !verifiedEnd.current);
-    if (!due) return;
-    verifying.current = true;
+    if (local.kind === "Ended") {
+      if (!verifiedEnd.current || now - lastVerify.current >= 30_000) {
+        verifiedEnd.current = true;
+        lastVerify.current = now;
+        void confirmEnded(local.reason);
+      }
+      return;
+    }
+    if (now - lastVerify.current < 30_000) return;
     lastVerify.current = now;
-    verifiedEnd.current = local.kind === "Ended";
+    verifying.current = true;
     void source
       .expiry(csrf)
       .then(
         (read) => {
-          if (read === "Ended") {
-            setEnded(local.kind === "Ended" ? local.reason : "SignedOut");
-            return;
-          }
-          const fresh = sessionNotice(read, Date.now());
-          if (fresh.kind !== "Ended") verifiedEnd.current = false;
-          setCurrent(read);
-          if (fresh.kind === "Ended") setEnded(fresh.reason);
+          // The explicit server answer on a fresh read (e.g. signed out on another screen).
+          if (read === "Ended") setEnded("SignedOut");
+          else setCurrent(read);
         },
-        () => {
-          // Unreachable server: the clock still decides when the Session has ended.
-          if (local.kind === "Ended") setEnded(local.reason);
-        },
+        () => undefined,
       )
       .finally(() => {
         verifying.current = false;
       });
-  }, [csrf, current, ended, now, report, source]);
+  }, [confirmEnded, csrf, current, ended, now, report, source]);
 
   useEffect(() => {
     if (ended !== null) dialog.current?.focus();
   }, [ended]);
+
+  const checkAgain = async () => {
+    setChecking(true);
+    try {
+      const read = await source.expiry(csrf);
+      if (read !== "Ended") {
+        // Still signed in after all: remove the cover and resume normally.
+        setCurrent(read);
+        setUnconfirmed(false);
+        verifiedEnd.current = false;
+        lastVerify.current = Date.now();
+        lastReport.current = Number.NEGATIVE_INFINITY;
+        setEnded(null);
+      }
+    } catch {
+      // Unreachable: stay on the cover; the sign-in link still works.
+    } finally {
+      setChecking(false);
+    }
+  };
 
   if (ended !== null)
     return (
@@ -266,10 +319,22 @@ export function StaffSessionGuard({
                 : "This sign-in has ended (signed out here or on another screen)."}
           </p>
           <StaffSignInLink client={source} label="Sign in again" />
+          <button type="button" disabled={checking} onClick={() => void checkAgain()}>
+            {checking ? "Checking…" : "Check again"}
+          </button>
         </section>
       </div>
     );
-  if (current === null || notice.kind === "None" || notice.kind === "Ended") return null;
+  if (current === null || notice.kind === "None") return null;
+  if (notice.kind === "Ended")
+    return unconfirmed ? (
+      <section className="staff-session__notice" role="alert" aria-label="Sign-in check">
+        <p>
+          <strong>Your sign-in may have ended.</strong> It could not be checked right now; check the
+          connection. If an action is refused, sign in again.
+        </p>
+      </section>
+    ) : null;
   const at = storeTime(notice.at, timeZone);
   return (
     <section

@@ -146,7 +146,17 @@ export function createStaffSessionClient(
       method,
       headers: { Accept: "application/json", "X-BOP-CSRF": csrf },
     });
-    if (response.status === 401 || response.status === 403) return "Ended";
+    // Only the explicit "session ended" answer ends the Session; a refused (403), busy or
+    // unavailable (5xx) check is retried later and never signs staff out.
+    if (response.status === 401) {
+      const body: unknown = await response.json().catch(() => null);
+      if (
+        body !== null &&
+        typeof body === "object" &&
+        (body as { error?: unknown }).error === "session_ended"
+      )
+        return "Ended";
+    }
     if (!response.ok) throw new Error("STAFF_SESSION_UNAVAILABLE");
     return deadlines(await response.json(), clock());
   }
