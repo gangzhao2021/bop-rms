@@ -548,7 +548,10 @@ NODE_ENV=development node tooling/environment/pilot-provision-tls.mjs renew /abs
 
 `renewPilotTls` applies the same development-mode, owner-only `0700` directory and matching
 InternalTest profile checks, and needs a complete owner-only `0600` pair whose key matches
-the certificate (it may already be expired). A pair with more than `within_days` (default 7,
+the certificate (it may already be expired; an earlier self-signed loopback pair issued with
+the OpenSSL default `CA:TRUE` constraint is accepted for renewal only and is replaced by a
+`CA:FALSE` server certificate). A refusal prints the failed requirement as a fixed code, for
+example `PILOT_TLS_RENEWAL_UNAVAILABLE (pair-file-not-0600)`, and never key material. A pair with more than `within_days` (default 7,
 at most 30) left is retained unchanged. Otherwise it generates a new key and a new 30-day
 certificate with the same subject and alternative names, validates it, keeps the previous
 pair as hard links in a new owner-only `tls-backup-<time>` directory and then replaces

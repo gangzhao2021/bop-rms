@@ -3,44 +3,56 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { X509Certificate, createPrivateKey, randomUUID } from "node:crypto";
 import { lstat, realpath, readFile, mkdir, chmod, link, rename, rm, rmdir } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import console from "node:console";
 import { pilotCertificatePublicKeyPin } from "./pilot-tls-trust.mjs";
 const execute = promisify(execFile);
-const unavailable = () => {
-  throw new Error("PILOT_TLS_BOOTSTRAP_UNAVAILABLE");
+/**
+ * Refuses with a fixed, non-secret requirement code (`error.reason`) so the operator can see
+ * which requirement failed; reasons never contain paths, names or key material.
+ */
+const unavailable = (reason = "unspecified") => {
+  const error = new Error("PILOT_TLS_BOOTSTRAP_UNAVAILABLE");
+  error.reason = reason;
+  throw error;
 };
+const keepReason = (reason) => (error) =>
+  unavailable(typeof error?.reason === "string" ? error.reason : reason);
 async function exists(file) {
   try {
     await lstat(file);
     return true;
   } catch (error) {
     if (error.code === "ENOENT") return false;
-    return unavailable();
+    return unavailable("pair-file-unreadable");
   }
 }
-async function readOwnedPair(keyFile, certificateFile) {
+/**
+ * `allowLegacyCa` accepts an existing self-signed loopback certificate that carries
+ * `CA:TRUE` (the OpenSSL `req -x509` default used by earlier pilot installations, e.g. v14/v15).
+ * Only renewal uses it, to replace such a pair; every generated or retained pair must be CA:FALSE.
+ */
+async function readOwnedPair(keyFile, certificateFile, { allowLegacyCa = false } = {}) {
   for (const file of [keyFile, certificateFile]) {
-    const state = await lstat(file);
-    if (
-      !state.isFile() ||
-      state.isSymbolicLink() ||
-      state.uid !== process.getuid() ||
-      (state.mode & 0o777) !== 0o600 ||
-      (await realpath(file)) !== file
-    )
-      return unavailable();
+    const state = await lstat(file).catch(keepReason("pair-incomplete"));
+    if (!state.isFile() || state.isSymbolicLink()) return unavailable("pair-file-not-regular");
+    if (state.uid !== process.getuid()) return unavailable("pair-file-not-owned");
+    if ((state.mode & 0o777) !== 0o600) return unavailable("pair-file-not-0600");
+    if ((await realpath(file)) !== file) return unavailable("pair-file-path-not-canonical");
   }
-  const certificate = new X509Certificate(await readFile(certificateFile));
-  const key = createPrivateKey(await readFile(keyFile));
-  if (
-    !certificate.checkPrivateKey(key) ||
-    certificate.checkIP("127.0.0.1") !== "127.0.0.1" ||
-    !certificate.verify(certificate.publicKey) ||
-    certificate.ca
-  )
-    return unavailable();
+  let certificate, key;
+  try {
+    certificate = new X509Certificate(await readFile(certificateFile));
+    key = createPrivateKey(await readFile(keyFile));
+  } catch {
+    return unavailable("pair-unparseable");
+  }
+  if (!certificate.checkPrivateKey(key)) return unavailable("key-does-not-match-certificate");
+  if (certificate.checkIP("127.0.0.1") !== "127.0.0.1")
+    return unavailable("certificate-not-for-127.0.0.1");
+  if (!certificate.verify(certificate.publicKey)) return unavailable("certificate-not-self-signed");
+  if (certificate.ca && !allowLegacyCa) return unavailable("certificate-is-ca");
   return certificate;
 }
 async function validatePair(keyFile, certificateFile) {
@@ -49,7 +61,7 @@ async function validatePair(keyFile, certificateFile) {
     Date.parse(certificate.validFrom) > Date.now() ||
     Date.parse(certificate.validTo) <= Date.now()
   )
-    return unavailable();
+    return unavailable("certificate-outside-validity");
 }
 const DEFAULT_SUBJECT = "/CN=BOP-RMS Local DEMO";
 const DEFAULT_SUBJECT_ALT_NAME = "IP:127.0.0.1";
@@ -58,12 +70,14 @@ const SAFE_NAME_VALUE = /^[A-Za-z0-9 .\-_]{1,64}$/;
 function certificateNames(certificate) {
   const subject = certificate.subject.split("\n").map((entry) => {
     const match = /^(CN|O|OU|C|ST|L)=(.*)$/.exec(entry);
-    if (!match || !SAFE_NAME_VALUE.test(match[2])) return unavailable();
+    if (!match || !SAFE_NAME_VALUE.test(match[2]))
+      return unavailable("certificate-subject-unsupported");
     return "/" + match[1] + "=" + match[2];
   });
   const alternativeNames = (certificate.subjectAltName ?? "").split(", ").map((entry) => {
     const match = /^(IP Address|DNS):(.*)$/.exec(entry);
-    if (!match || !SAFE_NAME_VALUE.test(match[2])) return unavailable();
+    if (!match || !SAFE_NAME_VALUE.test(match[2]))
+      return unavailable("certificate-alternative-name-unsupported");
     return (match[1] === "DNS" ? "DNS:" : "IP:") + match[2];
   });
   return { subject: subject.join(""), subjectAltName: alternativeNames.join(",") };
@@ -101,7 +115,7 @@ async function generatePair(stage, { subject, subjectAltName }) {
       { timeout: 30000, maxBuffer: 65536 },
     );
   } catch {
-    return unavailable();
+    return unavailable("openssl-generation-failed");
   }
   await chmod(key, 0o600);
   await chmod(certificate, 0o600);
@@ -109,24 +123,24 @@ async function generatePair(stage, { subject, subjectAltName }) {
   return { key, certificate };
 }
 async function prepareDirectory({ directory, expectedDatabaseName }) {
-  if (
-    process.env.NODE_ENV !== "development" ||
-    typeof expectedDatabaseName !== "string" ||
-    !expectedDatabaseName
-  )
-    return unavailable();
-  const state = await lstat(directory);
-  if (
-    !state.isDirectory() ||
-    state.isSymbolicLink() ||
-    state.uid !== process.getuid() ||
-    (state.mode & 0o777) !== 0o700 ||
-    (await realpath(directory)) !== directory
-  )
-    return unavailable();
-  const profile = JSON.parse(await readFile(join(directory, "internal-test-profile.json"), "utf8"));
-  if (profile.environment !== "InternalTest" || profile.database !== expectedDatabaseName)
-    return unavailable();
+  if (process.env.NODE_ENV !== "development") return unavailable("not-development-mode");
+  if (typeof expectedDatabaseName !== "string" || !expectedDatabaseName)
+    return unavailable("expected-database-missing");
+  if (typeof directory !== "string" || !isAbsolute(directory))
+    return unavailable("directory-not-absolute");
+  const state = await lstat(directory).catch(keepReason("directory-missing"));
+  if (!state.isDirectory() || state.isSymbolicLink()) return unavailable("directory-not-directory");
+  if (state.uid !== process.getuid()) return unavailable("directory-not-owned");
+  if ((state.mode & 0o777) !== 0o700) return unavailable("directory-not-0700");
+  if ((await realpath(directory)) !== directory) return unavailable("directory-path-not-canonical");
+  let profile;
+  try {
+    profile = JSON.parse(await readFile(join(directory, "internal-test-profile.json"), "utf8"));
+  } catch {
+    return unavailable("profile-unreadable");
+  }
+  if (profile?.environment !== "InternalTest") return unavailable("profile-not-internal-test");
+  if (profile.database !== expectedDatabaseName) return unavailable("profile-database-mismatch");
 }
 /** Local demo TLS only; no trust-store installation or existing key replacement. */
 export async function provisionPilotTls({ directory, expectedDatabaseName }) {
@@ -135,7 +149,7 @@ export async function provisionPilotTls({ directory, expectedDatabaseName }) {
   try {
     await mkdir(lock, { mode: 0o700 });
   } catch {
-    return unavailable();
+    return unavailable("provision-lock-held");
   }
   const stage = join(directory, ".tls-stage-" + randomUUID());
   let staged = false;
@@ -144,7 +158,7 @@ export async function provisionPilotTls({ directory, expectedDatabaseName }) {
       certificateFile = join(directory, "customer-tls-cert.pem");
     const hasKey = await exists(keyFile),
       hasCertificate = await exists(certificateFile);
-    if (hasKey !== hasCertificate) return unavailable();
+    if (hasKey !== hasCertificate) return unavailable("pair-incomplete");
     if (hasKey) {
       await validatePair(keyFile, certificateFile);
       return { status: "Retained", rotationPerformed: false };
@@ -184,14 +198,14 @@ export async function renewPilotTls({
   now = Date.now(),
 }) {
   if (!Number.isInteger(renewWithinDays) || renewWithinDays < 0 || renewWithinDays > 30)
-    return unavailable();
-  if (!Number.isFinite(now)) return unavailable();
+    return unavailable("renew-window-invalid");
+  if (!Number.isFinite(now)) return unavailable("renew-time-invalid");
   await prepareDirectory({ directory, expectedDatabaseName });
   const lock = join(directory, ".tls-provision-lock");
   try {
     await mkdir(lock, { mode: 0o700 });
   } catch {
-    return unavailable();
+    return unavailable("provision-lock-held");
   }
   const stage = join(directory, ".tls-stage-" + randomUUID());
   let staged = false;
@@ -199,7 +213,10 @@ export async function renewPilotTls({
     const keyFile = join(directory, "customer-tls-key.pem"),
       certificateFile = join(directory, "customer-tls-cert.pem");
     // Renewal needs a complete existing pair; a missing or partial pair is provisioning/recovery.
-    const current = await readOwnedPair(keyFile, certificateFile).catch(unavailable);
+    // Earlier installations were issued with CA:TRUE; renewal replaces them with a CA:FALSE leaf.
+    const current = await readOwnedPair(keyFile, certificateFile, { allowLegacyCa: true }).catch(
+      keepReason("pair-incomplete"),
+    );
     const previousValidTo = new Date(Date.parse(current.validTo)).toISOString();
     if (Date.parse(current.validTo) - now > renewWithinDays * DAY)
       return { status: "Retained", renewalPerformed: false, validTo: previousValidTo };
@@ -212,7 +229,7 @@ export async function renewPilotTls({
     try {
       await mkdir(backup, { mode: 0o700 });
     } catch {
-      return unavailable();
+      return unavailable("backup-already-exists");
     }
     await link(keyFile, join(backup, "customer-tls-key.pem"));
     await link(certificateFile, join(backup, "customer-tls-cert.pem"));
@@ -252,9 +269,17 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         }),
       ),
     );
-  } catch {
+  } catch (error) {
+    const reason =
+      typeof error?.reason === "string"
+        ? error.reason
+        : error?.message === "PILOT_TLS_ARGUMENTS_INVALID"
+          ? "arguments-invalid"
+          : "unexpected-error";
     console.error(
-      "PILOT_TLS_RENEWAL_UNAVAILABLE: requires development mode, a matching InternalTest profile, a private absolute directory and a complete owner-only certificate pair. Nothing was replaced.",
+      "PILOT_TLS_RENEWAL_UNAVAILABLE (" +
+        reason +
+        "): requires development mode, a matching InternalTest profile, a private absolute directory and a complete owner-only certificate pair. Nothing was replaced.",
     );
     process.exitCode = 1;
   }
