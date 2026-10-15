@@ -3,7 +3,7 @@ import {
   StoreTimeZoneContext,
   friendlyStoreTime,
   storeLocalInstant,
-  storeTime,
+  storeLocalInputValue,
 } from "./StoreTime.js";
 import { languageName, receiptFieldLabels, receiptTemplateStateLabel } from "./staff-text.js";
 import { StoreSetupClientError, type StoreSetupScope } from "./store-setup-client.js";
@@ -459,11 +459,7 @@ export function ReceiptTemplateDraftEditor({
   const localInput = (instant: string) =>
     instant === "" || Number.isNaN(Date.parse(instant))
       ? ""
-      : storeTime(
-          instant,
-          timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
-          true,
-        ).replace(" ", "T");
+      : storeLocalInputValue(instant, timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
   const instantInput = (local: string) =>
     local === ""
       ? ""

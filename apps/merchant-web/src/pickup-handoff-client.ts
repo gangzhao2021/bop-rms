@@ -48,7 +48,7 @@ export function createPickupHandoffClient(fetcher: typeof fetch = fetch) {
           !workstation ||
           input.item.phase !== "Ready" ||
           (verification === null
-            ? !["Expired", "NotIssued"].includes(input.item.proofReadiness) ||
+            ? !["Expired", "NotIssued", "Locked"].includes(input.item.proofReadiness) ||
               (input.identityCheck !== "OrderNumberAndName" &&
                 input.identityCheck !== "OrderNumberAndPhoneLast4")
             : !execution.proof ||

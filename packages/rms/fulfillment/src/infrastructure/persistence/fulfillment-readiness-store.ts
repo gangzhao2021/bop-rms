@@ -5,6 +5,10 @@ import {
   readPickupInPersonVerifications,
 } from "./pickup-handoff-history.js";
 import { foldPickupProofHistory } from "../../application/pickup-proof-history.js";
+import {
+  countPickupCodeCheckRejections,
+  pickupCodeCheckLimit,
+} from "./pickup-counter-code-store.js";
 import { readPickupProofHistory } from "./pickup-proof-history.js";
 import { parseFulfillmentReference } from "../../contracts/pickup-fulfillment.js";
 import type { ConsumerTransaction } from "@bop/eventing";
@@ -87,7 +91,12 @@ export function createPostgresFulfillmentReadinessStore(options: {
   lockPickupHandoffByOrder(
     input: Parameters<FulfillmentReadinessPorts["repository"]["lockByOrder"]>[0],
   ): Promise<
-    (ReturnType<typeof foldPickupHandoffHistory> & { readonly notCollected: boolean }) | null
+    | (ReturnType<typeof foldPickupHandoffHistory> & {
+        readonly notCollected: boolean;
+        /** WP-2423: five wrong pickup codes for the current proof; staff check in person. */
+        readonly codeChecksLocked: boolean;
+      })
+    | null
   >;
   lockPickupProofByOrder(
     input: Parameters<FulfillmentReadinessPorts["repository"]["lockByOrder"]>[0],
@@ -329,6 +338,20 @@ export function createPostgresFulfillmentReadinessStore(options: {
       columns.map((key) => row[key]),
     );
   }
+  async function codeChecksLocked(
+    tx: ConsumerTransaction,
+    capability: { fulfillmentReference: unknown; capabilityReference: unknown } | null | undefined,
+  ) {
+    if (!capability) return false;
+    return (
+      (await countPickupCodeCheckRejections(
+        tx,
+        { brandReference: brand, storeReference: store },
+        String(capability.fulfillmentReference),
+        String(capability.capabilityReference),
+      )) >= pickupCodeCheckLimit
+    );
+  }
   return {
     async listPickupQueue(input) {
       if (
@@ -396,6 +419,9 @@ export function createPostgresFulfillmentReadinessStore(options: {
                   expiresAt: capability.expiresAt,
                 })
               : null,
+            ...(source.canonicalPhase === "Ready" && (await codeChecksLocked(tx, capability))
+              ? { codeChecksLocked: true }
+              : {}),
             items: Object.freeze(
               source.items.map((item) =>
                 Object.freeze({
@@ -459,7 +485,13 @@ export function createPostgresFulfillmentReadinessStore(options: {
     async lockPickupHandoffByOrder(input) {
       scope(input);
       const state = await current(input.transaction, parseReadinessReference(input.orderReference));
-      return state?.handoff ? { ...state.handoff, notCollected: state.notCollected } : null;
+      return state?.handoff
+        ? {
+            ...state.handoff,
+            notCollected: state.notCollected,
+            codeChecksLocked: await codeChecksLocked(input.transaction, state.proof?.capability),
+          }
+        : null;
     },
     async apply(input) {
       const effect = validateFulfillmentReadyRecordEffect(input.effect, options.sha256),

@@ -1,5 +1,5 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
-import { SourceTime } from "./StoreTime.js";
+import { CheckedTime } from "./StoreTime.js";
 import {
   KitchenDisplayHeaderControls,
   KitchenDisplayNavigation,
@@ -261,14 +261,14 @@ export function StoreAvailabilityPage({
           {floorOnly ? (
             <p>
               Ran out of something? Mark it sold out and customers can no longer order it. It comes
-              back by itself when today's business day ends, or when you mark it back in stock.
-              Source as of <SourceTime instant={view.sourceAsOf} />
+              back by itself when today's business day ends, or when you mark it back in stock.{" "}
+              <CheckedTime instant={view.sourceAsOf} timeZone={view.timeZone} />
             </p>
           ) : (
             <p>
               Customers can order an item on a published menu only where it is offered and not sold
-              out; ingredient stock is checked again when they order. Source as of{" "}
-              <SourceTime instant={view.sourceAsOf} />
+              out; ingredient stock is checked again when they order.{" "}
+              <CheckedTime instant={view.sourceAsOf} timeZone={view.timeZone} />
             </p>
           )}
         </div>

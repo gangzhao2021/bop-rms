@@ -83,17 +83,50 @@ describe("Pickup proof immutable intent", () => {
     ).rejects.toMatchObject({ code: "OutcomeUnknown" });
   });
   it.each([
-    [403, "PermissionDenied"],
-    [409, "Conflict"],
-    [422, "Rejected"],
-  ])("disposes after terminal status %s", async (status, code) => {
-    const fetcher = vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(new Response(null, { status: Number(status) }));
+    [403, "PermissionDenied", null],
+    [409, "Conflict", null],
+    // WP-2423 (DEC-PICKUP-COUNTER-CODE): only a recorded wrong code is "Rejected"; an expired or
+    // replaced proof is a change to refresh; five wrong codes lock code checks.
+    [422, "Rejected", "PICKUP_PROOF_REJECTED"],
+    [422, "Conflict", "PICKUP_PROOF_UNAVAILABLE"],
+    [422, "Conflict", null],
+    [423, "Locked", "PICKUP_PROOF_LOCKED"],
+  ])("disposes after terminal status %s (%s)", async (status, code, error) => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(error === null ? null : JSON.stringify({ error }), {
+        status: Number(status),
+      }),
+    );
     const intent = createPickupProofClient(fetcher).prepare(input());
     await expect(intent.execute(csrf)).rejects.toMatchObject({ code });
     await expect(intent.execute(csrf)).rejects.toMatchObject({ code: "Invalid" });
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("sends the six-digit code without spaces or dashes, and a scanned long code as is", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => response());
+    const opaqueItem = {
+      ...item,
+      execution: {
+        ...(item.execution as NonNullable<PickupQueueItem["execution"]>),
+        proof: { kind: "Opaque" as const, generation: 1, expiresAt: "2026-09-20T00:00:00.000Z" },
+      },
+    };
+    for (const [credential, kind, sent] of [
+      [" 048 213 ", "HumanCode", "048213"],
+      ["048-213", "HumanCode", "048213"],
+      ["AbCdEfGhIjKlMnOpQrStUQ", "Opaque", "AbCdEfGhIjKlMnOpQrStUQ"],
+    ] as const) {
+      fetcher.mockClear();
+      await createPickupProofClient(fetcher)
+        .prepare({ ...input(), item: opaqueItem, credential })
+        .execute(csrf);
+      const body = JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body));
+      expect(body).toMatchObject({ kind, credential: sent });
+    }
+    for (const credential of ["04821", "0482134", "AbCdEfGhIjKlMnOpQrStUB", "abc def"])
+      expect(() =>
+        createPickupProofClient(fetcher).prepare({ ...input(), item: opaqueItem, credential }),
+      ).toThrow();
   });
   it("rejects disposed and pre-aborted operations without sending", async () => {
     const fetcher = vi.fn<typeof fetch>(),

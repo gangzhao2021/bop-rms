@@ -23,6 +23,7 @@ function ready(overrides: Record<string, unknown> = {}) {
     generation: 1,
     proofKind: "HumanCode",
     proofValue: "123456",
+    counterCode: null,
     observedAt: "2026-08-11T13:55:00.000Z",
     expiresAt: "2026-08-11T14:30:00.000Z",
     ...overrides,
@@ -126,6 +127,24 @@ describe("WP-1706 Pickup Code controller", () => {
     expect(controller.getState()).toEqual({ status });
   });
 
+  it("keeps the six-digit code a guest reads to staff (WP-2423)", () => {
+    const parsed = parsePickupCodeResult(
+      ready({ proofKind: "Opaque", proofValue: "A".repeat(21) + "Q", counterCode: "048213" }),
+      id(1),
+      "1001",
+      now,
+    );
+    expect(parsed).toMatchObject({ status: "Ready", counterCode: "048213" });
+    expect(() =>
+      parsePickupCodeResult(
+        Object.fromEntries(Object.entries(ready()).filter(([key]) => key !== "counterCode")),
+        id(1),
+        "1001",
+        now,
+      ),
+    ).toThrow("invalid pickup proof");
+  });
+
   it("rejects malformed, overlong, expired, mismatched and credential-bearing NotReady results", () => {
     const candidates = [
       { ...ready(), privateSelectorHash: "forbidden" },
@@ -134,6 +153,9 @@ describe("WP-1706 Pickup Code controller", () => {
       Object.assign(Object.create({ inherited: true }), ready()),
       ready({ orderReference: id(9) }),
       ready({ proofValue: "12345" }),
+      ready({ counterCode: "12345" }),
+      ready({ counterCode: "12345A" }),
+      ready({ counterCode: 123456 }),
       ready({ expiresAt: "2026-08-11T13:59:59.000Z" }),
       ready({ expiresAt: "2026-08-11T15:00:01.000Z" }),
       { schemaVersion: 1, status: "NotReady", orderReference: id(1), proofValue: "123456" },

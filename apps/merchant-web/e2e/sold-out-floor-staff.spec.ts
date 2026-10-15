@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
+import { expectNoInternalText } from "./internal-text-guard";
 
 /**
  * WP-2423 Q17: Kitchen and Front of House mark an item sold out for today from their own screens and
@@ -169,6 +170,11 @@ test("@production Kitchen marks an item sold out for today from the board and br
   );
   // Staff language only: no internal item codes.
   await expect(page.locator("main")).not.toContainText("OAT-LATTE-1");
+  // WP-2423: when the list was read, in store time and staff words (v15 showed "Source as of
+  // 2026-10-14 22:11"); the text guard now refuses machine dates however they are written.
+  await expect(page.locator(".screen-heading")).toContainText("Checked 2:00 PM today");
+  await expect(page.locator(".screen-heading")).not.toContainText("Source as of");
+  await expectNoInternalText(page);
   await expectLayout(page, "sold-out-kitchen");
 
   await page

@@ -162,6 +162,11 @@ export async function exerciseCapturedOrderFulfillment({
   await admin.query(
     "GRANT SELECT,INSERT ON rms_fulfillment.fulfillment_completion_publication TO " + role,
   );
+  // WP-2423 (DEC-PICKUP-COUNTER-CODE): the six-digit code and wrong-code checks (pilot api grants).
+  await admin.query(
+    "GRANT SELECT,INSERT ON rms_fulfillment.pickup_counter_code,rms_fulfillment.pickup_code_check_rejection TO " +
+      role,
+  );
   // WP-2423: in-person check and not-collected closure facts the handoff reads (pilot api grants).
   await admin.query(
     "GRANT SELECT,INSERT ON rms_fulfillment.pickup_in_person_verification,rms_fulfillment.pickup_not_collected_record TO " +

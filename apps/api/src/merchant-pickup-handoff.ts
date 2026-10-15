@@ -31,7 +31,8 @@ export function createMerchantPickupHandoff(options: {
   const resolveScope = createMerchantStoreScope(options.persistence);
   return async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
     const session = await options.authentication.authorize(input);
-    // WP-2423: staff verified the customer in person (proof expired or never issued) instead of a
+    // WP-2423: staff verified the customer in person (proof expired, never issued, or code checks
+    // locked after five wrong codes) instead of a
     // proof verification: the browser names only which identity check was made.
     const inPerson =
       input.command !== null &&
@@ -136,7 +137,13 @@ export function createMerchantPickupHandoff(options: {
             ...selected,
             verificationMethod: "InPerson" as const,
             identityCheck: intent.identityCheck,
-            reason: current.capability === null ? "ProofNotIssued" : "ProofExpired",
+            reason:
+              current.capability === null
+                ? "ProofNotIssued"
+                : String(current.source.lockedAt) < String(current.capability.expiresAt) &&
+                    current.codeChecksLocked
+                  ? "CodeLocked"
+                  : "ProofExpired",
             verifiedByActorReference: scope.actorReference,
             verifiedAt: options.persistence.now(),
           })

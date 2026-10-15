@@ -17,6 +17,7 @@ import {
   createPostgresStaffItemCancellationReader,
   createPostgresStaffOrderCancellationReader,
   listDiningOrderBatchAuthorship,
+  listOrderItemPrices,
   listStoreDiningBatchPaymentDeadlines,
   listStoreUnpaidBatchCancellations,
   OrderStatusProjectionError,
@@ -93,6 +94,15 @@ export interface CustomerDiningSessionFacts {
     }[];
     /** WP-2423 Q26: Order items the kitchen is remaking (Kitchen's public Query). */
     readonly remakes?: ReadonlySet<string>;
+    /**
+     * WP-2423 D5: each item's frozen price before tax and its tax (Ordering's own order items),
+     * for every shown item or absent, so the table prints item prices, subtotal, tax and total
+     * like the receipt. The amounts guests pay are unchanged.
+     */
+    readonly itemPrices?: ReadonlyMap<
+      string,
+      { readonly subtotal: CustomerMoney; readonly tax: CustomerMoney }
+    >;
     readonly payments: readonly {
       readonly status: "Succeeded" | "Failed";
       readonly amount: CustomerMoney | null;
@@ -138,9 +148,14 @@ export interface CustomerDiningSessionView {
       readonly servedQuantity: number;
       readonly cancelled: boolean;
       readonly lineTotal: CustomerMoney;
+      /** WP-2423 D5: the item's price before tax (present when every item's price is known). */
+      readonly priceBeforeTax?: CustomerMoney;
       /** WP-2423 Q26: present (true) only while the kitchen is making this item again. */
       readonly beingRemade?: true;
     }[];
+    /** WP-2423 D5: the round's items before tax and their tax (with priceBeforeTax). */
+    readonly subtotal?: CustomerMoney;
+    readonly tax?: CustomerMoney;
     readonly itemsTotal: CustomerMoney;
   }[];
   /** Null until the table has ordered. Due is the item total of rounds still waiting for payment. */
@@ -149,6 +164,15 @@ export interface CustomerDiningSessionView {
     readonly refunded: CustomerMoney;
     readonly refundPending: CustomerMoney;
     readonly due: CustomerMoney;
+    /**
+     * WP-2423 D5: what the table ordered (rounds never cancelled for non-payment): items before
+     * tax, tax and the total including tax. Present when every item's price is known.
+     */
+    readonly ordered?: {
+      readonly subtotal: CustomerMoney;
+      readonly tax: CustomerMoney;
+      readonly total: CustomerMoney;
+    };
   };
 }
 
@@ -179,6 +203,24 @@ export function composeCustomerDiningSession(
   const itemCancellation = (orderItemReference: string) =>
     order.itemCancellations.find((entry) => entry.orderItemReferences.includes(orderItemReference));
   let due = 0n;
+  // WP-2423 D5: item prices before tax only when every item has one (never a mix).
+  const prices =
+    order.itemPrices !== undefined &&
+    order.batches.every((batch) =>
+      batch.items.every((item) => {
+        const price = order.itemPrices?.get(item.orderItemReference);
+        return (
+          price !== undefined &&
+          price.subtotal.currencyCode === currency &&
+          price.tax.currencyCode === currency &&
+          price.subtotal.amountMinor >= 0n &&
+          price.tax.amountMinor >= 0n
+        );
+      }),
+    )
+      ? order.itemPrices
+      : undefined;
+  const ordered = { subtotal: 0n, tax: 0n, total: 0n };
   const rounds = order.batches.map((batch, index) => {
     const reference = batch.orderBatchReference;
     const mine = order.authorship.get(reference);
@@ -201,11 +243,22 @@ export function composeCustomerDiningSession(
         servedQuantity: cancelled ? 0 : delivery.deliveredQuantity,
         cancelled,
         lineTotal: money(item.lineTotal.amountMinor),
+        price: prices?.get(item.orderItemReference),
         phase: delivery.phase,
         beingRemade: !cancelled && order.remakes?.has(item.orderItemReference) === true,
       });
     });
     const itemsTotal = items.reduce((sum, item) => sum + item.lineTotal.amountMinor, 0n);
+    const subtotal = items.reduce(
+      (sum, item) => sum + (item.price?.subtotal.amountMinor ?? 0n),
+      0n,
+    );
+    const tax = items.reduce((sum, item) => sum + (item.price?.tax.amountMinor ?? 0n), 0n);
+    if (!unpaidCancelled) {
+      ordered.subtotal += subtotal;
+      ordered.tax += tax;
+      ordered.total += itemsTotal;
+    }
     const outcome = order.paymentOutcomes.get(reference);
     const deadline = order.paymentDeadlines.get(reference) ?? null;
     let status: DiningRoundStatus;
@@ -263,10 +316,14 @@ export function composeCustomerDiningSession(
             servedQuantity: item.servedQuantity,
             cancelled: item.cancelled,
             lineTotal: item.lineTotal,
+            ...(item.price === undefined
+              ? {}
+              : { priceBeforeTax: money(item.price.subtotal.amountMinor) }),
             ...(item.beingRemade ? { beingRemade: true as const } : {}),
           }),
         ),
       ),
+      ...(prices === undefined ? {} : { subtotal: money(subtotal), tax: money(tax) }),
       itemsTotal: money(itemsTotal),
     });
   });
@@ -291,6 +348,15 @@ export function composeCustomerDiningSession(
       refunded: money(refunded),
       refundPending: money(refundPending),
       due: money(due),
+      ...(prices === undefined
+        ? {}
+        : {
+            ordered: Object.freeze({
+              subtotal: money(ordered.subtotal),
+              tax: money(ordered.tax),
+              total: money(ordered.total),
+            }),
+          }),
     }),
   });
 }
@@ -510,6 +576,50 @@ function postgresDependencies(
           (entry) => entry.orderItemReference,
         ),
       );
+      // WP-2423 D5: each item's frozen price before tax (Ordering's own order items), only for the
+      // items this view shows and only when each one's total is the total shown. If they can't be
+      // read, the table keeps the totals it has.
+      let itemPrices:
+        | Map<
+            string,
+            {
+              subtotal: { amountMinor: bigint; currencyCode: string };
+              tax: { amountMinor: bigint; currencyCode: string };
+            }
+          >
+        | undefined;
+      if (await stillAuthorized()) {
+        const shown = new Map(
+          status.order.batches.flatMap((batch) =>
+            batch.items.map((item) => [String(item.orderItemReference), item] as const),
+          ),
+        );
+        try {
+          await transaction.query("SAVEPOINT customer_dining_item_prices", []);
+          const found = await listOrderItemPrices(transaction, scope, orderReference);
+          await transaction.query("RELEASE SAVEPOINT customer_dining_item_prices", []);
+          const matched = found.filter((price) => shown.has(price.orderItemReference));
+          if (
+            matched.length === shown.size &&
+            matched.every(
+              (price) =>
+                shown.get(price.orderItemReference)?.lineTotal.amountMinor ===
+                  price.total.amountMinor &&
+                shown.get(price.orderItemReference)?.lineTotal.currencyCode ===
+                  price.total.currencyCode,
+            )
+          )
+            itemPrices = new Map(
+              matched.map((price) => [
+                price.orderItemReference,
+                { subtotal: price.subtotal, tax: price.tax },
+              ]),
+            );
+        } catch {
+          await transaction.query("ROLLBACK TO SAVEPOINT customer_dining_item_prices", []);
+          await transaction.query("RELEASE SAVEPOINT customer_dining_item_prices", []);
+        }
+      }
       // Refund positions per captured payment, as the receipt reads them (Payment owner sources).
       const refunds = { confirmedMinor: 0n, pendingMinor: 0n };
       for (const projection of payments) {
@@ -574,6 +684,7 @@ function postgresDependencies(
           staffCancellations,
           itemCancellations,
           remakes,
+          ...(itemPrices === undefined ? {} : { itemPrices }),
           payments: payments.map((projection) => ({
             status: projection.snapshot.terminalStatus,
             amount: projection.snapshot.amount,

@@ -320,6 +320,39 @@ export async function exerciseEntryPickupHandoff({
     const wrongCredential = (proofCredential[0] === "A" ? "B" : "A") + proofCredential.slice(1);
     assert.equal((await http.verify({ ...proofIntent, credential: wrongCredential })).status, 422);
     assert.equal((await http.verify({ ...proofIntent, generation: 2 })).status, 422);
+    // WP-2423 (DEC-PICKUP-COUNTER-CODE): the six-digit code the guest reads, typed by staff with
+    // a space, is accepted through the Merchant API; it never appears in the queue.
+    const savedCode = await run(async (transaction) => {
+      await installContext(transaction, scope);
+      return proof.currentCounterCode({ transaction, orderReference });
+    });
+    const counterCode = createPickupCredentialProvider(credentialKeys).recoverCounterCode({
+      brandReference: scope.brandReference,
+      capability: issuedSource.capability,
+      counterCode: savedCode,
+      observedAt: now(),
+    });
+    assert.match(counterCode, /^[0-9]{6}$/u);
+    assert.equal(JSON.stringify(httpQueue.body).includes(counterCode), false);
+    const typed = await http.verify({
+      ...proofIntent,
+      kind: "HumanCode",
+      credential: counterCode.slice(0, 3) + " " + counterCode.slice(3),
+      idempotencyReference: reference(),
+      correlationReference: reference(),
+    });
+    assert.equal(typed.status, 200, "Short code HTTP failed: " + String(typed.body.error));
+    assert.equal(typed.body.status, "Applied");
+    const wrongCode = String((Number(counterCode) + 500001) % 1000000).padStart(6, "0");
+    const wrongTyped = await http.verify({
+      ...proofIntent,
+      kind: "HumanCode",
+      credential: wrongCode,
+      idempotencyReference: reference(),
+      correlationReference: reference(),
+    });
+    assert.equal(wrongTyped.status, 422);
+    assert.equal(wrongTyped.body.error, "PICKUP_PROOF_REJECTED");
     if (browser) assert.equal((await browser.verify(proofIntent)).status, "Applied");
     const verified = await Promise.all([http.verify(proofIntent), http.verify(proofIntent)]);
     for (const response of verified)
@@ -499,7 +532,7 @@ export async function exerciseEntryPickupHandoff({
         "SELECT (SELECT count(*)::int FROM rms_fulfillment.pickup_proof_generation) proofs,(SELECT count(*)::int FROM rms_fulfillment.pickup_proof_verification) verifications,(SELECT count(*)::int FROM rms_fulfillment.pickup_handoff_record) handoffs,(SELECT count(*)::int FROM rms_fulfillment.fulfillment_completion_publication) completions",
       )
     ).rows[0];
-    assert.deepEqual(counts, { proofs: 1, verifications: 1, handoffs: 1, completions: 1 });
+    assert.deepEqual(counts, { proofs: 1, verifications: 2, handoffs: 1, completions: 1 });
     return { event: envelope, completed, command };
   } finally {
     try {

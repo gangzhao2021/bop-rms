@@ -17,6 +17,14 @@ import {
 import { pickupProofCapabilityFromGeneration } from "../../application/pickup-proof-history.js";
 import { createPostgresFulfillmentReadinessStore } from "./fulfillment-readiness-store.js";
 import { readPickupProofHistory } from "./pickup-proof-history.js";
+import {
+  appendPickupCodeCheckRejection,
+  countPickupCodeCheckRejections,
+  pickupCodeCheckLimit,
+  readPickupCounterCode,
+} from "./pickup-counter-code-store.js";
+import { Buffer } from "node:buffer";
+import { timingSafeEqual } from "node:crypto";
 
 function unavailable(): never {
   throw new PickupProofError("PICKUP_PROOF_UNAVAILABLE");
@@ -30,7 +38,8 @@ interface Query {
   readonly idempotencyReference: string;
 }
 interface AuditFact {
-  readonly kind: "Issue" | "Regenerate" | "Verify";
+  /** Rejected/Locked: a wrong pickup code (the fifth locks code checks); never the code itself. */
+  readonly kind: "Issue" | "Regenerate" | "Verify" | "Rejected" | "Locked";
   readonly fulfillmentReference: string;
   readonly operationReference: string;
   readonly correlationReference: string;
@@ -235,7 +244,71 @@ export function createPostgresPickupProofStore(options: {
       return unavailable();
     }
   }
+  function same(a: unknown, b: unknown) {
+    return (
+      typeof a === "string" &&
+      typeof b === "string" &&
+      a.length === b.length &&
+      timingSafeEqual(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"))
+    );
+  }
+  /**
+   * WP-2423 (DEC-PICKUP-COUNTER-CODE): the saved hash a check compares against. The long code
+   * compares with the proof itself; the six-digit code with its own row for the same generation.
+   */
+  async function expectedSelector(
+    tx: ConsumerTransaction,
+    capability: {
+      capabilityReference: unknown;
+      fulfillmentReference: unknown;
+      kind: string;
+      selectorHash: string;
+    },
+    method: "Opaque" | "HumanCode",
+  ): Promise<string | null> {
+    if (method === capability.kind) return capability.selectorHash;
+    if (method !== "HumanCode" || capability.kind !== "Opaque") return null;
+    const code = await readPickupCounterCode(
+      tx,
+      { brandReference: brand, storeReference: store },
+      String(capability.fulfillmentReference),
+      String(capability.capabilityReference),
+    );
+    return code?.selectorHash ?? null;
+  }
   return {
+    /** Rejected checks for the current proof generation and whether code checks are locked. */
+    async codeChecks(input: { transaction: ConsumerTransaction; orderReference: string }) {
+      await authorize(input.transaction, input.orderReference, "Current");
+      const { capability } = await current(input.transaction, input.orderReference);
+      if (!capability) return { rejections: 0, locked: false, counterCode: false };
+      const rejections = await countPickupCodeCheckRejections(
+        input.transaction,
+        { brandReference: brand, storeReference: store },
+        String(capability.fulfillmentReference),
+        String(capability.capabilityReference),
+      );
+      return {
+        rejections,
+        locked: rejections >= pickupCodeCheckLimit,
+        counterCode: (await expectedSelector(input.transaction, capability, "HumanCode")) !== null,
+      };
+    },
+    /** The saved short-code row of the current proof (hashes only), for re-deriving the code. */
+    async currentCounterCode(input: { transaction: ConsumerTransaction; orderReference: string }) {
+      await authorize(input.transaction, input.orderReference, "Current");
+      const { capability } = await current(input.transaction, input.orderReference);
+      if (!capability) return null;
+      const row = await readPickupCounterCode(
+        input.transaction,
+        { brandReference: brand, storeReference: store },
+        String(capability.fulfillmentReference),
+        String(capability.capabilityReference),
+      );
+      return row
+        ? Object.freeze({ derivationIndex: row.derivationIndex, selectorHash: row.selectorHash })
+        : null;
+    },
     async lockByOrder(input: { transaction: ConsumerTransaction; orderReference: string }) {
       await authorize(input.transaction, input.orderReference, "Current");
       return current(input.transaction, input.orderReference);
@@ -296,6 +369,11 @@ export function createPostgresPickupProofStore(options: {
       orderReference: string;
       record: unknown;
       selectorHash: unknown;
+      /**
+       * WP-2423: when given, a wrong code is recorded as a rejected check by this staff member
+       * (idempotent on the check's idempotency reference) instead of only being refused.
+       */
+      rejection?: { readonly actorReference: string };
     }) {
       const record = parsePickupProofVerificationRecord(input.record),
         tx = input.transaction;
@@ -313,7 +391,18 @@ export function createPostgresPickupProofStore(options: {
         const generation = history.issues.find(
           (e) => e.generation.capabilityReference === record.capabilityReference,
         )?.generation;
-        if (!generation || input.selectorHash !== generation.selectorHash) return unavailable();
+        if (!generation) return unavailable();
+        const expected = await expectedSelector(
+          tx,
+          {
+            capabilityReference: generation.capabilityReference,
+            fulfillmentReference: generation.fulfillmentReference,
+            kind: generation.kind,
+            selectorHash: generation.selectorHash,
+          },
+          record.verificationMethod,
+        );
+        if (!same(input.selectorHash, expected)) return unavailable();
         return { status: "AlreadyApplied" as const, record: prior.record };
       }
       let prior = await recover(query);
@@ -328,10 +417,63 @@ export function createPostgresPickupProofStore(options: {
         record.verifiedAt < lastIssuedAt
       )
         return unavailable();
-      const planned = validatePickupProof({
+      const scoped = { brandReference: brand, storeReference: store };
+      const fulfillmentReference = String(capability.fulfillmentReference),
+        capabilityReference = String(capability.capabilityReference);
+      const rejections = await countPickupCodeCheckRejections(
+        tx,
+        scoped,
+        fulfillmentReference,
+        capabilityReference,
+      );
+      const expected = await expectedSelector(tx, capability, record.verificationMethod);
+      if (expected === null) return unavailable();
+      if (!same(input.selectorHash, expected)) {
+        if (!input.rejection) return unavailable();
+        // A replay of the same rejected check is answered again, never counted twice.
+        const replay = (
+          await tx.query<{ rejection_number: unknown }>(
+            "SELECT rejection_number FROM rms_fulfillment.pickup_code_check_rejection " +
+              "WHERE brand_id=$1 AND store_id=$2 AND pickup_code_check_rejection_id=$3",
+            [brand, store, record.idempotencyReference],
+          )
+        ).rows;
+        if (replay.length > 0)
+          return {
+            status: "Rejected" as const,
+            rejections,
+            locked: rejections >= pickupCodeCheckLimit,
+          };
+        if (rejections >= pickupCodeCheckLimit)
+          return { status: "Rejected" as const, rejections, locked: true };
+        const rejectionNumber = rejections + 1,
+          locked = rejectionNumber >= pickupCodeCheckLimit;
+        await appendPickupCodeCheckRejection(tx, scoped, {
+          rejectionReference: record.idempotencyReference,
+          fulfillmentReference,
+          capabilityReference,
+          generation: capability.generation,
+          entryMethod: record.verificationMethod,
+          actorReference: input.rejection.actorReference,
+          rejectionNumber,
+          rejectedAt: record.verifiedAt,
+          correlationReference: record.correlationReference,
+        });
+        await options.appendAudit(tx, {
+          kind: locked ? "Locked" : "Rejected",
+          fulfillmentReference,
+          operationReference: record.idempotencyReference,
+          correlationReference: record.correlationReference,
+          occurredAt: record.verifiedAt,
+        });
+        return { status: "Rejected" as const, rejections: rejectionNumber, locked };
+      }
+      // Five wrong codes lock code checks for this proof: staff check the guest in person instead.
+      if (rejections >= pickupCodeCheckLimit) throw new PickupProofError("PICKUP_PROOF_LOCKED");
+      const validated = validatePickupProof({
         source,
         capability,
-        selectorHash: input.selectorHash,
+        selectorHash: capability.selectorHash,
         generation: record.generation,
         expectedCapabilityVersion: 1,
         observedAt: record.verifiedAt,
@@ -340,6 +482,7 @@ export function createPostgresPickupProofStore(options: {
         idempotencyReference: record.idempotencyReference,
         correlationReference: record.correlationReference,
       });
+      const planned = { ...validated, verificationMethod: record.verificationMethod };
       if (
         encodePickupProofVerificationRecord(planned) !== encodePickupProofVerificationRecord(record)
       )

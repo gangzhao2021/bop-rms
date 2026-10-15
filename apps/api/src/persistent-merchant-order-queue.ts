@@ -21,6 +21,7 @@ import {
 import {
   createPostgresCardMachinePaymentStore,
   listStoreOrderBatchPaymentOutcomes,
+  listStoreOrderOnlinePaidTotals,
 } from "@rms/payment";
 import { createPostgresCurrentBrowserSessionSource } from "@bop/identity";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
@@ -34,6 +35,7 @@ import {
 } from "./merchant-order-staff-cancellation.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { readItemCancellationRefundStatus } from "./merchant-order-item-staff-cancellation.js";
+import { readCustomerReceiptFinancial } from "./customer-receipt-financial.js";
 import {
   resolveMerchantBatchPaymentDue,
   type BatchPaymentOutcome,
@@ -249,6 +251,19 @@ export function createPersistentMerchantOrderQueue(options: {
             ))
               paymentOutcomes.set(entry.orderBatchReference, entry.status);
           }
+          // WP-2423: what each Order was paid online (Payment's status projection), so staff see a
+          // paid online order as paid, as they do a counter order paid on the card machine.
+          const paidOnline = new Map<string, { amountMinor: string; currencyCode: "CAD" }>();
+          if (ownerScope !== null && result.items.length > 0)
+            for (const entry of await listStoreOrderOnlinePaidTotals(
+              businessTransaction,
+              ownerScope,
+              result.items.map((item) => item.orderReference),
+            ))
+              paidOnline.set(entry.orderReference, {
+                amountMinor: entry.amountMinor,
+                currencyCode: entry.currencyCode,
+              });
           // WP-2423 Q1: when a paid pickup Order not yet accepted stops being acceptable (Fulfillment's
           // capacity expiry); staff are warned before it lapses and Payment refunds it.
           const waiting = result.items.filter(
@@ -483,10 +498,42 @@ export function createPersistentMerchantOrderQueue(options: {
             ownerScope === null
               ? null
               : await loadOrderPickupContact(businessTransaction, ownerScope, only.orderReference);
+          // WP-2423: on one order's detail only, how much of its online payment Payment has refunded
+          // or is refunding (ordinary, cancellation and automatic refunds), as the receipt reads it.
+          // Optional evidence: when it cannot be read the detail shows the payment without it.
+          const onlineFinancial =
+            input.orderReference === undefined ||
+            only === undefined ||
+            !paidOnline.has(only.orderReference) ||
+            counter.has(only.orderReference) ||
+            ownerScope === null ||
+            tenantReference === null ||
+            options.resolveRefundConfiguration === undefined
+              ? null
+              : await readCustomerReceiptFinancial(
+                  businessTransaction,
+                  {
+                    scope: { tenantReference, ...ownerScope },
+                    ...(await options.resolveRefundConfiguration(businessTransaction, {
+                      tenantReference,
+                      ...ownerScope,
+                    })),
+                  },
+                  { orderReference: only.orderReference, observedAt: String(source.now()) },
+                  stillAllowed,
+                );
+          const paymentPosition =
+            onlineFinancial === null || onlineFinancial.currencyCode !== "CAD"
+              ? null
+              : Object.freeze({
+                  refundedMinor: onlineFinancial.confirmedRefundMinor.toString(),
+                  refundPendingMinor: onlineFinancial.pendingRefundMinor.toString(),
+                });
           return Object.freeze({
             ...result,
             lines: detailLines,
             pickupContact,
+            paymentPosition,
             items: Object.freeze(
               result.items.map((item) => {
                 const latestBatchSequence = item.batches.reduce(
@@ -508,6 +555,10 @@ export function createPersistentMerchantOrderQueue(options: {
                   unfulfillable: closed,
                   pickupNotCollected: uncollected.has(item.orderReference),
                   counter: counter.get(item.orderReference) ?? null,
+                  // A counter order's payment is the card-machine payment above.
+                  paidOnline: counter.has(item.orderReference)
+                    ? null
+                    : (paidOnline.get(item.orderReference) ?? null),
                   // A held order's deadline is the decision deadline once staff are back (none while
                   // it is held); otherwise Fulfillment's capacity expiry.
                   acceptBy: hold === null ? (deadlines.get(item.orderReference) ?? null) : decideBy,

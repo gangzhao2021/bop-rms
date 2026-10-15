@@ -5,6 +5,7 @@ import { createOrderExceptionClient } from "./order-exception-client.js";
 import { StatePanel } from "@bop-rms/ui";
 import { Freshness, SourceTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
+import { businessDateText } from "./StoreBusinessDay.js";
 
 /** Staff labels for the exception kinds and states the projection carries. */
 export const exceptionKindLabel: Record<OrderExceptionItem["kind"], string> = {
@@ -223,7 +224,7 @@ export function OrderExceptionScreen({
     <WorkspacePage
       className="order-exception-page"
       title="Exceptions"
-      meta={`${view.storeLabel} · Business date ${view.businessDate}`}
+      meta={`${view.storeLabel} · Business date ${businessDateText(view.businessDate)}`}
       status={<Freshness status={view.freshnessStatus} at={view.projectedAt} />}
       actions={
         <button ref={refreshButtonRef} disabled={!onRefresh} onClick={onRefresh}>

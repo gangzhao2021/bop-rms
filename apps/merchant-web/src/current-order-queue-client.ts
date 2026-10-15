@@ -121,6 +121,35 @@ function parseCounter(value: unknown, sourceChannel: unknown) {
   }
   return Object.freeze({ recordedAfterOutage: raw.recordedAfterOutage, paidOnCardMachine: paid });
 }
+/** WP-2423: the sum of an Order's succeeded online payments, from Payment. */
+function parsePaidOnline(value: unknown) {
+  if (value === null || value === undefined) return null;
+  const raw = exact(value, ["amountMinor", "currencyCode"]);
+  if (
+    typeof raw.amountMinor !== "string" ||
+    !minorPattern.test(raw.amountMinor) ||
+    raw.amountMinor === "0" ||
+    raw.currencyCode !== "CAD"
+  )
+    return fail();
+  return Object.freeze({ amountMinor: raw.amountMinor, currencyCode: "CAD" as const });
+}
+/** WP-2423: how much of an Order's online payment Payment has refunded or is refunding. */
+function parsePaymentPosition(value: unknown) {
+  if (value === null || value === undefined) return null;
+  const raw = exact(value, ["refundedMinor", "refundPendingMinor"]);
+  if (
+    typeof raw.refundedMinor !== "string" ||
+    !minorPattern.test(raw.refundedMinor) ||
+    typeof raw.refundPendingMinor !== "string" ||
+    !minorPattern.test(raw.refundPendingMinor)
+  )
+    return fail();
+  return Object.freeze({
+    refundedMinor: raw.refundedMinor,
+    refundPendingMinor: raw.refundPendingMinor,
+  });
+}
 /**
  * WP-2423: an unpaid dine-in round. When its payment failed it is cancelled automatically at
  * cancelsAt; the key is optional so older servers without it read as nothing due.
@@ -192,8 +221,12 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
     // WP-2423 Q21: the Store business day the Order belongs to (order numbers restart daily).
     const withBusinessDate =
       value !== null && typeof value === "object" && Object.hasOwn(value, "businessDate");
+    // WP-2423: what the Order was paid online (absent from an older server).
+    const withPaidOnline =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "paidOnline");
     const item = exact(value, [
       ...(withCounter ? ["counter"] : []),
+      ...(withPaidOnline ? ["paidOnline"] : []),
       ...(withHold ? ["acceptanceHold"] : []),
       ...(withBusinessDate ? ["businessDate"] : []),
       "orderReference",
@@ -368,6 +401,9 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         paymentDue,
       });
     });
+    const counter = parseCounter(item.counter, item.sourceChannel);
+    const paidOnline = parsePaidOnline(item.paidOnline);
+    if (paidOnline !== null && counter !== null) return fail();
     if (
       item.currentVersion !== null &&
       batches[0]?.sequence !== 1 &&
@@ -377,7 +413,9 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
     return Object.freeze({
       batches: Object.freeze(batches),
       /** WP-2423 Q7: staff took this pickup at the counter (null for customer orders). */
-      counter: parseCounter(item.counter, item.sourceChannel),
+      counter,
+      /** WP-2423: what the customer paid online (null when unpaid, a counter order, or unknown). */
+      paidOnline,
       orderReference,
       orderNumber: item.orderNumber,
       orderType: item.orderType,
@@ -498,7 +536,16 @@ function parsePickupContact(value: unknown, orderType: string): OrderPickupConta
   return Object.freeze({ status: "Available", name, channel: raw.channel, value: contact });
 }
 export function parseCurrentOrderDetail(value: unknown, orderReference: string) {
-  const raw = exact(value, ["screenId", "order", "lines", "pickupContact"]);
+  // WP-2423: refunds of the online payment (absent from an older server).
+  const withPosition =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "paymentPosition");
+  const raw = exact(value, [
+    "screenId",
+    "order",
+    "lines",
+    "pickupContact",
+    ...(withPosition ? ["paymentPosition"] : []),
+  ]);
   if (raw.screenId !== "OPS-ORDER-DETAIL") return fail();
   const queue = parseCurrentOrderQueue({ items: [raw.order], nextAfterOrderReference: null });
   const order = queue.items[0];
@@ -580,9 +627,19 @@ export function parseCurrentOrderDetail(value: unknown, orderReference: string) 
     )
       return fail();
   const totals = exact(lines.totals, ["subtotal", "discount", "tax", "fee", "total"]);
+  const paymentPosition = parsePaymentPosition(raw.paymentPosition);
+  if (
+    paymentPosition !== null &&
+    (order.paidOnline === null ||
+      BigInt(paymentPosition.refundedMinor) + BigInt(paymentPosition.refundPendingMinor) >
+        BigInt(order.paidOnline.amountMinor))
+  )
+    return fail();
   return Object.freeze({
     view: queue,
     order,
+    /** WP-2423: refunded and refunding amounts of the online payment (null when not read). */
+    paymentPosition,
     pickupContact: parsePickupContact(raw.pickupContact, order.orderType),
     lines: Object.freeze({
       items: Object.freeze(items),

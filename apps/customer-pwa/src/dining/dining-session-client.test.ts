@@ -102,3 +102,80 @@ describe("WP-2423 Q8 dining session client", () => {
     expect(request).not.toHaveBeenCalled();
   });
 });
+
+describe("WP-2423 D5 item prices before tax", () => {
+  function priced() {
+    const p = payload();
+    const round = firstRound(p);
+    const item = round.items[0];
+    if (item === undefined) throw new Error("fixture");
+    Object.assign(item, { priceBeforeTax: cad("2655") });
+    Object.assign(round, { subtotal: cad("2655"), tax: cad("345") });
+    Object.assign(p.session.summary, {
+      ordered: { subtotal: cad("2655"), tax: cad("345"), total: cad("3000") },
+    });
+    return p;
+  }
+
+  it("decodes item prices before tax and the round and table subtotal and tax", () => {
+    const view = parseDiningSessionView(priced());
+    expect(view.rounds[0]?.items[0]?.priceBeforeTax).toEqual(cad("2655"));
+    expect(view.rounds[0]?.items[0]?.lineTotal).toEqual(cad("3000"));
+    expect(view.rounds[0]?.subtotal).toEqual(cad("2655"));
+    expect(view.rounds[0]?.tax).toEqual(cad("345"));
+    expect(view.rounds[0]?.itemsTotal).toEqual(cad("3000"));
+    expect(view.summary?.ordered).toEqual({
+      subtotal: cad("2655"),
+      tax: cad("345"),
+      total: cad("3000"),
+    });
+    // Without them (an older server) nothing before tax is invented.
+    const plain = parseDiningSessionView(payload());
+    expect(plain.rounds[0]).not.toHaveProperty("subtotal");
+    expect(plain.summary).not.toHaveProperty("ordered");
+  });
+
+  it.each([
+    [
+      "a subtotal that is not the items before tax",
+      (p: ReturnType<typeof priced>) => Object.assign(firstRound(p), { subtotal: cad("2600") }),
+    ],
+    [
+      "a subtotal without tax",
+      (p: ReturnType<typeof priced>) => {
+        const round = firstRound(p) as Record<string, unknown>;
+        delete round.tax;
+      },
+    ],
+    [
+      "an item without its price before tax",
+      (p: ReturnType<typeof priced>) => {
+        const item = firstRound(p).items[0] as Record<string, unknown>;
+        delete item.priceBeforeTax;
+      },
+    ],
+    [
+      "a table breakdown with an unpriced round",
+      (p: ReturnType<typeof priced>) => {
+        const round = firstRound(p) as Record<string, unknown>;
+        delete round.subtotal;
+        delete round.tax;
+        delete (firstRound(p).items[0] as Record<string, unknown>).priceBeforeTax;
+      },
+    ],
+    [
+      "a priced round without the table breakdown",
+      (p: ReturnType<typeof priced>) => {
+        delete (p.session.summary as Record<string, unknown>).ordered;
+      },
+    ],
+    [
+      "a negative tax",
+      (p: ReturnType<typeof priced>) => Object.assign(firstRound(p), { tax: cad("-1") }),
+    ],
+  ])("refuses %s", (_label, change) => {
+    const p = priced();
+    change(p);
+    expect(() => parseDiningSessionView(p)).toThrow(DiningSessionClientError);
+  });
+});

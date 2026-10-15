@@ -96,7 +96,14 @@ export class CustomerDiningSessionHandler {
               servedQuantity: item.servedQuantity,
               cancelled: item.cancelled,
               lineTotal: money(item.lineTotal),
+              // WP-2423 D5: the item's price before tax, when every item's price is known.
+              ...(item.priceBeforeTax === undefined
+                ? {}
+                : { priceBeforeTax: money(item.priceBeforeTax) }),
             })),
+            ...(round.subtotal === undefined || round.tax === undefined
+              ? {}
+              : { subtotal: money(round.subtotal), tax: money(round.tax) }),
             itemsTotal: money(round.itemsTotal),
           })),
           summary:
@@ -107,6 +114,15 @@ export class CustomerDiningSessionHandler {
                   refunded: money(view.summary.refunded),
                   refundPending: money(view.summary.refundPending),
                   due: money(view.summary.due),
+                  ...(view.summary.ordered === undefined
+                    ? {}
+                    : {
+                        ordered: {
+                          subtotal: money(view.summary.ordered.subtotal),
+                          tax: money(view.summary.ordered.tax),
+                          total: money(view.summary.ordered.total),
+                        },
+                      }),
                 },
         };
         response.status(200).json({ schemaVersion: 1, session });

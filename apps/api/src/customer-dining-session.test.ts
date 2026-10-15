@@ -132,3 +132,48 @@ it("serializes only customer-safe fields and is unavailable when unconfigured", 
   const off = await setup(false);
   expect((await off.send()).status).toBe(503);
 });
+
+it("WP-2423 D5: sends item prices before tax and the round and table subtotal and tax as strings", async () => {
+  const f = await setup();
+  const priced = view();
+  const round = priced.rounds[0];
+  if (round === undefined || priced.summary === null) throw new Error("fixture");
+  f.read.mockResolvedValueOnce({
+    ...priced,
+    rounds: [
+      {
+        ...round,
+        items: round.items.map((entry) => ({ ...entry, priceBeforeTax: cad(2655n) })),
+        subtotal: cad(2655n),
+        tax: cad(345n),
+      },
+    ],
+    summary: {
+      ...priced.summary,
+      ordered: { subtotal: cad(2655n), tax: cad(345n), total: cad(3000n) },
+    },
+  });
+  const body = (await (await f.send()).json()) as {
+    session: {
+      rounds: {
+        items: { priceBeforeTax: unknown; lineTotal: unknown }[];
+        subtotal: unknown;
+        tax: unknown;
+        itemsTotal: unknown;
+      }[];
+      summary: { ordered: unknown; due: unknown };
+    };
+  };
+  const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+  expect(body.session.rounds[0]?.items[0]?.priceBeforeTax).toEqual(money("2655"));
+  expect(body.session.rounds[0]?.items[0]?.lineTotal).toEqual(money("3000"));
+  expect(body.session.rounds[0]?.subtotal).toEqual(money("2655"));
+  expect(body.session.rounds[0]?.tax).toEqual(money("345"));
+  expect(body.session.rounds[0]?.itemsTotal).toEqual(money("3000"));
+  expect(body.session.summary.ordered).toEqual({
+    subtotal: money("2655"),
+    tax: money("345"),
+    total: money("3000"),
+  });
+  expect(body.session.summary.due).toEqual(money("0"));
+});

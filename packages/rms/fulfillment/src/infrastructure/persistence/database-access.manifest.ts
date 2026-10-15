@@ -43,6 +43,23 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      // WP-2423 (DEC-PICKUP-COUNTER-CODE): keyed hashes of the six-digit pickup code only.
+      table: "pickup_counter_code",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/fulfillment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["credential"],
+    },
+    {
+      table: "pickup_code_check_rejection",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/fulfillment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "pickup_in_person_verification",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/fulfillment" },

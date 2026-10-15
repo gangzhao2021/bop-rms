@@ -726,3 +726,49 @@ it("WP-2423 Q10: admits the pickup customer's contact on the detail and refuses 
     ),
   ).toThrow();
 });
+
+it("WP-2423: reads what an online order was paid and its refund position on the detail", () => {
+  const paidOnline = { amountMinor: "1130", currencyCode: "CAD" };
+  const queue = (item: object) =>
+    parseCurrentOrderQueue({ items: [item], nextAfterOrderReference: null });
+  expect(queue({ ...row(), paidOnline }).items[0]?.paidOnline).toEqual(paidOnline);
+  expect(queue({ ...row(), paidOnline: null }).items[0]?.paidOnline).toBeNull();
+  // An older server without the key reads as not known.
+  expect(queue(row()).items[0]?.paidOnline).toBeNull();
+  for (const bad of [
+    { amountMinor: "0", currencyCode: "CAD" },
+    { amountMinor: "11.30", currencyCode: "CAD" },
+    { amountMinor: 1130, currencyCode: "CAD" },
+    { amountMinor: "1130", currencyCode: "USD" },
+    { amountMinor: "1130", currencyCode: "CAD", refundedMinor: "0" },
+  ])
+    expect(() => queue({ ...row(), paidOnline: bad })).toThrow(CurrentOrderQueueError);
+  // A counter order's payment is its card-machine payment, never an online one.
+  expect(() =>
+    queue({
+      ...row(),
+      sourceChannel: "Pos",
+      counter: { recordedAfterOutage: false, paidOnCardMachine: null },
+      paidOnline,
+    }),
+  ).toThrow(CurrentOrderQueueError);
+  const paid = { ...detail(), order: { ...row(1), paidOnline } };
+  expect(parseCurrentOrderDetail(paid, id(1)).paymentPosition).toBeNull();
+  const position = { refundedMinor: "500", refundPendingMinor: "130" };
+  expect(
+    parseCurrentOrderDetail({ ...paid, paymentPosition: position }, id(1)).paymentPosition,
+  ).toEqual(position);
+  for (const bad of [
+    { refundedMinor: "1000", refundPendingMinor: "131" },
+    { refundedMinor: "-1", refundPendingMinor: "0" },
+    { refundedMinor: "0" },
+  ])
+    expect(() => parseCurrentOrderDetail({ ...paid, paymentPosition: bad }, id(1))).toThrow();
+  // No refund position without an online payment.
+  expect(() =>
+    parseCurrentOrderDetail(
+      { ...detail(), paymentPosition: { refundedMinor: "0", refundPendingMinor: "0" } },
+      id(1),
+    ),
+  ).toThrow();
+});

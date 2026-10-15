@@ -27,8 +27,12 @@ export const internalTextRules: readonly InternalTextRule[] = [
   },
   // "Unavailable" / "Not available yet" placeholders instead of a working state.
   { name: "placeholder", pattern: /\bunavailable\b|\bnot available yet\b/giu },
-  // Raw machine timestamps such as 2026-10-14T15:00:00.000Z.
-  { name: "timestamp", pattern: /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/gu },
+  // Machine dates and times: 2026-10-14T15:00:00.000Z, 2026-10-14 22:11 or a bare 2026-10-14.
+  // Staff and guests read "Oct 14, 10:11 PM" (the T-only form let "2026-10-14 22:11" through).
+  {
+    name: "timestamp",
+    pattern: /\b\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?Z?)?\b/gu,
+  },
   // "Not available here yet" style stubs.
   { name: "stub", pattern: /\bnot available here yet\b|\bcannot be selected here yet\b/giu },
   // Doubled sentence punctuation such as "9:46 p.m.." (an ellipsis is fine).

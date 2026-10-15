@@ -40,7 +40,8 @@ test("@production Pickup paging, current scope and permission recovery", async (
     second = "B".repeat(21) + "A",
     queries: Record<string, unknown>[] = [];
   let denied = false,
-    foreign = false;
+    foreign = false,
+    firstHandedOver = false;
   await page.route("**/merchant/pickup/query", (route) => {
     const query = route.request().postDataJSON();
     queries.push(query);
@@ -56,25 +57,24 @@ test("@production Pickup paging, current scope and permission recovery", async (
         storeReference: foreign ? id(98) : scope.storeReference,
         observedAt: "2026-09-19T12:00:00.000Z",
         nextAfterFulfillmentReference: next ? null : id(1),
-        items: [
-          {
-            fulfillmentReference: next ? id(2) : id(1),
-            orderReference: id(3),
-            phase: query.includeCompleted ? "Completed" : "Ready",
-            aggregateVersion: "9007199254740993",
-            readyAt: "2026-09-19T11:40:00.000Z",
-            publicOrderReference: next ? second : first,
-            proof: { kind: "HumanCode", generation: 1, expiresAt: "2026-09-19T12:55:00.000Z" },
-            items: [
-              {
-                fulfillmentItemReference: id(4),
-                orderedQuantity: 2,
-                readyQuantity: 2,
-                handedOverQuantity: query.includeCompleted ? 2 : 0,
-              },
-            ],
-          },
-        ],
+        // WP-2423: once handed over, the first order leaves the waiting list.
+        items: (firstHandedOver && !next && !query.includeCompleted ? [] : [0]).map(() => ({
+          fulfillmentReference: next ? id(2) : id(1),
+          orderReference: id(3),
+          phase: query.includeCompleted ? "Completed" : "Ready",
+          aggregateVersion: "9007199254740993",
+          readyAt: "2026-09-19T11:40:00.000Z",
+          publicOrderReference: next ? second : first,
+          proof: { kind: "HumanCode", generation: 1, expiresAt: "2026-09-19T12:55:00.000Z" },
+          items: [
+            {
+              fulfillmentItemReference: id(4),
+              orderedQuantity: 2,
+              readyQuantity: 2,
+              handedOverQuantity: query.includeCompleted ? 2 : 0,
+            },
+          ],
+        })),
       },
     });
   });
@@ -198,6 +198,7 @@ test("@production Pickup paging, current scope and permission recovery", async (
         json: { error: "handoff_rejected" },
       });
     const handoffRequest = route.request().postDataJSON();
+    if (handoffRequest.fulfillmentReference === id(1)) firstHandedOver = true;
     return route.fulfill({
       headers,
       json: {
@@ -241,8 +242,15 @@ test("@production Pickup paging, current scope and permission recovery", async (
   await expect(dialog).toBeVisible();
   const retryHandoff = dialog.getByRole("button", { name: "Try confirming again" });
   await retryHandoff.focus();
+  const readsBeforeHandoff = queries.length;
   await page.keyboard.press("Enter");
-  await expect(dialog.getByText("Handoff recorded. Close and refresh the queue.")).toBeVisible();
+  // WP-2423: a recorded handover closes the dialog, re-reads the queue at once and says so.
+  await expect(dialog).toBeHidden();
+  await expect(
+    page.getByRole("status").filter({ hasText: `Order ${first} handed over.` }),
+  ).toBeVisible();
+  await expect(heading("Order " + first)).toHaveCount(0);
+  expect(queries.length).toBeGreaterThan(readsBeforeHandoff);
   expect(handoffs).toHaveLength(2);
   expect(handoffs[0]).toBe(handoffs[1]);
   expect(JSON.parse(handoffs[0] ?? "{}")).toMatchObject({
@@ -254,15 +262,6 @@ test("@production Pickup paging, current scope and permission recovery", async (
     recipientDisplayMask: "S***",
     quantities: [{ fulfillmentItemReference: id(4), quantity: 2 }],
   });
-  const closeHandoff = dialog.getByRole("button", { name: "Close handoff confirmation" });
-  await closeHandoff.focus();
-  await page.keyboard.press("Enter");
-  await expect(
-    page.getByRole("status").filter({
-      hasText: "Handoff recorded. Refresh the queue to see current status.",
-    }),
-  ).toBeFocused();
-  await expect(page.getByRole("button", { name: "Review pickup handoff" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Previous page", exact: true })).toBeDisabled();
   await orderSearch.fill("");
   await page.getByRole("button", { name: "Next page", exact: true }).click();
@@ -301,7 +300,7 @@ test("@production Pickup paging, current scope and permission recovery", async (
   ).toBeFocused();
   await expect(secondReview).toBeDisabled();
   await page.getByRole("button", { name: "Previous page", exact: true }).click();
-  await expect(heading("Order " + first)).toBeVisible();
+  await expect(heading("No pickups waiting")).toBeVisible();
   const includeCompleted = page.getByRole("checkbox", { name: "Include completed pickups" });
   await includeCompleted.focus();
   await page.keyboard.press("Space");
@@ -582,4 +581,143 @@ test("@production Pickup goes read-only offline, sends nothing and recovers on i
     await expect(notCollected).toBeEnabled();
   }
   expect(commands).toEqual([]);
+});
+
+// WP-2423 (DEC-PICKUP-COUNTER-CODE): staff type the guest's six-digit code; a wrong code is said
+// plainly and can be asked again; five wrong codes lock code checks and the order is handed over
+// after an in-person check instead.
+test("@production Pickup accepts the typed six-digit code, explains wrong codes and moves a locked order to the in-person check", async ({
+  page,
+}) => {
+  const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const scope = {
+    brandLabel: "Training Brand",
+    storeLabel: "Training Store",
+    storeReference: id(99),
+    timeZone: "America/Toronto",
+  };
+  const headers = { "cache-control": "no-store" };
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-09-19",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "FUL-PICKUP-QUEUE",
+              label: "Pickup",
+              href: "/operations/pickup",
+              permission: "fulfillment.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  let locked = false,
+    reads = 0;
+  await page.route("**/merchant/pickup/query", (route) => {
+    reads++;
+    const observedAt = new Date().toISOString();
+    return route.fulfill({
+      headers,
+      json: {
+        source: "CurrentFulfillment",
+        workstation: { deviceReference: id(10), pickupLocationReference: id(11) },
+        storeReference: scope.storeReference,
+        observedAt,
+        nextAfterFulfillmentReference: null,
+        items: [
+          {
+            fulfillmentReference: id(1),
+            orderReference: id(3),
+            orderNumber: "9",
+            phase: "Ready",
+            aggregateVersion: "4",
+            readyAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+            publicOrderReference: "A".repeat(22),
+            proof: {
+              kind: "Opaque",
+              generation: 1,
+              expiresAt: new Date(Date.now() + 50 * 60_000).toISOString(),
+            },
+            ...(locked ? { codeChecksLocked: true } : {}),
+            items: [
+              {
+                fulfillmentItemReference: id(4),
+                orderedQuantity: 1,
+                readyQuantity: 1,
+                handedOverQuantity: 0,
+              },
+            ],
+          },
+        ],
+      },
+    });
+  });
+  const sent: Record<string, unknown>[] = [];
+  await page.route("**/merchant/pickup/proof", (route) => {
+    sent.push(route.request().postDataJSON());
+    if (sent.length >= 2) locked = true;
+    return route.fulfill(
+      sent.length === 1
+        ? { status: 422, headers, json: { error: "PICKUP_PROOF_REJECTED" } }
+        : { status: 423, headers, json: { error: "PICKUP_PROOF_LOCKED" } },
+    );
+  });
+  await page.goto("/operations/pickup");
+  await expect(page.getByRole("heading", { name: "Order 9", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Check pickup code", exact: true }).click();
+  await expect(
+    page.getByText("Ask the customer to read the 6-digit pickup code", { exact: false }),
+  ).toBeVisible();
+  const code = page.getByLabel("Pickup code", { exact: true });
+  await expect(code).toBeFocused();
+  await expect(code).toHaveAttribute("type", "text");
+  await expect(code).toHaveAttribute("inputmode", "numeric");
+  // Not a pickup code at all: nothing is sent.
+  await code.fill("4821");
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("Pickup codes have 6 digits.", { exact: false })).toBeVisible();
+  expect(sent).toHaveLength(0);
+  // Typed with a space; sent as six digits. The server says it does not match.
+  await code.fill("048 213");
+  await page.keyboard.press("Enter");
+  await expect(
+    page.getByText("That code doesn't match this order.", { exact: false }),
+  ).toBeVisible();
+  await expect(code).toBeFocused();
+  await expect(code).toHaveValue("");
+  expect(sent[0]).toMatchObject({ kind: "HumanCode", credential: "048213" });
+  await expectNoInternalText(page);
+  // The fifth wrong code locks code checks: the queue re-reads and offers the in-person check.
+  const readsBeforeLock = reads;
+  await code.fill("048214");
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("Too many wrong codes · check in person")).toBeVisible();
+  expect(reads).toBeGreaterThan(readsBeforeLock);
+  await expect(
+    page.getByRole("button", { name: "Hand over after checking in person" }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Check pickup code", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Hand over after checking in person" }).click();
+  const dialog = page.getByRole("dialog", { name: "Confirm pickup handoff" });
+  await expect(
+    dialog.getByText("Too many wrong pickup codes were entered for this order", { exact: false }),
+  ).toBeVisible();
+  await expectNoInternalText(page);
+  // The code never reaches browser storage or the address bar.
+  expect(page.url()).not.toContain("048213");
+  expect(
+    await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length })),
+  ).toEqual({ local: 0, session: 0 });
 });

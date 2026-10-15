@@ -1,6 +1,9 @@
 import { expect, it, vi } from "vitest";
 import type { ConsumerTransaction } from "@bop/eventing";
-import { listStoreOrderBatchPaymentOutcomes } from "../infrastructure/persistence/payment-status-store.js";
+import {
+  listStoreOrderBatchPaymentOutcomes,
+  listStoreOrderOnlinePaidTotals,
+} from "../infrastructure/persistence/payment-status-store.js";
 
 const id = (n: number) => "0198a106-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const scope = { brandReference: id(1), storeReference: id(2) };
@@ -48,6 +51,48 @@ it("WP-2423: refuses foreign, duplicate or malformed rows and oversized requests
     ).rejects.toMatchObject({ code: "PAYMENT_STATUS_DEPENDENCY_UNAVAILABLE" });
   await expect(
     listStoreOrderBatchPaymentOutcomes(
+      fixture([]).transaction,
+      scope,
+      Array.from({ length: 101 }, (_, n) => id(1000 + n)),
+    ),
+  ).rejects.toThrow();
+});
+
+it("WP-2423: sums each Order's active succeeded online payments for the Orders page", async () => {
+  const paid = (order: number, amount_minor: string) => ({
+    order_id: id(order),
+    amount_minor,
+    currency_code: "CAD",
+    currencies: 1,
+  });
+  const f = fixture([paid(50, "1130"), paid(51, "2260")]);
+  const found = await listStoreOrderOnlinePaidTotals(f.transaction, scope, [id(50), id(51)]);
+  expect(found).toEqual([
+    { orderReference: id(50), amountMinor: "1130", currencyCode: "CAD" },
+    { orderReference: id(51), amountMinor: "2260", currencyCode: "CAD" },
+  ]);
+  expect(Object.isFrozen(found)).toBe(true);
+  expect(f.query.mock.calls[0]?.[1]).toEqual([id(1), id(2)]);
+  const sql = String(f.query.mock.calls[1]?.[0]);
+  expect(sql).toContain("p.is_active");
+  expect(sql).toContain("p.terminal_status='Succeeded'");
+  expect(sql).toContain("i.brand_id=$1 AND i.store_id=$2");
+  expect(f.query.mock.calls[1]?.[1]).toEqual([id(1), id(2), [id(50), id(51)]]);
+  expect(await listStoreOrderOnlinePaidTotals(f.transaction, scope, [])).toEqual([]);
+  for (const rows of [
+    [paid(99, "1130")],
+    [paid(50, "1130"), paid(50, "1")],
+    [paid(50, "0")],
+    [paid(50, "11.30")],
+    [{ ...paid(50, "1130"), currencies: 2 }],
+    [{ ...paid(50, "1130"), currency_code: "USD" }],
+    [{ ...paid(50, "1130"), extra: 1 }],
+  ])
+    await expect(
+      listStoreOrderOnlinePaidTotals(fixture(rows).transaction, scope, [id(50)]),
+    ).rejects.toMatchObject({ code: "PAYMENT_STATUS_DEPENDENCY_UNAVAILABLE" });
+  await expect(
+    listStoreOrderOnlinePaidTotals(
       fixture([]).transaction,
       scope,
       Array.from({ length: 101 }, (_, n) => id(1000 + n)),

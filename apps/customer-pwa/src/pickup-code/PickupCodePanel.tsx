@@ -142,15 +142,30 @@ export function PickupCodePanel({
           ) : null}
           <h3>{state.view.storeDisplayName}</h3>
           <p>{state.view.pickupInstruction}</p>
-          <div
-            className="pickup-code__visual"
-            aria-label={`Pickup code ${state.view.proofValue.split("").join(" ")}`}
-          >
-            <span>Order {state.view.orderNumber}</span>
-            <code>{state.view.proofValue}</code>
-          </div>
+          {state.view.counterCode ? (
+            // WP-2423 (DEC-PICKUP-COUNTER-CODE): six digits staff can type, read in two groups.
+            <div
+              className="pickup-code__visual pickup-code__visual--short"
+              aria-label={`Pickup code ${state.view.counterCode.split("").join(" ")}`}
+            >
+              <span>Order {state.view.orderNumber}</span>
+              <code>
+                {state.view.counterCode.slice(0, 3)} {state.view.counterCode.slice(3)}
+              </code>
+            </div>
+          ) : (
+            <div
+              className="pickup-code__visual"
+              aria-label={`Pickup code ${state.view.proofValue.split("").join(" ")}`}
+            >
+              <span>Order {state.view.orderNumber}</span>
+              <code>{state.view.proofValue}</code>
+            </div>
+          )}
           <p>
-            Show this code to staff to collect your order. Valid until{" "}
+            {state.view.counterCode
+              ? "Show or read this code to staff to collect your order. Valid until "
+              : "Show this code to staff to collect your order. Valid until "}
             <time dateTime={state.view.expiresAt}>
               {endSentence(formatClockTime(state.view.expiresAt))}
             </time>

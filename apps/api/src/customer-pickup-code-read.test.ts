@@ -4,6 +4,8 @@ const ports = vi.hoisted(() => ({
   readiness: vi.fn(),
   proof: vi.fn(),
   recover: vi.fn(),
+  counterCode: vi.fn(),
+  recoverCounterCode: vi.fn(),
 }));
 vi.mock("./customer-order-status-read.js", () => ({
   createCustomerOrderStatusRead: () => ({ read: ports.status }),
@@ -11,7 +13,10 @@ vi.mock("./customer-order-status-read.js", () => ({
 vi.mock("@rms/fulfillment", async (original) => ({
   ...(await original<typeof import("@rms/fulfillment")>()),
   createPostgresFulfillmentReadinessStore: () => ({ lockByOrder: ports.readiness }),
-  createPostgresPickupProofStore: () => ({ lockByOrder: ports.proof }),
+  createPostgresPickupProofStore: () => ({
+    lockByOrder: ports.proof,
+    currentCounterCode: ports.counterCode,
+  }),
 }));
 import {
   createCustomerPickupCodeRead,
@@ -36,7 +41,7 @@ function options() {
     },
     readiness: scope,
     proof: scope,
-    credentials: { recoverOpaque: ports.recover },
+    credentials: { recoverOpaque: ports.recover, recoverCounterCode: ports.recoverCounterCode },
     storeDisplayName: "DEMO Store",
     pickupInstruction: "Show this proof to staff.",
   } as unknown as CustomerPickupCodeReadOptions;
@@ -72,6 +77,8 @@ beforeEach(() => {
     capability: { generation: 1, expiresAt: "2026-09-20T07:00:00.000Z" },
   });
   ports.recover.mockReturnValue("synthetic-proof-result");
+  ports.counterCode.mockResolvedValue({ derivationIndex: 0, selectorHash: "a".repeat(64) });
+  ports.recoverCounterCode.mockReturnValue("048213");
 });
 describe("current Guest pickup proof read", () => {
   it("denies mismatched Store configuration before any query", () => {
@@ -125,6 +132,19 @@ describe("current Guest pickup proof read", () => {
     });
     expect(ports.status).toHaveBeenCalledTimes(2);
     expect(ports.recover).toHaveBeenCalledTimes(1);
+    // WP-2423 (DEC-PICKUP-COUNTER-CODE): the six-digit code re-derived from its saved row.
+    expect(result).toMatchObject({ counterCode: "048213" });
+    expect(ports.recoverCounterCode).toHaveBeenCalledWith(
+      expect.objectContaining({
+        counterCode: { derivationIndex: 0, selectorHash: "a".repeat(64) },
+      }),
+    );
+  });
+  it("shows no short code for a proof issued before short codes existed", async () => {
+    ports.counterCode.mockResolvedValue(null);
+    const result = await createCustomerPickupCodeRead(options()).read(input);
+    expect(result).toMatchObject({ status: "Ready", counterCode: null });
+    expect(ports.recoverCounterCode).not.toHaveBeenCalled();
   });
   it("propagates expired credential denial instead of refreshing or issuing", async () => {
     ports.recover.mockImplementation(() => {

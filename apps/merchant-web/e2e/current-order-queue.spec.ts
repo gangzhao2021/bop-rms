@@ -65,6 +65,8 @@ test("@production current queue pages and clears old orders after denied refresh
     pickupNotCollected: false,
     acceptBy: null,
     awaitingPayment: false,
+    // WP-2423: what the customer paid online (Payment's read), shown like a card-machine payment.
+    paidOnline: { amountMinor: "1130", currencyCode: "CAD" },
   });
   await page.route("**/merchant/orders*", (route) => {
     expect(route.request().method()).toBe("GET");
@@ -96,6 +98,16 @@ test("@production current queue pages and clears old orders after denied refresh
   await expect(visibleOrderRows).toHaveCount(1);
   await expect(orderRows.first()).toContainText("ORD-100");
   await expect(orderRows.first()).toHaveAttribute("open", "");
+  // WP-2423: an online order says it is paid, in the row and the detail, with store-time dates
+  // in words (the guard now also refuses machine dates such as 2026-09-13 20:00).
+  await expect(orderRows.first().locator(".order-online-paid")).toHaveText("Paid online $11.30");
+  await expect(orderRows.first().locator(".order-workbench-detail")).toContainText(
+    "PaymentPaid online $11.30",
+  );
+  await expect(orderRows.first().locator(".order-workbench-detail")).toContainText(
+    "Sep 13, 2026, 8:00 PM",
+  );
+  await expectNoInternalText(page);
   await page.getByRole("combobox", { name: "Order type" }).selectOption("DineIn");
   await expect(page.getByRole("heading", { name: "No orders match these filters" })).toBeVisible();
   await expect(visibleOrderRows).toHaveCount(0);

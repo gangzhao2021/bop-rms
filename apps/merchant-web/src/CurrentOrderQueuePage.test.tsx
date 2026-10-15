@@ -7,6 +7,7 @@ import {
   PickupContactPanel,
   orderMoney,
   CurrentOrderQueueRows,
+  onlinePaymentText,
   storeTime,
   filterCurrentOrderItems,
   acceptanceWindow,
@@ -206,7 +207,9 @@ it("keeps payments accessible on cancelled Dining without offering unavailable s
 
 it("WP-2423: shows order times in the Store's time zone", () => {
   expect(storeTime("2026-10-08T01:30:00.000Z", "America/Toronto")).toBe("21:30");
-  expect(storeTime("2026-10-08T01:30:00.000Z", "America/Toronto", true)).toBe("2026-10-07 21:30");
+  expect(storeTime("2026-10-08T01:30:00.000Z", "America/Toronto", true)).toBe(
+    "Oct 7, 2026, 9:30 PM",
+  );
   expect(storeTime("2026-10-08T01:30:00.000Z", undefined)).toBe("01:30 UTC");
 });
 
@@ -920,4 +923,102 @@ it("WP-2423 Q9-G1: shows orders paid during an outage for a decision with accept
   expect(rows).toContain("Paid during an outage · decide");
   expect(rows).not.toContain("Acceptance window ended");
   expect(rows).not.toMatch(/hold_?id|holdReference/u);
+});
+
+it("WP-2423: says an online order is paid, and what happened to the payment", () => {
+  const id = (n: number) => `01909968-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
+  const batch = (n: number, extra: object = {}) => ({
+    orderBatchReference: id(90 + n),
+    sequence: n,
+    acceptanceStatus: "Accepted",
+    canRequestAcceptance: false,
+    canCancel: false,
+    staffCancellation: null,
+    canCancelItems: false,
+    ...extra,
+  });
+  const order = (extra: object = {}) => ({
+    orderReference: id(1),
+    orderNumber: "9",
+    orderType: "Pickup",
+    sourceChannel: "Qr",
+    submittedAt: "2026-10-15T02:08:00.000Z",
+    observedAt: "2026-10-15T02:09:00.000Z",
+    initialBatchReference: id(91),
+    batches: [batch(1)],
+    canRequestAcceptance: false,
+    unfulfillable: null,
+    pickupNotCollected: false,
+    acceptBy: null,
+    awaitingPayment: false,
+    paidOnline: { amountMinor: "1130", currencyCode: "CAD" },
+    currentPhase: "Accepted",
+    currentVersion: 2,
+    ...extra,
+  });
+  const parse = (value: object) =>
+    parseCurrentOrderQueue({ items: [value], nextAfterOrderReference: null });
+  const text = (value: object, position?: Parameters<typeof onlinePaymentText>[1]) => {
+    const item = parse(value).items[0];
+    if (item === undefined) throw new Error("no order");
+    return onlinePaymentText(item, position);
+  };
+  expect(text(order())).toBe("Paid online $11.30");
+  expect(text(order({ paidOnline: null }))).toBeNull();
+  // Refunds Payment reports on the order detail.
+  const position = (refundedMinor: string, refundPendingMinor = "0") => ({
+    refundedMinor,
+    refundPendingMinor,
+  });
+  expect(text(order(), position("0"))).toBe("Paid online $11.30");
+  expect(text(order(), position("500"))).toBe("Paid online $11.30 · partly refunded");
+  expect(text(order(), position("1130"))).toBe("Paid online $11.30 · refunded");
+  expect(text(order(), position("0", "1130"))).toBe("Paid online $11.30 · refund pending");
+  // On the list: refunds the queue itself shows.
+  expect(
+    text(
+      order({
+        unfulfillable: "CapacityExpired",
+        currentPhase: "Submitted",
+        currentVersion: 1,
+        batches: [batch(1, { acceptanceStatus: "NotAccepted" })],
+      }),
+    ),
+  ).toBe("Paid online $11.30 · refunded");
+  const cancellation = (refundStatus: string) => ({
+    reasonCode: "SOLD_OUT",
+    cancelledAt: "2026-10-15T02:10:00.000Z",
+    refundStatus,
+  });
+  const cancelled = (refundStatus: string) =>
+    order({
+      currentPhase: "Cancelled",
+      currentVersion: 3,
+      batches: [batch(1, { staffCancellation: cancellation(refundStatus) })],
+    });
+  expect(text(cancelled("Pending"))).toBe("Paid online $11.30 · refund pending");
+  expect(text(cancelled("Refunded"))).toBe("Paid online $11.30 · refunded");
+  const dining = order({
+    orderType: "DineIn",
+    paidOnline: { amountMinor: "2260", currencyCode: "CAD" },
+    batches: [
+      batch(1),
+      batch(2, { acceptanceStatus: "Cancelled", staffCancellation: cancellation("Refunded") }),
+    ],
+  });
+  expect(text(dining)).toBe("Paid online $22.60 · partly refunded");
+  // Rendered in the row and the detail, in plain words with store-time dates.
+  const html = renderToStaticMarkup(
+    <CurrentOrderQueueRows view={parse(order())} timeZone="America/Toronto" />,
+  );
+  expect(html).toContain(
+    '<span class="order-counter-paid order-online-paid">Paid online $11.30</span>',
+  );
+  expect(html).toContain("<dt>Payment</dt><dd>Paid online $11.30</dd>");
+  expect(html).toContain("Oct 14, 2026, 10:08 PM");
+  expect(html).not.toMatch(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/u);
+  const single = renderToStaticMarkup(
+    <CurrentOrderQueueRows single view={parse(order())} paymentPosition={position("500")} />,
+  );
+  expect(single).toContain("Paid online $11.30 · partly refunded");
 });

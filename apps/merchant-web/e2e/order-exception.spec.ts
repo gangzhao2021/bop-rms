@@ -262,8 +262,9 @@ test("@production workbench displays the full 500-row backlog", async ({ page })
   await expect(
     page.getByRole("heading", { name: "Paid without a fulfillable order", exact: true }),
   ).toHaveCount(500);
-  await expect(page.getByText("2026-08-12T16:00:00.000Z").first()).toBeVisible();
-  await expect(page.getByText(/due 2026-08-12T16:15:00\.000Z/).first()).toBeVisible();
+  // WP-2423: times in words, never the machine instant (no Store zone here, so labelled UTC).
+  await expect(page.getByText(/^Aug 12, 2026, 4:00\sPM UTC$/u).first()).toBeVisible();
+  await expect(page.getByText(/due Aug 12, 2026, 4:15\sPM UTC/u).first()).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Paid without a fulfillable order", exact: true }).last(),
   ).toBeAttached();

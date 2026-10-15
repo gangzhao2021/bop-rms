@@ -11,6 +11,8 @@ export interface PickupQueueReadItem {
     readonly generation: number;
     readonly expiresAt: string;
   } | null;
+  /** WP-2423 (DEC-PICKUP-COUNTER-CODE): five wrong codes locked code checks for this proof. */
+  readonly codeChecksLocked?: true;
   readonly items: readonly {
     readonly fulfillmentItemReference: string;
     /** WP-2423 Q26: the Order item this pickup line fulfils (Kitchen remakes are matched on it). */

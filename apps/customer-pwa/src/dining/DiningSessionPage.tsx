@@ -44,6 +44,11 @@ const settled: ReadonlySet<DiningRoundStatus> = new Set([
 ]);
 
 const money = (value: DiningMoney) => formatMoney(value.amountMinor, value.currencyCode);
+/** Discounts and fees the items carried (total − subtotal − tax), or null when there are none. */
+function adjustments(total: DiningMoney, subtotal: DiningMoney, tax: DiningMoney): string | null {
+  const rest = BigInt(total.amountMinor) - BigInt(subtotal.amountMinor) - BigInt(tax.amountMinor);
+  return rest === 0n ? null : formatMoney(rest, total.currencyCode);
+}
 
 function RoundNote({ round }: { readonly round: DiningRound }) {
   if (round.status === "PaymentFailed")
@@ -108,7 +113,9 @@ function RoundCard({ round }: { readonly round: DiningRound }) {
             <span className="order-status__item-name">
               {item.quantity} × {item.displayName}
             </span>
-            <span className="order-status__item-amount">{money(item.lineTotal)}</span>
+            <span className="order-status__item-amount">
+              {money(item.priceBeforeTax ?? item.lineTotal)}
+            </span>
             {item.cancelled ? (
               <span className="order-status__item-cancelled">Cancelled</span>
             ) : item.beingRemade ? (
@@ -123,8 +130,27 @@ function RoundCard({ round }: { readonly round: DiningRound }) {
           </li>
         ))}
       </ul>
+      {/* WP-2423 D5: like the receipt — items before tax, then subtotal, tax and total. */}
+      {round.subtotal !== undefined && round.tax !== undefined ? (
+        <dl className="order-status__money">
+          <div>
+            <dt>Subtotal</dt>
+            <dd>{money(round.subtotal)}</dd>
+          </div>
+          {adjustments(round.itemsTotal, round.subtotal, round.tax) ? (
+            <div>
+              <dt>Discounts and fees</dt>
+              <dd>{adjustments(round.itemsTotal, round.subtotal, round.tax)}</dd>
+            </div>
+          ) : null}
+          <div>
+            <dt>Tax</dt>
+            <dd>{money(round.tax)}</dd>
+          </div>
+        </dl>
+      ) : null}
       <p className="order-status__total">
-        <span>Round total</span>
+        <span>{round.subtotal === undefined ? "Round total including tax" : "Round total"}</span>
         <span>{money(round.itemsTotal)}</span>
       </p>
     </article>
@@ -141,6 +167,30 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
       aria-labelledby="dining-summary-heading"
     >
       <h2 id="dining-summary-heading">Table total</h2>
+      {summary.ordered !== undefined ? (
+        <dl className="order-status__money">
+          <div>
+            <dt>Subtotal</dt>
+            <dd>{money(summary.ordered.subtotal)}</dd>
+          </div>
+          {adjustments(summary.ordered.total, summary.ordered.subtotal, summary.ordered.tax) ? (
+            <div>
+              <dt>Discounts and fees</dt>
+              <dd>
+                {adjustments(summary.ordered.total, summary.ordered.subtotal, summary.ordered.tax)}
+              </dd>
+            </div>
+          ) : null}
+          <div>
+            <dt>Tax</dt>
+            <dd>{money(summary.ordered.tax)}</dd>
+          </div>
+          <div>
+            <dt>Total ordered</dt>
+            <dd>{money(summary.ordered.total)}</dd>
+          </div>
+        </dl>
+      ) : null}
       <dl>
         <div>
           <dt>Paid so far</dt>
@@ -164,7 +214,10 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
         ) : null}
       </dl>
       <p>
-        Paid amounts include tax and any tip. Amounts waiting for payment are item prices before
+        {summary.ordered !== undefined
+          ? "Item prices are before tax. Rounds that were never paid are not included. "
+          : ""}
+        Paid amounts include tax and any tip. Amounts waiting for payment include tax, before any
         tip. Each guest pays for the rounds they order.
       </p>
     </section>

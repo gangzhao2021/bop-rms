@@ -84,6 +84,7 @@ export { createPostgresPaymentProviderObservationStore } from "./infrastructure/
 export {
   createPostgresPaymentStatusStore,
   listStoreOrderBatchPaymentOutcomes,
+  listStoreOrderOnlinePaidTotals,
 } from "./infrastructure/persistence/payment-status-store.js";
 
 export {

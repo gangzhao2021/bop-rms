@@ -39,9 +39,14 @@ export interface DiningRound {
     readonly servedQuantity: number;
     readonly cancelled: boolean;
     readonly lineTotal: DiningMoney;
+    /** WP-2423 D5: the item's price before tax (every item has it, or none does). */
+    readonly priceBeforeTax?: DiningMoney;
     /** WP-2423 Q26: the kitchen is making this item again. */
     readonly beingRemade?: boolean;
   }[];
+  /** WP-2423 D5: the round's items before tax and their tax (with priceBeforeTax). */
+  readonly subtotal?: DiningMoney;
+  readonly tax?: DiningMoney;
   readonly itemsTotal: DiningMoney;
 }
 
@@ -55,6 +60,12 @@ export interface DiningSessionView {
     readonly refunded: DiningMoney;
     readonly refundPending: DiningMoney;
     readonly due: DiningMoney;
+    /** WP-2423 D5: what the table ordered: items before tax, tax and total including tax. */
+    readonly ordered?: {
+      readonly subtotal: DiningMoney;
+      readonly tax: DiningMoney;
+      readonly total: DiningMoney;
+    };
   };
 }
 
@@ -155,7 +166,9 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
   ]);
   if (!Array.isArray(session.rounds) || session.rounds.length > 100) return invalid();
   const rounds = session.rounds.map((value: unknown, index): DiningRound => {
+    const priced = value !== null && typeof value === "object" && Object.hasOwn(value, "subtotal");
     const round = record(value, [
+      ...(priced ? ["subtotal", "tax"] : []),
       "roundNumber",
       "orderedBy",
       "submittedAt",
@@ -169,6 +182,59 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
     if (round.roundNumber !== index + 1) return invalid();
     if (!Array.isArray(round.items) || round.items.length < 1 || round.items.length > 100)
       return invalid();
+    const itemsTotal = money(round.itemsTotal);
+    const items = Object.freeze(
+      round.items.map((value: unknown) => {
+        const remade =
+          value !== null && typeof value === "object" && Object.hasOwn(value, "beingRemade");
+        const item = record(value, [
+          "displayName",
+          "quantity",
+          "servedQuantity",
+          "cancelled",
+          "lineTotal",
+          ...(priced ? ["priceBeforeTax"] : []),
+          ...(remade ? ["beingRemade"] : []),
+        ]);
+        if (remade && item.beingRemade !== true) return invalid();
+        const quantity = count(item.quantity, 1);
+        const servedQuantity = count(item.servedQuantity, 0);
+        if (servedQuantity > quantity || typeof item.cancelled !== "boolean") return invalid();
+        const lineTotal = money(item.lineTotal);
+        const priceBeforeTax = priced ? money(item.priceBeforeTax) : null;
+        if (
+          priceBeforeTax !== null &&
+          (priceBeforeTax.currencyCode !== lineTotal.currencyCode ||
+            BigInt(priceBeforeTax.amountMinor) < 0n)
+        )
+          return invalid();
+        return Object.freeze({
+          displayName: text(item.displayName),
+          quantity,
+          servedQuantity,
+          cancelled: item.cancelled,
+          lineTotal,
+          ...(priceBeforeTax === null ? {} : { priceBeforeTax }),
+          ...(remade ? { beingRemade: true } : {}),
+        });
+      }),
+    );
+    // WP-2423 D5: the round's subtotal is its items before tax; with its tax it stays within the
+    // round total (any difference is a discount or fee the items carried).
+    let breakdown: { subtotal: DiningMoney; tax: DiningMoney } | null = null;
+    if (priced) {
+      const subtotal = money(round.subtotal),
+        tax = money(round.tax);
+      if (
+        subtotal.currencyCode !== itemsTotal.currencyCode ||
+        tax.currencyCode !== itemsTotal.currencyCode ||
+        BigInt(tax.amountMinor) < 0n ||
+        BigInt(subtotal.amountMinor) !==
+          items.reduce((sum, item) => sum + BigInt(item.priceBeforeTax?.amountMinor ?? "0"), 0n)
+      )
+        return invalid();
+      breakdown = { subtotal, tax };
+    }
     return Object.freeze({
       roundNumber: index + 1,
       orderedBy: oneOf(round.orderedBy, ["You", "AnotherGuest"] as const),
@@ -180,43 +246,43 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
         round.storeCancellationReason === null
           ? null
           : oneOf(round.storeCancellationReason, reasons),
-      items: Object.freeze(
-        round.items.map((value: unknown) => {
-          const remade =
-            value !== null && typeof value === "object" && Object.hasOwn(value, "beingRemade");
-          const item = record(value, [
-            "displayName",
-            "quantity",
-            "servedQuantity",
-            "cancelled",
-            "lineTotal",
-            ...(remade ? ["beingRemade"] : []),
-          ]);
-          if (remade && item.beingRemade !== true) return invalid();
-          const quantity = count(item.quantity, 1);
-          const servedQuantity = count(item.servedQuantity, 0);
-          if (servedQuantity > quantity || typeof item.cancelled !== "boolean") return invalid();
-          return Object.freeze({
-            displayName: text(item.displayName),
-            quantity,
-            servedQuantity,
-            cancelled: item.cancelled,
-            lineTotal: money(item.lineTotal),
-            ...(remade ? { beingRemade: true } : {}),
-          });
-        }),
-      ),
-      itemsTotal: money(round.itemsTotal),
+      items,
+      ...(breakdown === null ? {} : breakdown),
+      itemsTotal,
     });
   });
   let summary: DiningSessionView["summary"] = null;
   if (session.summary !== null) {
-    const raw = record(session.summary, ["paid", "refunded", "refundPending", "due"]);
+    const withOrdered =
+      session.summary !== null &&
+      typeof session.summary === "object" &&
+      Object.hasOwn(session.summary, "ordered");
+    const raw = record(session.summary, [
+      "paid",
+      "refunded",
+      "refundPending",
+      "due",
+      ...(withOrdered ? ["ordered"] : []),
+    ]);
+    let ordered: { subtotal: DiningMoney; tax: DiningMoney; total: DiningMoney } | null = null;
+    if (withOrdered) {
+      // Only with every round priced; the table's subtotal is the priced rounds' (never a guess).
+      if (rounds.some((round) => round.subtotal === undefined)) return invalid();
+      const entry = record(raw.ordered, ["subtotal", "tax", "total"]);
+      ordered = Object.freeze({
+        subtotal: money(entry.subtotal),
+        tax: money(entry.tax),
+        total: money(entry.total),
+      });
+      if (BigInt(ordered.subtotal.amountMinor) < 0n || BigInt(ordered.tax.amountMinor) < 0n)
+        return invalid();
+    } else if (rounds.some((round) => round.subtotal !== undefined)) return invalid();
     summary = Object.freeze({
       paid: money(raw.paid),
       refunded: money(raw.refunded),
       refundPending: money(raw.refundPending),
       due: money(raw.due),
+      ...(ordered === null ? {} : { ordered }),
     });
   }
   if ((summary === null) !== (rounds.length === 0)) return invalid();

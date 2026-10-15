@@ -157,7 +157,7 @@ test("@production Settlement shows the day's totals, the run result and differen
   ).toBeVisible();
   await expect(
     page.getByText(
-      "14 payments checked in 240 runs · last 2026-09-22 03:58 · 13 matched · 1 difference",
+      "14 payments checked in 240 runs · last Sep 22, 2026, 3:58 AM · 13 matched · 1 difference",
     ),
   ).toBeVisible();
   await expect(page.getByText("Difference · Refund differs")).toBeVisible();

@@ -291,6 +291,67 @@ export function cardMachineOwed(order: CurrentOrderQueue["items"][number]): stri
   const owed = BigInt(paid.amountMinor) - BigInt(paid.refundedMinor);
   return owed > 0n ? owed.toString() : null;
 }
+/**
+ * WP-2423: an online order's payment as staff read it ("Paid online $11.30 · partly refunded"),
+ * like a counter order's "Paid on card machine". With Payment's refund position (the order
+ * detail) the refund state is exact; on the list it follows the refunds the queue shows (the
+ * store's cancellations and orders refunded because they could not be fulfilled). Null when
+ * nothing was paid online.
+ */
+export function onlinePaymentText(
+  order: CurrentOrderQueue["items"][number],
+  position?: CurrentOrderDetail["paymentPosition"],
+): string | null {
+  const paid = order.paidOnline;
+  if (paid === null) return null;
+  const base = "Paid online " + orderMoney(paid);
+  if (position !== undefined && position !== null) {
+    if (BigInt(position.refundPendingMinor) > 0n) return base + " · refund pending";
+    const refunded = BigInt(position.refundedMinor);
+    if (refunded >= BigInt(paid.amountMinor)) return base + " · refunded";
+    return refunded > 0n ? base + " · partly refunded" : base;
+  }
+  if (order.unfulfillable !== null) return base + " · refunded";
+  const cancelled = order.batches.filter(
+    (batch) =>
+      batch.staffCancellation !== null && batch.staffCancellation.refundMethod === "Online",
+  );
+  if (cancelled.length === 0) return base;
+  if (cancelled.some((batch) => batch.staffCancellation?.refundStatus === "Pending"))
+    return base + " · refund pending";
+  // Rounds cancelled automatically because they were never paid were not part of the payment.
+  const paidBatches = order.batches.filter(
+    (batch) =>
+      batch.paymentDue === null &&
+      (batch.acceptanceStatus !== "Cancelled" || batch.staffCancellation !== null),
+  );
+  return base + (cancelled.length >= paidBatches.length ? " · refunded" : " · partly refunded");
+}
+/** WP-2423: the exact refunds of an online payment on the order detail, when Payment has any. */
+function OnlineRefundNote({
+  order,
+  position,
+}: {
+  readonly order: CurrentOrderQueue["items"][number];
+  readonly position: CurrentOrderDetail["paymentPosition"];
+}) {
+  if (order.paidOnline === null || position === null) return null;
+  const refunded = BigInt(position.refundedMinor),
+    pending = BigInt(position.refundPendingMinor);
+  if (refunded === 0n && pending === 0n) return null;
+  const amount = (minor: bigint) =>
+    orderMoney({
+      amountMinor: minor.toString(),
+      currencyCode: order.paidOnline?.currencyCode ?? "CAD",
+    });
+  return (
+    <p className="order-counter-note order-online-refunds" role="note">
+      {refunded > 0n ? `Refunded ${amount(refunded)} of the online payment.` : ""}
+      {refunded > 0n && pending > 0n ? " " : ""}
+      {pending > 0n ? `A refund of ${amount(pending)} is on its way to the customer.` : ""}
+    </p>
+  );
+}
 /** Staff-facing words for an order's type and the channel it came in through (never codes). */
 export const orderTypeLabel = { DineIn: "Dine-in", Pickup: "Pickup" } as const;
 export function orderChannelLabel(channel: string): string {
@@ -405,6 +466,7 @@ function QueuedOrderLines({
   return state.kind === "Ready" ? (
     <>
       <PickupContactPanel contact={state.detail.pickupContact} />
+      <OnlineRefundNote order={state.detail.order} position={state.detail.paymentPosition} />
       <CurrentOrderLines
         lines={state.detail.lines}
         refundCheck={refundCheck}
@@ -488,8 +550,11 @@ export function CurrentOrderQueueRows({
   detail,
   timeZone,
   now,
+  paymentPosition,
 }: {
   readonly view: CurrentOrderQueue;
+  /** WP-2423: Payment's refund position of the one Order shown (the order detail page). */
+  readonly paymentPosition?: CurrentOrderDetail["paymentPosition"] | undefined;
   /** WP-2423 Q1: the clock acceptance deadlines are shown against (omitted: not shown). */
   readonly now?: number | undefined;
   readonly timeZone?: string | undefined;
@@ -625,6 +690,12 @@ export function CurrentOrderQueueRows({
                     })}
                   </span>
                 ) : null}
+                {/* WP-2423: an online order — paid online, and any refund of that payment. */}
+                {order.paidOnline !== null ? (
+                  <span className="order-counter-paid order-online-paid">
+                    {onlinePaymentText(order, single ? paymentPosition : undefined)}
+                  </span>
+                ) : null}
                 {order.counter?.recordedAfterOutage ? (
                   <span className="order-counter-outage" data-tier="warning">
                     Recorded after outage
@@ -670,6 +741,12 @@ export function CurrentOrderQueueRows({
                     </time>
                   </dd>
                 </div>
+                {order.paidOnline === null ? null : (
+                  <div>
+                    <dt>Payment</dt>
+                    <dd>{onlinePaymentText(order, single ? paymentPosition : undefined)}</dd>
+                  </div>
+                )}
                 {order.businessDate === null ? null : (
                   <div>
                     <dt>Business day</dt>
@@ -1143,6 +1220,7 @@ export function CurrentOrderQueuePage({
               view={state.view}
               timeZone={timeZone}
               now={now}
+              paymentPosition={detail?.paymentPosition}
               visibleOrderReferences={visibleOrderReferences}
               detail={(order, open) => (
                 <CurrentOrderDetails
@@ -1151,6 +1229,7 @@ export function CurrentOrderQueuePage({
                     detail !== undefined ? (
                       <>
                         <PickupContactPanel contact={detail.pickupContact} timeZone={timeZone} />
+                        <OnlineRefundNote order={detail.order} position={detail.paymentPosition} />
                         <CurrentOrderLines
                           lines={detail.lines}
                           cancelledBatches={storeCancelledBatches(detail.view)}

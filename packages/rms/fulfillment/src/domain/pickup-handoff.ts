@@ -43,7 +43,8 @@ export interface PickupInPersonVerificationRecord {
   readonly storeReference: PickupHandoffReference;
   readonly verificationMethod: "InPerson";
   readonly identityCheck: "OrderNumberAndName" | "OrderNumberAndPhoneLast4";
-  readonly reason: "ProofExpired" | "ProofNotIssued";
+  /** CodeLocked (WP-2423): five wrong pickup codes locked code checks for a still-valid proof. */
+  readonly reason: "ProofExpired" | "ProofNotIssued" | "CodeLocked";
   readonly verifiedByActorReference: PickupHandoffReference;
   readonly verifiedAt: PickupHandoffInstant;
 }
@@ -444,7 +445,9 @@ export function parsePickupInPersonVerificationRecord(
     raw.verificationMethod !== "InPerson" ||
     (raw.identityCheck !== "OrderNumberAndName" &&
       raw.identityCheck !== "OrderNumberAndPhoneLast4") ||
-    (raw.reason !== "ProofExpired" && raw.reason !== "ProofNotIssued")
+    (raw.reason !== "ProofExpired" &&
+      raw.reason !== "ProofNotIssued" &&
+      raw.reason !== "CodeLocked")
   )
     return fail("PICKUP_HANDOFF_INPUT_INVALID");
   const verificationReference = reference(raw.verificationReference);

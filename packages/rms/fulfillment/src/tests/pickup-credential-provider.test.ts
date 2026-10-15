@@ -115,3 +115,67 @@ it("rejects duplicate versions, shared keys and malformed credentials", () => {
     }),
   ).toThrow();
 });
+// WP-2423 (DEC-PICKUP-COUNTER-CODE): the six-digit code a guest reads to staff.
+it("derives a six-digit code per proof generation and candidate, and recovers it after restart", () => {
+  const f = setup(),
+    code = f.provider.deriveCounterCode({ ...input, index: 0 });
+  expect(code).toMatch(/^[0-9]{6}$/);
+  expect(f.provider.deriveCounterCode({ ...input, index: 0 })).toBe(code);
+  const others = new Set(
+    Array.from({ length: 16 }, (_, index) => f.provider.deriveCounterCode({ ...input, index })),
+  );
+  expect(others.size).toBeGreaterThan(1);
+  for (const field of ["storeReference", "fulfillmentReference", "capabilityReference"] as const)
+    expect(f.provider.deriveCounterCode({ ...input, [field]: id(99), index: 0 })).not.toBe(code);
+  const selectorHash = f.provider.hashCredential({
+    ...input,
+    purpose: "PickupHandoff",
+    kind: "HumanCode",
+    credential: code,
+  });
+  const restarted = createPickupCredentialProvider(keys());
+  expect(
+    restarted.recoverCounterCode({
+      brandReference: id(1),
+      capability: f.capability,
+      counterCode: { derivationIndex: 0, selectorHash },
+      observedAt: "2026-09-19T12:30:00.000Z",
+    }),
+  ).toBe(code);
+  for (const counterCode of [
+    { derivationIndex: 1, selectorHash },
+    { derivationIndex: 0, selectorHash: "0".repeat(64) },
+  ])
+    expect(() =>
+      restarted.recoverCounterCode({
+        brandReference: id(1),
+        capability: f.capability,
+        counterCode,
+        observedAt: "2026-09-19T12:30:00.000Z",
+      }),
+    ).toThrow("pickup proof is unavailable");
+  expect(() =>
+    restarted.recoverCounterCode({
+      brandReference: id(1),
+      capability: f.capability,
+      counterCode: { derivationIndex: 0, selectorHash },
+      observedAt: f.capability.expiresAt,
+    }),
+  ).toThrow();
+  expect(() => f.provider.deriveCounterCode({ ...input, index: 16 })).toThrow();
+});
+it("binds the collision hash to the Store only, never to the order", () => {
+  const f = setup(),
+    lookup = (storeReference: string, credential: string) =>
+      f.provider.counterCodeLookupHash({
+        brandReference: id(1),
+        storeReference,
+        pepperVersion: 1,
+        credential,
+      });
+  expect(lookup(id(2), "048213")).toBe(lookup(id(2), "048213"));
+  expect(lookup(id(2), "048213")).not.toBe(lookup(id(5), "048213"));
+  expect(lookup(id(2), "048213")).not.toBe(lookup(id(2), "048214"));
+  expect(lookup(id(2), "048213")).not.toContain("048213");
+  expect(() => lookup(id(2), "48213")).toThrow();
+});

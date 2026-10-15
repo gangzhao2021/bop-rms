@@ -8067,6 +8067,14 @@ body:has(.product-complete-draft) .bop-shell__header,
   background: var(--bop-color-surface-raised);
   font-weight: 600;
 }
+/* WP-2423: the order just handed over on this device. */
+.pickup-queue__handed-over {
+  margin: 0;
+  padding: 8px 10px;
+  border-inline-start: 4px solid var(--bop-color-success);
+  background: var(--bop-color-surface-raised);
+  font-weight: 600;
+}
 /* WP-2423 Q26: orders from earlier business days, apart from today's (numbers repeat daily). */
 .pickup-queue__day {
   margin: 2px 0 0;

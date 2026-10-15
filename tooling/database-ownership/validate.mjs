@@ -2730,11 +2730,15 @@ async function scanUnsupported(root, module, diagnostics) {
             "pickup_proof_invalidation",
             "pickup_proof_operation",
             "pickup_proof_verification",
+            // WP-2423 (DEC-PICKUP-COUNTER-CODE): the six-digit code and its rejected checks.
+            "pickup_counter_code",
+            "pickup_code_check_rejection",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           [
             "src/infrastructure/persistence/pickup-proof-store.ts",
             "src/infrastructure/persistence/pickup-proof-history.ts",
             "src/infrastructure/persistence/pickup-proof-issuer.ts",
+            "src/infrastructure/persistence/pickup-counter-code-store.ts",
           ].includes(moduleRelative);
         const acceptedPickupFulfillmentStoreAsset =
           module.packageName === "@rms/fulfillment" &&

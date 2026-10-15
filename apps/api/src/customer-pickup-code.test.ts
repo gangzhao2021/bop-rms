@@ -23,6 +23,7 @@ async function setup(enabled = true) {
     generation: 1,
     proofKind: "Opaque",
     proofValue: "A".repeat(22),
+    counterCode: "048213",
     observedAt: "2026-09-20T06:00:00.000Z",
     expiresAt: "2026-09-20T07:00:00.000Z",
     privateMetadata: "never serialize",
@@ -59,7 +60,30 @@ it("returns only explicit proof fields and forbids caching", async () => {
   expect(response.status).toBe(200);
   expect(response.headers.get("cache-control")).toBe("no-store");
   expect(response.headers.get("referrer-policy")).toBe("no-referrer");
-  expect(await response.json()).not.toHaveProperty("privateMetadata");
+  const body = (await response.json()) as Record<string, unknown>;
+  expect(body).not.toHaveProperty("privateMetadata");
+  // WP-2423 (DEC-PICKUP-COUNTER-CODE): the six-digit code the guest reads to staff.
+  expect(body.counterCode).toBe("048213");
+});
+it("refuses a malformed six-digit code instead of showing it", async () => {
+  const f = await setup();
+  for (const counterCode of ["48213", "04821A", 48213]) {
+    f.read.mockResolvedValueOnce({
+      schemaVersion: 1,
+      status: "Ready",
+      orderReference: id,
+      orderNumber: "11",
+      storeDisplayName: "DEMO Store",
+      pickupInstruction: "Show staff",
+      generation: 1,
+      proofKind: "Opaque",
+      proofValue: "A".repeat(22),
+      counterCode,
+      observedAt: "2026-09-20T06:00:00.000Z",
+      expiresAt: "2026-09-20T07:00:00.000Z",
+    });
+    expect((await f.request()).status).toBe(503);
+  }
 });
 it("rejects cross-origin, absent CSRF, duplicate cookie and query injection before querying", async () => {
   const f = await setup();

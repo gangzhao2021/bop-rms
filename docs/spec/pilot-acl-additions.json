@@ -2970,6 +2970,42 @@
       "privilege": "SELECT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_counter_code",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 pickup code): the six-digit pickup code staff can type at the counter (keyed hashes only)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_counter_code",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 pickup code): the six-digit pickup code staff can type at the counter (keyed hashes only)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_code_check_rejection",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 pickup code): wrong pickup code checks, five lock code checks for that order (never the code typed)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_code_check_rejection",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 pickup code): wrong pickup code checks, five lock code checks for that order (never the code typed)"
     }
   ]
 }

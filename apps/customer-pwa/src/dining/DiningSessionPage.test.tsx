@@ -197,3 +197,65 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
     expect(page("Pickup")).not.toContain("/dine-in/session");
   });
 });
+
+describe("CUST-DINE-IN-SESSION item prices before tax (WP-2423 D5)", () => {
+  // Ramen 2 × $13.27 + 13% tax = $30.00; Gyoza $7.96 + $1.04 = $9.00.
+  const priced = view({
+    rounds: [
+      round({
+        items: round().items.map((entry) => ({ ...entry, priceBeforeTax: cad("2655") })),
+        subtotal: cad("2655"),
+        tax: cad("345"),
+      }),
+      round({
+        roundNumber: 2,
+        orderedBy: "AnotherGuest",
+        status: "AwaitingPayment",
+        payment: "Awaiting",
+        items: [
+          {
+            displayName: "Gyoza",
+            quantity: 1,
+            servedQuantity: 0,
+            cancelled: false,
+            lineTotal: cad("900"),
+            priceBeforeTax: cad("796"),
+          },
+        ],
+        subtotal: cad("796"),
+        tax: cad("104"),
+        itemsTotal: cad("900"),
+      }),
+    ],
+    summary: {
+      paid: cad("3000"),
+      refunded: cad("0"),
+      refundPending: cad("0"),
+      due: cad("900"),
+      ordered: { subtotal: cad("3451"), tax: cad("449"), total: cad("3900") },
+    },
+  });
+  const text = (html: string) => html.replace(/<[^>]+>/gu, " ").replace(/\s+/gu, " ");
+
+  it("lists items before tax, then each round's and the table's subtotal, tax and total", () => {
+    const html = text(render({ status: "ready", view: priced, refreshing: false }));
+    expect(html).toContain("2 × Ramen $26.55");
+    expect(html).toContain("1 × Gyoza $7.96");
+    expect(html).toContain("Subtotal $26.55 Tax $3.45 Round total $30.00");
+    expect(html).toContain("Subtotal $7.96 Tax $1.04 Round total $9.00");
+    expect(html).toContain("Subtotal $34.51 Tax $4.49 Total ordered $39.00");
+    // What the table paid and still owes is unchanged.
+    expect(html).toContain("Paid so far $30.00");
+    expect(html).toContain("Waiting for payment $9.00");
+    expect(html).toContain("Item prices are before tax.");
+    expect(html).not.toContain("Discounts and fees");
+  });
+
+  it("keeps totals including tax, labelled so, when the prices before tax are not known", () => {
+    const html = text(render({ status: "ready", view: view(), refreshing: false }));
+    expect(html).toContain("2 × Ramen $30.00");
+    expect(html).toContain("Round total including tax $30.00");
+    expect(html).not.toContain("Subtotal");
+    expect(html).not.toContain("Item prices are before tax.");
+  });
+});

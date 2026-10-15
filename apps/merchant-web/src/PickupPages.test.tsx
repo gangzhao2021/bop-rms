@@ -121,6 +121,19 @@ it("WP-2423: offers an in-person handoff when the pickup code expired or was nev
   expect(render("Expired")).toContain("Code expired · check in person");
   expect(render("NotIssued")).toContain("No code sent · check in person");
   expect(render("Ready")).not.toContain("Hand over after checking in person");
+  // DEC-PICKUP-COUNTER-CODE: five wrong codes lock code checks; staff check in person instead.
+  expect(render("Locked")).toContain("Hand over after checking in person");
+  expect(render("Locked")).toContain("Too many wrong codes · check in person");
+  expect(render("Locked")).not.toContain("Check pickup code");
+});
+it("WP-2423: confirms a recorded handover in plain words on the queue", () => {
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <PickupQueueScreen view={parsePickupQueueView(pickupQueueFixture())} handedOver="9" />
+    </MemoryRouter>,
+  );
+  expect(html).toContain("Order 9 handed over.");
+  expect(html).not.toContain("refresh the queue");
 });
 
 it("WP-2423: offers closing as not collected only after the one-hour pickup hold", () => {

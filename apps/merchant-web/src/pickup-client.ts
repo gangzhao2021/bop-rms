@@ -111,9 +111,12 @@ export function createPickupClient(options: {
                   ? "Unavailable"
                   : !execution.proof
                     ? "NotIssued"
-                    : Date.parse(execution.proof.expiresAt) > Date.parse(result.observedAt)
-                      ? "Ready"
-                      : "Expired",
+                    : Date.parse(execution.proof.expiresAt) <= Date.parse(result.observedAt)
+                      ? "Expired"
+                      : // Five wrong codes locked code checks for this order (DEC-PICKUP-COUNTER-CODE).
+                        raw.codeChecksLocked === true
+                        ? "Locked"
+                        : "Ready",
               stagingLocation: null,
               claimStatus: "Unavailable",
               exceptionStatus: "Unavailable",

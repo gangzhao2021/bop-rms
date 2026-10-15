@@ -692,6 +692,7 @@ describe("migration catalog", () => {
       "2000_047_create_kitchen_ticket_closure",
       "2000_048_create_store_receipt_profile",
       "2000_049_alter_checkout_contact_redaction_customer_request",
+      "2000_050_create_pickup_counter_code",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

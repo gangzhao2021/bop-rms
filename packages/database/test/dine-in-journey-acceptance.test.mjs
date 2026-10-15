@@ -828,7 +828,26 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         refunded: { amountMinor: 0n, currencyCode: "CAD" },
         refundPending: { amountMinor: 0n, currencyCode: "CAD" },
         due: { amountMinor: 0n, currencyCode: "CAD" },
+        // WP-2423 D5: what the table ordered, before tax and with tax, as the receipt prints it;
+        // the never-paid round 2 is not included and the total is the amount paid.
+        ordered: {
+          subtotal: { amountMinor: pricedSubtotal, currencyCode: "CAD" },
+          tax: { amountMinor: pricedTax, currencyCode: "CAD" },
+          total: { amountMinor: roundTotal, currencyCode: "CAD" },
+        },
       });
+      // Round 1's items print before tax; its subtotal + tax is the unchanged round total.
+      assert.equal(hostTable.rounds[0].subtotal.amountMinor, pricedSubtotal);
+      assert.equal(hostTable.rounds[0].tax.amountMinor, pricedTax);
+      assert.equal(hostTable.rounds[0].itemsTotal.amountMinor, roundTotal);
+      assert.equal(
+        hostTable.rounds[0].items.reduce((sum, item) => sum + item.priceBeforeTax.amountMinor, 0n),
+        pricedSubtotal,
+      );
+      assert.equal(
+        hostTable.rounds[0].items.reduce((sum, item) => sum + item.lineTotal.amountMinor, 0n),
+        roundTotal,
+      );
       const otherTable = await tableOf(tableGuestP);
       assert.deepEqual(
         roundsOf(otherTable),
@@ -912,6 +931,11 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         ],
       );
       assert.equal(queuedOrder.awaitingPayment, false);
+      // WP-2423: staff see what the table paid online — round 1 only (round 2 was never paid).
+      assert.deepEqual(queuedOrder.paidOnline, {
+        amountMinor: String(roundTotal),
+        currencyCode: "CAD",
+      });
       // The detail lists every line; the merchant screen's rule takes the unpaid round off the total.
       const unpaidRounds = unpaidCancelledBatches(queued);
       assert.deepEqual([...unpaidRounds], [R2.batch.orderBatchReference]);
@@ -2143,11 +2167,36 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       assert.equal(position3.pendingMinor, 0n);
       // WP-2423 Q8: the table view shows the confirmed refund once, for every guest at the table.
       const afterRefund = await tableOf(tableGuestP);
-      assert.deepEqual(afterRefund.summary, {
+      const { ordered: orderedAfterRefund, ...moneyAfterRefund } = afterRefund.summary;
+      assert.deepEqual(moneyAfterRefund, {
         paid: { amountMinor: 2n * roundTotal, currencyCode: "CAD" },
         refunded: { amountMinor: roundTotal, currencyCode: "CAD" },
         refundPending: { amountMinor: 0n, currencyCode: "CAD" },
         due: { amountMinor: 0n, currencyCode: "CAD" },
+      });
+      assert.equal(orderedAfterRefund.total.amountMinor, 2n * roundTotal);
+      assert.equal(
+        orderedAfterRefund.subtotal.amountMinor + orderedAfterRefund.tax.amountMinor,
+        2n * roundTotal,
+      );
+      // WP-2423: the Orders page detail shows staff the same paid and refunded amounts, read as
+      // the restricted merchant role through Payment's order financial position.
+      const refundedDetail = await createPersistentMerchantOrderQueue({
+        persistence: { ...queueSession.persistence, now },
+        quoteVersion: 1,
+        acceptanceConfigured: true,
+        resolveRefundConfiguration: async () => ({
+          providerAccountReference: provider,
+          environment: "Test",
+        }),
+      })({ sessionCookie: queueSession.sessionCookie, afterOrderReference: null, orderReference });
+      assert.deepEqual(refundedDetail.items[0].paidOnline, {
+        amountMinor: String(2n * roundTotal),
+        currencyCode: "CAD",
+      });
+      assert.deepEqual(refundedDetail.paymentPosition, {
+        refundedMinor: String(roundTotal),
+        refundPendingMinor: "0",
       });
       // A guest who has left the table no longer reads it; the Host still does.
       await admin.query(

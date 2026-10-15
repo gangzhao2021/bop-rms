@@ -806,6 +806,7 @@ it("protects current order queue reads and bounds cursor authority", async () =>
     nextAfterOrderReference: null,
     lines: null,
     pickupContact: null,
+    paymentPosition: null,
   }));
   const root = await serve(
     fakeService(),
@@ -866,6 +867,8 @@ it("WP-2423: reads one order's detail with its lines and hides other Stores' ord
     // WP-2423 Q1: a paid pickup awaiting acceptance carries when it stops being acceptable.
     acceptBy: "2026-10-08T21:30:30.000Z",
     awaitingPayment: false,
+    // WP-2423: paid online; staff see it as paid like a card-machine order.
+    paidOnline: { amountMinor: "1130", currencyCode: "CAD" as const },
     batches: [
       {
         orderBatchReference: "0198a408-0000-7000-8000-000000000124",
@@ -894,6 +897,8 @@ it("WP-2423: reads one order's detail with its lines and hides other Stores' ord
     nextAfterOrderReference: null,
     lines,
     pickupContact: { ...pickupContact },
+    // WP-2423: refunds of the online payment, on the detail only.
+    paymentPosition: { refundedMinor: "500", refundPendingMinor: "0" },
   }));
   const root = await serve(
     fakeService(),
@@ -919,6 +924,7 @@ it("WP-2423: reads one order's detail with its lines and hides other Stores' ord
     screenId: "OPS-ORDER-DETAIL",
     order: item,
     lines,
+    paymentPosition: { refundedMinor: "500", refundPendingMinor: "0" },
     pickupContact,
   });
   expect(queue).toHaveBeenCalledWith({

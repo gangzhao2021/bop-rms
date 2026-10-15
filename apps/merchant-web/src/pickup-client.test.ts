@@ -151,3 +151,19 @@ it("WP-2423: shows the Store's order number on the pickup card when the server g
   const view = parsePickupQueueView(await f.client.loadQueue());
   expect(view.items.map((card) => card.publicOrderNumber)).toEqual(["15", null]);
 });
+it("WP-2423: a still-valid code locked after five wrong codes reads as Locked (check in person)", async () => {
+  const f = setup();
+  f.fetcher.mockResolvedValue(
+    response({ ...page(), items: [{ ...item(), codeChecksLocked: true }] }),
+  );
+  expect(parsePickupQueueView(await f.client.loadQueue()).items[0]?.proofReadiness).toBe("Locked");
+  f.fetcher.mockResolvedValue(
+    response({
+      ...page(),
+      observedAt: "2026-09-19T13:00:00.000Z",
+      items: [{ ...item(), codeChecksLocked: true }],
+    }),
+  );
+  // Once the code has expired anyway, it reads as expired.
+  expect(parsePickupQueueView(await f.client.loadQueue()).items[0]?.proofReadiness).toBe("Expired");
+});

@@ -8,7 +8,10 @@ import {
   listStoreDiningBatchPaymentDeadlines,
   listStoreUnpaidBatchCancellations,
 } from "../../rms/ordering/src/index.ts";
-import { listStoreOrderBatchPaymentOutcomes } from "../../rms/payment/src/index.ts";
+import {
+  listStoreOrderBatchPaymentOutcomes,
+  listStoreOrderOnlinePaidTotals,
+} from "../../rms/payment/src/index.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 
@@ -223,6 +226,12 @@ it("reads dine-in round payment deadlines, unpaid cancellations and batch paymen
         { orderReference: orderA, orderBatchReference: a1, status: "Succeeded" },
         { orderReference: orderA, orderBatchReference: a2, status: "Failed" },
         { orderReference: orderA, orderBatchReference: a3, status: "Succeeded" },
+      ]);
+
+      // WP-2423: what staff see as "Paid online" on the Orders page — the succeeded rounds only
+      // (a1 and the retried a3), never the failed or inactive outcomes or another Store's Order.
+      assert.deepEqual(await scoped((tx) => listStoreOrderOnlinePaidTotals(tx, scope, orders)), [
+        { orderReference: orderA, amountMinor: "2260", currencyCode: "CAD" },
       ]);
 
       // The other Store sees only its own Order.

@@ -2,7 +2,7 @@ import { AppFrame, StatePanel } from "@bop-rms/ui";
 import type { ReactNode } from "react";
 import type { MerchantWorkspaceSnapshot } from "./merchant-workspace.js";
 import { StaffSignInLink } from "./StaffSession.js";
-import { useStoreBusinessDay } from "./StoreBusinessDay.js";
+import { businessDateText, useStoreBusinessDay } from "./StoreBusinessDay.js";
 import { Freshness } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 
@@ -73,7 +73,7 @@ export function MerchantShell({
     <WorkspacePage
       className="workspace-page--overview"
       title={scope.storeLabel}
-      meta={`${scope.brandLabel} · Business date ${businessDate}`}
+      meta={`${scope.brandLabel} · Business date ${businessDateText(businessDate)}`}
       status={<Freshness status={ready.workspace.freshness} />}
       actions={
         multiStore ? (
@@ -125,7 +125,7 @@ export function MerchantShell({
               <p className="overview-status-value">
                 <span>{ready.workspace.storeStatus}</span>
               </p>
-              <p>Business date {businessDate}</p>
+              <p>Business date {businessDateText(businessDate)}</p>
             </section>
             {today ?? (
               <section className="overview-card" aria-labelledby="today-summary-heading">

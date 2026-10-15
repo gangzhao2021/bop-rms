@@ -73,3 +73,24 @@ it("keeps the new rules narrow: plain minutes, zone names, ordinary slashes and 
     ]),
   ).toEqual([]);
 });
+
+it("flags machine dates and times however they are joined, as on the v15 sold-out page", () => {
+  for (const text of [
+    "Source as of 2026-10-14 22:11",
+    "Source as of 2026-10-14T22:11",
+    "Updated 2026-10-14T22:11:05.123Z",
+    "Business day 2026-10-14",
+  ])
+    expect(
+      findInternalText([text]).map((finding) => finding.rule),
+      text,
+    ).toContain("timestamp");
+  expect(
+    findInternalText([
+      "Checked 10:11 PM today",
+      "Submitted Oct 14, 2026, 10:08 PM",
+      "Order 2026 · Call (604) 555-0166",
+      "Table 12 · 2 guests",
+    ]),
+  ).toEqual([]);
+});

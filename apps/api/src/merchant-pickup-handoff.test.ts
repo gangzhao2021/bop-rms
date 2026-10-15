@@ -181,10 +181,22 @@ it("WP-2423: builds an in-person verification for the current staff member and p
   doubles.current.mockResolvedValue({
     verifications: [],
     inPerson: [],
+    source: { lockedAt: "2026-09-19T12:00:00.000Z" },
+    codeChecksLocked: false,
     capability: { expiresAt: "2026-09-19T11:00:00.000Z" },
   });
   await f.operation({ ...f.input, command });
   expect(doubles.complete.mock.calls[1]?.[0].command.verification.reason).toBe("ProofExpired");
+  // DEC-PICKUP-COUNTER-CODE: a still-valid code locked after five wrong codes.
+  doubles.current.mockResolvedValue({
+    verifications: [],
+    inPerson: [],
+    source: { lockedAt: "2026-09-19T12:00:00.000Z" },
+    codeChecksLocked: true,
+    capability: { expiresAt: "2026-09-19T13:00:00.000Z" },
+  });
+  await f.operation({ ...f.input, command });
+  expect(doubles.complete.mock.calls[2]?.[0].command.verification.reason).toBe("CodeLocked");
   await expect(
     f.operation({ ...f.input, command: { ...command, identityCheck: "LooksFamiliar" } }),
   ).rejects.toMatchObject({ code: "PICKUP_HANDOFF_INPUT_INVALID" });

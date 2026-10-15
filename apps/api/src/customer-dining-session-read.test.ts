@@ -371,3 +371,83 @@ describe("WP-2423 Q26 a dish being remade at the table", () => {
     expect(plain).not.toHaveProperty("beingRemade");
   });
 });
+
+describe("WP-2423 D5 item prices before tax at the table", () => {
+  // Ramen 2 × $13.27 + 13% tax = $30.00 (26.55 + 3.45); Gyoza $7.96 + $1.04 = $9.00;
+  // Soda $2.21 + $0.29 = $2.50 (its round was never paid and is cancelled).
+  const prices = new Map([
+    [id(31), { subtotal: cad(2655n), tax: cad(345n) }],
+    [id(41), { subtotal: cad(796n), tax: cad(104n) }],
+    [id(51), { subtotal: cad(221n), tax: cad(29n) }],
+  ]);
+  const threeRounds = {
+    batches: [
+      { orderBatchReference: id(30), submittedAt: at, items: [item(31, "Ramen", 2, 3000n)] },
+      { orderBatchReference: id(40), submittedAt: at, items: [item(41, "Gyoza", 1, 900n)] },
+      { orderBatchReference: id(50), submittedAt: at, items: [item(51, "Soda", 1, 250n)] },
+    ],
+    authorship: new Map([
+      [id(30), true],
+      [id(40), false],
+      [id(50), true],
+    ]),
+    delivery: new Map([
+      [id(31), { phase: "InProgress" as const, deliveredQuantity: 0 }],
+      [id(41), { phase: "Submitted" as const, deliveredQuantity: 0 }],
+      [id(51), { phase: "Cancelled" as const, deliveredQuantity: 0 }],
+    ]),
+    paymentOutcomes: new Map([
+      [id(30), "Succeeded" as const],
+      [id(50), "Failed" as const],
+    ]),
+    unpaidCancellations: new Set([id(50)]),
+    payments: [{ status: "Succeeded" as const, amount: cad(3000n) }],
+  };
+
+  it("prints item prices before tax, then each round's and the table's subtotal, tax and total", () => {
+    const before = composeCustomerDiningSession(facts(threeRounds));
+    const view = composeCustomerDiningSession(facts({ ...threeRounds, itemPrices: prices }));
+    expect(view.rounds.map((round) => round.items.map((entry) => entry.priceBeforeTax))).toEqual([
+      [cad(2655n)],
+      [cad(796n)],
+      [cad(221n)],
+    ]);
+    expect(view.rounds.map((round) => [round.subtotal, round.tax, round.itemsTotal])).toEqual([
+      [cad(2655n), cad(345n), cad(3000n)],
+      [cad(796n), cad(104n), cad(900n)],
+      [cad(221n), cad(29n), cad(250n)],
+    ]);
+    // The table ordered rounds 1 and 2 (round 3 was never paid and never charged).
+    expect(view.summary?.ordered).toEqual({
+      subtotal: cad(3451n),
+      tax: cad(449n),
+      total: cad(3900n),
+    });
+    // What guests pay, have paid and still owe is unchanged by printing prices before tax.
+    expect(view.summary?.paid).toEqual(before.summary?.paid);
+    expect(view.summary?.due).toEqual(before.summary?.due);
+    expect(view.summary?.due).toEqual(cad(900n));
+    expect(view.rounds.map((round) => round.itemsTotal)).toEqual(
+      before.rounds.map((round) => round.itemsTotal),
+    );
+    expect(view.rounds.flatMap((round) => round.items.map((entry) => entry.lineTotal))).toEqual(
+      before.rounds.flatMap((round) => round.items.map((entry) => entry.lineTotal)),
+    );
+    // Without prices (an older read) nothing before tax is invented.
+    expect(before.rounds[0]?.items[0]).not.toHaveProperty("priceBeforeTax");
+    expect(before.rounds[0]).not.toHaveProperty("subtotal");
+    expect(before.summary).not.toHaveProperty("ordered");
+  });
+
+  it("never mixes priced and unpriced items", () => {
+    const partial = new Map([...prices].filter(([reference]) => reference !== id(41)));
+    const view = composeCustomerDiningSession(facts({ ...threeRounds, itemPrices: partial }));
+    expect(view.rounds[0]?.items[0]).not.toHaveProperty("priceBeforeTax");
+    expect(view.summary).not.toHaveProperty("ordered");
+    const usd = new Map(prices);
+    usd.set(id(41), { subtotal: { amountMinor: 796n, currencyCode: "USD" }, tax: cad(104n) });
+    expect(
+      composeCustomerDiningSession(facts({ ...threeRounds, itemPrices: usd })).summary,
+    ).not.toHaveProperty("ordered");
+  });
+});

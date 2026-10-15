@@ -437,14 +437,17 @@ export function createPostgresPickupHandoffStore(options: {
         throw new PickupHandoffError("PICKUP_HANDOFF_VERIFICATION_FAILED");
       let inPerson: PickupInPersonVerificationRecord | null = null;
       if (submitted.verificationMethod === "InPerson") {
-        // WP-2423: in person only when no usable proof exists: never issued, or expired by now.
+        // WP-2423: in person only when no usable proof exists: never issued, expired by now, or
+        // locked after five wrong codes (DEC-PICKUP-COUNTER-CODE).
         const notIssued = state.capability === null;
         const expired =
           state.capability !== null &&
           String(state.source.lockedAt) >= String(state.capability.expiresAt);
+        const locked = !notIssued && !expired && state.codeChecksLocked;
         if (
-          !(notIssued || expired) ||
+          !(notIssued || expired || locked) ||
           (submitted.reason === "ProofNotIssued") !== notIssued ||
+          (submitted.reason === "CodeLocked") !== locked ||
           submitted.verifiedAt > state.source.lockedAt ||
           state.inPerson.some((v) => v.verificationReference === submitted.verificationReference)
         )

@@ -12,7 +12,13 @@ export function PickupHandoffForm({
   csrf,
   storeReference,
   paused = false,
+  onRecorded,
 }: {
+  /**
+   * WP-2423: called once the handover is recorded; the queue closes this dialog, re-reads at once
+   * so the order leaves Waiting, and says so plainly.
+   */
+  readonly onRecorded?: (() => void) | undefined;
   /** IDR-0039: offline or stale; nothing is sent and nothing is queued for later. */
   readonly paused?: boolean;
   readonly item: PickupQueueItem;
@@ -84,7 +90,13 @@ export function PickupHandoffForm({
       setStatus("Pending");
       try {
         const result = await intent.current.execute(csrf, active.signal);
-        if (!active.signal.aborted) setStatus(result.nextPhase);
+        if (!active.signal.aborted) {
+          setStatus(result.nextPhase);
+          if (onRecorded) {
+            dialog.current?.close();
+            onRecorded();
+          }
+        }
       } catch (error) {
         if (!active.signal.aborted)
           setStatus(
@@ -109,7 +121,7 @@ export function PickupHandoffForm({
       </button>
       {status === "Completed" || status === "InProgress" ? (
         <p ref={resultAnnouncement} role="status" tabIndex={-1}>
-          Handoff recorded. Refresh the queue to see current status.
+          Handed over. The list is updating.
         </p>
       ) : status === "Rejected" ? (
         <p ref={resultAnnouncement} role="status" tabIndex={-1}>
@@ -147,7 +159,9 @@ export function PickupHandoffForm({
           <p>
             {item.proofReadiness === "Expired"
               ? "The customer's pickup code has expired."
-              : "No pickup code was sent for this order."}{" "}
+              : item.proofReadiness === "Locked"
+                ? "Too many wrong pickup codes were entered for this order, so code checks are locked."
+                : "No pickup code was sent for this order."}{" "}
             Ask for the order number and check it with the name or the last four digits of the phone
             on the order before handing over.
           </p>
@@ -228,9 +242,7 @@ export function PickupHandoffForm({
           {status === "Rejected"
             ? "Handoff was not confirmed. Close and refresh the queue before another attempt."
             : null}
-          {status === "Completed" || status === "InProgress"
-            ? "Handoff recorded. Close and refresh the queue."
-            : null}
+          {status === "Completed" || status === "InProgress" ? "Handed over." : null}
         </div>
         {status === "Unknown" ? (
           <button disabled={paused} onClick={() => void submit(true)}>

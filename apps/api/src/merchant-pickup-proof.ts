@@ -75,8 +75,10 @@ export function createMerchantPickupProof(options: {
       Number(raw.generation) < 1
     )
       return unavailable();
-    const credential = raw.credential,
-      kind = raw.kind;
+    const kind = raw.kind;
+    // WP-2423 (DEC-PICKUP-COUNTER-CODE): staff may type the six-digit code with spaces or dashes.
+    const credential =
+      kind === "HumanCode" ? raw.credential.replace(/[\s-]/gu, "") : raw.credential;
     if (kind === "HumanCode") {
       if (!/^[0-9]{6}$/.test(credential)) return unavailable();
     } else if (kind === "Opaque") {
@@ -86,7 +88,7 @@ export function createMerchantPickupProof(options: {
       )
         return unavailable();
     } else return unavailable();
-    return options.persistence.transactions.run(async (transaction) => {
+    const outcome = await options.persistence.transactions.run(async (transaction) => {
       const scope = await resolveScope(
         transaction,
         input.sessionCookie,
@@ -139,10 +141,12 @@ export function createMerchantPickupProof(options: {
           (await scope.allowed()),
       });
       const current = await store.lockByOrder({ transaction: tx, orderReference });
+      // The long code checks against the proof itself; the six-digit code against its own row.
       if (
         !current.capability ||
         current.source.fulfillmentReference !== fulfillmentReference ||
-        current.capability.kind !== kind
+        (current.capability.kind !== kind &&
+          !(kind === "HumanCode" && current.capability.kind === "Opaque"))
       )
         return unavailable();
       const selectorHash = await options.hashCredential({
@@ -160,10 +164,11 @@ export function createMerchantPickupProof(options: {
       });
       if (prior && prior.kind !== "Verify")
         throw new PickupProofError("PICKUP_PROOF_VERSION_CONFLICT");
+      // Shapes the record only; the owner store compares the typed code and records a wrong one.
       const record = validatePickupProof({
         source: current.source,
         capability: current.capability,
-        selectorHash,
+        selectorHash: current.capability.selectorHash,
         generation: raw.generation,
         expectedCapabilityVersion: 1,
         observedAt: options.persistence.now(),
@@ -176,9 +181,14 @@ export function createMerchantPickupProof(options: {
         transaction: tx,
         orderReference,
         selectorHash,
-        record: prior ? { ...record, verifiedAt: prior.record.verifiedAt } : record,
+        record: prior
+          ? { ...record, verificationMethod: kind, verifiedAt: prior.record.verifiedAt }
+          : { ...record, verificationMethod: kind },
+        rejection: { actorReference: scope.actorReference },
       });
       if (result.status === "Conflict") throw new PickupProofError("PICKUP_PROOF_VERSION_CONFLICT");
+      // A wrong code is committed as a rejected check (so the count survives), then refused.
+      if (result.status === "Rejected") return { rejected: result.locked ? "Locked" : "Rejected" };
       return Object.freeze({
         status: result.status,
         verificationReference: result.record.verificationReference,
@@ -188,5 +198,10 @@ export function createMerchantPickupProof(options: {
         grantsCompletionAuthority: false as const,
       });
     });
+    if ("rejected" in outcome)
+      throw new PickupProofError(
+        outcome.rejected === "Locked" ? "PICKUP_PROOF_LOCKED" : "PICKUP_PROOF_REJECTED",
+      );
+    return outcome;
   };
 }

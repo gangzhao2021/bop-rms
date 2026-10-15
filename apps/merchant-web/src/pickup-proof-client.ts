@@ -2,7 +2,14 @@ import { parsePickupExecution, parsePickupReference, type PickupQueueItem } from
 
 export class PickupProofClientError extends Error {
   constructor(
-    readonly code: "Invalid" | "PermissionDenied" | "Conflict" | "Rejected" | "OutcomeUnknown",
+    readonly code:
+      | "Invalid"
+      | "PermissionDenied"
+      | "Conflict"
+      | "Rejected"
+      /** WP-2423: five wrong codes locked code checks; check the customer in person. */
+      | "Locked"
+      | "OutcomeUnknown",
   ) {
     super("Pickup proof verification could not be confirmed");
     this.name = "PickupProofClientError";
@@ -34,20 +41,23 @@ export function createPickupProofClient(fetcher: typeof fetch = fetch) {
           proof = execution.proof;
         if (!proof || input.item.phase !== "Ready" || input.item.proofReadiness !== "Ready")
           return fail("Invalid");
-        if (
-          proof.kind === "HumanCode"
-            ? !/^[0-9]{6}$/.test(input.credential)
-            : !/^[A-Za-z0-9_-]{21}[AQgw]$/.test(input.credential)
-        )
-          return fail("Invalid");
+        // WP-2423 (DEC-PICKUP-COUNTER-CODE): staff type the six-digit code (spaces or dashes are
+        // ignored); a scanner may still enter the long code.
+        const typed = input.credential.trim().replace(/[\s-]/gu, "");
+        const kind = /^[0-9]{6}$/.test(typed)
+          ? "HumanCode"
+          : proof.kind === "Opaque" && /^[A-Za-z0-9_-]{21}[AQgw]$/.test(input.credential.trim())
+            ? "Opaque"
+            : null;
+        if (kind === null) return fail("Invalid");
         expectedVersion = execution.aggregateVersion;
         command = {
           orderReference: parsePickupReference(input.item.orderReference),
           storeReference: parsePickupReference(input.storeReference),
           fulfillmentReference: parsePickupReference(input.item.fulfillmentReference),
-          kind: proof.kind,
+          kind,
           generation: proof.generation,
-          credential: input.credential,
+          credential: kind === "HumanCode" ? typed : input.credential.trim(),
           idempotencyReference: parsePickupReference(input.idempotencyReference),
           correlationReference: parsePickupReference(input.correlationReference),
         };
@@ -89,7 +99,19 @@ export function createPickupProofClient(fetcher: typeof fetch = fetch) {
             if (controller.signal.aborted || body === null) return fail("OutcomeUnknown");
             if (response.status === 401 || response.status === 403) return fail("PermissionDenied");
             if (response.status === 409) return fail("Conflict");
-            if (response.status === 404 || response.status === 422) return fail("Rejected");
+            if (response.status === 423) return fail("Locked");
+            if (response.status === 404) return fail("Conflict");
+            if (response.status === 422) {
+              // Only a recorded wrong code is "Rejected"; an expired or replaced proof is a change.
+              let error: unknown = null;
+              try {
+                const text = await response.text();
+                if (text.length <= 1024) error = (JSON.parse(text) as { error?: unknown }).error;
+              } catch {
+                error = null;
+              }
+              return fail(error === "PICKUP_PROOF_REJECTED" ? "Rejected" : "Conflict");
+            }
             if (response.status === 400) return fail("Invalid");
             if (
               !response.ok ||

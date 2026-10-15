@@ -100,6 +100,9 @@ export const pickupProofErrorCodes = [
   "PICKUP_PROOF_NOT_READY",
   "PICKUP_PROOF_VERSION_CONFLICT",
   "PICKUP_PROOF_UNAVAILABLE",
+  // WP-2423 (DEC-PICKUP-COUNTER-CODE): a wrong code was recorded; five lock code checks.
+  "PICKUP_PROOF_REJECTED",
+  "PICKUP_PROOF_LOCKED",
 ] as const;
 
 export class PickupProofError extends Error {

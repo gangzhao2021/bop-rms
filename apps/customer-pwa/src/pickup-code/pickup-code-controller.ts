@@ -13,6 +13,8 @@ export interface PickupCodeView {
   readonly generation: number;
   readonly proofKind: "Opaque" | "HumanCode";
   readonly proofValue: string;
+  /** WP-2423: the six-digit code the guest reads to staff; null for a proof issued before codes. */
+  readonly counterCode: string | null;
   readonly observedAt: string;
   readonly expiresAt: string;
 }
@@ -139,6 +141,7 @@ export function parsePickupCodeResult(
           "generation",
           "proofKind",
           "proofValue",
+          "counterCode",
           "observedAt",
           "expiresAt",
         ],
@@ -160,7 +163,9 @@ export function parsePickupCodeResult(
     (base.proofKind !== "Opaque" && base.proofKind !== "HumanCode") ||
     typeof base.proofValue !== "string" ||
     (base.proofKind === "Opaque" && !opaqueProof.test(base.proofValue)) ||
-    (base.proofKind === "HumanCode" && !humanCode.test(base.proofValue))
+    (base.proofKind === "HumanCode" && !humanCode.test(base.proofValue)) ||
+    (base.counterCode !== null &&
+      (typeof base.counterCode !== "string" || !humanCode.test(base.counterCode)))
   )
     return invalid();
   const observedAt = parseInstant(base.observedAt);
@@ -185,6 +190,7 @@ export function parsePickupCodeResult(
     generation: base.generation as number,
     proofKind: base.proofKind,
     proofValue: base.proofValue,
+    counterCode: base.counterCode as string | null,
     observedAt,
     expiresAt,
   });

@@ -109,7 +109,13 @@ function PickupCard({
   workstation,
   hidden,
   earlier = false,
+  onHandedOver,
+  onRefresh,
 }: {
+  /** Re-read the queue (after code checks were locked, to offer the in-person check). */
+  readonly onRefresh?: (() => void) | undefined;
+  /** WP-2423: the handover was recorded; the queue re-reads and confirms it. */
+  readonly onHandedOver?: ((orderLabel: string) => void) | undefined;
   /** IDR-0039: offline or stale; actions stay on screen but cannot be used. */
   readonly paused: boolean;
   readonly workstation?: PickupWorkstation | null | undefined;
@@ -127,11 +133,17 @@ function PickupCard({
     Math.floor((Date.parse(observedAt) - Date.parse(item.readyAt)) / 60_000),
   );
   const canComplete = !readOnly && item.phase !== "Completed" && item.proofReadiness === "Ready";
-  // WP-2423: the pickup code expired or was never sent; staff check the customer in person.
+  // WP-2423: the pickup code expired, was never sent, or is locked after five wrong codes; staff
+  // check the customer in person.
   const inPersonEligible =
     !readOnly &&
     item.phase === "Ready" &&
-    (item.proofReadiness === "Expired" || item.proofReadiness === "NotIssued");
+    (item.proofReadiness === "Expired" ||
+      item.proofReadiness === "NotIssued" ||
+      item.proofReadiness === "Locked");
+  const orderLabel =
+    item.publicOrderNumber ?? item.execution?.publicOrderReference ?? "number unavailable";
+  const recorded = onHandedOver ? () => onHandedOver(orderLabel) : undefined;
   return (
     <article className="store-card pickup-queue__card" hidden={hidden}>
       <header>
@@ -169,11 +181,13 @@ function PickupCard({
           <dd>
             {item.proofReadiness === "Expired"
               ? "Code expired · check in person"
-              : item.proofReadiness === "NotIssued"
-                ? "No code sent · check in person"
-                : item.proofReadiness === "Ready"
-                  ? "Sent to customer"
-                  : "Not known yet · check in person"}
+              : item.proofReadiness === "Locked"
+                ? "Too many wrong codes · check in person"
+                : item.proofReadiness === "NotIssued"
+                  ? "No code sent · check in person"
+                  : item.proofReadiness === "Ready"
+                    ? "Sent to customer"
+                    : "Not known yet · check in person"}
           </dd>
         </div>
         <div>
@@ -208,6 +222,7 @@ function PickupCard({
               workstation={workstation}
               csrf={proofContext.csrf}
               storeReference={proofContext.storeReference}
+              onRecorded={recorded}
             />
           ) : canComplete && item.execution && proofContext ? (
             <PickupProofForm
@@ -217,6 +232,8 @@ function PickupCard({
               workstation={workstation}
               csrf={proofContext.csrf}
               storeReference={proofContext.storeReference}
+              onRecorded={recorded}
+              onLocked={onRefresh}
             />
           ) : null}
           {inPersonEligible && wait >= pickupHoldMinutes && proofContext ? (
@@ -246,8 +263,13 @@ export function PickupQueueScreen({
   proofContext,
   stale,
   checkedAt,
+  handedOver,
+  onHandedOver,
 }: {
   readonly view: PickupQueueView;
+  /** WP-2423: the order just handed over on this device (plain confirmation). */
+  readonly handedOver?: string | null | undefined;
+  readonly onHandedOver?: ((orderLabel: string) => void) | undefined;
   readonly stale?: StaleRead | undefined;
   /** When this device last read the queue successfully (shown as "Last checked"). */
   readonly checkedAt?: string | undefined;
@@ -309,6 +331,11 @@ export function PickupQueueScreen({
       }
     >
       <>
+        {handedOver ? (
+          <p className="pickup-queue__handed-over" role="status">
+            Order {handedOver} handed over.
+          </p>
+        ) : null}
         {stale ? (
           <StaleReadNotice stale={stale} />
         ) : readOnly ? (
@@ -406,6 +433,8 @@ export function PickupQueueScreen({
                 proofContext={proofContext}
                 workstation={view.workstation}
                 hidden={!visibleReferences.has(item.fulfillmentReference)}
+                onHandedOver={onHandedOver}
+                onRefresh={onRefresh}
               />
             ))}
           </div>
@@ -433,6 +462,8 @@ export function PickupQueueScreen({
                   workstation={view.workstation}
                   hidden={!visibleReferences.has(item.fulfillmentReference)}
                   earlier
+                  onHandedOver={onHandedOver}
+                  onRefresh={onRefresh}
                 />
               ))}
             </div>
@@ -471,7 +502,14 @@ export function PickupQueuePage(props: {
   );
   const [cursors, setCursors] = useState<string[]>([]),
     [includeCompleted, setIncludeCompleted] = useState(false),
-    [revision, setRevision] = useState(0);
+    [revision, setRevision] = useState(0),
+    [handedOver, setHandedOver] = useState<string | null>(null);
+  // WP-2423: the confirmation stays long enough to read, then clears.
+  useEffect(() => {
+    if (handedOver === null) return;
+    const timer = window.setTimeout(() => setHandedOver(null), 20_000);
+    return () => window.clearTimeout(timer);
+  }, [handedOver]);
   const cursor = cursors.at(-1) ?? null;
   const load = useCallback(
     () =>
@@ -596,6 +634,13 @@ export function PickupQueuePage(props: {
       refreshButtonRef={refreshButtonRef}
       stale={stale}
       checkedAt={state.loadedAt}
+      handedOver={handedOver}
+      onHandedOver={(orderLabel) => {
+        // Re-read at once so the order leaves Waiting without anyone pressing Refresh.
+        setHandedOver(orderLabel);
+        focusAfterLoad.current = true;
+        setRevision((value) => value + 1);
+      }}
       includeCompleted={includeCompleted}
       onCompletedChange={(value) => {
         focusAfterLoad.current = true;

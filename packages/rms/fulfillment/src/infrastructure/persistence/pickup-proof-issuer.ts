@@ -6,6 +6,7 @@ import {
 } from "../../contracts/pickup-proof.js";
 import { createPostgresPickupProofStore } from "./pickup-proof-store.js";
 import type { createPickupCredentialProvider } from "../crypto/pickup-credential-provider.js";
+import { insertPickupCounterCode } from "./pickup-counter-code-store.js";
 type StoreOptions = Parameters<typeof createPostgresPickupProofStore>[0];
 /** Explicit readiness command, never called by a Customer refresh/query. Caller owns transaction. */
 export function createPostgresPickupProofIssuer(options: {
@@ -104,6 +105,45 @@ export function createPostgresPickupProofIssuer(options: {
       });
       const result = await store.issue({ transaction: input.transaction, orderReference, effect });
       if (result.status === "Conflict") throw new PickupProofError("PICKUP_PROOF_VERSION_CONFLICT");
+      // WP-2423 (DEC-PICKUP-COUNTER-CODE): the short code staff can type, issued with the proof in
+      // the same transaction. A code still valid for another order at this Store is skipped.
+      const generation = effect.generation;
+      let inserted = false;
+      for (let index = 0; index < 16 && !inserted; index++) {
+        const code = options.credentials.deriveCounterCode({
+          ...selected,
+          capabilityReference,
+          generation: 1,
+          index,
+        });
+        inserted =
+          (await insertPickupCounterCode(
+            input.transaction,
+            { brandReference: source.brandReference, storeReference: source.storeReference },
+            {
+              capabilityReference,
+              fulfillmentReference: source.fulfillmentReference,
+              generation: 1,
+              derivationIndex: index,
+              pepperVersion: options.pepperVersion,
+              selectorHash: options.credentials.hashCredential({
+                ...selected,
+                purpose: "PickupHandoff",
+                kind: "HumanCode",
+                credential: code,
+              }),
+              lookupHash: options.credentials.counterCodeLookupHash({
+                brandReference: source.brandReference,
+                storeReference: source.storeReference,
+                pepperVersion: options.pepperVersion,
+                credential: code,
+              }),
+              issuedAt: generation.issuedAt,
+              expiresAt: generation.expiresAt,
+            },
+          )) === "Inserted";
+      }
+      if (!inserted) throw new PickupProofError("PICKUP_PROOF_UNAVAILABLE");
       return Object.freeze({ status: "Issued" as const, capabilityReference, generation: 1 });
     },
   });

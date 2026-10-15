@@ -2676,24 +2676,28 @@ describe("Database Schema Ownership Architecture Test", () => {
     );
     expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
   });
-  it.each(["pickup-proof-store.ts", "pickup-proof-history.ts", "pickup-proof-issuer.ts"])(
-    "admits only Pickup proof owner asset %s",
-    async (file) => {
-      const root = await fixture();
-      const context = await writeModule(root, "RMS", "fulfillment", "rms_fulfillment", [
-        "fulfillment",
-        "pickup_proof_generation",
-        "pickup_proof_invalidation",
-        "pickup_proof_operation",
-        "pickup_proof_verification",
-      ]);
-      const asset = join(context.moduleRoot, "src/infrastructure/persistence", file);
-      await writeFile(asset, "export const synthetic = true;");
-      expect(await resultCodes(root)).not.toContain("UNSUPPORTED_DATABASE_ASSET");
-      await writeFile(asset, 'import pg from "pg"; export {pg};');
-      expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
-    },
-  );
+  it.each([
+    "pickup-proof-store.ts",
+    "pickup-proof-history.ts",
+    "pickup-proof-issuer.ts",
+    "pickup-counter-code-store.ts",
+  ])("admits only Pickup proof owner asset %s", async (file) => {
+    const root = await fixture();
+    const context = await writeModule(root, "RMS", "fulfillment", "rms_fulfillment", [
+      "fulfillment",
+      "pickup_proof_generation",
+      "pickup_proof_invalidation",
+      "pickup_proof_operation",
+      "pickup_proof_verification",
+      "pickup_counter_code",
+      "pickup_code_check_rejection",
+    ]);
+    const asset = join(context.moduleRoot, "src/infrastructure/persistence", file);
+    await writeFile(asset, "export const synthetic = true;");
+    expect(await resultCodes(root)).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(asset, 'import pg from "pg"; export {pg};');
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
   it.each([
     "owner",
     "schema",
@@ -2703,6 +2707,8 @@ describe("Database Schema Ownership Architecture Test", () => {
     "pickup_proof_invalidation",
     "pickup_proof_operation",
     "pickup_proof_verification",
+    "pickup_counter_code",
+    "pickup_code_check_rejection",
   ])("rejects Pickup proof owner asset with changed %s", async (changed) => {
     const root = await fixture();
     const context = await writeModule(
@@ -2716,6 +2722,8 @@ describe("Database Schema Ownership Architecture Test", () => {
         "pickup_proof_invalidation",
         "pickup_proof_operation",
         "pickup_proof_verification",
+        "pickup_counter_code",
+        "pickup_code_check_rejection",
       ].filter((v) => v !== changed),
     );
     await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });

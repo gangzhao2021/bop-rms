@@ -297,13 +297,14 @@ describe("WP-1804 Kitchen Board screens", () => {
       </MemoryRouter>,
     );
     expect(html).toContain('aria-label="Work item milestones"');
-    expect(html).toContain('<time dateTime="2026-08-12T15:00:00.000Z">');
-    expect(html).toContain('<time dateTime="2026-08-12T15:04:00.000Z">');
+    expect(html).toContain('<time dateTime="2026-08-12T15:00:00.000Z"');
+    expect(html).toContain('<time dateTime="2026-08-12T15:04:00.000Z"');
     expect(html).toContain("Accepted");
-    expect(html).toContain('<time dateTime="2026-08-12T15:17:00.000Z">');
+    expect(html).toContain('<time dateTime="2026-08-12T15:17:00.000Z"');
     expect(html).toContain("Order item marked ready");
+    // WP-2423: without the Store's zone the time is labelled UTC, never the raw machine instant.
     expect(html).toContain(
-      '<time dateTime="2026-08-12T15:17:00.000Z">2026-08-12T15:17:00.000Z</time>',
+      '<time dateTime="2026-08-12T15:17:00.000Z" title="2026-08-12T15:17:00.000Z">Aug 12, 2026, 3:17 PM UTC</time>',
     );
     expect(html).not.toContain("unavailable from this projection");
     expect(html.indexOf("Work item created")).toBeLessThan(html.indexOf("Accepted"));

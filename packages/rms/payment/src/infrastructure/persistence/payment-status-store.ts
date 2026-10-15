@@ -345,3 +345,70 @@ export async function listStoreOrderBatchPaymentOutcomes(
     return unavailable();
   }
 }
+
+/**
+ * WP-2423: what each of the given Orders has been paid online — the sum of its active succeeded
+ * payment outcomes (one per payment intent), from the same status projection as the batch
+ * outcomes above. Orders with no succeeded online payment are absent. Card-machine payments are
+ * a separate Payment record and are not included. Read only; the caller authorizes the Orders and
+ * owns the transaction.
+ */
+export async function listStoreOrderOnlinePaidTotals(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReferences: readonly string[],
+): Promise<
+  readonly {
+    readonly orderReference: string;
+    readonly amountMinor: string;
+    readonly currencyCode: "CAD";
+  }[]
+> {
+  if (orderReferences.length > 100) return unavailable();
+  const brand = parsePaymentReference(scope.brandReference),
+    store = parsePaymentReference(scope.storeReference),
+    orders = orderReferences.map((reference) => parsePaymentReference(reference));
+  if (orders.length === 0) return Object.freeze([]);
+  try {
+    await transaction.query(
+      "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+      [brand, store],
+    );
+    const found = await transaction.query(
+      "SELECT i.order_id::text AS order_id,sum(p.amount_minor)::text AS amount_minor,min(p.currency_code) AS currency_code," +
+        "count(DISTINCT p.currency_code)::int AS currencies " +
+        "FROM rms_payment.payment_intent i JOIN rms_payment.payment_status_projection p ON p.brand_id=i.brand_id " +
+        "AND p.store_id=i.store_id AND p.payment_intent_id=i.payment_intent_id AND p.order_id=i.order_id AND p.is_active " +
+        "WHERE i.brand_id=$1 AND i.store_id=$2 AND i.order_id=ANY($3::uuid[]) AND p.terminal_status='Succeeded' " +
+        "GROUP BY i.order_id ORDER BY i.order_id LIMIT 101",
+      [brand, store, orders],
+    );
+    if (!Array.isArray(found.rows) || found.rows.length > 100) return unavailable();
+    const seen = new Set<string>();
+    return Object.freeze(
+      found.rows.map((row: Record<string, unknown>) => {
+        if (Object.keys(row).length !== 4) return unavailable();
+        const orderReference = parsePaymentReference(row.order_id);
+        if (
+          !orders.includes(orderReference) ||
+          seen.has(orderReference) ||
+          row.currencies !== 1 ||
+          row.currency_code !== "CAD" ||
+          typeof row.amount_minor !== "string" ||
+          !/^[1-9][0-9]{0,18}$/u.test(row.amount_minor) ||
+          BigInt(row.amount_minor) > 9223372036854775807n
+        )
+          return unavailable();
+        seen.add(orderReference);
+        return Object.freeze({
+          orderReference,
+          amountMinor: row.amount_minor,
+          currencyCode: "CAD" as const,
+        });
+      }),
+    );
+  } catch (error) {
+    if (error instanceof PaymentStatusProjectionError) throw error;
+    return unavailable();
+  }
+}

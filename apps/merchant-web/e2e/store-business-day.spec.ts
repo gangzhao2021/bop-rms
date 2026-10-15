@@ -116,7 +116,7 @@ test("@production Orders after midnight stay under the Store's business day", as
   await expect(afterMidnight).toContainText("A-5");
   await expect(afterMidnight.locator(".order-workbench-time")).toHaveText("00:40");
   await afterMidnight.locator("summary").click();
-  await expect(afterMidnight.getByText("2026-10-15 00:40")).toBeVisible();
+  await expect(afterMidnight.getByText("Oct 15, 2026, 12:40 AM")).toBeVisible();
   await expect(afterMidnight.getByText("Today · Wed, Oct 14", { exact: true })).toBeVisible();
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });

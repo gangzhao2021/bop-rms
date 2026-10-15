@@ -13,7 +13,10 @@ export interface CustomerPickupCodeReadOptions {
   readonly status: Parameters<typeof createCustomerOrderStatusRead>[0];
   readonly readiness: Parameters<typeof createPostgresFulfillmentReadinessStore>[0];
   readonly proof: Parameters<typeof createPostgresPickupProofStore>[0];
-  readonly credentials: Pick<ReturnType<typeof createPickupCredentialProvider>, "recoverOpaque">;
+  readonly credentials: Pick<
+    ReturnType<typeof createPickupCredentialProvider>,
+    "recoverOpaque" | "recoverCounterCode"
+  >;
   readonly storeDisplayName: string;
   readonly pickupInstruction: string;
 }
@@ -80,6 +83,20 @@ export function createCustomerPickupCodeRead(options: CustomerPickupCodeReadOpti
           capability: current.capability,
           observedAt,
         });
+        // WP-2423 (DEC-PICKUP-COUNTER-CODE): the six-digit code the guest reads to staff. A proof
+        // issued before short codes existed has none; the long code still works then.
+        const saved = await proof.currentCounterCode({
+          transaction,
+          orderReference: input.orderReference,
+        });
+        const counterCode = saved
+          ? options.credentials.recoverCounterCode({
+              brandReference: scope.brandReference,
+              capability: current.capability,
+              counterCode: saved,
+              observedAt,
+            })
+          : null;
         return {
           schemaVersion: 1 as const,
           status: "Ready" as const,
@@ -90,6 +107,7 @@ export function createCustomerPickupCodeRead(options: CustomerPickupCodeReadOpti
           generation: current.capability.generation,
           proofKind: "Opaque" as const,
           proofValue,
+          counterCode,
           observedAt,
           expiresAt: current.capability.expiresAt,
         };

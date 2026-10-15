@@ -85,6 +85,7 @@ export class CustomerPickupCodeHandler {
           view.status !== "Ready" ||
           view.proofKind !== "Opaque" ||
           !/^[A-Za-z0-9_-]{21}[AQgw]$/u.test(view.proofValue) ||
+          (view.counterCode !== null && !/^[0-9]{6}$/u.test(view.counterCode)) ||
           !Number.isSafeInteger(view.generation) ||
           view.generation < 1 ||
           !Number.isFinite(Date.parse(view.expiresAt)) ||
@@ -101,6 +102,7 @@ export class CustomerPickupCodeHandler {
           generation: view.generation,
           proofKind: view.proofKind,
           proofValue: view.proofValue,
+          counterCode: view.counterCode,
           observedAt: view.observedAt,
           expiresAt: view.expiresAt,
         });

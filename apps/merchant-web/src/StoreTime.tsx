@@ -3,10 +3,41 @@ import { createContext, useContext } from "react";
 /** WP-2423: the selected Store's IANA time zone, provided once by the workspace. */
 export const StoreTimeZoneContext = createContext<string | undefined>(undefined);
 
-/** An instant as Store-local time (UTC when the Store's time zone is not known). */
+/**
+ * An instant as Store-local time: "14:05", or with the date "Oct 14, 2026, 2:05 PM" (never a
+ * machine date such as 2026-10-14). UTC, labelled, when the Store's time zone is not known.
+ */
 export function storeTime(instant: string, timeZone: string | undefined, withDate = false): string {
-  if (timeZone === undefined)
-    return (withDate ? instant.slice(0, 10) + " " : "") + instant.slice(11, 16) + " UTC";
+  if (withDate) {
+    const text = new Intl.DateTimeFormat("en-US", {
+      timeZone: timeZone ?? "UTC",
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(new Date(instant));
+    return timeZone === undefined ? text + " UTC" : text;
+  }
+  if (timeZone === undefined) return instant.slice(11, 16) + " UTC";
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(new Date(instant))
+      .map((part) => [part.type, part.value]),
+  );
+  return `${parts.hour}:${parts.minute}`;
+}
+
+/**
+ * The Store wall-clock time of an instant as a datetime-local input value ("2026-10-14T14:05").
+ * For form inputs only; text staff read uses storeTime.
+ */
+export function storeLocalInputValue(instant: string, timeZone: string): string {
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat("en-CA", {
       timeZone,
@@ -20,8 +51,7 @@ export function storeTime(instant: string, timeZone: string | undefined, withDat
       .formatToParts(new Date(instant))
       .map((part) => [part.type, part.value]),
   );
-  const time = `${parts.hour}:${parts.minute}`;
-  return withDate ? `${parts.year}-${parts.month}-${parts.day} ${time}` : time;
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
 }
 
 /**
@@ -84,7 +114,6 @@ export function SourceTime({
   readonly withDate?: boolean;
 }) {
   const timeZone = useContext(StoreTimeZoneContext);
-  if (timeZone === undefined) return <time dateTime={instant}>{instant}</time>;
   return (
     <time dateTime={instant} title={instant}>
       {storeTime(instant, timeZone, withDate)}
@@ -143,6 +172,26 @@ export function storeDayTime(
   if (day(date) === today) return `${time}${suffix} today`;
   if (day(date) === tomorrow) return `${time}${suffix} tomorrow`;
   return friendlyStoreTime(instant, timeZone, now);
+}
+
+/**
+ * WP-2423: when a screen's information was last read, as staff say it: "Checked 10:11 PM today"
+ * (or "Checked Oct 13, 10:11 PM" for an older read), in the Store's time zone. The exact
+ * instant stays in the title.
+ */
+export function CheckedTime({
+  instant,
+  timeZone,
+}: {
+  readonly instant: string;
+  readonly timeZone?: string | undefined;
+}) {
+  const contextZone = useContext(StoreTimeZoneContext);
+  return (
+    <time dateTime={instant} title={instant}>
+      Checked {storeDayTime(instant, timeZone ?? contextZone)}
+    </time>
+  );
 }
 
 /** A staff-facing instant such as "Oct 14, 3:00 PM"; the exact instant stays in the title. */

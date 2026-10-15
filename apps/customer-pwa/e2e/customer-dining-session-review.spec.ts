@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { expectNoInternalText } from "./internal-text-guard";
 
 // WP-2423 Q8: synthetic HTTP views exercise the production CUST-DINE-IN-SESSION page; these
 // fixtures grant no real membership and contain no real Store, guest or payment data.
@@ -173,6 +174,66 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     }
     expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
     expect(errors).toEqual([]);
+  });
+
+  test("WP-2423 D5: lists item prices before tax, then subtotal, tax and total per round and table", async ({
+    page,
+  }) => {
+    // Ramen $30.07 + $3.91 tax = $33.98; tea $3.00 + $0.39 = $3.39; gyoza $8.00 + $1.04 = $9.04.
+    const [round1, round2] = session.session.rounds;
+    if (round1 === undefined || round2 === undefined) throw new Error("fixture");
+    const priced = {
+      schemaVersion: 1,
+      session: {
+        ...session.session,
+        rounds: [
+          {
+            ...round1,
+            items: [
+              { ...round1.items[0], priceBeforeTax: cad("3007") },
+              { ...round1.items[1], priceBeforeTax: cad("300") },
+            ],
+            subtotal: cad("3307"),
+            tax: cad("430"),
+          },
+          {
+            ...round2,
+            items: [{ ...round2.items[0], priceBeforeTax: cad("800") }],
+            subtotal: cad("800"),
+            tax: cad("104"),
+          },
+        ],
+        summary: {
+          ...session.session.summary,
+          ordered: { subtotal: cad("4107"), tax: cad("534"), total: cad("4641") },
+        },
+      },
+    };
+    await enterTable(page, () => ({ status: 200, json: priced }));
+    const main = page.getByRole("main");
+    const round = main.getByRole("article", { name: "Round 1 · Ordered by you" });
+    await expect(round.getByText("$30.07", { exact: true })).toBeVisible();
+    await expect(round.getByText("$3.00", { exact: true })).toBeVisible();
+    await expect(round.locator(".order-status__money")).toContainText("Subtotal$33.07");
+    await expect(round.locator(".order-status__money")).toContainText("Tax$4.30");
+    await expect(round.locator(".order-status__total")).toHaveText("Round total$37.37");
+    const summary = main.getByRole("region", { name: "Table total" });
+    await expect(summary.locator(".order-status__money")).toContainText("Subtotal$41.07");
+    await expect(summary.locator(".order-status__money")).toContainText("Tax$5.34");
+    await expect(summary.locator(".order-status__money")).toContainText("Total ordered$46.41");
+    // What the table paid and still owes is the same as before.
+    await expect(summary.getByText("$42.82", { exact: true })).toBeVisible();
+    await expect(summary.getByText("$9.04", { exact: true })).toBeVisible();
+    await expect(summary).toContainText("Item prices are before tax.");
+    await expectNoInternalText(page);
+    for (const width of [390, 320]) {
+      await page.setViewportSize({ width, height: 844 });
+      await expectNoHorizontalOverflow(page);
+    }
+    await page.screenshot({
+      path: "test-results/customer-dining-session-priced-320.png",
+      fullPage: true,
+    });
   });
 
   test("asks a guest who has not joined to join first", async ({ page }) => {

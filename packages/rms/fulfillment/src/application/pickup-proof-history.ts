@@ -110,7 +110,9 @@ export function foldPickupProofHistory(
       v.storeReference !== source.storeReference ||
       v.fulfillmentReference !== source.fulfillmentReference ||
       v.generation !== g.generation ||
-      v.verificationMethod !== g.kind ||
+      // WP-2423 (DEC-PICKUP-COUNTER-CODE): the six-digit code verifies a long-code proof too.
+      (v.verificationMethod !== g.kind &&
+        !(v.verificationMethod === "HumanCode" && g.kind === "Opaque")) ||
       v.verifiedAt < g.issuedAt ||
       v.verifiedAt >= g.expiresAt ||
       v.verifiedAt > source.lockedAt ||

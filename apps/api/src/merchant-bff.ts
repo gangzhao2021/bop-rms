@@ -1693,6 +1693,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             awaitingPayment: item.awaitingPayment,
             // WP-2423 Q7: a staff-taken counter order and its card-machine payment.
             counter: item.counter,
+            // WP-2423: what the Order was paid online (null for counter or unpaid orders).
+            paidOnline: item.paidOnline,
             batches: item.batches.map((batch) => ({
               orderBatchReference: batch.orderBatchReference,
               sequence: batch.sequence,
@@ -1720,6 +1722,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             observedAt: item.observedAt,
           },
           lines: view.lines,
+          // WP-2423: refunds of the online payment, when Payment's position could be read.
+          paymentPosition: view.paymentPosition,
           // WP-2423 Q10: the pickup customer's contact for this order (detail only).
           pickupContact:
             view.pickupContact === null
@@ -1782,6 +1786,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             awaitingPayment: item.awaitingPayment,
             // WP-2423 Q7: a staff-taken counter order and its card-machine payment.
             counter: item.counter,
+            // WP-2423: what the Order was paid online (null for counter or unpaid orders).
+            paidOnline: item.paidOnline,
             batches: item.batches.map((batch) => ({
               orderBatchReference: batch.orderBatchReference,
               sequence: batch.sequence,
@@ -7350,6 +7356,9 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           PICKUP_PROOF_NOT_READY: 422,
           PICKUP_PROOF_VERSION_CONFLICT: 409,
           PICKUP_PROOF_UNAVAILABLE: 422,
+          // WP-2423 (DEC-PICKUP-COUNTER-CODE): a wrong code, and code checks locked after five.
+          PICKUP_PROOF_REJECTED: 422,
+          PICKUP_PROOF_LOCKED: 423,
           PICKUP_HANDOFF_INPUT_INVALID: 400,
           PICKUP_HANDOFF_PERMISSION_DENIED: 403,
           PICKUP_HANDOFF_NOT_READY: 422,

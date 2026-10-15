@@ -45,6 +45,7 @@ describe("CUST-PICKUP-CODE contextual screen", () => {
         generation: 1,
         proofKind: "HumanCode",
         proofValue: "123456",
+        counterCode: null,
         observedAt: "2026-08-11T13:55:00.000Z",
         expiresAt: "2026-08-11T14:30:00.000Z",
       },
@@ -53,6 +54,31 @@ describe("CUST-PICKUP-CODE contextual screen", () => {
     expect(html).toContain("123456");
     expect(html).toContain("Pickup code 1 2 3 4 5 6");
     expect(html).toContain("Show this code to staff");
+  });
+
+  it("shows the six-digit code large, in two groups, instead of the long code (WP-2423)", () => {
+    const html = render({
+      status: "ready",
+      refreshing: false,
+      view: {
+        schemaVersion: 1,
+        status: "Ready",
+        orderReference: id(1),
+        orderNumber: "1001",
+        storeDisplayName: "Synthetic Harbour Store",
+        pickupInstruction: "Show this proof at the pickup counter.",
+        generation: 1,
+        proofKind: "Opaque",
+        proofValue: "AbCdEfGhIjKlMnOpQrStUQ",
+        counterCode: "048213",
+        observedAt: "2026-08-11T13:55:00.000Z",
+        expiresAt: "2026-08-11T14:30:00.000Z",
+      },
+    });
+    expect(html).toContain("048 213");
+    expect(html).toContain("Pickup code 0 4 8 2 1 3");
+    expect(html).toContain("Show or read this code to staff");
+    expect(html).not.toContain("AbCdEfGhIjKlMnOpQrStUQ");
   });
 
   it.each([
