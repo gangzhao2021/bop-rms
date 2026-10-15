@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import process from "node:process";
 import {
   parsePilotWorkloadHealth,
   createPilotKitchenHealthObserver,
@@ -179,4 +180,65 @@ it("retains a previous failed-cycle timestamp during a later retry", () => {
       Date.parse(at),
     ).lastCycleFailure,
   ).toEqual(lastCycleFailure);
+});
+
+it("keeps the safe failure code and SQLSTATE, and refuses free text in them", () => {
+  const detailed = {
+    occurredAt: at,
+    category: "Unclassified",
+    code: "COMPENSATION_DISCOVERY_INVALID",
+    sqlState: "25P03",
+  };
+  expect(
+    parsePilotWorkloadHealth(
+      { ...value, snapshot: { ...snapshot, lastCycleFailure: detailed } },
+      identity,
+      Date.parse(at),
+    ).lastCycleFailure,
+  ).toEqual(detailed);
+  for (const change of [{ code: "permission denied for table x" }, { sqlState: "private" }])
+    expect(() =>
+      parsePilotWorkloadHealth(
+        { ...value, snapshot: { ...snapshot, lastCycleFailure: { ...detailed, ...change } } },
+        identity,
+        Date.parse(at),
+      ),
+    ).toThrow();
+});
+
+it("writes one service log line per failed cycle with category, code and SQLSTATE only", () => {
+  const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pilot-health-")));
+  fs.chmodSync(directory, 0o700);
+  const lines = [];
+  const write = process.stderr.write;
+  process.stderr.write = (line) => lines.push(String(line)) > 0;
+  try {
+    const observer = createPilotWorkloadHealthObserver(directory, "business-compensation");
+    const failed = {
+      state: "failed",
+      cycleInFlight: false,
+      completedCycles: 3,
+      lastCycleStartedAt: new Date(Date.now() - 1000).toISOString(),
+      lastCycleCompletedAt: new Date(Date.now() - 2000).toISOString(),
+      lastCycleFailure: {
+        occurredAt: new Date(Date.now() - 500).toISOString(),
+        category: "Unclassified",
+        code: "COMPENSATION_DISCOVERY_INVALID",
+        sqlState: null,
+      },
+    };
+    observer(failed);
+    observer({ ...failed, state: "stopped" });
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0])).toMatchObject({
+      event: "workload_cycle_failed",
+      component: "business-compensation",
+      category: "Unclassified",
+      code: "COMPENSATION_DISCOVERY_INVALID",
+      sqlState: null,
+    });
+  } finally {
+    process.stderr.write = write;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });

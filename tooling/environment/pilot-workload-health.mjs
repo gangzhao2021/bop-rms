@@ -24,6 +24,8 @@ const instant = (value) => {
     return fail();
   return Date.parse(value);
 };
+const SAFE_FAILURE_CODE = /^[A-Z][A-Z0-9_]{2,79}$/u;
+const SQLSTATE = /^[0-9A-Z]{5}$/u;
 export function parsePilotWorkloadHealth(value, identity, now = Date.now()) {
   const record = exact(value, ["pid", "started", "observedAt", "snapshot"]);
   if (
@@ -66,9 +68,17 @@ export function parsePilotWorkloadHealth(value, identity, now = Date.now()) {
     return fail();
   let lastCycleFailure = null;
   if (snapshot.lastCycleFailure !== undefined && snapshot.lastCycleFailure !== null) {
-    const failure = exact(snapshot.lastCycleFailure, ["occurredAt", "category"]);
+    const detailed = Object.hasOwn(snapshot.lastCycleFailure, "sqlState");
+    const failure = exact(snapshot.lastCycleFailure, [
+      "occurredAt",
+      "category",
+      ...(detailed ? ["code", "sqlState"] : []),
+    ]);
     const failedAt = instant(failure.occurredAt);
     if (
+      (detailed &&
+        ((failure.code !== null && !SAFE_FAILURE_CODE.test(failure.code)) ||
+          (failure.sqlState !== null && !SQLSTATE.test(failure.sqlState)))) ||
       started === null ||
       failedAt > observed ||
       ![
@@ -84,6 +94,7 @@ export function parsePilotWorkloadHealth(value, identity, now = Date.now()) {
     lastCycleFailure = Object.freeze({
       occurredAt: failure.occurredAt,
       category: failure.category,
+      ...(detailed ? { code: failure.code, sqlState: failure.sqlState } : {}),
     });
   }
   return Object.freeze({
@@ -128,9 +139,31 @@ export function createPilotWorkloadHealthObserver(directory, component) {
   const fields = fs.readFileSync("/proc/self/stat", "utf8").split(") ").at(-1).trim().split(/\s+/u);
   const identity = { pid: process.pid, started: fields[19] };
   const target = path.join(directory, component + ".health.json");
-  let sequence = 0;
+  let sequence = 0,
+    reportedFailure = null;
   return (snapshot) => {
     const value = { ...identity, observedAt: new Date().toISOString(), snapshot };
+    const failure = snapshot?.lastCycleFailure;
+    if (failure && failure.occurredAt !== reportedFailure) {
+      reportedFailure = failure.occurredAt;
+      // One line per failed cycle in the service log: category, safe code and SQLSTATE only.
+      try {
+        process.stderr.write(
+          JSON.stringify({
+            level: 50,
+            time: value.observedAt,
+            module: "pilot-workload-health",
+            event: "workload_cycle_failed",
+            component,
+            category: failure.category,
+            code: SAFE_FAILURE_CODE.test(failure.code ?? "") ? failure.code : null,
+            sqlState: SQLSTATE.test(failure.sqlState ?? "") ? failure.sqlState : null,
+          }) + "\n",
+        );
+      } catch {
+        /* Diagnostics must not change workload execution. */
+      }
+    }
     const temporary = target + "." + process.pid + "." + ++sequence + ".tmp";
     let created = false;
     try {

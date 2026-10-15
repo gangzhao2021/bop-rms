@@ -22,6 +22,36 @@ export async function withoutCardMachinePayments(transaction, scope, page, autho
       kept.push(candidate);
   return Object.freeze({ ...page, candidates: Object.freeze(kept) });
 }
+/**
+ * Pages owner discovery while leaving out card-machine payments, and keeps the workload's page
+ * contract: a non-null cursor only follows a full page and equals its last candidate. Filtering a
+ * single owner page could return fewer candidates with a cursor, which the refund workload
+ * rejects as invalid discovery (WP-2423 worker recovery, 2026-10-15). Every owner read advances,
+ * so the loop ends; an excluded tail ends the round with a null cursor.
+ */
+export async function discoverWithoutCardMachinePayments(input, { read, isCardMachinePayment }) {
+  const limit = input.limit;
+  const kept = [];
+  let after = input.afterDispositionReference;
+  for (;;) {
+    const page = await read({ afterDispositionReference: after, limit: limit - kept.length });
+    for (const candidate of page.candidates)
+      if (!(await isCardMachinePayment(candidate))) kept.push(candidate);
+    if (page.nextAfterDispositionReference === null)
+      return Object.freeze({
+        candidates: Object.freeze(kept),
+        nextAfterDispositionReference: null,
+      });
+    if (kept.length === limit)
+      return Object.freeze({
+        candidates: Object.freeze(kept),
+        nextAfterDispositionReference: kept[kept.length - 1].dispositionReference,
+      });
+    if (after !== null && page.nextAfterDispositionReference <= after)
+      throw new Error("INTERNAL_COMPENSATION_DISCOVERY_UNAVAILABLE");
+    after = page.nextAfterDispositionReference;
+  }
+}
 /** Read-only owner discovery; candidate presence never authorizes or executes a refund. */
 /**
  * WP-2423 Q6: the refund workload also discovers staff cancellations of paid batches
@@ -61,11 +91,17 @@ export function createInternalCompensationCandidates(
     async discover(input) {
       if (!active()) return unavailable();
       return resources.transactions.run(async (tx) => {
-        const page = await reader(tx, input);
+        if (!excludeCardMachinePayments) return reader(tx, input);
         // The refund workload only; stock of such an Order is still released by its own workload.
-        return excludeCardMachinePayments
-          ? withoutCardMachinePayments(tx, scope, page, active)
-          : page;
+        const cards = createPostgresCardMachinePaymentStore({
+          scope,
+          authorize: async () => active(),
+        });
+        return discoverWithoutCardMachinePayments(input, {
+          read: (page) => reader(tx, page),
+          isCardMachinePayment: async (candidate) =>
+            (await cards.loadByIntent(tx, candidate.paymentIntentReference)) !== null,
+        });
       });
     },
   });

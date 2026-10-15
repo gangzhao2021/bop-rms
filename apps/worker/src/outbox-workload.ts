@@ -8,10 +8,15 @@ export type CycleFailureCategory =
   | "QueryCancelled"
   | "DependencyUnavailable"
   | "Unclassified";
-function failureCategory(error: unknown): CycleFailureCategory {
+const SAFE_CODE =
+  /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*_(?:UNAVAILABLE|INVALID|DENIED|CONFLICT|FAILED|TIMEOUT|EXPIRED|REQUIRED|CHANGED|UNCONFIGURED|NOT_FOUND|MISMATCH|EXHAUSTED)$/u;
+const SQLSTATE = /^[0-9A-Z]{5}$/u;
+function failureCategory(error: unknown, causeSqlState: string | null): CycleFailureCategory {
   try {
     if (!error || typeof error !== "object") return "Unclassified";
-    const code = Object.getOwnPropertyDescriptor(error, "code")?.value as unknown;
+    const own = Object.getOwnPropertyDescriptor(error, "code")?.value as unknown;
+    // A Postgres error wrapped by an owner keeps its SQLSTATE on the cause chain.
+    const code = typeof own === "string" && SQLSTATE.test(own) ? own : (causeSqlState ?? own);
     if (code === "40001") return "SerializationConflict";
     if (code === "40P01") return "Deadlock";
     if (code === "55P03") return "LockUnavailable";
@@ -32,6 +37,33 @@ function failureCategory(error: unknown): CycleFailureCategory {
   }
   return "Unclassified";
 }
+/** A safe application error code (an allowlisted code shape, never free text) and the Postgres
+ * SQLSTATE, read from the error and its cause chain. Neither carries values, rows or secrets. */
+function failureDetail(error: unknown): { code: string | null; sqlState: string | null } {
+  let code: string | null = null,
+    sqlState: string | null = null;
+  try {
+    let current: unknown = error;
+    for (let depth = 0; depth < 5 && current && typeof current === "object"; depth++) {
+      const value: object = current;
+      const ownCode = Object.getOwnPropertyDescriptor(value, "code")?.value as unknown,
+        message = Object.getOwnPropertyDescriptor(value, "message")?.value as unknown;
+      if (sqlState === null && typeof ownCode === "string" && SQLSTATE.test(ownCode))
+        sqlState = ownCode;
+      if (code === null)
+        for (const text of [ownCode, message])
+          if (typeof text === "string" && text.length <= 80 && SAFE_CODE.test(text)) {
+            code = text;
+            break;
+          }
+      if (code !== null && sqlState !== null) break;
+      current = Object.getOwnPropertyDescriptor(value, "cause")?.value as unknown;
+    }
+  } catch {
+    /* Untrusted errors must never break failure reporting. */
+  }
+  return { code, sqlState };
+}
 export interface OutboxWorkloadSnapshot {
   readonly state: "idle" | "running" | "stopping" | "stopped" | "failed";
   readonly cycleInFlight: boolean;
@@ -39,6 +71,10 @@ export interface OutboxWorkloadSnapshot {
   readonly lastCycleFailure: Readonly<{
     occurredAt: string;
     category: CycleFailureCategory;
+    /** Allowlisted application code shape, or null. */
+    code: string | null;
+    /** Postgres SQLSTATE from the error or its cause chain, or null. */
+    sqlState: string | null;
   }> | null;
   readonly lastCycleStartedAt: string | null;
   readonly lastCycleCompletedAt: string | null;
@@ -119,9 +155,11 @@ export function createOutboxWorkload(options: {
         } catch {
           /* Fail closed. */
         }
+        const detail = failureDetail(error);
         lastCycleFailure = Object.freeze({
           occurredAt: new Date().toISOString(),
-          category: failureCategory(error),
+          category: failureCategory(error, detail.sqlState),
+          ...detail,
         });
         throw error;
       })

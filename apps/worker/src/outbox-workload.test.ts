@@ -180,6 +180,51 @@ it.each([
   expect(JSON.stringify(work.snapshot())).not.toContain("PRIVATE_CANARY");
 });
 
+it("records a safe code and the SQLSTATE from a wrapped Postgres error, never free text", async () => {
+  vi.useFakeTimers();
+  const database = Object.assign(
+    new Error("terminating connection due to idle-in-transaction timeout for PRIVATE_CANARY"),
+    {
+      code: "25P03",
+    },
+  );
+  const runOnce = vi
+    .fn()
+    .mockRejectedValueOnce(
+      new Error("ORDER_PAYMENT_OUTCOME_SOURCE_UNAVAILABLE", { cause: database }),
+    );
+  const work = createOutboxWorkload({
+    dispatcher: { runOnce, stop: async () => "drained" },
+    pollIntervalMs: 10,
+    drainDeadlineMs: 100,
+  });
+  await expect(work.start()).rejects.toThrow();
+  expect(work.snapshot().lastCycleFailure).toMatchObject({
+    category: "Unclassified",
+    code: "ORDER_PAYMENT_OUTCOME_SOURCE_UNAVAILABLE",
+    sqlState: "25P03",
+  });
+  expect(JSON.stringify(work.snapshot())).not.toContain("PRIVATE_CANARY");
+  const wrappedDeadlock = createOutboxWorkload({
+    dispatcher: {
+      runOnce: vi
+        .fn()
+        .mockRejectedValueOnce(
+          Error("WRAPPED", { cause: Object.assign(Error("x"), { code: "40P01" }) }),
+        ),
+      stop: async () => "drained",
+    },
+    pollIntervalMs: 10,
+    drainDeadlineMs: 100,
+  });
+  await expect(wrappedDeadlock.start()).rejects.toThrow();
+  expect(wrappedDeadlock.snapshot().lastCycleFailure).toMatchObject({
+    category: "Deadlock",
+    code: null,
+    sqlState: "40P01",
+  });
+});
+
 it("retries explicitly allowed dependency failures with backoff, without counting failed cycles", async () => {
   vi.useFakeTimers();
   const runOnce = vi
