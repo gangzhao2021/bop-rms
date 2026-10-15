@@ -30,11 +30,9 @@ import { SettlementPage } from "./SettlementPage.js";
 import { StoreReportsPage } from "./StoreReportsPage.js";
 import { RefundApprovalsPage } from "./RefundApprovalsPage.js";
 import { WorkspacePage } from "./WorkspacePage.js";
-import {
-  KitchenBoardPage,
-  KitchenDisplayNavigation,
-  KitchenWorkItemPage,
-} from "./KitchenBoardPages.js";
+import { KitchenBoardPage, KitchenWorkItemPage } from "./KitchenBoardPages.js";
+import { createKitchenBoardClient } from "./kitchen-board-client.js";
+import { parseKitchenBoardView } from "./kitchen-board.js";
 import { PickupQueuePage } from "./PickupPages.js";
 import { OrderExceptionPage } from "./OrderExceptionPage.js";
 import { StoreMenuBuilderPage, StoreMenuListPage } from "./StoreMenuPages.js";
@@ -833,11 +831,25 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                 <StoreAvailabilityPage
                   key={state.workspace.selectedScope.storeReference + state.csrf}
                   client={createAvailabilityClient(state.csrf)}
-                  navigation={
-                    soldOutFromKitchen ? (
-                      <KitchenDisplayNavigation current="SoldOut" soldOutHref={pathname} />
-                    ) : undefined
-                  }
+                  {...(soldOutFromKitchen
+                    ? {
+                        kitchenDisplay: {
+                          storeLabel: state.workspace.selectedScope.storeLabel,
+                          csrf: state.csrf,
+                          soldOutHref: pathname,
+                          // The kitchen board's own read says whether this is a kitchen display
+                          // sign-in (presentation only; the server checks every request).
+                          loadOperatorStatus: () =>
+                            createKitchenBoardClient({
+                              csrf: state.csrf,
+                              storeLabel: state.workspace.selectedScope.storeLabel,
+                              storeReference: state.workspace.selectedScope.storeReference,
+                            })
+                              .loadQueue()
+                              .then((value) => parseKitchenBoardView(value).operatorStatus),
+                        },
+                      }
+                    : {})}
                 />
               ) : (
                 <StoreAvailabilityPage />

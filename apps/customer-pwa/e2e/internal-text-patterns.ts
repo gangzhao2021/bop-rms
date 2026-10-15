@@ -34,6 +34,28 @@ export const internalTextRules: readonly InternalTextRule[] = [
   { name: "stub", pattern: /\bnot available here yet\b|\bcannot be selected here yet\b/giu },
   // Doubled sentence punctuation such as "9:46 p.m.." (an ellipsis is fine).
   { name: "double period", pattern: /(?<!\.)\.\.(?!\.)/gu },
+  // Wait times in contract seconds ("whole seconds from 0 to 86400", "Order cutoff seconds")
+  // instead of minutes. Narrow on purpose: "in 30 seconds" and 86400000 stay allowed.
+  {
+    name: "seconds unit",
+    pattern: /\b86,?400\b|\bwhole seconds\b|\b(?:cutoff|lead time|wait time)s? seconds\b/giu,
+  },
+  // IANA zone identifiers such as Africa/Abidjan or America/Argentina/Salta; staff read
+  // "Eastern Time (Toronto, …)". Only the IANA area names are matched, so "and/or" is fine.
+  {
+    name: "time zone identifier",
+    pattern:
+      /\b(?:Africa|America|Antarctica|Arctic|Asia|Atlantic|Australia|Europe|Indian|Pacific|Etc)\/[A-Za-z0-9_+-]+(?:\/[A-Za-z0-9_+-]+)*/gu,
+  },
+  // Retired configuration phrases that staff read as jargon. Single words such as "Draft",
+  // "configuration" or "policy" are also real staff words, so only these exact phrases are matched.
+  {
+    name: "configuration jargon",
+    pattern:
+      /\bfee contexts?\b|\beffective policy\b|\bdraft configuration\b|\bbind Store configuration\b/giu,
+  },
+  // A role written as a code-like proper noun mid-sentence ("ask Staff"); guests ask staff.
+  { name: "capitalized role", pattern: /\b(?:[Aa]sk|[Tt]ell|[Ss]how|[Cc]all) Staff\b/gu },
 ];
 
 /** Reviewed business language that the rules above would otherwise flag. */
@@ -43,6 +65,8 @@ export const reviewedInternalTextAllowlist: readonly RegExp[] = [
   /\biPhone\b/u,
   /\bApple Pay\b/u,
   /\bGoogle Pay\b/u,
+  // A real place name in the store time zone list ("New Zealand Time (McMurdo)").
+  /\bMcMurdo\b/u,
 ];
 
 export interface InternalTextFinding {

@@ -10,6 +10,7 @@ import { createDigitalReceiptQueryService } from "../application/digital-receipt
 import {
   DigitalReceiptError,
   parseDigitalReceiptChain,
+  parseDigitalReceiptRecord,
   parseDigitalReceiptSnapshot,
 } from "../domain/digital-receipt.js";
 
@@ -449,5 +450,98 @@ describe("additional paid receipt snapshots", () => {
     expect(() => createAdditionalReceiptSnapshot(previous, additional())).toThrow(
       DigitalReceiptError,
     );
+  });
+});
+
+describe("item prices before tax (WP-2423 D5)", () => {
+  const money = (amountMinor: bigint) => ({ amountMinor, currencyCode: "CAD" });
+  const line = (n: number, subtotal: bigint, total: bigint) => ({
+    lineReference: id(n),
+    displayName: "Synthetic latte",
+    quantity: 1,
+    lineTotal: money(total),
+    lineSubtotal: money(subtotal),
+  });
+  const priced = () =>
+    snapshot({
+      lines: [line(7, 1000n, 1130n), line(8, 450n, 509n)],
+      subtotal: money(1450n),
+      tax: money(189n),
+      total: money(1639n),
+    });
+  it("keeps the frozen total and adds a pre-tax price that adds up to the subtotal", () => {
+    const parsed = parseDigitalReceiptSnapshot(priced());
+    expect(parsed.lines.map((entry) => entry.lineSubtotal?.amountMinor)).toEqual([1000n, 450n]);
+    expect(parsed.lines.map((entry) => entry.lineTotal.amountMinor)).toEqual([1130n, 509n]);
+    expect(
+      parsed.lines.reduce((sum, entry) => sum + (entry.lineSubtotal?.amountMinor ?? 0n), 0n) +
+        parsed.tax.amountMinor +
+        parsed.tip.amountMinor,
+    ).toBe(parsed.total.amountMinor);
+    const record = { ...chain().records[0], snapshot: priced() };
+    expect(decodeDigitalReceiptRecord(encodeDigitalReceiptRecord(record))).toEqual(
+      parseDigitalReceiptRecord(record),
+    );
+  });
+  it("still reads receipts issued before item prices were frozen, unchanged", () => {
+    const legacy = parseDigitalReceiptSnapshot(snapshot());
+    expect(legacy.lines[0]).not.toHaveProperty("lineSubtotal");
+  });
+  it("rejects item prices that don't add up to the subtotal or are on only some lines", () => {
+    const value = priced();
+    for (const candidate of [
+      { ...value, lines: [line(7, 1000n, 1130n), line(8, 449n, 509n)] },
+      {
+        ...value,
+        lines: [line(7, 1000n, 1130n), { ...line(8, 450n, 509n), lineSubtotal: undefined }],
+      },
+      {
+        ...value,
+        lines: [
+          line(7, 1000n, 1130n),
+          Object.fromEntries(
+            Object.entries(line(8, 450n, 509n)).filter(([key]) => key !== "lineSubtotal"),
+          ),
+        ],
+      },
+      {
+        ...value,
+        lines: [
+          { ...line(7, 1000n, 1130n), lineSubtotal: { amountMinor: 1000n, currencyCode: "USD" } },
+          line(8, 450n, 509n),
+        ],
+      },
+    ])
+      expect(() => parseDigitalReceiptSnapshot(candidate)).toThrow(DigitalReceiptError);
+  });
+  it("lets a later paid round add priced items to a receipt issued before prices were frozen", () => {
+    const previous = chain().records[0];
+    if (!previous) throw new Error("missing fixture");
+    const old = snapshot();
+    const current = snapshot({
+      lines: [
+        { ...old.lines[0], lineSubtotal: money(1000n) },
+        { ...old.lines[0], lineReference: id(70), lineSubtotal: money(1000n) },
+      ],
+      subtotal: money(2000n),
+      tax: money(260n),
+      total: money(2260n),
+    });
+    const next = createAdditionalReceiptSnapshot(previous, current);
+    expect(next?.lines.every((entry) => entry.lineSubtotal?.amountMinor === 1000n)).toBe(true);
+    // The old item's printed facts are never rewritten.
+    expect(() =>
+      createAdditionalReceiptSnapshot(previous, {
+        ...current,
+        lines: [{ ...current.lines[0], lineTotal: money(999n) }, current.lines[1]],
+      }),
+    ).toThrow(DigitalReceiptError);
+    // Same items, now priced: no new version is issued just to add prices.
+    expect(
+      createAdditionalReceiptSnapshot(previous, {
+        ...old,
+        lines: [{ ...old.lines[0], lineSubtotal: money(1000n) }],
+      }),
+    ).toBeNull();
   });
 });

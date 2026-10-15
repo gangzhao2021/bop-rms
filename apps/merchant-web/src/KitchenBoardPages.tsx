@@ -1,4 +1,4 @@
-import { useKitchenActions } from "./use-kitchen-actions.js";
+import { kitchenStepText, useKitchenActions } from "./use-kitchen-actions.js";
 import {
   KitchenRecentlyFinished,
   KitchenRemakeDialog,
@@ -114,14 +114,68 @@ export function kitchenOrderSearchTerm(input: string): string | null {
   return term.length === 0 ? null : term;
 }
 
-/** WP-2423: whether a work item belongs to the order (or table) staff searched for. */
-export function matchesKitchenOrderSearch(item: KitchenBoardItem, input: string): boolean {
+/** WP-2423: whether an order (by its number or table) is the one staff searched for. */
+export function matchesKitchenOrderLabel(
+  label: KitchenOrderLabel | null | undefined,
+  input: string,
+): boolean {
   const term = kitchenOrderSearchTerm(input);
   if (term === null) return true;
-  const label = item.orderLabel;
   if (!label) return false;
   const number = (value: string) => value.toUpperCase().replace(/^0+(?=\d)/u, "");
   return number(label.orderNumber) === number(term) || label.tableLabel?.toUpperCase() === term;
+}
+
+/** WP-2423: whether a work item belongs to the order (or table) staff searched for. */
+export function matchesKitchenOrderSearch(item: KitchenBoardItem, input: string): boolean {
+  return matchesKitchenOrderLabel(item.orderLabel, input);
+}
+
+/**
+ * WP-2423: one order search applies to the whole board: today's lanes, remakes, the earlier days'
+ * tickets and recently finished work. Earlier days' open tickets are kept apart from today's lanes.
+ */
+export function kitchenBoardSearch(input: {
+  readonly items: readonly KitchenBoardItem[];
+  readonly reworks: readonly KitchenReworkView[];
+  readonly today: string | null;
+  readonly search: string | null;
+}) {
+  const { search } = input;
+  const match = (item: KitchenBoardItem) =>
+    search === null || matchesKitchenOrderSearch(item, search);
+  const earlier = earlierDayTickets(
+    input.items.filter(isActiveKitchenWork),
+    input.today,
+    kitchenOrderLabel,
+  );
+  const earlierOpen = new Set(
+    earlier.flatMap((ticket) => ticket.items.map((item) => item.workItemReference)),
+  );
+  return {
+    /** Every open ticket from an earlier business day, whatever the search. */
+    earlier,
+    earlierOpen,
+    /** The earlier days' tickets the search finds. */
+    earlierShown: search === null ? earlier : earlier.filter((ticket) => ticket.items.some(match)),
+    /** Today's work the search finds (before the lane filters). */
+    todayMatches: input.items.filter(
+      (item) => !earlierOpen.has(item.workItemReference) && match(item),
+    ),
+    reworks:
+      search === null
+        ? input.reworks
+        : input.reworks.filter((rework) => matchesKitchenOrderLabel(rework.orderLabel, search)),
+    /** Board items the search finds, for the recently finished list. */
+    items: search === null ? input.items : input.items.filter(match),
+  };
+}
+
+/** WP-2423: how many of the earlier days' tickets carry the searched number, in staff words. */
+export function earlierDaySearchText(count: number, search: string): string {
+  return count === 1
+    ? `1 ticket from an earlier day has number or table “${search}”`
+    : `${count} tickets from earlier days have number or table “${search}”`;
 }
 
 /**
@@ -357,6 +411,7 @@ import {
   type KitchenBoardClient,
   type KitchenBoardItem,
   type KitchenBoardView,
+  type KitchenOrderLabel,
   type KitchenWorkItemDetailView,
 } from "./kitchen-board.js";
 import { StaffSignInLink, StaffSwitchButton } from "./StaffSession.js";
@@ -599,7 +654,11 @@ function WorkCard({
       </div>
       <div className="kitchen-work-item__state">
         <strong data-status={item.status}>
-          {item.status === "In Progress" ? "In progress" : item.status}
+          {item.status === "In Progress"
+            ? "In progress"
+            : item.status === "Queued" && item.execution?.acceptedAt
+              ? "Accepted"
+              : item.status}
         </strong>
         {!isActiveKitchenWork(item) ? (
           <span data-age="done">Done</span>
@@ -907,14 +966,18 @@ export function KitchenBoardScreen({
   const onRemake = remakes?.canRework
     ? (item: KitchenBoardItem) => guarded(item, "Remake", () => setRemakeTarget(item))
     : undefined;
-  const earlierTickets = earlierDayTickets(
-    view.items.filter(isActiveKitchenWork),
+  const board = kitchenBoardSearch({
+    items: view.items,
+    reworks: remakes?.items ?? [],
     today,
-    kitchenOrderLabel,
-  );
-  const earlierOpen = new Set(
-    earlierTickets.flatMap((ticket) => ticket.items.map((item) => item.workItemReference)),
-  );
+    search: orderSearch,
+  });
+  const { earlierOpen } = board;
+  const earlierTickets = board.earlierShown;
+  const earlierElsewhere =
+    orderSearch !== null && earlierTickets.length > 0
+      ? earlierDaySearchText(earlierTickets.length, orderSearch)
+      : null;
   const canCloseEarlier = view.canCloseEarlierDayTickets === true && earlierDays !== undefined;
   const stations = [
     ...new Set(
@@ -930,11 +993,7 @@ export function KitchenBoardScreen({
   const activeStation = stationFilterAvailable && stations.includes(station) ? station : "All";
   const activeAllergen = allergenFilterAvailable ? allergen : "All";
   const activeException = exceptionFilterAvailable ? exception : "All";
-  const searchMatches = view.items.filter(
-    (item) =>
-      !earlierOpen.has(item.workItemReference) &&
-      (orderSearch === null || matchesKitchenOrderSearch(item, orderSearch)),
-  );
+  const searchMatches = board.todayMatches;
   const items = searchMatches.filter(
     (item) =>
       (activeStation === "All" || item.stationLabel === activeStation) &&
@@ -1232,7 +1291,7 @@ export function KitchenBoardScreen({
         {remakes ? (
           <div className="kitchen-board-lanes kitchen-board-remakes">
             <KitchenRemakeLane
-              items={remakes.items}
+              items={board.reworks}
               readOnly={remakeReadOnly}
               onAdvance={remakes.onAdvance}
             />
@@ -1243,7 +1302,8 @@ export function KitchenBoardScreen({
             <summary>
               <span>From earlier days — check and close</span>
               <span className="kitchen-earlier-days__count">
-                {earlierTickets.length === 1 ? "1 ticket" : `${earlierTickets.length} tickets`}
+                {earlierElsewhere ??
+                  (earlierTickets.length === 1 ? "1 ticket" : `${earlierTickets.length} tickets`)}
               </span>
             </summary>
             <p className="kitchen-earlier-days__intro">
@@ -1319,7 +1379,9 @@ export function KitchenBoardScreen({
               {orderSearch !== null
                 ? searchMatches.length > 0
                   ? `Order or table “${orderSearch}” has work, but the filters hide it. Clear the filters to see it.`
-                  : `Nothing on the board for order or table “${orderSearch}”. Clear the search to see the whole queue.`
+                  : earlierElsewhere !== null
+                    ? `Nothing from today for order or table “${orderSearch}”. ${earlierElsewhere}: see From earlier days above.`
+                    : `Nothing on the board for order or table “${orderSearch}”. Clear the search to see the whole queue.`
                 : view.items.length === 0
                   ? "No authorized work item is available in the loaded queue."
                   : view.items.length === earlierOpen.size
@@ -1390,7 +1452,7 @@ export function KitchenBoardScreen({
         )}
         {remakes && onRemake ? (
           <KitchenRecentlyFinished
-            items={view.items}
+            items={board.items}
             reworks={remakes.items}
             observedAt={view.projectedAt}
             readOnly={remakeReadOnly}
@@ -1737,22 +1799,22 @@ function KitchenBoardContent(
               : actions.state.kind === "Unknown"
                 ? "Action result unknown"
                 : actions.state.kind === "Confirmed"
-                  ? actions.reflected
-                    ? "Kitchen action confirmed"
-                    : "Waiting for refreshed queue"
+                  ? // WP-2423: what the cook just did, said plainly; the card already shows it.
+                    kitchenStepText(
+                      kitchenOrderLabel(actions.state.attempt.item),
+                      actions.state.attempt.item,
+                      actions.state.result,
+                    )
                   : "Kitchen action not completed"
           }
           status
         >
-          <p>
-            {actions.state.kind === "Submitting"
-              ? "Please wait before taking another action."
-              : actions.state.kind === "Unknown"
-                ? "The response was lost. Retry this same operation to recover its result; do not create another operation."
-                : actions.state.kind === "Confirmed"
-                  ? actions.reflected
-                    ? "The queue now reflects the confirmed operation."
-                    : "The operation is confirmed. Refresh from source until the queue reflects its new version."
+          {actions.state.kind === "Confirmed" ? null : (
+            <p>
+              {actions.state.kind === "Submitting"
+                ? "Please wait before taking another action."
+                : actions.state.kind === "Unknown"
+                  ? "The response was lost. Retry this same operation to recover its result; do not create another operation."
                   : actions.rejectedRefreshed
                     ? "The queue has been refreshed. Review the current item before choosing an action."
                     : actions.state.code === "PermissionDenied"
@@ -1760,7 +1822,8 @@ function KitchenBoardContent(
                       : actions.state.code === "Conflict"
                         ? "The work item changed. Refresh and review its current state before choosing an action."
                         : "The action was not accepted. Refresh and review the current work item."}
-          </p>
+            </p>
+          )}
           {actions.state.kind === "Unknown" ? (
             <button
               ref={retryButtonRef}
@@ -1780,7 +1843,7 @@ function KitchenBoardContent(
     <>
       {state.kind === "Found" ? (
         <KitchenBoardScreen
-          view={state.view}
+          view={actions.view ?? state.view}
           notices={notices}
           onRefresh={refresh}
           refreshButtonRef={refreshButtonRef}
@@ -1885,11 +1948,52 @@ export function useKitchenScreenAwake(active: boolean) {
 
 /** IDR-0039 named-operator browser KDS: visibility loss covers the whole board (no snapshot),
  * and handover signs the current named Session out before the next operator signs in. */
+/**
+ * WP-2423: the kitchen display's handover (release the shift, then sign out), shared by the board
+ * and the kitchen display's sold-out page so staff can hand over from either.
+ */
+export function useKitchenHandover(csrf: string | undefined, signOut?: () => Promise<void>) {
+  const [handover, setHandover] = useState<"Idle" | "SigningOut" | "SignedOut" | "Failed">("Idle");
+  const run =
+    signOut ??
+    (async () => {
+      // Kitchen records the Release first; the next named operator's Start derives the handover.
+      const release = await fetch("/merchant/kitchen/release", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "x-bop-csrf": csrf ?? "" },
+      });
+      if (release.status !== 204) throw new Error("KDS_RELEASE_FAILED");
+      const response = await fetch("/merchant/logout", {
+        method: "POST",
+        credentials: "same-origin",
+      });
+      if (!response.ok) throw new Error("KDS_SIGN_OUT_FAILED");
+    });
+  const handOver = () => {
+    setHandover("SigningOut");
+    run().then(
+      () => setHandover("SignedOut"),
+      () => setHandover("Failed"),
+    );
+  };
+  return { handover, handOver };
+}
+/** WP-2423: what a kitchen display shows once its shift has been handed over. */
+export function KitchenSignedOutPanel() {
+  return (
+    <StatePanel heading="Kitchen display signed out" status>
+      <p>The next named operator must sign in before using this board.</p>
+      {/* WP-2423 Q18: the sign-in that works here (the labelled test sign-in in the pilot). */}
+      <StaffSignInLink label="Sign in to the kitchen display" />
+    </StatePanel>
+  );
+}
 export function KitchenBoardPage(
   props: KitchenPageProps & { readonly signOut?: () => Promise<void> },
 ) {
   const [covered, setCovered] = useState(false),
-    [handover, setHandover] = useState<"Idle" | "SigningOut" | "SignedOut" | "Failed">("Idle"),
+    { handover, handOver } = useKitchenHandover(props.csrf, props.signOut),
     [resumed, setResumed] = useState(0);
   useEffect(() => {
     const cover = () => {
@@ -1903,30 +2007,7 @@ export function KitchenBoardPage(
   // "Start kitchen display here" instead (WP-2423).
   const [operator, setOperator] = useState<KitchenBoardView["operatorStatus"] | null>(null);
   const awake = useKitchenScreenAwake(!covered && handover !== "SignedOut");
-  const signOut =
-    props.signOut ??
-    (async () => {
-      // Kitchen records the Release first; the next named operator's Start derives the handover.
-      const release = await fetch("/merchant/kitchen/release", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "x-bop-csrf": props.csrf ?? "" },
-      });
-      if (release.status !== 204) throw new Error("KDS_RELEASE_FAILED");
-      const response = await fetch("/merchant/logout", {
-        method: "POST",
-        credentials: "same-origin",
-      });
-      if (!response.ok) throw new Error("KDS_SIGN_OUT_FAILED");
-    });
-  if (handover === "SignedOut")
-    return (
-      <StatePanel heading="Kitchen display signed out" status>
-        <p>The next named operator must sign in before using this board.</p>
-        {/* WP-2423 Q18: the sign-in that works here (the labelled test sign-in in the pilot). */}
-        <StaffSignInLink label="Sign in to the kitchen display" />
-      </StatePanel>
-    );
+  if (handover === "SignedOut") return <KitchenSignedOutPanel />;
   if (covered)
     return (
       <StatePanel heading="Kitchen display covered" tone="offline" status>
@@ -1944,13 +2025,6 @@ export function KitchenBoardPage(
         </button>
       </StatePanel>
     );
-  const handOver = () => {
-    setHandover("SigningOut");
-    signOut().then(
-      () => setHandover("SignedOut"),
-      () => setHandover("Failed"),
-    );
-  };
   return (
     <KitchenBoardContent
       key={resumed}

@@ -144,7 +144,17 @@ function record(value: unknown, expectedVersion: number) {
   )
     return invalid();
   const lines = snapshot.lines.map((candidate) => {
-    const line = exact(candidate, ["lineReference", "displayName", "quantity", "lineTotal"]);
+    const hasSubtotal =
+      candidate !== null &&
+      typeof candidate === "object" &&
+      Object.hasOwn(candidate as object, "lineSubtotal");
+    const line = exact(candidate, [
+      "lineReference",
+      "displayName",
+      "quantity",
+      "lineTotal",
+      ...(hasSubtotal ? ["lineSubtotal"] : []),
+    ]);
     if (
       !reference.test(String(line.lineReference)) ||
       typeof line.displayName !== "string" ||
@@ -160,6 +170,7 @@ function record(value: unknown, expectedVersion: number) {
       displayName: line.displayName,
       quantity: line.quantity as number,
       lineTotal: amount(line.lineTotal),
+      ...(hasSubtotal ? { lineSubtotal: amount(line.lineSubtotal) } : {}),
     });
   });
   const subtotal = amount(snapshot.subtotal);
@@ -260,6 +271,7 @@ function record(value: unknown, expectedVersion: number) {
     total,
     refundedTotal,
     ...lines.map((line) => line.lineTotal),
+    ...lines.flatMap((line) => (line.lineSubtotal ? [line.lineSubtotal] : [])),
     ...(adjustments ? [adjustments.discount, adjustments.fee] : []),
   ];
   if (
@@ -274,6 +286,15 @@ function record(value: unknown, expectedVersion: number) {
       (adjustments?.fee.amountMinor ?? 0n) +
       tip.amountMinor !==
       total.amountMinor
+  )
+    return invalid();
+  // WP-2423 D5: item prices are on every line or none, and add up to the subtotal.
+  const priced = lines.filter((line) => line.lineSubtotal !== undefined);
+  if (
+    priced.length > 0 &&
+    (priced.length !== lines.length ||
+      priced.reduce((sum, line) => sum + (line.lineSubtotal?.amountMinor ?? 0n), 0n) !==
+        subtotal.amountMinor)
   )
     return invalid();
   return Object.freeze({

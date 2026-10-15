@@ -114,3 +114,68 @@ export function createPostgresReceiptOrderSource(options: {
     }
   };
 }
+
+export interface OrderItemPrice {
+  readonly orderItemReference: string;
+  readonly orderBatchReference: string;
+  /** Unit price × quantity, before discount, fees and tax (the price printed beside the item). */
+  readonly subtotal: { readonly amountMinor: bigint; readonly currencyCode: string };
+  readonly tax: { readonly amountMinor: bigint; readonly currencyCode: string };
+  /** The item's frozen total after discount, fees and tax. */
+  readonly total: { readonly amountMinor: bigint; readonly currencyCode: string };
+}
+
+/**
+ * WP-2423 D5: each Order item's frozen prices, for reads that print item prices before tax next to
+ * the order's subtotal and tax. A plain read of the frozen transaction snapshots (no locks, no
+ * current menu prices); the caller authorizes the Order before calling and keeps its own fences.
+ */
+export async function listOrderItemPrices(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReference: string,
+): Promise<readonly OrderItemPrice[]> {
+  try {
+    const brandReference = String(parseOrderingReference(scope.brandReference));
+    const storeReference = String(parseOrderingReference(scope.storeReference));
+    const order = String(parseOrderingReference(orderReference));
+    await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+      brandReference,
+      storeReference,
+    ]);
+    const rows = (
+      await tx.query(
+        "SELECT order_item_id,order_batch_id,quantity,transaction_snapshot_json,transaction_snapshot_json#>>'{pricing,quoteVersion}' AS quote_version FROM rms_ordering.order_item WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 ORDER BY order_batch_id,ordinal LIMIT 101",
+        [brandReference, storeReference, order],
+      )
+    ).rows;
+    if (rows.length > 100) return fail();
+    return Object.freeze(
+      rows.map((row) => {
+        if (row.quote_version !== "1" && row.quote_version !== "2") return fail();
+        const snapshot =
+          row.quote_version === "2"
+            ? decodeConfiguredOrderItemSnapshot(row.transaction_snapshot_json)
+            : decodeOrderItemSnapshot(row.transaction_snapshot_json);
+        if (
+          row.order_item_id !== snapshot.orderItemReference ||
+          row.order_batch_id !== snapshot.orderBatchReference ||
+          row.quantity !== snapshot.quantity
+        )
+          return fail();
+        const money = (value: { amountMinor: bigint; currencyCode: string }) =>
+          Object.freeze({ amountMinor: value.amountMinor, currencyCode: value.currencyCode });
+        return Object.freeze({
+          orderItemReference: String(snapshot.orderItemReference),
+          orderBatchReference: String(snapshot.orderBatchReference),
+          subtotal: money(snapshot.pricing.subtotal),
+          tax: money(snapshot.pricing.tax),
+          total: money(snapshot.pricing.total),
+        });
+      }),
+    );
+  } catch (error) {
+    if (error instanceof DigitalReceiptError) throw error;
+    return fail();
+  }
+}

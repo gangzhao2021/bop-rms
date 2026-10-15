@@ -78,6 +78,18 @@ function decodeStatus(value: unknown, orderReference: string): OrderStatusView {
         }),
       };
     }
+    // WP-2423 D5: item prices before tax and their tax are money too.
+    if (Object.hasOwn(sources, "itemPrices")) {
+      if (!Array.isArray(sources.itemPrices) || sources.itemPrices.length > 2000)
+        throw new Error("invalid status");
+      sources = {
+        ...sources,
+        itemPrices: sources.itemPrices.map((value: unknown) => {
+          const entry = record(value);
+          return { ...entry, subtotal: decodeMoney(entry.subtotal), tax: decodeMoney(entry.tax) };
+        }),
+      };
+    }
     if (sources.payments !== null) {
       if (!Array.isArray(sources.payments) || sources.payments.length > 100)
         throw new Error("invalid status");

@@ -20,6 +20,9 @@ import {
   dispatchStoreSetupDraft,
   recoverStoreSetupDraft,
   type StoreSetupEditorInputs,
+  type StoreSetupHourInput,
+  savedWaitText,
+  waitMinutesText,
 } from "./StoreSetupDraftPage.js";
 import {
   createStoreSetupClient,
@@ -30,6 +33,7 @@ import {
   StoreSetupClientError,
   type StoreSetupCursor,
   type StoreSetupSnapshot,
+  type StoreSetupContent,
 } from "./store-setup-client.js";
 import { type StoreSetupPendingJournal } from "./store-setup-pending-journal.js";
 import { publicationValueDigest } from "./product-publication-command-client-v2.js";
@@ -187,8 +191,8 @@ it("author-authored timezone, modes and weekly intervals use ordinary controls w
           end: "17:00",
           followingDay: false,
           modes: ["Pickup"],
-          cutoff: "600",
-          lead: "900",
+          cutoff: "10",
+          lead: "15",
         },
       ],
       ...Array.from({ length: 6 }, () => []),
@@ -196,8 +200,72 @@ it("author-authored timezone, modes and weekly intervals use ordinary controls w
   });
   expect(result.businessDayStartLocalTime).toEqual({ state: "Configured", value: "04:00:00" });
   expect(result.weeklySchedule.state).toBe("Configured");
+  // Staff enter minutes; the stored contract keeps seconds.
+  const interval =
+    result.weeklySchedule.state === "Configured"
+      ? result.weeklySchedule.value[0]?.intervals[0]
+      : undefined;
+  expect(interval?.orderCutoffSeconds).toBe(600);
+  expect(interval?.leadTimeSeconds).toBe(900);
 });
-it.each(["", "1.5", "-1", "86401", "1e3"])(
+const waitHours = (cutoff: string, lead: string, saved: Partial<StoreSetupHourInput> = {}) => ({
+  timeZone: "",
+  businessStart: "",
+  serviceModes: [] as const,
+  hours: [
+    [
+      {
+        start: "09:00",
+        end: "17:00",
+        followingDay: false,
+        modes: ["Pickup"] as const,
+        cutoff,
+        lead,
+        ...saved,
+      },
+    ],
+    ...Array.from({ length: 6 }, () => []),
+  ],
+});
+const savedWaits = (content: StoreSetupContent) =>
+  content.weeklySchedule.state === "Configured"
+    ? [
+        content.weeklySchedule.value[0]?.intervals[0]?.orderCutoffSeconds,
+        content.weeklySchedule.value[0]?.intervals[0]?.leadTimeSeconds,
+      ]
+    : [];
+it("accepts waits up to 24 hours in minutes and converts them to seconds", () => {
+  expect(
+    savedWaits(
+      buildStoreSetupEditedContent(createUnconfiguredStoreSetupContent(), waitHours("0", "1440")),
+    ),
+  ).toEqual([0, 86400]);
+});
+it("a saved wait that is not whole minutes is shown rounded but never changed unless edited", () => {
+  expect(waitMinutesText(90)).toBe("2");
+  expect(waitMinutesText(600)).toBe("10");
+  expect(savedWaitText(90)).toBe("1 minute 30 seconds");
+  expect(savedWaitText(45)).toBe("45 seconds");
+  // Untouched prefilled fields keep the exact saved seconds.
+  expect(
+    savedWaits(
+      buildStoreSetupEditedContent(
+        createUnconfiguredStoreSetupContent(),
+        waitHours("2", "1", { savedCutoffSeconds: 90, savedLeadSeconds: 59 }),
+      ),
+    ),
+  ).toEqual([90, 59]);
+  // Once staff edit a field (saved seconds cleared), exactly the typed minutes are saved.
+  expect(
+    savedWaits(
+      buildStoreSetupEditedContent(
+        createUnconfiguredStoreSetupContent(),
+        waitHours("2", "3", { savedCutoffSeconds: null, savedLeadSeconds: 59 }),
+      ),
+    ),
+  ).toEqual([120, 180]);
+});
+it.each(["", "1.5", "-1", "1441", "86400", "1e3"])(
   "invalid raw wait %s cannot be coerced into a Save",
   (raw) => {
     const fields = {
@@ -276,6 +344,19 @@ it("review never shows opaque references or asserts approval/publication", () =>
   expect(html).toContain("No order limits");
   expect(html).toContain("not approved, published, or live");
   expect(html).not.toContain(id(8));
+});
+it("review names the saved time zone in plain words, not its identifier", () => {
+  const html = renderToStaticMarkup(
+    <StoreSetupDraftReview
+      content={{
+        ...createUnconfiguredStoreSetupContent(),
+        timeZone: { state: "Configured", value: "America/Toronto" },
+      }}
+    />,
+  );
+  expect(html).toContain("Timezone: Eastern Time (Toronto, Ottawa and Montréal)");
+  expect(html).not.toContain("America/Toronto");
+  expect(findInternalText([staticText(html)])).toEqual([]);
 });
 it("the ordinary route shell offers refresh without fake Store facts", () => {
   const html = renderToStaticMarkup(
@@ -926,14 +1007,17 @@ it("renders three explicit fee configurations, actual order types and honest pre
       onChange={vi.fn()}
     />,
   );
-  expect(html).toContain('aria-label="Fee contexts"');
+  expect(html).toContain('aria-label="Fees"');
   for (const kind of ["Service charge", "Delivery fee", "Tip"])
     expect(html).toContain(`aria-label="${kind}"`);
   expect(html).toContain("Not set");
   expect(html).toContain(">Off<");
   // Staff read fee names, never the charge codes (WP-2423 internal-text guard).
   expect(findInternalText([staticText(html)])).toEqual([]);
-  expect(html).toContain("These selections do not set fees, rates or effective policy");
+  expect(html).toContain(
+    "Saving the setup draft keeps these choices. It does not set fee amounts or tax rates",
+  );
+  expect(html).not.toMatch(/Fee contexts|Draft configuration|effective policy/u);
   expect(html).not.toContain('type="text"');
 });
 it("saves a new V2 with explicit incomplete fee policy while preserving every legacy field and the durable original sequence", async () => {

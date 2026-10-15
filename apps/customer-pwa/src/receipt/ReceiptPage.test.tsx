@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { describe, expect, it } from "vitest";
-import { ReceiptPage } from "./ReceiptPage.js";
+import { ReceiptPage, receiptLineAmount } from "./ReceiptPage.js";
 import type { ReceiptController } from "./receipt-controller.js";
 import type { ReceiptState } from "./types.js";
 
@@ -215,5 +215,99 @@ describe("receipt version reasons", () => {
     });
     expect(html).toContain("Reason: An additional payment was added to this order.");
     expect(html).not.toMatch(/ORDER.ADDITIONAL|SOME.UNREVIEWED/u);
+  });
+});
+
+describe("WP-2423 D5/D6: item prices before tax and plain payment wording", () => {
+  const amount = (amountMinor: bigint) => ({ amountMinor, currencyCode: "CAD" });
+  function versioned(lines: unknown[], subtotal: bigint, tax: bigint): ReceiptState {
+    const state = ready();
+    if (state.status !== "ready") throw new Error("fixture");
+    const record = state.view.records[0];
+    if (!record) throw new Error("fixture");
+    return {
+      ...state,
+      view: {
+        ...state.view,
+        records: [
+          {
+            ...record,
+            snapshot: {
+              ...record.snapshot,
+              lines: lines as typeof record.snapshot.lines,
+              subtotal: amount(subtotal),
+              tax: amount(tax),
+              total: amount(subtotal + tax),
+            },
+          },
+        ],
+      },
+    };
+  }
+  it("prints each item before tax so the items add up to the subtotal, then tax and total", () => {
+    const lines = [
+      {
+        lineReference: id(4),
+        displayName: "DEMO Latte",
+        quantity: 1,
+        lineTotal: amount(1130n),
+        lineSubtotal: amount(1000n),
+      },
+      {
+        lineReference: id(5),
+        displayName: "Synthetic muffin",
+        quantity: 2,
+        lineTotal: amount(905n),
+        lineSubtotal: amount(801n),
+      },
+    ];
+    const html = render(versioned(lines, 1801n, 234n));
+    expect(html).toContain("<span>1 × DEMO Latte</span><span>$10.00</span>");
+    expect(html).toContain("<span>2 × Synthetic muffin</span><span>$8.01</span>");
+    expect(html).toContain("<dt>Subtotal</dt><dd>$18.01</dd>");
+    expect(html).toContain("<dt>Total</dt><dd>$20.35</dd>");
+    expect(html).not.toContain("$11.30");
+    expect(html).not.toContain("already include tax");
+    const printed = lines.reduce((sum, line) => sum + receiptLineAmount(line).amountMinor, 0n);
+    expect(printed).toBe(1801n);
+    expect(printed + 234n).toBe(2035n);
+  });
+  it("prints an older version's items as issued and says they include tax", () => {
+    const html = render(
+      versioned(
+        [
+          {
+            lineReference: id(4),
+            displayName: "DEMO Latte",
+            quantity: 1,
+            lineTotal: amount(1130n),
+          },
+        ],
+        1000n,
+        130n,
+      ),
+    );
+    expect(html).toContain("<span>1 × DEMO Latte</span><span>$11.30</span>");
+    expect(html).toContain("Item amounts on this version already include tax");
+  });
+  it("labels the captured amount as Paid", () => {
+    const state = ready();
+    if (state.status !== "ready") throw new Error("fixture");
+    const html = render({
+      ...state,
+      view: {
+        ...state.view,
+        financial: {
+          observedAt: "2026-08-12T14:05:00.000Z",
+          currencyCode: "CAD",
+          capturedMinor: 1130n,
+          confirmedRefundMinor: 0n,
+          pendingRefundMinor: 0n,
+          unresolvedAttemptCount: 0,
+        },
+      },
+    });
+    expect(html).toContain("<dt>Paid</dt><dd>$11.30</dd>");
+    expect(html).not.toContain("Captured");
   });
 });

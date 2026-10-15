@@ -189,6 +189,9 @@ function parseSources(
     ...(value !== null && typeof value === "object" && Object.hasOwn(value, "remakes")
       ? ["remakes"]
       : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "itemPrices")
+      ? ["itemPrices"]
+      : []),
   ]);
   const checkedAt = parseInstant(raw.checkedAt);
   if (Date.parse(checkedAt) < Date.parse(submittedAt)) return invalid();
@@ -533,11 +536,43 @@ function parseSources(
       }),
     );
   }
+  // WP-2423 D5: every shown item's price before tax and its tax, adding up to its total.
+  let itemPrices: OrderStatusSources["itemPrices"];
+  if (Object.hasOwn(raw, "itemPrices")) {
+    const items = new Map(
+      batches.flatMap((batch) =>
+        batch.items.map((item) => [item.orderItemReference, item] as const),
+      ),
+    );
+    if (!Array.isArray(raw.itemPrices) || raw.itemPrices.length !== items.size) return invalid();
+    const seen = new Set<string>();
+    itemPrices = Object.freeze(
+      raw.itemPrices.map((value: unknown) => {
+        const entry = exact(value, ["orderItemReference", "subtotal", "tax"]);
+        const orderItemReference = parseReference(entry.orderItemReference);
+        const item = items.get(orderItemReference);
+        const subtotal = parseMoney(entry.subtotal);
+        const tax = parseMoney(entry.tax);
+        if (
+          item === undefined ||
+          seen.has(orderItemReference) ||
+          subtotal.amountMinor < 0n ||
+          tax.amountMinor < 0n ||
+          subtotal.currencyCode !== item.lineTotal.currencyCode ||
+          tax.currencyCode !== item.lineTotal.currencyCode
+        )
+          return invalid();
+        seen.add(orderItemReference);
+        return Object.freeze({ orderItemReference, subtotal, tax });
+      }),
+    );
+  }
   return Object.freeze({
     checkedAt,
     kitchen,
     payments,
     ...(remakes === undefined ? {} : { remakes }),
+    ...(itemPrices === undefined ? {} : { itemPrices }),
     ...(dining ? { dining } : {}),
     ...(pickup === undefined ? {} : { pickup }),
     ...(unpaidCancellation === undefined ? {} : { unpaidCancellation }),

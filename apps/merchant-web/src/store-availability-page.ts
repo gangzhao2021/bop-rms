@@ -1,4 +1,6 @@
 /** WP-2423 8.5: CAT-AVAILABILITY view contract and same-origin client for the selected Store. */
+import { storeDayTime } from "./StoreTime.js";
+import type { KitchenBoardView } from "./kitchen-board.js";
 export type AvailabilityErrorCode =
   "PermissionDenied" | "NotFound" | "Conflict" | "Invalid" | "Offline" | "Unavailable";
 export class AvailabilityPageError extends Error {
@@ -64,23 +66,33 @@ export function parseStoreAvailabilityView(value: unknown): StoreAvailabilityVie
     throw new Error("AVAILABILITY_PAGE_INVALID");
   return r as unknown as StoreAvailabilityView;
 }
-/** "Sold out until 23:59" style text in the Store's time zone; null means until brought back. */
-export function soldOutText(until: string | null, timeZone: string): string {
+/**
+ * How long an item stays sold out, in the Store's time and staff words (WP-2423): "Sold out for
+ * the rest of today" when the mark ends at the Store's midnight, "Sold out until 4:00 AM tomorrow"
+ * when it ends with a late business day; null means until someone brings it back.
+ */
+export function soldOutText(
+  until: string | null,
+  timeZone: string,
+  now: Date = new Date(),
+): string {
   if (until === null) return "Sold out until brought back";
-  const end = new Date(Date.parse(until) - 1);
-  const time = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).format(end);
-  const day = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(end);
-  return `Sold out through ${day} ${time}`;
+  const end = new Date(until);
+  const local = (at: Date) =>
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).format(at);
+  // Ends exactly at the start of the next calendar day: the rest of today.
+  const lastMinute = local(new Date(end.getTime() - 60_000));
+  if (local(end).endsWith("00:00") && lastMinute.slice(0, 10) === local(now).slice(0, 10))
+    return "Sold out for the rest of today";
+  return `Sold out until ${storeDayTime(until, timeZone, now)}`;
 }
 /** What a viewer may do with one item (WP-2423 Q17: floor staff mark sold out for today only). */
 export type AvailabilityAction =
@@ -97,6 +109,20 @@ export function floorStaffOnly(permissions: StoreAvailabilityView["permissions"]
     !(permissions.mayMarkUntilBack ?? permissions.mayMarkSoldOut) &&
     !permissions.mayOffer
   );
+}
+/**
+ * WP-2423 Q17 / IDR-0039: on the kitchen display, what the page offers is today's sold-out mark and
+ * bringing it back, whatever the person's roles allow elsewhere. Presentation only: the server
+ * still checks every request. The signal is the operator status the kitchen board read reports for
+ * this sign-in; only a counter or office sign-in ("Unverified") that opened this route sees its own
+ * reported permissions. While that status is unknown, the page stays with the kitchen's actions.
+ */
+export function kitchenDisplayPermissions(
+  permissions: StoreAvailabilityView["permissions"],
+  operator: KitchenBoardView["operatorStatus"] | null,
+): StoreAvailabilityView["permissions"] {
+  if (operator === "Unverified") return permissions;
+  return { mayOffer: false, mayMarkSoldOut: permissions.mayMarkSoldOut, mayMarkUntilBack: false };
 }
 export function availabilityActions(
   item: Pick<AvailabilityItem, "status" | "soldOutUntil">,

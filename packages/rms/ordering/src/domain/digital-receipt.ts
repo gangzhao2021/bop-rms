@@ -12,7 +12,17 @@ export interface ReceiptLineSnapshot {
   readonly lineReference: string;
   readonly displayName: string;
   readonly quantity: number;
+  /**
+   * The Order item's frozen total: its price after discount, plus its fee and tax. Kept as issued
+   * on every version; it is not the amount a receipt prints beside the item.
+   */
   readonly lineTotal: ReceiptMoney;
+  /**
+   * WP-2423 D5: the item's price before discount, fees and tax (unit price × quantity), the amount
+   * a Canadian receipt prints beside the item. Lines of one version either all carry it and add up
+   * to `subtotal`, or none do (versions issued before D5 are never rewritten).
+   */
+  readonly lineSubtotal?: ReceiptMoney;
 }
 
 /** WP-2423 Q15: the Store address printed on the receipt (its published address at issue). */
@@ -183,13 +193,24 @@ function money(value: unknown): ReceiptMoney {
 }
 
 function line(value: unknown): ReceiptLineSnapshot {
-  const raw = exact(value, ["lineReference", "displayName", "quantity", "lineTotal"]);
+  const hasSubtotal =
+    value !== null &&
+    typeof value === "object" &&
+    Object.prototype.hasOwnProperty.call(value, "lineSubtotal");
+  const raw = exact(value, [
+    "lineReference",
+    "displayName",
+    "quantity",
+    "lineTotal",
+    ...(hasSubtotal ? ["lineSubtotal"] : []),
+  ]);
   if (!Number.isSafeInteger(raw.quantity) || (raw.quantity as number) < 1) return fail();
   return Object.freeze({
     lineReference: reference(raw.lineReference),
     displayName: text(raw.displayName),
     quantity: raw.quantity as number,
     lineTotal: money(raw.lineTotal),
+    ...(hasSubtotal ? { lineSubtotal: money(raw.lineSubtotal) } : {}),
   });
 }
 
@@ -346,6 +367,7 @@ export function parseDigitalReceiptSnapshot(value: unknown): DigitalReceiptSnaps
       parsed.refundedTotal,
       ...(parsed.adjustments ? [parsed.adjustments.discount, parsed.adjustments.fee] : []),
       ...parsed.lines.map((item) => item.lineTotal),
+      ...parsed.lines.flatMap((item) => (item.lineSubtotal ? [item.lineSubtotal] : [])),
       ...(parsed.taxDetails?.taxLines.map((item) => item.amount) ?? []),
     ].some((amount) => amount.currencyCode !== currency) ||
     (parsed.taxDetails !== undefined &&
@@ -359,6 +381,15 @@ export function parseDigitalReceiptSnapshot(value: unknown): DigitalReceiptSnaps
       parsed.tip.amountMinor !==
       parsed.total.amountMinor ||
     parsed.refundedTotal.amountMinor > parsed.total.amountMinor
+  )
+    return fail();
+  // WP-2423 D5: item prices are all present or all absent, and add up to the printed subtotal.
+  const priced = parsed.lines.filter((item) => item.lineSubtotal !== undefined);
+  if (
+    priced.length > 0 &&
+    (priced.length !== parsed.lines.length ||
+      priced.reduce((sum, item) => sum + (item.lineSubtotal?.amountMinor ?? 0n), 0n) !==
+        parsed.subtotal.amountMinor)
   )
     return fail();
   return parsed;

@@ -49,6 +49,27 @@ const kindText: Record<ReceiptRecordView["kind"], string> = {
   Reissue: "Reissued receipt",
 };
 
+/**
+ * WP-2423 D5: a receipt prints each item's price before tax, then the subtotal and each tax. Versions
+ * issued before item prices were frozen only hold each item's total after tax and fees; they are
+ * printed as issued, with a note so the item amounts are not mistaken for pre-tax prices.
+ */
+export function receiptLineAmount(
+  line: ReceiptRecordView["snapshot"]["lines"][number],
+): ReceiptMoneyView {
+  return line.lineSubtotal ?? line.lineTotal;
+}
+
+export function receiptLinesIncludeTax(snapshot: ReceiptRecordView["snapshot"]): boolean {
+  return (
+    snapshot.lines.some((line) => line.lineSubtotal === undefined) &&
+    snapshot.tax.amountMinor +
+      (snapshot.adjustments?.fee.amountMinor ?? 0n) +
+      (snapshot.adjustments?.discount.amountMinor ?? 0n) >
+      0n
+  );
+}
+
 function ReceiptVersion({ record }: { readonly record: ReceiptRecordView }) {
   const snapshot = record.snapshot;
   return (
@@ -69,10 +90,15 @@ function ReceiptVersion({ record }: { readonly record: ReceiptRecordView }) {
             <span>
               {line.quantity} × {line.displayName}
             </span>
-            <span>{money(line.lineTotal)}</span>
+            <span>{money(receiptLineAmount(line))}</span>
           </li>
         ))}
       </ul>
+      {receiptLinesIncludeTax(snapshot) ? (
+        <p className="receipt-page__lines-note">
+          Item amounts on this version already include tax and any fees or discounts.
+        </p>
+      ) : null}
       <dl className="receipt-page__totals">
         {snapshot.adjustments ? (
           <>
@@ -171,7 +197,7 @@ function ReceiptContent({
             <p>Last checked {formatDateTime(financial.observedAt, current.locale)}</p>
             <dl className="receipt-page__totals">
               <div>
-                <dt>Captured</dt>
+                <dt>Paid</dt>
                 <dd>
                   {money({
                     amountMinor: financial.capturedMinor,

@@ -305,3 +305,33 @@ it("WP-2423 Q10: serializes only the Store's published phone and address", async
   expect(body.status.sources.storeContact).toEqual(storeContact);
   expect(JSON.stringify(body)).not.toContain("private");
 });
+it("WP-2423 D5: serializes each item's price before tax and its tax as exact decimals", async () => {
+  const f = await setup();
+  f.read.mockResolvedValue({
+    ...f.result,
+    sources: {
+      checkedAt: "2026-09-12T12:00:00.000Z",
+      kitchen: null,
+      payments: null,
+      itemPrices: [
+        {
+          orderItemReference: id(4),
+          subtotal: { amountMinor: 1000n, currencyCode: "CAD" },
+          tax: { amountMinor: 130n, currencyCode: "CAD" },
+          quoteInputDigest: "private",
+        },
+      ],
+    },
+  });
+  const body = (await (await f.send()).json()) as {
+    status: { sources: Record<string, unknown> };
+  };
+  expect(body.status.sources.itemPrices).toEqual([
+    {
+      orderItemReference: id(4),
+      subtotal: { amountMinor: "1000", currencyCode: "CAD" },
+      tax: { amountMinor: "130", currencyCode: "CAD" },
+    },
+  ]);
+  expect(JSON.stringify(body)).not.toContain("private");
+});

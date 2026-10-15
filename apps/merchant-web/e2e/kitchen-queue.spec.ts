@@ -964,6 +964,16 @@ test("@production Kitchen commands preserve intent and wait for projection versi
             : command.action === "StartKitchenWorkItem"
               ? "Started"
               : "CompletedAndOrderItemReady",
+        // The work item as the command left it (the real API returns these with every result).
+        workItemStatus:
+          command.action === "AcceptKitchenWorkItem"
+            ? "Queued"
+            : command.action === "StartKitchenWorkItem"
+              ? "In Progress"
+              : "Completed",
+        completedQuantity: command.action === "CompleteKitchenWorkItem" ? 2 : 0,
+        requiredQuantity: 2,
+        occurredAt: at,
         projectionName: "kitchen_work_queue_v1",
         projectionPending: true,
       },
@@ -1016,12 +1026,19 @@ test("@production Kitchen commands preserve intent and wait for projection versi
   await expect(page.getByRole("heading", { name: "Action result unknown" })).toBeVisible();
   await expect(retry).toBeFocused();
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("heading", { name: "Waiting for refreshed queue" })).toBeVisible();
+  // WP-2423: the confirmed step shows at once, in plain words, before the queue catches up.
+  await expect(
+    page.getByRole("heading", { name: "Order 21 · Pickup · Synthetic rice accepted." }),
+  ).toBeVisible();
+  await expect(page.getByText("The queue now reflects", { exact: false })).toHaveCount(0);
   expect(commands[1]).toEqual(commands[0]);
   expect(commands[2]).toEqual(commands[0]);
+  await expect(accept).toHaveCount(0);
+  await expect(start).toBeEnabled();
+  // A re-read of the queue that has not caught up yet does not take the confirmed step back.
   await refresh.click();
-  await expect(accept).toBeDisabled();
-  await expect(start).toHaveCount(0);
+  await expect(accept).toHaveCount(0);
+  await expect(start).toBeEnabled();
   Object.assign(item, {
     acceptedAt: at,
     ticketAggregateVersion: "9007199254740994",
@@ -1038,7 +1055,10 @@ test("@production Kitchen commands preserve intent and wait for projection versi
   await expect(start).toBeEnabled();
   conflict = false;
   await start.click();
-  await expect(page.getByRole("heading", { name: "Waiting for refreshed queue" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Order 21 · Pickup · Synthetic rice started." }),
+  ).toBeVisible();
+  await expect(complete).toBeEnabled();
   Object.assign(item, {
     status: "In Progress",
     ticketAggregateVersion: "9007199254740995",
@@ -1047,7 +1067,9 @@ test("@production Kitchen commands preserve intent and wait for projection versi
   await refresh.click();
   await expect(complete).toBeEnabled();
   await complete.click();
-  await expect(page.getByRole("heading", { name: "Waiting for refreshed queue" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Order 21 · Pickup · Synthetic rice done and ready." }),
+  ).toBeVisible();
   expect(commands[5]?.quantityDelta).toBe(2);
   Object.assign(item, {
     status: "Completed",
@@ -1058,7 +1080,7 @@ test("@production Kitchen commands preserve intent and wait for projection versi
   });
   await refresh.click();
   await expect(
-    page.getByRole("heading", { name: "Kitchen action confirmed", exact: true }),
+    page.getByRole("heading", { name: "Order 21 · Pickup · Synthetic rice done and ready." }),
   ).toBeVisible();
   await expect(complete).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Mark ready", exact: true })).toHaveCount(0);
@@ -1216,6 +1238,10 @@ test("@production a kitchen display shows the kitchen only and keeps focus on th
             : command.action === "StartKitchenWorkItem"
               ? "Started"
               : "OrderItemReady",
+        workItemStatus: command.action === "StartKitchenWorkItem" ? "In Progress" : current.status,
+        completedQuantity: current.completedQuantity,
+        requiredQuantity: current.requiredQuantity,
+        occurredAt: new Date().toISOString(),
         projectionName: "kitchen_work_queue_v1",
         projectionPending: true,
       },

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
+import { timeZoneLabel } from "./time-zone-names.js";
 import {
   createStoreConfigurationClient,
   type StoreConfigurationView,
@@ -269,7 +270,7 @@ export function StoreHoursDraftForm({
             : "No published hours yet."}
       </p>
       <p>
-        Times are in {draft.timeZone}. The business day starts at{" "}
+        Times are in {timeZoneLabel(draft.timeZone)}. The business day starts at{" "}
         {draft.businessDayStartLocalTime.slice(0, 5)}.
       </p>
       {draft.setupBasis !== undefined && <StoreConfigurationFeeBasisView configuration={draft} />}
@@ -325,7 +326,8 @@ export function StoreHoursDraftForm({
           <fieldset>
             <legend>Dated exceptions</legend>
             <p>
-              Dates use {draft.timeZone}. An exception with no intervals is closed for that date.
+              Dates use {timeZoneLabel(draft.timeZone)}. An exception with no intervals is closed
+              for that date.
             </p>
             {draft.exceptions.map((exception, n) => (
               <fieldset key={n}>
@@ -609,8 +611,8 @@ export function StoreConfigurationFeeBasisView({
     >
       <h3>
         {configuration.lifecycle === "Published"
-          ? "Published configuration fee contexts"
-          : "Recorded configuration fee contexts"}
+          ? "Fees in the published settings"
+          : "Fees in the recorded settings"}
       </h3>
       <p>
         {storeConfigurationStateLabel(configuration.lifecycle)}.{" "}

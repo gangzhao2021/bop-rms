@@ -380,7 +380,7 @@ async function journalRecords(page: Page) {
 
 async function feeStep(page: Page) {
   await page.getByRole("button", { name: "5. Tax and payment", exact: true }).click();
-  return page.getByRole("region", { name: "Fee contexts", exact: true });
+  return page.getByRole("region", { name: "Fees", exact: true });
 }
 async function enabledFee(page: Page) {
   const panel = await feeStep(page);
@@ -627,7 +627,7 @@ test("@production Store fee contexts late Actor choices cannot replace new scope
   expect(await config.evaluate((e) => e.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
   await expect(
     panel.getByText(
-      "Draft configuration only. These selections do not set fees, rates or effective policy.",
+      "Choose whether this store uses a service charge, a delivery fee and tips, and which orders each one applies to. Saving the setup draft keeps these choices. It does not set fee amounts or tax rates, and customers are not charged anything new until the store settings are approved and published.",
       { exact: true },
     ),
   ).toBeVisible();

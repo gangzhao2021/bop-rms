@@ -1264,7 +1264,7 @@ test("@production published receipt template selection saves stable Store refere
   await page.getByRole("button", { name: "5. Tax and payment", exact: true }).click();
   await expect(
     page
-      .getByRole("heading", { name: "Receipt configuration", exact: true })
+      .getByRole("heading", { name: "Receipt settings", exact: true })
       .locator("xpath=following-sibling::p[1]"),
   ).toHaveText("Already configured.");
   await expect(page.getByRole("button", { name: "Save setup draft", exact: true })).toBeEnabled();
@@ -1318,7 +1318,7 @@ test("@production published receipt template selection saves stable Store refere
   expect(state.setupPosts[2]).not.toHaveProperty("content");
   await expect(
     page
-      .getByRole("heading", { name: "Receipt configuration", exact: true })
+      .getByRole("heading", { name: "Receipt settings", exact: true })
       .locator("xpath=following-sibling::p[1]"),
   ).toHaveText("Already configured.");
   expect(state.errors).toEqual([]);

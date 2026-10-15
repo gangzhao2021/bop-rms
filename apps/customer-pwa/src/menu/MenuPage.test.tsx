@@ -207,6 +207,9 @@ describe("WP-1701 Customer Menu screens", () => {
     expect(html).toContain("Prices shown are what each choice adds now");
     expect(html).toContain("Oat beverage");
     expect(html).toContain("Do not enter allergy, medical or other sensitive details");
+    // Guests ask staff (plain role), never "ask Staff".
+    expect(html).toContain("ask staff for assistance.");
+    expect(html).not.toContain("Staff");
     expect(html).not.toContain(configurable.optionRules[0]?.options[0]?.optionReference);
   });
 });

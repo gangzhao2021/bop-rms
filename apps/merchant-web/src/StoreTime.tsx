@@ -113,6 +113,38 @@ export function friendlyStoreTime(
   return timeZone === undefined ? text + " UTC" : text;
 }
 
+/**
+ * WP-2423: when something ends, as staff say it in the Store's time zone, relative to now:
+ * "3:00 PM today", "4:00 AM tomorrow", otherwise "Oct 16, 4:00 AM".
+ */
+export function storeDayTime(
+  instant: string,
+  timeZone: string | undefined,
+  now: Date = new Date(),
+): string {
+  const zone = timeZone ?? "UTC";
+  const day = (at: Date) =>
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: zone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(at);
+  const date = new Date(instant);
+  const today = day(now);
+  const [y, m, d] = today.split("-").map(Number) as [number, number, number];
+  const tomorrow = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
+  const time = new Intl.DateTimeFormat("en-US", {
+    timeZone: zone,
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+  const suffix = timeZone === undefined ? " UTC" : "";
+  if (day(date) === today) return `${time}${suffix} today`;
+  if (day(date) === tomorrow) return `${time}${suffix} tomorrow`;
+  return friendlyStoreTime(instant, timeZone, now);
+}
+
 /** A staff-facing instant such as "Oct 14, 3:00 PM"; the exact instant stays in the title. */
 export function StaffTime({ instant }: { readonly instant: string }) {
   const timeZone = useContext(StoreTimeZoneContext);

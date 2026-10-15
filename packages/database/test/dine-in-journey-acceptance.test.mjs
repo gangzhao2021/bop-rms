@@ -793,6 +793,25 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         .flatMap((batch) => batch.items)
         .reduce((sum, item) => sum + item.lineTotal.amountMinor, 0n);
       assert.equal(customerTotal, roundTotal);
+      // WP-2423 D5: under the restricted API role the read carries every shown item's frozen
+      // price before tax and its tax; items (pre-tax) + tax reconcile to the same total.
+      const prices = new Map(view.sources?.itemPrices?.map((e) => [e.orderItemReference, e]));
+      const shownItems = view.order.batches.flatMap((batch) => batch.items);
+      assert.equal(prices.size, shownItems.length);
+      const charged = view.order.batches
+        .filter((batch) => !unpaid.has(batch.orderBatchReference))
+        .flatMap((batch) => batch.items);
+      const pricedSubtotal = charged.reduce(
+        (sum, item) => sum + prices.get(item.orderItemReference).subtotal.amountMinor,
+        0n,
+      );
+      const pricedTax = charged.reduce(
+        (sum, item) => sum + prices.get(item.orderItemReference).tax.amountMinor,
+        0n,
+      );
+      assert.ok(pricedTax > 0n);
+      assert.ok(pricedSubtotal < customerTotal);
+      assert.equal(pricedSubtotal + pricedTax, customerTotal);
 
       // ── 3a. WP-2423 Q8: the table view after round 2's automatic cancellation. The Host sees both
       // rounds as theirs; participant P sees the same rounds as another guest's. Nothing is due.

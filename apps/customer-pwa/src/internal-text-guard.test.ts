@@ -22,3 +22,18 @@ it("accepts the guest wording that replaced them", () => {
     ]),
   ).toEqual([]);
 });
+
+it("flags the capitalized role on the item page and keeps the plain wording", () => {
+  expect(
+    findInternalText([
+      "Do not put allergy or medical information in the preparation note; ask Staff.",
+    ]),
+  ).not.toEqual([]);
+  expect(
+    findInternalText([
+      "Do not put allergy or medical information in the preparation note; ask staff.",
+      "Plain preparation requests only. Do not enter allergy, medical or other sensitive details; ask staff for assistance.",
+      "No allergen-free claim is made. Ask staff before ordering.",
+    ]),
+  ).toEqual([]);
+});

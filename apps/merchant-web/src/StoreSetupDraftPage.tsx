@@ -47,6 +47,7 @@ import {
 } from "./store-setup-pending-journal.js";
 import { serviceOperationReference, type ServiceMode } from "./service-control-client.js";
 import { languageName } from "./staff-text.js";
+import { timeZoneChoices, timeZoneLabel } from "./time-zone-names.js";
 const steps = [
   "Identity",
   "Address and timezone",
@@ -64,14 +65,43 @@ export interface StoreSetupHourInput {
   readonly end: string;
   readonly followingDay: boolean;
   readonly modes: readonly ServiceMode[];
+  /** Staff type wait times in whole minutes; the stored contract keeps seconds. */
   readonly cutoff: string;
   readonly lead: string;
+  /**
+   * The saved seconds behind a prefilled minute field, kept until staff edit that field (then
+   * null). A saved value that is not a whole number of minutes (e.g. 90 seconds) is shown rounded
+   * (2) but saved back unchanged, so opening and saving setup never alters a value staff did not
+   * touch; typing any value replaces it with exactly that many minutes.
+   */
+  readonly savedCutoffSeconds?: number | null;
+  readonly savedLeadSeconds?: number | null;
+}
+/** Largest wait the contract accepts: 86,400 seconds = 24 hours = 1,440 minutes. */
+const maxWaitMinutes = 1440;
+/** Minutes shown for saved seconds; rounded only for display (see StoreSetupHourInput). */
+export const waitMinutesText = (seconds: number) => String(Math.round(seconds / 60));
+/** "1 minute 30 seconds" for a saved wait that is not a whole number of minutes. */
+export function savedWaitText(seconds: number): string {
+  const minutes = Math.floor(seconds / 60),
+    rest = seconds % 60;
+  return [
+    minutes > 0 ? `${minutes} minute${minutes === 1 ? "" : "s"}` : "",
+    rest > 0 ? `${rest} second${rest === 1 ? "" : "s"}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 export interface StoreSetupEditorInputs {
   readonly timeZone: string;
   readonly businessStart: string;
   readonly serviceModes: readonly ServiceMode[];
   readonly hours: readonly (readonly StoreSetupHourInput[])[] | null;
+}
+/** Shown only when a saved wait is not a whole number of minutes and staff have not edited it. */
+function SavedWaitNote({ seconds }: { readonly seconds?: number | null | undefined }) {
+  if (typeof seconds !== "number" || seconds % 60 === 0) return null;
+  return <p>Saved as {savedWaitText(seconds)}. It stays as saved unless you change it here.</p>;
 }
 function editInputs(content: StoreSetupContent): StoreSetupEditorInputs {
   return {
@@ -90,8 +120,10 @@ function editInputs(content: StoreSetupContent): StoreSetupEditorInputs {
               end: i.endLocalTime,
               followingDay: i.endsNextDay,
               modes: i.serviceModes,
-              cutoff: String(i.orderCutoffSeconds),
-              lead: String(i.leadTimeSeconds),
+              cutoff: waitMinutesText(i.orderCutoffSeconds),
+              lead: waitMinutesText(i.leadTimeSeconds),
+              savedCutoffSeconds: i.orderCutoffSeconds,
+              savedLeadSeconds: i.leadTimeSeconds,
             })),
           )
         : null,
@@ -105,9 +137,11 @@ export function buildStoreSetupEditedContent(
 ): StoreSetupContent {
   const configured = <T,>(value: T) => ({ state: "Configured" as const, value }),
     empty = { state: "Unconfigured" as const };
-  const integer = (value: string) => {
-    if (!/^\d+$/u.test(value) || Number(value) > 86400) throw new StoreSetupClientError("Invalid");
-    return Number(value);
+  const waitSeconds = (minutes: string, saved: number | null | undefined) => {
+    if (typeof saved === "number" && minutes === waitMinutesText(saved)) return saved;
+    if (!/^\d+$/u.test(minutes) || Number(minutes) > maxWaitMinutes)
+      throw new StoreSetupClientError("Invalid");
+    return Number(minutes) * 60;
   };
   const time = (value: string) => (/^\d{2}:\d{2}$/u.test(value) ? value + ":00" : value);
   const weeklySchedule =
@@ -121,8 +155,8 @@ export function buildStoreSetupEditedContent(
               endLocalTime: time(value.end),
               endsNextDay: value.followingDay,
               serviceModes: value.modes,
-              orderCutoffSeconds: integer(value.cutoff),
-              leadTimeSeconds: integer(value.lead),
+              orderCutoffSeconds: waitSeconds(value.cutoff, value.savedCutoffSeconds),
+              leadTimeSeconds: waitSeconds(value.lead, value.savedLeadSeconds),
             })),
           })),
         );
@@ -195,7 +229,7 @@ export async function recoverStoreSetupDraft(input: {
 }
 const messages: Record<StoreSetupClientError["code"], string> = {
   Invalid:
-    "Check the edited settings. Each service interval needs valid times and at least one service mode. Wait times must be whole seconds from 0 to 86400. Enabled fee contexts require an active registered classification and at least one order type.",
+    "Check the edited settings. Each service interval needs valid times and at least one service mode. Wait times are whole minutes, up to 24 hours (1,440 minutes). A fee that is On needs a tax classification that is still in use and at least one order type.",
   Denied: "Your current permission or selected Store does not allow this action.",
   Conflict:
     "The saved settings or their baseline changed. Refresh, then discard your local edits to use the latest saved version.",
@@ -501,6 +535,7 @@ export function StoreSetupDraftPage({
       ),
     });
   };
+  const zones = useMemo(() => timeZoneChoices(inputs.timeZone), [inputs.timeZone]);
   let parsed: StoreSetupContent | null = null;
   try {
     parsed = buildStoreSetupEditedContent(content, inputs);
@@ -586,7 +621,7 @@ export function StoreSetupDraftPage({
                 <dt>Currency</dt>
                 <dd>{workspace.store.currencyCode}</dd>
                 <dt>Current timezone</dt>
-                <dd>{workspace.store.timeZone}</dd>
+                <dd>{timeZoneLabel(workspace.store.timeZone)}</dd>
                 <dt>Saved draft</dt>
                 <dd>
                   {workspace.setup.snapshot
@@ -608,14 +643,20 @@ export function StoreSetupDraftPage({
                     onChange={(e) => changeInputs({ timeZone: e.currentTarget.value })}
                   >
                     <option value="">Not configured</option>
-                    {[
-                      ...new Set([
-                        ...(inputs.timeZone ? [inputs.timeZone] : []),
-                        ...Intl.supportedValuesOf("timeZone"),
-                      ]),
-                    ].map((value) => (
-                      <option key={value}>{value}</option>
-                    ))}
+                    <optgroup label="Canada">
+                      {zones.canada.map((zone) => (
+                        <option key={zone.value} value={zone.value}>
+                          {zone.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Other time zones">
+                      {zones.other.map((zone) => (
+                        <option key={zone.value} value={zone.value}>
+                          {zone.label}
+                        </option>
+                      ))}
+                    </optgroup>
                   </select>
                 </label>
                 <label>
@@ -686,7 +727,8 @@ export function StoreSetupDraftPage({
             {step === 3 && (
               <>
                 <p>
-                  Weekly times use the draft timezone. Wait times are whole seconds from 0 to 86400.
+                  Weekly times are in the store&rsquo;s timezone chosen in step 2. Wait times are in
+                  whole minutes, up to 24 hours (1,440 minutes).
                 </p>
                 {inputs.hours === null ? (
                   <>
@@ -772,7 +814,7 @@ export function StoreSetupDraftPage({
                               ))}
                             </fieldset>
                             <label>
-                              Order cutoff seconds
+                              Last orders (minutes before closing)
                               <input
                                 inputMode="numeric"
                                 aria-invalid={error === "Invalid"}
@@ -783,12 +825,16 @@ export function StoreSetupDraftPage({
                                 }
                                 value={value.cutoff}
                                 onChange={(e) =>
-                                  intervalChange(day, index, { cutoff: e.currentTarget.value })
+                                  intervalChange(day, index, {
+                                    cutoff: e.currentTarget.value,
+                                    savedCutoffSeconds: null,
+                                  })
                                 }
                               />
                             </label>
+                            <SavedWaitNote seconds={value.savedCutoffSeconds} />
                             <label>
-                              Lead time seconds
+                              Preparation time (minutes)
                               <input
                                 inputMode="numeric"
                                 aria-invalid={error === "Invalid"}
@@ -799,10 +845,14 @@ export function StoreSetupDraftPage({
                                 }
                                 value={value.lead}
                                 onChange={(e) =>
-                                  intervalChange(day, index, { lead: e.currentTarget.value })
+                                  intervalChange(day, index, {
+                                    lead: e.currentTarget.value,
+                                    savedLeadSeconds: null,
+                                  })
                                 }
                               />
                             </label>
+                            <SavedWaitNote seconds={value.savedLeadSeconds} />
                             <button
                               type="button"
                               onClick={() =>
@@ -856,8 +906,8 @@ export function StoreSetupDraftPage({
                   </>
                 )}
                 <p id="setup-wait-help">
-                  Enter a whole number from 0 to 86400 for each wait time. Daily intervals must not
-                  overlap.
+                  Enter each wait as whole minutes, from 0 to 1,440 (24 hours). Opening periods on
+                  the same day must not overlap.
                 </p>
                 {content.exceptions.state === "Configured" ? (
                   <>
@@ -897,11 +947,11 @@ export function StoreSetupDraftPage({
                   disabled={disabled}
                   onChange={(feeContexts) => changeContent({ feeContexts })}
                 />
-                <h4>Tax configuration</h4>
+                <h4>Tax settings</h4>
                 <SavedReference value={content.taxConfigurationReference} />
-                <h4>Payment configuration</h4>
+                <h4>Payment settings</h4>
                 <SavedReference value={content.paymentConfigurationReference} />
-                <h4>Receipt configuration</h4>
+                <h4>Receipt settings</h4>
                 <SavedReference value={content.receiptReference} />
                 <p>Tax rates and tax names are set in Tax review.</p>
               </>
@@ -1098,7 +1148,9 @@ function storeReview(content: StoreSetupContent): readonly (readonly [string, st
   return [
     [
       "Timezone",
-      content.timeZone.state === "Configured" ? content.timeZone.value : "Not configured",
+      content.timeZone.state === "Configured"
+        ? timeZoneLabel(content.timeZone.value)
+        : "Not configured",
     ],
     [
       "Business day start",
@@ -1123,7 +1175,7 @@ function storeReview(content: StoreSetupContent): readonly (readonly [string, st
       content.addressReference.state === "Configured" ? "Already configured" : "Not configured",
     ],
     [
-      "Fee contexts",
+      "Fees",
       content.feeContexts?.state === "Configured"
         ? content.feeContexts.value
             .map(
@@ -2002,9 +2054,14 @@ export function StoreSetupFeeContextEditor({
     Date.parse(choices.observedAt) <= Date.now() &&
     Date.parse(choices.validUntil) > Date.now();
   return (
-    <section className="store-setup-fee-contexts" aria-label="Fee contexts">
-      <h4>Fee contexts</h4>
-      <p>Draft configuration only. These selections do not set fees, rates or effective policy.</p>
+    <section className="store-setup-fee-contexts" aria-label="Fees">
+      <h4>Fees</h4>
+      <p>
+        Choose whether this store uses a service charge, a delivery fee and tips, and which orders
+        each one applies to. Saving the setup draft keeps these choices. It does not set fee amounts
+        or tax rates, and customers are not charged anything new until the store settings are
+        approved and published.
+      </p>
       {error === "NotRegistered" && (
         <p role="status">
           No tax classifications are set up for this Brand yet, so these fees cannot be turned on

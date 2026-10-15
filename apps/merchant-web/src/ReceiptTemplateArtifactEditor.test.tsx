@@ -126,7 +126,7 @@ it("renders two separate ordinary presets without opaque IDs or Store binding", 
   const markup = renderToStaticMarkup(<ReceiptTemplateArtifactEditor scope={scope} csrf={csrf} />);
   expect(markup).toContain("Save receipt layout");
   expect(markup).toContain("Save required receipt fields");
-  expect(markup).toContain("legal approval");
+  expect(markup).toContain("does not mean a legal professional has approved them");
   expect(markup).not.toContain(scope.storeReference);
   expect(markup).not.toContain("Use saved");
 });

@@ -720,7 +720,7 @@ function configurationIssues(
   if (note !== note.normalize("NFC") || note.length > 500)
     issues.push("Preparation note must be 500 characters or fewer.");
   if (/\b(?:allerg(?:y|ic|ies)|anaphyla\w*|medical|medication|celiac|intoleran\w*)\b/iu.test(note))
-    issues.push("Do not put allergy or medical information in the preparation note; ask Staff.");
+    issues.push("Do not put allergy or medical information in the preparation note; ask staff.");
   return Object.freeze(issues);
 }
 
@@ -934,7 +934,7 @@ export function SellableConfigurator({
       />
       <p id="configure-note-help">
         Plain preparation requests only. Do not enter allergy, medical or other sensitive details;
-        ask Staff for assistance.
+        ask staff for assistance.
       </p>
       {issues.length > 0 ? (
         <div className="configure-issues" role="alert">

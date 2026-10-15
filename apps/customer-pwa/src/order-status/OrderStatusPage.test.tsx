@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { describe, expect, it } from "vitest";
-import { OrderStatusPage, isOrderSettled } from "./OrderStatusPage.js";
+import { OrderStatusPage, isOrderSettled, orderMoneySummary } from "./OrderStatusPage.js";
 import type { OrderStatusController } from "./order-status-controller.js";
 import type { OrderStatusState, OrderStatusView } from "./types.js";
 import { endSentence, formatClockTime } from "../journey/format.js";
@@ -684,7 +684,7 @@ it("WP-2423 Q6 step 2: marks items the store cancelled and where their refund is
   expect(html).not.toContain("Order cancelled by the store");
   expect(html).not.toContain("SoldOut");
   // The original items total stays; the refund is explained beneath it.
-  expect(html).toMatch(/Items total<\/span><span>\$33\.98/u);
+  expect(html).toMatch(/Total including tax<\/span><span>\$33\.98/u);
   const refunded = render({
     ...state,
     view: {
@@ -798,7 +798,7 @@ describe("WP-2423: a dine-in round whose payment didn't go through", () => {
     // The unpaid round is not waiting to be served and is not counted as owed.
     expect(html).toContain("Not paid");
     expect(html).not.toContain("Served 0 of 1");
-    expect(html).toMatch(/Items total<\/span><span>\$11\.30<\/span>/u);
+    expect(html).toMatch(/Total including tax<\/span><span>\$11\.30<\/span>/u);
     expect(html).toContain("Rounds that weren&#x27;t paid are not included.");
     // Only the failed round carries the note; the paid round's kitchen state is not hidden by it.
     expect(html.match(/didn&#x27;t go through/gu)).toHaveLength(1);
@@ -822,8 +822,8 @@ describe("WP-2423: a dine-in round whose payment didn't go through", () => {
     );
     expect(html.match(/class="order-status__item--cancelled"/gu)).toHaveLength(1);
     expect(html).toContain("Synthetic dish 41");
-    // Items total agrees with the payment received.
-    expect(html).toMatch(/Items total<\/span><span>\$11\.30<\/span>/u);
+    // The total agrees with the payment received.
+    expect(html).toMatch(/Total including tax<\/span><span>\$11\.30<\/span>/u);
     expect(html).toContain("Payment received $11.30");
     expect(html).toContain("Rounds that weren&#x27;t paid are not included.");
     expect(html).not.toContain("It will be cancelled at");
@@ -902,4 +902,106 @@ it("WP-2423 Q26: a ready pickup with a dish being remade says to wait, not that 
   expect(html).not.toContain("Your order is ready. Show your pickup code at the counter.");
   // The pickup code stays available.
   expect(html).toContain("Checking your pickup code");
+});
+
+describe("WP-2423 D5: item prices before tax, then subtotal, tax and total", () => {
+  const money = (amountMinor: bigint) => ({ amountMinor, currencyCode: "CAD" });
+  function pricedView(): OrderStatusView {
+    const state = readyState();
+    if (state.status !== "ready") throw new Error("fixture");
+    return {
+      ...state.view,
+      order: {
+        ...state.view.order,
+        batches: [
+          {
+            orderBatchReference: id(3),
+            submittedAt: "2026-08-11T13:55:00.000Z",
+            items: [
+              {
+                orderItemReference: id(4),
+                displayName: "DEMO Latte",
+                quantity: 1,
+                lineTotal: money(1130n),
+              },
+              {
+                orderItemReference: id(5),
+                displayName: "Synthetic muffin",
+                quantity: 2,
+                lineTotal: money(905n),
+              },
+            ],
+          },
+        ],
+      },
+      sources: {
+        checkedAt: "2026-08-11T14:00:00.000Z",
+        kitchen: null,
+        payments: [],
+        itemPrices: [
+          { orderItemReference: id(4), subtotal: money(1000n), tax: money(130n) },
+          { orderItemReference: id(5), subtotal: money(801n), tax: money(104n) },
+        ],
+      },
+    } as OrderStatusView;
+  }
+
+  it("lists each item at its price before tax and reconciles subtotal + tax to the total", () => {
+    const view = pricedView();
+    const summary = orderMoneySummary(view, () => true);
+    expect(summary.itemAmount(id(4), 1130n)).toBe(1000n);
+    expect(summary.itemAmount(id(5), 905n)).toBe(801n);
+    expect(summary.subtotal).toBe(1801n);
+    expect(summary.tax).toBe(234n);
+    expect(summary.adjustments).toBe(0n);
+    expect((summary.subtotal ?? 0n) + (summary.tax ?? 0n)).toBe(summary.total);
+    expect(summary.total).toBe(2035n);
+    const html = render({ status: "ready", realtime: "unavailable", refreshing: false, view });
+    expect(html).toMatch(/DEMO Latte<\/span><span class="order-status__item-amount">\$10\.00</u);
+    expect(html).toMatch(/Subtotal<\/dt><dd>\$18\.01</u);
+    expect(html).toMatch(/Tax<\/dt><dd>\$2\.34</u);
+    expect(html).toMatch(/Total<\/span><span>\$20\.35</u);
+    expect(html).not.toContain("$11.30");
+    expect(html).not.toContain("Discounts and fees");
+    expect(html).not.toContain("Items total");
+  });
+
+  it("keeps totals including tax when the item prices are not available", () => {
+    const view = pricedView();
+    const sources = Object.fromEntries(
+      Object.entries(view.sources ?? {}).filter(([key]) => key !== "itemPrices"),
+    );
+    const html = render({
+      status: "ready",
+      realtime: "unavailable",
+      refreshing: false,
+      view: { ...view, sources } as OrderStatusView,
+    });
+    expect(html).toContain("$11.30");
+    expect(html).toMatch(/Total including tax<\/span><span>\$20\.35</u);
+    expect(html).not.toContain("Subtotal");
+  });
+
+  it("shows discounts and fees when the frozen items carried any", () => {
+    const view = pricedView();
+    const sources = view.sources;
+    if (!sources) throw new Error("fixture");
+    const summary = orderMoneySummary(
+      {
+        ...view,
+        sources: {
+          ...sources,
+          itemPrices: [
+            { orderItemReference: id(4), subtotal: money(1100n), tax: money(130n) },
+            { orderItemReference: id(5), subtotal: money(801n), tax: money(104n) },
+          ],
+        },
+      } as OrderStatusView,
+      () => true,
+    );
+    expect(summary.adjustments).toBe(-100n);
+    expect((summary.subtotal ?? 0n) + (summary.adjustments ?? 0n) + (summary.tax ?? 0n)).toBe(
+      summary.total,
+    );
+  });
 });

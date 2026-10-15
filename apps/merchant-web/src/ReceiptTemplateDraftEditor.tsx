@@ -1019,8 +1019,10 @@ export function ReceiptTemplateDraftEditor({
     <section hidden={hidden} aria-label="Receipt template drafts">
       <h4>Receipt template drafts</h4>
       <p>
-        Save an authored template and inspect its standard receipt fields. A Draft does not publish
-        a template, bind Store configuration, or confirm professional or legal review.
+        Write a receipt template and preview the standard fields it shows. Saving keeps it as a
+        draft: customer receipts do not change until it is published and chosen for this store under
+        Published receipt template in Store setup. Saving does not mean a tax or legal professional
+        has checked it.
       </p>
       <label>
         Receipt template
@@ -1151,8 +1153,9 @@ export function ReceiptTemplateDraftEditor({
             {publishedHistory.effectiveUntil === null
               ? " with no end date"
               : ` until ${friendlyStoreTime(publishedHistory.effectiveUntil, timeZone)}`}
-            . This is the record of that publication; whether this Store prints it is chosen in
-            Receipt configuration, and it has not been checked by a tax or legal professional.
+            . This is the record of that publication; whether this store uses it is chosen under
+            Published receipt template in Store setup, and it has not been checked by a tax or legal
+            professional.
           </p>
         </section>
       )}

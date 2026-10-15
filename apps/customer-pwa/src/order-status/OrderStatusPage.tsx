@@ -19,6 +19,61 @@ import { StoreContactCard } from "../journey/StoreContact.js";
 import { ContactDetailsSection } from "./ContactDetailsSection.js";
 import type { ContactRemovalClient } from "./contact-removal-client.js";
 
+/**
+ * WP-2423 D5: the order's money as a receipt prints it — each item at its price before tax, then
+ * the subtotal, tax and total — over the rounds that are charged. Without the frozen item prices
+ * (an older server) items keep their totals including tax and only the total is printed.
+ */
+export interface OrderMoneySummary {
+  readonly itemAmount: (orderItemReference: string, lineTotal: bigint) => bigint;
+  readonly subtotal: bigint | null;
+  readonly tax: bigint | null;
+  /** Discounts and fees the items carried (zero unless the order had any). */
+  readonly adjustments: bigint | null;
+  readonly total: bigint;
+}
+
+export function orderMoneySummary(
+  view: OrderStatusView,
+  charged: (orderBatchReference: string) => boolean,
+): OrderMoneySummary {
+  const prices = new Map(
+    (view.sources?.itemPrices ?? []).map((price) => [price.orderItemReference, price] as const),
+  );
+  const items = view.order.batches
+    .filter((batch) => charged(batch.orderBatchReference))
+    .flatMap((batch) => batch.items);
+  const total = items.reduce((sum, item) => sum + item.lineTotal.amountMinor, 0n);
+  const priced =
+    prices.size > 0 &&
+    view.order.batches.every((batch) =>
+      batch.items.every((item) => prices.has(item.orderItemReference)),
+    );
+  if (!priced)
+    return {
+      itemAmount: (_reference, lineTotal) => lineTotal,
+      subtotal: null,
+      tax: null,
+      adjustments: null,
+      total,
+    };
+  const subtotal = items.reduce(
+    (sum, item) => sum + (prices.get(item.orderItemReference)?.subtotal.amountMinor ?? 0n),
+    0n,
+  );
+  const tax = items.reduce(
+    (sum, item) => sum + (prices.get(item.orderItemReference)?.tax.amountMinor ?? 0n),
+    0n,
+  );
+  return {
+    itemAmount: (reference, lineTotal) => prices.get(reference)?.subtotal.amountMinor ?? lineTotal,
+    subtotal,
+    tax,
+    adjustments: total - subtotal - tax,
+    total,
+  };
+}
+
 /** How often an active order re-reads its status when no live connection is available. */
 export const orderStatusPollIntervalMs = 15_000;
 
@@ -304,10 +359,7 @@ function StatusContent({
             : kitchenLabel;
   const multipleBatches = view.order.batches.length > 1;
   // WP-2423: a round whose payment didn't go through is never charged (cancelled, or about to be).
-  const total = view.order.batches
-    .filter((batch) => !notPaid.has(batch.orderBatchReference))
-    .flatMap((batch) => batch.items)
-    .reduce((sum, item) => sum + item.lineTotal.amountMinor, 0n);
+  const summary = orderMoneySummary(view, (reference) => !notPaid.has(reference));
   const currency = view.order.batches[0]?.items[0]?.lineTotal.currencyCode ?? "CAD";
   return (
     <>
@@ -452,7 +504,10 @@ function StatusContent({
                         {item.quantity} × {item.displayName}
                       </span>
                       <span className="order-status__item-amount">
-                        {formatMoney(item.lineTotal.amountMinor, item.lineTotal.currencyCode)}
+                        {formatMoney(
+                          summary.itemAmount(item.orderItemReference, item.lineTotal.amountMinor),
+                          item.lineTotal.currencyCode,
+                        )}
                       </span>
                       {itemCancellation ? (
                         <span className="order-status__item-cancelled">
@@ -484,9 +539,27 @@ function StatusContent({
             </article>
           );
         })}
+        {summary.subtotal === null ? null : (
+          <dl className="order-status__money">
+            <div>
+              <dt>Subtotal</dt>
+              <dd>{formatMoney(summary.subtotal, currency)}</dd>
+            </div>
+            {summary.adjustments !== null && summary.adjustments !== 0n ? (
+              <div>
+                <dt>Discounts and fees</dt>
+                <dd>{formatMoney(summary.adjustments, currency)}</dd>
+              </div>
+            ) : null}
+            <div>
+              <dt>Tax</dt>
+              <dd>{formatMoney(summary.tax ?? 0n, currency)}</dd>
+            </div>
+          </dl>
+        )}
         <p className="order-status__total">
-          <span>Items total</span>
-          <span>{formatMoney(total, currency)}</span>
+          <span>{summary.subtotal === null ? "Total including tax" : "Total"}</span>
+          <span>{formatMoney(summary.total, currency)}</span>
         </p>
         {notPaid.size > 0 ? (
           <p className="order-status__item-refund">

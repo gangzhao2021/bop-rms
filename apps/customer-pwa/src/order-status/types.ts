@@ -45,6 +45,15 @@ export interface OrderStatusSources {
   readonly contactDetails?: "Stored" | "Removed" | "NotGiven";
   /** WP-2423 Q16: the Store's privacy notice (absent until its Owner enters one). */
   readonly privacyNoticeUrl?: string;
+  /**
+   * WP-2423 D5: each shown item's frozen price before tax and its tax (every item or none), so
+   * the page lists item prices, then the subtotal and tax, like the receipt.
+   */
+  readonly itemPrices?: readonly {
+    readonly orderItemReference: string;
+    readonly subtotal: { readonly amountMinor: bigint; readonly currencyCode: string };
+    readonly tax: { readonly amountMinor: bigint; readonly currencyCode: string };
+  }[];
   /** WP-2423 Q26: items the kitchen is remaking (open portions per Order item). */
   readonly remakes?: readonly {
     readonly orderItemReference: string;

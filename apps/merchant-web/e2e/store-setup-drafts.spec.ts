@@ -277,8 +277,8 @@ test("@production Store Setup ordinary entry eight steps partial save refresh an
     .getByRole("button")
     .all()) {
     await step.click();
-    // Reviewed: IANA time zone names (America/Toronto) are the standard zone choices.
-    await expectNoInternalText(page, [/\b[A-Z][A-Za-z_]+(?:\/[A-Za-z0-9_+-]+)+/u]);
+    // Time zones are listed by name and place; no identifier allowlist is needed.
+    await expectNoInternalText(page);
   }
   await timezone(page);
   await page.getByRole("button", { name: "3. Service modes", exact: true }).click();
@@ -295,8 +295,13 @@ test("@production Store Setup ordinary entry eight steps partial save refresh an
     .getByRole("group", { name: "Monday interval 1 service modes", exact: true })
     .getByLabel("Pickup", { exact: true })
     .check();
-  await page.getByLabel("Order cutoff seconds", { exact: true }).fill("600");
-  await page.getByLabel("Lead time seconds", { exact: true }).fill("900");
+  await expect(
+    page.getByText("Wait times are in whole minutes, up to 24 hours (1,440 minutes).", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await page.getByLabel("Last orders (minutes before closing)", { exact: true }).fill("10");
+  await page.getByLabel("Preparation time (minutes)", { exact: true }).fill("15");
   await page.getByRole("button", { name: "Save setup draft", exact: true }).click();
   await expect(
     page.getByText("Setup draft saved. These settings have not been validated or published.", {
@@ -307,12 +312,21 @@ test("@production Store Setup ordinary entry eight steps partial save refresh an
   expect(fixture.control.reads).toBeGreaterThanOrEqual(3);
   expect(fixture.snapshot()?.content.addressReference).toEqual({ state: "Unconfigured" });
   expect(fixture.snapshot()?.content.weeklySchedule.state).toBe("Configured");
+  // Staff typed minutes; the saved contract keeps seconds.
+  const saved = fixture.snapshot()?.content.weeklySchedule;
+  expect(saved?.state === "Configured" ? saved.value[0]?.intervals[0] : undefined).toMatchObject({
+    orderCutoffSeconds: 600,
+    leadTimeSeconds: 900,
+  });
   await page.reload();
   await expect(page.getByText("Revision 1", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "2. Address and timezone", exact: true }).click();
   await expect(page.getByRole("combobox", { name: "Draft timezone", exact: true })).toHaveValue(
     "America/Toronto",
   );
+  await expect(
+    page.getByRole("combobox", { name: "Draft timezone", exact: true }).locator("option:checked"),
+  ).toHaveText("Eastern Time (Toronto, Ottawa and Montréal)");
   await expect(page.getByLabel("Business day starts at (local time)", { exact: true })).toHaveValue(
     "04:00:00",
   );

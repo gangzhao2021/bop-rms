@@ -48,7 +48,8 @@ async function session(page: Page, navigation: readonly unknown[]) {
   );
 }
 
-async function availabilitySource(page: Page) {
+const floorPermissions = { mayOffer: false, mayMarkSoldOut: true, mayMarkUntilBack: false };
+async function availabilitySource(page: Page, permissions: object = floorPermissions) {
   const item = (n: number, product: string, size: string, extra: Record<string, unknown>) => ({
     skuReference: id(n),
     skuCode: product.toUpperCase().replaceAll(" ", "-") + "-" + n,
@@ -74,7 +75,7 @@ async function availabilitySource(page: Page) {
         sourceAsOf: "2026-10-14T18:00:00.000Z",
         viewer: id(50),
         timeZone: "America/Toronto",
-        permissions: { mayOffer: false, mayMarkSoldOut: true, mayMarkUntilBack: false },
+        permissions,
         items,
       },
     });
@@ -117,6 +118,8 @@ async function expectLayout(page: Page, name: string) {
 test("@production Kitchen marks an item sold out for today from the board and brings it back", async ({
   page,
 }) => {
+  // 18:00 in Toronto on Oct 14: today's mark ends at the Store's midnight.
+  await page.clock.setFixedTime(new Date("2026-10-14T22:00:00.000Z"));
   await session(page, [
     nav("KIT-KITCHEN-QUEUE", "Kitchen", "/operations/kitchen", "kitchen.operate"),
     availability,
@@ -173,9 +176,11 @@ test("@production Kitchen marks an item sold out for today from the board and br
     .getByRole("button", { name: "Sold out today" })
     .click();
   await expect(page.getByText("Oat latte — Regular (12 oz) is sold out for today.")).toBeVisible();
+  // Store time in staff words, never a raw date stamp.
   await expect(page.getByRole("row", { name: /Oat latte/u })).toContainText(
-    "Sold out through 2026-10-14 23:59",
+    "Sold out for the rest of today",
   );
+  await expect(page.getByRole("row", { name: /Oat latte/u })).not.toContainText("2026-10");
   await page
     .getByRole("row", { name: /Oat latte/u })
     .getByRole("button", { name: "Back in stock" })
@@ -240,7 +245,13 @@ test("@production the kitchen display marks an item sold out for today in its ow
       },
     }),
   );
-  const commands = await availabilitySource(page);
+  // The live case: the person behind the kitchen display sign-in is a manager, so the page's own
+  // read reports manager permissions; the kitchen display still offers only today's mark.
+  const commands = await availabilitySource(page, {
+    mayOffer: true,
+    mayMarkSoldOut: true,
+    mayMarkUntilBack: true,
+  });
 
   await page.goto("/operations/kitchen");
   const kitchenNav = page.getByRole("navigation", { name: "Primary" });
@@ -249,6 +260,11 @@ test("@production the kitchen display marks an item sold out for today in its ow
   await kitchenNav.getByRole("link", { name: "Mark an item sold out" }).click();
   await expect(page).toHaveURL(/\/app\/commerce\/availability\?from=kitchen$/u);
   await expect(page.getByText(/Ran out of something\? Mark it sold out/u)).toBeVisible();
+  // The kitchen display's header stays: the Store's name and the handover.
+  await expect(page.getByRole("heading", { name: scope.storeLabel, level: 1 })).toBeVisible();
+  await expect(
+    page.locator(".bop-shell__header").getByRole("button", { name: "Hand over / sign out" }),
+  ).toBeVisible();
   // Kitchen frame only: no workspace sidebar, no back-office links; the way back to the board.
   await expect(page.getByRole("navigation", { name: "Workspace" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Orders", exact: true })).toHaveCount(0);

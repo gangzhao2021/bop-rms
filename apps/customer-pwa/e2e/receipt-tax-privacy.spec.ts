@@ -49,7 +49,9 @@ function receipt(withPrivacy: boolean) {
                 lineReference: id(4),
                 displayName: "Synthetic bowl",
                 quantity: 1,
-                lineTotal: money("1000"),
+                // WP-2423 D5: the frozen total after tax, and the price before tax that is printed.
+                lineTotal: money("1130"),
+                lineSubtotal: money("1000"),
               },
             ],
             subtotal: money("1000"),
@@ -292,6 +294,20 @@ for (const viewport of [
       ).toBeVisible();
       await expect(page.getByText("HST 13%", { exact: true })).toBeVisible();
       await expect(page.getByText("Card · Paid", { exact: true })).toBeVisible();
+      // WP-2423 D5: the item is printed before tax and adds up to the subtotal; tax then total.
+      const line = page.locator(".receipt-page__lines li").first();
+      await expect(line).toHaveText("1 × Synthetic bowl$10.00");
+      await expect(page.locator(".receipt-page__totals div", { hasText: "Subtotal" })).toHaveText(
+        "Subtotal$10.00",
+      );
+      await expect(page.locator(".receipt-page__totals div", { hasText: /^Total/u })).toHaveText(
+        "Total$11.30",
+      );
+      await expect(page.getByText("already include tax")).toHaveCount(0);
+      // Amounts stay on one line at phone width.
+      const amount = page.locator(".receipt-page__totals div", { hasText: "HST" }).locator("dd");
+      const box = await amount.boundingBox();
+      expect(box?.height ?? 0).toBeLessThan(30);
       const link = page.getByRole("link", { name: /Privacy notice/u });
       await expect(link).toHaveAttribute("href", privacyNoticeUrl);
       await expect(link).toHaveAttribute("rel", "noopener noreferrer");

@@ -443,6 +443,29 @@ it("WP-2423 Q15/Q16: receipt tax details, privacy link and customer contact remo
         ]);
       }
       assert.equal(issued.records[1].snapshot.paymentStatus, "PartiallyRefunded");
+      // WP-2423 D5: every version prints each item at its frozen price before tax; the items add
+      // up to the subtotal and, with tax, to the captured total. The frozen line totals stay.
+      for (const version of issued.records) {
+        const lines = version.snapshot.lines;
+        assert.deepEqual(
+          lines.map((line) => line.lineSubtotal),
+          record.items.map((item) => item.pricing.subtotal),
+        );
+        assert.deepEqual(
+          lines.map((line) => line.lineTotal),
+          record.items.map((item) => item.pricing.total),
+        );
+        const printed = lines.reduce((sum, line) => sum + line.lineSubtotal.amountMinor, 0n);
+        assert.equal(printed, version.snapshot.subtotal.amountMinor);
+        assert.equal(
+          printed -
+            version.snapshot.adjustments.discount.amountMinor +
+            version.snapshot.adjustments.fee.amountMinor +
+            version.snapshot.tax.amountMinor +
+            version.snapshot.tip.amountMinor,
+          captured,
+        );
+      }
 
       // 4. The Owner later clears the number: issued receipts are unchanged, new reads print none.
       const second = await save(apiRole, id(0x107), 1, { ...testOnly, gstHstNumber: null });

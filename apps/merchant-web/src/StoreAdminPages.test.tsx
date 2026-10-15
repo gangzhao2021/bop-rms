@@ -27,7 +27,7 @@ describe("Store administration Section 88 screens", () => {
       "Stores",
       "TRAINING_01",
       "Training Store",
-      "America/Toronto",
+      "Eastern Time (Toronto, Ottawa and Montréal)",
       "Synthetic Avenue",
       "DineIn, Pickup",
       "Today hours",

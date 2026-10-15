@@ -222,3 +222,40 @@ it("WP-2423 Q10: serializes only the Store's published phone and address with th
   };
   expect(without.receipt).not.toHaveProperty("storeContact");
 });
+
+it("WP-2423 D5: serializes each item's price before tax when the receipt version froze it", async () => {
+  const test = await setup();
+  const record = test.chain.records[0];
+  if (!record) throw new Error("missing fixture");
+  const priced = parseDigitalReceiptChain({
+    orderReference: id(1),
+    records: [
+      {
+        ...record,
+        snapshot: {
+          ...record.snapshot,
+          lines: [
+            { ...record.snapshot.lines[0], lineTotal: money(114n), lineSubtotal: money(100n) },
+          ],
+        },
+      },
+    ],
+  });
+  test.read.mockResolvedValue(priced);
+  const body = (await (await test.send()).json()) as {
+    receipt: { records: { snapshot: { lines: unknown[]; subtotal: unknown } }[] };
+  };
+  expect(body.receipt.records[0]?.snapshot.lines).toEqual([
+    {
+      lineReference: id(8),
+      displayName: "Synthetic item",
+      quantity: 1,
+      lineTotal: { amountMinor: "114", currencyCode: "CAD" },
+      lineSubtotal: { amountMinor: "100", currencyCode: "CAD" },
+    },
+  ]);
+  // An older version without it is serialized exactly as issued.
+  test.read.mockResolvedValue(test.chain);
+  const legacy = (await (await test.send()).json()) as typeof body;
+  expect(legacy.receipt.records[0]?.snapshot.lines[0]).not.toHaveProperty("lineSubtotal");
+});

@@ -241,3 +241,69 @@ describe("order status source wire money", () => {
     },
   );
 });
+
+describe("WP-2423 D5: item prices before tax", () => {
+  const withPrices = (itemPrices: unknown) => {
+    const body = payload();
+    Object.assign(body.status, {
+      sources: { checkedAt: "2026-08-11T14:00:00.000Z", kitchen: null, payments: null, itemPrices },
+    });
+    return body;
+  };
+  it("decodes each item's price before tax and its tax as lossless money", async () => {
+    setCustomerCsrfCredential("a".repeat(43));
+    const result = await createHttpOrderStatusClient(
+      responder(
+        withPrices([
+          {
+            orderItemReference: id(4),
+            subtotal: { amountMinor: "2300", currencyCode: "CAD" },
+            tax: { amountMinor: "298", currencyCode: "CAD" },
+          },
+        ]),
+      ),
+    ).load(id(1));
+    expect((result as OrderStatusView).sources?.itemPrices).toEqual([
+      {
+        orderItemReference: id(4),
+        subtotal: { amountMinor: 2300n, currencyCode: "CAD" },
+        tax: { amountMinor: 298n, currencyCode: "CAD" },
+      },
+    ]);
+  });
+  it.each([
+    [[]],
+    [
+      [
+        {
+          orderItemReference: id(9),
+          subtotal: { amountMinor: "2300", currencyCode: "CAD" },
+          tax: { amountMinor: "298", currencyCode: "CAD" },
+        },
+      ],
+    ],
+    [
+      [
+        {
+          orderItemReference: id(4),
+          subtotal: { amountMinor: 2300, currencyCode: "CAD" },
+          tax: { amountMinor: "298", currencyCode: "CAD" },
+        },
+      ],
+    ],
+    [
+      [
+        {
+          orderItemReference: id(4),
+          subtotal: { amountMinor: "2300", currencyCode: "USD" },
+          tax: { amountMinor: "298", currencyCode: "CAD" },
+        },
+      ],
+    ],
+  ])("rejects prices for other items, float money or another currency %#", async (prices) => {
+    setCustomerCsrfCredential("a".repeat(43));
+    await expect(
+      createHttpOrderStatusClient(responder(withPrices(prices))).load(id(1)),
+    ).rejects.toMatchObject({ code: "service_unavailable" });
+  });
+});

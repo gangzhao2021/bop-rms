@@ -8,6 +8,15 @@ export type KitchenAction =
   | "StartKitchenWorkItem"
   | "CompleteKitchenWorkItem"
   | "MarkKitchenOrderItemReady";
+export type KitchenActionOutcome =
+  | "Accepted"
+  | "Started"
+  | "ProgressRecorded"
+  | "Completed"
+  | "CompletedAndOrderItemReady"
+  | "OrderItemReady";
+/** What the server confirmed the work item's state to be after the command. */
+export type KitchenConfirmedStatus = "Queued" | "In Progress" | "Completed";
 export class KitchenWorkClientError extends Error {
   constructor(
     readonly code:
@@ -149,10 +158,28 @@ export function createKitchenWorkClient(fetcher: typeof fetch = fetch) {
               ].includes(String(raw.outcome))
             )
               return fail("OutcomeUnknown");
+            // The work item as the command left it (the queue projection catches up later).
+            const status = raw.workItemStatus,
+              completed = raw.completedQuantity,
+              occurredAt = raw.occurredAt;
+            if (
+              !["Queued", "In Progress", "Completed"].includes(String(status)) ||
+              !Number.isSafeInteger(completed) ||
+              Number(completed) < 0 ||
+              Number(completed) > item.requiredQuantity ||
+              raw.requiredQuantity !== item.requiredQuantity ||
+              typeof occurredAt !== "string" ||
+              !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(occurredAt) ||
+              Number.isNaN(Date.parse(occurredAt))
+            )
+              return fail("OutcomeUnknown");
             return Object.freeze({
-              outcome: String(raw.outcome),
+              outcome: String(raw.outcome) as KitchenActionOutcome,
               ticketVersion,
               workItemVersion,
+              workItemStatus: status as KitchenConfirmedStatus,
+              completedQuantity: Number(completed),
+              occurredAt,
               projectionPending: true as const,
             });
           } catch (error) {

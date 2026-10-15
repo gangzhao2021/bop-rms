@@ -1,11 +1,21 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import {
+  KitchenDisplayHeaderControls,
+  KitchenDisplayNavigation,
+  kitchenHandoverOffered,
+  KitchenSignedOutPanel,
+  useKitchenHandover,
+  useKitchenScreenAwake,
+} from "./KitchenBoardPages.js";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import type { KitchenBoardView } from "./kitchen-board.js";
 import { newOperationReference } from "./RoleAdministrationPages.js";
 import {
   AvailabilityPageError,
   availabilityActions,
   floorStaffOnly,
+  kitchenDisplayPermissions,
   parseStoreAvailabilityView,
   soldOutText,
   unavailableAvailabilityClient,
@@ -38,12 +48,69 @@ const statusText = {
 
 export function StoreAvailabilityPage({
   client = unavailableAvailabilityClient,
-  navigation,
+  navigation: workspaceNavigation,
+  kitchenDisplay,
 }: {
   readonly client?: AvailabilityClient;
-  /** WP-2423 Q17: the kitchen display's own navigation when reached from the kitchen board. */
+  /** A frame navigation of the caller's own (the workspace layout supplies one otherwise). */
   readonly navigation?: ReactNode;
+  /**
+   * WP-2423 Q17: reached from the kitchen display, the page keeps the kitchen display's frame: the
+   * Store's name, the kitchen navigation and the handover. What the sign-in may do on each item
+   * still comes from the permissions the server reports with the page.
+   */
+  readonly kitchenDisplay?: {
+    readonly storeLabel: string;
+    readonly csrf: string;
+    readonly soldOutHref: string;
+    /** Who the kitchen board says is using this sign-in (the board's own read). */
+    readonly loadOperatorStatus: () => Promise<KitchenBoardView["operatorStatus"]>;
+    readonly signOut?: () => Promise<void>;
+  };
 }) {
+  // undefined while reading; null when the read failed.
+  const [operator, setOperator] = useState<KitchenBoardView["operatorStatus"] | null | undefined>(
+    undefined,
+  );
+  // Read once when the page opens (the caller may pass a new function on every render).
+  const loadOperatorStatus = useRef(kitchenDisplay?.loadOperatorStatus);
+  useEffect(() => {
+    const load = loadOperatorStatus.current;
+    if (!load) return;
+    let active = true;
+    load().then(
+      (status) => {
+        if (active) setOperator(status);
+      },
+      () => {
+        if (active) setOperator(null);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
+  const { handover, handOver } = useKitchenHandover(kitchenDisplay?.csrf, kitchenDisplay?.signOut);
+  const awake = useKitchenScreenAwake(kitchenDisplay !== undefined && handover !== "SignedOut");
+  const frame = kitchenDisplay
+    ? {
+        title: kitchenDisplay.storeLabel,
+        description: "Kitchen display",
+        className: "kitchen-shell",
+        navigation: (
+          <KitchenDisplayNavigation current="SoldOut" soldOutHref={kitchenDisplay.soldOutHref} />
+        ),
+        headerStatus: (
+          <KitchenDisplayHeaderControls
+            handoverOffered={kitchenHandoverOffered(true, operator ?? null)}
+            handover={handover}
+            awake={awake}
+            onHandover={handOver}
+          />
+        ),
+      }
+    : { title: "Item availability", description: "", navigation: workspaceNavigation };
+  const navigation = frame.navigation;
   const [state, setState] = useState<
     | { readonly kind: "Loading" | AvailabilityErrorCode }
     | { readonly kind: "Found"; readonly view: StoreAvailabilityView }
@@ -68,6 +135,7 @@ export function StoreAvailabilityPage({
       active = false;
     };
   }, [client, generation]);
+  if (handover === "SignedOut") return <KitchenSignedOutPanel />;
   if (state.kind !== "Found") {
     const panel = (
       <StatePanel
@@ -79,17 +147,14 @@ export function StoreAvailabilityPage({
       </StatePanel>
     );
     // From the kitchen display there is no workspace frame around the page; keep the way back.
-    return navigation ? (
-      <AppFrame title="Item availability" description="" navigation={navigation}>
-        {panel}
-      </AppFrame>
-    ) : (
-      panel
-    );
+    return navigation ? <AppFrame {...frame}>{panel}</AppFrame> : panel;
   }
   const view = state.view;
+  const permissions = kitchenDisplay
+    ? kitchenDisplayPermissions(view.permissions, operator ?? null)
+    : view.permissions;
   // WP-2423 Q17: floor staff (Kitchen, Front of House) see only items sold here.
-  const floorOnly = floorStaffOnly(view.permissions);
+  const floorOnly = floorStaffOnly(permissions);
   const items = floorOnly
     ? view.items.filter(
         (item) =>
@@ -141,7 +206,7 @@ export function StoreAvailabilityPage({
         {text}
       </button>
     );
-    const buttons = availabilityActions(item, view.permissions).map((action) => {
+    const buttons = availabilityActions(item, permissions).map((action) => {
       switch (action) {
         case "SoldOutToday":
           return button(
@@ -189,7 +254,7 @@ export function StoreAvailabilityPage({
     return buttons;
   };
   return (
-    <AppFrame title="Item availability" description="" navigation={navigation}>
+    <AppFrame {...frame}>
       <header className="screen-heading">
         <div>
           <h2>Item availability</h2>

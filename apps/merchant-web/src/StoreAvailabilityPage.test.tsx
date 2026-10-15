@@ -1,18 +1,37 @@
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { StoreAvailabilityPage } from "./StoreAvailabilityPage.js";
+import { KitchenDisplayHeaderControls, kitchenHandoverOffered } from "./KitchenBoardPages.js";
 import {
   availabilityActions,
   createAvailabilityClient,
   floorStaffOnly,
+  kitchenDisplayPermissions,
   parseStoreAvailabilityView,
   soldOutText,
 } from "./store-availability-page.js";
 
 describe("WP-2423 item availability page helpers", () => {
   it("shows when a sold-out mark ends in the Store's time zone", () => {
-    expect(soldOutText("2026-10-09T04:00:00.000Z", "America/Toronto")).toBe(
-      "Sold out through 2026-10-08 23:59",
+    const evening = new Date("2026-10-15T01:30:00.000Z"); // 21:30 on Oct 14 in Toronto
+    // The business day ends at the Store's midnight: the rest of today.
+    expect(soldOutText("2026-10-15T04:00:00.000Z", "America/Toronto", evening)).toBe(
+      "Sold out for the rest of today",
+    );
+    // A late business day ends at 4:00 the next morning.
+    expect(soldOutText("2026-10-15T08:00:00.000Z", "America/Toronto", evening)).toBe(
+      "Sold out until 4:00 AM tomorrow",
+    );
+    // After midnight, the same business day ends later today.
+    expect(
+      soldOutText("2026-10-15T08:00:00.000Z", "America/Toronto", new Date("2026-10-15T05:30:00Z")),
+    ).toBe("Sold out until 4:00 AM today");
+    expect(soldOutText("2026-10-17T08:00:00.000Z", "America/Toronto", evening)).toBe(
+      "Sold out until Oct 17, 4:00 AM",
     );
     expect(soldOutText(null, "America/Toronto")).toBe("Sold out until brought back");
+    for (const until of ["2026-10-15T04:00:00.000Z", "2026-10-15T08:00:00.000Z"])
+      expect(soldOutText(until, "America/Toronto", evening)).not.toMatch(/\d{4}-\d{2}-\d{2}/u);
   });
   it("accepts only known statuses", () => {
     const view = {
@@ -53,5 +72,54 @@ describe("WP-2423 item availability page helpers", () => {
       "SoldOutToday",
       "SoldOutUntilBack",
     ]);
+  });
+  it("keeps the kitchen display's frame when reached from the kitchen display", () => {
+    const html = renderToStaticMarkup(
+      <StoreAvailabilityPage
+        kitchenDisplay={{
+          storeLabel: "Queen Street",
+          csrf: "c".repeat(43),
+          soldOutHref: "/app/commerce/availability",
+          loadOperatorStatus: async () => "Named",
+        }}
+      />,
+    );
+    expect(html).toContain("<h1>Queen Street</h1>");
+    expect(html).toContain("Kitchen display");
+    // The handover appears once the kitchen board's read confirms a kitchen display sign-in.
+    expect(html).not.toContain("Hand over / sign out");
+    const header = renderToStaticMarkup(
+      <KitchenDisplayHeaderControls
+        handoverOffered={kitchenHandoverOffered(true, "Named")}
+        handover="Idle"
+        awake="Released"
+        onHandover={() => undefined}
+      />,
+    );
+    expect(header).toContain("Hand over / sign out");
+    expect(kitchenHandoverOffered(true, "Unverified")).toBe(false);
+    expect(html).toContain('href="/operations/kitchen"');
+    expect(html).toContain('href="/app/commerce/availability?from=kitchen"');
+    const office = renderToStaticMarkup(<StoreAvailabilityPage />);
+    expect(office).not.toContain("Hand over / sign out");
+  });
+  it("offers the kitchen display today's mark and its return only, whatever the roles allow", () => {
+    const brand = { mayOffer: true, mayMarkSoldOut: true, mayMarkUntilBack: true };
+    const kitchen = { mayOffer: false, mayMarkSoldOut: true, mayMarkUntilBack: false };
+    const available = { status: "Available", soldOutUntil: null } as const;
+    const untilBack = { status: "SoldOut", soldOutUntil: null } as const;
+    for (const operator of ["Named", "Locked", "HandoverRequired", "Unavailable", null] as const)
+      expect(kitchenDisplayPermissions(brand, operator), String(operator)).toEqual(kitchen);
+    expect(availabilityActions(available, kitchenDisplayPermissions(brand, "Named"))).toEqual([
+      "SoldOutToday",
+    ]);
+    expect(availabilityActions(untilBack, kitchenDisplayPermissions(brand, "Named"))).toEqual([
+      "ManagerBringsBack",
+    ]);
+    // A counter or office sign-in that opened the kitchen route keeps what the server reported.
+    expect(kitchenDisplayPermissions(brand, "Unverified")).toBe(brand);
+    // Never more than the server reported.
+    const none = { mayOffer: false, mayMarkSoldOut: false, mayMarkUntilBack: false };
+    expect(kitchenDisplayPermissions(none, "Named")).toEqual(none);
   });
 });

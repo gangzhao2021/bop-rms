@@ -282,7 +282,18 @@ test.describe("@production order status HTTP continuity", () => {
     await page.route("**/api/v1/orders/*/status", async (route) => {
       expect(route.request().headers()["x-csrf-token"]).toBe(csrf);
       expect(route.request().method()).toBe("GET");
-      await route.fulfill({ json: status(id(1), "1001", "2598") });
+      // WP-2423 D5: the item's frozen price before tax and its tax ($23.00 + $2.98 = $25.98).
+      const body = status(id(1), "1001", "2598");
+      Object.assign(body.status.sources, {
+        itemPrices: [
+          {
+            orderItemReference: id(4),
+            subtotal: { amountMinor: "2300", currencyCode: "CAD" },
+            tax: { amountMinor: "298", currencyCode: "CAD" },
+          },
+        ],
+      });
+      await route.fulfill({ json: body });
     });
     await page.goto("/#qr=aaa.bbb.ccc");
     await expect(
@@ -297,6 +308,12 @@ test.describe("@production order status HTTP continuity", () => {
     await expect(main.getByText("Payment received $25.98", { exact: true })).toBeVisible();
     await expect(main).not.toContainText(/\bPaid\b/u);
     await expect(main.getByText("Synthetic tea", { exact: false })).toBeVisible();
+    // WP-2423 D5: the item at its price before tax, then subtotal, tax and the total paid.
+    await expect(main.locator(".order-status__item-amount").first()).toHaveText("$23.00");
+    await expect(main.locator(".order-status__money")).toContainText("Subtotal$23.00");
+    await expect(main.locator(".order-status__money")).toContainText("Tax$2.98");
+    await expect(main.locator(".order-status__total")).toHaveText("Total$25.98");
+    await expect(main).not.toContainText("Items total");
     await expect(main).not.toContainText("Estimated time");
     await expect(main.getByRole("link", { name: "View receipt and support" })).toBeVisible();
     await expect(main.getByRole("button", { name: "Refresh now" })).toBeVisible();

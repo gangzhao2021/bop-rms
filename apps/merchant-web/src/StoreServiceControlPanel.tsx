@@ -4,6 +4,7 @@ import { WorkspacePage } from "./WorkspacePage.js";
 import { createStoreConfigurationClient } from "./store-configuration-client.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
+import { timeZoneLabel } from "./time-zone-names.js";
 import {
   createServiceControlClient,
   serviceOperationReference,
@@ -65,7 +66,7 @@ export function ServiceHoursSummary({
         {hours.configurationSource === "StoreOverride"
           ? "Store configuration"
           : "Inherited Brand configuration"}{" "}
-        · {timeZone}
+        · {timeZoneLabel(timeZone)}
       </p>
       <p>Business day starts at {serviceTime(hours.businessDayStartLocalTime)}.</p>
       <div className="detail-section-grid">
@@ -297,7 +298,7 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
                 dateStyle: "medium",
                 timeStyle: "short",
               }).format(new Date(view.observedAt))}{" "}
-              ({view.timeZone})
+              ({timeZoneLabel(view.timeZone)})
             </p>
             <fieldset disabled={disabled}>
               <legend>Pause service</legend>

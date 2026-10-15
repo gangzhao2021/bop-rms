@@ -44,6 +44,36 @@ function fixture(): OriginalReceiptSources {
   };
 }
 describe("original receipt assembly from frozen owner facts", () => {
+  it("prints each item at its price before tax, adding up to the subtotal (WP-2423 D5)", () => {
+    const input = fixture();
+    const record = input.order as {
+      items: { orderItemReference: string; pricing: { subtotal: unknown; total: unknown } }[];
+    };
+    const result = createOriginalReceiptSnapshotFromOrder(input);
+    expect(result.lines).toHaveLength(record.items.length);
+    for (const line of result.lines) {
+      const item = record.items.find((entry) => entry.orderItemReference === line.lineReference);
+      if (!item) throw new Error("missing item");
+      // The printed price is the item's pre-tax price, never its total after tax.
+      expect(line.lineSubtotal).toEqual(item.pricing.subtotal);
+      expect(line.lineTotal).toEqual(item.pricing.total);
+    }
+    const printed = result.lines.reduce(
+      (sum, line) => sum + (line.lineSubtotal?.amountMinor ?? 0n),
+      0n,
+    );
+    expect(printed).toBe(result.subtotal.amountMinor);
+    if (!result.adjustments) throw new Error("missing frozen adjustments");
+    // Items + fees - discounts + tax + tip reconcile to the captured total.
+    expect(
+      printed -
+        result.adjustments.discount.amountMinor +
+        result.adjustments.fee.amountMinor +
+        result.tax.amountMinor +
+        result.tip.amountMinor,
+    ).toBe(result.total.amountMinor);
+    expect(result.tax.amountMinor).toBeGreaterThan(0n);
+  });
   it("keeps frozen names, taxes and line totals and adds the confirmed tip", () => {
     const input = fixture();
     const result = createOriginalReceiptSnapshotFromOrder(input);

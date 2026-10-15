@@ -28,8 +28,15 @@ const success = () => ({
   ticketVersion: "9007199254740994",
   workItemVersion: "2",
   outcome: "Accepted",
+  workItemStatus: "Queued",
+  completedQuantity: 0,
+  requiredQuantity: 2,
+  occurredAt: "2026-10-14T21:30:00.000Z",
+  readyResultReference: null,
+  readyQuantity: null,
   projectionName: "kitchen_work_queue_v1",
   projectionPending: true,
+  projectionTriggers: ["KitchenLifecycleEvent"],
 });
 function setup() {
   const fetcher = vi.fn<typeof fetch>(),
@@ -55,6 +62,9 @@ it("retries the same immutable intent after a lost response without automatic re
   f.input.storeReference = id(99);
   expect(await f.operation.execute("a".repeat(43))).toMatchObject({
     ticketVersion: "9007199254740994",
+    workItemStatus: "Queued",
+    completedQuantity: 0,
+    occurredAt: "2026-10-14T21:30:00.000Z",
     projectionPending: true,
   });
   expect(f.fetcher.mock.calls[0]?.[1]?.body).toBe(f.fetcher.mock.calls[1]?.[1]?.body);
@@ -87,6 +97,12 @@ it("treats mismatched work, unsafe versions and malformed success as unknown", a
     { ticketVersion: 9007199254740994 },
     { projectionPending: false },
     { outcome: "invented" },
+    // The work item's confirmed state is part of the result; without it nothing is shown.
+    { workItemStatus: undefined },
+    { workItemStatus: "Held" },
+    { completedQuantity: 3 },
+    { requiredQuantity: 5 },
+    { occurredAt: "yesterday" },
   ]) {
     f.fetcher.mockResolvedValueOnce(response({ ...success(), ...change }));
     await expect(f.operation.execute("a".repeat(43))).rejects.toMatchObject({

@@ -1,6 +1,7 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
+import { timeZoneLabel } from "./time-zone-names.js";
 import {
   STORE_SETUP_STEPS,
   StoreAdminClientError,
@@ -153,7 +154,7 @@ export function StoreListScreen({ view }: { readonly view: StoreListView }) {
               <dl>
                 <div>
                   <dt>Timezone</dt>
-                  <dd>{store.timeZone}</dd>
+                  <dd>{timeZoneLabel(store.timeZone)}</dd>
                 </div>
                 <div>
                   <dt>Address</dt>

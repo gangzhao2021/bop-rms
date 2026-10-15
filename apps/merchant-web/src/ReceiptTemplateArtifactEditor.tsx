@@ -120,8 +120,9 @@ export function ReceiptTemplateArtifactEditor(props: ReceiptTemplateArtifactEdit
     <section hidden={props.hidden} aria-label="Receipt presets">
       <h4>Receipt presets</h4>
       <p>
-        Save the accessible receipt layout and its required fields. These presets do not publish a
-        receipt template or confirm legal approval.
+        Save the receipt layout and the fields every receipt must show; receipt templates are built
+        from these presets. Saving them does not change customer receipts and does not mean a legal
+        professional has approved them.
       </p>
       {(["Layout", "Compliance"] as const).map((kind) => (
         <Preset key={kind} {...props} kind={kind} />

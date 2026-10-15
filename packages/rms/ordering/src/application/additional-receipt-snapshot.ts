@@ -38,8 +38,19 @@ export function createAdditionalReceiptSnapshot(previousValue: unknown, currentV
   )
     return fail();
   const lines = new Map(current.lines.map((line) => [line.lineReference, line]));
+  // WP-2423 D5: a version issued before item prices were frozen compares without them; the new
+  // version adds each item's pre-tax price but never changes an item fact the old one printed.
+  const comparable = (line: (typeof current.lines)[number] | undefined, withSubtotal: boolean) => {
+    if (line === undefined) return null;
+    if (withSubtotal) return line;
+    return Object.fromEntries(Object.entries(line).filter(([key]) => key !== "lineSubtotal"));
+  };
   for (const line of old.lines)
-    if (encode(lines.get(line.lineReference) ?? null) !== encode(line)) return fail();
+    if (
+      encode(comparable(lines.get(line.lineReference), line.lineSubtotal !== undefined)) !==
+      encode(line)
+    )
+      return fail();
   if (current.lines.length === old.lines.length) {
     for (const field of [
       "subtotal",

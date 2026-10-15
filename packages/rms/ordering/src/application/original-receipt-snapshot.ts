@@ -212,6 +212,8 @@ export function createOriginalReceiptSnapshotFromCurrentOrder(
         displayName: item.catalog.localizedNames[input.template.locale],
         quantity: item.quantity,
         lineTotal: item.pricing.total,
+        // WP-2423 D5: print the item's price before tax; tax is listed after the subtotal.
+        lineSubtotal: item.pricing.subtotal,
       })),
       subtotal: sum("subtotal"),
       adjustments: { discount: sum("discount"), fee: sum("fee") },

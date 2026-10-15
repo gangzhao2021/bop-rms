@@ -1308,6 +1308,23 @@
   color: var(--bop-color-text-muted);
   font-size: 0.875rem;
 }
+/* WP-2423 D5: subtotal and tax above the order total, like the receipt. */
+.order-status__money {
+  margin: var(--bop-space-3) 0 0;
+  padding-top: var(--bop-space-2);
+  border-top: 1px solid var(--bop-color-border-default);
+}
+.order-status__money div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--bop-space-4);
+  padding: var(--bop-space-1) 0;
+  font-variant-numeric: tabular-nums;
+}
+.order-status__money dt,
+.order-status__money dd {
+  margin: 0;
+}
 .order-status__total {
   display: flex;
   justify-content: space-between;
@@ -1453,6 +1470,16 @@
   gap: var(--bop-space-3);
   padding: var(--bop-space-1) 0;
   font-variant-numeric: tabular-nums;
+}
+/* Amounts never break across lines ("$1.3 / 0") on a phone; the label wraps instead. */
+.receipt-page__lines li > span:last-child,
+.receipt-page__totals dd {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.receipt-page__lines-note {
+  margin: var(--bop-space-1) 0 0;
+  color: var(--bop-color-text-muted);
 }
 .receipt-page__totals {
   margin-top: var(--bop-space-2);

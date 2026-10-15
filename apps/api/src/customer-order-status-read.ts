@@ -25,6 +25,7 @@ import {
   listStoreDiningBatchPaymentDeadlines,
   listStoreOrderAcceptanceHolds,
   listStoreUnpaidBatchCancellations,
+  listOrderItemPrices,
   loadOrderNotAcceptedClosure,
   loadPickupPaymentWindowClosure,
   createPostgresOrderStatusProjectionStore,
@@ -374,6 +375,47 @@ export function createCustomerOrderStatusRead(
                 orderItemReference: entry.orderItemReference,
                 quantity: entry.openQuantity,
               });
+          // WP-2423 D5: each item's frozen price before tax, so the page prints item prices, then
+          // the subtotal and tax, like the receipt. Ordering's own frozen order items; only for the
+          // items this projection shows. If they can't be read, the page keeps the totals it has.
+          let itemPrices:
+            | {
+                orderItemReference: string;
+                subtotal: { amountMinor: bigint; currencyCode: string };
+                tax: { amountMinor: bigint; currencyCode: string };
+              }[]
+            | null = null;
+          if (await stillAuthorized()) {
+            const shown = new Map(
+              result.order.batches.flatMap((batch) =>
+                batch.items.map((item) => [String(item.orderItemReference), item] as const),
+              ),
+            );
+            try {
+              await transaction.query("SAVEPOINT customer_order_item_prices", []);
+              const prices = await listOrderItemPrices(transaction, options.scope, orderReference);
+              await transaction.query("RELEASE SAVEPOINT customer_order_item_prices", []);
+              const matched = prices.filter((price) => shown.has(price.orderItemReference));
+              if (
+                matched.length === shown.size &&
+                matched.every(
+                  (price) =>
+                    shown.get(price.orderItemReference)?.lineTotal.amountMinor ===
+                      price.total.amountMinor &&
+                    shown.get(price.orderItemReference)?.lineTotal.currencyCode ===
+                      price.total.currencyCode,
+                )
+              )
+                itemPrices = matched.map((price) => ({
+                  orderItemReference: price.orderItemReference,
+                  subtotal: price.subtotal,
+                  tax: price.tax,
+                }));
+            } catch {
+              await transaction.query("ROLLBACK TO SAVEPOINT customer_order_item_prices", []);
+              await transaction.query("RELEASE SAVEPOINT customer_order_item_prices", []);
+            }
+          }
           // WP-2423: a dine-in round whose payment failed is cancelled automatically when its payment
           // window ends; the customer is told when before it happens, and that it was not charged.
           let batchPayments: readonly CustomerBatchPayment[] = [];
@@ -465,6 +507,7 @@ export function createCustomerOrderStatusRead(
               ...(staffCancellations.length === 0 ? {} : { staffCancellations }),
               ...(itemCancellations.length === 0 ? {} : { itemCancellations }),
               ...(remakes.length === 0 ? {} : { remakes }),
+              ...(itemPrices === null ? {} : { itemPrices }),
               ...(batchPayments.length === 0 ? {} : { batchPayments }),
               ...(unpaidCancellations.length === 0 ? {} : { unpaidCancellations }),
               ...(storeContact === null ? {} : { storeContact }),

@@ -157,6 +157,8 @@ export class CustomerReceiptHandler {
                   displayName: line.displayName,
                   quantity: line.quantity,
                   lineTotal: money(line.lineTotal),
+                  // WP-2423 D5: the item's pre-tax price, on versions issued since it was frozen.
+                  ...(line.lineSubtotal ? { lineSubtotal: money(line.lineSubtotal) } : {}),
                 })),
                 subtotal: money(snapshot.subtotal),
                 tax: money(snapshot.tax),

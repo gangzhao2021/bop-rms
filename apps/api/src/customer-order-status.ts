@@ -224,6 +224,22 @@ export class CustomerOrderStatusHandler {
                           quantity: remake.quantity,
                         })),
                       }),
+                  // WP-2423 D5: each item's price before tax and its tax, from the frozen order.
+                  ...(sources.itemPrices === undefined
+                    ? {}
+                    : {
+                        itemPrices: sources.itemPrices.map((price) => ({
+                          orderItemReference: price.orderItemReference,
+                          subtotal: {
+                            amountMinor: price.subtotal.amountMinor.toString(),
+                            currencyCode: price.subtotal.currencyCode,
+                          },
+                          tax: {
+                            amountMinor: price.tax.amountMinor.toString(),
+                            currencyCode: price.tax.currencyCode,
+                          },
+                        })),
+                      }),
                   // WP-2423 Q6: dine-in rounds whose payment failed (with when they are cancelled)
                   // and rounds cancelled because their payment did not go through.
                   ...(sources.batchPayments === undefined

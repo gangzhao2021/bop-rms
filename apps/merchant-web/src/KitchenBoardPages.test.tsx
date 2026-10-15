@@ -11,6 +11,8 @@ import {
   kitchenNavigationFor,
   kitchenOrderSearchTerm,
   matchesKitchenOrderSearch,
+  kitchenBoardSearch,
+  earlierDaySearchText,
   KitchenWorkItemScreen,
   kitchenAgeTier,
   kitchenLateMinutes,
@@ -991,5 +993,69 @@ describe("DEC-KITCHEN-STALE-TICKETS earlier business days on the kitchen board",
     expect(kitchenWaitText(125)).toBe("2 h 5 min");
     expect(kitchenWaitText(60 * 24)).toBe("1 day");
     expect(kitchenWaitText(60 * 24 * 5 + 30)).toBe("5 days");
+  });
+  it("applies one order search to today's lanes, remakes, earlier days and finished work", () => {
+    const six = (item: Record<string, unknown>, n: string) => ({
+      ...item,
+      orderLabel: { orderNumber: n, orderType: "Pickup" as const, tableLabel: null },
+    });
+    const view = parseKitchenBoardView({
+      ...kitchenBoardFixture(),
+      items: [six(today, "6"), six(old, "6")],
+    });
+    const remake = (orderNumber: string) => ({
+      reworkReference: "018f0f58-767a-7f3b-a1d0-00000000050" + orderNumber,
+      originalWorkItemReference: today.workItemReference,
+      orderReference: today.orderReference,
+      orderItemReference: execution.orderItemReference,
+      reasonCode: "DROPPED" as const,
+      note: null,
+      quantity: 1,
+      wasteApplies: true,
+      status: "Queued" as const,
+      version: 1,
+      createdAt: "2026-08-12T15:10:00.000Z",
+      startedAt: null,
+      completedAt: null,
+      displayName: "Mushroom rice bowl",
+      selectedOptions: [],
+      orderLabel: { orderNumber, orderType: "Pickup" as const, tableLabel: null },
+      customerNote: null,
+    });
+    const reworks = [remake("2"), remake("6")];
+    const found = kitchenBoardSearch({
+      items: view.items,
+      reworks,
+      today: "2026-08-12",
+      search: "6",
+    });
+    expect(found.todayMatches.map((item) => item.displayName)).toEqual(["Mushroom rice bowl"]);
+    expect(found.earlierShown.map((ticket) => ticket.orderLabel)).toEqual(["Order 6 · Pickup"]);
+    expect(found.reworks.map((rework) => rework.orderLabel?.orderNumber)).toEqual(["6"]);
+    const other = kitchenBoardSearch({
+      items: view.items,
+      reworks,
+      today: "2026-08-12",
+      search: "2",
+    });
+    expect(other.todayMatches).toEqual([]);
+    expect(other.earlierShown).toEqual([]);
+    // Earlier days stay apart from today's lanes whatever the search.
+    expect(other.earlier).toHaveLength(1);
+    expect(other.reworks.map((rework) => rework.orderLabel?.orderNumber)).toEqual(["2"]);
+    const all = kitchenBoardSearch({
+      items: view.items,
+      reworks,
+      today: "2026-08-12",
+      search: null,
+    });
+    expect(all.reworks).toBe(reworks);
+    expect(all.earlierShown).toHaveLength(1);
+    expect(earlierDaySearchText(1, "6")).toBe(
+      "1 ticket from an earlier day has number or table “6”",
+    );
+    expect(earlierDaySearchText(3, "6")).toBe(
+      "3 tickets from earlier days have number or table “6”",
+    );
   });
 });

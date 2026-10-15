@@ -251,4 +251,14 @@ test("@production DEC-KITCHEN-STALE-TICKETS: kitchen staff see earlier days apar
   await page.locator("details.kitchen-earlier-days").getByText("From earlier days").click();
   await expect(page.getByText("Ask a manager to check and close them.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Close ticket" })).toHaveCount(0);
+  // WP-2423: one order search covers the earlier days too, and says how many it found there.
+  const search = page.locator(".kitchen-reference-search--desktop");
+  const summary = page.locator("details.kitchen-earlier-days summary");
+  await search.getByRole("searchbox", { name: "Order number or table" }).fill("2");
+  await search.getByRole("button", { name: "Find" }).click();
+  await expect(summary).toContainText("1 ticket from an earlier day has number or table “2”");
+  await search.getByRole("searchbox", { name: "Order number or table" }).fill("9");
+  await search.getByRole("button", { name: "Find" }).click();
+  await expect(page.locator("details.kitchen-earlier-days")).toHaveCount(0);
+  await expect(page.getByText("Nothing on the board for order or table “9”.")).toBeVisible();
 });

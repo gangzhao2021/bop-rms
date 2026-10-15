@@ -276,3 +276,26 @@ it.each([
     parseReceiptView({ ...payload(), financial: { ...financialPayload(), ...change } }, id(1)),
   ).toThrow();
 });
+
+describe("WP-2423 D5: item prices before tax", () => {
+  const amount = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+  const priced = (lineSubtotal: unknown) => {
+    const body = payload();
+    const snapshot = body.records[0]?.snapshot;
+    const line = snapshot?.lines[0];
+    if (!snapshot || !line) throw new Error("fixture");
+    Object.assign(line, { lineTotal: amount("1130"), lineSubtotal });
+    return body;
+  };
+  it("reads each item's price before tax when the version froze it", () => {
+    const parsed = parseReceiptView(priced(amount("1000")), id(1));
+    expect(parsed.records[0]?.snapshot.lines[0]?.lineSubtotal?.amountMinor).toBe(1000n);
+    expect(parsed.records[0]?.snapshot.lines[0]?.lineTotal.amountMinor).toBe(1130n);
+  });
+  it("rejects item prices that don't add up to the subtotal", () => {
+    expect(() => parseReceiptView(priced(amount("999")), id(1))).toThrow("invalid receipt");
+    expect(() =>
+      parseReceiptView(priced({ amountMinor: "1000", currencyCode: "USD" }), id(1)),
+    ).toThrow("invalid receipt");
+  });
+});
