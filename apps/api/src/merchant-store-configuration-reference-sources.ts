@@ -30,7 +30,7 @@ import {
   createPublishingScope,
   parsePublishingReference,
 } from "@bop/publishing";
-import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import type { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import {
   createCurrentStoreBrandConfigurationContentSource,
@@ -56,7 +56,13 @@ const references = Object.freeze({
   canonicalize: canonicalizeRfc8785,
   hashIntent: (text: string) => "sha256:" + sha256Hex(text),
 });
-/** Read-only owner composition. Recorded references do not establish external
+/** WP-2423: `scope` is the caller's run scope (the ordinary Store configuration run): its
+ * `allowed` answers from that run's authority (`organization.manage` and the command's permission
+ * decided in full at the start and re-checked in full before the checks and COMMIT), so owner
+ * admissions here cost no query. Brand content admission resolves the Brand scope in full once per
+ * phase (work, then the parent's final check) instead of once per owner callback.
+ *
+ * Read-only owner composition. Recorded references do not establish external
  * address verification, Provider readiness, professional Tax or Live Gate approval.
  * Required-field inventories bind owner admission; IAM currently authorizes the
  * complete owning read through organization.manage, without a field-mask claim. */
@@ -80,14 +86,15 @@ export function createMerchantStoreConfigurationReferenceSources(
     now = persistence.now,
     register = host.registerBeforeCommit,
     postCommit = host.registerAfterCommit,
-    resolve = createMerchantStoreScope(persistence),
     cookie = options.sessionCookie,
     store = selected.store,
     context = selected.context,
     brand = context.brand,
     session = selected.sessionReference,
-    allowed = selected.allowed,
     lease = selected.authorizationValidUntil;
+  // The run's guard (see above): pinned once, answered without a query.
+  const { allowed: runGuard } = selected;
+  const pinnedGuard = () => Object.getOwnPropertyDescriptor(selected, "allowed")?.value;
   const identityOwner = persistence.identity,
     hasher = identityOwner.hasher,
     currentActor = persistence.currentActor,
@@ -144,7 +151,7 @@ export function createMerchantStoreConfigurationReferenceSources(
       options.sessionCookie !== cookie ||
       options.originalObservedAt !== origin ||
       options.originalValidUntil !== originalUntil ||
-      selected.allowed !== allowed ||
+      pinnedGuard() !== runGuard ||
       selected.authorizationValidUntil !== lease
     )
       fail();
@@ -178,51 +185,14 @@ export function createMerchantStoreConfigurationReferenceSources(
   };
   const fresh = async () => {
     check();
-    const current = await resolve(tx, cookie, "organization.manage", session);
-    identity();
-    const currentStore = current.store,
-      currentContext = current.context,
-      currentSelected = current.selected,
-      actionPort = current.authorizeAction,
-      currentLease = current.authorizationValidUntil;
-    const currentIdentity = () => {
-      identity();
-      if (
-        current.store !== currentStore ||
-        current.context !== currentContext ||
-        current.selected !== currentSelected ||
-        current.authorizeAction !== actionPort ||
-        current.authorizationValidUntil !== currentLease
-      )
-        fail();
-      if (
-        current.sessionReference !== session ||
-        String(currentSelected.tenantReference) !== fixed.tenantReference ||
-        String(currentContext.brand.brandReference) !== fixed.brandReference ||
-        String(currentStore.storeReference) !== fixed.storeReference ||
-        String(current.actorReference) !== fixed.actorReference ||
-        currentStore.locale !== locale ||
-        currentStore.currencyCode !== currency
-      )
-        fail("STORE_CONFIGURATION_ORIGINAL_PERMISSION_DENIED");
-    };
-    currentIdentity();
-    const decision = await actionPort.call(current, "organization.manage");
-    currentIdentity();
-    if (
-      !decision ||
-      !Object.isFrozen(decision) ||
-      decision.effect !== "Allow" ||
-      decision.action !== "organization.manage" ||
-      decision.scopeKind !== "Store"
-    )
+    if ((await runGuard.call(selected)) !== true)
       fail("STORE_CONFIGURATION_ORIGINAL_PERMISSION_DENIED");
-    retain(currentLease.call(current));
-    currentIdentity();
+    identity();
     retain(lease.call(selected));
-    currentIdentity();
     check();
   };
+  /** The phase whose Brand admission was resolved in full; later admissions in it take `fresh`. */
+  let brandResolvedIn: "Work" | "Checks" | "Final" | null = null;
   const brandReads = new Map<
     string,
     {
@@ -632,6 +602,10 @@ export function createMerchantStoreConfigurationReferenceSources(
             canonicalizeRfc8785(tenantBrandConfigurationRequiredFields)
         )
           fail();
+        if (brandResolvedIn === phase) {
+          await fresh();
+          return true;
+        }
         const current = await resolveBrand(tx, cookie, session);
         identity();
         if (
@@ -655,6 +629,7 @@ export function createMerchantStoreConfigurationReferenceSources(
         )
           fail("STORE_CONFIGURATION_ORIGINAL_PERMISSION_DENIED");
         retain(result.validUntil);
+        brandResolvedIn = phase;
         await fresh();
         return true;
       };

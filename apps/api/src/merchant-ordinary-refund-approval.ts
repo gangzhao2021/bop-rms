@@ -12,6 +12,10 @@ import {
   ordinaryRefundClaimKind,
 } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import {
+  withMerchantTransactionAuthorization,
+  type MerchantTransactionAuthority,
+} from "./merchant-transaction-authorization.js";
 import { createMerchantOrdinaryRefundAuthority } from "./merchant-ordinary-refund-authority.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -154,9 +158,34 @@ export function createMerchantOrdinaryRefundApproval(options: {
     const orderReference = ref(raw.orderReference),
       requestReference = ref(raw.requestReference),
       approvalReference = ref(raw.approvalReference);
+    const denied = (): never => {
+      throw new MerchantRefundApprovalError("Denied");
+    };
+    // WP-2423: one authorized run. The approver and `payment.refund.approve` are resolved in full
+    // once at the start and once more before the commit (inside this transaction, so a withdrawn
+    // permission or ended Session never commits the approval); the Payment owner reads in
+    // between, taken while the refund request is locked, use the run's no-query guard. The
+    // requester's and approver's roles and recent verification are still read from their owners.
     const approved = await options.persistence.transactions.run(async (transaction) => {
       try {
-        return await approveInTransaction(transaction);
+        return await withMerchantTransactionAuthorization(
+          {
+            transaction,
+            resolve: async () => {
+              const resolved = await resolve(
+                transaction,
+                input.sessionCookie,
+                "payment.refund.approve",
+                authenticated.sessionReference,
+              );
+              if ((await resolved.allowed()) !== true) return denied();
+              return resolved;
+            },
+            recheck: async (current) => (await current.allowed()) === true,
+            denied,
+          },
+          (authority) => approveInTransaction(transaction, authority),
+        );
       } catch (error) {
         // WP-2423 Q5: a declined request is closed and is never approved or sent.
         if (error instanceof Error && error.message === "ORDINARY_REFUND_DECLINED")
@@ -166,14 +195,10 @@ export function createMerchantOrdinaryRefundApproval(options: {
     });
     async function approveInTransaction(
       transaction: Parameters<Parameters<typeof options.persistence.transactions.run>[0]>[0],
+      run: MerchantTransactionAuthority<Awaited<ReturnType<typeof resolve>>>,
     ) {
-      const current = await resolve(
-        transaction,
-        input.sessionCookie,
-        "payment.refund.approve",
-        authenticated.sessionReference,
-      );
-      if (!(await current.allowed())) throw new MerchantRefundApprovalError("Denied");
+      const current = run.scope;
+      const guard = () => run.guard();
       const tx = businessTransaction(transaction);
       const actorReference = String(current.actorReference);
       const scope = {
@@ -184,7 +209,7 @@ export function createMerchantOrdinaryRefundApproval(options: {
       const configuration = await options.resolveConfiguration(
         tx,
         { ...scope, actorReference },
-        Object.freeze({ context: current.context, authorize: current.allowed }),
+        Object.freeze({ context: current.context, authorize: guard }),
       );
       const authorize = async (
         _tx: ConsumerTransaction,
@@ -195,7 +220,7 @@ export function createMerchantOrdinaryRefundApproval(options: {
         query.storeReference === scope.storeReference &&
         (query.orderReference === undefined || query.orderReference === orderReference) &&
         (query.requestReference === undefined || query.requestReference === requestReference) &&
-        (await current.allowed());
+        (await guard());
       const escalation = await createPostgresOrdinaryRefundCurrentEscalationSource({
         scope,
         providerAccountReference: configuration.providerAccountReference,
@@ -270,8 +295,8 @@ export function createMerchantOrdinaryRefundApproval(options: {
       // recorded there; the approval never prepares or sends anything to a Provider.
       const cards = createPostgresCardMachinePaymentStore({
         scope,
-        // Checked in full above and again before the approval is recorded.
-        authorize: async (_t, query) => query.orderReference === orderReference,
+        // Checked in full at the start of the run and again before it commits.
+        authorize: async (_t, query) => query.orderReference === orderReference && (await guard()),
       });
       let cardMachine = false;
       for (const payment of subject.request.payments)
@@ -325,7 +350,6 @@ export function createMerchantOrdinaryRefundApproval(options: {
           retentionPolicyVersion: options.retentionPolicyVersion,
         },
       );
-      if (!(await current.allowed())) throw new MerchantRefundApprovalError("Denied");
       return { replayed: false, payments, cardMachine };
     }
     // One payment at a time, with identities fixed by the approval reference.

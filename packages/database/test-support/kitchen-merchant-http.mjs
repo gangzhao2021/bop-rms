@@ -14,6 +14,10 @@ export async function createKitchenMerchantHttp({
   validateCurrentSource,
   sha256,
 }) {
+  /** Statements each kitchen command ran (WP-2423 query budget). */
+  const commandCosts = [];
+  /** Runs once inside the next kitchen command, after its caller was resolved. */
+  const midway = { next: null, sessionEnded: false };
   const runtime = createApiServerRuntime({
     port: 0,
     logger: {
@@ -37,14 +41,43 @@ export async function createKitchenMerchantHttp({
         authentication: session.authentication,
         sha256,
       }),
-      kitchenCommand: (input) => {
+      kitchenCommand: async (input) => {
         const ports = createPorts(input.command, new Date().toISOString());
-        return createMerchantKitchenCommand({
-          persistence: { ...session.persistence, now: () => new Date().toISOString() },
-          authentication: session.authentication,
-          lifecycle: ports,
-          validateCurrentSource,
-        })(input);
+        // WP-2423 query budget: every statement the kitchen command runs is counted.
+        let statements = 0;
+        const counted = {
+          run: (work) =>
+            session.persistence.transactions.run((tx) =>
+              work({
+                query: (sql, values) => {
+                  statements += 1;
+                  return tx.query(sql, values);
+                },
+              }),
+            ),
+        };
+        try {
+          return await createMerchantKitchenCommand({
+            persistence: {
+              ...session.persistence,
+              transactions: counted,
+              // `midway.sessionEnded` moves the operator's Session clock past its lifetime.
+              now: () =>
+                new Date(Date.now() + (midway.sessionEnded ? 86_400_000 : 0)).toISOString(),
+            },
+            authentication: session.authentication,
+            lifecycle: ports,
+            validateCurrentSource: async (...args) => {
+              // Runs inside the command while its ticket and work item rows are locked.
+              const during = midway.next;
+              midway.next = null;
+              await during?.();
+              return validateCurrentSource(...args);
+            },
+          })(input);
+        } finally {
+          commandCosts.push({ action: String(input.command?.action), statements });
+        }
       },
     },
   });
@@ -99,6 +132,8 @@ export async function createKitchenMerchantHttp({
       return { status: response.status, body: response.body };
     };
     return {
+      commandCosts,
+      midway,
       submit,
       query: (query, overrides = {}) => submit(query, overrides, "/merchant/kitchen/query"),
       async execute(command) {

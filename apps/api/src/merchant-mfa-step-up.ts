@@ -10,6 +10,7 @@ import {
   type WorkforceStepUpMethod,
 } from "@bop/identity";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 
@@ -31,6 +32,9 @@ export class MerchantStepUpError extends Error {
     this.name = "MerchantStepUpError";
   }
 }
+const denied = (): never => {
+  throw new MerchantStepUpError("Denied");
+};
 
 /**
  * WP-2423 Q5: the signed-in staff member re-verifies their second factor at the selected Store.
@@ -66,40 +70,59 @@ export function createMerchantMfaStepUp(options: {
       parseOpaqueUuidV7(options.newReference(), "ACTOR_REFERENCE_INVALID"),
     );
     try {
-      return await options.persistence.transactions.run(async (tx) => {
-        const current = await resolve(
-          tx,
-          input.sessionCookie,
-          "merchant.access",
-          authenticated.sessionReference,
-        );
-        if (!(await current.allowed())) throw new MerchantStepUpError("Denied");
-        const binding = {
-          brandReference: String(current.context.brand.brandReference),
-          storeReference: String(current.store.storeReference),
-          actorReference: String(current.actorReference),
-          sessionReference: String(current.sessionReference),
-        };
-        const record = createPostgresWorkforceMfaStepUpStore({
-          method: options.method,
-          verify: options.verify,
-          authorize: async (_tx, query) =>
-            query.brandReference === binding.brandReference &&
-            query.storeReference === binding.storeReference &&
-            query.actorReference === binding.actorReference &&
-            query.sessionReference === binding.sessionReference &&
-            (await current.allowed()),
-          retentionPolicyCode: options.retentionPolicyCode,
-          retentionPolicyVersion: options.retentionPolicyVersion,
-        });
-        return record(tx, {
-          ...binding,
-          stepUpReference,
-          auditReference,
-          purposeCode,
-          code: raw.code,
-        });
-      });
+      // WP-2423: one authorized run. The caller is resolved in full once at the start and once
+      // more before the commit (inside this transaction, so a step-up by a Session that ended
+      // meanwhile never commits — the property the owner store's closing authorize check was
+      // asking for); the owner store's checks in between, taken while the actor's advisory lock
+      // is held, use the run's no-query guard. The second factor itself is still verified fresh
+      // by the verifier port on every attempt.
+      return await options.persistence.transactions.run((tx) =>
+        withMerchantTransactionAuthorization(
+          {
+            transaction: tx,
+            resolve: async () => {
+              const resolved = await resolve(
+                tx,
+                input.sessionCookie,
+                "merchant.access",
+                authenticated.sessionReference,
+              );
+              if ((await resolved.allowed()) !== true) return denied();
+              return resolved;
+            },
+            recheck: async (current) => (await current.allowed()) === true,
+            denied,
+          },
+          async (authority) => {
+            const current = authority.scope;
+            const binding = {
+              brandReference: String(current.context.brand.brandReference),
+              storeReference: String(current.store.storeReference),
+              actorReference: String(current.actorReference),
+              sessionReference: String(current.sessionReference),
+            };
+            const record = createPostgresWorkforceMfaStepUpStore({
+              method: options.method,
+              verify: options.verify,
+              authorize: async (ownerTransaction, query) =>
+                query.brandReference === binding.brandReference &&
+                query.storeReference === binding.storeReference &&
+                query.actorReference === binding.actorReference &&
+                query.sessionReference === binding.sessionReference &&
+                (await authority.guard(ownerTransaction)),
+              retentionPolicyCode: options.retentionPolicyCode,
+              retentionPolicyVersion: options.retentionPolicyVersion,
+            });
+            return record(tx, {
+              ...binding,
+              stepUpReference,
+              auditReference,
+              purposeCode,
+              code: raw.code,
+            });
+          },
+        ),
+      );
     } catch (error) {
       if (error instanceof MerchantStepUpError) throw error;
       if (error instanceof WorkforceStepUpError && error.code === "WORKFORCE_STEP_UP_UNAVAILABLE")
@@ -110,34 +133,51 @@ export function createMerchantMfaStepUp(options: {
   /** The signed-in member's current verification at this Store: the same Identity recency
    * (enrollment or latest step-up) refund approval uses. validUntil null: verify again. */
   const status = async (input: { sessionCookie: unknown }) =>
-    options.persistence.transactions.run(async (tx) => {
-      const current = await resolve(tx, input.sessionCookie, "merchant.access");
-      if (!(await current.allowed())) throw new MerchantStepUpError("Denied");
-      const actorReference = String(current.actorReference);
-      const brandReference = String(current.context.brand.brandReference);
-      const storeReference = String(current.store.storeReference);
-      const observedAt = String(current.context.resolvedAt);
-      const own = async (_tx: unknown, actor: string) =>
-        actor === actorReference && (await current.allowed());
-      const mfa = await createPostgresCurrentWorkforceMfaSource({
-        authorize: (t, actor) => own(t, actor),
-      })(tx, { actorReference, observedAt });
-      const latestStepUpAt = await createPostgresLatestWorkforceStepUpSource({
-        authorize: (t, query) => own(t, query.actorReference),
-      })(tx, { brandReference, storeReference, actorReference, observedAt });
-      const recent = resolveRecentWorkforceMfaAt({
-        status: mfa.status,
-        verifiedAt: mfa.verifiedAt,
-        resetAt: mfa.resetAt,
-        latestStepUpAt,
-      });
-      const until =
-        recent === null ? null : Date.parse(recent) + workforceStepUpRecencyMilliseconds;
-      return Object.freeze({
-        observedAt,
-        validUntil:
-          until !== null && until > Date.parse(observedAt) ? new Date(until).toISOString() : null,
-      });
-    });
+    // WP-2423: resolved in full at the start and before the reply; the two owner reads take the
+    // run's no-query guard.
+    options.persistence.transactions.run((tx) =>
+      withMerchantTransactionAuthorization(
+        {
+          transaction: tx,
+          resolve: async () => {
+            const resolved = await resolve(tx, input.sessionCookie, "merchant.access");
+            if ((await resolved.allowed()) !== true) return denied();
+            return resolved;
+          },
+          recheck: async (current) => (await current.allowed()) === true,
+          denied,
+        },
+        async (authority) => {
+          const current = authority.scope;
+          const actorReference = String(current.actorReference);
+          const brandReference = String(current.context.brand.brandReference);
+          const storeReference = String(current.store.storeReference);
+          const observedAt = String(current.context.resolvedAt);
+          const own = async (ownerTransaction: unknown, actor: string) =>
+            actor === actorReference && (await authority.guard(ownerTransaction));
+          const mfa = await createPostgresCurrentWorkforceMfaSource({
+            authorize: (t, actor) => own(t, actor),
+          })(tx, { actorReference, observedAt });
+          const latestStepUpAt = await createPostgresLatestWorkforceStepUpSource({
+            authorize: (t, query) => own(t, query.actorReference),
+          })(tx, { brandReference, storeReference, actorReference, observedAt });
+          const recent = resolveRecentWorkforceMfaAt({
+            status: mfa.status,
+            verifiedAt: mfa.verifiedAt,
+            resetAt: mfa.resetAt,
+            latestStepUpAt,
+          });
+          const until =
+            recent === null ? null : Date.parse(recent) + workforceStepUpRecencyMilliseconds;
+          return Object.freeze({
+            observedAt,
+            validUntil:
+              until !== null && until > Date.parse(observedAt)
+                ? new Date(until).toISOString()
+                : null,
+          });
+        },
+      ),
+    );
   return Object.assign(record, { status });
 }

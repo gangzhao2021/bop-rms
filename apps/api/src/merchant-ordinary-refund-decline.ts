@@ -5,6 +5,7 @@ import {
   ordinaryRefundDeclineReasons,
 } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import { createMerchantOrdinaryRefundAuthority } from "./merchant-ordinary-refund-authority.js";
 import {
   approvalDerivedReference,
@@ -52,60 +53,80 @@ export function createMerchantOrdinaryRefundDecline(options: {
     if (!ordinaryRefundDeclineReasons.includes(raw.reasonCode as never))
       throw new MerchantRefundApprovalError("Denied");
     try {
-      return await options.persistence.transactions.run(async (transaction) => {
-        const current = await resolve(
-          transaction,
-          input.sessionCookie,
-          "payment.refund.approve",
-          authenticated.sessionReference,
-        );
-        if (!(await current.allowed())) throw new MerchantRefundApprovalError("Denied");
-        const tx = businessTransaction(transaction);
-        const actorReference = String(current.actorReference);
-        const scope = {
-          tenantReference: current.selected.tenantReference,
-          brandReference: String(current.context.brand.brandReference),
-          storeReference: String(current.store.storeReference),
-        };
-        const configuration = await options.resolveConfiguration(
-          tx,
-          { ...scope, actorReference },
-          Object.freeze({ context: current.context, authorize: current.allowed }),
-        );
-        const result = await createPostgresOrdinaryRefundDeclineStore({
-          scope,
-          authorize: async (_tx, query) =>
-            query.tenantReference === scope.tenantReference &&
-            query.brandReference === scope.brandReference &&
-            query.storeReference === scope.storeReference &&
-            query.orderReference === orderReference &&
-            query.requestReference === requestReference &&
-            (await current.allowed()),
-          authority: createMerchantOrdinaryRefundAuthority(configuration.workforce),
-        })(
-          tx,
+      const denied = (): never => {
+        throw new MerchantRefundApprovalError("Denied");
+      };
+      // WP-2423: one authorized run. The caller and `payment.refund.approve` are resolved in full
+      // once at the start and once more before the commit (inside this transaction, so a
+      // withdrawn permission or ended Session never commits the decline); the owner callbacks
+      // in between, taken while the request is locked, use the run's no-query guard.
+      return await options.persistence.transactions.run((transaction) =>
+        withMerchantTransactionAuthorization(
           {
-            orderReference,
-            requestReference,
-            declineReference: approvalDerivedReference(operationReference, "decline"),
-            operationReference,
-            auditReference: approvalDerivedReference(operationReference, "decline-audit"),
-            declinerReference: actorReference,
-            reasonCode: raw.reasonCode,
-            ...(withMode ? { declineMode: "SoleOperator" } : {}),
+            transaction,
+            resolve: async () => {
+              const resolved = await resolve(
+                transaction,
+                input.sessionCookie,
+                "payment.refund.approve",
+                authenticated.sessionReference,
+              );
+              if ((await resolved.allowed()) !== true) return denied();
+              return resolved;
+            },
+            recheck: async (current) => (await current.allowed()) === true,
+            denied,
           },
-          {
-            retentionPolicyCode: options.retentionPolicyCode,
-            retentionPolicyVersion: options.retentionPolicyVersion,
+          async (authority) => {
+            const current = authority.scope;
+            const tx = businessTransaction(transaction);
+            authority.bind(tx);
+            const actorReference = String(current.actorReference);
+            const scope = {
+              tenantReference: current.selected.tenantReference,
+              brandReference: String(current.context.brand.brandReference),
+              storeReference: String(current.store.storeReference),
+            };
+            const configuration = await options.resolveConfiguration(
+              tx,
+              { ...scope, actorReference },
+              Object.freeze({ context: current.context, authorize: () => authority.guard() }),
+            );
+            const result = await createPostgresOrdinaryRefundDeclineStore({
+              scope,
+              authorize: async (ownerTransaction, query) =>
+                query.tenantReference === scope.tenantReference &&
+                query.brandReference === scope.brandReference &&
+                query.storeReference === scope.storeReference &&
+                query.orderReference === orderReference &&
+                query.requestReference === requestReference &&
+                (await authority.guard(ownerTransaction)),
+              authority: createMerchantOrdinaryRefundAuthority(configuration.workforce),
+            })(
+              tx,
+              {
+                orderReference,
+                requestReference,
+                declineReference: approvalDerivedReference(operationReference, "decline"),
+                operationReference,
+                auditReference: approvalDerivedReference(operationReference, "decline-audit"),
+                declinerReference: actorReference,
+                reasonCode: raw.reasonCode,
+                ...(withMode ? { declineMode: "SoleOperator" } : {}),
+              },
+              {
+                retentionPolicyCode: options.retentionPolicyCode,
+                retentionPolicyVersion: options.retentionPolicyVersion,
+              },
+            );
+            return Object.freeze({
+              status: "Declined" as const,
+              declinedAt: String(result.declinedAt),
+              replayed: result.status === "AlreadyCommitted",
+            });
           },
-        );
-        if (!(await current.allowed())) throw new MerchantRefundApprovalError("Denied");
-        return Object.freeze({
-          status: "Declined" as const,
-          declinedAt: String(result.declinedAt),
-          replayed: result.status === "AlreadyCommitted",
-        });
-      });
+        ),
+      );
     } catch (error) {
       if (error instanceof MerchantRefundApprovalError) throw error;
       if (error instanceof OrdinaryRefundDeclineError) {

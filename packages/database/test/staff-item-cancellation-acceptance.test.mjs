@@ -1109,6 +1109,12 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
       merchant.allowed = () => false;
       await assert.rejects(cancel(pickup, [0]), { code: "ORDER_CANCELLATION_PERMISSION_DENIED" });
       await assert.rejects(preview(pickup, [0]), { code: "ORDER_CANCELLATION_PERMISSION_DENIED" });
+      // WP-2423: allowed when the staff member is resolved at the start, withdrawn before the
+      // commit: kitchen, Ordering, the refund claim, fulfillment and stock all roll back.
+      let calls = 0;
+      merchant.allowed = () => ++calls <= 1;
+      await assert.rejects(cancel(pickup, [0]), { code: "ORDER_CANCELLATION_PERMISSION_DENIED" });
+      assert.equal(calls, 2);
       merchant.allowed = () => true;
       merchant.store = otherStore;
       await assert.rejects(cancel(pickup, [0]), { code: "ORDER_CANCELLATION_NOT_FOUND" });
@@ -1151,7 +1157,13 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
 
       // ── Scenario 1: cancel line A of the paid, accepted pickup Order with two queued items.
       const operationReference = fresh();
+      // WP-2423 resolution budget: the staff member is resolved in full (the double's `allowed`)
+      // once at the start and once before the commit, not by every owner check in between.
+      let resolutions = 0;
+      merchant.allowed = () => (++resolutions, true);
       const cancelled = await cancel(pickup, [0], { operationReference });
+      assert.equal(resolutions, 2);
+      merchant.allowed = () => true;
       assert.equal(cancelled.status, "Cancelled");
       assert.equal(cancelled.scope, "Items");
       assert.equal(cancelled.orderReference, pickup.order);

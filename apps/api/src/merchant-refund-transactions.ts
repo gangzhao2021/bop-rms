@@ -1,5 +1,6 @@
 import type { ConsumerTransaction } from "@bop/eventing";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 const denied = (): never => {
   throw new Error("ORDINARY_REFUND_SEND_DENIED");
@@ -31,28 +32,21 @@ export async function createMerchantRefundTransactions(options: {
       actorReference: String(current.actorReference),
     };
   });
-  const active = new Map<ConsumerTransaction, Parameters<typeof resolveScope>[0]>();
+  type Current = Awaited<ReturnType<typeof resolveScope>>;
+  /**
+   * WP-2423: each run resolves the caller in full once at its start (against the bound scope) and
+   * once more before its commit, inside the run's transaction, so a withdrawn permission or ended
+   * Session never commits. Owner callbacks during the run (taken while rows are locked) read this
+   * run's no-query guard instead of re-resolving the caller.
+   */
+  const active = new Map<
+    ConsumerTransaction,
+    { readonly context: Current["context"]; guard(): Promise<boolean> }
+  >();
   const resolveAuthority = async (tx: ConsumerTransaction) => {
-    const original = active.get(tx);
-    if (!original) return denied();
-    const current = await resolveScope(
-      original,
-      options.sessionCookie,
-      options.permission ?? "payment.refund.execute",
-      options.sessionReference,
-    );
-    if (
-      current.selected.tenantReference !== bound.scope.tenantReference ||
-      String(current.context.brand.brandReference) !== bound.scope.brandReference ||
-      String(current.store.storeReference) !== bound.scope.storeReference ||
-      String(current.actorReference) !== bound.actorReference ||
-      !(await current.allowed())
-    )
-      return denied();
-    return {
-      context: current.context,
-      authorize: async () => active.has(tx) && (await current.allowed()),
-    };
+    const run = active.get(tx);
+    if (!run) return denied();
+    return { context: run.context, authorize: () => run.guard() };
   };
   const authorize = async (
     tx: ConsumerTransaction,
@@ -79,7 +73,7 @@ export async function createMerchantRefundTransactions(options: {
 
   const transactions: { run<T>(work: (tx: ConsumerTransaction) => Promise<T>): Promise<T> } = {
     run: (work) =>
-      options.persistence.transactions.run(async (original) => {
+      options.persistence.transactions.run((original) => {
         const tx: ConsumerTransaction = {
           async query<Row = Record<string, unknown>>(sql: string, values: readonly unknown[]) {
             const result = await original.query(sql, values);
@@ -101,15 +95,41 @@ export async function createMerchantRefundTransactions(options: {
             };
           },
         };
-        active.set(tx, original);
-        try {
-          await resolveAuthority(tx);
-          const result = await work(tx);
-          await resolveAuthority(tx);
-          return result;
-        } finally {
-          active.delete(tx);
-        }
+        return withMerchantTransactionAuthorization(
+          {
+            transaction: tx,
+            resolve: async () => {
+              const current = await resolveScope(
+                original,
+                options.sessionCookie,
+                options.permission ?? "payment.refund.execute",
+                options.sessionReference,
+              );
+              if (
+                current.selected.tenantReference !== bound.scope.tenantReference ||
+                String(current.context.brand.brandReference) !== bound.scope.brandReference ||
+                String(current.store.storeReference) !== bound.scope.storeReference ||
+                String(current.actorReference) !== bound.actorReference ||
+                (await current.allowed()) !== true
+              )
+                return denied();
+              return current;
+            },
+            recheck: async (current) => (await current.allowed()) === true,
+            denied,
+          },
+          async (authority) => {
+            active.set(tx, {
+              context: authority.scope.context,
+              guard: () => authority.guard(tx),
+            });
+            try {
+              return await work(tx);
+            } finally {
+              active.delete(tx);
+            }
+          },
+        );
       }),
   };
   return { ...bound, resolveAuthority, authorize, transactions };

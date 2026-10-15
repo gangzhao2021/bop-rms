@@ -13,6 +13,7 @@ import {
   type StockCountAggregate,
 } from "@rms/inventory";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import { merchantStockCatalog } from "./merchant-stock-catalog.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -242,19 +243,74 @@ export function createMerchantStockCounts(options: {
     options.authentication
       .authorize({ sessionCookie: input.sessionCookie, csrf: input.csrf })
       .catch(() => fail("PermissionDenied"));
-  async function scopeFor(tx: Tx, sessionCookie: unknown, sessionReference: string) {
-    const scope = await resolveScope(tx, sessionCookie, "inventory.count.read", sessionReference);
-    if (!(await scope.allowed())) fail("PermissionDenied");
-    const may = async (action: string) => (await scope.authorizeAction(action))?.effect === "Allow";
-    return {
-      owner: {
-        tenantReference: String(scope.selected.tenantReference),
-        brandReference: String(scope.context.brand.brandReference),
-        storeReference: String(scope.store.storeReference),
+  const countActions = [
+    "inventory.count.read",
+    "inventory.count.manage",
+    "inventory.count.execute",
+    "inventory.count.approve",
+  ] as const;
+  /**
+   * WP-2423: one authorized run. `inventory.count.read` and every count permission are decided in
+   * full once at the start (one permission packet); the read permission and every permission a
+   * command used are re-checked in full once more before the reply or commit, inside the
+   * transaction. `may` answers from the start decisions while the run is in progress (no query).
+   */
+  function authorizedRun<T>(
+    tx: Tx,
+    sessionCookie: unknown,
+    sessionReference: string,
+    work: (scope: {
+      owner: { tenantReference: string; brandReference: string; storeReference: string };
+      actor: string;
+      /** The start decision (display only; never authorizes a change). */
+      allows(action: string): boolean;
+      /** Authorizes `action` for an owner command: the start decision, re-checked before commit. */
+      may(action: string): Promise<boolean>;
+    }) => Promise<T>,
+  ): Promise<T> {
+    const used = new Set<string>();
+    return withMerchantTransactionAuthorization(
+      {
+        transaction: tx,
+        resolve: async () => {
+          const scope = await resolveScope(
+            tx,
+            sessionCookie,
+            "inventory.count.read",
+            sessionReference,
+          );
+          const decisions = await scope.authorizeActions(countActions);
+          if (decisions.get("inventory.count.read")?.effect !== "Allow")
+            return fail("PermissionDenied");
+          return { scope, decisions };
+        },
+        recheck: async ({ scope }) => {
+          if (used.size === 0) return (await scope.allowed()) === true;
+          const actions = ["inventory.count.read", ...used];
+          const decisions = await scope.authorizeActions(actions);
+          return actions.every((action) => decisions.get(action)?.effect === "Allow");
+        },
+        denied: () => fail("PermissionDenied"),
       },
-      actor: String(scope.actorReference),
-      may,
-    };
+      (authority) => {
+        const { scope, decisions } = authority.scope;
+        const allows = (action: string) => decisions.get(action)?.effect === "Allow";
+        return work({
+          owner: {
+            tenantReference: String(scope.selected.tenantReference),
+            brandReference: String(scope.context.brand.brandReference),
+            storeReference: String(scope.store.storeReference),
+          },
+          actor: String(scope.actorReference),
+          allows,
+          may: async (action) => {
+            if (!(await authority.guard(tx))) return false;
+            used.add(action);
+            return allows(action);
+          },
+        });
+      },
+    );
   }
   const ledger = (tx: Tx) => tx as unknown as LedgerTransaction;
   const query = async (input: {
@@ -265,57 +321,58 @@ export function createMerchantStockCounts(options: {
   }) => {
     const current = await session(input);
     return retryTransactionConflict(() =>
-      options.persistence.transactions.run(async (tx) => {
-        const scope = await scopeFor(tx, input.sessionCookie, current.sessionReference);
-        const permissions = {
-          mayCreate: await scope.may("inventory.count.manage"),
-          mayCount: await scope.may("inventory.count.execute"),
-          mayApprove: await scope.may("inventory.count.approve"),
-        };
-        const catalog = await merchantStockCatalog(tx, scope.owner, options.locale);
-        const members = await listStoreMembers(
-          tx as unknown as MemberDirectoryTransaction,
-          scope.owner,
-        );
-        const staff = members
-          .filter((member) => member.membershipLifecycle === "Active")
-          .map((member) => ({
-            actorReference: member.actorReference,
-            label:
-              member.actorReference === scope.actor
-                ? "You"
-                : (member.displayName ?? "Staff " + member.actorReference.slice(-4)),
-          }));
-        const base = {
-          sourceAsOf: options.persistence.now(),
-          viewer: scope.actor,
-          permissions,
-          varianceReasons: stockCountVarianceReasons,
-          items: catalog.items,
-          locations: catalog.locations,
-          staff,
-        };
-        if (input.countReference !== null) {
-          const count = await loadStockCount(ledger(tx), scope.owner, input.countReference);
-          if (count === null) return fail("NotFound");
-          const lots = await stockLotLabels(
-            ledger(tx),
-            scope.owner,
-            count.lines.flatMap((line) => (line.lotReference ? [line.lotReference] : [])),
-          );
-          return {
-            screenId: "INV-COUNT-WORKBENCH" as const,
-            ...base,
-            count: redactStockCount(count, permissions.mayApprove, scope.actor),
-            lots: Object.fromEntries(lots),
+      options.persistence.transactions.run((tx) =>
+        authorizedRun(tx, input.sessionCookie, current.sessionReference, async (scope) => {
+          const permissions = {
+            mayCreate: scope.allows("inventory.count.manage"),
+            mayCount: scope.allows("inventory.count.execute"),
+            mayApprove: scope.allows("inventory.count.approve"),
           };
-        }
-        const page = await listStockCounts(ledger(tx), scope.owner, {
-          before: input.before,
-          limit: 30,
-        });
-        return { screenId: "INV-COUNT-LIST" as const, ...base, ...page };
-      }),
+          const catalog = await merchantStockCatalog(tx, scope.owner, options.locale);
+          const members = await listStoreMembers(
+            tx as unknown as MemberDirectoryTransaction,
+            scope.owner,
+          );
+          const staff = members
+            .filter((member) => member.membershipLifecycle === "Active")
+            .map((member) => ({
+              actorReference: member.actorReference,
+              label:
+                member.actorReference === scope.actor
+                  ? "You"
+                  : (member.displayName ?? "Staff " + member.actorReference.slice(-4)),
+            }));
+          const base = {
+            sourceAsOf: options.persistence.now(),
+            viewer: scope.actor,
+            permissions,
+            varianceReasons: stockCountVarianceReasons,
+            items: catalog.items,
+            locations: catalog.locations,
+            staff,
+          };
+          if (input.countReference !== null) {
+            const count = await loadStockCount(ledger(tx), scope.owner, input.countReference);
+            if (count === null) return fail("NotFound");
+            const lots = await stockLotLabels(
+              ledger(tx),
+              scope.owner,
+              count.lines.flatMap((line) => (line.lotReference ? [line.lotReference] : [])),
+            );
+            return {
+              screenId: "INV-COUNT-WORKBENCH" as const,
+              ...base,
+              count: redactStockCount(count, permissions.mayApprove, scope.actor),
+              lots: Object.fromEntries(lots),
+            };
+          }
+          const page = await listStockCounts(ledger(tx), scope.owner, {
+            before: input.before,
+            limit: 30,
+          });
+          return { screenId: "INV-COUNT-LIST" as const, ...base, ...page };
+        }),
+      ),
     );
   };
 
@@ -323,152 +380,153 @@ export function createMerchantStockCounts(options: {
     const body = parseStockCountCommandBody(input.body);
     const current = await session(input);
     return retryTransactionConflict(() =>
-      options.persistence.transactions.run(async (tx) => {
-        const scope = await scopeFor(tx, input.sessionCookie, current.sessionReference);
-        const at = options.persistence.now();
-        const mayViewExpected = await scope.may("inventory.count.approve");
-        const ports = createPostgresStockCountPorts(ledger(tx), scope.owner, {
-          nextReference: () => options.references.next(),
-          authorization: {
-            authorize: async ({ action, permission }) =>
-              permission === permissionOf[action as StockCountAction] &&
-              (await scope.may(permissionOf[action as StockCountAction]))
-                ? { authorized: true, mayViewExpected }
-                : null,
-          },
-          audit: async ({ command, before, after }) => ({
-            auditId: options.references.next(),
-            brandId: scope.owner.brandReference,
-            storeId: scope.owner.storeReference,
-            actor: { type: "User", reference: command.actorReference },
-            actionCode: "INVENTORY_COUNT_" + command.action.toUpperCase(),
-            targetType: "StockCount",
-            targetId: (after ?? before)?.countReference ?? command.operationReference,
-            afterSummary: {
-              status: after?.status ?? "Posted",
-              version: (after ?? before)?.aggregateVersion ?? 0,
+      options.persistence.transactions.run((tx) =>
+        authorizedRun(tx, input.sessionCookie, current.sessionReference, async (scope) => {
+          const at = options.persistence.now();
+          const mayViewExpected = scope.allows("inventory.count.approve");
+          const ports = createPostgresStockCountPorts(ledger(tx), scope.owner, {
+            nextReference: () => options.references.next(),
+            authorization: {
+              authorize: async ({ action, permission }) =>
+                permission === permissionOf[action as StockCountAction] &&
+                (await scope.may(permissionOf[action as StockCountAction]))
+                  ? { authorized: true, mayViewExpected }
+                  : null,
             },
-            reasonCode: "STOCK_COUNT",
-            correlationId: command.operationReference,
-            occurredAt: command.occurredAt,
-            sourceChannel: "MERCHANT_WEB",
-            dataClassification: "Internal",
-            retentionPolicyCode: "AUDIT_STANDARD",
-            retentionPolicyVersion: 1,
-          }),
-        });
-        const run = (
-          action: StockCountAction,
-          operationReference: string,
-          payload: Record<string, unknown>,
-        ) =>
-          executeStockCountCommand(
-            {
-              tenantReference: scope.owner.tenantReference,
-              brandReference: scope.owner.brandReference,
-              actorReference: scope.actor,
-              purpose: "StockCountManagement",
-              permission: action === "Post" ? "inventory.count.approve" : permissionOf[action],
-              operationReference,
-              occurredAt: at,
-              action,
-              payload,
-            },
-            ports,
-          );
-        try {
-          switch (body.action) {
-            case "Create": {
-              // One open count per Storage Location.
-              if (
-                (await openStockCountAt(ledger(tx), scope.owner, body.locationReference)) !== null
-              )
-                return fail("AlreadyOpen");
-              const created = await run("Create", body.operationReference, {
-                stockScope: { scopeType: "Location", scopeReference: body.locationReference },
-                countType: body.countType,
-                expectedQuantityVisibility: "BlindUntilSubmit",
-                movementControl: "SnapshotOnly",
-                approvalPolicy: "Segregated",
-                assigneeReference: body.assigneeReference,
-                dueAt: null,
-              });
-              return { status: created.outcome, countReference: created.count.countReference };
+            audit: async ({ command, before, after }) => ({
+              auditId: options.references.next(),
+              brandId: scope.owner.brandReference,
+              storeId: scope.owner.storeReference,
+              actor: { type: "User", reference: command.actorReference },
+              actionCode: "INVENTORY_COUNT_" + command.action.toUpperCase(),
+              targetType: "StockCount",
+              targetId: (after ?? before)?.countReference ?? command.operationReference,
+              afterSummary: {
+                status: after?.status ?? "Posted",
+                version: (after ?? before)?.aggregateVersion ?? 0,
+              },
+              reasonCode: "STOCK_COUNT",
+              correlationId: command.operationReference,
+              occurredAt: command.occurredAt,
+              sourceChannel: "MERCHANT_WEB",
+              dataClassification: "Internal",
+              retentionPolicyCode: "AUDIT_STANDARD",
+              retentionPolicyVersion: 1,
+            }),
+          });
+          const run = (
+            action: StockCountAction,
+            operationReference: string,
+            payload: Record<string, unknown>,
+          ) =>
+            executeStockCountCommand(
+              {
+                tenantReference: scope.owner.tenantReference,
+                brandReference: scope.owner.brandReference,
+                actorReference: scope.actor,
+                purpose: "StockCountManagement",
+                permission: action === "Post" ? "inventory.count.approve" : permissionOf[action],
+                operationReference,
+                occurredAt: at,
+                action,
+                payload,
+              },
+              ports,
+            );
+          try {
+            switch (body.action) {
+              case "Create": {
+                // One open count per Storage Location.
+                if (
+                  (await openStockCountAt(ledger(tx), scope.owner, body.locationReference)) !== null
+                )
+                  return fail("AlreadyOpen");
+                const created = await run("Create", body.operationReference, {
+                  stockScope: { scopeType: "Location", scopeReference: body.locationReference },
+                  countType: body.countType,
+                  expectedQuantityVisibility: "BlindUntilSubmit",
+                  movementControl: "SnapshotOnly",
+                  approvalPolicy: "Segregated",
+                  assigneeReference: body.assigneeReference,
+                  dueAt: null,
+                });
+                return { status: created.outcome, countReference: created.count.countReference };
+              }
+              case "SaveLine": {
+                const count =
+                  (await loadStockCount(ledger(tx), scope.owner, body.countReference)) ??
+                  fail("NotFound");
+                const line =
+                  count.lines.find((item) => item.lineReference === body.lineReference) ??
+                  fail("LineInvalid", [body.lineReference]);
+                const item = (
+                  await merchantStockCatalog(tx, scope.owner, options.locale)
+                ).items.find((candidate) => candidate.itemReference === line.itemReference);
+                const fraction = body.countedQuantity.split(".")[1] ?? "";
+                if (item && fraction.length > item.ledgerPrecision)
+                  return fail("LineInvalid", [body.lineReference]);
+                const saved = await run("SaveLine", body.operationReference, {
+                  countReference: body.countReference,
+                  expectedVersion: body.expectedVersion,
+                  lineReference: body.lineReference,
+                  countedQuantity: body.countedQuantity,
+                  unitCode: line.unitCode,
+                  varianceReasonCode: null,
+                });
+                return { status: saved.outcome, version: saved.count.aggregateVersion };
+              }
+              case "ExplainVariance": {
+                const saved = await run("ExplainVariance", body.operationReference, {
+                  countReference: body.countReference,
+                  expectedVersion: body.expectedVersion,
+                  lineReference: body.lineReference,
+                  varianceReasonCode: body.varianceReasonCode,
+                });
+                return { status: saved.outcome, version: saved.count.aggregateVersion };
+              }
+              case "ApproveAndPost": {
+                const approved = await run("Approve", body.operationReference, {
+                  countReference: body.countReference,
+                  expectedVersion: body.expectedVersion,
+                  reasonCode: "VARIANCE_APPROVED",
+                });
+                const posted = await run("Post", body.postOperationReference, {
+                  countReference: body.countReference,
+                  expectedVersion: approved.count.aggregateVersion,
+                });
+                return {
+                  status: posted.outcome,
+                  version: posted.count.aggregateVersion,
+                  movements: posted.movements.length,
+                };
+              }
+              default: {
+                const action: StockCountAction =
+                  body.action === "SendBack"
+                    ? "Reject"
+                    : body.action === "Cancel"
+                      ? "Cancel"
+                      : body.action;
+                const saved = await run(action, body.operationReference, {
+                  countReference: body.countReference,
+                  expectedVersion: body.expectedVersion,
+                  ...(action === "Reject"
+                    ? { reasonCode: "RECOUNT_REQUIRED" }
+                    : action === "Cancel"
+                      ? { reasonCode: "COUNT_CANCELLED" }
+                      : {}),
+                });
+                return { status: saved.outcome, version: saved.count.aggregateVersion };
+              }
             }
-            case "SaveLine": {
-              const count =
-                (await loadStockCount(ledger(tx), scope.owner, body.countReference)) ??
-                fail("NotFound");
-              const line =
-                count.lines.find((item) => item.lineReference === body.lineReference) ??
-                fail("LineInvalid", [body.lineReference]);
-              const item = (await merchantStockCatalog(tx, scope.owner, options.locale)).items.find(
-                (candidate) => candidate.itemReference === line.itemReference,
-              );
-              const fraction = body.countedQuantity.split(".")[1] ?? "";
-              if (item && fraction.length > item.ledgerPrecision)
-                return fail("LineInvalid", [body.lineReference]);
-              const saved = await run("SaveLine", body.operationReference, {
-                countReference: body.countReference,
-                expectedVersion: body.expectedVersion,
-                lineReference: body.lineReference,
-                countedQuantity: body.countedQuantity,
-                unitCode: line.unitCode,
-                varianceReasonCode: null,
-              });
-              return { status: saved.outcome, version: saved.count.aggregateVersion };
-            }
-            case "ExplainVariance": {
-              const saved = await run("ExplainVariance", body.operationReference, {
-                countReference: body.countReference,
-                expectedVersion: body.expectedVersion,
-                lineReference: body.lineReference,
-                varianceReasonCode: body.varianceReasonCode,
-              });
-              return { status: saved.outcome, version: saved.count.aggregateVersion };
-            }
-            case "ApproveAndPost": {
-              const approved = await run("Approve", body.operationReference, {
-                countReference: body.countReference,
-                expectedVersion: body.expectedVersion,
-                reasonCode: "VARIANCE_APPROVED",
-              });
-              const posted = await run("Post", body.postOperationReference, {
-                countReference: body.countReference,
-                expectedVersion: approved.count.aggregateVersion,
-              });
-              return {
-                status: posted.outcome,
-                version: posted.count.aggregateVersion,
-                movements: posted.movements.length,
-              };
-            }
-            default: {
-              const action: StockCountAction =
-                body.action === "SendBack"
-                  ? "Reject"
-                  : body.action === "Cancel"
-                    ? "Cancel"
-                    : body.action;
-              const saved = await run(action, body.operationReference, {
-                countReference: body.countReference,
-                expectedVersion: body.expectedVersion,
-                ...(action === "Reject"
-                  ? { reasonCode: "RECOUNT_REQUIRED" }
-                  : action === "Cancel"
-                    ? { reasonCode: "COUNT_CANCELLED" }
-                    : {}),
-              });
-              return { status: saved.outcome, version: saved.count.aggregateVersion };
-            }
+          } catch (error) {
+            if (error instanceof StockCountStaleError)
+              return fail("StockChanged", error.lineReferences);
+            if (error instanceof StockCountError) return fail(serviceErrors[error.code]);
+            throw error;
           }
-        } catch (error) {
-          if (error instanceof StockCountStaleError)
-            return fail("StockChanged", error.lineReferences);
-          if (error instanceof StockCountError) return fail(serviceErrors[error.code]);
-          throw error;
-        }
-      }),
+        }),
+      ),
     );
   };
   return { query, command };

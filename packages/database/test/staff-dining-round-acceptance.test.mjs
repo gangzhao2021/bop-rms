@@ -105,7 +105,7 @@ import {
 // WP-2423 item 4: only the merchant session lookup of the refund staff (manager, owner) is a test
 // double, as in the dine-in journey; every other cookie (the real encrypted staff sessions) goes to
 // the real scope resolution.
-const signedIn = vi.hoisted(() => ({ cookies: new Set(), scopeFor: null }));
+const signedIn = vi.hoisted(() => ({ cookies: new Set(), scopeFor: null, ended: false }));
 vi.mock("../../../apps/api/src/merchant-store-scope.ts", async (importOriginal) => {
   const actual = await importOriginal();
   return {
@@ -135,6 +135,38 @@ const fresh = () =>
   (references++).toString(16).padStart(12, "0");
 const now = () => new Date().toISOString();
 
+/**
+ * WP-2423 query budgets: every statement the restricted API role runs is counted, so each staff
+ * command is held to a cost a busy Store can afford. Before (e597b252) every owner check inside a
+ * command re-resolved the caller in full (Session, selection, membership, store assignment and
+ * permission policy, ~30 statements each); now the caller is resolved once at the start and once
+ * before the commit.
+ */
+const restricted = { statements: 0 };
+// Before (e597b252) → now, statements: card-machine payment 594 → 134, its replay 60 → 60, order
+// accept 639 → 271 (its replay 133 → 110), refund request 852 → 150.
+const commandBudgets = {
+  "card-machine payment": 200,
+  "card-machine payment replay": 90,
+  "order accept": 330,
+  "refund request": 220,
+};
+async function withinBudget(label, work) {
+  const before = restricted.statements,
+    started = performance.now();
+  const result = await work();
+  const cost = {
+    statements: restricted.statements - before,
+    ms: Math.round(performance.now() - started),
+  };
+  if (process.env.WP2423_COST_LOG)
+    await appendFile(process.env.WP2423_COST_LOG, label + " " + JSON.stringify(cost) + "\n");
+  assert.ok(
+    cost.statements <= commandBudgets[label],
+    label + " ran " + cost.statements + " statements (budget " + commandBudgets[label] + ")",
+  );
+  return result;
+}
 /**
  * WP-2423 Q7 slice 2 (DEC-STAFF-DINE-IN-ROUND). A table whose first round a guest paid online gets a
  * second round entered by staff for guests who don't use a phone. The round is submitted by the
@@ -209,7 +241,10 @@ it("enters a dine-in round by staff, takes its card-machine payment and marks it
                 [tenant, scope.brandReference, scope.storeReference],
               );
             const result = await work({
-              query: (sql, values) => client.query(sql, values === undefined ? [] : [...values]),
+              query: (sql, values) => {
+                restricted.statements += 1;
+                return client.query(sql, values === undefined ? [] : [...values]);
+              },
             });
             await client.query("COMMIT");
             return result;
@@ -810,13 +845,18 @@ it("enters a dine-in round by staff, takes its card-machine payment and marks it
       ]);
 
       // ── The card-machine payment of the round (dine-in later-round payment admission).
+      // `midway` runs once inside the next payment command, after its staff member was resolved
+      // and while its Payment and Ordering rows are read (WP-2423 refusal-before-commit checks).
+      let midway = null;
       const admission = ({ scope: selected, preparation, allowed, kind }) => {
         assert.equal(kind, "DiningAdditional");
+        const during = midway;
+        midway = null;
         const authorize = async (_tx, value) =>
           value.submissionReference === String(preparation.submissionReference) &&
           value.actorReference === String(preparation.guestSessionReference) &&
           (await allowed());
-        return createCustomerAdditionalDiningPaymentAdmission({
+        const admitted = createCustomerAdditionalDiningPaymentAdmission({
           scope: selected,
           quoteVersion: 1,
           authorizeHistory: async (tx, value) =>
@@ -832,6 +872,15 @@ it("enters a dine-in round by staff, takes its card-machine payment and marks it
             resolveExpiryCutoff: stock.resolveExpiryCutoff,
           },
         });
+        if (during === null) return admitted;
+        return {
+          ...admitted,
+          admit: async (...args) => {
+            const result = await admitted.admit(...args);
+            await during();
+            return result;
+          },
+        };
       };
       const cardPayment = (session) =>
         createMerchantCardMachinePayment({
@@ -875,7 +924,34 @@ it("enters a dine-in round by staff, takes its card-machine payment and marks it
         code: "CARD_MACHINE_NOT_FOUND",
       });
       assert.deepEqual(await counts(), start);
-      const paid = await cardPayment(staffSession)(payInput(staffSession));
+      // WP-2423: the staff member's Session ending while the payment is being recorded (after
+      // they were resolved, while the Payment and Ordering rows are read, before the commit)
+      // records nothing. (A permission change cannot land mid-command: the permission policy
+      // read holds SHARE locks on the permission tables, so an administrator's change waits
+      // for the command to commit and applies to the next one.)
+      let sessionEnded = false;
+      midway = async () => {
+        sessionEnded = true;
+      };
+      await assert.rejects(
+        createMerchantCardMachinePayment({
+          persistence: {
+            ...staffSession.persistence,
+            // The Session's idle and absolute lifetimes have passed by the commit.
+            now: () => (sessionEnded ? new Date(Date.now() + 86_400_000).toISOString() : now()),
+          },
+          authentication: staffSession.authentication,
+          admission,
+          environment: "Test",
+          nextReference: fresh,
+        })(payInput(staffSession)),
+        { code: "CARD_MACHINE_PERMISSION_DENIED" },
+      );
+      assert.equal(sessionEnded, true);
+      assert.deepEqual(await counts(), start);
+      const paid = await withinBudget("card-machine payment", () =>
+        cardPayment(staffSession)(payInput(staffSession)),
+      );
       assert.equal(paid.status, "Recorded");
       assert.equal(paid.amountMinor, String(round2Total + tipMinor));
       assert.equal(paid.recordingReason, "AtCounter");
@@ -884,7 +960,11 @@ it("enters a dine-in round by staff, takes its card-machine payment and marks it
         events: start.events + 1,
       });
       assert.equal(
-        (await cardPayment(staffSession)(payInput(staffSession))).status,
+        (
+          await withinBudget("card-machine payment replay", () =>
+            cardPayment(staffSession)(payInput(staffSession)),
+          )
+        ).status,
         "AlreadyRecorded",
       );
       await assert.rejects(
@@ -1280,7 +1360,10 @@ async function exerciseCardMachinePartialRefund({
       sessionReference: id(0xa00 + Object.keys(cookies).indexOf(cookie)),
       kdsOperatorProfileAllows: (requested) =>
         kdsOperatorProfileAllows({ policy: { code: "WorkforceStandard" } }, requested),
-      allowed: async () => (await decide(action))?.effect === "Allow",
+      allowed: async () => {
+        if (signedIn.ended) throw new Error("STORE_SERVICE_PERMISSION_DENIED");
+        return (await decide(action))?.effect === "Allow";
+      },
       authorizeAction: decide,
     };
   };
@@ -1326,10 +1409,18 @@ async function exerciseCardMachinePartialRefund({
     resolveRoleMapping: async () => standardRefundRoleMapping,
     stepUp: true,
   });
+  // `midway` runs once inside the next refund request, after the requester was resolved and
+  // before the request is prepared and recorded (WP-2423 refusal-before-commit check).
+  let midway = null;
   const request = createMerchantOrdinaryRefundRequest({
     persistence,
     authentication,
-    resolveConfiguration: refundConfiguration,
+    resolveConfiguration: async (...args) => {
+      const during = midway;
+      midway = null;
+      await during?.();
+      return refundConfiguration(...args);
+    },
     newAuditReference: fresh,
     retentionPolicyCode: "FINANCIAL_COMPLIANCE",
     retentionPolicyVersion: 1,
@@ -1541,7 +1632,28 @@ async function exerciseCardMachinePartialRefund({
     Object.values(previewA.components).reduce((sum, value) => sum + BigInt(value), 0n),
     amountA,
   );
-  const recordedA = await request({ ...session("manager"), command: commandA });
+  // WP-2423: the manager's Session ending while the request is being made (after they were
+  // resolved, before the commit) records nothing. The test double of the manager's scope refuses
+  // as the real one does once the Session's lifetime has passed.
+  const requests = async () =>
+    (
+      await one(
+        "SELECT (SELECT count(*)::int FROM rms_payment.ordinary_refund_request WHERE order_id=$1)+(SELECT count(*)::int FROM platform_audit.audit_record WHERE target_id=$1) AS n",
+        [orderReference],
+      )
+    )[0].n;
+  const requestsBefore = await requests();
+  midway = async () => {
+    signedIn.ended = true;
+  };
+  await assert.rejects(request({ ...session("manager"), command: commandA }), {
+    message: "ORDINARY_REFUND_REQUEST_DENIED",
+  });
+  signedIn.ended = false;
+  assert.equal(await requests(), requestsBefore);
+  const recordedA = await withinBudget("refund request", () =>
+    request({ ...session("manager"), command: commandA }),
+  );
   assert.equal(recordedA.status, "Created");
   assert.equal(recordedA.approvalRequired, false);
   const statusA = async () =>
@@ -2042,6 +2154,10 @@ async function exerciseGuestsLeftOrderClose({
     "order close": 700,
     "order close replay": 120,
     "table finalize": 450,
+    // WP-2423: a staff round cancellation resolves the manager once and once before the commit
+    // (before: card-machine round 615, online round 382 statements; now 132 and 129).
+    "round cancellation card machine": 200,
+    "round cancellation online": 200,
   };
   const measured = async (label, work) => {
     const before = statements,
@@ -2167,24 +2283,28 @@ async function exerciseGuestsLeftOrderClose({
 
   // ── The manager resolves the rounds (GUEST_LEFT). Round 2 was refunded on the machine in full:
   // cancelled with nothing more owed. Round 1: Payment refunds the online payment.
-  const cancel = async (round, operationReference = fresh()) =>
-    cancelRound({
-      ...session,
-      command: {
-        orderReference,
-        orderBatchReference: round.orderBatchReference,
-        expectedOrderVersion: (await plan()).orderVersion,
-        operationReference,
-        reasonCode: "GUEST_LEFT",
-      },
-    });
-  const machineRound = await cancel(open.rounds[1]);
+  const cancel = async (round, operationReference = fresh(), label = null) => {
+    const expectedOrderVersion = (await plan()).orderVersion;
+    const run = () =>
+      cancelRound({
+        ...session,
+        command: {
+          orderReference,
+          orderBatchReference: round.orderBatchReference,
+          expectedOrderVersion,
+          operationReference,
+          reasonCode: "GUEST_LEFT",
+        },
+      });
+    return label === null ? run() : (await measured(label, run)).result;
+  };
+  const machineRound = await cancel(open.rounds[1], fresh(), "round cancellation card machine");
   assert.deepEqual(
     [machineRound.status, machineRound.refundMethod, machineRound.refundStatus],
     ["Cancelled", "CardMachine", "Refunded"],
   );
   assert.equal(machineRound.refundAmountMinor, String(cardMachineTotal));
-  const onlineRound = await cancel(open.rounds[0]);
+  const onlineRound = await cancel(open.rounds[0], fresh(), "round cancellation online");
   assert.deepEqual(
     [onlineRound.status, onlineRound.refundMethod, onlineRound.refundStatus],
     ["Cancelled", "Online", "Pending"],
@@ -2400,13 +2520,24 @@ async function exerciseServerSideAcceptance({
   const version = before.currentVersion;
   assert.ok(version > 1);
   assert.equal(before.batches[1].acceptanceStatus, "NotAccepted");
+  // `midway` runs once inside the next acceptance, after the staff member was resolved and
+  // before the Order is read and accepted (WP-2423 refusal-before-commit check). `sessionEnded`
+  // moves only the staff member's Session clock past its lifetime.
+  let midway = null,
+    sessionEnded = false;
   const accept = createMerchantOrderAcceptanceCommand({
-    persistence: { ...staffSession.persistence, now },
+    persistence: {
+      ...staffSession.persistence,
+      now: () => (sessionEnded ? new Date(Date.now() + 86_400_000).toISOString() : now()),
+    },
     authentication: staffSession.authentication,
     generateAuditReference: fresh,
     audit: { retentionPolicyCode: "FINANCIAL_COMPLIANCE", retentionPolicyVersion: 1 },
-    resolveConfiguration: (tx, selected, command) =>
-      createMerchantAcceptanceConfigurationResolver({
+    resolveConfiguration: async (tx, selected, command) => {
+      const during = midway;
+      midway = null;
+      await during?.();
+      return createMerchantAcceptanceConfigurationResolver({
         now,
         authorize: async (_tx, value) =>
           value.brandReference === scope.brandReference &&
@@ -2445,7 +2576,8 @@ async function exerciseServerSideAcceptance({
             },
           },
         }),
-      })(tx, selected, command),
+      })(tx, selected, command);
+    },
   });
   const session = { sessionCookie: staffSession.sessionCookie, csrf: staffSession.csrf };
   const seen = (expectedOrderVersion) => ({
@@ -2468,8 +2600,21 @@ async function exerciseServerSideAcceptance({
       )
     )[0].n;
   assert.equal(await acceptances(), 0);
+  // WP-2423: the staff member's Session ending while the acceptance runs (after they were
+  // resolved, after the Order was accepted in this transaction, before the commit) accepts
+  // nothing: the Order version and its acceptance stay as they were.
+  midway = async () => {
+    sessionEnded = true;
+  };
+  await assert.rejects(accept(seen(version)), { message: "ORDER_ACCEPTANCE_COMMAND_DENIED" });
+  sessionEnded = false;
+  assert.equal(await acceptances(), 0);
+  assert.equal((await queued()).currentVersion, version);
   // The payment record (a retry of the same operation) brings the server-side acceptance.
-  const paid = withPaidBatchAcceptance(record, { accept, nextReference: fresh });
+  const paid = withPaidBatchAcceptance(record, {
+    accept: (input, mode) => withinBudget("order accept", () => accept(input, mode)),
+    nextReference: fresh,
+  });
   const first = await paid(payInput);
   assert.equal(first.status, "AlreadyRecorded");
   assert.equal(first.acceptance, "Accepted");

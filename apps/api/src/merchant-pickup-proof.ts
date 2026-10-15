@@ -10,6 +10,7 @@ import {
   completePickupHandoffPermission,
 } from "@rms/fulfillment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 type StoreOptions = Parameters<typeof createPostgresPickupProofStore>[0];
@@ -88,116 +89,142 @@ export function createMerchantPickupProof(options: {
       )
         return unavailable();
     } else return unavailable();
-    const outcome = await options.persistence.transactions.run(async (transaction) => {
-      const scope = await resolveScope(
-        transaction,
-        input.sessionCookie,
-        completePickupHandoffPermission,
-        session.sessionReference,
-      );
-      if (raw.storeReference !== scope.store.storeReference || !(await scope.allowed()))
-        throw new PickupHandoffError("PICKUP_HANDOFF_PERMISSION_DENIED");
-      const tx: ConsumerTransaction = {
-        async query<Row = Record<string, unknown>>(sql: string, values: readonly unknown[]) {
-          const result = await transaction.query(sql, values);
-          if (!result || typeof result !== "object") return unavailable();
-          const rows = Object.getOwnPropertyDescriptor(result, "rows"),
-            count = Object.getOwnPropertyDescriptor(result, "rowCount");
+    const denied = (): never => {
+      throw new PickupHandoffError("PICKUP_HANDOFF_PERMISSION_DENIED");
+    };
+    // WP-2423: one authorized run. The caller and `fulfillment.pickup.complete` are resolved in
+    // full once at the start and once more before the commit (inside this transaction, so a
+    // withdrawn permission or ended Session never commits); the owner store's authorize callback,
+    // which runs while the order is locked, takes the run's no-query guard.
+    const outcome = await options.persistence.transactions.run((transaction) =>
+      withMerchantTransactionAuthorization(
+        {
+          transaction,
+          resolve: async () => {
+            const resolved = await resolveScope(
+              transaction,
+              input.sessionCookie,
+              completePickupHandoffPermission,
+              session.sessionReference,
+            );
+            if (
+              raw.storeReference !== resolved.store.storeReference ||
+              (await resolved.allowed()) !== true
+            )
+              return denied();
+            return resolved;
+          },
+          recheck: async (scope) => (await scope.allowed()) === true,
+          denied,
+        },
+        async (authority) => {
+          const scope = authority.scope;
+          const tx: ConsumerTransaction = {
+            async query<Row = Record<string, unknown>>(sql: string, values: readonly unknown[]) {
+              const result = await transaction.query(sql, values);
+              if (!result || typeof result !== "object") return unavailable();
+              const rows = Object.getOwnPropertyDescriptor(result, "rows"),
+                count = Object.getOwnPropertyDescriptor(result, "rowCount");
+              if (
+                !rows ||
+                !("value" in rows) ||
+                !Array.isArray(rows.value) ||
+                !count ||
+                !("value" in count) ||
+                (count.value !== null && (!Number.isSafeInteger(count.value) || count.value < 0))
+              )
+                return unavailable();
+              return { rows: rows.value as readonly Row[], rowCount: count.value as number | null };
+            },
+          };
+
+          const selected = {
+            brandReference: scope.context.brand.brandReference,
+            storeReference: scope.store.storeReference,
+          };
           if (
-            !rows ||
-            !("value" in rows) ||
-            !Array.isArray(rows.value) ||
-            !count ||
-            !("value" in count) ||
-            (count.value !== null && (!Number.isSafeInteger(count.value) || count.value < 0))
+            !(await options.consumeAttempt({
+              ...selected,
+              actorReference: scope.actorReference,
+              orderReference,
+            }))
           )
             return unavailable();
-          return { rows: rows.value as readonly Row[], rowCount: count.value as number | null };
+          authority.bind(tx);
+          await options.installContext(tx, selected);
+          const store = createPostgresPickupProofStore({
+            ...options.store,
+            ...selected,
+            now: options.persistence.now,
+            appendAudit: (transaction, fact) =>
+              options.appendAudit(transaction, fact, scope.actorReference),
+            authorize: async (ownerTransaction, access) =>
+              access.access !== "Issue" &&
+              access.orderReference === orderReference &&
+              (await authority.guard(ownerTransaction)),
+          });
+          const current = await store.lockByOrder({ transaction: tx, orderReference });
+          // The long code checks against the proof itself; the six-digit code against its own row.
+          if (
+            !current.capability ||
+            current.source.fulfillmentReference !== fulfillmentReference ||
+            (current.capability.kind !== kind &&
+              !(kind === "HumanCode" && current.capability.kind === "Opaque"))
+          )
+            return unavailable();
+          const selectorHash = await options.hashCredential({
+            ...selected,
+            purpose: "PickupHandoff",
+            kind,
+            fulfillmentReference,
+            pepperVersion: current.capability.pepperVersion,
+            credential,
+          });
+          const prior = await store.resolveByIdempotency({
+            transaction: tx,
+            orderReference,
+            idempotencyReference,
+          });
+          if (prior && prior.kind !== "Verify")
+            throw new PickupProofError("PICKUP_PROOF_VERSION_CONFLICT");
+          // Shapes the record only; the owner store compares the typed code and records a wrong one.
+          const record = validatePickupProof({
+            source: current.source,
+            capability: current.capability,
+            selectorHash: current.capability.selectorHash,
+            generation: raw.generation,
+            expectedCapabilityVersion: 1,
+            observedAt: options.persistence.now(),
+            verificationReference: prior?.record.verificationReference ?? options.nextReference(),
+            operationReference: prior?.record.operationReference ?? options.nextReference(),
+            idempotencyReference,
+            correlationReference,
+          });
+          const result = await store.verify({
+            transaction: tx,
+            orderReference,
+            selectorHash,
+            record: prior
+              ? { ...record, verificationMethod: kind, verifiedAt: prior.record.verifiedAt }
+              : { ...record, verificationMethod: kind },
+            rejection: { actorReference: scope.actorReference },
+          });
+          if (result.status === "Conflict")
+            throw new PickupProofError("PICKUP_PROOF_VERSION_CONFLICT");
+          // A wrong code is committed as a rejected check (so the count survives), then refused.
+          if (result.status === "Rejected")
+            return { rejected: result.locked ? "Locked" : "Rejected" };
+          return Object.freeze({
+            status: result.status,
+            verificationReference: result.record.verificationReference,
+            fulfillmentReference: result.record.fulfillmentReference,
+            expectedAggregateVersion: current.source.aggregateVersion.toString(),
+            generation: result.record.generation,
+            grantsCompletionAuthority: false as const,
+          });
         },
-      };
-
-      const selected = {
-        brandReference: scope.context.brand.brandReference,
-        storeReference: scope.store.storeReference,
-      };
-      if (
-        !(await options.consumeAttempt({
-          ...selected,
-          actorReference: scope.actorReference,
-          orderReference,
-        }))
-      )
-        return unavailable();
-      await options.installContext(tx, selected);
-      const store = createPostgresPickupProofStore({
-        ...options.store,
-        ...selected,
-        now: options.persistence.now,
-        appendAudit: (transaction, fact) =>
-          options.appendAudit(transaction, fact, scope.actorReference),
-        authorize: async (_tx, access) =>
-          access.access !== "Issue" &&
-          access.orderReference === orderReference &&
-          (await scope.allowed()),
-      });
-      const current = await store.lockByOrder({ transaction: tx, orderReference });
-      // The long code checks against the proof itself; the six-digit code against its own row.
-      if (
-        !current.capability ||
-        current.source.fulfillmentReference !== fulfillmentReference ||
-        (current.capability.kind !== kind &&
-          !(kind === "HumanCode" && current.capability.kind === "Opaque"))
-      )
-        return unavailable();
-      const selectorHash = await options.hashCredential({
-        ...selected,
-        purpose: "PickupHandoff",
-        kind,
-        fulfillmentReference,
-        pepperVersion: current.capability.pepperVersion,
-        credential,
-      });
-      const prior = await store.resolveByIdempotency({
-        transaction: tx,
-        orderReference,
-        idempotencyReference,
-      });
-      if (prior && prior.kind !== "Verify")
-        throw new PickupProofError("PICKUP_PROOF_VERSION_CONFLICT");
-      // Shapes the record only; the owner store compares the typed code and records a wrong one.
-      const record = validatePickupProof({
-        source: current.source,
-        capability: current.capability,
-        selectorHash: current.capability.selectorHash,
-        generation: raw.generation,
-        expectedCapabilityVersion: 1,
-        observedAt: options.persistence.now(),
-        verificationReference: prior?.record.verificationReference ?? options.nextReference(),
-        operationReference: prior?.record.operationReference ?? options.nextReference(),
-        idempotencyReference,
-        correlationReference,
-      });
-      const result = await store.verify({
-        transaction: tx,
-        orderReference,
-        selectorHash,
-        record: prior
-          ? { ...record, verificationMethod: kind, verifiedAt: prior.record.verifiedAt }
-          : { ...record, verificationMethod: kind },
-        rejection: { actorReference: scope.actorReference },
-      });
-      if (result.status === "Conflict") throw new PickupProofError("PICKUP_PROOF_VERSION_CONFLICT");
-      // A wrong code is committed as a rejected check (so the count survives), then refused.
-      if (result.status === "Rejected") return { rejected: result.locked ? "Locked" : "Rejected" };
-      return Object.freeze({
-        status: result.status,
-        verificationReference: result.record.verificationReference,
-        fulfillmentReference: result.record.fulfillmentReference,
-        expectedAggregateVersion: current.source.aggregateVersion.toString(),
-        generation: result.record.generation,
-        grantsCompletionAuthority: false as const,
-      });
-    });
+      ),
+    );
     if ("rejected" in outcome)
       throw new PickupProofError(
         outcome.rejected === "Locked" ? "PICKUP_PROOF_LOCKED" : "PICKUP_PROOF_REJECTED",

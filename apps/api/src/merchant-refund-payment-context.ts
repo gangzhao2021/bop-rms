@@ -9,6 +9,10 @@ import {
   createOrdinaryRefundRoleResolver,
 } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import {
+  withMerchantTransactionAuthorization,
+  type MerchantTransactionAuthority,
+} from "./merchant-transaction-authorization.js";
 import { createMerchantWorkforcePermissionSource } from "./merchant-workforce-authority-source.js";
 import { refundReadAccess } from "./merchant-refund-read-authority.js";
 import { cardMachineWholeRefundSource } from "./merchant-card-machine-refund.js";
@@ -46,15 +50,37 @@ export function createMerchantRefundPaymentContext(options: {
     const paymentIntentReference = String(
       parseOpaqueUuidV7(raw.paymentIntentReference, "ACTOR_REFERENCE_INVALID"),
     );
-    return options.persistence.transactions.run(async (transaction) => {
-      const current = await resolve(
-        transaction,
-        input.sessionCookie,
-        // WP-2423 Q5: workspace access here; refundReadAccess decides who may read refunds.
-        "merchant.access",
-        authenticated.sessionReference,
-      );
-      if (!(await current.allowed())) return deny();
+    // WP-2423: one authorized run. The caller is resolved in full once at the start and once more
+    // before the reply (with who may read refunds); owner reads in between take the run's guard
+    // (no query) instead of re-resolving the caller in every read.
+    return options.persistence.transactions.run((transaction) =>
+      withMerchantTransactionAuthorization(
+        {
+          transaction,
+          resolve: async () => {
+            const current = await resolve(
+              transaction,
+              input.sessionCookie,
+              // WP-2423 Q5: workspace access here; refundReadAccess decides who may read refunds.
+              "merchant.access",
+              authenticated.sessionReference,
+            );
+            if (!(await current.allowed())) return deny();
+            return current;
+          },
+          recheck: async (current) => (await current.allowed()) === true,
+          denied: deny,
+        },
+        (authority) => readInRun(transaction, authority),
+      ),
+    );
+    async function readInRun(
+      transaction: Parameters<
+        Parameters<PersistentMerchantBffOptions["transactions"]["run"]>[0]
+      >[0],
+      authority: MerchantTransactionAuthority<Awaited<ReturnType<typeof resolve>>>,
+    ) {
+      const current = authority.scope;
       const businessTransaction: ConsumerTransaction = {
         async query<Row = Record<string, unknown>>(sql: string, values: readonly unknown[]) {
           const result = await transaction.query(sql, values);
@@ -77,6 +103,7 @@ export function createMerchantRefundPaymentContext(options: {
           return { rows: rows.value as readonly Row[], rowCount: count.value as number | null };
         },
       };
+      authority.bind(businessTransaction);
       const scope = {
         tenantReference: current.selected.tenantReference,
         brandReference: String(current.context.brand.brandReference),
@@ -105,13 +132,13 @@ export function createMerchantRefundPaymentContext(options: {
                   actorReference: String(current.actorReference),
                   observedAt: String(current.context.resolvedAt),
                 },
-                { context: current.context, authorize: current.allowed },
+                { context: current.context, authorize: () => authority.guard() },
               );
               return (await soleOperatorStatus) === "Effective";
             };
-      const allowed = async () => {
-        if (!(await current.allowed())) return false;
-        // WP-2423 Q5: Owners/Finance read refunds too; only a Manager records requests.
+      // WP-2423 Q5: Owners/Finance read refunds too; only a Manager records requests. Decided in
+      // full here and once more before the reply.
+      const readAccess = async () => {
         const access = await refundReadAccess(
           workforce,
           businessTransaction,
@@ -127,14 +154,16 @@ export function createMerchantRefundPaymentContext(options: {
         viewer.canRequest = access.canRequest;
         return access.canRead;
       };
-      if (!(await allowed())) return deny();
+      if (!(await readAccess())) return deny();
+      authority.recheckBeforeReply(readAccess);
+      const allowed = (tx?: unknown) => authority.guard(tx);
       const observedAt = String(current.context.resolvedAt);
       // WP-2423 item 4: a payment taken on the Store's own card machine. Its refunds are made on
       // that machine: confirmed is what was recorded as refunded there (ordinary requests and
       // whole refunds of a cancelled or unfulfillable round); pending is an ordinary request not
       // yet recorded, or the rest of a whole refund still owed.
       // Owner reads run inside this transaction after the full check above; it is repeated
-      // before the reply.
+      // before the reply (withMerchantTransactionAuthorization).
       const card = await createPostgresCardMachinePaymentStore({
         scope,
         authorize: async () => true,
@@ -166,7 +195,7 @@ export function createMerchantRefundPaymentContext(options: {
         const whole = await cardMachineWholeRefundSource(businessTransaction, scope, card);
         if (whole !== null && !refunds.some((refund) => refund.sourceReference === whole.reference))
           pending = captured - confirmed;
-        if (confirmed + pending > captured || !(await allowed())) return deny();
+        if (confirmed + pending > captured) return deny();
         return Object.freeze({
           paymentIntentReference: card.paymentIntentReference,
           paymentAttemptReference: card.paymentAttemptReference,
@@ -184,7 +213,7 @@ export function createMerchantRefundPaymentContext(options: {
       }
       const binding = await createPostgresPaymentIntentBindingSource({
         scope: { ...scope, environment: configuration.environment },
-        authorize: allowed,
+        authorize: (tx) => allowed(tx),
       })(businessTransaction, { paymentIntentReference, observedAt });
       const terminal = await createPostgresPaymentTerminalStore(
         { run: (work) => work(businessTransaction) },
@@ -203,7 +232,6 @@ export function createMerchantRefundPaymentContext(options: {
       )
         return deny();
       if (terminal === null || terminal.outcome === "Failed") {
-        if (!(await allowed())) return deny();
         return Object.freeze({
           ...binding,
           observedAt,
@@ -226,7 +254,7 @@ export function createMerchantRefundPaymentContext(options: {
         scope,
         providerAccountReference: configuration.providerAccountReference,
         environment: configuration.environment,
-        authorize: allowed,
+        authorize: (tx) => allowed(tx),
       })(businessTransaction, {
         orderReference: binding.orderReference,
         paymentTransactionReference: terminal.paymentTransactionReference,
@@ -234,10 +262,7 @@ export function createMerchantRefundPaymentContext(options: {
         paymentAttemptReference: binding.paymentAttemptReference,
         observedAt,
       });
-      if (
-        position.confirmedMinor + position.pendingMinor > terminal.amount.amountMinor ||
-        !(await allowed())
-      )
+      if (position.confirmedMinor + position.pendingMinor > terminal.amount.amountMinor)
         return deny();
       return Object.freeze({
         ...binding,
@@ -251,6 +276,6 @@ export function createMerchantRefundPaymentContext(options: {
         // WP-2423 Q5: only a Manager records a refund request; Owners/Finance read and approve.
         canRequest: viewer.canRequest,
       });
-    });
+    }
   };
 }

@@ -173,9 +173,25 @@ it("requires Manager eligibility even when action policy allows Owner", async ()
 });
 it("rechecks authority before commit", async () => {
   const f = setup();
-  f.allowed.mockResolvedValueOnce(true).mockResolvedValueOnce(true).mockResolvedValue(false);
+  // WP-2423: a permission withdrawn or Session ended during the request records nothing; the
+  // refusal is raised inside the transaction callback after the write, so it rolls back.
+  f.allowed.mockResolvedValueOnce(true).mockResolvedValue(false);
   await expect(f.operation(f.input)).rejects.toThrow("ORDINARY_REFUND_REQUEST_DENIED");
   expect(d.record).toHaveBeenCalledTimes(1);
+  expect(f.allowed).toHaveBeenCalledTimes(2);
+});
+
+it("WP-2423: resolves the requester in full twice and their role once plus once before commit", async () => {
+  const f = setup();
+  await f.operation(f.input);
+  expect(d.resolve).toHaveBeenCalledTimes(1);
+  expect(f.allowed).toHaveBeenCalledTimes(2);
+  expect(d.workforce).toHaveBeenCalledTimes(2);
+  // A role withdrawn during the request refuses it before commit.
+  d.workforce
+    .mockResolvedValueOnce({ decision: { effect: "Allow" }, activeRoleCodes: ["manager"] })
+    .mockResolvedValueOnce({ decision: { effect: "Deny" }, activeRoleCodes: [] });
+  await expect(f.operation(f.input)).rejects.toThrow("ORDINARY_REFUND_REQUEST_DENIED");
 });
 
 it("previews server component amounts without reporting a committed request", async () => {

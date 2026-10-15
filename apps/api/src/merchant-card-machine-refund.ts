@@ -16,6 +16,7 @@ import {
   parsePaymentInstant,
 } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { staffOrderCancellationPermission } from "./merchant-order-staff-cancellation.js";
@@ -163,95 +164,111 @@ export function createMerchantCardMachineCancellationRefund(options: {
         ),
     );
     try {
-      return await options.persistence.transactions.run(async (transaction) => {
-        const resolved = await resolveScope(
-          transaction,
-          input.sessionCookie,
-          staffOrderCancellationPermission,
-          session.sessionReference,
-        ).catch(() => fail("CARD_MACHINE_REFUND_PERMISSION_DENIED"));
-        const allowed = async () => (await resolved.allowed()) === true;
-        if (!(await allowed())) return fail("CARD_MACHINE_REFUND_PERMISSION_DENIED");
-        const tx = transaction as unknown as ConsumerTransaction;
-        const scope = {
-          tenantReference: String(resolved.selected.tenantReference),
-          brandReference: String(resolved.context.brand.brandReference),
-          storeReference: String(resolved.store.storeReference),
-        };
-        const actorReference = String(resolved.actorReference);
-        const payments = createPostgresCardMachinePaymentStore({
-          scope,
-          authorize: async (_tx, value) =>
-            value.orderReference === command.orderReference && (await allowed()),
-        });
-        const reply = (
-          status: CardMachineRefundResult["status"],
-          refund: { amountMinor: bigint; refundedAt: string },
-        ) =>
-          Object.freeze({
-            status,
-            orderReference: command.orderReference,
-            orderBatchReference: command.orderBatchReference,
-            amountMinor: refund.amountMinor.toString(),
-            refundedAt: String(refund.refundedAt),
-          });
-        const prior = await payments.loadRefundByOperation(tx, command.operationReference);
-        if (prior !== null) {
-          if (prior.intentDigest !== intentDigest || prior.actorReference !== actorReference)
-            return fail("CARD_MACHINE_REFUND_IDEMPOTENCY_CONFLICT");
-          return reply("AlreadyRecorded", prior);
-        }
-        const payment = await payments.loadByBatch(
-          tx,
-          command.orderReference,
-          command.orderBatchReference,
-        );
-        if (payment === null) return fail("CARD_MACHINE_REFUND_NOT_FOUND");
-        // Why the money is owed: the store cancelled the Batch (Q6), or Ordering found the paid
-        // Order could no longer be fulfilled (for example it was not accepted in time).
-        const source = await cardMachineWholeRefundSource(tx, scope, payment);
-        if (source === null) return fail("CARD_MACHINE_REFUND_NOT_FOUND");
-        const already = await payments.loadRefundBySource(tx, source.kind, source.reference);
-        if (already !== null) return fail("CARD_MACHINE_REFUND_NOTHING_OWED");
-        const refunded = (await payments.refunds(tx, payment.cardMachinePaymentReference)).reduce(
-          (sum, refund) => sum + refund.amountMinor,
-          0n,
-        );
-        const owed = payment.preparation.total.amountMinor - refunded;
-        if (owed <= 0n) return fail("CARD_MACHINE_REFUND_NOTHING_OWED");
-        const recordedAt = parsePaymentInstant(options.persistence.now());
-        const refundedAt =
-          command.refundedAt === null ? recordedAt : parsePaymentInstant(command.refundedAt);
-        if (
-          refundedAt > recordedAt ||
-          refundedAt < source.at ||
-          Date.parse(recordedAt) - Date.parse(refundedAt) > cardMachineBackEntryWindowMs
-        )
-          return fail("CARD_MACHINE_REFUND_INPUT_INVALID");
-        if (!(await allowed())) return fail("CARD_MACHINE_REFUND_PERMISSION_DENIED");
-        const saved = await payments.recordRefund(
-          tx,
-          parseCardMachineRefundRecord({
-            tenantReference: scope.tenantReference,
-            brandReference: scope.brandReference,
-            storeReference: scope.storeReference,
-            cardMachineRefundReference: options.nextReference(),
-            cardMachinePaymentReference: payment.cardMachinePaymentReference,
-            orderReference: command.orderReference,
-            operationReference: command.operationReference,
-            intentDigest,
-            sourceKind: source.kind,
-            sourceReference: source.reference,
-            amountMinor: owed,
-            slipReference: command.slipReference,
-            refundedAt,
-            recordedAt,
-            actorReference,
-            auditReference: options.nextReference(),
-          }),
-        );
-        return reply(saved.status === "Created" ? "Recorded" : "AlreadyRecorded", saved.refund);
-      });
+      // WP-2423: one authorized run. The staff member and the cancel permission are resolved in
+      // full once at the start and once more before the commit (inside this transaction: a
+      // permission withdrawn or Session ended meanwhile records nothing); the Payment and
+      // Ordering owner reads in between take the run's no-query guard.
+      return await options.persistence.transactions.run((transaction) =>
+        withMerchantTransactionAuthorization(
+          {
+            transaction,
+            resolve: async () => {
+              const current = await resolveScope(
+                transaction,
+                input.sessionCookie,
+                staffOrderCancellationPermission,
+                session.sessionReference,
+              ).catch(() => fail("CARD_MACHINE_REFUND_PERMISSION_DENIED"));
+              if ((await current.allowed()) !== true)
+                return fail("CARD_MACHINE_REFUND_PERMISSION_DENIED");
+              return current;
+            },
+            recheck: async (current) => (await current.allowed()) === true,
+            denied: () => fail("CARD_MACHINE_REFUND_PERMISSION_DENIED"),
+          },
+          async (authority) => {
+            const resolved = authority.scope;
+            const allowed = () => authority.guard();
+            const tx = transaction as unknown as ConsumerTransaction;
+            const scope = {
+              tenantReference: String(resolved.selected.tenantReference),
+              brandReference: String(resolved.context.brand.brandReference),
+              storeReference: String(resolved.store.storeReference),
+            };
+            const actorReference = String(resolved.actorReference);
+            const payments = createPostgresCardMachinePaymentStore({
+              scope,
+              authorize: async (_tx, value) =>
+                value.orderReference === command.orderReference && (await allowed()),
+            });
+            const reply = (
+              status: CardMachineRefundResult["status"],
+              refund: { amountMinor: bigint; refundedAt: string },
+            ) =>
+              Object.freeze({
+                status,
+                orderReference: command.orderReference,
+                orderBatchReference: command.orderBatchReference,
+                amountMinor: refund.amountMinor.toString(),
+                refundedAt: String(refund.refundedAt),
+              });
+            const prior = await payments.loadRefundByOperation(tx, command.operationReference);
+            if (prior !== null) {
+              if (prior.intentDigest !== intentDigest || prior.actorReference !== actorReference)
+                return fail("CARD_MACHINE_REFUND_IDEMPOTENCY_CONFLICT");
+              return reply("AlreadyRecorded", prior);
+            }
+            const payment = await payments.loadByBatch(
+              tx,
+              command.orderReference,
+              command.orderBatchReference,
+            );
+            if (payment === null) return fail("CARD_MACHINE_REFUND_NOT_FOUND");
+            // Why the money is owed: the store cancelled the Batch (Q6), or Ordering found the paid
+            // Order could no longer be fulfilled (for example it was not accepted in time).
+            const source = await cardMachineWholeRefundSource(tx, scope, payment);
+            if (source === null) return fail("CARD_MACHINE_REFUND_NOT_FOUND");
+            const already = await payments.loadRefundBySource(tx, source.kind, source.reference);
+            if (already !== null) return fail("CARD_MACHINE_REFUND_NOTHING_OWED");
+            const refunded = (
+              await payments.refunds(tx, payment.cardMachinePaymentReference)
+            ).reduce((sum, refund) => sum + refund.amountMinor, 0n);
+            const owed = payment.preparation.total.amountMinor - refunded;
+            if (owed <= 0n) return fail("CARD_MACHINE_REFUND_NOTHING_OWED");
+            const recordedAt = parsePaymentInstant(options.persistence.now());
+            const refundedAt =
+              command.refundedAt === null ? recordedAt : parsePaymentInstant(command.refundedAt);
+            if (
+              refundedAt > recordedAt ||
+              refundedAt < source.at ||
+              Date.parse(recordedAt) - Date.parse(refundedAt) > cardMachineBackEntryWindowMs
+            )
+              return fail("CARD_MACHINE_REFUND_INPUT_INVALID");
+            const saved = await payments.recordRefund(
+              tx,
+              parseCardMachineRefundRecord({
+                tenantReference: scope.tenantReference,
+                brandReference: scope.brandReference,
+                storeReference: scope.storeReference,
+                cardMachineRefundReference: options.nextReference(),
+                cardMachinePaymentReference: payment.cardMachinePaymentReference,
+                orderReference: command.orderReference,
+                operationReference: command.operationReference,
+                intentDigest,
+                sourceKind: source.kind,
+                sourceReference: source.reference,
+                amountMinor: owed,
+                slipReference: command.slipReference,
+                refundedAt,
+                recordedAt,
+                actorReference,
+                auditReference: options.nextReference(),
+              }),
+            );
+            return reply(saved.status === "Created" ? "Recorded" : "AlreadyRecorded", saved.refund);
+          },
+        ),
+      );
     } catch (error) {
       if (error instanceof CardMachineRefundCommandError) throw error;
       if (error instanceof CardMachinePaymentError) {

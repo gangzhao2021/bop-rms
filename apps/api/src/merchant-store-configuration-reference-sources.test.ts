@@ -520,10 +520,31 @@ it("refuses late authority withdrawal before child source finals", async () => {
 it("refuses changed Actor or Store locale after source observation", async () => {
   const f = fixture();
   await f.source.address(id(10));
-  f.state.actor = id(99);
+  f.scope.actorReference = id(99);
   await expect(f.finish()).rejects.toMatchObject({
     code: "STORE_CONFIGURATION_ORIGINAL_PERMISSION_DENIED",
   });
+  const g = fixture();
+  await g.source.address(id(10));
+  g.scope.store.locale = "en-CA";
+  await expect(g.finish()).rejects.toMatchObject({
+    code: "STORE_CONFIGURATION_ORIGINAL_PERMISSION_DENIED",
+  });
+});
+it("WP-2423: owner admissions take the run scope's guard; the caller is never re-resolved here", async () => {
+  const h = fixture();
+  const guard = vi.fn(async () => h.state.allow);
+  const options = { ...h.options, scope: { ...h.scope, allowed: guard } };
+  const source = createMerchantStoreConfigurationReferenceSources(
+    options as unknown as MerchantStoreConfigurationReferenceSourcesOptions,
+  );
+  await source.address(id(10));
+  await source.payment(id(12));
+  await source.receipt(id(15));
+  await h.finish();
+  expect(source.assertFinalized()).toBe(until);
+  expect(mocks.scope).not.toHaveBeenCalled();
+  expect(guard.mock.calls.length).toBeGreaterThan(0);
 });
 it("refuses lease expiry and missing mandatory finalization", async () => {
   const f = fixture();
@@ -560,8 +581,18 @@ it("reads exact Store-purpose Brand content only through both owning publication
   expect(value.configurationVersionReference).toBe(id(30));
   expect(value.eligibility).toBe("NotEvaluated");
   await f.finish();
-  expect(mocks.brandScope).toHaveBeenCalled();
+  // WP-2423: the Brand scope is resolved in full once in the work and once in the final check.
+  expect(mocks.brandScope).toHaveBeenCalledTimes(2);
+  expect(mocks.scope).not.toHaveBeenCalled();
   expect(mocks.currentBrand).toHaveBeenCalledTimes(1);
+});
+it("WP-2423: Brand authority withdrawn before the final check refuses it", async () => {
+  const f = fixture();
+  await f.source.brand(brandPins);
+  f.state.brandAllow = false;
+  await expect(f.finish()).rejects.toMatchObject({
+    code: "STORE_CONFIGURATION_ORIGINAL_PERMISSION_DENIED",
+  });
 });
 it("does not replace denied Brand authority with an allowed Store grant", async () => {
   const f = fixture();

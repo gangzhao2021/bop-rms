@@ -104,6 +104,16 @@ it("DEC-KITCHEN-STALE-TICKETS: a manager closes with the narrow permission; acto
   });
 });
 
+it("WP-2423: resolves the manager twice and refuses before commit when withdrawn meanwhile", async () => {
+  const { close, allowed } = setup();
+  await close(input(command));
+  expect(allowed).toHaveBeenCalledTimes(2);
+  allowed.mockReset();
+  allowed.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+  await expect(close(input(command))).rejects.toThrow();
+  expect(doubles.close).toHaveBeenCalledTimes(2);
+});
+
 it("DEC-KITCHEN-STALE-TICKETS: refuses browser authority, unknown reasons and a revoked permission", async () => {
   {
     const { close, run } = setup();

@@ -15,6 +15,7 @@ import {
   type RoleAdministrationVersionRecord,
 } from "@bop/permission";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -156,19 +157,62 @@ export function createMerchantRoleAdministration(options: {
   type Tx = Parameters<Parameters<typeof options.persistence.transactions.run>[0]>[0];
   const asRoleTx = (tx: Tx) => tx as unknown as RoleAdministrationTransaction;
 
-  async function readScope(tx: Tx, sessionCookie: unknown, expectedSession?: string) {
-    const scope = await resolveScope(tx, sessionCookie, "identity.role.read", expectedSession);
-    if (!(await scope.allowed())) fail("PermissionDenied");
-    return scope;
+  type Scope = Awaited<ReturnType<typeof resolveScope>>;
+  type Decision = Awaited<ReturnType<Scope["authorizeAction"]>>;
+  const denied = () => fail("PermissionDenied");
+  const roleActions = [...new Set(Object.values(operationAction))];
+  /**
+   * WP-2423: one authorized run. The caller's `identity.role.read` and the further `actions` are
+   * decided in full once at the start (one permission packet) and re-checked in full once more
+   * before the reply or commit, inside the transaction, so nothing a refused command wrote commits.
+   */
+  function authorizedRun<T>(
+    tx: Tx,
+    sessionCookie: unknown,
+    expectedSession: string,
+    actions: readonly string[],
+    recheckActions: readonly string[],
+    work: (
+      scope: Scope,
+      decisions: ReadonlyMap<string, Decision>,
+      guard: (transaction?: unknown) => Promise<boolean>,
+    ) => Promise<T>,
+  ): Promise<T> {
+    return withMerchantTransactionAuthorization(
+      {
+        transaction: tx,
+        resolve: async () => {
+          const scope = await resolveScope(
+            tx,
+            sessionCookie,
+            "identity.role.read",
+            expectedSession,
+          );
+          const decisions = await scope.authorizeActions(["identity.role.read", ...actions]);
+          if (decisions.get("identity.role.read")?.effect !== "Allow") return denied();
+          return { scope, decisions };
+        },
+        recheck: async ({ scope }) => {
+          if (recheckActions.length === 0) return (await scope.allowed()) === true;
+          const decisions = await scope.authorizeActions(["identity.role.read", ...recheckActions]);
+          return ["identity.role.read", ...recheckActions].every(
+            (action) => decisions.get(action)?.effect === "Allow",
+          );
+        },
+        denied,
+      },
+      (authority) => work(authority.scope.scope, authority.scope.decisions, authority.guard),
+    );
   }
   async function view(
-    scope: Awaited<ReturnType<typeof readScope>>,
+    scope: Scope,
+    decisions: ReadonlyMap<string, Decision>,
     roles: readonly RoleAdministrationRoleView[],
     screenId: "IAM-ROLE-LIST" | "IAM-ROLE-EDITOR",
   ) {
     const allowed = new Map<string, boolean>();
-    for (const action of new Set(Object.values(operationAction)))
-      allowed.set(action, (await scope.authorizeAction(action))?.effect === "Allow");
+    for (const action of roleActions)
+      allowed.set(action, decisions.get(action)?.effect === "Allow");
     const label = (actor: string | null) =>
       actor === null
         ? null
@@ -244,18 +288,26 @@ export function createMerchantRoleAdministration(options: {
   const list = async (input: { sessionCookie: unknown; csrf: unknown }) => {
     const current = await session(input);
     return retryTransactionConflict(() =>
-      options.persistence.transactions.run(async (tx) => {
-        const scope = await readScope(tx, input.sessionCookie, current.sessionReference);
-        const roles = await listRoleAdministration(
-          asRoleTx(tx),
-          {
-            brandReference: scope.context.brand.brandReference,
-            storeReference: scope.store.storeReference,
+      options.persistence.transactions.run((tx) =>
+        authorizedRun(
+          tx,
+          input.sessionCookie,
+          current.sessionReference,
+          roleActions,
+          [],
+          async (scope, decisions) => {
+            const roles = await listRoleAdministration(
+              asRoleTx(tx),
+              {
+                brandReference: scope.context.brand.brandReference,
+                storeReference: scope.store.storeReference,
+              },
+              options.persistence.now(),
+            );
+            return view(scope, decisions, roles, "IAM-ROLE-LIST");
           },
-          options.persistence.now(),
-        );
-        return view(scope, roles, "IAM-ROLE-LIST");
-      }),
+        ),
+      ),
     );
   };
   const detail = async (input: {
@@ -265,130 +317,150 @@ export function createMerchantRoleAdministration(options: {
   }) => {
     const current = await session(input);
     return retryTransactionConflict(() =>
-      options.persistence.transactions.run(async (tx) => {
-        const scope = await readScope(tx, input.sessionCookie, current.sessionReference);
-        try {
-          const role = await loadRoleAdministration(
-            asRoleTx(tx),
-            {
-              brandReference: scope.context.brand.brandReference,
-              storeReference: scope.store.storeReference,
-            },
-            input.roleReference,
-            options.persistence.now(),
-          );
-          return view(scope, [role], "IAM-ROLE-EDITOR");
-        } catch (error) {
-          if (error instanceof RoleAdministrationStoreError) return fail("NotFound");
-          throw error;
-        }
-      }),
+      options.persistence.transactions.run((tx) =>
+        authorizedRun(
+          tx,
+          input.sessionCookie,
+          current.sessionReference,
+          roleActions,
+          [],
+          async (scope, decisions) => {
+            try {
+              const role = await loadRoleAdministration(
+                asRoleTx(tx),
+                {
+                  brandReference: scope.context.brand.brandReference,
+                  storeReference: scope.store.storeReference,
+                },
+                input.roleReference,
+                options.persistence.now(),
+              );
+              return view(scope, decisions, [role], "IAM-ROLE-EDITOR");
+            } catch (error) {
+              if (error instanceof RoleAdministrationStoreError) return fail("NotFound");
+              throw error;
+            }
+          },
+        ),
+      ),
     );
   };
 
   const command = async (input: { sessionCookie: unknown; csrf: unknown; body: unknown }) => {
     const command = parseRoleCommandInput(input.body);
+    const action = operationAction[command.operation];
     const current0 = await session(input);
     return retryTransactionConflict(() =>
-      options.persistence.transactions.run(async (tx) => {
-        const scope = await readScope(tx, input.sessionCookie, current0.sessionReference);
-        const ownerScope = {
-          brandReference: scope.context.brand.brandReference,
-          storeReference: scope.store.storeReference,
-        };
-        let current: RoleAdministrationVersionRecord;
-        try {
-          current = (
-            await loadRoleAdministration(
-              asRoleTx(tx),
-              ownerScope,
-              command.roleReference,
-              options.persistence.now(),
-            )
-          ).record;
-        } catch (error) {
-          if (error instanceof RoleAdministrationStoreError) return fail("NotFound");
-          throw error;
-        }
-        if (current.storeReference === null) fail("PermissionDenied");
-        if (current.version !== command.expectedVersion) fail("Conflict");
-        const ports = createPostgresRoleAdministrationPorts({
-          transaction: asRoleTx(tx),
-          scope: ownerScope,
-          operation: command.operation,
-          operationReference: command.operationReference,
-          actorReference: scope.actorReference,
-          authorization: {
-            authorize: async (request) => {
-              const decision = await scope.authorizeAction(request.action);
-              return decision ?? fail("PermissionDenied");
-            },
-          },
-          clock: { now: () => options.persistence.now() },
-          nextReference: () => options.references.next(),
-        });
-        const policyVersion = await ports.policy.currentVersion(current.brandReference);
-        const now = options.persistence.now();
-        const selections = (actions: readonly string[]) =>
-          buildRolePermissionSelections(asRoleTx(tx), actions).catch(() => fail("Conflict"));
-        let next: RoleAdministrationVersionRecord;
-        try {
-          next = planRoleAdministrationChange({
-            operation: command.operation,
-            current,
-            actorReference: scope.actorReference,
-            policyVersion,
-            changedAt: now,
-            reasonCode: command.reasonCode,
-            nextReference: () => options.references.next(),
-            draft:
-              command.draft === null
-                ? null
-                : {
-                    ...(command.draft.code === undefined ? {} : { code: command.draft.code }),
-                    displayName: command.draft.displayName,
-                    description: command.draft.description,
-                    selections: await selections(command.draft.actions),
-                  },
-          });
-        } catch {
-          return fail("Invalid");
-        }
-        try {
-          const result = await executeRoleAdministration(
-            {
-              tenantContext: scope.context,
+      options.persistence.transactions.run((tx) =>
+        authorizedRun(
+          tx,
+          input.sessionCookie,
+          current0.sessionReference,
+          [action],
+          [action],
+          async (scope, decisions, guard) => {
+            const ownerScope = {
+              brandReference: scope.context.brand.brandReference,
+              storeReference: scope.store.storeReference,
+            };
+            let current: RoleAdministrationVersionRecord;
+            try {
+              current = (
+                await loadRoleAdministration(
+                  asRoleTx(tx),
+                  ownerScope,
+                  command.roleReference,
+                  options.persistence.now(),
+                )
+              ).record;
+            } catch (error) {
+              if (error instanceof RoleAdministrationStoreError) return fail("NotFound");
+              throw error;
+            }
+            if (current.storeReference === null) fail("PermissionDenied");
+            if (current.version !== command.expectedVersion) fail("Conflict");
+            const ports = createPostgresRoleAdministrationPorts({
+              transaction: asRoleTx(tx),
+              scope: ownerScope,
               operation: command.operation,
-              expectedVersion: command.expectedVersion as never,
-              idempotencyKey: command.operationReference,
-              current,
-              next,
-              auditId: options.references.next() as never,
-              correlationId: command.operationReference as never,
-              sourceChannel: "MERCHANT_WEB",
-            },
-            ports,
-          );
-          return {
-            roleReference: result.roleReference,
-            version: result.version,
-            status: result.lifecycle,
-          };
-        } catch (error) {
-          if (error instanceof RoleAdministrationServiceError)
-            return fail(
-              error.code === "ROLE_ADMIN_PERMISSION_DENIED"
-                ? "PermissionDenied"
-                : error.code === "ROLE_ADMIN_ROLE_IN_USE"
-                  ? "InUse"
-                  : error.code === "ROLE_ADMIN_MUTATION_INVALID"
-                    ? "Invalid"
-                    : "Conflict",
-            );
-          if (error instanceof RoleAdministrationContractError) return fail("Invalid");
-          throw error;
-        }
-      }),
+              operationReference: command.operationReference,
+              actorReference: scope.actorReference,
+              authorization: {
+                // The decision taken at the start of this run (no query); the run re-checks it in
+                // full before the commit.
+                authorize: async (request) => {
+                  if (!(await guard(tx)) || String(request.action) !== action)
+                    return fail("PermissionDenied");
+                  return decisions.get(action) ?? fail("PermissionDenied");
+                },
+              },
+              clock: { now: () => options.persistence.now() },
+              nextReference: () => options.references.next(),
+            });
+            const policyVersion = await ports.policy.currentVersion(current.brandReference);
+            const now = options.persistence.now();
+            const selections = (actions: readonly string[]) =>
+              buildRolePermissionSelections(asRoleTx(tx), actions).catch(() => fail("Conflict"));
+            let next: RoleAdministrationVersionRecord;
+            try {
+              next = planRoleAdministrationChange({
+                operation: command.operation,
+                current,
+                actorReference: scope.actorReference,
+                policyVersion,
+                changedAt: now,
+                reasonCode: command.reasonCode,
+                nextReference: () => options.references.next(),
+                draft:
+                  command.draft === null
+                    ? null
+                    : {
+                        ...(command.draft.code === undefined ? {} : { code: command.draft.code }),
+                        displayName: command.draft.displayName,
+                        description: command.draft.description,
+                        selections: await selections(command.draft.actions),
+                      },
+              });
+            } catch {
+              return fail("Invalid");
+            }
+            try {
+              const result = await executeRoleAdministration(
+                {
+                  tenantContext: scope.context,
+                  operation: command.operation,
+                  expectedVersion: command.expectedVersion as never,
+                  idempotencyKey: command.operationReference,
+                  current,
+                  next,
+                  auditId: options.references.next() as never,
+                  correlationId: command.operationReference as never,
+                  sourceChannel: "MERCHANT_WEB",
+                },
+                ports,
+              );
+              return {
+                roleReference: result.roleReference,
+                version: result.version,
+                status: result.lifecycle,
+              };
+            } catch (error) {
+              if (error instanceof RoleAdministrationServiceError)
+                return fail(
+                  error.code === "ROLE_ADMIN_PERMISSION_DENIED"
+                    ? "PermissionDenied"
+                    : error.code === "ROLE_ADMIN_ROLE_IN_USE"
+                      ? "InUse"
+                      : error.code === "ROLE_ADMIN_MUTATION_INVALID"
+                        ? "Invalid"
+                        : "Conflict",
+                );
+              if (error instanceof RoleAdministrationContractError) return fail("Invalid");
+              throw error;
+            }
+          },
+        ),
+      ),
     );
   };
   return { list, detail, command };

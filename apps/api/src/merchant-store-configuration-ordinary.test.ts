@@ -39,6 +39,13 @@ function fixture(
     denyAt: Infinity,
     driftAt: Infinity,
     committed: false,
+    decided: [] as string[][],
+  };
+  /** One full caller resolution (Session, selection, membership, permission policy). */
+  const resolveInFull = () => {
+    state.allowedCalls++;
+    if (state.allowedCalls === state.driftAt) scope.actorReference = id(99);
+    return state.allowed && state.allowedCalls < state.denyAt;
   };
   const selected = { tenantReference: scope4.tenantReference };
   const scope = {
@@ -47,10 +54,16 @@ function fixture(
     store: { storeReference: scope4.storeReference, locale: "en-CA", currencyCode: "CAD" },
     actorReference: scope4.actorReference,
     sessionReference: id(5),
-    allowed: async () => {
-      state.allowedCalls++;
-      if (state.allowedCalls === state.driftAt) scope.actorReference = id(99);
-      return state.allowed && state.allowedCalls < state.denyAt;
+    allowed: async () => resolveInFull(),
+    authorizeActions: async (actions: readonly string[]) => {
+      state.decided.push([...actions]);
+      const allow = resolveInFull();
+      return new Map(
+        actions.map((action) => [
+          action,
+          allow ? Object.freeze({ effect: "Allow", action, scopeKind: "Store" }) : null,
+        ]),
+      );
     },
     authorizationValidUntil: () => state.until,
   };
@@ -237,8 +250,26 @@ it("returns truthful empty current state through actual owning read and final au
   });
   expect(value.businessReferenceValidation).toBe("NotEvaluated");
   expect(f.queries.filter((sql) => sql.includes("IN SHARE MODE")).length).toBe(2);
-  expect(f.state.allowedCalls).toBeGreaterThan(2);
+  // WP-2423: the caller is resolved in full exactly twice (start, and before the checks/COMMIT).
+  expect(f.state.allowedCalls).toBe(2);
+  expect(mocks.scope).toHaveBeenCalledOnce();
+  expect(f.state.decided).toEqual([["organization.manage"], ["organization.manage"]]);
   expect(f.next).not.toHaveBeenCalled();
+});
+it("WP-2423: owner configuration's scope answers from the run's guard (true during, false after)", async () => {
+  const f = fixture();
+  const during: boolean[] = [];
+  f.baseline.mockImplementation(async () => {
+    const owner = f.configure.mock.calls[0]?.[1];
+    if (!owner) throw new Error("configure was not reached");
+    during.push(await owner.allowed());
+    return null;
+  });
+  await f.service.read(f.read);
+  expect(during).toEqual([true, true]);
+  expect(f.state.allowedCalls).toBe(2);
+  const owner = f.configure.mock.calls[0]?.[1];
+  expect(await owner?.allowed()).toBe(false);
 });
 it("retains the shortest current authority lease", async () => {
   const f = fixture();
@@ -330,7 +361,10 @@ it("reads immutable history through held current read authority without loading 
   expect(page.entries).toEqual([]);
   expect(page.nextBeforeSequence).toBeNull();
   expect(page.readerActorReference).toBe(scope4.actorReference);
-  expect(mocks.scope.mock.calls.some((call) => call[2] === "store.service.read")).toBe(true);
+  expect(f.state.decided).toEqual([
+    ["organization.manage", "store.service.read"],
+    ["organization.manage", "store.service.read"],
+  ]);
   expect(f.configure).not.toHaveBeenCalled();
   expect(f.next).not.toHaveBeenCalled();
   expect(

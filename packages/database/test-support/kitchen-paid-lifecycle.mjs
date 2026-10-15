@@ -1,3 +1,4 @@
+import { appendFile } from "node:fs/promises";
 import process from "node:process";
 import { createKitchenMerchantBrowser } from "./kitchen-merchant-browser.mjs";
 import { exerciseKitchenQueueReadModel } from "./kitchen-queue-read-model.mjs";
@@ -273,6 +274,28 @@ export async function exercisePaidKitchenLifecycle({
           403,
         );
         assert.equal((await http.submit({ ...accept, actorReference: id(39000) })).status, 403);
+        // WP-2423: the operator's Session ending while the command runs (after the operator was
+        // resolved, while the ticket rows are locked, before the commit) changes nothing.
+        http.midway.next = async () => {
+          http.midway.sessionEnded = true;
+        };
+        const refused = { ...accept, idempotencyKey: accept.idempotencyKey + "-revoked" };
+        await assert.rejects(http.execute(refused), { status: 403 });
+        assert.equal(http.midway.next, null);
+        assert.equal(http.midway.sessionEnded, true);
+        assert.equal(
+          (
+            await scoped((transaction) =>
+              repository.resolveByIdempotency({
+                ...scope,
+                idempotencyKey: refused.idempotencyKey,
+                transaction,
+              }),
+            )
+          ).status,
+          "NotFound",
+        );
+        http.midway.sessionEnded = false;
       }
       let accepted;
       if (browser) {
@@ -462,6 +485,22 @@ export async function exercisePaidKitchenLifecycle({
           (item) => item.workItemReference === detail.body.item.workItemReference,
         ),
       );
+      // WP-2423 query budget: each kitchen command resolves the operator once at the start and
+      // once before the commit. Before, every owner check in the Kitchen store and service
+      // re-resolved the operator in full (Session, selection, membership, permission policy):
+      // accept/start 175–199 and complete 184–208 statements; now 106–130 and 115–139.
+      const kitchenBudget = 160;
+      if (process.env.WP2423_COST_LOG)
+        await appendFile(
+          process.env.WP2423_COST_LOG,
+          http.commandCosts.map((cost) => "kitchen " + JSON.stringify(cost) + "\n").join(""),
+        );
+      assert.ok(http.commandCosts.length > 0);
+      for (const cost of http.commandCosts)
+        assert.ok(
+          cost.statements <= kitchenBudget,
+          cost.action + " ran " + cost.statements + " statements (budget " + kitchenBudget + ")",
+        );
       await merchantKitchen.session.revokeKitchen();
       await browser?.assertRevoked();
       assert.equal(

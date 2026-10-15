@@ -1,7 +1,17 @@
 vi.mock("./dining-table-release-composition.js", () => ({
   createDiningTableReleaseComposition: () => mock.release,
 }));
-import { beforeEach, expect, it, vi } from "vitest";
+vi.mock("./dining-exception-task-composition.js", () => ({
+  createDiningExceptionTaskComposition: (options: unknown) => {
+    mock.taskComposition(options);
+    return { ensure: async () => ({ status: "Ensured" }) };
+  },
+}));
+vi.mock("./dining-settled-session-evidence.js", () => ({
+  createDiningSettledSessionEvidence: () => ({ load: mock.evidence }),
+  createDiningSessionClosingEvidence: () => ({ load: mock.evidence }),
+}));
+import { beforeEach, describe, expect, it, vi } from "vitest";
 const mock = vi.hoisted(() => ({
   scope: vi.fn(),
   fence: vi.fn(),
@@ -12,6 +22,8 @@ const mock = vi.hoisted(() => ({
   release: vi.fn(),
   sessionOrders: vi.fn(),
   cancellations: vi.fn(),
+  taskComposition: vi.fn(),
+  evidence: vi.fn(),
 }));
 vi.mock("@rms/ordering", async (original) => ({
   ...(await original<typeof import("@rms/ordering")>()),
@@ -34,17 +46,29 @@ const id = (n: number) => "0190fad7-0000-7000-8000-" + String(n).padStart(12, "0
 beforeEach(() => vi.resetAllMocks());
 function setup() {
   const allowed = vi.fn(async () => true),
-    authorizeAction = vi.fn(async (): Promise<unknown> => ({ effect: "Allow" })),
+    // The run's single current-fact read at the start (close and Task permissions together).
+    authorizeActions = vi.fn(
+      async (actions: readonly string[]): Promise<ReadonlyMap<string, unknown>> =>
+        new Map(actions.map((action) => [action, { effect: "Allow", action }])),
+    ),
     authenticate = vi.fn(async () => ({ sessionReference: id(8) })),
     tx = { query: vi.fn() },
-    run = vi.fn(async (work: (tx: object) => Promise<unknown>) => work(tx));
+    inside = { thrown: false },
+    run = vi.fn(async (work: (tx: object) => Promise<unknown>) => {
+      try {
+        return await work(tx);
+      } catch (error) {
+        inside.thrown = true;
+        throw error;
+      }
+    });
   mock.scope.mockResolvedValue({
     selected: { tenantReference: id(1) },
     context: { brand: { brandReference: id(2) }, resolvedAt: at },
     store: { storeReference: id(3) },
     actorReference: id(4),
     allowed,
-    authorizeAction,
+    authorizeActions,
   });
   mock.fence.mockResolvedValue({
     diningSessionReference: id(5),
@@ -77,7 +101,7 @@ function setup() {
       expectedSessionVersion: 2,
     },
   };
-  return { allowed, authorizeAction, authenticate, run, input, handler };
+  return { allowed, authorizeActions, authenticate, run, inside, input, handler };
 }
 it.each(["Begin", "Finalize"])("routes %s through domain with server time", async (action) => {
   const f = setup();
@@ -119,7 +143,7 @@ it("rejects conflicting retry action", async () => {
 });
 it("rejects absent current permission before fence", async () => {
   const f = setup();
-  f.authorizeAction.mockResolvedValue(null);
+  f.authorizeActions.mockResolvedValue(new Map([["dining.session.close", null]]));
   await expect(f.handler(f.input)).rejects.toMatchObject({
     code: "DINING_CLOSING_PERMISSION_DENIED",
   });
@@ -129,15 +153,132 @@ it("WP-2423: resolves the caller in full once at the start and once before the r
   const f = setup();
   await f.handler(f.input);
   expect(mock.scope).toHaveBeenCalledOnce();
-  expect(f.authorizeAction).toHaveBeenCalledOnce();
+  expect(f.authorizeActions).toHaveBeenCalledExactlyOnceWith([
+    "dining.session.close",
+    "task.create",
+    "task.assign",
+  ]);
   // Owner reads are fenced by the run itself; only the final re-check resolves the caller again.
   expect(f.allowed).toHaveBeenCalledOnce();
 });
-it("WP-2423: a permission withdrawn during the close refuses the reply", async () => {
+it("WP-2423: a permission withdrawn during the close refuses it before commit", async () => {
   const f = setup();
   f.allowed.mockResolvedValue(false);
   await expect(f.handler(f.input)).rejects.toMatchObject({
     code: "DINING_CLOSING_PERMISSION_DENIED",
+  });
+  expect(mock.begin).toHaveBeenCalledOnce();
+  // The refusal is thrown inside the transaction callback, so nothing it wrote commits.
+  expect(f.inside.thrown).toBe(true);
+});
+it("WP-2423: owner callbacks take the run's guard during the close and are refused after it", async () => {
+  const f = setup();
+  mock.sessionOrders.mockResolvedValue(new Map());
+  const during: unknown[] = [];
+  mock.begin.mockImplementation(async () => {
+    const ports = mock.ports.mock.calls[0]?.[0];
+    during.push(
+      (await ports.authorization.authorize({
+        session: { diningSessionReference: id(5) },
+        operation: "Begin",
+        observedAt: at,
+      })) !== null,
+    );
+    during.push(
+      await ports.authorization.authorize({
+        session: { diningSessionReference: id(99) },
+        operation: "Begin",
+        observedAt: at,
+      }),
+    );
+    return { status: "Applied", session: { phase: "Closing", version: 3 } };
+  });
+  await f.handler(f.input);
+  expect(during).toEqual([true, null]);
+  expect(f.allowed).toHaveBeenCalledOnce();
+  const ports = mock.ports.mock.calls[0]?.[0];
+  expect(
+    await ports.authorization.authorize({
+      session: { diningSessionReference: id(5) },
+      operation: "Begin",
+      observedAt: at,
+    }),
+  ).toBeNull();
+});
+describe("WP-2423: exception Task permissions", () => {
+  const policy = { synthetic: true };
+  function withTasks() {
+    const f = setup();
+    const handler = createMerchantDiningClosingCommand({
+      persistence: { transactions: { run: f.run } } as unknown as Parameters<
+        typeof createMerchantDiningClosingCommand
+      >[0]["persistence"],
+      authentication: { authorize: f.authenticate } as unknown as Parameters<
+        typeof createMerchantDiningClosingCommand
+      >[0]["authentication"],
+      providerAccountReference: id(9),
+      environment: "Test",
+      exceptionTaskPolicy: policy,
+      newReference: () => id(10),
+      retentionPolicyCode: "ORDER_AUDIT",
+      retentionPolicyVersion: 1,
+    } as Parameters<typeof createMerchantDiningClosingCommand>[0]);
+    mock.evidence.mockResolvedValue({ synthetic: "evidence" });
+    const decisions: unknown[] = [];
+    mock.begin.mockImplementation(async () => {
+      const ports = mock.ports.mock.calls[0]?.[0];
+      await ports.closureEvidence.resolve({ diningSessionReference: id(5), observedAt: at });
+      await ports.tasks.ensure({});
+      const composition = mock.taskComposition.mock.calls[0]?.[0];
+      // Several Task decisions during the run cost no further resolution.
+      decisions.push(await composition.authorizeTask({ action: "task.create" }));
+      decisions.push(await composition.authorizeTask({ action: "task.assign" }));
+      decisions.push(await composition.authorizeTask({ action: "task.create" }));
+      return { status: "Applied", session: { phase: "Closing", version: 3 } };
+    });
+    return { ...f, handler, decisions };
+  }
+  it("are decided once at the start and re-checked once with the close permission", async () => {
+    const f = withTasks();
+    await expect(f.handler(f.input)).resolves.toMatchObject({ status: "Applied" });
+    expect(f.decisions).toEqual([
+      { effect: "Allow", action: "task.create" },
+      { effect: "Allow", action: "task.assign" },
+      { effect: "Allow", action: "task.create" },
+    ]);
+    // Exactly two full resolutions: the start and the re-check before the commit.
+    expect(f.authorizeActions).toHaveBeenCalledTimes(2);
+    expect(f.authorizeActions).toHaveBeenLastCalledWith([
+      "dining.session.close",
+      "task.create",
+      "task.assign",
+    ]);
+    expect(f.allowed).not.toHaveBeenCalled();
+    // After the run the Task callback is refused.
+    const composition = mock.taskComposition.mock.calls[0]?.[0];
+    await expect(composition.authorizeTask({ action: "task.create" })).rejects.toThrow();
+  });
+  it("a Task permission withdrawn during the close refuses it before commit", async () => {
+    const f = withTasks();
+    f.authorizeActions
+      .mockImplementationOnce(
+        async (actions: readonly string[]) =>
+          new Map(actions.map((action) => [action, { effect: "Allow", action }])),
+      )
+      .mockImplementationOnce(
+        async (actions: readonly string[]) =>
+          new Map(
+            actions.map((action) => [
+              action,
+              { effect: action === "task.assign" ? "Deny" : "Allow", action },
+            ]),
+          ),
+      );
+    await expect(f.handler(f.input)).rejects.toMatchObject({
+      code: "DINING_CLOSING_PERMISSION_DENIED",
+    });
+    expect(f.authorizeActions).toHaveBeenCalledTimes(2);
+    expect(f.inside.thrown).toBe(true);
   });
 });
 it("rejects CSRF failure before transaction", async () => {

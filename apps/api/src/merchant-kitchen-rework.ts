@@ -9,6 +9,7 @@ import {
 } from "@rms/kitchen";
 import { kitchenPreparation, type KitchenPreparation } from "./merchant-kitchen-query.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 
@@ -95,47 +96,71 @@ export function createMerchantKitchenRework(options: {
   return Object.freeze({
     async query(input: { sessionCookie: unknown; csrf: unknown }) {
       const session = await options.authentication.authorize(input);
-      return options.persistence.transactions.run(async (transaction) => {
-        const scope = await resolveScope(
-          transaction,
-          input.sessionCookie,
-          "kitchen.operate",
-          session.sessionReference,
-        );
-        if (!(await scope.allowed())) return denied();
-        const canRework =
-          session.policy?.code === "NamedKdsOperator" &&
-          (await scope.authorizeAction(kitchenReworkPermission))?.effect === "Allow";
-        const authority = {
-          brandReference: scope.context.brand.brandReference,
-          storeReference: scope.store.storeReference,
-        };
-        const tx = boundTransaction(transaction);
-        const observedAt = options.persistence.now();
-        const rows = await createPostgresKitchenReworkStore({
-          ...authority,
-          nextReference: options.nextReference,
-        }).listCurrent(tx, observedAt);
-        const preparation =
-          rows.length === 0
-            ? new Map<string, KitchenPreparation>()
-            : await kitchenPreparation(
-                tx,
-                authority,
-                rows.map((row) => ({
-                  workItemReference: row.item.originalWorkItemReference,
-                  orderReference: row.item.orderReference,
-                })),
+      // WP-2423: one authorized run. The caller, `kitchen.operate` and (for a named operator) the
+      // remake permission are resolved in one current-fact read at the start, and the caller is
+      // re-checked in full before the reply, inside this transaction.
+      return options.persistence.transactions.run((transaction) =>
+        withMerchantTransactionAuthorization(
+          {
+            transaction,
+            resolve: async () => {
+              const scope = await resolveScope(
+                transaction,
+                input.sessionCookie,
+                "kitchen.operate",
+                session.sessionReference,
               );
-        return Object.freeze({
-          storeReference: authority.storeReference,
-          observedAt,
-          canRework,
-          items: rows.map((row) =>
-            reworkView(row.item, row.dish, preparation.get(row.item.originalWorkItemReference)),
-          ),
-        });
-      });
+              if (session.policy?.code !== "NamedKdsOperator") {
+                if ((await scope.allowed()) !== true) return denied();
+                return { scope, canRework: false };
+              }
+              const decisions = await scope.authorizeActions([
+                "kitchen.operate",
+                kitchenReworkPermission,
+              ]);
+              if (decisions.get("kitchen.operate")?.effect !== "Allow") return denied();
+              return {
+                scope,
+                canRework: decisions.get(kitchenReworkPermission)?.effect === "Allow",
+              };
+            },
+            recheck: async ({ scope }) => (await scope.allowed()) === true,
+            denied,
+          },
+          async (run) => {
+            const { scope, canRework } = run.scope;
+            const authority = {
+              brandReference: scope.context.brand.brandReference,
+              storeReference: scope.store.storeReference,
+            };
+            const tx = boundTransaction(transaction);
+            const observedAt = options.persistence.now();
+            const rows = await createPostgresKitchenReworkStore({
+              ...authority,
+              nextReference: options.nextReference,
+            }).listCurrent(tx, observedAt);
+            const preparation =
+              rows.length === 0
+                ? new Map<string, KitchenPreparation>()
+                : await kitchenPreparation(
+                    tx,
+                    authority,
+                    rows.map((row) => ({
+                      workItemReference: row.item.originalWorkItemReference,
+                      orderReference: row.item.orderReference,
+                    })),
+                  );
+            return Object.freeze({
+              storeReference: authority.storeReference,
+              observedAt,
+              canRework,
+              items: rows.map((row) =>
+                reworkView(row.item, row.dish, preparation.get(row.item.originalWorkItemReference)),
+              ),
+            });
+          },
+        ),
+      );
     },
     async command(input: { sessionCookie: unknown; csrf: unknown; command: unknown }) {
       const session = await options.authentication.authorize(input);
@@ -170,29 +195,46 @@ export function createMerchantKitchenRework(options: {
       } catch {
         throw new KitchenReworkError("KITCHEN_REWORK_INPUT_INVALID");
       }
-      return options.persistence.transactions.run(async (transaction) => {
-        const scope = await resolveScope(
-          transaction,
-          input.sessionCookie,
-          command.action === "CreateKitchenRework" ? kitchenReworkPermission : "kitchen.operate",
-          session.sessionReference,
-        );
-        if (!(await scope.allowed())) return denied();
-        const result = await createPostgresKitchenReworkStore({
-          brandReference: scope.context.brand.brandReference,
-          storeReference: scope.store.storeReference,
-          nextReference: options.nextReference,
-        }).execute(boundTransaction(transaction), {
-          command,
-          actorReference: scope.actorReference,
-          occurredAt: options.persistence.now(),
-        });
-        return Object.freeze({
-          status: result.status,
-          action: result.action,
-          rework: reworkView(result.item, null, undefined),
-        });
-      });
+      // WP-2423: the caller and the command's permission are resolved in full at the start and
+      // re-checked in full before the commit, inside this transaction, so a withdrawn permission
+      // or ended Session never commits the remake.
+      return options.persistence.transactions.run((transaction) =>
+        withMerchantTransactionAuthorization(
+          {
+            transaction,
+            resolve: async () => {
+              const scope = await resolveScope(
+                transaction,
+                input.sessionCookie,
+                command.action === "CreateKitchenRework"
+                  ? kitchenReworkPermission
+                  : "kitchen.operate",
+                session.sessionReference,
+              );
+              if ((await scope.allowed()) !== true) return denied();
+              return scope;
+            },
+            recheck: async (scope) => (await scope.allowed()) === true,
+            denied,
+          },
+          async ({ scope }) => {
+            const result = await createPostgresKitchenReworkStore({
+              brandReference: scope.context.brand.brandReference,
+              storeReference: scope.store.storeReference,
+              nextReference: options.nextReference,
+            }).execute(boundTransaction(transaction), {
+              command,
+              actorReference: scope.actorReference,
+              occurredAt: options.persistence.now(),
+            });
+            return Object.freeze({
+              status: result.status,
+              action: result.action,
+              rework: reworkView(result.item, null, undefined),
+            });
+          },
+        ),
+      );
     },
   });
 }

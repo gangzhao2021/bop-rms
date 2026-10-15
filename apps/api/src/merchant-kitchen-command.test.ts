@@ -97,9 +97,25 @@ it("rejects current denied permission before owner access", async () => {
   });
   expect(doubles.store).not.toHaveBeenCalled();
 });
-it("binds trusted authority and rechecks revoked authority for execute and recovery", async () => {
+it("binds trusted authority; owner callbacks take the run's guard and end with it", async () => {
   const s = setup();
+  const during: boolean[] = [];
+  doubles.execute.mockImplementation(async () => {
+    const service = doubles.service.mock.calls[0]?.[0];
+    const store = doubles.store.mock.calls[0]?.[0];
+    const tx = { query: vi.fn() };
+    await service.transactions.withTransaction(async (bound: object) => {
+      during.push(await store.authorize(bound, { access: "Recover", idempotencyKey: id(1) }));
+      during.push(await store.authorize(bound, { access: "Execute", command }));
+      // Not this run's transaction: refused without a query.
+      during.push(await store.authorize(tx, { access: "Execute", command }));
+    });
+    during.push(await service.authorization.authorize(command));
+    during.push(await service.authorization.authorize({ ...command, storeReference: id(99) }));
+    return { outcome: "Accepted" };
+  });
   await expect(s.operation(s.input)).resolves.toEqual({ outcome: "Accepted" });
+  expect(during).toEqual([true, true, false, true, false]);
   const service = doubles.service.mock.calls[0]?.[0];
   const store = doubles.store.mock.calls[0]?.[0];
   expect(doubles.scope).toHaveBeenCalledWith(s.tx, s.input.sessionCookie, "kitchen.operate", id(9));
@@ -111,11 +127,22 @@ it("binds trusted authority and rechecks revoked authority for execute and recov
   });
   expect(service.clock.now()).toBe((await service.trustedContext.resolveAuthority()).observedAt);
   expect(doubles.execute).toHaveBeenCalledWith(command);
-  expect(await store.authorize(s.tx, { access: "Recover", idempotencyKey: id(1) })).toBe(true);
-  s.allowed.mockResolvedValue(false);
+  // WP-2423: the caller is resolved in full exactly twice (start and before the commit).
+  expect(doubles.scope).toHaveBeenCalledOnce();
+  expect(s.allowed).toHaveBeenCalledTimes(2);
+  // The guard ends with the run.
   expect(await service.authorization.authorize(command)).toBe(false);
-  expect(await store.authorize(s.tx, { access: "Execute", command })).toBe(false);
   expect(await store.authorize(s.tx, { access: "Recover", idempotencyKey: id(1) })).toBe(false);
+});
+it("WP-2423: a permission withdrawn or Session ended during the command refuses it before commit", async () => {
+  const s = setup();
+  s.allowed.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+  await expect(s.operation(s.input)).rejects.toMatchObject({
+    code: "KITCHEN_WORK_PERMISSION_DENIED",
+  });
+  // The refusal is thrown inside the transaction callback, so nothing it wrote commits.
+  expect(doubles.execute).toHaveBeenCalledOnce();
+  expect(s.allowed).toHaveBeenCalledTimes(2);
 });
 
 it("binds browser intent to current named Actor and Brand while preserving its Store and idempotency", async () => {

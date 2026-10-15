@@ -1,6 +1,7 @@
 import { readClosedRecord } from "@bop/identity";
 import { createPostgresDiningHostTransferSelection, parseDiningReference } from "@rms/dining";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 export function createMerchantDiningHostSelection(options: {
@@ -13,31 +14,48 @@ export function createMerchantDiningHostSelection(options: {
       const authenticated = await options.authentication.authorize(input),
         raw = readClosedRecord(input.query, ["diningSessionReference"]),
         reference = parseDiningReference(raw.diningSessionReference);
-      return await options.persistence.transactions.run(async (tx) => {
-        const current = await resolve(
-          tx,
-          input.sessionCookie,
-          "dining.host.transfer",
-          authenticated.sessionReference,
-        );
-        if (!(await current.allowed())) throw new Error("denied");
-        const owner = createPostgresDiningHostTransferSelection(
-          { run: (work) => work(tx) },
+      const denied = (): never => {
+        throw new Error("denied");
+      };
+      // WP-2423: one authorized run. The caller and `dining.host.transfer` are resolved in full
+      // once at the start and once more before the reply; the owner read in between takes the
+      // run's no-query guard.
+      return await options.persistence.transactions.run((tx) =>
+        withMerchantTransactionAuthorization(
           {
-            scope: {
-              tenantReference: current.selected.tenantReference,
-              brandReference: current.context.brand.brandReference,
-              storeReference: current.store.storeReference,
+            transaction: tx,
+            resolve: async () => {
+              const current = await resolve(
+                tx,
+                input.sessionCookie,
+                "dining.host.transfer",
+                authenticated.sessionReference,
+              );
+              if ((await current.allowed()) !== true) return denied();
+              return current;
             },
-            now: options.persistence.now,
-            authorize: async (transaction) =>
-              transaction === tx && (await current.allowed()) === true,
+            recheck: async (current) => (await current.allowed()) === true,
+            denied,
           },
-        );
-        const result = await owner.readCurrent({ diningSessionReference: reference });
-        if (!(await current.allowed())) throw new Error("denied");
-        return result;
-      });
+          async (authority) => {
+            const current = authority.scope;
+            const owner = createPostgresDiningHostTransferSelection(
+              { run: (work) => work(tx) },
+              {
+                scope: {
+                  tenantReference: current.selected.tenantReference,
+                  brandReference: current.context.brand.brandReference,
+                  storeReference: current.store.storeReference,
+                },
+                now: options.persistence.now,
+                authorize: async (transaction) =>
+                  transaction === tx && (await authority.guard(transaction)),
+              },
+            );
+            return owner.readCurrent({ diningSessionReference: reference });
+          },
+        ),
+      );
     } catch {
       throw new Error("DINING_HOST_SELECTION_UNAVAILABLE");
     }

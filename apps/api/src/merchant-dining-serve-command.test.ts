@@ -56,7 +56,15 @@ function setup() {
     actorReference: id(11),
     allowed,
   });
-  const run = vi.fn(async (work: (tx: object) => Promise<unknown>) => work({}));
+  const inside = { thrown: false };
+  const run = vi.fn(async (work: (tx: object) => Promise<unknown>) => {
+    try {
+      return await work({});
+    } catch (error) {
+      inside.thrown = true;
+      throw error;
+    }
+  });
   let ref = 30;
   const reference = vi.fn(() => id(ref++));
   const execute = createMerchantDiningServeCommand({
@@ -83,7 +91,7 @@ function setup() {
       expectedTableAssignmentVersion: 3,
     },
   };
-  return { execute, input, allowed, authenticate, run, reference };
+  return { execute, input, allowed, authenticate, run, reference, inside };
 }
 beforeEach(() => {
   vi.clearAllMocks();
@@ -183,4 +191,30 @@ it("rejects non-ready items and permission denial", async () => {
   m.find.mockClear();
   await expect(f.execute(f.input)).rejects.toThrow();
   expect(m.find).not.toHaveBeenCalled();
+});
+it("WP-2423: resolves the caller in full twice; the serve write takes the run's guard", async () => {
+  const f = setup();
+  const during: boolean[] = [];
+  m.commit.mockImplementation(async ({ record }) => {
+    const owner = m.compose.mock.calls[0]?.[0];
+    during.push(await owner.authorize());
+    during.push(await owner.authorize());
+    return { status: "Created", record };
+  });
+  await expect(f.execute(f.input)).resolves.toEqual({ status: "Created", itemServiceVersion: 1 });
+  expect(during).toEqual([true, true]);
+  // Start and the re-check before the commit; the owner reads in between cost no resolution.
+  expect(m.scope).toHaveBeenCalledOnce();
+  expect(f.allowed).toHaveBeenCalledTimes(2);
+  // The guard ends with the run.
+  expect(await m.compose.mock.calls[0]?.[0].authorize()).toBe(false);
+});
+it("WP-2423: a permission withdrawn during the serve refuses it before commit", async () => {
+  const f = setup();
+  f.allowed.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+  await expect(f.execute(f.input)).rejects.toThrow("DINING_SERVE_COMMAND_DENIED");
+  expect(m.commit).toHaveBeenCalledOnce();
+  expect(f.allowed).toHaveBeenCalledTimes(2);
+  // Thrown inside the transaction callback, so the serve record does not commit.
+  expect(f.inside.thrown).toBe(true);
 });

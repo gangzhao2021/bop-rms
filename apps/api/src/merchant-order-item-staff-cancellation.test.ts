@@ -217,6 +217,39 @@ it("WP-2423 Q6 step 2a: cancels kitchen, Ordering, the item refund claim, fulfil
   });
 });
 
+it("WP-2423: resolves the staff member in full twice; owner checks take the run's guard", async () => {
+  const f = setup();
+  const during: boolean[] = [];
+  d.prepare.mockImplementation(async () => {
+    const owned = d.itemStore.mock.calls[0]?.[0].authorize;
+    const identity = { orderReference: id(5), orderBatchReference: id(6), actorReference: id(2) };
+    during.push(await owned(f.tx, identity));
+    during.push(await owned(f.tx, { ...identity, orderBatchReference: id(99) }));
+    during.push(await owned({}, identity));
+    return { status: "Ready", plan: plan([id(51)]) };
+  });
+  await f.operation.cancel(f.input);
+  expect(during).toEqual([true, false, false]);
+  expect(d.scope).toHaveBeenCalledTimes(1);
+  expect(f.allowed).toHaveBeenCalledTimes(2);
+  // The guard ends with the run.
+  const owned = d.itemStore.mock.calls[0]?.[0].authorize;
+  expect(
+    await owned(f.tx, { orderReference: id(5), orderBatchReference: id(6), actorReference: id(2) }),
+  ).toBe(false);
+});
+
+it("WP-2423: a permission withdrawn or Session ended during the cancellation cancels nothing", async () => {
+  const f = setup();
+  f.allowed.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+  await expect(f.operation.cancel(f.input)).rejects.toMatchObject({
+    code: "ORDER_CANCELLATION_PERMISSION_DENIED",
+  });
+  // Refused inside the transaction callback after the writes (they roll back); never dispatched.
+  expect(d.commit).toHaveBeenCalledTimes(1);
+  expect(d.drive).not.toHaveBeenCalled();
+});
+
 it("keeps the cancellation when dispatch fails after commit (refund pending, never resent here)", async () => {
   const f = setup();
   d.drive.mockRejectedValue(new Error("provider down"));

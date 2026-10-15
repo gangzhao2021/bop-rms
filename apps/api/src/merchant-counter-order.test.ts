@@ -5,6 +5,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({
   entries: new Map<string, Record<string, unknown>>(),
   orders: new Map<string, Record<string, unknown>>(),
+  // The full caller resolution (Session, selection, membership, permission policy).
+  allowed: { fn: async (): Promise<boolean> => true, calls: 0 },
+  // What the owner callbacks answered during and after each run.
+  guards: [] as (() => Promise<boolean>)[],
+  during: [] as boolean[],
+  rolledBack: 0,
 }));
 vi.mock("./merchant-store-scope.js", () => ({
   createMerchantStoreScope: () => async () => ({
@@ -12,30 +18,41 @@ vi.mock("./merchant-store-scope.js", () => ({
     context: { brand: { brandReference: "0198a7c0-0000-7000-8000-000000000002" } },
     store: { storeReference: "0198a7c0-0000-7000-8000-000000000003" },
     actorReference: "0198a7c0-0000-7000-8000-000000000004",
-    allowed: async () => true,
+    allowed: async () => {
+      state.allowed.calls++;
+      return state.allowed.fn();
+    },
   }),
 }));
 vi.mock("./counter-payment-preparation.js", () => ({
-  readCounterPaymentPreparation: async () => ({
-    preparation: {
-      orderAllocation: { amountMinor: 1130n },
-      tip: { amountMinor: 150n },
-      total: { amountMinor: 1280n },
-      capacityExpiresAt: "2026-10-13T18:30:00.000Z",
-    },
-    orderNumber: "12",
-    orderVersion: 1,
-    paymentOperationReference: "0198a7c0-0000-7000-8000-000000000099",
-  }),
+  readCounterPaymentPreparation: async (_tx: unknown, owner: { authorize(): Promise<boolean> }) => {
+    state.guards.push(owner.authorize);
+    state.during.push(await owner.authorize());
+    return {
+      preparation: {
+        orderAllocation: { amountMinor: 1130n },
+        tip: { amountMinor: 150n },
+        total: { amountMinor: 1280n },
+        capacityExpiresAt: "2026-10-13T18:30:00.000Z",
+      },
+      orderNumber: "12",
+      orderVersion: 1,
+      paymentOperationReference: "0198a7c0-0000-7000-8000-000000000099",
+    };
+  },
 }));
 vi.mock("@rms/ordering", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@rms/ordering")>();
   return {
     ...actual,
-    createPostgresCounterOrderEntryStore: () => ({
-      loadByOperation: async (_tx: unknown, operation: string) =>
-        state.entries.get(operation) ?? null,
+    createPostgresCounterOrderEntryStore: (owner: { authorize(): Promise<boolean> }) => ({
+      loadByOperation: async (_tx: unknown, operation: string) => {
+        state.guards.push(owner.authorize);
+        state.during.push(await owner.authorize());
+        return state.entries.get(operation) ?? null;
+      },
       record: async (_tx: unknown, value: Record<string, unknown>) => {
+        state.during.push(await owner.authorize());
         const key = String(value.operationReference);
         const prior = state.entries.get(key);
         if (prior) return { status: "AlreadyRecorded", record: prior };
@@ -106,7 +123,16 @@ function setup(clock = { at: "2026-10-13T18:00:00.000Z" }) {
   const onUnexpected = vi.fn();
   const command = createMerchantCounterOrder({
     persistence: {
-      transactions: { run: async (work: (tx: unknown) => Promise<unknown>) => work({}) },
+      transactions: {
+        run: async (work: (tx: unknown) => Promise<unknown>) => {
+          try {
+            return await work({});
+          } catch (error) {
+            state.rolledBack++;
+            throw error;
+          }
+        },
+      },
       now: () => clock.at,
     } as never,
     authentication: { authorize: async () => ({ sessionReference: id(9) }) } as never,
@@ -133,6 +159,10 @@ describe("counter order command — WP-2423 Q7", () => {
   beforeEach(() => {
     state.entries.clear();
     state.orders.clear();
+    state.allowed = { fn: async () => true, calls: 0 };
+    state.guards = [];
+    state.during = [];
+    state.rolledBack = 0;
   });
 
   it("saves the pickup checkout details before checkout, as every pickup Order needs", async () => {
@@ -196,5 +226,29 @@ describe("counter order command — WP-2423 Q7", () => {
       lineIndex: 0,
     });
     expect(onUnexpected).not.toHaveBeenCalled();
+  });
+
+  it("WP-2423: each counter transaction resolves the caller twice; owner callbacks take its guard", async () => {
+    const { send } = setup();
+    expect(await send()).toMatchObject({ status: "Placed" });
+    // Three transactions (earlier send, entry, finished order), each resolved at its start and
+    // re-checked before it commits; the owner reads and writes in between cost no resolution.
+    expect(state.allowed.calls).toBe(6);
+    expect(state.during.length).toBeGreaterThanOrEqual(3);
+    expect(state.during.every((answer) => answer)).toBe(true);
+    // The guard ends with its run.
+    for (const guard of state.guards) expect(await guard()).toBe(false);
+  });
+
+  it("WP-2423: a permission withdrawn during a counter transaction refuses it before commit", async () => {
+    const { send, pipeline } = setup();
+    let call = 0;
+    // Allowed at the start of the entry transaction, withdrawn before it commits.
+    state.allowed.fn = async () => ++call !== 4;
+    await expect(send()).rejects.toMatchObject({ code: "COUNTER_ORDER_PERMISSION_DENIED" });
+    expect(state.allowed.calls).toBe(4);
+    // Thrown inside the transaction callback, so the counter entry does not commit.
+    expect(state.rolledBack).toBe(1);
+    expect(pipeline.addItem).not.toHaveBeenCalled();
   });
 });

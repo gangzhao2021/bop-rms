@@ -11,6 +11,11 @@
  * The final full re-check is not optional: the result of `work` is only returned after it passes,
  * so a Session that expired or was revoked, or a permission withdrawn, during the read still
  * refuses the reply. The guard stops answering true as soon as `work` settles.
+ *
+ * Commands use the same run: `persistence.transactions.run` wraps it, so the final re-check runs
+ * inside the command's transaction and a refusal rolls back everything the command wrote (a
+ * permission withdrawn or a Session ended before the commit commits nothing). Authorization work
+ * no longer runs while the command's locks are held, except this single final re-check.
  */
 export interface MerchantTransactionAuthority<Scope> {
   /** The scope resolved in full at the start of this run. */
@@ -73,8 +78,16 @@ export async function withMerchantTransactionAuthorization<Scope, T>(
     active = false;
     transactions.clear();
   }
-  // Sequential: one query at a time on the transaction.
-  if ((await options.recheck(scope)) !== true) return options.denied();
-  for (const check of rechecks) if ((await check()) !== true) return options.denied();
+  // Sequential: one query at a time on the transaction. The Store scope refuses a Session that
+  // ended (expired) since the start by throwing its own denial; that is this run's refusal too.
+  if ((await options.recheck(scope).catch(refusal)) !== true) return options.denied();
+  for (const check of rechecks)
+    if ((await check().catch(refusal)) !== true) return options.denied();
   return result;
+}
+
+/** The merchant Store scope's own refusal (Session ended, selection changed) reads as false. */
+function refusal(error: unknown): false {
+  if (error instanceof Error && error.message === "STORE_SERVICE_PERMISSION_DENIED") return false;
+  throw error;
 }

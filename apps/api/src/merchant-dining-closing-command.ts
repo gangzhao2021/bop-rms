@@ -37,6 +37,9 @@ const denied = (): never => {
 const changed = (): never => {
   throw new DiningClosingError("DINING_CLOSING_VERSION_CONFLICT");
 };
+/** The Task actions an unpaid-order exception Task can need while a table closes. */
+const taskActions = ["task.create", "task.assign"] as const;
+
 export function createMerchantDiningClosingCommand(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
@@ -63,10 +66,11 @@ export function createMerchantDiningClosingCommand(options: {
       operationReference: parseDiningReference(raw.operationReference),
       expectedSessionVersion: parsePositiveDiningVersion(raw.expectedSessionVersion),
     };
-    // WP-2423: one authorized run. The caller and its `dining.session.close` permission are
-    // resolved in full once at the start and once more before the reply; owner reads in between
-    // are fenced by the run's guard (no query). Re-resolving the caller inside every owner read
-    // (as before) cost ~3,000 statements to finalize a one-order table.
+    // WP-2423: one authorized run. The caller, its `dining.session.close` permission and the Task
+    // permissions an unpaid-order exception Task may need are resolved in full once at the start
+    // (one current-fact read) and once more before the reply; owner reads in between are fenced by
+    // the run's guard (no query). Re-resolving the caller inside every owner read (as before) cost
+    // ~3,000 statements to finalize a one-order table.
     return options.persistence.transactions.run((transaction) =>
       withMerchantTransactionAuthorization(
         {
@@ -78,11 +82,28 @@ export function createMerchantDiningClosingCommand(options: {
               "dining.session.close",
               authenticated.sessionReference,
             ).catch(denied);
-            const permission = await current.authorizeAction("dining.session.close");
+            const decisions = await current.authorizeActions([
+              "dining.session.close",
+              ...taskActions,
+            ]);
+            const permission = decisions.get("dining.session.close");
             if (permission?.effect !== "Allow") return denied();
-            return { current, permission };
+            return { current, permission, tasks: decisions, usedTasks: new Set<string>() };
           },
-          recheck: async ({ current }) => (await current.allowed()) === true,
+          // The Task permissions this run used are re-checked with the close permission, in the
+          // same current-fact read, and must still answer as they did at the start.
+          recheck: async ({ current, tasks, usedTasks }) => {
+            if (usedTasks.size === 0) return (await current.allowed()) === true;
+            const fresh = await current.authorizeActions(["dining.session.close", ...usedTasks]);
+            return (
+              fresh.get("dining.session.close")?.effect === "Allow" &&
+              [...usedTasks].every(
+                (action) =>
+                  fresh.get(action)?.effect !== undefined &&
+                  fresh.get(action)?.effect === tasks.get(action)?.effect,
+              )
+            );
+          },
           denied,
         },
         (authority) => closeInRun(transaction, authority),
@@ -97,10 +118,12 @@ export function createMerchantDiningClosingCommand(options: {
         permission: NonNullable<
           Awaited<ReturnType<Awaited<ReturnType<typeof resolve>>["authorizeAction"]>>
         >;
+        tasks: Awaited<ReturnType<Awaited<ReturnType<typeof resolve>>["authorizeActions"]>>;
+        usedTasks: Set<string>;
       }>,
     ) {
-      const { current, permission: closePermission } = authority.scope,
-        allowed = () => authority.guard();
+      const { current, permission: closePermission, tasks, usedTasks } = authority.scope,
+        guard = () => authority.guard();
       const scope = {
         tenantReference: current.selected.tenantReference,
         brandReference: String(current.context.brand.brandReference),
@@ -132,7 +155,7 @@ export function createMerchantDiningClosingCommand(options: {
       const release = createDiningTableReleaseComposition({
         scope,
         actorReference: String(current.actorReference),
-        authorize: allowed,
+        authorize: guard,
         newReference: options.newReference,
         retentionPolicyCode: options.retentionPolicyCode,
         retentionPolicyVersion: options.retentionPolicyVersion,
@@ -144,12 +167,12 @@ export function createMerchantDiningClosingCommand(options: {
           expectedSessionVersion: version,
           observedAt,
         });
-      const fence = createPostgresDiningClosingFence({ scope, authorize: allowed });
+      const fence = createPostgresDiningClosingFence({ scope, authorize: guard });
       const session = await fence(tx, {
         diningSessionReference: command.diningSessionReference,
         observedAt,
       });
-      const prior = await store.readReceipt(command.operationReference, allowed);
+      const prior = await store.readReceipt(command.operationReference, guard);
       if (prior) {
         if (
           prior.record.action !== command.action ||
@@ -160,7 +183,6 @@ export function createMerchantDiningClosingCommand(options: {
         )
           return fail();
         if (command.action === "Finalize") await releaseClosedTable(prior.record.session.version);
-        if (!(await allowed())) return fail();
         return Object.freeze({
           status: "AlreadyApplied" as const,
           phase: prior.record.session.phase,
@@ -190,9 +212,9 @@ export function createMerchantDiningClosingCommand(options: {
           providerAccountReference: options.providerAccountReference,
           environment: options.environment,
         },
-        authorize: allowed,
-        authorizeKitchen: allowed,
-        authorizeDining: allowed,
+        authorize: guard,
+        authorizeKitchen: guard,
+        authorizeDining: guard,
         authorizeAndFence,
         // WP-2423 item 2: an Order whose every round was cancelled is closed with the table too.
         includeCancelled: true,
@@ -225,7 +247,7 @@ export function createMerchantDiningClosingCommand(options: {
           authorize: async (request) => {
             // The permission decided for this run at its start (re-checked before the reply).
             if (
-              !(await allowed()) ||
+              !(await guard()) ||
               request.session.diningSessionReference !== command.diningSessionReference
             )
               return null;
@@ -279,10 +301,13 @@ export function createMerchantDiningClosingCommand(options: {
               policy: options.exceptionTaskPolicy,
               hashes,
               newReference: options.newReference,
-              authorizeAndFence: async () => (await allowed()) && (await authorizeAndFence()),
+              authorizeAndFence: async () => (await guard()) && (await authorizeAndFence()),
+              // Decided for this run at its start; re-checked in full before the reply.
               authorizeTask: async (request) => {
-                const decision = await current.authorizeAction(request.action);
-                if (!decision) return fail();
+                const action = String(request.action);
+                const decision = tasks.get(action);
+                if (!decision || !(await guard())) return fail();
+                usedTasks.add(action);
                 return decision;
               },
             }).ensure(taskInput);
@@ -299,7 +324,6 @@ export function createMerchantDiningClosingCommand(options: {
         ? service.begin(request)
         : service.finalize(request));
       if (command.action === "Finalize") await releaseClosedTable(result.session.version);
-      if (!(await allowed())) return fail();
       return Object.freeze({
         status: result.status,
         phase: result.session.phase,

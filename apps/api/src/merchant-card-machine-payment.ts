@@ -20,6 +20,7 @@ import {
   type PaymentIntentClaimAdmission,
 } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { readCounterPaymentPreparation } from "./counter-payment-preparation.js";
@@ -246,100 +247,118 @@ export function createMerchantCardMachinePayment(options: {
         recordedAt: String(record.recordedAt),
       });
     try {
-      return await options.persistence.transactions.run(async (transaction) => {
-        const resolved = await resolveScope(
-          transaction,
-          input.sessionCookie,
-          counterOrderPermission,
-          session.sessionReference,
-        ).catch(() => fail("CARD_MACHINE_PERMISSION_DENIED"));
-        const allowed = async () => (await resolved.allowed()) === true;
-        if (!(await allowed())) return fail("CARD_MACHINE_PERMISSION_DENIED");
-        const tx = transaction as unknown as ConsumerTransaction;
-        const scope = {
-          tenantReference: String(resolved.selected.tenantReference),
-          brandReference: String(resolved.context.brand.brandReference),
-          storeReference: String(resolved.store.storeReference),
-        };
-        const actorReference = String(resolved.actorReference);
-        const payments = createPostgresCardMachinePaymentStore({
-          scope,
-          authorize: async (_tx, value) =>
-            value.orderReference === command.orderReference && (await allowed()),
-        });
-        const prior = await payments.loadByOperation(tx, command.operationReference);
-        if (prior !== null) {
-          if (
-            prior.intentDigest !== intentDigest ||
-            prior.actorReference !== actorReference ||
-            prior.orderBatchReference !== command.orderBatchReference
-          )
-            return fail("CARD_MACHINE_IDEMPOTENCY_CONFLICT");
-          return reply("AlreadyRecorded", prior);
-        }
-        const recordedAt = parsePaymentInstant(now());
-        const takenAt =
-          command.takenAt === null ? recordedAt : parsePaymentInstant(command.takenAt);
-        if (
-          takenAt > recordedAt ||
-          Date.parse(recordedAt) - Date.parse(takenAt) > cardMachineBackEntryWindowMs
-        )
-          return fail("CARD_MACHINE_INPUT_INVALID");
-        if (
-          (await payments.loadByBatch(tx, command.orderReference, command.orderBatchReference)) !==
-          null
-        )
-          return fail("CARD_MACHINE_ALREADY_PAID");
-        // Only an order staff took at the counter, or a dine-in round staff entered for a table,
-        // is paid on the Store's card machine.
-        const staffEntry = await resolveStaffEntry(tx, scope, allowed, command, {
-          now,
-          nextReference: options.nextReference,
-        });
-        if (staffEntry === null) return fail("CARD_MACHINE_NOT_FOUND");
-        const order = { submissionReference: staffEntry.submissionReference };
-        const current = staffEntry.current;
-        if (current === null) return fail("CARD_MACHINE_NOT_PAYABLE");
-        const preparation = current.preparation;
-        const total = preparation.total.amountMinor.toString();
-        if (total !== command.expectedTotalMinor) return fail("CARD_MACHINE_AMOUNT_CHANGED", total);
-        if (recordedAt >= String(preparation.capacityExpiresAt))
-          return fail("CARD_MACHINE_PAYMENT_WINDOW_CLOSED");
-        const record = parseCardMachinePaymentRecord({
-          tenantReference: scope.tenantReference,
-          brandReference: scope.brandReference,
-          storeReference: scope.storeReference,
-          cardMachinePaymentReference: options.nextReference(),
-          paymentIntentReference: options.nextReference(),
-          paymentAttemptReference: options.nextReference(),
-          paymentOperationReference: current.paymentOperationReference,
-          operationReference: command.operationReference,
-          intentDigest,
-          orderReference: command.orderReference,
-          orderBatchReference: command.orderBatchReference,
-          submissionReference: String(order.submissionReference),
-          preparation,
-          environment: options.environment,
-          slipReference: command.slipReference,
-          recordingReason: command.takenAt === null ? "AtCounter" : "RecordedAfterOutage",
-          takenAt,
-          recordedAt,
-          actorReference,
-          eventReference: options.nextReference(),
-          auditReference: options.nextReference(),
-        });
-        const admitted = await options
-          .admission({ scope, preparation, allowed, kind: staffEntry.kind })
-          .admit(tx, cardMachinePaymentIntentView(record), recordedAt);
-        if (
-          admitted === false ||
-          (admitted !== true && admitted.validUntil <= recordedAt) ||
-          !(await allowed())
-        )
-          return fail("CARD_MACHINE_NOT_PAYABLE");
-        const saved = await payments.record(tx, record);
-        return reply(saved.status === "Created" ? "Recorded" : "AlreadyRecorded", saved.record);
-      });
+      // WP-2423: one authorized run. The staff member and the counter-order permission are
+      // resolved in full once at the start and once more before the commit (inside this
+      // transaction, so a permission withdrawn or Session ended meanwhile records nothing). The
+      // Payment, Ordering and admission owner reads in between take the run's no-query guard
+      // instead of re-resolving the caller (~30 statements each) while their rows are locked.
+      return await options.persistence.transactions.run((transaction) =>
+        withMerchantTransactionAuthorization(
+          {
+            transaction,
+            resolve: async () => {
+              const current = await resolveScope(
+                transaction,
+                input.sessionCookie,
+                counterOrderPermission,
+                session.sessionReference,
+              ).catch(() => fail("CARD_MACHINE_PERMISSION_DENIED"));
+              if ((await current.allowed()) !== true) return fail("CARD_MACHINE_PERMISSION_DENIED");
+              return current;
+            },
+            recheck: async (current) => (await current.allowed()) === true,
+            denied: () => fail("CARD_MACHINE_PERMISSION_DENIED"),
+          },
+          async (authority) => {
+            const resolved = authority.scope;
+            const allowed = () => authority.guard();
+            const tx = transaction as unknown as ConsumerTransaction;
+            const scope = {
+              tenantReference: String(resolved.selected.tenantReference),
+              brandReference: String(resolved.context.brand.brandReference),
+              storeReference: String(resolved.store.storeReference),
+            };
+            const actorReference = String(resolved.actorReference);
+            const payments = createPostgresCardMachinePaymentStore({
+              scope,
+              authorize: async (_tx, value) =>
+                value.orderReference === command.orderReference && (await allowed()),
+            });
+            const prior = await payments.loadByOperation(tx, command.operationReference);
+            if (prior !== null) {
+              if (
+                prior.intentDigest !== intentDigest ||
+                prior.actorReference !== actorReference ||
+                prior.orderBatchReference !== command.orderBatchReference
+              )
+                return fail("CARD_MACHINE_IDEMPOTENCY_CONFLICT");
+              return reply("AlreadyRecorded", prior);
+            }
+            const recordedAt = parsePaymentInstant(now());
+            const takenAt =
+              command.takenAt === null ? recordedAt : parsePaymentInstant(command.takenAt);
+            if (
+              takenAt > recordedAt ||
+              Date.parse(recordedAt) - Date.parse(takenAt) > cardMachineBackEntryWindowMs
+            )
+              return fail("CARD_MACHINE_INPUT_INVALID");
+            if (
+              (await payments.loadByBatch(
+                tx,
+                command.orderReference,
+                command.orderBatchReference,
+              )) !== null
+            )
+              return fail("CARD_MACHINE_ALREADY_PAID");
+            // Only an order staff took at the counter, or a dine-in round staff entered for a table,
+            // is paid on the Store's card machine.
+            const staffEntry = await resolveStaffEntry(tx, scope, allowed, command, {
+              now,
+              nextReference: options.nextReference,
+            });
+            if (staffEntry === null) return fail("CARD_MACHINE_NOT_FOUND");
+            const order = { submissionReference: staffEntry.submissionReference };
+            const current = staffEntry.current;
+            if (current === null) return fail("CARD_MACHINE_NOT_PAYABLE");
+            const preparation = current.preparation;
+            const total = preparation.total.amountMinor.toString();
+            if (total !== command.expectedTotalMinor)
+              return fail("CARD_MACHINE_AMOUNT_CHANGED", total);
+            if (recordedAt >= String(preparation.capacityExpiresAt))
+              return fail("CARD_MACHINE_PAYMENT_WINDOW_CLOSED");
+            const record = parseCardMachinePaymentRecord({
+              tenantReference: scope.tenantReference,
+              brandReference: scope.brandReference,
+              storeReference: scope.storeReference,
+              cardMachinePaymentReference: options.nextReference(),
+              paymentIntentReference: options.nextReference(),
+              paymentAttemptReference: options.nextReference(),
+              paymentOperationReference: current.paymentOperationReference,
+              operationReference: command.operationReference,
+              intentDigest,
+              orderReference: command.orderReference,
+              orderBatchReference: command.orderBatchReference,
+              submissionReference: String(order.submissionReference),
+              preparation,
+              environment: options.environment,
+              slipReference: command.slipReference,
+              recordingReason: command.takenAt === null ? "AtCounter" : "RecordedAfterOutage",
+              takenAt,
+              recordedAt,
+              actorReference,
+              eventReference: options.nextReference(),
+              auditReference: options.nextReference(),
+            });
+            const admitted = await options
+              .admission({ scope, preparation, allowed, kind: staffEntry.kind })
+              .admit(tx, cardMachinePaymentIntentView(record), recordedAt);
+            if (admitted === false || (admitted !== true && admitted.validUntil <= recordedAt))
+              return fail("CARD_MACHINE_NOT_PAYABLE");
+            const saved = await payments.record(tx, record);
+            return reply(saved.status === "Created" ? "Recorded" : "AlreadyRecorded", saved.record);
+          },
+        ),
+      );
     } catch (error) {
       if (error instanceof CardMachinePaymentCommandError) throw error;
       if (error instanceof CardMachinePaymentError) {

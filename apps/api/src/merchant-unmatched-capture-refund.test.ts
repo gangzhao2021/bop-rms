@@ -67,7 +67,7 @@ function setup() {
     csrf: "synthetic-csrf",
     command: { exceptionReference: id(7), idempotencyReference: id(11) },
   };
-  return { command, input, allowed, refundPayment };
+  return { command, input, allowed, refundPayment, run };
 }
 const observation = {
   kind: "RefundObservation",
@@ -164,15 +164,44 @@ it("WP-2423 P6: rejects a Provider observation for another operation", async () 
 
 it("WP-2423 P6: each step may read the current state but no other step, for the current staff only", async () => {
   const f = setup();
-  doubles.store.read.mockResolvedValue(state("Refunded"));
+  type Authorize = (tx: unknown, step: string, actor: string | null) => Promise<boolean>;
+  const during: boolean[] = [];
+  doubles.store.read.mockImplementation(async (tx: unknown) => {
+    const { authorize } = doubles.options.at(-1) as { authorize: Authorize };
+    during.push(await authorize(tx, "Read", null));
+    during.push(await authorize(tx, "Approve", id(2)));
+    during.push(await authorize(tx, "Request", id(2)));
+    during.push(await authorize(tx, "Approve", id(99)));
+    during.push(await authorize({}, "Read", null));
+    return state("Refunded");
+  });
   await f.command.approve(f.input);
-  const { authorize } = doubles.options[0] as {
-    authorize(tx: unknown, step: string, actor: string | null): Promise<boolean>;
-  };
+  expect(during).toEqual([true, true, false, false, false]);
+  // WP-2423: the caller is resolved in full at the start and before the commit only.
+  expect(f.allowed).toHaveBeenCalledTimes(2);
+  // The owner callback is the run's guard; it ends with the run.
+  const { authorize } = doubles.options.at(-1) as { authorize: Authorize };
   const tx = (doubles.store.read.mock.calls[0] as unknown[])[0];
-  expect(await authorize(tx, "Read", null)).toBe(true);
-  expect(await authorize(tx, "Approve", id(2))).toBe(true);
-  expect(await authorize(tx, "Request", id(2))).toBe(false);
-  expect(await authorize(tx, "Approve", id(99))).toBe(false);
-  expect(await authorize({}, "Read", null)).toBe(false);
+  expect(await authorize(tx, "Read", null)).toBe(false);
+});
+it("WP-2423: a permission withdrawn during approval refuses it inside the transaction and sends nothing", async () => {
+  const f = setup();
+  let rolledBack: unknown = null;
+  f.run.mockImplementation(async (work: (tx: object) => Promise<unknown>) =>
+    work({ query: vi.fn() }).catch((error: unknown) => {
+      rolledBack = error;
+      throw error;
+    }),
+  );
+  doubles.store.read.mockResolvedValue(state("Requested"));
+  doubles.store.approve.mockResolvedValue(state("Approved"));
+  f.allowed.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+  await expect(f.command.approve(f.input)).rejects.toMatchObject({
+    code: "UNMATCHED_REFUND_PERMISSION_DENIED",
+  });
+  // Thrown inside the transaction callback, so the approval does not commit; no Provider call.
+  expect(rolledBack).toMatchObject({ code: "UNMATCHED_REFUND_PERMISSION_DENIED" });
+  expect(doubles.store.approve).toHaveBeenCalledOnce();
+  expect(f.refundPayment).not.toHaveBeenCalled();
+  expect(f.allowed).toHaveBeenCalledTimes(2);
 });

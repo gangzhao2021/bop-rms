@@ -65,10 +65,26 @@ it("binds session, executor, selected scope and stable Provider operation identi
   });
   const opts = doubles.compose.mock.calls[0]?.[0];
   const query = { ...opts.scope, orderReference: id(6), requestReference: id(7) };
-  expect(await opts.authorize({}, query)).toBe(true);
-  expect(await opts.authorize({}, { ...query, requestReference: id(99) })).toBe(false);
-  f.allowed.mockResolvedValue(false);
+  // WP-2423: the owner callback is the run's guard; it ends with the run.
   expect(await opts.authorize({}, query)).toBe(false);
+});
+it("WP-2423: owner callbacks take the run's guard; the caller is resolved in full twice", async () => {
+  const f = setup();
+  const during: boolean[] = [];
+  doubles.prepare.mockImplementation(async (tx: object) => {
+    const opts = doubles.compose.mock.calls[0]?.[0];
+    const query = { ...opts.scope, orderReference: id(6), requestReference: id(7) };
+    for (let i = 0; i < 4; i += 1) during.push(await opts.authorize(tx, query));
+    during.push(await opts.authorize(tx, { ...query, requestReference: id(99) }));
+    during.push(await opts.authorize(tx, { ...query, orderReference: id(99) }));
+    const authority = vi.mocked(f.configure).mock.calls[0]?.[2];
+    during.push((await authority?.authorize()) === true);
+    return { status: "Created" };
+  });
+  await f.operation(f.input);
+  expect(during).toEqual([true, true, true, true, false, false, true]);
+  expect(doubles.resolve).toHaveBeenCalledOnce();
+  expect(f.allowed).toHaveBeenCalledTimes(2);
 });
 it.each([
   "executorReference",
@@ -98,8 +114,18 @@ it("rejects revoked execute authority before configuration", async () => {
 it("throws before caller transaction commits when final authorization is lost", async () => {
   const f = setup();
   f.allowed.mockResolvedValueOnce(true).mockResolvedValue(false);
+  let rolledBack: unknown = null;
+  f.run.mockImplementation(async (work: (tx: object) => Promise<unknown>) =>
+    work(f.tx).catch((error: unknown) => {
+      rolledBack = error;
+      throw error;
+    }),
+  );
   await expect(f.operation(f.input)).rejects.toThrow("ORDINARY_REFUND_COMMAND_DENIED");
+  // WP-2423: thrown inside the transaction callback, so the prepared refund does not commit.
+  expect(rolledBack).toMatchObject({ message: "ORDINARY_REFUND_COMMAND_DENIED" });
   expect(doubles.prepare).toHaveBeenCalledTimes(1);
+  expect(f.allowed).toHaveBeenCalledTimes(2);
 });
 
 it("supplies current server context and retained authority to configuration without browser overrides", async () => {
@@ -115,7 +141,6 @@ it("supplies current server context and retained authority to configuration with
   const authority = calls[0]?.[2];
   expect(authority?.context).toEqual({ brand: { brandReference: id(2) } });
   expect(Object.isFrozen(authority)).toBe(true);
-  expect(await authority?.authorize()).toBe(true);
-  f.allowed.mockResolvedValue(false);
+  // WP-2423: the retained authority is the run's guard, which ends with the run.
   expect(await authority?.authorize()).toBe(false);
 });

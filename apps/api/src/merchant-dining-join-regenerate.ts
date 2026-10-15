@@ -9,6 +9,7 @@ import {
   type DiningCredentialPort,
 } from "@rms/dining";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 export function createMerchantDiningJoinRegenerate(options: {
@@ -35,102 +36,118 @@ export function createMerchantDiningJoinRegenerate(options: {
       "expectedGeneration",
       "operationReference",
     ]);
-    return options.persistence.transactions.run(async (tx) => {
-      const current = await resolve(
-        tx,
-        input.sessionCookie,
-        "dining.operate",
-        authenticated.sessionReference,
-      );
-      if (!(await current.allowed())) return unavailable();
-      const scope = {
-          tenantReference: current.selected.tenantReference,
-          brandReference: current.context.brand.brandReference,
-          storeReference: current.store.storeReference,
-        },
-        runner = { run: <T>(work: (transaction: typeof tx) => Promise<T>) => work(tx) };
-      const tables = createPostgresDiningTableStore(runner, scope, {
-        hashIntent: (v) => "sha256:" + createHash("sha256").update(v).digest("hex"),
-        equals: (a, b) => a === b,
-      });
-      const start = createPostgresDiningSessionStartStore(runner, scope, options.credentials);
-      const regeneration = createPostgresDiningJoinRegenerationStore(
-        runner,
-        scope,
-        options.credentials,
-      );
-      const service = createDiningSessionService({
-        credentials: options.credentials,
-        pepperVersion: options.pepperVersion,
-        guests: { resolve: async () => null },
-        abuse: { admit: async () => "Cooldown" },
-        store: {
-          ...start,
-          resolveJoinState: async () => null,
-          resolveJoinOperation: async () => null,
-          join: async () => unavailable(),
-          ...regeneration,
-        },
-        staff: {
-          authorize: async (request) => {
-            if (request.operation !== "RegenerateJoinCredential") return null;
+    // WP-2423: one authorized run. The caller and its `dining.operate` permission are resolved in
+    // full once at the start and once more before the commit (inside this transaction, so a
+    // withdrawn permission or ended Session never commits); the Dining staff callback in between,
+    // which runs inside the Dining write, takes the run's no-query guard.
+    return options.persistence.transactions.run((tx) =>
+      withMerchantTransactionAuthorization(
+        {
+          transaction: tx,
+          resolve: async () => {
+            const current = await resolve(
+              tx,
+              input.sessionCookie,
+              "dining.operate",
+              authenticated.sessionReference,
+            );
             const permission = await current.authorizeAction("dining.operate");
-            if (permission?.effect !== "Allow") return null;
-            const table = await tables.loadTable(request.tableReference);
-            if (!table) return null;
-            const active =
-              table.activeDiningSessionReference === null
-                ? null
-                : await start.loadSession(table.activeDiningSessionReference);
-            if (table.activeDiningSessionReference !== null && !active) return null;
-            if (!(await current.allowed())) return null;
-            return {
-              tenantContext: current.context,
-              permission,
-              table: {
-                brandReference: parseDiningReference(scope.brandReference),
-                storeReference: parseDiningReference(scope.storeReference),
-                tableReference: table.tableReference,
-                assignmentVersion: active?.tableAssignmentVersion ?? table.aggregateVersion,
-                tableState:
-                  table.lifecycle === "Published" && table.operationalState === "Available"
-                    ? "Eligible"
-                    : "Unavailable",
-                activeDiningSessionReference: table.activeDiningSessionReference,
-                observedAt: request.observedAt,
-              },
-              audit: {
-                auditId: options.newReference(),
-                brandId: scope.brandReference,
-                storeId: scope.storeReference,
-                actor: { type: "User", reference: current.actorReference },
-                actionCode: "DINING_JOIN_CREDENTIAL_REGENERATE",
-                targetType: "DiningTable",
-                targetId: table.tableReference,
-                reasonCode: "STAFF_JOIN_CREDENTIAL_REGENERATE",
-                correlationId: request.operationReference,
-                occurredAt: request.observedAt,
-                sourceChannel: "MERCHANT_WEB",
-                dataClassification: "Restricted",
-                retentionPolicyCode: options.retentionPolicyCode,
-                retentionPolicyVersion: options.retentionPolicyVersion,
-              },
-            };
+            if (permission?.effect !== "Allow") return unavailable();
+            return { current, permission };
           },
+          recheck: async ({ current }) => (await current.allowed()) === true,
+          denied: unavailable,
         },
-      });
-      const result = await service.regenerate({
-        ...command,
-        requestedAt: current.context.resolvedAt,
-      });
-      if (!(await current.allowed())) return unavailable();
-      return Object.freeze({
-        status: result.status,
-        generation: result.capability.generation,
-        capabilityVersion: result.capability.version,
-        joinKind: result.capability.kind,
-        ...(result.status === "Issued" ? { joinCredential: result.joinCredential } : {}),
-      });
-    });
+        async (authority) => {
+          const { current, permission } = authority.scope;
+          const scope = {
+              tenantReference: current.selected.tenantReference,
+              brandReference: current.context.brand.brandReference,
+              storeReference: current.store.storeReference,
+            },
+            runner = { run: <T>(work: (transaction: typeof tx) => Promise<T>) => work(tx) };
+          const tables = createPostgresDiningTableStore(runner, scope, {
+            hashIntent: (v) => "sha256:" + createHash("sha256").update(v).digest("hex"),
+            equals: (a, b) => a === b,
+          });
+          const start = createPostgresDiningSessionStartStore(runner, scope, options.credentials);
+          const regeneration = createPostgresDiningJoinRegenerationStore(
+            runner,
+            scope,
+            options.credentials,
+          );
+          const service = createDiningSessionService({
+            credentials: options.credentials,
+            pepperVersion: options.pepperVersion,
+            guests: { resolve: async () => null },
+            abuse: { admit: async () => "Cooldown" },
+            store: {
+              ...start,
+              resolveJoinState: async () => null,
+              resolveJoinOperation: async () => null,
+              join: async () => unavailable(),
+              ...regeneration,
+            },
+            staff: {
+              authorize: async (request) => {
+                if (request.operation !== "RegenerateJoinCredential") return null;
+                // The permission decided for this run at its start (re-checked before the commit).
+                if (!(await authority.guard())) return null;
+                const table = await tables.loadTable(request.tableReference);
+                if (!table) return null;
+                const active =
+                  table.activeDiningSessionReference === null
+                    ? null
+                    : await start.loadSession(table.activeDiningSessionReference);
+                if (table.activeDiningSessionReference !== null && !active) return null;
+                return {
+                  tenantContext: current.context,
+                  permission,
+                  table: {
+                    brandReference: parseDiningReference(scope.brandReference),
+                    storeReference: parseDiningReference(scope.storeReference),
+                    tableReference: table.tableReference,
+                    assignmentVersion: active?.tableAssignmentVersion ?? table.aggregateVersion,
+                    tableState:
+                      table.lifecycle === "Published" && table.operationalState === "Available"
+                        ? "Eligible"
+                        : "Unavailable",
+                    activeDiningSessionReference: table.activeDiningSessionReference,
+                    observedAt: request.observedAt,
+                  },
+                  audit: {
+                    auditId: options.newReference(),
+                    brandId: scope.brandReference,
+                    storeId: scope.storeReference,
+                    actor: { type: "User", reference: current.actorReference },
+                    actionCode: "DINING_JOIN_CREDENTIAL_REGENERATE",
+                    targetType: "DiningTable",
+                    targetId: table.tableReference,
+                    reasonCode: "STAFF_JOIN_CREDENTIAL_REGENERATE",
+                    correlationId: request.operationReference,
+                    occurredAt: request.observedAt,
+                    sourceChannel: "MERCHANT_WEB",
+                    dataClassification: "Restricted",
+                    retentionPolicyCode: options.retentionPolicyCode,
+                    retentionPolicyVersion: options.retentionPolicyVersion,
+                  },
+                };
+              },
+            },
+          });
+          const result = await service.regenerate({
+            ...command,
+            requestedAt: current.context.resolvedAt,
+          });
+          return Object.freeze({
+            status: result.status,
+            generation: result.capability.generation,
+            capabilityVersion: result.capability.version,
+            joinKind: result.capability.kind,
+            ...(result.status === "Issued" ? { joinCredential: result.joinCredential } : {}),
+          });
+        },
+      ),
+    );
   };
 }

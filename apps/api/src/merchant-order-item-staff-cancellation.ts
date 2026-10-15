@@ -26,6 +26,7 @@ import {
   createPostgresCardMachinePaymentStore,
 } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { createSubmissionInventoryRelease } from "./submission-inventory-release.js";
@@ -67,7 +68,7 @@ async function refuseCardMachineBatch(
   context: {
     tx: ConsumerTransaction;
     selected: { brandReference: string; storeReference: string };
-    allowed(): Promise<boolean>;
+    guard(): Promise<boolean>;
   },
   orderReference: string,
   orderBatchReference: string,
@@ -75,7 +76,7 @@ async function refuseCardMachineBatch(
   const paid = await createPostgresCardMachinePaymentStore({
     scope: context.selected,
     authorize: async (_tx, value) =>
-      value.orderReference === orderReference && (await context.allowed()),
+      value.orderReference === orderReference && (await context.guard()),
   }).loadByBatch(context.tx, orderReference, orderBatchReference);
   if (paid !== null) return fail("ORDER_ITEM_CANCELLATION_CARD_MACHINE");
 }
@@ -240,41 +241,59 @@ export function createMerchantOrderItemStaffCancellation(options: {
       selected: Scope;
       refund: Scope & RefundConfiguration;
       actorReference: string;
-      allowed: () => Promise<boolean>;
+      guard: () => Promise<boolean>;
     }) => Promise<T>,
   ): Promise<T> {
     try {
-      return await options.persistence.transactions.run(async (transaction) => {
-        const scope = await resolveScope(
-          transaction,
-          input.sessionCookie,
-          staffOrderCancellationPermission,
-          sessionReference,
-        ).catch(() => fail("ORDER_CANCELLATION_PERMISSION_DENIED"));
-        const allowed = async () => (await scope.allowed()) === true;
-        if (!(await allowed())) return fail("ORDER_CANCELLATION_PERMISSION_DENIED");
-        const tx = transaction as unknown as ConsumerTransaction;
-        const selected = {
-          tenantReference: String(scope.selected.tenantReference),
-          brandReference: String(scope.context.brand.brandReference),
-          storeReference: String(scope.store.storeReference),
-        };
-        await options.installContext(tx, selected);
-        const configuration = await options.resolveRefundConfiguration(tx, selected);
-        const result = await work({
-          tx,
-          selected,
-          refund: {
-            ...selected,
-            providerAccountReference: configuration.providerAccountReference,
-            environment: configuration.environment,
+      // WP-2423: one authorized run. The staff member and `ordering.order.cancel` are resolved
+      // in full once at the start and once more before the commit (inside this transaction: a
+      // permission withdrawn or Session ended meanwhile cancels nothing). The Ordering, Kitchen,
+      // Fulfillment, Payment and Inventory owner checks in between, which run while the Order
+      // fence, Kitchen rows and stock reservations are locked, take the run's no-query guard.
+      return await options.persistence.transactions.run((transaction) =>
+        withMerchantTransactionAuthorization(
+          {
+            transaction,
+            resolve: async () => {
+              const current = await resolveScope(
+                transaction,
+                input.sessionCookie,
+                staffOrderCancellationPermission,
+                sessionReference,
+              ).catch(() => fail("ORDER_CANCELLATION_PERMISSION_DENIED"));
+              if ((await current.allowed()) !== true)
+                return fail("ORDER_CANCELLATION_PERMISSION_DENIED");
+              return current;
+            },
+            recheck: async (current) => (await current.allowed()) === true,
+            denied: () => fail("ORDER_CANCELLATION_PERMISSION_DENIED"),
           },
-          actorReference: String(scope.actorReference),
-          allowed,
-        });
-        if (!(await allowed())) return fail("ORDER_CANCELLATION_PERMISSION_DENIED");
-        return result;
-      });
+          async (authority) => {
+            const scope = authority.scope;
+            const guard = () => authority.guard();
+            const tx = transaction as unknown as ConsumerTransaction;
+            const selected = {
+              tenantReference: String(scope.selected.tenantReference),
+              brandReference: String(scope.context.brand.brandReference),
+              storeReference: String(scope.store.storeReference),
+            };
+            await options.installContext(tx, selected);
+            const configuration = await options.resolveRefundConfiguration(tx, selected);
+            const result = await work({
+              tx,
+              selected,
+              refund: {
+                ...selected,
+                providerAccountReference: configuration.providerAccountReference,
+                environment: configuration.environment,
+              },
+              actorReference: String(scope.actorReference),
+              guard,
+            });
+            return result;
+          },
+        ),
+      );
     } catch (error) {
       if (error instanceof StaffItemCancellationError) throw error;
       if (error instanceof KitchenBatchCancellationError && error.code === "KITCHEN_WORK_STARTED")
@@ -295,7 +314,7 @@ export function createMerchantOrderItemStaffCancellation(options: {
     tx: ConsumerTransaction;
     selected: Scope;
     refund: Scope & RefundConfiguration;
-    allowed: () => Promise<boolean>;
+    guard: () => Promise<boolean>;
   }) {
     return createPostgresCancellationRefundRuntime({
       scope: context.refund,
@@ -304,7 +323,7 @@ export function createMerchantOrderItemStaffCancellation(options: {
         query.tenantReference === context.selected.tenantReference &&
         query.brandReference === context.selected.brandReference &&
         query.storeReference === context.selected.storeReference &&
-        (await context.allowed()),
+        (await context.guard()),
       cancellationAuthority: createItemCancellationRefundAuthority(context.selected),
       businessDate: options.businessDate,
       now: options.persistence.now,
@@ -326,7 +345,7 @@ export function createMerchantOrderItemStaffCancellation(options: {
       scope: context.refund,
       ...payment,
       observedAt: parseOrderingInstant(options.persistence.now()),
-      authorize: async (t) => t === context.tx && (await context.allowed()),
+      authorize: async (t) => t === context.tx && (await context.guard()),
     });
   }
 
@@ -416,7 +435,7 @@ export function createMerchantOrderItemStaffCancellation(options: {
             identity.orderReference === intent.orderReference &&
             identity.orderBatchReference === intent.orderBatchReference &&
             identity.actorReference === context.actorReference &&
-            (await context.allowed()),
+            (await context.guard()),
         });
         const prepared = await store.prepare(context.tx, {
           ...intent,
@@ -487,7 +506,7 @@ export function createMerchantOrderItemStaffCancellation(options: {
           String(intent.orderReference),
           String(intent.orderBatchReference),
         );
-        const { tx, selected, actorReference, allowed } = context;
+        const { tx, selected, actorReference, guard } = context;
         const owned = async (
           t: ConsumerTransaction,
           identity: { orderReference: string; orderBatchReference: string; actorReference: string },
@@ -496,7 +515,7 @@ export function createMerchantOrderItemStaffCancellation(options: {
           identity.orderReference === intent.orderReference &&
           identity.orderBatchReference === intent.orderBatchReference &&
           identity.actorReference === actorReference &&
-          (await allowed());
+          (await guard());
         const ordering = createPostgresStaffItemCancellationStore({
           brandReference: selected.brandReference,
           storeReference: selected.storeReference,
@@ -631,7 +650,7 @@ export function createMerchantOrderItemStaffCancellation(options: {
             occurredAt: String(record.cancelledAt),
           },
           releasedAt: String(record.cancelledAt),
-          authorize: allowed,
+          authorize: guard,
           cartLineReferences: plan.lines.map((line) => String(line.sourceCartLineReference)),
         });
         if (inventory.status === "NotReleasable")
@@ -681,12 +700,7 @@ export function createMerchantOrderItemStaffCancellation(options: {
         status = (await drive(found.refund, found.record)).status;
       } catch {
         status = await scoped(input, session.sessionReference, (context) =>
-          readItemCancellationRefundStatus(
-            context.tx,
-            context.refund,
-            found.record,
-            context.allowed,
-          ),
+          readItemCancellationRefundStatus(context.tx, context.refund, found.record, context.guard),
         );
       }
       return Object.freeze({
@@ -727,7 +741,7 @@ export function createMerchantOrderItemStaffCancellation(options: {
         (await createPostgresStaffOrderCancellationStore({
           brandReference: context.selected.brandReference,
           storeReference: context.selected.storeReference,
-          authorize: async (t) => t === context.tx && (await context.allowed()),
+          authorize: async (t) => t === context.tx && (await context.guard()),
         }).loadByOperation(context.tx, intent.operationReference as string)) ??
         fail("ORDER_CANCELLATION_UNAVAILABLE");
       const position = await remaining(context, {

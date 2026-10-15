@@ -17,6 +17,10 @@ import {
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import {
+  withMerchantTransactionAuthorization,
+  type MerchantTransactionAuthority,
+} from "./merchant-transaction-authorization.js";
+import {
   approvalDerivedReference,
   businessTransaction,
 } from "./merchant-ordinary-refund-approval.js";
@@ -68,45 +72,76 @@ export function createMerchantSoleOperator(options: {
   const resolveBrand = createMerchantBrandScope(options.persistence);
   const ref = (value: unknown) => String(parseOpaqueUuidV7(value, "ACTOR_REFERENCE_INVALID"));
   type Transaction = Parameters<Parameters<typeof options.persistence.transactions.run>[0]>[0];
-  async function owner(transaction: Transaction, sessionCookie: unknown, sessionReference: string) {
+  const denied = (): never => {
+    throw new MerchantSoleOperatorError("Denied");
+  };
+  /**
+   * WP-2423: the Brand Owner at the selected Store, resolved in full (Session, Store access and
+   * Brand-scope `organization.brand.manage`) once at the start of the run; `recheck` resolves both
+   * again in full before the reply, inside the transaction.
+   */
+  async function owner(
+    transaction: Transaction,
+    sessionCookie: unknown,
+    sessionReference?: string,
+  ) {
     const current = await resolveStore(
       transaction,
       sessionCookie,
       "merchant.access",
       sessionReference,
     );
-    if (!(await current.allowed())) throw new MerchantSoleOperatorError("Denied");
-    const brand = await resolveBrand(transaction, sessionCookie, sessionReference).catch(() => {
-      throw new MerchantSoleOperatorError("Denied");
-    });
-    const isOwner = async () =>
-      (await current.allowed()) &&
-      (await brand.authorizeAction("organization.brand.manage"))?.effect === "Allow";
+    if ((await current.allowed()) !== true) return denied();
+    const brand = await resolveBrand(
+      transaction,
+      sessionCookie,
+      String(current.sessionReference),
+    ).catch(denied);
     // WP-2423: current staff of the Store who are not the Brand Owner are told so (NotOwner)
     // rather than refused, so the Approvals page shows them nothing without a refused request.
-    if (!(await isOwner()))
-      throw new MerchantSoleOperatorError((await current.allowed()) ? "NotOwner" : "Denied");
+    if ((await brand.authorizeAction("organization.brand.manage"))?.effect !== "Allow")
+      throw new MerchantSoleOperatorError("NotOwner");
     const scope = {
       tenantReference: current.selected.tenantReference,
       brandReference: String(current.context.brand.brandReference),
       storeReference: String(current.store.storeReference),
     };
     const actorReference = String(current.actorReference);
-    return { current, scope, actorReference, isOwner };
+    return { current, brand, scope, actorReference };
+  }
+  type Owner = Awaited<ReturnType<typeof owner>>;
+  const isStillOwner = async ({ current, brand }: Owner) =>
+    (await current.allowed()) === true &&
+    (await brand.authorizeAction("organization.brand.manage"))?.effect === "Allow";
+  function asOwner<T>(
+    transaction: Transaction,
+    sessionCookie: unknown,
+    sessionReference: string | undefined,
+    work: (authority: MerchantTransactionAuthority<Owner>) => Promise<T>,
+  ) {
+    return withMerchantTransactionAuthorization(
+      {
+        transaction,
+        resolve: () => owner(transaction, sessionCookie, sessionReference),
+        recheck: isStillOwner,
+        denied,
+      },
+      work,
+    );
   }
   async function recentMfaAt(
     tx: ConsumerTransaction,
     scope: StoreScope,
     actorReference: string,
     observedAt: string,
-    allowed: () => Promise<boolean>,
+    guard: (transaction?: unknown) => Promise<boolean>,
   ) {
-    const own = async (actor: string) => actor === actorReference && (await allowed());
+    const own = async (t: unknown, actor: string) => actor === actorReference && (await guard(t));
     const mfa = await createPostgresCurrentWorkforceMfaSource({
-      authorize: (_t, actor) => own(actor),
+      authorize: (t, actor) => own(t, actor),
     })(tx, { actorReference, observedAt });
     const latestStepUpAt = await createPostgresLatestWorkforceStepUpSource({
-      authorize: (_t, query) => own(query.actorReference),
+      authorize: (t, query) => own(t, query.actorReference),
     })(tx, {
       brandReference: scope.brandReference,
       storeReference: scope.storeReference,
@@ -121,76 +156,74 @@ export function createMerchantSoleOperator(options: {
     });
   }
   const read = async (input: { sessionCookie: unknown }) =>
-    options.persistence.transactions.run(async (transaction) => {
-      // A read: the session is the one the cookie names (no CSRF on GET).
-      const session = await resolveStore(transaction, input.sessionCookie, "merchant.access");
-      const { current, scope, actorReference, isOwner } = await owner(
-        transaction,
-        input.sessionCookie,
-        String(session.sessionReference),
-      );
-      const tx = businessTransaction(transaction);
-      const observedAt = String(current.context.resolvedAt);
-      const setting = await createPostgresSoleOperatorSettingSource({
-        authorize: async (_t, query) =>
-          query.brandReference === scope.brandReference && (await isOwner()),
-      })(tx, {
-        tenantReference: scope.tenantReference,
-        brandReference: scope.brandReference,
-        observedAt,
-        historyLimit: 10,
-      });
-      const configuration = await options.resolveConfiguration(
-        tx,
-        { ...scope, actorReference },
-        Object.freeze({ context: current.context, authorize: current.allowed }),
-      );
-      const holders = await createMerchantApprovalHolders(configuration.workforce)(tx, {
-        ...scope,
-        permissionCode: "payment.refund.approve",
-        observedAt,
-      });
-      const members = await listStoreMembers(tx, scope);
-      const nameOf = (actor: string) =>
-        members.find((member) => member.actorReference === actor)?.displayName ?? null;
-      const others = holders.filter((holder) => holder !== actorReference);
-      const youHold = holders.includes(actorReference);
-      const refundApproval =
-        setting.state !== "On"
-          ? "NotSet"
-          : youHold && others.length === 0
-            ? "Effective"
-            : "OtherApprovers";
-      const mfaAt = await recentMfaAt(tx, scope, actorReference, observedAt, isOwner);
-      if (!(await isOwner())) throw new MerchantSoleOperatorError("Denied");
-      return Object.freeze({
-        observedAt,
-        state: setting.state ?? "Off",
-        version: setting.version,
-        history: setting.history.map((entry) =>
-          Object.freeze({
-            version: entry.version,
-            state: entry.state,
-            reasonCode: entry.reasonCode,
-            recordedAt: entry.recordedAt,
-            changedByYou: entry.actorReference === actorReference,
-            changedByName: nameOf(entry.actorReference),
-          }),
-        ),
-        refundApproval: Object.freeze({
-          status: refundApproval,
-          youHoldApproval: youHold,
-          otherApprovers: Object.freeze(
-            others.map((other) => Object.freeze({ displayName: nameOf(other) })),
+    // A read: the session is the one the cookie names (no CSRF on GET). Resolved once (it was
+    // resolved twice, the second time against its own Session reference).
+    options.persistence.transactions.run((transaction) =>
+      asOwner(transaction, input.sessionCookie, undefined, async (authority) => {
+        const { current, scope, actorReference } = authority.scope;
+        const tx = businessTransaction(transaction);
+        authority.bind(tx);
+        const observedAt = String(current.context.resolvedAt);
+        const setting = await createPostgresSoleOperatorSettingSource({
+          authorize: async (t, query) =>
+            query.brandReference === scope.brandReference && (await authority.guard(t)),
+        })(tx, {
+          tenantReference: scope.tenantReference,
+          brandReference: scope.brandReference,
+          observedAt,
+          historyLimit: 10,
+        });
+        const configuration = await options.resolveConfiguration(
+          tx,
+          { ...scope, actorReference },
+          Object.freeze({ context: current.context, authorize: () => authority.guard() }),
+        );
+        const holders = await createMerchantApprovalHolders(configuration.workforce)(tx, {
+          ...scope,
+          permissionCode: "payment.refund.approve",
+          observedAt,
+        });
+        const members = await listStoreMembers(tx, scope);
+        const nameOf = (actor: string) =>
+          members.find((member) => member.actorReference === actor)?.displayName ?? null;
+        const others = holders.filter((holder) => holder !== actorReference);
+        const youHold = holders.includes(actorReference);
+        const refundApproval =
+          setting.state !== "On"
+            ? "NotSet"
+            : youHold && others.length === 0
+              ? "Effective"
+              : "OtherApprovers";
+        const mfaAt = await recentMfaAt(tx, scope, actorReference, observedAt, authority.guard);
+        return Object.freeze({
+          observedAt,
+          state: setting.state ?? "Off",
+          version: setting.version,
+          history: setting.history.map((entry) =>
+            Object.freeze({
+              version: entry.version,
+              state: entry.state,
+              reasonCode: entry.reasonCode,
+              recordedAt: entry.recordedAt,
+              changedByYou: entry.actorReference === actorReference,
+              changedByName: nameOf(entry.actorReference),
+            }),
           ),
-        }),
-        verifiedUntil:
-          mfaAt === null || Date.parse(mfaAt) + 15 * 60 * 1000 <= Date.parse(observedAt)
-            ? null
-            : new Date(Date.parse(mfaAt) + 15 * 60 * 1000).toISOString(),
-        reasons: soleOperatorSettingReasons,
-      });
-    });
+          refundApproval: Object.freeze({
+            status: refundApproval,
+            youHoldApproval: youHold,
+            otherApprovers: Object.freeze(
+              others.map((other) => Object.freeze({ displayName: nameOf(other) })),
+            ),
+          }),
+          verifiedUntil:
+            mfaAt === null || Date.parse(mfaAt) + 15 * 60 * 1000 <= Date.parse(observedAt)
+              ? null
+              : new Date(Date.parse(mfaAt) + 15 * 60 * 1000).toISOString(),
+          reasons: soleOperatorSettingReasons,
+        });
+      }),
+    );
   const command = async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
     const authenticated = await options.authentication.authorize(input);
     const raw = readClosedRecord(input.command, [
@@ -217,53 +250,70 @@ export function createMerchantSoleOperator(options: {
     const settingReference = approvalDerivedReference(operationReference, "sole-operator-setting");
     const auditReference = approvalDerivedReference(operationReference, "sole-operator-audit");
     try {
-      return await options.persistence.transactions.run(async (transaction) => {
-        const { current, scope, actorReference, isOwner } = await owner(
+      return await options.persistence.transactions.run((transaction) =>
+        asOwner(
           transaction,
           input.sessionCookie,
           authenticated.sessionReference,
-        );
-        const tx = businessTransaction(transaction);
-        const observedAt = String(current.context.resolvedAt);
-        const actorMfaAt = await recentMfaAt(tx, scope, actorReference, observedAt, isOwner);
-        const result = await createPostgresSoleOperatorSettingStore({
-          authorize: async (_t, query) =>
-            query.tenantReference === scope.tenantReference &&
-            query.brandReference === scope.brandReference &&
-            query.actorReference === actorReference &&
-            (await isOwner()),
-          appendAudit: async (t, record) => {
-            await appendAuditRecordInTransaction(
-              t as ConsumerTransaction,
-              validateAuditRecord({
-                ...record,
-                actor: { ...record.actor },
-                beforeSummary: { ...record.beforeSummary },
-                afterSummary: { ...record.afterSummary },
-              }),
+          async (authority) => {
+            const { current, scope, actorReference } = authority.scope;
+            const tx = businessTransaction(transaction);
+            authority.bind(tx);
+            const observedAt = String(current.context.resolvedAt);
+            const actorMfaAt = await recentMfaAt(
+              tx,
+              scope,
+              actorReference,
+              observedAt,
+              authority.guard,
             );
+            const result = await createPostgresSoleOperatorSettingStore({
+              authorize: async (t, query) =>
+                query.tenantReference === scope.tenantReference &&
+                query.brandReference === scope.brandReference &&
+                query.actorReference === actorReference &&
+                (await authority.guard(t)),
+              appendAudit: async (t, record) => {
+                // A Brand-level audit row: no Store selected (the audit chain's row policy). The
+                // reads earlier in this run (Store scope, verification recency) select the Store;
+                // before WP-2423 a Brand re-resolution right before the write cleared it.
+                await (t as ConsumerTransaction).query(
+                  "SELECT set_config('bop.store_id','',true)",
+                  [],
+                );
+                await appendAuditRecordInTransaction(
+                  t as ConsumerTransaction,
+                  validateAuditRecord({
+                    ...record,
+                    actor: { ...record.actor },
+                    beforeSummary: { ...record.beforeSummary },
+                    afterSummary: { ...record.afterSummary },
+                  }),
+                );
+              },
+              retentionPolicyCode: options.retentionPolicyCode,
+              retentionPolicyVersion: options.retentionPolicyVersion,
+            })(tx, {
+              tenantReference: scope.tenantReference,
+              brandReference: scope.brandReference,
+              actorReference,
+              settingReference,
+              operationReference,
+              auditReference,
+              state,
+              reasonCode,
+              expectedVersion,
+              actorMfaAt,
+            });
+            return Object.freeze({
+              status: result.status,
+              state: result.record.state,
+              version: result.record.version,
+              recordedAt: result.record.recordedAt,
+            });
           },
-          retentionPolicyCode: options.retentionPolicyCode,
-          retentionPolicyVersion: options.retentionPolicyVersion,
-        })(tx, {
-          tenantReference: scope.tenantReference,
-          brandReference: scope.brandReference,
-          actorReference,
-          settingReference,
-          operationReference,
-          auditReference,
-          state,
-          reasonCode,
-          expectedVersion,
-          actorMfaAt,
-        });
-        return Object.freeze({
-          status: result.status,
-          state: result.record.state,
-          version: result.record.version,
-          recordedAt: result.record.recordedAt,
-        });
-      });
+        ),
+      );
     } catch (error) {
       // A change by anyone but the Brand Owner is a refusal.
       if (error instanceof MerchantSoleOperatorError && error.code === "NotOwner")

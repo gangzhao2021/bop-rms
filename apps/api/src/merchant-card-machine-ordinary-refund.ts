@@ -22,6 +22,7 @@ import { businessTransaction } from "./merchant-ordinary-refund-approval.js";
 import { CardMachineRefundCommandError } from "./merchant-card-machine-refund.js";
 import { refundReadAccess } from "./merchant-refund-read-authority.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import { createMerchantWorkforcePermissionSource } from "./merchant-workforce-authority-source.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -125,192 +126,216 @@ export function createMerchantCardMachineOrdinaryRefund(options: {
     );
     let recorded: Omit<CardMachineOrdinaryRefundResult, "receipt">;
     try {
-      recorded = await options.persistence.transactions.run(async (transaction) => {
-        const current = await resolveScope(
-          transaction,
-          input.sessionCookie,
-          "merchant.access",
-          session.sessionReference,
-        ).catch(() => fail("CARD_MACHINE_REFUND_PERMISSION_DENIED"));
-        if (!(await current.allowed())) return fail("CARD_MACHINE_REFUND_PERMISSION_DENIED");
-        const tx = businessTransaction(transaction);
-        const scope = {
-          tenantReference: String(current.selected.tenantReference),
-          brandReference: String(current.context.brand.brandReference),
-          storeReference: String(current.store.storeReference),
-        };
-        const actorReference = String(current.actorReference);
-        const observedAt = String(current.context.resolvedAt);
-        const configuration = await options.resolveConfiguration(tx, scope);
-        const workforce = createMerchantWorkforcePermissionSource({
-          resolveContext: async () => ({
-            tenantReference: scope.tenantReference,
-            context: current.context,
-          }),
-        });
-        const role = createOrdinaryRefundRoleResolver(configuration.roleMapping);
-        // Refund handlers only: a Manager who may request or an Owner/Finance member who may
-        // approve (the same people who read refunds).
-        const handler = async () =>
-          (await current.allowed()) &&
-          (
-            await refundReadAccess(
-              workforce,
-              tx,
-              { ...scope, actorReference, observedAt },
-              role,
-              current.kdsOperatorProfileAllows,
-            )
-          ).canRead;
-        if (!(await handler())) return fail("CARD_MACHINE_REFUND_PERMISSION_DENIED");
-        const byOrder = async (
-          _tx: ConsumerTransaction,
-          query: { orderReference?: string; requestReference?: string },
-        ) =>
-          (query.orderReference === undefined || query.orderReference === command.orderReference) &&
-          (query.requestReference === undefined ||
-            query.requestReference === command.requestReference);
-        const cards = createPostgresCardMachinePaymentStore({
-          scope,
-          authorize: async (_tx, query) => byOrder(tx, query),
-        });
-        const reply = (
-          status: CardMachineOrdinaryRefundResult["status"],
-          refund: { amountMinor: bigint; refundedAt: string },
-        ) =>
-          Object.freeze({
-            status,
-            orderReference: command.orderReference,
-            requestReference: command.requestReference,
-            amountMinor: refund.amountMinor.toString(),
-            refundedAt: String(refund.refundedAt),
-          });
-        const prior = await cards.loadRefundByOperation(tx, command.operationReference);
-        if (prior !== null) {
-          if (
-            prior.intentDigest !== intentDigest ||
-            prior.actorReference !== actorReference ||
-            prior.sourceKind !== "OrdinaryRefund" ||
-            prior.sourceReference !== command.requestReference
-          )
-            return fail("CARD_MACHINE_REFUND_IDEMPOTENCY_CONFLICT");
-          return reply("AlreadyRecorded", prior);
-        }
-        // The request, as recorded (history under the Order's refund fence).
-        const context = await createPostgresOrdinaryRefundRequestContextSource({
-          scope,
-          authorize: (t, query) => byOrder(t, query),
-        })(tx, {
-          orderReference: command.orderReference,
-          operationReference: options.nextReference(),
-          observedAt,
-        });
-        const request = context.history.find(
-          (entry) => entry.requestReference === command.requestReference,
-        );
-        if (context.existing !== null || request === undefined)
-          return fail("CARD_MACHINE_REFUND_NOT_FOUND");
-        if (context.declines.has(request.requestReference))
-          return fail("CARD_MACHINE_REFUND_NOTHING_OWED");
-        const leg = request.payments[0];
-        if (
-          leg === undefined ||
-          request.payments.length !== 1 ||
-          ordinaryRefundClaimKind(request) !== "Ordinary"
-        )
-          return fail("CARD_MACHINE_REFUND_NOT_FOUND");
-        const payment = await cards.loadByIntent(tx, leg.paymentIntentReference);
-        if (
-          payment === null ||
-          payment.orderReference !== command.orderReference ||
-          payment.cardMachinePaymentReference !== leg.paymentTransactionReference
-        )
-          return fail("CARD_MACHINE_REFUND_NOT_FOUND");
-        if (
-          (await cards.loadRefundBySource(tx, "OrdinaryRefund", request.requestReference)) !== null
-        )
-          return fail("CARD_MACHINE_REFUND_NOTHING_OWED");
-        // The same escalation rules as the online first send, evaluated now: an escalated refund
-        // needs its approval recorded before the machine refund is recorded.
-        const escalation = await createPostgresOrdinaryRefundCurrentEscalationSource({
-          scope,
-          providerAccountReference: configuration.providerAccountReference,
-          environment: configuration.environment,
-          authorize: (t, query) => byOrder(t, query),
-          businessDate: options.businessDate,
-        })(tx, {
-          orderReference: command.orderReference,
-          requestReference: request.requestReference,
-        });
-        if (escalation.decision.requiresIndependentApproval) {
-          const subject = await createPostgresOrdinaryRefundApprovalSubjectSource({
-            scope,
-            authorize: (t, query) => byOrder(t, query),
-          })(tx, {
-            orderReference: command.orderReference,
-            requestReference: request.requestReference,
-            observedAt: escalation.observedAt,
-          });
-          const read = createPostgresOrdinaryRefundApprovalReader({
-            scope,
-            authorize: (t, query) => byOrder(t, query),
-          });
-          let approved = false;
-          for (const approvalReference of await listOrdinaryRefundApprovalReferences(tx, scope, {
-            orderReference: command.orderReference,
-            requestReference: request.requestReference,
-          })) {
-            const stored = await read(tx, {
-              orderReference: command.orderReference,
-              approvalReference,
-              observedAt: escalation.observedAt,
+      const denied = () => fail("CARD_MACHINE_REFUND_PERMISSION_DENIED");
+      // WP-2423: one authorized run. The caller (Session, Store access) and their refund-handler
+      // role are resolved in full once at the start and once more before the commit (inside this
+      // transaction, so a withdrawn permission or ended Session never commits the record); the
+      // Payment owner reads in between, taken under the Order's refund fence, use the run's
+      // no-query guard. No Provider is called.
+      recorded = await options.persistence.transactions.run((transaction) =>
+        withMerchantTransactionAuthorization(
+          {
+            transaction,
+            resolve: async () => {
+              const current = await resolveScope(
+                transaction,
+                input.sessionCookie,
+                "merchant.access",
+                session.sessionReference,
+              ).catch(denied);
+              if ((await current.allowed()) !== true) return denied();
+              const tx = businessTransaction(transaction);
+              const scope = {
+                tenantReference: String(current.selected.tenantReference),
+                brandReference: String(current.context.brand.brandReference),
+                storeReference: String(current.store.storeReference),
+              };
+              const actorReference = String(current.actorReference);
+              const observedAt = String(current.context.resolvedAt);
+              const configuration = await options.resolveConfiguration(tx, scope);
+              const workforce = createMerchantWorkforcePermissionSource({
+                resolveContext: async () => ({
+                  tenantReference: scope.tenantReference,
+                  context: current.context,
+                }),
+              });
+              const role = createOrdinaryRefundRoleResolver(configuration.roleMapping);
+              // Refund handlers only: a Manager who may request or an Owner/Finance member who
+              // may approve (the same people who read refunds).
+              const handler = async () =>
+                (
+                  await refundReadAccess(
+                    workforce,
+                    tx,
+                    { ...scope, actorReference, observedAt },
+                    role,
+                    current.kdsOperatorProfileAllows,
+                  )
+                ).canRead;
+              if (!(await handler())) return denied();
+              return { current, tx, scope, actorReference, observedAt, configuration, handler };
+            },
+            recheck: async ({ current, handler }) =>
+              (await current.allowed()) === true && (await handler()),
+            denied,
+          },
+          async (authority) => {
+            const { tx, scope, actorReference, observedAt, configuration } = authority.scope;
+            const byOrder = async (
+              _tx: ConsumerTransaction,
+              query: { orderReference?: string; requestReference?: string },
+            ) =>
+              (query.orderReference === undefined ||
+                query.orderReference === command.orderReference) &&
+              (query.requestReference === undefined ||
+                query.requestReference === command.requestReference) &&
+              (await authority.guard());
+            const cards = createPostgresCardMachinePaymentStore({
+              scope,
+              authorize: async (_tx, query) => byOrder(tx, query),
             });
+            const reply = (
+              status: CardMachineOrdinaryRefundResult["status"],
+              refund: { amountMinor: bigint; refundedAt: string },
+            ) =>
+              Object.freeze({
+                status,
+                orderReference: command.orderReference,
+                requestReference: command.requestReference,
+                amountMinor: refund.amountMinor.toString(),
+                refundedAt: String(refund.refundedAt),
+              });
+            const prior = await cards.loadRefundByOperation(tx, command.operationReference);
+            if (prior !== null) {
+              if (
+                prior.intentDigest !== intentDigest ||
+                prior.actorReference !== actorReference ||
+                prior.sourceKind !== "OrdinaryRefund" ||
+                prior.sourceReference !== command.requestReference
+              )
+                return fail("CARD_MACHINE_REFUND_IDEMPOTENCY_CONFLICT");
+              return reply("AlreadyRecorded", prior);
+            }
+            // The request, as recorded (history under the Order's refund fence).
+            const context = await createPostgresOrdinaryRefundRequestContextSource({
+              scope,
+              authorize: (t, query) => byOrder(t, query),
+            })(tx, {
+              orderReference: command.orderReference,
+              operationReference: options.nextReference(),
+              observedAt,
+            });
+            const request = context.history.find(
+              (entry) => entry.requestReference === command.requestReference,
+            );
+            if (context.existing !== null || request === undefined)
+              return fail("CARD_MACHINE_REFUND_NOT_FOUND");
+            if (context.declines.has(request.requestReference))
+              return fail("CARD_MACHINE_REFUND_NOTHING_OWED");
+            const leg = request.payments[0];
             if (
-              stored !== null &&
-              stored.approval.subject.requestReference === request.requestReference &&
-              stored.approval.subject.allocationDigest === subject.subject.allocationDigest &&
-              stored.approval.requesterReference === request.actorReference
+              leg === undefined ||
+              request.payments.length !== 1 ||
+              ordinaryRefundClaimKind(request) !== "Ordinary"
             )
-              approved = true;
-          }
-          if (!approved) return fail("CARD_MACHINE_REFUND_APPROVAL_REQUIRED");
-        }
-        const amount = ordinaryRefundPaymentAmount(leg);
-        const recordedAt = parsePaymentInstant(options.persistence.now());
-        const refundedAt =
-          command.refundedAt === null ? recordedAt : parsePaymentInstant(command.refundedAt);
-        if (
-          refundedAt > recordedAt ||
-          refundedAt < request.requestedAt ||
-          refundedAt < payment.takenAt ||
-          Date.parse(recordedAt) - Date.parse(refundedAt) > cardMachineBackEntryWindowMs
-        )
-          return fail("CARD_MACHINE_REFUND_INPUT_INVALID");
-        if (!(await handler())) return fail("CARD_MACHINE_REFUND_PERMISSION_DENIED");
-        const saved = await cards.recordRefund(
-          tx,
-          parseCardMachineRefundRecord({
-            tenantReference: scope.tenantReference,
-            brandReference: scope.brandReference,
-            storeReference: scope.storeReference,
-            cardMachineRefundReference: options.nextReference(),
-            cardMachinePaymentReference: payment.cardMachinePaymentReference,
-            orderReference: command.orderReference,
-            operationReference: command.operationReference,
-            intentDigest,
-            sourceKind: "OrdinaryRefund",
-            sourceReference: request.requestReference,
-            amountMinor: amount,
-            slipReference: command.slipReference,
-            refundedAt,
-            recordedAt,
-            actorReference,
-            auditReference: options.nextReference(),
-          }),
-        );
-        if (!(await handler())) return fail("CARD_MACHINE_REFUND_PERMISSION_DENIED");
-        return reply(saved.status === "Created" ? "Recorded" : "AlreadyRecorded", saved.refund);
-      });
+              return fail("CARD_MACHINE_REFUND_NOT_FOUND");
+            const payment = await cards.loadByIntent(tx, leg.paymentIntentReference);
+            if (
+              payment === null ||
+              payment.orderReference !== command.orderReference ||
+              payment.cardMachinePaymentReference !== leg.paymentTransactionReference
+            )
+              return fail("CARD_MACHINE_REFUND_NOT_FOUND");
+            if (
+              (await cards.loadRefundBySource(tx, "OrdinaryRefund", request.requestReference)) !==
+              null
+            )
+              return fail("CARD_MACHINE_REFUND_NOTHING_OWED");
+            // The same escalation rules as the online first send, evaluated now: an escalated refund
+            // needs its approval recorded before the machine refund is recorded.
+            const escalation = await createPostgresOrdinaryRefundCurrentEscalationSource({
+              scope,
+              providerAccountReference: configuration.providerAccountReference,
+              environment: configuration.environment,
+              authorize: (t, query) => byOrder(t, query),
+              businessDate: options.businessDate,
+            })(tx, {
+              orderReference: command.orderReference,
+              requestReference: request.requestReference,
+            });
+            if (escalation.decision.requiresIndependentApproval) {
+              const subject = await createPostgresOrdinaryRefundApprovalSubjectSource({
+                scope,
+                authorize: (t, query) => byOrder(t, query),
+              })(tx, {
+                orderReference: command.orderReference,
+                requestReference: request.requestReference,
+                observedAt: escalation.observedAt,
+              });
+              const read = createPostgresOrdinaryRefundApprovalReader({
+                scope,
+                authorize: (t, query) => byOrder(t, query),
+              });
+              let approved = false;
+              for (const approvalReference of await listOrdinaryRefundApprovalReferences(
+                tx,
+                scope,
+                {
+                  orderReference: command.orderReference,
+                  requestReference: request.requestReference,
+                },
+              )) {
+                const stored = await read(tx, {
+                  orderReference: command.orderReference,
+                  approvalReference,
+                  observedAt: escalation.observedAt,
+                });
+                if (
+                  stored !== null &&
+                  stored.approval.subject.requestReference === request.requestReference &&
+                  stored.approval.subject.allocationDigest === subject.subject.allocationDigest &&
+                  stored.approval.requesterReference === request.actorReference
+                )
+                  approved = true;
+              }
+              if (!approved) return fail("CARD_MACHINE_REFUND_APPROVAL_REQUIRED");
+            }
+            const amount = ordinaryRefundPaymentAmount(leg);
+            const recordedAt = parsePaymentInstant(options.persistence.now());
+            const refundedAt =
+              command.refundedAt === null ? recordedAt : parsePaymentInstant(command.refundedAt);
+            if (
+              refundedAt > recordedAt ||
+              refundedAt < request.requestedAt ||
+              refundedAt < payment.takenAt ||
+              Date.parse(recordedAt) - Date.parse(refundedAt) > cardMachineBackEntryWindowMs
+            )
+              return fail("CARD_MACHINE_REFUND_INPUT_INVALID");
+            const saved = await cards.recordRefund(
+              tx,
+              parseCardMachineRefundRecord({
+                tenantReference: scope.tenantReference,
+                brandReference: scope.brandReference,
+                storeReference: scope.storeReference,
+                cardMachineRefundReference: options.nextReference(),
+                cardMachinePaymentReference: payment.cardMachinePaymentReference,
+                orderReference: command.orderReference,
+                operationReference: command.operationReference,
+                intentDigest,
+                sourceKind: "OrdinaryRefund",
+                sourceReference: request.requestReference,
+                amountMinor: amount,
+                slipReference: command.slipReference,
+                refundedAt,
+                recordedAt,
+                actorReference,
+                auditReference: options.nextReference(),
+              }),
+            );
+            return reply(saved.status === "Created" ? "Recorded" : "AlreadyRecorded", saved.refund);
+          },
+        ),
+      );
     } catch (error) {
       if (error instanceof CardMachineRefundCommandError) throw error;
       if (error instanceof CardMachinePaymentError) {

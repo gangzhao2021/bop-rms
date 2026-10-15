@@ -37,7 +37,15 @@ function fixture() {
     allowed = vi.fn(async () => true),
     authorizeAction = vi.fn(async () => ({ effect: "Allow" })),
     tx = { query: vi.fn() },
-    run = vi.fn(async (work: (tx: object) => Promise<unknown>) => work(tx));
+    inside = { thrown: false },
+    run = vi.fn(async (work: (tx: object) => Promise<unknown>) => {
+      try {
+        return await work(tx);
+      } catch (error) {
+        inside.thrown = true;
+        throw error;
+      }
+    });
   mock.scope.mockResolvedValue({
     selected: { tenantReference: id(1) },
     context: { brand: { brandReference: id(2) }, resolvedAt: at },
@@ -74,7 +82,7 @@ function fixture() {
       ...change,
     },
   });
-  return { execute, input, allowed, tables, operations, run, tx, throwAfterCommit };
+  return { execute, input, allowed, tables, operations, run, tx, throwAfterCommit, inside };
 }
 beforeEach(() => vi.resetAllMocks());
 
@@ -129,11 +137,46 @@ it("requires current dining.operate before reading the table", async () => {
   expect(mock.store).not.toHaveBeenCalled();
 });
 
-it("does not commit after current Store permission is lost before the owner write", async () => {
+it("WP-2423: a permission withdrawn or Session ended during the command refuses it before commit", async () => {
   const f = fixture();
-  f.allowed.mockResolvedValueOnce(true).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
-  await expect(f.execute(f.input())).rejects.toThrow();
-  expect(f.operations.size).toBe(0);
+  f.allowed.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+  await expect(f.execute(f.input())).rejects.toThrow("DINING_TABLE_COMMAND_UNAVAILABLE");
+  // Resolved in full at the start and in the re-check; the refusal is thrown inside the
+  // transaction callback, so the table write it made does not commit.
+  expect(f.allowed).toHaveBeenCalledTimes(2);
+  expect(f.inside.thrown).toBe(true);
+});
+
+it("WP-2423: resolves the caller in full twice; table callbacks take the run's guard", async () => {
+  const f = fixture();
+  const during: boolean[] = [];
+  const store = {
+    resolveTableOperation: async () => null,
+    loadTable: async () => f.tables.get(id(5)) ?? null,
+    commitTable: vi.fn(async () => {
+      during.push(true);
+    }),
+  };
+  mock.store.mockReturnValue(store);
+  await expect(f.execute(f.input())).resolves.toMatchObject({ status: "Applied" });
+  expect(during).toEqual([true]);
+  expect(mock.scope).toHaveBeenCalledOnce();
+  expect(f.allowed).toHaveBeenCalledTimes(2);
+});
+
+it("WP-2423: the owner write is refused once the run has ended", async () => {
+  const f = fixture();
+  let commitTable: ((record: never) => Promise<unknown>) | undefined;
+  const real = (await import("@rms/dining")).createDiningTableService;
+  const spy = vi.spyOn(await import("@rms/dining"), "createDiningTableService");
+  spy.mockImplementation((ports) => {
+    commitTable = ports.repository.commitTable;
+    return real(ports);
+  });
+  await f.execute(f.input());
+  await expect(commitTable?.({} as never)).rejects.toThrow("DINING_TABLE_PERMISSION_DENIED");
+  expect(f.allowed).toHaveBeenCalledTimes(2);
+  spy.mockRestore();
 });
 
 it("rejects a changed intent under the same operation reference", async () => {

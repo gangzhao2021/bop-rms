@@ -8,6 +8,7 @@ import {
   StoreReceiptProfileError,
 } from "@rms/store";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import {
   approvalDerivedReference,
   businessTransaction,
@@ -36,6 +37,9 @@ export function createMerchantStoreReceiptProfile(options: {
   authentication: Pick<MerchantBffService, "authorize">;
 }) {
   const resolveStore = createMerchantStoreScope(options.persistence);
+  const denied = (): never => {
+    throw new MerchantStoreReceiptProfileError("Denied");
+  };
   const mapError = (error: unknown): never => {
     if (error instanceof MerchantStoreReceiptProfileError) throw error;
     // A serialization conflict stays visible so the read is retried (transaction-conflict-retry).
@@ -65,38 +69,57 @@ export function createMerchantStoreReceiptProfile(options: {
   };
   const read = async (input: { sessionCookie: unknown }) => {
     try {
-      return await options.persistence.transactions.run(async (transaction) => {
-        const current = await resolveStore(
-          transaction,
-          input.sessionCookie,
-          "organization.store.read",
-        );
-        if (!(await current.allowed())) throw new MerchantStoreReceiptProfileError("Denied");
-        const scope = {
-          brandReference: String(current.context.brand.brandReference),
-          storeReference: String(current.store.storeReference),
-        };
-        const profile = await readCurrentStoreReceiptProfile(
-          businessTransaction(transaction),
-          scope,
-        );
-        const canChange =
-          (await current.authorizeAction("organization.store.publish"))?.effect === "Allow";
-        if (!(await current.allowed())) throw new MerchantStoreReceiptProfileError("Denied");
-        return Object.freeze({
-          observedAt: String(current.context.resolvedAt),
-          canChange,
-          version: profile?.version ?? 0,
-          recordedAt: profile?.recordedAt ?? null,
-          details: Object.freeze({
-            gstHstNumber: profile?.gstHstNumber ?? null,
-            qstNumber: profile?.qstNumber ?? null,
-            pstNumber: profile?.pstNumber ?? null,
-            privacyNoticeUrl: profile?.privacyNoticeUrl ?? null,
-          }),
-          gaps: storeReceiptProfileSetupGaps(profile),
-        });
-      });
+      // WP-2423: one authorized run. The caller, its read permission and whether it may change
+      // the profile are resolved in full once at the start (one permission packet) and the read
+      // permission once more before the reply.
+      return await options.persistence.transactions.run((transaction) =>
+        withMerchantTransactionAuthorization(
+          {
+            transaction,
+            resolve: async () => {
+              const current = await resolveStore(
+                transaction,
+                input.sessionCookie,
+                "organization.store.read",
+              );
+              const decisions = await current.authorizeActions([
+                "organization.store.read",
+                "organization.store.publish",
+              ]);
+              if (decisions.get("organization.store.read")?.effect !== "Allow") return denied();
+              return {
+                current,
+                canChange: decisions.get("organization.store.publish")?.effect === "Allow",
+              };
+            },
+            recheck: async ({ current }) => (await current.allowed()) === true,
+            denied,
+          },
+          async ({ scope: { current, canChange } }) => {
+            const scope = {
+              brandReference: String(current.context.brand.brandReference),
+              storeReference: String(current.store.storeReference),
+            };
+            const profile = await readCurrentStoreReceiptProfile(
+              businessTransaction(transaction),
+              scope,
+            );
+            return Object.freeze({
+              observedAt: String(current.context.resolvedAt),
+              canChange,
+              version: profile?.version ?? 0,
+              recordedAt: profile?.recordedAt ?? null,
+              details: Object.freeze({
+                gstHstNumber: profile?.gstHstNumber ?? null,
+                qstNumber: profile?.qstNumber ?? null,
+                pstNumber: profile?.pstNumber ?? null,
+                privacyNoticeUrl: profile?.privacyNoticeUrl ?? null,
+              }),
+              gaps: storeReceiptProfileSetupGaps(profile),
+            });
+          },
+        ),
+      );
     } catch (error) {
       return mapError(error);
     }
@@ -125,54 +148,71 @@ export function createMerchantStoreReceiptProfile(options: {
     // Derived from the operation so a retry of the same save finds the same audit.
     const auditReference = approvalDerivedReference(operationReference, "store-receipt-profile");
     try {
-      return await options.persistence.transactions.run(async (transaction) => {
-        const current = await resolveStore(
-          transaction,
-          input.sessionCookie,
-          "organization.store.publish",
-          authenticated.sessionReference,
-        );
-        if (!(await current.allowed())) throw new MerchantStoreReceiptProfileError("Denied");
-        const scope = {
-          brandReference: String(current.context.brand.brandReference),
-          storeReference: String(current.store.storeReference),
-        };
-        const actorReference = String(current.actorReference);
-        const result = await createPostgresStoreReceiptProfileStore({
-          authorize: async (_tx, query) =>
-            query.brandReference === scope.brandReference &&
-            query.storeReference === scope.storeReference &&
-            query.actorReference === actorReference &&
-            (await current.allowed()),
-          appendAudit: async (tx, record) => {
-            await appendAuditRecordInTransaction(
-              tx as ConsumerTransaction,
-              validateAuditRecord({
-                ...record,
-                actor: { ...record.actor },
-                beforeSummary: { ...record.beforeSummary },
-                afterSummary: { ...record.afterSummary },
-              }),
-            );
+      // WP-2423: one authorized run; the owner store's authorize takes the run's guard (no query)
+      // and the caller is re-checked in full before the transaction commits.
+      return await options.persistence.transactions.run((transaction) =>
+        withMerchantTransactionAuthorization(
+          {
+            transaction,
+            resolve: async () => {
+              const current = await resolveStore(
+                transaction,
+                input.sessionCookie,
+                "organization.store.publish",
+                authenticated.sessionReference,
+              );
+              if (!(await current.allowed())) return denied();
+              return current;
+            },
+            recheck: async (current) => (await current.allowed()) === true,
+            denied,
           },
-          retentionPolicyCode: "AUDIT_DEFAULT",
-          retentionPolicyVersion: 1,
-        })(businessTransaction(transaction), {
-          ...scope,
-          actorReference,
-          operationReference,
-          auditReference,
-          expectedVersion,
-          recordedAt: String(current.context.resolvedAt),
-          details: raw.details,
-        });
-        return Object.freeze({
-          status: result.status,
-          version: result.profile.version,
-          recordedAt: result.profile.recordedAt,
-          gaps: storeReceiptProfileSetupGaps(result.profile),
-        });
-      });
+          async (authority) => {
+            const current = authority.scope;
+            const scope = {
+              brandReference: String(current.context.brand.brandReference),
+              storeReference: String(current.store.storeReference),
+            };
+            const actorReference = String(current.actorReference);
+            const ownerTransaction = businessTransaction(transaction);
+            authority.bind(ownerTransaction);
+            const result = await createPostgresStoreReceiptProfileStore({
+              authorize: async (tx, query) =>
+                query.brandReference === scope.brandReference &&
+                query.storeReference === scope.storeReference &&
+                query.actorReference === actorReference &&
+                (await authority.guard(tx)),
+              appendAudit: async (tx, record) => {
+                await appendAuditRecordInTransaction(
+                  tx as ConsumerTransaction,
+                  validateAuditRecord({
+                    ...record,
+                    actor: { ...record.actor },
+                    beforeSummary: { ...record.beforeSummary },
+                    afterSummary: { ...record.afterSummary },
+                  }),
+                );
+              },
+              retentionPolicyCode: "AUDIT_DEFAULT",
+              retentionPolicyVersion: 1,
+            })(ownerTransaction, {
+              ...scope,
+              actorReference,
+              operationReference,
+              auditReference,
+              expectedVersion,
+              recordedAt: String(current.context.resolvedAt),
+              details: raw.details,
+            });
+            return Object.freeze({
+              status: result.status,
+              version: result.profile.version,
+              recordedAt: result.profile.recordedAt,
+              gaps: storeReceiptProfileSetupGaps(result.profile),
+            });
+          },
+        ),
+      );
     } catch (error) {
       return mapError(error);
     }

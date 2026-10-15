@@ -100,8 +100,24 @@ it("binds expected authenticated session, selected scope and server Audit", asyn
     dataClassification: "Restricted",
     afterSummary: { quantity: 1, version: 1 },
   });
-  f.allowed.mockResolvedValue(false);
+  // WP-2423: resolved in full once at the start and once before the commit; the owner check
+  // takes the run's guard, which ends with the run.
+  expect(f.allowed).toHaveBeenCalledTimes(2);
   expect(await options.authorize(f.tx, record())).toBe(false);
+});
+it("WP-2423: the owner check holds during the run; a permission withdrawn meanwhile refuses before commit", async () => {
+  const f = setup();
+  const during: boolean[] = [];
+  doubles.commit.mockImplementation(async () => {
+    const options = doubles.compose.mock.calls[0]?.[0];
+    during.push(await options.authorize(f.tx, record()));
+    return { status: "Created" };
+  });
+  await f.operation(f.input);
+  expect(during).toEqual([true]);
+  f.allowed.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+  await expect(f.operation(f.input)).rejects.toThrow("DINING_ITEM_SERVICE_PERMISSION_DENIED");
+  expect(doubles.commit).toHaveBeenCalledTimes(2);
 });
 it("rejects CSRF/session failure before opening a transaction", async () => {
   const f = setup();

@@ -63,3 +63,48 @@ it("denies before lookup and withholds results after revocation", async () => {
   f.allowed.mockResolvedValueOnce(true).mockResolvedValue(false);
   await expect(f.read(f.input)).rejects.toThrow();
 });
+it("WP-2423: resolves the caller in full once at the start and once before the reply", async () => {
+  const f = setup();
+  const during: boolean[] = [];
+  m.read.mockImplementation(async () => {
+    const owner = m.owner.mock.calls[0]?.[1];
+    during.push(await owner.authorize(f.tx));
+    during.push(await owner.authorize(f.tx));
+    // Not this run's transaction: refused without a query.
+    during.push(await owner.authorize({}));
+    return { participants: [] };
+  });
+  await expect(f.read(f.input)).resolves.toEqual({ participants: [] });
+  expect(during).toEqual([true, true, false]);
+  expect(m.resolve).toHaveBeenCalledOnce();
+  expect(f.allowed).toHaveBeenCalledTimes(2);
+  // The guard ends with the run.
+  expect(await m.owner.mock.calls[0]?.[1].authorize(f.tx)).toBe(false);
+});
+it("WP-2423: a permission withdrawn during the read refuses it inside the transaction", async () => {
+  const f = setup();
+  let thrownInside = false;
+  const read = createMerchantDiningHostSelection({
+    persistence: {
+      transactions: {
+        run: async (work: (tx: unknown) => Promise<unknown>) => {
+          try {
+            return await work(f.tx);
+          } catch (error) {
+            thrownInside = true;
+            throw error;
+          }
+        },
+      },
+      now: () => "2026-09-21T03:55:00.000Z",
+    } as unknown as Options["persistence"],
+    authentication: {
+      authorize: async () => ({ sessionReference: id(4) }),
+    } as unknown as Options["authentication"],
+  });
+  f.allowed.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+  await expect(read(f.input)).rejects.toThrow("DINING_HOST_SELECTION_UNAVAILABLE");
+  expect(m.read).toHaveBeenCalledOnce();
+  expect(f.allowed).toHaveBeenCalledTimes(2);
+  expect(thrownInside).toBe(true);
+});

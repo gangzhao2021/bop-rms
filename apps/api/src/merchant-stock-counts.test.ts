@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { parseStockCountCommandBody, redactStockCount } from "./merchant-stock-counts.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  createMerchantStockCounts,
+  parseStockCountCommandBody,
+  redactStockCount,
+} from "./merchant-stock-counts.js";
 import { parseStoreWasteCommandBody } from "./merchant-store-waste.js";
 
 const id = (n: number) => "01909a1b-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -147,5 +151,112 @@ describe("WP-2423 blind count redaction", () => {
     expect(
       redactStockCount(count("Posted", id(9)), true, id(8)).lines[0]?.balanceVersion,
     ).toBeUndefined();
+  });
+});
+
+const d = vi.hoisted(() => ({
+  resolve: vi.fn(),
+  ports: vi.fn(),
+  execute: vi.fn(),
+  list: vi.fn(),
+}));
+vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => d.resolve }));
+vi.mock("./merchant-stock-catalog.js", () => ({
+  merchantStockCatalog: async () => ({ items: [], locations: [] }),
+}));
+vi.mock("@bop/membership", async (original) => ({
+  ...(await original<object>()),
+  listStoreMembers: async () => [],
+}));
+vi.mock("@rms/inventory", async (original) => ({
+  ...(await original<object>()),
+  createPostgresStockCountPorts: d.ports,
+  executeStockCountCommand: d.execute,
+  listStockCounts: d.list,
+}));
+type Options = Parameters<typeof createMerchantStockCounts>[0];
+type Authorize = (request: { action: string; permission: string }) => Promise<unknown>;
+const allowAll = async (actions: readonly string[]) =>
+  new Map(actions.map((action) => [action, { effect: "Allow" as "Allow" | "Deny" }]));
+function setup() {
+  const tx = { query: vi.fn() };
+  const allowed = vi.fn(async () => true);
+  const authorizeActions = vi.fn(allowAll);
+  d.resolve.mockResolvedValue({
+    selected: { tenantReference: id(7) },
+    context: { brand: { brandReference: id(8) } },
+    store: { storeReference: id(9) },
+    actorReference: id(10),
+    allowed,
+    authorizeActions,
+  });
+  d.ports.mockImplementation((_tx: unknown, _owner: unknown, ports: unknown) => ports);
+  d.list.mockResolvedValue({ counts: [], hasMore: false });
+  d.execute.mockImplementation(
+    async (
+      command: { action: string; permission: string },
+      ports: { authorization: { authorize: Authorize } },
+    ) => {
+      if ((await ports.authorization.authorize(command)) === null) throw new Error("denied");
+      return { outcome: "Applied", count: { aggregateVersion: 4 } };
+    },
+  );
+  const run = vi.fn(async (work: (t: object) => Promise<unknown>) => work(tx));
+  const service = createMerchantStockCounts({
+    persistence: { transactions: { run }, now: () => "2026-10-15T12:00:00.000Z" },
+    authentication: { authorize: async () => ({ sessionReference: id(6) }) },
+    references: { next: () => id(5) },
+    locale: "en-CA",
+  } as unknown as Options);
+  const input = { sessionCookie: "synthetic-cookie", csrf: "synthetic-csrf" };
+  const submit = { ...input, body: { action: "Submit", ...base } };
+  return { tx, allowed, authorizeActions, service, input, submit };
+}
+describe("WP-2423 stock count authorization", () => {
+  beforeEach(() => vi.clearAllMocks());
+  it("lists counts with one start resolution (every count permission) and one recheck", async () => {
+    const f = setup();
+    const view = await f.service.query({ ...f.input, countReference: null, before: null });
+    expect(view.permissions).toEqual({ mayCreate: true, mayCount: true, mayApprove: true });
+    expect(f.authorizeActions).toHaveBeenCalledOnce();
+    expect(f.allowed).toHaveBeenCalledOnce();
+  });
+  it("refuses a caller without inventory.count.read before reading counts", async () => {
+    const f = setup();
+    f.authorizeActions.mockResolvedValue(new Map());
+    await expect(
+      f.service.query({ ...f.input, countReference: null, before: null }),
+    ).rejects.toMatchObject({ code: "PermissionDenied" });
+    expect(d.list).not.toHaveBeenCalled();
+  });
+  it("a permission withdrawn during the read refuses the reply", async () => {
+    const f = setup();
+    f.allowed.mockResolvedValue(false);
+    await expect(
+      f.service.query({ ...f.input, countReference: null, before: null }),
+    ).rejects.toMatchObject({ code: "PermissionDenied" });
+  });
+  it("commands use the start decision (true during the run, refused after) and re-check it", async () => {
+    const f = setup();
+    await expect(f.service.command(f.submit)).resolves.toEqual({ status: "Applied", version: 4 });
+    expect(f.authorizeActions).toHaveBeenCalledTimes(2);
+    expect(f.authorizeActions.mock.calls[1]?.[0]).toEqual([
+      "inventory.count.read",
+      "inventory.count.execute",
+    ]);
+    expect(f.allowed).not.toHaveBeenCalled();
+    const ports = d.ports.mock.calls[0]?.[2] as { authorization: { authorize: Authorize } };
+    expect(
+      await ports.authorization.authorize({
+        action: "Submit",
+        permission: "inventory.count.execute",
+      }),
+    ).toBe(null);
+  });
+  it("a permission withdrawn or Session ended during the command refuses it inside the transaction", async () => {
+    const f = setup();
+    f.authorizeActions.mockImplementationOnce(allowAll).mockResolvedValue(new Map());
+    await expect(f.service.command(f.submit)).rejects.toMatchObject({ code: "PermissionDenied" });
+    expect(d.execute).toHaveBeenCalledOnce();
   });
 });

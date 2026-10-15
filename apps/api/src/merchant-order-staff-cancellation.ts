@@ -19,6 +19,7 @@ import {
   readPaymentRemainingRefundable,
 } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { createSubmissionInventoryRelease } from "./submission-inventory-release.js";
@@ -236,198 +237,222 @@ export function createMerchantOrderStaffCancellation(options: {
       return fail("ORDER_CANCELLATION_INPUT_INVALID");
     const reasonCode = intent.reasonCode as StaffOrderCancellationReasonCode;
     try {
-      return await options.persistence.transactions.run(async (transaction) => {
-        const scope = await resolveScope(
-          transaction,
-          input.sessionCookie,
-          staffOrderCancellationPermission,
-          session.sessionReference,
-        ).catch(() => fail("ORDER_CANCELLATION_PERMISSION_DENIED"));
-        const allowed = async () => (await scope.allowed()) === true;
-        if (!(await allowed())) return fail("ORDER_CANCELLATION_PERMISSION_DENIED");
-        const tx = transaction as unknown as ConsumerTransaction;
-        const selected = {
-          tenantReference: String(scope.selected.tenantReference),
-          brandReference: String(scope.context.brand.brandReference),
-          storeReference: String(scope.store.storeReference),
-        };
-        const actorReference = String(scope.actorReference);
-        await options.installContext(tx, selected);
-        const owned = async (
-          t: ConsumerTransaction,
-          identity: { orderReference: string; orderBatchReference: string; actorReference: string },
-        ) =>
-          t === tx &&
-          identity.orderReference === orderReference &&
-          identity.orderBatchReference === orderBatchReference &&
-          identity.actorReference === actorReference &&
-          (await allowed());
-        const ordering = createPostgresStaffOrderCancellationStore({
-          brandReference: selected.brandReference,
-          storeReference: selected.storeReference,
-          authorize: owned,
-        });
-        const replied = async (
-          status: "Cancelled" | "AlreadyCancelled",
-          record: StaffOrderCancellationRecord,
-        ) => {
-          const card = await readCardMachineCancellationRefund(tx, selected, record, allowed);
-          const refundStatus =
-            card !== null
-              ? card.status
-              : status === "Cancelled" && record.refundDisposition !== "AlreadyRefunded"
-                ? ("Pending" as const)
-                : await readStaffCancellationRefundStatus(tx, selected, record, allowed);
-          if (!(await allowed())) return fail("ORDER_CANCELLATION_PERMISSION_DENIED");
-          return Object.freeze({
-            status,
-            orderReference,
-            orderBatchReference,
-            cancelledAt: String(record.cancelledAt),
-            refundStatus,
-            refundMethod: card === null ? ("Online" as const) : ("CardMachine" as const),
-            refundAmountMinor: card?.amountMinor ?? null,
-          });
-        };
-        // Replay of the same staff command: the original outcome, nothing written.
-        const prior = await ordering.loadByOperation(tx, operationReference);
-        if (prior !== null) {
-          if (
-            String(prior.orderReference) !== orderReference ||
-            String(prior.orderBatchReference) !== orderBatchReference ||
-            prior.reasonCode !== reasonCode ||
-            String(prior.actorReference) !== actorReference ||
-            prior.expectedOrderVersion !== expectedOrderVersion
-          )
-            return fail("ORDER_CANCELLATION_NOT_CANCELLABLE");
-          return replied("AlreadyCancelled", prior);
-        }
-        const prepared = await ordering.prepare(tx, {
-          orderReference,
-          orderBatchReference,
-          expectedOrderVersion,
-          actorReference,
-        });
-        if (prepared.status === "NotEligible")
-          return fail(
-            prepared.reason === "NotFound"
-              ? "ORDER_CANCELLATION_NOT_FOUND"
-              : prepared.reason === "VersionConflict"
-                ? "ORDER_CANCELLATION_VERSION_CONFLICT"
-                : "ORDER_CANCELLATION_NOT_CANCELLABLE",
-          );
-        const plan = prepared.plan;
-        // DEC-TABLE-CLOSE-GUESTS-LEFT: a round whose payment ordinary refunds already returned in full
-        // (never accepted, or accepted and refunded item by item) owes nothing more; otherwise
-        // Payment refunds what is left (all of it, tip included).
-        let refundDisposition: "Refund" | "AlreadyRefunded" = "Refund";
-        {
-          // The staff member was resolved at the start of this transaction and is again before
-          // the reply; these Payment reads only confirm they run in it, for this Order.
-          const cardStore = createPostgresCardMachinePaymentStore({
-            scope: selected,
-            authorize: async (t, value) => t === tx && value.orderReference === orderReference,
-          });
-          const card = await cardStore.loadByBatch(tx, orderReference, orderBatchReference);
-          let remainingMinor: bigint | null = null;
-          if (card !== null) {
-            const refunds = await cardStore.refunds(tx, card.cardMachinePaymentReference);
-            remainingMinor =
-              card.preparation.total.amountMinor -
-              refunds.reduce((sum, refund) => sum + refund.amountMinor, 0n);
-          } else if (options.resolveRefundConfiguration !== undefined) {
-            const configuration = await options.resolveRefundConfiguration(tx, selected);
-            const position = await readPaymentRemainingRefundable(tx, {
-              scope: {
-                ...selected,
-                providerAccountReference: configuration.providerAccountReference,
-                environment: configuration.environment,
-              },
-              orderReference,
-              paymentTransactionReference: String(plan.payment.paymentTransactionReference),
-              paymentIntentReference: String(plan.payment.paymentIntentReference),
-              paymentAttemptReference: String(plan.payment.paymentAttemptReference),
-              observedAt: parseOrderingInstant(options.persistence.now()),
-              authorize: async (t, query) => t === tx && query.orderReference === orderReference,
-            });
-            remainingMinor = position.remainingMinor;
-          } else if (plan.previousPhase === "Submitted")
-            return fail("ORDER_CANCELLATION_NOT_CANCELLABLE");
-          if (remainingMinor !== null && remainingMinor < 0n)
-            return fail("ORDER_CANCELLATION_UNAVAILABLE");
-          if (remainingMinor === 0n) refundDisposition = "AlreadyRefunded";
-          if (!(await allowed())) return fail("ORDER_CANCELLATION_PERMISSION_DENIED");
-        }
-        const cancellationReference = String(parseOrderingReference(options.nextReference()));
-        const cancelledAt = parseOrderingInstant(options.persistence.now());
-        // Kitchen after the Ordering fence (foreign owner fences first): every item still unstarted.
-        const kitchen = await createPostgresKitchenBatchCancellation({
-          ...selected,
-          authorize: owned,
-        }).cancel(tx, {
-          orderReference,
-          orderBatchReference,
-          operationReference,
-          orderCancellationReference: cancellationReference,
-          actorReference,
-          cancelledAt,
-          auditReference: options.nextReference(),
-          eventReference: options.nextReference(),
-          nextReference: options.nextReference,
-        });
-        if (kitchen.status === "AlreadyCancelled") return fail("ORDER_CANCELLATION_UNAVAILABLE");
-        const created = await ordering.commit(tx, {
-          plan,
-          cancellationReference,
-          operationReference,
-          actorReference,
-          reasonCode,
-          kitchenEvidenceDigest: kitchen.evidenceDigest,
-          auditReference: options.nextReference(),
-          terminationAuditReference: options.nextReference(),
-          cancelledAt,
-          refundDisposition,
-        });
-        const record = created.record;
-        // Stock reserved at submission returns in the same transaction, or nothing is cancelled.
-        // The ledger movement names the cancelling staff member; the release audit is System-owned.
-        const releaser = createSubmissionInventoryRelease({
-          scope: selected,
-          systemActorReference: actorReference,
-          reasonCode: "STAFF_CANCELLED_BEFORE_PREPARATION",
-          now: options.persistence.now,
-        });
-        const request = {
-          source: {
-            kind: "StaffOrderCancellationInventory/v1",
-            reference: String(record.cancellationReference),
-            submissionReference: String(record.submissionReference),
-            orderReference: String(record.orderReference),
-            occurredAt: String(record.cancelledAt),
+      // WP-2423: one authorized run. The staff member and `ordering.order.cancel` are resolved
+      // in full once at the start and once more before the commit (inside this transaction: a
+      // permission withdrawn or Session ended meanwhile cancels nothing). The Ordering, Kitchen,
+      // Payment and Inventory owner checks in between, which run while the Order fence, Kitchen
+      // rows and stock reservations are locked, take the run's no-query guard.
+      return await options.persistence.transactions.run((transaction) =>
+        withMerchantTransactionAuthorization(
+          {
+            transaction,
+            resolve: async () => {
+              const current = await resolveScope(
+                transaction,
+                input.sessionCookie,
+                staffOrderCancellationPermission,
+                session.sessionReference,
+              ).catch(() => fail("ORDER_CANCELLATION_PERMISSION_DENIED"));
+              if ((await current.allowed()) !== true)
+                return fail("ORDER_CANCELLATION_PERMISSION_DENIED");
+              return current;
+            },
+            recheck: async (current) => (await current.allowed()) === true,
+            denied: () => fail("ORDER_CANCELLATION_PERMISSION_DENIED"),
           },
-          releasedAt: String(record.cancelledAt),
-          authorize: allowed,
-        };
-        // WP-2423 Q6 step 2a: once lines of this Batch were cancelled (and their stock released),
-        // the remaining lines are released line by line.
-        const lines = await readStaffBatchLineSources(
-          tx,
-          selected,
-          orderReference,
-          orderBatchReference,
-        );
-        const inventory = lines.some((line) => line.itemCancelled)
-          ? await releaser.releaseLines(tx, {
-              ...request,
-              cartLineReferences: lines
-                .filter((line) => !line.itemCancelled)
-                .map((line) => String(line.sourceCartLineReference)),
-            })
-          : await releaser.release(tx, request);
-        if (inventory.status === "NotReleasable")
-          return fail("ORDER_CANCELLATION_STOCK_NOT_RELEASABLE");
-        return replied("Cancelled", record);
-      });
+          async (authority) => {
+            const scope = authority.scope;
+            const allowed = () => authority.guard();
+            const tx = transaction as unknown as ConsumerTransaction;
+            const selected = {
+              tenantReference: String(scope.selected.tenantReference),
+              brandReference: String(scope.context.brand.brandReference),
+              storeReference: String(scope.store.storeReference),
+            };
+            const actorReference = String(scope.actorReference);
+            await options.installContext(tx, selected);
+            const owned = async (
+              t: ConsumerTransaction,
+              identity: {
+                orderReference: string;
+                orderBatchReference: string;
+                actorReference: string;
+              },
+            ) =>
+              t === tx &&
+              identity.orderReference === orderReference &&
+              identity.orderBatchReference === orderBatchReference &&
+              identity.actorReference === actorReference &&
+              (await allowed());
+            const ordering = createPostgresStaffOrderCancellationStore({
+              brandReference: selected.brandReference,
+              storeReference: selected.storeReference,
+              authorize: owned,
+            });
+            const replied = async (
+              status: "Cancelled" | "AlreadyCancelled",
+              record: StaffOrderCancellationRecord,
+            ) => {
+              const card = await readCardMachineCancellationRefund(tx, selected, record, allowed);
+              const refundStatus =
+                card !== null
+                  ? card.status
+                  : status === "Cancelled" && record.refundDisposition !== "AlreadyRefunded"
+                    ? ("Pending" as const)
+                    : await readStaffCancellationRefundStatus(tx, selected, record, allowed);
+              return Object.freeze({
+                status,
+                orderReference,
+                orderBatchReference,
+                cancelledAt: String(record.cancelledAt),
+                refundStatus,
+                refundMethod: card === null ? ("Online" as const) : ("CardMachine" as const),
+                refundAmountMinor: card?.amountMinor ?? null,
+              });
+            };
+            // Replay of the same staff command: the original outcome, nothing written.
+            const prior = await ordering.loadByOperation(tx, operationReference);
+            if (prior !== null) {
+              if (
+                String(prior.orderReference) !== orderReference ||
+                String(prior.orderBatchReference) !== orderBatchReference ||
+                prior.reasonCode !== reasonCode ||
+                String(prior.actorReference) !== actorReference ||
+                prior.expectedOrderVersion !== expectedOrderVersion
+              )
+                return fail("ORDER_CANCELLATION_NOT_CANCELLABLE");
+              return replied("AlreadyCancelled", prior);
+            }
+            const prepared = await ordering.prepare(tx, {
+              orderReference,
+              orderBatchReference,
+              expectedOrderVersion,
+              actorReference,
+            });
+            if (prepared.status === "NotEligible")
+              return fail(
+                prepared.reason === "NotFound"
+                  ? "ORDER_CANCELLATION_NOT_FOUND"
+                  : prepared.reason === "VersionConflict"
+                    ? "ORDER_CANCELLATION_VERSION_CONFLICT"
+                    : "ORDER_CANCELLATION_NOT_CANCELLABLE",
+              );
+            const plan = prepared.plan;
+            // DEC-TABLE-CLOSE-GUESTS-LEFT: a round whose payment ordinary refunds already returned in full
+            // (never accepted, or accepted and refunded item by item) owes nothing more; otherwise
+            // Payment refunds what is left (all of it, tip included).
+            let refundDisposition: "Refund" | "AlreadyRefunded" = "Refund";
+            {
+              // The staff member was resolved at the start of this transaction and is again before
+              // the commit; these Payment reads only confirm they run in it, for this Order.
+              const cardStore = createPostgresCardMachinePaymentStore({
+                scope: selected,
+                authorize: async (t, value) =>
+                  t === tx && value.orderReference === orderReference && (await allowed()),
+              });
+              const card = await cardStore.loadByBatch(tx, orderReference, orderBatchReference);
+              let remainingMinor: bigint | null = null;
+              if (card !== null) {
+                const refunds = await cardStore.refunds(tx, card.cardMachinePaymentReference);
+                remainingMinor =
+                  card.preparation.total.amountMinor -
+                  refunds.reduce((sum, refund) => sum + refund.amountMinor, 0n);
+              } else if (options.resolveRefundConfiguration !== undefined) {
+                const configuration = await options.resolveRefundConfiguration(tx, selected);
+                const position = await readPaymentRemainingRefundable(tx, {
+                  scope: {
+                    ...selected,
+                    providerAccountReference: configuration.providerAccountReference,
+                    environment: configuration.environment,
+                  },
+                  orderReference,
+                  paymentTransactionReference: String(plan.payment.paymentTransactionReference),
+                  paymentIntentReference: String(plan.payment.paymentIntentReference),
+                  paymentAttemptReference: String(plan.payment.paymentAttemptReference),
+                  observedAt: parseOrderingInstant(options.persistence.now()),
+                  authorize: async (t, query) =>
+                    t === tx && query.orderReference === orderReference,
+                });
+                remainingMinor = position.remainingMinor;
+              } else if (plan.previousPhase === "Submitted")
+                return fail("ORDER_CANCELLATION_NOT_CANCELLABLE");
+              if (remainingMinor !== null && remainingMinor < 0n)
+                return fail("ORDER_CANCELLATION_UNAVAILABLE");
+              if (remainingMinor === 0n) refundDisposition = "AlreadyRefunded";
+            }
+            const cancellationReference = String(parseOrderingReference(options.nextReference()));
+            const cancelledAt = parseOrderingInstant(options.persistence.now());
+            // Kitchen after the Ordering fence (foreign owner fences first): every item still unstarted.
+            const kitchen = await createPostgresKitchenBatchCancellation({
+              ...selected,
+              authorize: owned,
+            }).cancel(tx, {
+              orderReference,
+              orderBatchReference,
+              operationReference,
+              orderCancellationReference: cancellationReference,
+              actorReference,
+              cancelledAt,
+              auditReference: options.nextReference(),
+              eventReference: options.nextReference(),
+              nextReference: options.nextReference,
+            });
+            if (kitchen.status === "AlreadyCancelled")
+              return fail("ORDER_CANCELLATION_UNAVAILABLE");
+            const created = await ordering.commit(tx, {
+              plan,
+              cancellationReference,
+              operationReference,
+              actorReference,
+              reasonCode,
+              kitchenEvidenceDigest: kitchen.evidenceDigest,
+              auditReference: options.nextReference(),
+              terminationAuditReference: options.nextReference(),
+              cancelledAt,
+              refundDisposition,
+            });
+            const record = created.record;
+            // Stock reserved at submission returns in the same transaction, or nothing is cancelled.
+            // The ledger movement names the cancelling staff member; the release audit is System-owned.
+            const releaser = createSubmissionInventoryRelease({
+              scope: selected,
+              systemActorReference: actorReference,
+              reasonCode: "STAFF_CANCELLED_BEFORE_PREPARATION",
+              now: options.persistence.now,
+            });
+            const request = {
+              source: {
+                kind: "StaffOrderCancellationInventory/v1",
+                reference: String(record.cancellationReference),
+                submissionReference: String(record.submissionReference),
+                orderReference: String(record.orderReference),
+                occurredAt: String(record.cancelledAt),
+              },
+              releasedAt: String(record.cancelledAt),
+              authorize: allowed,
+            };
+            // WP-2423 Q6 step 2a: once lines of this Batch were cancelled (and their stock released),
+            // the remaining lines are released line by line.
+            const lines = await readStaffBatchLineSources(
+              tx,
+              selected,
+              orderReference,
+              orderBatchReference,
+            );
+            const inventory = lines.some((line) => line.itemCancelled)
+              ? await releaser.releaseLines(tx, {
+                  ...request,
+                  cartLineReferences: lines
+                    .filter((line) => !line.itemCancelled)
+                    .map((line) => String(line.sourceCartLineReference)),
+                })
+              : await releaser.release(tx, request);
+            if (inventory.status === "NotReleasable")
+              return fail("ORDER_CANCELLATION_STOCK_NOT_RELEASABLE");
+            return replied("Cancelled", record);
+          },
+        ),
+      );
     } catch (error) {
       if (error instanceof StaffOrderCancellationError) throw error;
       if (error instanceof KitchenBatchCancellationError && error.code === "KITCHEN_WORK_STARTED")

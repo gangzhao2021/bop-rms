@@ -9,6 +9,7 @@ import {
   type InventoryItemTransaction,
 } from "@rms/inventory";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
@@ -210,12 +211,62 @@ export function createMerchantInventoryItems(options: {
     options.authentication
       .authorize({ sessionCookie: input.sessionCookie, csrf: input.csrf })
       .catch(() => fail("PermissionDenied"));
-  async function scopeFor(tx: Tx, sessionCookie: unknown, sessionReference: string) {
-    const scope = await resolveScope(tx, sessionCookie, "inventory.item.read", sessionReference);
-    if (!(await scope.allowed())) fail("PermissionDenied");
-    return scope;
+  type Scope = Awaited<ReturnType<typeof resolveScope>>;
+  type Decision = Awaited<ReturnType<Scope["authorizeAction"]>>;
+  const denied = () => fail("PermissionDenied");
+  const itemActions: readonly string[] = Object.values(actionPermissions);
+  /**
+   * WP-2423: one authorized run. `inventory.item.read` and every item permission are decided in
+   * full once at the start (one permission packet); the read permission and every permission a
+   * command used are re-checked in full once more before the reply or commit, inside the
+   * transaction. Owner callbacks take the start decisions while the run is in progress (no query).
+   */
+  function authorizedRun<T>(
+    tx: Tx,
+    sessionCookie: unknown,
+    sessionReference: string,
+    work: (
+      scope: Scope,
+      may: (action: string) => Promise<boolean>,
+      decisions: ReadonlyMap<string, Decision>,
+    ) => Promise<T>,
+  ): Promise<T> {
+    const used = new Set<string>();
+    return withMerchantTransactionAuthorization(
+      {
+        transaction: tx,
+        resolve: async () => {
+          const scope = await resolveScope(
+            tx,
+            sessionCookie,
+            "inventory.item.read",
+            sessionReference,
+          );
+          const decisions = await scope.authorizeActions(["inventory.item.read", ...itemActions]);
+          if (decisions.get("inventory.item.read")?.effect !== "Allow") return denied();
+          return { scope, decisions };
+        },
+        recheck: async ({ scope }) => {
+          if (used.size === 0) return (await scope.allowed()) === true;
+          const actions = ["inventory.item.read", ...used];
+          const decisions = await scope.authorizeActions(actions);
+          return actions.every((action) => decisions.get(action)?.effect === "Allow");
+        },
+        denied,
+      },
+      (authority) =>
+        work(
+          authority.scope.scope,
+          async (action) => {
+            if (!(await authority.guard(tx))) return false;
+            used.add(action);
+            return authority.scope.decisions.get(action)?.effect === "Allow";
+          },
+          authority.scope.decisions,
+        ),
+    );
   }
-  const storeFor = (tx: Tx, scope: Awaited<ReturnType<typeof scopeFor>>) =>
+  const storeFor = (tx: Tx, scope: Scope) =>
     createPostgresInventoryItemStore(
       { run: (work) => work(tx as unknown as InventoryItemTransaction) },
       {
@@ -241,10 +292,10 @@ export function createMerchantInventoryItems(options: {
     version: item.aggregateVersion,
     updatedAt: item.updatedAt,
   });
-  async function permissions(scope: Awaited<ReturnType<typeof scopeFor>>) {
+  function permissions(decisions: ReadonlyMap<string, Decision>) {
     const result: Record<string, boolean> = {};
     for (const [key, action] of Object.entries(actionPermissions))
-      result[key] = (await scope.authorizeAction(action))?.effect === "Allow";
+      result[key] = decisions.get(action)?.effect === "Allow";
     return result as Record<keyof typeof actionPermissions, boolean>;
   }
   const mapError = (error: unknown): never => {
@@ -276,43 +327,49 @@ export function createMerchantInventoryItems(options: {
   }) => {
     const current = await session(input);
     return retryTransactionConflict(() =>
-      options.persistence.transactions.run(async (tx) => {
-        const scope = await scopeFor(tx, input.sessionCookie, current.sessionReference);
-        const store = storeFor(tx, scope);
-        const may = await permissions(scope);
-        try {
-          if (input.itemReference !== null) {
-            const item = await store.load(parseInventoryReference(input.itemReference));
-            if (item === null) return fail("NotFound");
-            return {
-              screenId: "INV-ITEM-DETAIL" as const,
-              sourceAsOf: options.persistence.now(),
-              permissions: may,
-              units: inventoryUnitPresets,
-              items: [itemView(item)],
-              stockRemaining: await store.stockExposure(item.itemReference),
-              hasMore: false,
-            };
-          }
-          const page = await store.list({
-            search: input.search,
-            lifecycle: input.lifecycle,
-            afterInternalCode: input.afterInternalCode,
-            limit: 50,
-          });
-          return {
-            screenId: "INV-ITEM-LIST" as const,
-            sourceAsOf: options.persistence.now(),
-            permissions: may,
-            units: inventoryUnitPresets,
-            items: page.items.map(itemView),
-            stockRemaining: null,
-            hasMore: page.hasMore,
-          };
-        } catch (error) {
-          return mapError(error);
-        }
-      }),
+      options.persistence.transactions.run((tx) =>
+        authorizedRun(
+          tx,
+          input.sessionCookie,
+          current.sessionReference,
+          async (scope, _, decisions) => {
+            const store = storeFor(tx, scope);
+            const may = permissions(decisions);
+            try {
+              if (input.itemReference !== null) {
+                const item = await store.load(parseInventoryReference(input.itemReference));
+                if (item === null) return fail("NotFound");
+                return {
+                  screenId: "INV-ITEM-DETAIL" as const,
+                  sourceAsOf: options.persistence.now(),
+                  permissions: may,
+                  units: inventoryUnitPresets,
+                  items: [itemView(item)],
+                  stockRemaining: await store.stockExposure(item.itemReference),
+                  hasMore: false,
+                };
+              }
+              const page = await store.list({
+                search: input.search,
+                lifecycle: input.lifecycle,
+                afterInternalCode: input.afterInternalCode,
+                limit: 50,
+              });
+              return {
+                screenId: "INV-ITEM-LIST" as const,
+                sourceAsOf: options.persistence.now(),
+                permissions: may,
+                units: inventoryUnitPresets,
+                items: page.items.map(itemView),
+                stockRemaining: null,
+                hasMore: page.hasMore,
+              };
+            } catch (error) {
+              return mapError(error);
+            }
+          },
+        ),
+      ),
     );
   };
 
@@ -320,142 +377,142 @@ export function createMerchantInventoryItems(options: {
     const body = parseInventoryItemCommandBody(input.body);
     const current = await session(input);
     return retryTransactionConflict(() =>
-      options.persistence.transactions.run(async (tx) => {
-        const scope = await scopeFor(tx, input.sessionCookie, current.sessionReference);
-        const store = storeFor(tx, scope);
-        const tenantReference = scope.selected.tenantReference,
-          brandReference = scope.context.brand.brandReference,
-          actorReference = String(scope.actorReference);
-        const fields = body.fields;
-        const unit = fields === null ? null : unitByCode.get(fields.unitCode);
-        const tracking =
-          fields === null
-            ? null
-            : {
-                stockTrackingEnabled: fields.stockTracked,
-                lotTrackingMode: fields.stockTracked ? fields.lotTracking : "NoLot",
-                defaultShelfLifeDays: fields.shelfLifeDays,
-                expiryWarningDays: fields.expiryWarningDays,
-                issuePolicy: fields.lotTracking === "LotExpiryRequired" ? "FEFO" : "FIFO",
-                negativeStockPolicy: fields.negativeStockPolicy,
+      options.persistence.transactions.run((tx) =>
+        authorizedRun(tx, input.sessionCookie, current.sessionReference, async (scope, may) => {
+          const store = storeFor(tx, scope);
+          const tenantReference = scope.selected.tenantReference,
+            brandReference = scope.context.brand.brandReference,
+            actorReference = String(scope.actorReference);
+          const fields = body.fields;
+          const unit = fields === null ? null : unitByCode.get(fields.unitCode);
+          const tracking =
+            fields === null
+              ? null
+              : {
+                  stockTrackingEnabled: fields.stockTracked,
+                  lotTrackingMode: fields.stockTracked ? fields.lotTracking : "NoLot",
+                  defaultShelfLifeDays: fields.shelfLifeDays,
+                  expiryWarningDays: fields.expiryWarningDays,
+                  issuePolicy: fields.lotTracking === "LotExpiryRequired" ? "FEFO" : "FIFO",
+                  negativeStockPolicy: fields.negativeStockPolicy,
+                };
+          const baseUnit =
+            unit === null || unit === undefined
+              ? null
+              : {
+                  unitCode: unit.unitCode,
+                  dimension: unit.dimension,
+                  displayPrecision: unit.displayPrecision,
+                  ledgerPrecision: unit.ledgerPrecision,
+                  roundingMode: unit.roundingMode,
+                };
+          let payload: Record<string, unknown>;
+          switch (body.action) {
+            case "Create":
+              payload = {
+                internalCode: fields?.internalCode,
+                itemType: fields?.itemType,
+                localizedNames: { [options.locale]: fields?.name },
+                baseUnit,
+                trackingPolicy: tracking,
               };
-        const baseUnit =
-          unit === null || unit === undefined
-            ? null
-            : {
-                unitCode: unit.unitCode,
-                dimension: unit.dimension,
-                displayPrecision: unit.displayPrecision,
-                ledgerPrecision: unit.ledgerPrecision,
-                roundingMode: unit.roundingMode,
+              break;
+            case "Update": {
+              const before = await store.load(parseInventoryReference(body.itemReference));
+              if (before === null) return fail("NotFound");
+              payload = {
+                itemReference: body.itemReference,
+                expectedVersion: body.expectedVersion,
+                localizedNames: { ...before.localizedNames, [options.locale]: fields?.name },
+                baseUnit,
+                trackingPolicy: tracking,
+                migrationPlanReference: null,
               };
-        let payload: Record<string, unknown>;
-        switch (body.action) {
-          case "Create":
-            payload = {
-              internalCode: fields?.internalCode,
-              itemType: fields?.itemType,
-              localizedNames: { [options.locale]: fields?.name },
-              baseUnit,
-              trackingPolicy: tracking,
-            };
-            break;
-          case "Update": {
-            const before = await store.load(parseInventoryReference(body.itemReference));
-            if (before === null) return fail("NotFound");
-            payload = {
-              itemReference: body.itemReference,
-              expectedVersion: body.expectedVersion,
-              localizedNames: { ...before.localizedNames, [options.locale]: fields?.name },
-              baseUnit,
-              trackingPolicy: tracking,
-              migrationPlanReference: null,
-            };
-            break;
+              break;
+            }
+            case "Archive":
+              if (await store.stockExposure(String(body.itemReference)))
+                return fail("StockRemaining");
+              payload = {
+                itemReference: body.itemReference,
+                expectedVersion: body.expectedVersion,
+                reasonCode: body.reasonCode,
+                // Open documents (receipts, counts, transfers) join this guard as those flows land.
+                hasOpenWork: false,
+                hasNonZeroStock: await store.stockExposure(String(body.itemReference)),
+              };
+              break;
+            default:
+              payload = {
+                itemReference: body.itemReference,
+                expectedVersion: body.expectedVersion,
+                reasonCode: body.reasonCode,
+              };
           }
-          case "Archive":
-            if (await store.stockExposure(String(body.itemReference)))
-              return fail("StockRemaining");
-            payload = {
-              itemReference: body.itemReference,
-              expectedVersion: body.expectedVersion,
-              reasonCode: body.reasonCode,
-              // Open documents (receipts, counts, transfers) join this guard as those flows land.
-              hasOpenWork: false,
-              hasNonZeroStock: await store.stockExposure(String(body.itemReference)),
-            };
-            break;
-          default:
-            payload = {
-              itemReference: body.itemReference,
-              expectedVersion: body.expectedVersion,
-              reasonCode: body.reasonCode,
-            };
-        }
-        try {
-          const record = await executeInventoryItemCommand(
-            {
-              tenantReference,
-              brandReference,
-              actorReference,
-              purpose: "InventoryItemManagement",
-              operationReference: body.operationReference,
-              occurredAt: options.persistence.now(),
-              action: body.action,
-              payload,
-            },
-            {
-              authorization: {
-                authorize: async (request) =>
-                  (await scope.authorizeAction(request.permission))?.effect === "Allow"
-                    ? { authorized: true }
-                    : null,
+          try {
+            const record = await executeInventoryItemCommand(
+              {
+                tenantReference,
+                brandReference,
+                actorReference,
+                purpose: "InventoryItemManagement",
+                operationReference: body.operationReference,
+                occurredAt: options.persistence.now(),
+                action: body.action,
+                payload,
               },
-              audit: {
-                create: async ({ command, after }) => ({
-                  auditId: options.references.next(),
-                  brandId: command.brandReference,
-                  actor: { type: "User", reference: command.actorReference },
-                  actionCode: "INVENTORY_ITEM_" + command.action.toUpperCase(),
-                  targetType: "InventoryItem",
-                  targetId: after.itemReference,
-                  reasonCode:
-                    typeof command.payload.reasonCode === "string"
-                      ? command.payload.reasonCode
-                      : "INVENTORY_ITEM_MAINTENANCE",
-                  correlationId: command.operationReference,
-                  occurredAt: command.occurredAt,
-                  sourceChannel: "MERCHANT_WEB",
-                  dataClassification: "Internal",
-                  retentionPolicyCode: "AUDIT_STANDARD",
-                  retentionPolicyVersion: 1,
-                }),
-              },
-              references: {
-                generate: () => options.references.next(),
-                hashIntent: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
-                equals: (left, right) => left === right,
-              },
-              // A stock account opened in the item's unit fixes that unit even before the first
-              // movement marks the item, so administration locks it the same way.
-              repository: {
-                ...store,
-                load: async (reference) => {
-                  const item = await store.load(reference);
-                  return item === null ||
-                    item.hasMovementHistory ||
-                    !(await store.stockAccountsOpened(reference))
-                    ? item
-                    : Object.freeze({ ...item, hasMovementHistory: true });
+              {
+                authorization: {
+                  authorize: async (request) =>
+                    (await may(request.permission)) ? { authorized: true } : null,
+                },
+                audit: {
+                  create: async ({ command, after }) => ({
+                    auditId: options.references.next(),
+                    brandId: command.brandReference,
+                    actor: { type: "User", reference: command.actorReference },
+                    actionCode: "INVENTORY_ITEM_" + command.action.toUpperCase(),
+                    targetType: "InventoryItem",
+                    targetId: after.itemReference,
+                    reasonCode:
+                      typeof command.payload.reasonCode === "string"
+                        ? command.payload.reasonCode
+                        : "INVENTORY_ITEM_MAINTENANCE",
+                    correlationId: command.operationReference,
+                    occurredAt: command.occurredAt,
+                    sourceChannel: "MERCHANT_WEB",
+                    dataClassification: "Internal",
+                    retentionPolicyCode: "AUDIT_STANDARD",
+                    retentionPolicyVersion: 1,
+                  }),
+                },
+                references: {
+                  generate: () => options.references.next(),
+                  hashIntent: (value) =>
+                    "sha256:" + createHash("sha256").update(value).digest("hex"),
+                  equals: (left, right) => left === right,
+                },
+                // A stock account opened in the item's unit fixes that unit even before the first
+                // movement marks the item, so administration locks it the same way.
+                repository: {
+                  ...store,
+                  load: async (reference) => {
+                    const item = await store.load(reference);
+                    return item === null ||
+                      item.hasMovementHistory ||
+                      !(await store.stockAccountsOpened(reference))
+                      ? item
+                      : Object.freeze({ ...item, hasMovementHistory: true });
+                  },
                 },
               },
-            },
-          );
-          return { item: itemView(record.item), outcome: record.outcome };
-        } catch (error) {
-          return mapError(error);
-        }
-      }),
+            );
+            return { item: itemView(record.item), outcome: record.outcome };
+          } catch (error) {
+            return mapError(error);
+          }
+        }),
+      ),
     );
   };
   return { query, command };

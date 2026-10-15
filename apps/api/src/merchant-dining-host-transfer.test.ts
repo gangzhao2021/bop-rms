@@ -145,3 +145,39 @@ it("preserves original retry receipt time without exposing private context", asy
   expect(result).not.toHaveProperty("actorReference");
   expect(f.references).not.toHaveBeenCalled();
 });
+it("WP-2423: resolves the caller in full twice; the owner callback takes the run's guard", async () => {
+  const f = setup();
+  const during: boolean[] = [];
+  const candidate = (c: Record<string, unknown>) => ({ ...c });
+  m.transfer.mockImplementation(async (c) => {
+    const owner = m.options as {
+      authorize(tx: unknown, candidate: unknown): Promise<boolean>;
+    };
+    during.push(await owner.authorize(f.tx, candidate(c)));
+    during.push(await owner.authorize(f.tx, candidate(c)));
+    during.push(await owner.authorize({}, candidate(c)));
+    during.push(await owner.authorize(f.tx, { ...c, storeReference: id(99) }));
+    return {
+      status: "Applied",
+      record: {
+        command: c,
+        previousSession: { hostParticipantReference: id(8) },
+        session: { diningSessionReference: id(7), hostParticipantReference: id(10), version: 4 },
+      },
+    };
+  });
+  await f.transfer(f.input);
+  expect(during).toEqual([true, true, false, false]);
+  expect(m.resolve).toHaveBeenCalledOnce();
+  expect(f.allowed).toHaveBeenCalledTimes(2);
+  const owner = m.options as { authorize(tx: unknown, candidate: unknown): Promise<boolean> };
+  expect(await owner.authorize(f.tx, m.transfer.mock.calls[0]?.[0])).toBe(false);
+});
+it("WP-2423: a permission withdrawn during the transfer is refused inside the transaction", async () => {
+  const f = setup();
+  f.allowed.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+  await expect(f.transfer(f.input)).rejects.toThrow("DINING_HOST_TRANSFER_UNAVAILABLE");
+  expect(m.transfer).toHaveBeenCalledOnce();
+  expect(f.allowed).toHaveBeenCalledTimes(2);
+  expect(f.rolledBack()).toBe(true);
+});

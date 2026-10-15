@@ -82,3 +82,45 @@ it("WP-2423: refuses browser authority, another Store and a withdrawn permission
   });
   expect(doubles.close).not.toHaveBeenCalled();
 });
+it("WP-2423: resolves the caller in full once at the start and once before the commit", async () => {
+  const f = setup();
+  const access = {
+    actorReference: id(2),
+    orderReference: id(5),
+    permission: "fulfillment.pickup.complete",
+  };
+  const during: boolean[] = [];
+  doubles.close.mockImplementation(async (request: { transaction: object }) => {
+    const store = doubles.store.mock.calls[0]?.[0];
+    during.push(await store.authorize(request.transaction, access));
+    // Not this run's transaction, or another order: refused without a query.
+    during.push(await store.authorize({ query: vi.fn() }, access));
+    during.push(await store.authorize(request.transaction, { ...access, orderReference: id(99) }));
+    return { status: "Applied", record: { fulfillmentReference: id(6), closedAt: "x" } };
+  });
+  await f.operation(f.input);
+  expect(during).toEqual([true, false, false]);
+  expect(doubles.scope).toHaveBeenCalledOnce();
+  expect(f.allowed).toHaveBeenCalledTimes(2);
+  // The guard ends with the run.
+  const transaction = doubles.close.mock.calls[0]?.[0].transaction;
+  expect(await doubles.store.mock.calls[0]?.[0].authorize(transaction, access)).toBe(false);
+});
+it("WP-2423: a permission withdrawn or Session ended during the close refuses it before commit", async () => {
+  const f = setup();
+  f.allowed.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+  let rolledBack: unknown = null;
+  f.run.mockImplementation(async (work: (tx: object) => Promise<unknown>) =>
+    work({ query: vi.fn() }).catch((error: unknown) => {
+      rolledBack = error;
+      throw error;
+    }),
+  );
+  await expect(f.operation(f.input)).rejects.toMatchObject({
+    code: "PICKUP_HANDOFF_PERMISSION_DENIED",
+  });
+  // The refusal is thrown inside the transaction callback, so nothing it wrote commits.
+  expect(rolledBack).toMatchObject({ code: "PICKUP_HANDOFF_PERMISSION_DENIED" });
+  expect(doubles.close).toHaveBeenCalledOnce();
+  expect(f.allowed).toHaveBeenCalledTimes(2);
+});

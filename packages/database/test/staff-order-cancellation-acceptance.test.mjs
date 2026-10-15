@@ -1205,9 +1205,12 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       let before = await counts();
       merchant.allowed = () => false;
       await assert.rejects(cancel(pickup, 0), { code: "ORDER_CANCELLATION_PERMISSION_DENIED" });
+      // WP-2423: allowed when resolved at the start, withdrawn before the commit: the whole
+      // cancellation (kitchen, Ordering, stock) rolls back.
       let calls = 0;
-      merchant.allowed = () => ++calls <= 2;
-      await assert.rejects(cancel(pickup, 0));
+      merchant.allowed = () => ++calls <= 1;
+      await assert.rejects(cancel(pickup, 0), { code: "ORDER_CANCELLATION_PERMISSION_DENIED" });
+      assert.equal(calls, 2);
       merchant.allowed = () => true;
       merchant.store = otherStore;
       await assert.rejects(cancel(pickup, 0), { code: "ORDER_CANCELLATION_NOT_FOUND" });
@@ -1222,7 +1225,18 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
 
       // ── Scenario 1: paid, accepted, Confirmed pickup Order with two queued kitchen items.
       const operationReference = fresh();
+      // WP-2423 resolution budget: the staff member is resolved in full (the double's `allowed`,
+      // ~30 statements on the real scope) once at the start and once before the commit; before,
+      // every Ordering, Kitchen, Payment and Inventory owner check resolved them again.
+      const resolutions = () => {
+        let n = 0;
+        merchant.allowed = () => (++n, true);
+        return () => n;
+      };
+      const cancelResolutions = resolutions();
       const cancelled = await cancel(pickup, 0, { operationReference });
+      assert.equal(cancelResolutions(), 2);
+      merchant.allowed = () => true;
       assert.equal(cancelled.status, "Cancelled");
       assert.equal(cancelled.refundStatus, "Pending");
       assert.equal(cancelled.orderReference, pickup.order);
@@ -1723,7 +1737,11 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
         ),
         { code: "CARD_MACHINE_REFUND_NOT_FOUND" },
       );
+      let refundResolutions = 0;
+      merchant.allowed = () => (++refundResolutions, true);
       const machineRefund = await refundOnMachine(refundInput());
+      assert.equal(refundResolutions, 2);
+      merchant.allowed = () => true;
       assert.equal(machineRefund.status, "Recorded");
       assert.equal(machineRefund.amountMinor, cardTotal);
       assert.equal((await refundOnMachine(refundInput())).status, "AlreadyRecorded");

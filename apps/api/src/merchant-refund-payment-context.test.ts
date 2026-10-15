@@ -11,6 +11,7 @@ const d = vi.hoisted(() => ({
   binding: vi.fn(),
   terminal: vi.fn(),
   position: vi.fn(),
+  bindingOptions: vi.fn(),
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => d.resolve }));
 vi.mock("./merchant-workforce-authority-source.js", () => ({
@@ -20,7 +21,10 @@ vi.mock("@rms/payment", async (original) => ({
   ...(await original<object>()),
   // WP-2423 item 4: no card-machine payment unless a test says so.
   createPostgresCardMachinePaymentStore: () => d.cards(),
-  createPostgresPaymentIntentBindingSource: () => d.binding,
+  createPostgresPaymentIntentBindingSource: (options: unknown) => {
+    d.bindingOptions(options);
+    return d.binding;
+  },
   createPostgresPaymentTerminalStore: () => ({ read: d.terminal }),
   createPostgresOrderPaymentRefundPosition: () => d.position,
 }));
@@ -153,10 +157,48 @@ it("rejects refund totals exceeding captured amount", async () => {
   d.position.mockResolvedValue({ confirmedMinor: 2000n, pendingMinor: 1000n });
   await expect(f.operation(f.input)).rejects.toThrow();
 });
-it("rechecks selected scope before returning financial information", async () => {
+it("WP-2423: resolves the caller in full exactly twice (start and before the reply)", async () => {
   const f = setup();
-  f.allowed.mockResolvedValueOnce(true).mockResolvedValueOnce(true).mockResolvedValue(false);
-  await expect(f.operation(f.input)).rejects.toThrow();
+  await f.operation(f.input);
+  expect(d.resolve).toHaveBeenCalledOnce();
+  expect(f.allowed).toHaveBeenCalledTimes(2);
+  // Who may read refunds is decided at the start and re-decided before the reply.
+  expect(d.workforce).toHaveBeenCalledTimes(2);
+});
+it("WP-2423: a permission withdrawn or Session ended during the read refuses the reply", async () => {
+  const f = setup();
+  f.allowed.mockResolvedValueOnce(true).mockResolvedValue(false);
+  await expect(f.operation(f.input)).rejects.toThrow("ORDINARY_REFUND_REQUEST_DENIED");
+  expect(d.position).toHaveBeenCalledOnce();
+  expect(f.allowed).toHaveBeenCalledTimes(2);
+});
+it("WP-2423: refund read access withdrawn during the read refuses the reply", async () => {
+  const f = setup();
+  d.workforce
+    .mockResolvedValueOnce({ decision: { effect: "Allow" }, activeRoleCodes: ["manager"] })
+    .mockResolvedValue({ decision: { effect: "Deny" }, activeRoleCodes: [] });
+  await expect(f.operation(f.input)).rejects.toThrow("ORDINARY_REFUND_REQUEST_DENIED");
+});
+it("WP-2423: owner reads take the run's guard (true during the run, false after)", async () => {
+  const f = setup();
+  const during: boolean[] = [];
+  d.binding.mockImplementation(async (tx: unknown) => {
+    const { authorize } = d.bindingOptions.mock.calls[0]?.[0] as {
+      authorize(tx: unknown): Promise<boolean>;
+    };
+    during.push(await authorize(tx));
+    // Not this run's transaction: refused without a query.
+    during.push(await authorize({ query: vi.fn() }));
+    return binding;
+  });
+  await f.operation(f.input);
+  const { authorize } = d.bindingOptions.mock.calls[0]?.[0] as {
+    authorize(tx: unknown): Promise<boolean>;
+  };
+  const tx = d.binding.mock.calls[0]?.[0];
+  expect(during).toEqual([true, false]);
+  expect(await authorize(tx)).toBe(false);
+  expect(f.allowed).toHaveBeenCalledTimes(2);
 });
 it("rejects client supplied scope and clock", async () => {
   const f = setup();

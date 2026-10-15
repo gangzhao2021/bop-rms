@@ -7,6 +7,7 @@ import {
   type UnmatchedCaptureRefundState,
 } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 
@@ -80,29 +81,49 @@ export function createMerchantUnmatchedCaptureRefund(options: {
     ) => Promise<T>,
   ) => {
     const session = await options.authentication.authorize(input);
-    return options.persistence.transactions.run(async (transaction) => {
-      const scope = await resolveScope(
-        transaction,
-        input.sessionCookie,
-        permission,
-        session.sessionReference,
-      );
-      if (!(await scope.allowed()))
-        throw new UnmatchedCaptureRefundError("UNMATCHED_REFUND_PERMISSION_DENIED");
-      const tx = transaction as unknown as ConsumerTransaction;
-      const actorReference = String(scope.actorReference);
-      const store = createPostgresUnmatchedCaptureRefundStore({
-        brandReference: String(scope.context.brand.brandReference),
-        storeReference: String(scope.store.storeReference),
-        authorize: async (t, step, actor) =>
-          t === tx &&
-          // Every step reads the current state first; reading is part of each step's authority.
-          (step === access || step === "Read") &&
-          (actor === null || actor === actorReference) &&
-          (await scope.allowed()),
-      });
-      return work(store, tx, actorReference);
-    });
+    const denied = (): never => {
+      throw new UnmatchedCaptureRefundError("UNMATCHED_REFUND_PERMISSION_DENIED");
+    };
+    // WP-2423: one authorized run per step. The caller and the step's permission are resolved in
+    // full once at the start and once more before the commit (inside this transaction, so a
+    // withdrawn permission or ended Session never commits); the owner store's checks in between,
+    // taken while the exception is locked, use the run's no-query guard. The Provider call
+    // between the approve and record runs is unchanged and outside both transactions.
+    return options.persistence.transactions.run((transaction) =>
+      withMerchantTransactionAuthorization(
+        {
+          transaction,
+          resolve: async () => {
+            const resolved = await resolveScope(
+              transaction,
+              input.sessionCookie,
+              permission,
+              session.sessionReference,
+            );
+            if ((await resolved.allowed()) !== true) return denied();
+            return resolved;
+          },
+          recheck: async (scope) => (await scope.allowed()) === true,
+          denied,
+        },
+        async (authority) => {
+          const scope = authority.scope;
+          const tx = transaction as unknown as ConsumerTransaction;
+          const actorReference = String(scope.actorReference);
+          const store = createPostgresUnmatchedCaptureRefundStore({
+            brandReference: String(scope.context.brand.brandReference),
+            storeReference: String(scope.store.storeReference),
+            authorize: async (t, step, actor) =>
+              t === tx &&
+              // Every step reads the current state first; reading is part of each step's authority.
+              (step === access || step === "Read") &&
+              (actor === null || actor === actorReference) &&
+              (await authority.guard(t)),
+          });
+          return work(store, tx, actorReference);
+        },
+      ),
+    );
   };
   const exceptionOf = (command: unknown, keys: readonly string[]) => {
     let raw: Readonly<Record<string, unknown>>;

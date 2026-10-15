@@ -12,6 +12,7 @@ import {
 } from "@rms/ordering";
 import type { Money } from "@rms/pricing";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { readCounterPaymentPreparation } from "./counter-payment-preparation.js";
@@ -343,48 +344,67 @@ export function createMerchantCounterOrder(options: {
           }),
         ),
     );
+    const denied = () => fail("COUNTER_ORDER_PERMISSION_DENIED");
+    /**
+     * WP-2423: one authorized run per counter transaction. The caller and `counter order`
+     * permission are resolved in full once at its start and once more before it commits (inside
+     * the transaction, so a withdrawn permission or ended Session never commits); the Ordering
+     * owner reads and writes in between take the run's no-query guard.
+     */
     const inScope = <T>(
       work: (
         tx: ConsumerTransaction,
         scope: CounterStaffScope,
-        allowed: () => Promise<boolean>,
+        guard: () => Promise<boolean>,
       ) => Promise<T>,
     ) =>
-      options.persistence.transactions.run(async (transaction) => {
-        const resolved = await resolveScope(
-          transaction,
-          input.sessionCookie,
-          counterOrderPermission,
-          session.sessionReference,
-        ).catch(() => fail("COUNTER_ORDER_PERMISSION_DENIED"));
-        const allowed = async () => (await resolved.allowed()) === true;
-        if (!(await allowed())) return fail("COUNTER_ORDER_PERMISSION_DENIED");
-        return work(
-          transaction as unknown as ConsumerTransaction,
+      options.persistence.transactions.run((transaction) =>
+        withMerchantTransactionAuthorization(
           {
-            selected: {
-              tenantReference: String(resolved.selected.tenantReference),
-              brandReference: String(resolved.context.brand.brandReference),
-              storeReference: String(resolved.store.storeReference),
+            transaction,
+            resolve: async () => {
+              const resolved = await resolveScope(
+                transaction,
+                input.sessionCookie,
+                counterOrderPermission,
+                session.sessionReference,
+              ).catch(denied);
+              if ((await resolved.allowed()) !== true) return denied();
+              return resolved;
             },
-            actorReference: String(resolved.actorReference),
+            recheck: async (resolved) => (await resolved.allowed()) === true,
+            denied,
           },
-          allowed,
-        );
-      });
-    const entries = (scope: CounterStaffScope, allowed: () => Promise<boolean>) =>
+          (authority) => {
+            const resolved = authority.scope;
+            return work(
+              transaction as unknown as ConsumerTransaction,
+              {
+                selected: {
+                  tenantReference: String(resolved.selected.tenantReference),
+                  brandReference: String(resolved.context.brand.brandReference),
+                  storeReference: String(resolved.store.storeReference),
+                },
+                actorReference: String(resolved.actorReference),
+              },
+              () => authority.guard(),
+            );
+          },
+        ),
+      );
+    const entries = (scope: CounterStaffScope, guard: () => Promise<boolean>) =>
       createPostgresCounterOrderEntryStore({
         brandReference: scope.selected.brandReference,
         storeReference: scope.selected.storeReference,
-        authorize: allowed,
+        authorize: guard,
       });
     /** The finished order of a recorded counter entry, from owner records only. */
     const finished = async (
       status: CounterOrderResult["status"],
       entry: CounterOrderEntryRecord,
     ): Promise<CounterOrderResult> =>
-      inScope(async (tx, scope, allowed) => {
-        const order = await entries(scope, allowed).loadOrder(tx, String(entry.cartReference));
+      inScope(async (tx, scope, guard) => {
+        const order = await entries(scope, guard).loadOrder(tx, String(entry.cartReference));
         if (order === null) return fail("COUNTER_ORDER_NOT_FINISHED");
         const current = await readCounterPaymentPreparation(
           tx,
@@ -392,7 +412,7 @@ export function createMerchantCounterOrder(options: {
             scope: scope.selected,
             now,
             nextPreparationReference: options.nextReference,
-            authorize: allowed,
+            authorize: guard,
           },
           {
             submissionReference: String(order.submissionReference),
@@ -437,8 +457,8 @@ export function createMerchantCounterOrder(options: {
     };
     try {
       // A retry of the same staff command returns the order it created, never a second one.
-      const prior = await inScope(async (tx, scope, allowed) => {
-        const found = await entries(scope, allowed).loadByOperation(tx, command.operationReference);
+      const prior = await inScope(async (tx, scope, guard) => {
+        const found = await entries(scope, guard).loadByOperation(tx, command.operationReference);
         if (
           found !== null &&
           (found.intentHash !== intentHash || String(found.actorReference) !== scope.actorReference)
@@ -458,8 +478,8 @@ export function createMerchantCounterOrder(options: {
       });
       const credentials = bound.credentials;
       const tipSelectionReference = String(parseOrderingReference(options.nextReference()));
-      const entry = await inScope(async (tx, scope, allowed) => {
-        const created = await entries(scope, allowed).record(tx, {
+      const entry = await inScope(async (tx, scope, guard) => {
+        const created = await entries(scope, guard).record(tx, {
           brandReference: parseOrderingReference(scope.selected.brandReference),
           storeReference: parseOrderingReference(scope.selected.storeReference),
           operationReference: parseOrderingReference(command.operationReference),

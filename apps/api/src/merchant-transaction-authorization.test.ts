@@ -81,6 +81,36 @@ describe("withMerchantTransactionAuthorization", () => {
     expect(await escaped(tx)).toBe(false);
   });
 
+  it("reads the Store scope's own refusal in the final re-check as a denial, other failures as failures", async () => {
+    const ended = () => Promise.reject(new Error("STORE_SERVICE_PERMISSION_DENIED"));
+    await expect(
+      withMerchantTransactionAuthorization(
+        { transaction: {}, resolve: async () => ({}), recheck: ended, denied },
+        async () => "reply",
+      ),
+    ).rejects.toThrow("SYNTHETIC_DENIED");
+    await expect(
+      withMerchantTransactionAuthorization(
+        { transaction: {}, resolve: async () => ({}), recheck: async () => true, denied },
+        async (authority) => {
+          authority.recheckBeforeReply(ended);
+          return "reply";
+        },
+      ),
+    ).rejects.toThrow("SYNTHETIC_DENIED");
+    await expect(
+      withMerchantTransactionAuthorization(
+        {
+          transaction: {},
+          resolve: async () => ({}),
+          recheck: () => Promise.reject(new Error("SYNTHETIC_LOCK_TIMEOUT")),
+          denied,
+        },
+        async () => "reply",
+      ),
+    ).rejects.toThrow("SYNTHETIC_LOCK_TIMEOUT");
+  });
+
   it("does not return the reply when the work fails, and runs no re-check", async () => {
     const recheck = vi.fn(async () => true);
     await expect(
@@ -98,46 +128,21 @@ describe("withMerchantTransactionAuthorization", () => {
 /**
  * Static guard (WP-2423): an owner-read authorization callback (`authorize`, `authorizeQueue`,
  * `authorizeKitchen`, `authorizeDining`, `authorizeAndFence` …) must not re-resolve the caller's
- * merchant scope — directly (`.allowed()`, `.authorizeAction(`, `resolve(`, `resolveScope(`) or
- * through a local helper that does. Merchant reads use `withMerchantTransactionAuthorization`.
+ * merchant scope — directly (`.allowed()`, `.authorizeAction(s)(`, `resolve(`, `resolveScope(`, a
+ * resolved scope's `allowed` passed on as the callback, or `allowed` destructured from it) or
+ * through a local helper that does. Merchant reads and commands use
+ * `withMerchantTransactionAuthorization`.
  *
  * Modules that still re-resolve inside owner callbacks are listed below with their current
- * count (2026-10-14); the list may only shrink. They are commands (writes, out of this change's
- * scope) and a few merchant screens outside the polled reads migrated first (inventory items,
- * stock counts, Store configuration, refund payment context, role administration, table QR codes,
- * receipt profile). A new read must use withMerchantTransactionAuthorization instead.
+ * count; the list may only shrink. Every merchant command and read migrated on 2026-10-15
+ * (commands resolve the caller once at the start and once before the commit, inside the
+ * transaction). The one left is the Store setup save, whose authoring reads renew a time-bounded
+ * authorization lease (`authorizationValidUntil`) on each read by design; it is a rare
+ * configuration write, not a busy-Store command. A new command or read must use
+ * withMerchantTransactionAuthorization instead.
  */
 const knownOccurrences: Readonly<Record<string, number>> = {
-  "merchant-card-machine-payment.ts": 4,
-  "merchant-card-machine-refund.ts": 1,
-  "merchant-counter-order.ts": 2,
-  "merchant-dining-closing-command.ts": 2,
-  "merchant-dining-host-selection.ts": 1,
-  "merchant-dining-host-transfer.ts": 1,
-  "merchant-dining-join-regenerate.ts": 1,
-  "merchant-dining-order-close-command.ts": 5,
-  "merchant-dining-session-start.ts": 1,
-  "merchant-dining-table-qr.ts": 1,
-  "merchant-inventory-items.ts": 1,
-  "merchant-kitchen-command.ts": 2,
-  "merchant-mfa-step-up.ts": 3,
-  "merchant-order-acceptance-hold-refund.ts": 1,
-  "merchant-order-item-staff-cancellation.ts": 11,
-  "merchant-order-staff-cancellation.ts": 3,
-  "merchant-ordinary-refund-decline.ts": 1,
-  "merchant-pickup-handoff.ts": 1,
-  "merchant-pickup-not-collected.ts": 1,
-  "merchant-pickup-proof.ts": 1,
-  "merchant-reconciliation-follow-up-transactions.ts": 1,
-  "merchant-refund-payment-context.ts": 3,
-  "merchant-refund-transactions.ts": 1,
-  "merchant-role-administration.ts": 1,
-  "merchant-sole-operator-setting.ts": 2,
-  "merchant-stock-counts.ts": 1,
-  "merchant-store-configuration-ordinary.ts": 1,
-  "merchant-store-configuration-reference-sources.ts": 2,
-  "merchant-store-configuration.ts": 4,
-  "merchant-store-receipt-profile.ts": 1,
+  "merchant-store-setup.ts": 1,
 };
 
 /** The source text of the expression that starts at `start`, up to its end in the enclosing list. */
@@ -168,8 +173,11 @@ export function ownerReadFullResolutions(source: string): number {
   ].map((match) => match[1] as string);
   const direct = new RegExp(
     [
-      "\\.allowed\\(\\)",
-      "\\.authorizeAction\\(",
+      // A call, or the resolver passed on as an owner callback (`authorize: current.allowed`).
+      "\\.allowed\\b",
+      "\\.authorizeActions?\\(",
+      // `allowed` destructured from a resolved scope (`const { allowed } = await resolve(...)`).
+      ...(/\{[^}]*\ballowed\b[^}]*\}\s*=\s*await\s+\w+\(/u.test(source) ? ["\\ballowed\\("] : []),
       ...resolvers.map((name) => "\\b" + escape(name) + "\\("),
     ].join("|"),
     "u",
@@ -219,6 +227,20 @@ describe("owner-read authorization static guard", () => {
         "const resolve = createMerchantStoreScope(source);\n" +
           "const again = async (tx) => resolve(tx, cookie, 'x');\n" +
           "const r = read({ authorize: async (tx) => (await again(tx)) !== null });",
+      ),
+    ).toBe(1);
+    // The resolver passed on as the callback, and `allowed` destructured from a resolved scope.
+    expect(
+      ownerReadFullResolutions(
+        "const resolve = createMerchantStoreScope(source);\n" +
+          "const r = read({ context, authorize: current.allowed });",
+      ),
+    ).toBe(1);
+    expect(
+      ownerReadFullResolutions(
+        "const resolve = createMerchantStoreScope(source);\n" +
+          "const { store, allowed } = await resolve(tx, cookie, 'x');\n" +
+          "const r = read({ authorize: async () => (await allowed()) === true });",
       ),
     ).toBe(1);
     expect(

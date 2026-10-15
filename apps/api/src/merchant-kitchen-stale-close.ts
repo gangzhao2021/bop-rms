@@ -10,6 +10,7 @@ import { listStoreOrderBusinessDates } from "@rms/ordering";
 import { createMerchantStoreBusinessDay } from "./merchant-store-business-day.js";
 import { createMerchantRoundBusinessDates } from "./merchant-round-business-date.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 
@@ -65,65 +66,81 @@ export function createMerchantKitchenStaleClose(options: {
     } catch {
       throw new KitchenStaleTicketError("KITCHEN_STALE_TICKET_INPUT_INVALID");
     }
-    return options.persistence.transactions.run(async (transaction) => {
-      const scope = await resolveScope(
-        transaction,
-        input.sessionCookie,
-        kitchenStaleTicketClosePermission,
-        session.sessionReference,
-      );
-      if (!(await scope.allowed())) return denied();
-      const selected = {
-        brandReference: scope.context.brand.brandReference,
-        storeReference: scope.store.storeReference,
-      };
-      const tx = boundTransaction(transaction);
-      const occurredAt = options.persistence.now();
-      const result = await createPostgresKitchenStaleTicketStore({
-        ...selected,
-        nextReference: options.nextReference,
-      }).close(tx, {
-        command,
-        actorReference: scope.actorReference,
-        occurredAt,
-        businessDays: async (orderReference, orderBatchReference) => {
-          const orders = await listStoreOrderBusinessDates(tx, selected, [orderReference]);
-          // WP-2423 D4: the ticket's round's own business day; a round added today to a table
-          // opened on an earlier day is today's work and is not closed as an earlier day's.
-          const rounds = await createMerchantRoundBusinessDates({
-            persistence: options.persistence,
-            scope: {
-              tenantReference: String(scope.selected.tenantReference),
-              brandReference: String(selected.brandReference),
-              storeReference: String(selected.storeReference),
-            },
-            timeZone: scope.store.timeZone,
-            authorize: scope.allowed,
-          })(tx, [orderBatchReference]);
-          const today = await createMerchantStoreBusinessDay({
-            publication: options.persistence.publication,
-            tenantReference: scope.selected.tenantReference,
-            brandReference: selected.brandReference,
-            storeReference: selected.storeReference,
-            timeZone: scope.store.timeZone,
-            authorize: scope.allowed,
-          })(transaction, occurredAt);
-          return {
-            orderBusinessDate:
-              rounds.get(orderBatchReference) ?? orders.get(orderReference) ?? null,
-            currentBusinessDate: String(today.businessDate),
-          };
+    // WP-2423: one authorized run. The staff member is resolved in full once at the start and
+    // once more before the commit (inside this transaction); the business-day reads in between,
+    // made while the ticket is locked, take the run's no-query guard.
+    return options.persistence.transactions.run((transaction) =>
+      withMerchantTransactionAuthorization(
+        {
+          transaction,
+          resolve: async () => {
+            const current = await resolveScope(
+              transaction,
+              input.sessionCookie,
+              kitchenStaleTicketClosePermission,
+              session.sessionReference,
+            );
+            if (!(await current.allowed())) return denied();
+            return current;
+          },
+          recheck: async (current) => (await current.allowed()) === true,
+          denied,
         },
-      });
-      if (!(await scope.allowed())) return denied();
-      return Object.freeze({
-        status: result.status,
-        ticketReference: result.closure.ticketReference,
-        reasonCode: result.closure.reasonCode,
-        foodMade: result.closure.foodMade,
-        orderBusinessDate: result.closure.orderBusinessDate,
-        closedAt: result.closure.closedAt,
-      });
-    });
+        async (authority) => {
+          const scope = authority.scope;
+          const guard = () => authority.guard();
+          const selected = {
+            brandReference: scope.context.brand.brandReference,
+            storeReference: scope.store.storeReference,
+          };
+          const tx = boundTransaction(transaction);
+          const occurredAt = options.persistence.now();
+          const result = await createPostgresKitchenStaleTicketStore({
+            ...selected,
+            nextReference: options.nextReference,
+          }).close(tx, {
+            command,
+            actorReference: scope.actorReference,
+            occurredAt,
+            businessDays: async (orderReference, orderBatchReference) => {
+              const orders = await listStoreOrderBusinessDates(tx, selected, [orderReference]);
+              // WP-2423 D4: the ticket's round's own business day; a round added today to a table
+              // opened on an earlier day is today's work and is not closed as an earlier day's.
+              const rounds = await createMerchantRoundBusinessDates({
+                persistence: options.persistence,
+                scope: {
+                  tenantReference: String(scope.selected.tenantReference),
+                  brandReference: String(selected.brandReference),
+                  storeReference: String(selected.storeReference),
+                },
+                timeZone: scope.store.timeZone,
+                authorize: guard,
+              })(tx, [orderBatchReference]);
+              const today = await createMerchantStoreBusinessDay({
+                publication: options.persistence.publication,
+                tenantReference: scope.selected.tenantReference,
+                brandReference: selected.brandReference,
+                storeReference: selected.storeReference,
+                timeZone: scope.store.timeZone,
+                authorize: guard,
+              })(transaction, occurredAt);
+              return {
+                orderBusinessDate:
+                  rounds.get(orderBatchReference) ?? orders.get(orderReference) ?? null,
+                currentBusinessDate: String(today.businessDate),
+              };
+            },
+          });
+          return Object.freeze({
+            status: result.status,
+            ticketReference: result.closure.ticketReference,
+            reasonCode: result.closure.reasonCode,
+            foodMade: result.closure.foodMade,
+            orderBusinessDate: result.closure.orderBusinessDate,
+            closedAt: result.closure.closedAt,
+          });
+        },
+      ),
+    );
   };
 }

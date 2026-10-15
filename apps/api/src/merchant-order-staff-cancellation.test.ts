@@ -119,6 +119,15 @@ beforeEach(() => vi.resetAllMocks());
 
 it("WP-2423 Q6: cancels kitchen, Ordering and stock in one transaction with server-owned staff and time", async () => {
   const f = setup();
+  const ownerAnswers: boolean[] = [];
+  d.prepare.mockImplementation(async () => {
+    const ownerAuthorize = d.ordering.mock.calls[0]?.[0].authorize;
+    const identity = { orderReference: id(5), orderBatchReference: id(6), actorReference: id(2) };
+    ownerAnswers.push(await ownerAuthorize(f.tx, identity));
+    ownerAnswers.push(await ownerAuthorize(f.tx, { ...identity, orderBatchReference: id(99) }));
+    ownerAnswers.push(await ownerAuthorize({}, identity));
+    return { status: "Ready", plan: { synthetic: "plan" } };
+  });
   expect(await f.operation(f.input)).toEqual({
     status: "Cancelled",
     orderReference: id(5),
@@ -178,14 +187,25 @@ it("WP-2423 Q6: cancels kitchen, Ordering and stock in one transaction with serv
     },
     releasedAt: at,
   });
-  // Each owner authorizes only this order, batch and staff member while the permission holds.
-  const ownerAuthorize = d.ordering.mock.calls[0]?.[0].authorize;
+  // Each owner authorizes only this order, batch and staff member, and only during the run.
+  expect(ownerAnswers).toEqual([true, false, false]);
   const identity = { orderReference: id(5), orderBatchReference: id(6), actorReference: id(2) };
-  expect(await ownerAuthorize(f.tx, identity)).toBe(true);
-  expect(await ownerAuthorize(f.tx, { ...identity, orderBatchReference: id(99) })).toBe(false);
-  expect(await ownerAuthorize({}, identity)).toBe(false);
-  f.allowed.mockResolvedValue(false);
   expect(await d.kitchen.mock.calls[0]?.[0].authorize(f.tx, identity)).toBe(false);
+  // WP-2423: the caller is resolved in full exactly twice (start, and before the commit).
+  expect(d.scope).toHaveBeenCalledTimes(1);
+  expect(f.allowed).toHaveBeenCalledTimes(2);
+});
+
+it("WP-2423: a permission withdrawn or Session ended during the cancellation cancels nothing", async () => {
+  const f = setup();
+  f.allowed.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+  await expect(f.operation(f.input)).rejects.toMatchObject({
+    code: "ORDER_CANCELLATION_PERMISSION_DENIED",
+  });
+  // The refusal is raised inside the transaction callback after the writes, so they roll back.
+  expect(d.commit).toHaveBeenCalledTimes(1);
+  expect(f.run).toHaveBeenCalledTimes(1);
+  expect(f.allowed).toHaveBeenCalledTimes(2);
 });
 
 it("WP-2423 Q6: replays the same staff command without writing and reports the refund", async () => {

@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   review: vi.fn(),
   preparation: vi.fn(),
   administration: vi.fn(),
+  authoring: vi.fn(),
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => mocks.resolve }));
 vi.mock("@rms/store", async (original) => ({
@@ -17,6 +18,7 @@ vi.mock("@rms/store", async (original) => ({
   createPersistentStoreConfigurationReview: mocks.review,
   createPersistentStoreApprovalPreparation: mocks.preparation,
   createPersistentStoreConfigurationAdministration: mocks.administration,
+  createPostgresStoreConfigurationAuthoringSource: mocks.authoring,
 }));
 const id = (n: number) => `018f9f40-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const at = "2026-08-15T14:00:00.000Z";
@@ -87,6 +89,20 @@ function setup() {
     actorReference: id(11),
     allowed: vi.fn(async () => true),
     authorizeAction: vi.fn(async () => decision),
+    authorizeActions: vi.fn(
+      async (actions: readonly string[]) =>
+        new Map<
+          string,
+          Readonly<{ effect: "Allow" | "Deny"; action: string; scopeKind: string }> | null
+        >(
+          actions.map((action) => [
+            action,
+            action === "publishing.review.approve"
+              ? decision
+              : Object.freeze({ effect: "Allow" as "Allow" | "Deny", action, scopeKind: "Store" }),
+          ]),
+        ),
+    ),
   };
   mocks.resolve.mockResolvedValue(scope);
   const prepare = vi.fn(async () => ({
@@ -179,40 +195,83 @@ it("routes approval through atomic workflow using server context and current Pub
   expect(await f.service(f.request)).toEqual({ status: "Applied", resultingVersion: 1 });
   expect(f.inputs[0]?.publishingApproval.tenantContext).toBe(f.scope.context);
   expect(f.inputs[0]?.storeCommand).toMatchObject({ actorReference: id(11), occurredAt: at });
-  expect(f.scope.authorizeAction).toHaveBeenCalledWith("publishing.review.approve");
+  // WP-2423: the command's permission and every approval Publishing decision come from one
+  // permission packet at the start; the used ones are re-checked in full before the commit.
+  expect(mocks.resolve).toHaveBeenCalledOnce();
+  expect(f.scope.authorizeActions).toHaveBeenCalledTimes(2);
+  expect(f.scope.authorizeActions.mock.calls[0]?.[0]).toEqual([
+    "store.service.approve",
+    "publishing.draft.create",
+    "publishing.review.submit",
+    "publishing.review.approve",
+  ]);
+  expect(f.scope.authorizeActions.mock.calls[1]?.[0]).toEqual([
+    "store.service.approve",
+    "publishing.review.approve",
+  ]);
+  expect(f.scope.allowed).not.toHaveBeenCalled();
+  expect(f.scope.authorizeAction).not.toHaveBeenCalled();
   expect(mocks.administration).not.toHaveBeenCalled();
 });
-it("rechecks Store authorization after preparation before Publishing approval", async () => {
+it("WP-2423: owner callbacks take the run's guard: true during the run, false after", async () => {
   const f = setup();
-  const prepare = f.prepare.getMockImplementation();
-  if (!prepare) throw new Error("Synthetic preparation is missing");
+  const during: boolean[] = [];
   f.prepare.mockImplementation(async () => {
-    f.scope.allowed.mockResolvedValue(false);
-    return prepare();
+    const options = mocks.preparation.mock.calls[0]?.[0] as Parameters<
+      typeof createPersistentStoreApprovalPreparation
+    >[0];
+    during.push(await options.authorize({} as never, at));
+    return {
+      kind: "Approve",
+      configuration: configuration("Approved"),
+      snapshot: { actorReference: id(11) },
+      publishingApproval: { tenantContext: { actor: { actorReference: id(99) } } },
+    };
   });
+  await f.service(f.request);
+  const options = mocks.preparation.mock.calls[0]?.[0] as Parameters<
+    typeof createPersistentStoreApprovalPreparation
+  >[0];
+  expect(during).toEqual([true]);
+  expect(await options.authorize({} as never, at)).toBe(false);
+  // The owner configuration's scope answers from the same guard.
+  const review = mocks.review.mock.calls[0]?.[0] as ReviewOptions;
+  await expect(
+    review.publishingAuthorization({ query: async () => undefined } as never).authorize({
+      action: "publishing.review.approve",
+    } as never),
+  ).rejects.toThrow("STORE_CONFIGURATION_PERMISSION_DENIED");
+});
+it("WP-2423: a permission withdrawn or Session ended during approval refuses it before commit", async () => {
+  const f = setup();
+  const start = f.scope.authorizeActions.getMockImplementation();
+  if (!start) throw new Error("Synthetic permission packet is missing");
+  f.scope.authorizeActions
+    .mockImplementationOnce(start)
+    .mockImplementation(
+      async (actions: readonly string[]) => new Map(actions.map((action) => [action, null])),
+    );
   await expect(f.service(f.request)).rejects.toThrow("STORE_CONFIGURATION_PERMISSION_DENIED");
-  expect(f.scope.authorizeAction).not.toHaveBeenCalled();
+  // The refusal is thrown inside the transaction callback after the approval ran.
+  expect(f.inputs).toHaveLength(1);
 });
 it("passes current Publishing denial through without manufacturing an Allow", async () => {
   const f = setup();
-  f.scope.authorizeAction.mockResolvedValue(
-    Object.freeze({
-      effect: "Deny",
-      action: "publishing.review.approve",
-      scopeKind: "Store",
-    }),
-  );
+  const start = f.scope.authorizeActions.getMockImplementation();
+  if (!start) throw new Error("Synthetic permission packet is missing");
+  f.scope.authorizeActions.mockImplementation(async (actions: readonly string[]) => {
+    const decisions = await start(actions);
+    decisions.set(
+      "publishing.review.approve",
+      Object.freeze({ effect: "Deny", action: "publishing.review.approve", scopeKind: "Store" }),
+    );
+    return decisions;
+  });
   await expect(f.service(f.request)).rejects.toThrow("PUBLISHING_PERMISSION_DENIED");
 });
-it("rejects tenant selection drift before preparing approval", async () => {
+it("refuses a caller without the command's permission before preparing approval", async () => {
   const f = setup();
-  mocks.resolve
-    .mockReset()
-    .mockResolvedValueOnce(f.scope)
-    .mockResolvedValueOnce({
-      ...f.scope,
-      selected: { tenantReference: id(99) },
-    });
+  f.scope.authorizeActions.mockResolvedValue(new Map());
   await expect(f.service(f.request)).rejects.toThrow("STORE_CONFIGURATION_PERMISSION_DENIED");
   expect(f.prepare).not.toHaveBeenCalled();
 });
@@ -278,4 +337,45 @@ it("routes V2 approval through owning fresh preparation instead of synthesizing 
   expect(f.prepare).not.toHaveBeenCalled();
   expect(mocks.preparation).not.toHaveBeenCalled();
   expect(mocks.review).not.toHaveBeenCalled();
+});
+
+it("WP-2423: reads with two full resolutions; owner reads take the run's guard", async () => {
+  const f = setup();
+  const during: boolean[] = [];
+  mocks.authoring.mockImplementation((options: { authorize(): Promise<boolean> }) => async () => {
+    during.push(await options.authorize());
+    return null;
+  });
+  const baseline = vi.fn(async () => {
+    const scope = (configure.mock.calls[0] as unknown[] | undefined)?.[1] as {
+      allowed(): Promise<boolean>;
+    };
+    during.push(await scope.allowed());
+    return null;
+  });
+  const configure = vi.fn(() => ({ publishedBaseline: baseline }));
+  const service = createMerchantStoreConfiguration({
+    persistence: {
+      now: () => at,
+      transactions: { run: async (work: (tx: object) => Promise<unknown>) => work({}) },
+    },
+    authentication: { authorize: async () => ({ sessionReference: id(30) }) },
+    actionPermissions: {
+      saveDraft: "store.service.save-draft",
+      validate: "store.service.validate",
+      submit: "store.service.submit",
+      approve: "store.service.approve",
+      publish: "store.service.publish",
+    },
+    configure,
+  } as unknown as Parameters<typeof createMerchantStoreConfiguration>[0]);
+  await expect(service.read("synthetic")).resolves.toMatchObject({ expectedVersion: 0 });
+  expect(during).toEqual([true, true]);
+  expect(f.scope.allowed).toHaveBeenCalledTimes(2);
+  const scope = (configure.mock.calls[0] as unknown[] | undefined)?.[1] as {
+    allowed(): Promise<boolean>;
+  };
+  expect(await scope.allowed()).toBe(false);
+  f.scope.allowed.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+  await expect(service.read("synthetic")).rejects.toThrow("STORE_CONFIGURATION_PERMISSION_DENIED");
 });
