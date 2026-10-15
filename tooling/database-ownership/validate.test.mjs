@@ -9578,6 +9578,7 @@ describe("Database Schema Ownership Architecture Test", () => {
     const context = await writeModule(root, "RMS", "payment", "rms_payment", [
       "payment_reconciliation_exception",
       "payment_reconciliation_record",
+      "payment_reconciliation_resolution",
     ]);
     const asset = join(
       context.moduleRoot,
@@ -9588,7 +9589,7 @@ describe("Database Schema Ownership Architecture Test", () => {
     await writeFile(asset, 'import pg from "pg"; export {pg};');
     expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
   });
-  it.each(["owner", "schema", "path", "table", "record-table"])(
+  it.each(["owner", "schema", "path", "table", "record-table", "resolution-table"])(
     "rejects Payment reconciliation exception source with changed %s",
     async (changed) => {
       const root = await fixture();
@@ -9597,14 +9598,20 @@ describe("Database Schema Ownership Architecture Test", () => {
         "RMS",
         changed === "owner" ? "other" : "payment",
         changed === "schema" ? "rms_other" : "rms_payment",
-        ["payment_reconciliation_exception", "payment_reconciliation_record"].filter(
+        [
+          "payment_reconciliation_exception",
+          "payment_reconciliation_record",
+          "payment_reconciliation_resolution",
+        ].filter(
           (table) =>
             table !==
             (changed === "table"
               ? "payment_reconciliation_exception"
               : changed === "record-table"
                 ? "payment_reconciliation_record"
-                : ""),
+                : changed === "resolution-table"
+                  ? "payment_reconciliation_resolution"
+                  : ""),
         ),
       );
       await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
@@ -9625,6 +9632,7 @@ describe("Database Schema Ownership Architecture Test", () => {
       "payment_reconciliation_run",
       "payment_reconciliation_exception",
       "payment_reconciliation_record",
+      "payment_reconciliation_resolution",
     ]);
     const asset = join(
       context.moduleRoot,
@@ -9635,7 +9643,7 @@ describe("Database Schema Ownership Architecture Test", () => {
     await writeFile(asset, 'import pg from "pg"; export {pg};');
     expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
   });
-  it.each(["owner", "schema", "path", "table", "record-table", "run-table"])(
+  it.each(["owner", "schema", "path", "table", "record-table", "run-table", "resolution-table"])(
     "rejects Payment reconciliation run source with changed %s",
     async (changed) => {
       const root = await fixture();
@@ -9648,6 +9656,7 @@ describe("Database Schema Ownership Architecture Test", () => {
           "payment_reconciliation_run",
           "payment_reconciliation_exception",
           "payment_reconciliation_record",
+          "payment_reconciliation_resolution",
         ].filter(
           (table) =>
             table !==
@@ -9657,7 +9666,9 @@ describe("Database Schema Ownership Architecture Test", () => {
                 ? "payment_reconciliation_record"
                 : changed === "run-table"
                   ? "payment_reconciliation_run"
-                  : ""),
+                  : changed === "resolution-table"
+                    ? "payment_reconciliation_resolution"
+                    : ""),
         ),
       );
       await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });

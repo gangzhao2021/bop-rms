@@ -259,6 +259,52 @@ const feeLabel = (chargeType: string) =>
 function SavedReference({ value }: { value: StoreSetupContent["addressReference"] }) {
   return <p>{value.state === "Configured" ? "Already configured." : "Not configured."}</p>;
 }
+/**
+ * v15 finding: a Store Manager reads this page (organization.store.read) but only the Owner changes
+ * setup (organization.manage). When the setup read itself is refused, the setup steps are
+ * permission-trimmed: no "not allowed" error and no refresh of a draft they cannot read, while the
+ * Store sections on the page stay readable with their own "Only the Owner can change" notes.
+ */
+export function storeSetupOwnerOnly(
+  error: StoreSetupClientError["code"] | null,
+  workspace: StoreSetupWorkspace | null,
+  sameStore: boolean,
+): boolean {
+  return error === "Denied" && workspace === null && sameStore;
+}
+export function StoreSetupHeader({
+  ownerOnly,
+  displayName,
+  refreshDisabled,
+  onRefresh,
+}: {
+  readonly ownerOnly: boolean;
+  readonly displayName: string | null;
+  readonly refreshDisabled: boolean;
+  readonly onRefresh: () => void;
+}) {
+  return (
+    <header className="screen-heading">
+      <div>
+        <h2>Store setup</h2>
+        {displayName !== null && <p>{displayName}</p>}
+        {ownerOnly ? (
+          <p role="note">
+            Only the Owner can change Store setup. You can see the details customers and receipts
+            use below.
+          </p>
+        ) : (
+          <p>Saving a draft does not change the live Store.</p>
+        )}
+      </div>
+      {ownerOnly ? null : (
+        <button type="button" disabled={refreshDisabled} onClick={onRefresh}>
+          Refresh saved setup
+        </button>
+      )}
+    </header>
+  );
+}
 export function StoreSetupDraftPage({
   storeReference,
   csrf,
@@ -545,26 +591,21 @@ export function StoreSetupDraftPage({
   } catch {
     /* Review shows a safe validation state; local raw input remains. */
   }
+  const ownerOnly = storeSetupOwnerOnly(error, workspace, id === storeReference);
   return (
     <AppFrame
       className="store-setup-draft-page"
       title="Store setup"
-      description="Save unfinished settings and continue later"
+      description={
+        ownerOnly ? "The Store's details" : "Save unfinished settings and continue later"
+      }
     >
-      <header className="screen-heading">
-        <div>
-          <h2>Store setup</h2>
-          {workspace && <p>{workspace.store.displayName}</p>}
-          <p>Saving a draft does not change the live Store.</p>
-        </div>
-        <button
-          type="button"
-          disabled={busy || !online || id !== storeReference}
-          onClick={() => void refresh()}
-        >
-          Refresh saved setup
-        </button>
-      </header>
+      <StoreSetupHeader
+        ownerOnly={ownerOnly}
+        displayName={workspace?.store.displayName ?? null}
+        refreshDisabled={busy || !online || id !== storeReference}
+        onRefresh={() => void refresh()}
+      />
       {id !== storeReference && (
         <StatePanel heading="Select this Store" tone="error" status>
           <p>Choose this Store in the workspace before opening its setup.</p>
@@ -576,7 +617,7 @@ export function StoreSetupDraftPage({
           Offline. Your local edits are retained. Reconnect and refresh before saving.
         </p>
       )}
-      {error && (
+      {error && !ownerOnly && (
         <p id="setup-validation-error" role="alert">
           {messages[error]}
         </p>

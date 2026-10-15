@@ -142,11 +142,12 @@ export const ALERT_CATALOG = Object.freeze({
   "reconciliation.differences": {
     severity: "warning",
     raiseAfterMs: 0,
-    title: () => "Payments need checking",
+    title: () => "Payment differences need checking",
+    // An open reconciliation difference is either one payment or a whole business day's totals.
     summary: (p) =>
-      `${count(p.count, "payment does", "payments do")} not match between the store and the payment provider (oldest ${formatDuration(p.oldestAgeMs)} ago).`,
+      `${count(p.count, "difference", "differences")} between the store's records and the payment provider ${p.count === 1 ? "is" : "are"} still open (oldest ${formatDuration(p.oldestAgeMs)} ago). A difference can be one payment or a business day's totals.`,
     action: () =>
-      "Open Payment reconciliation, review each difference and resolve or escalate it before day-end.",
+      "Open Exceptions to see each difference. For a business day's totals, open Settlement and choose that day; it explains the difference and what to do.",
     runbook: "alert-reconciliation-differences",
   },
   "settlement.exceptions": {

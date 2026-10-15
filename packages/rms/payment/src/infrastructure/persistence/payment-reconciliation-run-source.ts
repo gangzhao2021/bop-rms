@@ -1,4 +1,5 @@
 import type { ConsumerTransaction } from "@bop/eventing";
+import { appendAuditRecordInTransaction } from "@bop/audit";
 import { parsePaymentReference } from "../../application/payment-provider-adapter.js";
 import {
   equivalentPaymentReconciliationResult,
@@ -152,6 +153,12 @@ export function createPostgresPaymentReconciliationRunSource(options: {
 export function createPostgresPaymentReconciliationRepository(
   options: Parameters<typeof createPostgresPaymentReconciliationRunSource>[0] & {
     transactions: { run<T>(work: (tx: ConsumerTransaction) => Promise<T>): Promise<T> };
+    /**
+     * WP-2423: when given, a matching settlement check of a business day resolves that day's
+     * earlier open differences (one append-only resolution row and one audit record each, in the
+     * same transaction as the run). Without it no resolution is recorded.
+     */
+    resolutions?: { nextReference(): string };
   },
 ) {
   const read = createPostgresPaymentReconciliationRunSource(options);
@@ -280,9 +287,110 @@ export function createPostgresPaymentReconciliationRepository(
               c.checkedAt,
             ],
           );
+        if (options.resolutions)
+          for (const c of result.checks) {
+            if (c.mode !== "DailySettlement" || c.outcome !== "Matched") continue;
+            const open = await tx.query(
+              "SELECT e.reconciliation_exception_id::text AS exception_reference FROM rms_payment.payment_reconciliation_exception e WHERE e.brand_id=$1 AND e.store_id=$2 AND e.candidate_id=$3 AND e.opened_at<=$4::timestamptz AND NOT EXISTS (SELECT 1 FROM rms_payment.payment_reconciliation_resolution s WHERE s.brand_id=e.brand_id AND s.store_id=e.store_id AND s.reconciliation_exception_id=e.reconciliation_exception_id) ORDER BY e.reconciliation_exception_id LIMIT 5",
+              [c.brandReference, c.storeReference, c.candidateReference, c.checkedAt],
+            );
+            if (!Array.isArray(open.rows) || open.rows.length > 4) return conflict();
+            for (const row of open.rows) {
+              const exception = String(parsePaymentReference(row.exception_reference));
+              const auditReference = String(
+                parsePaymentReference(options.resolutions.nextReference()),
+              );
+              const inserted = await tx.query(
+                "INSERT INTO rms_payment.payment_reconciliation_resolution (reconciliation_exception_id,brand_id,store_id,candidate_id,resolution,reconciliation_run_id,reconciliation_check_id,resolved_at,audit_id) VALUES ($1,$2,$3,$4,'MatchedOnRecheck',$5,$6,$7,$8)",
+                [
+                  exception,
+                  c.brandReference,
+                  c.storeReference,
+                  c.candidateReference,
+                  c.runReference,
+                  c.checkReference,
+                  c.checkedAt,
+                  auditReference,
+                ],
+              );
+              if (inserted.rowCount !== 1) return conflict();
+              await appendAuditRecordInTransaction(tx, {
+                auditId: auditReference,
+                brandId: c.brandReference,
+                storeId: c.storeReference,
+                actor: { type: "System" },
+                actionCode: "PAYMENT_RECONCILIATION_DIFFERENCE_RESOLVED",
+                targetType: "PaymentReconciliationException",
+                targetId: exception,
+                reasonCode: "MATCHED_ON_RECHECK",
+                correlationId: c.checkReference,
+                occurredAt: c.checkedAt,
+                sourceChannel: "PAYMENT_RECONCILIATION",
+                dataClassification: "Restricted",
+                retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+                retentionPolicyVersion: 1,
+              });
+            }
+          }
         const saved = await read(tx, { runReference: r.runReference });
         if (!saved || !equivalentPaymentReconciliationResult(result, saved)) return conflict();
         return { status: "Created" as const, result: saved };
       }),
   });
+}
+
+export interface PaymentReconciliationResolution {
+  readonly exceptionReference: string;
+  readonly resolution: "MatchedOnRecheck";
+  readonly runReference: string;
+  readonly checkReference: string;
+  readonly resolvedAt: string;
+}
+/**
+ * WP-2423: how an earlier reconciliation difference was resolved by a later matching settlement
+ * check of the same business day, or null when it was not. Read-only, Store-scoped.
+ */
+export function createPostgresPaymentReconciliationResolutionReader(options: {
+  readonly scope: { readonly brandReference: string; readonly storeReference: string };
+  authorize(tx: ConsumerTransaction): Promise<boolean>;
+}) {
+  const scope = Object.freeze({
+    brandReference: String(parsePaymentReference(options.scope.brandReference)),
+    storeReference: String(parsePaymentReference(options.scope.storeReference)),
+  });
+  return async (
+    tx: ConsumerTransaction,
+    exceptionReference: string,
+  ): Promise<PaymentReconciliationResolution | null> => {
+    const exception = String(parsePaymentReference(exceptionReference));
+    if ((await options.authorize(tx)) !== true)
+      throw new PaymentReconciliationError("PAYMENT_RECONCILIATION_PERMISSION_DENIED");
+    await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+      scope.brandReference,
+      scope.storeReference,
+    ]);
+    const result = await tx.query(
+      "SELECT reconciliation_exception_id::text AS exception_reference,resolution,reconciliation_run_id::text AS run_reference,reconciliation_check_id::text AS check_reference,resolved_at FROM rms_payment.payment_reconciliation_resolution WHERE brand_id=$1 AND store_id=$2 AND reconciliation_exception_id=$3 LIMIT 2",
+      [scope.brandReference, scope.storeReference, exception],
+    );
+    if (!Array.isArray(result.rows) || result.rows.length > 1) return unavailable();
+    const row = result.rows[0];
+    if (!row) return null;
+    const resolvedAt = instant(row.resolved_at);
+    if (
+      row.exception_reference !== exception ||
+      row.resolution !== "MatchedOnRecheck" ||
+      typeof resolvedAt !== "string"
+    )
+      return unavailable();
+    if ((await options.authorize(tx)) !== true)
+      throw new PaymentReconciliationError("PAYMENT_RECONCILIATION_PERMISSION_DENIED");
+    return Object.freeze({
+      exceptionReference: exception,
+      resolution: "MatchedOnRecheck",
+      runReference: String(parsePaymentReference(row.run_reference)),
+      checkReference: String(parsePaymentReference(row.check_reference)),
+      resolvedAt: new Date(resolvedAt).toISOString(),
+    });
+  };
 }

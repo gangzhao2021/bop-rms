@@ -48,7 +48,9 @@ describe("WP-2423 P1 settlement report", () => {
     expect(html).toContain("$1,223.20");
     expect(html).toContain("Settled · the day&#x27;s totals match the provider statement");
     expect(html).toContain("Settlement run Sep 22, 2026, 8:00 AM");
-    expect(html).toContain("SETTLE-2026-09-21-01");
+    // WP-2423: plain words for the statement, never the internal statement reference.
+    expect(html).toContain("Provider statement for Mon, Sep 21");
+    expect(html).not.toContain("SETTLE-2026-09-21-01");
     expect(html).toContain("$1,234.50 / $1,234.50");
     expect(html).toContain("14 payments checked in 240 runs · last Sep 22, 2026, 3:58 AM");
     expect(html).toContain("12 matched · 1 unresolved · 1 difference");
@@ -81,6 +83,68 @@ describe("WP-2423 P1 settlement report", () => {
     );
     expect(html).toContain("$11.30 / $22.60");
     expect(html).toContain("Showing the latest 2 of 350 payments.");
+    // WP-2423: an open day difference says what it is and what staff can do (no dead end).
+    expect(html).toContain("Refunds for this day differ");
+    expect(html).toContain(
+      "The store&#x27;s records show $11.30 in refunds; the payment provider&#x27;s statement shows $22.60 ($11.30 more at the payment provider).",
+    );
+    expect(html).toContain("This day is checked again automatically when new records arrive.");
+    expect(html).toContain("tell the pilot operator");
+  });
+  it("WP-2423: shows a day re-checked after an unmatched charge was refunded as resolved", () => {
+    const view = settlementViewFixture();
+    const settlement = view.reconciliation.settlement;
+    const first = settlement.checks[0];
+    if (!first) throw Error("fixture");
+    Object.assign(first, {
+      outcome: "Difference",
+      differenceReason: "RefundMismatch",
+      internalRefundedMinor: "1130",
+      providerRefundedMinor: "3390",
+      exceptionReference: "018f7700-0000-7000-8000-0000000000a1",
+    });
+    const recheckRun = "018f7700-0000-7000-8000-0000000000a2";
+    Object.assign(settlement, {
+      recheck: {
+        run: {
+          ...settlement.run,
+          runReference: recheckRun,
+          scheduledAt: "2026-10-15T16:00:00.000Z",
+          cutoffAt: "2026-10-15T16:00:00.000Z",
+          completedAt: "2026-10-15T16:00:01.000Z",
+        },
+        check: {
+          ...first,
+          checkReference: "018f7700-0000-7000-8000-0000000000a3",
+          runReference: recheckRun,
+          checkedAt: "2026-10-15T16:00:00.500Z",
+          outcome: "Matched",
+          differenceReason: null,
+          internalRefundedMinor: "3390",
+          providerRefundedMinor: "3390",
+          exceptionReference: null,
+          settlementReference: "simset_20261009_" + "d".repeat(64),
+        },
+        count: 1,
+      },
+    });
+    const html = render({
+      ...view,
+      unmatchedProviderCharges: {
+        captured: { count: 0, amountMinor: "0", currencyCode: "CAD" },
+        refunded: { count: 1, amountMinor: "2260", currencyCode: "CAD" },
+      },
+    });
+    expect(html).toContain("Settled · the day&#x27;s totals match the provider statement");
+    expect(html).toContain("First check of Mon, Sep 21");
+    expect(html).toContain("Checked again");
+    expect(html).toContain("Difference · Refund differs");
+    expect(html).toContain("$33.90 / $33.90");
+    expect(html).toContain("so that difference is resolved");
+    expect(html).not.toContain("Refunds for this day differ");
+    expect(html).toContain("Charges that match no order");
+    expect(html).toContain("Refund of an unmatched provider charge: 1 refund · $22.60");
+    expect(html).not.toContain("simset_");
   });
   it("explains an open day, a day not yet settled, an empty day and unreadable sources", () => {
     const base = settlementViewFixture();

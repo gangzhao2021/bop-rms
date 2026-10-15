@@ -76,6 +76,15 @@ export interface PaymentReconciliationDay {
   readonly settlement: {
     readonly run: PaymentReconciliationDayRun;
     readonly checks: readonly PaymentReconciliationDayCheck[];
+    /**
+     * WP-2423: the latest later check of the same day (re-checked after new records arrived),
+     * which is the day's current result; null when the day was checked once.
+     */
+    readonly recheck: {
+      readonly run: PaymentReconciliationDayRun;
+      readonly check: PaymentReconciliationDayCheck;
+      readonly count: number;
+    } | null;
   } | null;
   /** Runs whose cutoff fell inside the day, and every payment they checked, counted once. */
   readonly operational: {
@@ -294,7 +303,55 @@ ORDER BY r.checked_at,r.reconciliation_check_id LIMIT $4`,
           checks.some((check) => check.runReference !== run.runReference)
         )
           return unavailable();
-        settlement = Object.freeze({ run, checks: Object.freeze(checks) });
+        // WP-2423: later settlement checks of the same day (same candidate, other runs).
+        const candidates = rows(
+          await tx.query(
+            `SELECT candidate_id::text AS candidate_reference FROM rms_payment.payment_reconciliation_record
+WHERE brand_id=$1 AND store_id=$2 AND reconciliation_run_id=$3 AND mode='DailySettlement' LIMIT 2`,
+            [scope.brandReference, scope.storeReference, settlementRunReference],
+          ),
+        );
+        let recheck: NonNullable<PaymentReconciliationDay["settlement"]>["recheck"] = null;
+        if (candidates.length === 1) {
+          const candidate = reference(candidates[0]?.candidate_reference);
+          const later = rows(
+            await tx.query(
+              `SELECT ${checkColumns},count(*) OVER ()::int AS recheck_count
+FROM rms_payment.payment_reconciliation_record r
+WHERE r.brand_id=$1 AND r.store_id=$2 AND r.candidate_id=$3 AND r.mode='DailySettlement'
+  AND r.reconciliation_run_id<>$4 AND EXISTS (SELECT 1 FROM rms_payment.payment_reconciliation_run u
+    WHERE u.reconciliation_run_id=r.reconciliation_run_id AND u.brand_id=r.brand_id
+      AND u.store_id=r.store_id AND u.mode='DailySettlement' AND u.scheduled_at>=$5::timestamptz)
+ORDER BY r.checked_at DESC,r.reconciliation_check_id DESC LIMIT 1`,
+              [
+                scope.brandReference,
+                scope.storeReference,
+                candidate,
+                settlementRunReference,
+                endsAt,
+              ],
+            ),
+          );
+          const latest = later[0];
+          if (latest !== undefined) {
+            const check = toCheck(latest);
+            const recheckRuns = rows(
+              await tx.query(
+                `SELECT ${runColumns} FROM rms_payment.payment_reconciliation_run
+WHERE brand_id=$1 AND store_id=$2 AND reconciliation_run_id=$3 AND mode='DailySettlement'`,
+                [scope.brandReference, scope.storeReference, check.runReference],
+              ),
+            );
+            if (recheckRuns.length !== 1 || recheckRuns[0] === undefined) return unavailable();
+            if (check.checkedAt < (checks.at(-1)?.checkedAt ?? "")) return unavailable();
+            recheck = Object.freeze({
+              run: toRun(recheckRuns[0]),
+              check,
+              count: count(latest.recheck_count),
+            });
+          }
+        } else if (candidates.length > 1) return unavailable();
+        settlement = Object.freeze({ run, checks: Object.freeze(checks), recheck });
       }
     }
     await authorize();

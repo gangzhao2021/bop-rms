@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import {
+  OPERATIONS_ALERTS_NOT_PERMITTED,
   OperationsAlertsCard,
   createOperationsAlertsClient,
   parseOperationsAlertView,
@@ -86,7 +87,7 @@ describe("WP-2423 Q13 store system alerts on the Home", () => {
     ).toThrow();
     expect(parseOperationsAlertView(view({ active: [critical] })).active).toHaveLength(1);
   });
-  it("reads without caching and treats any refusal as unavailable", async () => {
+  it("reads without caching; a 403 means not permitted, any other refusal is unavailable", async () => {
     const ok = vi.fn<(input: string, init?: RequestInit) => Promise<Response>>(
       async () =>
         new Response(JSON.stringify(view()), {
@@ -97,7 +98,16 @@ describe("WP-2423 Q13 store system alerts on the Home", () => {
     expect(ok.mock.calls[0]?.[0]).toBe("/merchant/operations-alerts");
     const denied = vi.fn(async () => new Response("{}", { status: 403 }));
     await expect(createOperationsAlertsClient(denied as never).load()).rejects.toThrow(
-      "OPERATIONS_ALERTS_UNAVAILABLE",
+      OPERATIONS_ALERTS_NOT_PERMITTED,
     );
+    for (const status of [401, 500, 503]) {
+      const failed = vi.fn(async () => new Response("{}", { status }));
+      await expect(createOperationsAlertsClient(failed as never).load()).rejects.toThrow(
+        "OPERATIONS_ALERTS_UNAVAILABLE",
+      );
+    }
+  });
+  it("renders nothing at all for a role the server does not permit", () => {
+    expect(render({ kind: "NotPermitted" })).toBe("");
   });
 });

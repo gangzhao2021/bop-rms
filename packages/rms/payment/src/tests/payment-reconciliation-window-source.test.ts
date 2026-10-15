@@ -69,21 +69,32 @@ function setup() {
     differences: [unresolved],
     settlementRuns: [settlementRun],
     settlementChecks: [statement],
+    candidates: [{ candidate_reference: id(7) }] as Record<string, unknown>[],
+    rechecks: [] as Record<string, unknown>[],
+    recheckRuns: [] as Record<string, unknown>[],
   };
   const query = vi.fn(async (sql: string) => ({
-    rows: sql.includes("count(*)::int AS run_count")
-      ? [{ run_count: rows.runCount }]
-      : sql.includes("count(*)::int AS payments")
-        ? rows.outcomes
-        : sql.includes("WITH latest AS")
-          ? rows.differences
-          : sql.includes("mode='DailySettlement'")
-            ? rows.settlementRuns
-            : sql.includes("FROM rms_payment.payment_reconciliation_record r")
-              ? rows.settlementChecks
-              : sql.includes("FROM rms_payment.payment_reconciliation_run")
-                ? rows.latest
-                : [],
+    rows: sql.includes("AS candidate_reference")
+      ? rows.candidates
+      : sql.includes("recheck_count")
+        ? rows.rechecks
+        : sql.includes("FROM rms_payment.payment_reconciliation_run") &&
+            sql.includes("mode='DailySettlement'") &&
+            !sql.includes("scheduled_at>=")
+          ? rows.recheckRuns
+          : sql.includes("count(*)::int AS run_count")
+            ? [{ run_count: rows.runCount }]
+            : sql.includes("count(*)::int AS payments")
+              ? rows.outcomes
+              : sql.includes("WITH latest AS")
+                ? rows.differences
+                : sql.includes("mode='DailySettlement'")
+                  ? rows.settlementRuns
+                  : sql.includes("FROM rms_payment.payment_reconciliation_record r")
+                    ? rows.settlementChecks
+                    : sql.includes("FROM rms_payment.payment_reconciliation_run")
+                      ? rows.latest
+                      : [],
     rowCount: 0,
   }));
   const tx = { query } as unknown as ConsumerTransaction;
@@ -203,4 +214,57 @@ it("refuses a denied scope, an inverted window and corrupt rows", async () => {
   await expect(
     empty.read(empty.tx, { startsAt, endsAt, settlementRunReference: id(5) }),
   ).rejects.toMatchObject({ code: "PAYMENT_RECONCILIATION_DEPENDENCY_UNAVAILABLE" });
+});
+
+it("WP-2423: reads the day's latest re-check as its current result beside the first check", async () => {
+  const f = setup();
+  f.rows.settlementChecks = [
+    {
+      ...f.rows.settlementChecks[0],
+      outcome: "Difference",
+      difference_reason: "RefundMismatch",
+      internal_refunded_minor: "0",
+      provider_refunded_minor: "2260",
+      exception_reference: id(9),
+    },
+  ];
+  f.rows.rechecks = [
+    {
+      ...f.rows.settlementChecks[0],
+      check_reference: id(11),
+      run_reference: id(10),
+      checked_at: new Date("2026-10-15T12:00:00.500Z"),
+      outcome: "Matched",
+      difference_reason: null,
+      internal_refunded_minor: "2260",
+      provider_refunded_minor: "2260",
+      exception_reference: null,
+      recheck_count: 1,
+    },
+  ];
+  f.rows.recheckRuns = [
+    {
+      ...f.rows.settlementRuns[0],
+      run_reference: id(10),
+      scheduled_at: new Date("2026-10-15T12:00:00.000Z"),
+      cutoff_at: new Date("2026-10-15T12:00:00.000Z"),
+      completed_at: new Date("2026-10-15T12:00:01.000Z"),
+    },
+  ];
+  const result = await f.read(f.tx, { startsAt, endsAt, settlementRunReference: id(5) });
+  expect(result.settlement?.checks[0]).toMatchObject({ outcome: "Difference" });
+  expect(result.settlement?.recheck).toMatchObject({
+    run: { runReference: id(10), mode: "DailySettlement" },
+    check: { outcome: "Matched", internalRefundedMinor: "2260", providerRefundedMinor: "2260" },
+    count: 1,
+  });
+  const later = (f.query.mock.calls as unknown as [string, unknown[]][]).find(([sql]) =>
+    sql.includes("recheck_count"),
+  );
+  expect(later?.[1]).toEqual([id(2), id(3), id(7), id(5), endsAt]);
+});
+it("WP-2423: a day checked once has no re-check", async () => {
+  const f = setup();
+  const result = await f.read(f.tx, { startsAt, endsAt, settlementRunReference: id(5) });
+  expect(result.settlement?.recheck).toBeNull();
 });

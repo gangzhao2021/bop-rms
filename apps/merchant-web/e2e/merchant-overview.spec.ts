@@ -305,16 +305,22 @@ test("@production Home reads only the summaries the staff member's screens permi
     });
   const errors: string[] = [];
   page.on("console", (message) => {
+    // The store system card asks the server once; the browser reports that 403 as a failed
+    // resource load, which is expected for a role that does not handle system alerts.
+    if (message.location().url.endsWith("/merchant/operations-alerts")) return;
     if (message.type() === "error") errors.push(message.text());
   });
 
-  // A cashier: no order queue, pickup or exception screen — Home reads none of them.
+  // A cashier: no order queue, pickup or exception screen — Home reads none of them. The store
+  // system card asks once; the server answers 403 for this role, so the card stays hidden.
   await page.goto("/app");
   await expect(page.getByRole("heading", { level: 1, name: "Training Store" })).toBeVisible();
   await page.waitForTimeout(500);
-  expect(requested).toEqual([]);
+  expect(requested).toEqual(["/merchant/operations-alerts"]);
   expect(errors).toEqual([]);
   await expect(page.getByRole("region", { name: "Right now" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Store system" })).toHaveCount(0);
+  await expect(page.getByText("System alerts could not be read")).toHaveCount(0);
 
   // With the order queue screen only, Home reads the orders summary and nothing else.
   screens = navigation([
@@ -326,5 +332,6 @@ test("@production Home reads only the summaries the staff member's screens permi
   await expect(page.getByText("Open orders")).toBeVisible();
   await expect(page.getByText("Pickups waiting")).toHaveCount(0);
   await expect(page.getByText("Open exceptions")).toHaveCount(0);
-  expect(new Set(requested)).toEqual(new Set(["/merchant/orders"]));
+  expect(new Set(requested)).toEqual(new Set(["/merchant/orders", "/merchant/operations-alerts"]));
+  await expect(page.getByRole("region", { name: "Store system" })).toHaveCount(0);
 });

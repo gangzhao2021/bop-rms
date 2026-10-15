@@ -6,6 +6,7 @@ import {
   createPostgresPaymentCaptureWindowSource,
   createPostgresPaymentReconciliationDaySource,
   createPostgresSoleOperatorRefundSummaryReader,
+  createPostgresUnmatchedCaptureRefundStore,
 } from "@rms/payment";
 import { createMerchantBusinessDayWindows } from "./merchant-business-day-window.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
@@ -302,6 +303,56 @@ export function createPersistentMerchantSettlement(options: {
             refunded: {
               count: summary.refundCount,
               amountMinor: summary.refundedMinor.toString(),
+              currencyCode: "CAD" as const,
+            },
+          };
+        }),
+      // WP-2423: Provider charges matching no Order, and their refunds, in the day — the lines the
+      // settlement statement counts on the store's side beyond the store's own orders.
+      unmatchedProviderCharges: (tx, scope, window) =>
+        optional(async () => {
+          const configuration = await options.resolveConfiguration(tx, scope);
+          const store = createPostgresUnmatchedCaptureRefundStore({
+            brandReference: scope.brandReference,
+            storeReference: scope.storeReference,
+            authorize: async (t, access) => access === "Read" && (await guard(scope)(t)),
+          });
+          const inDay = (at: string) => at >= window.startsAt && at < window.endsAt;
+          let captured = 0n,
+            capturedCount = 0,
+            refunded = 0n,
+            refundedCount = 0,
+            afterExceptionReference: string | null = null,
+            pages = 0;
+          do {
+            if (++pages > 100) return unavailable();
+            const page = await store.list(tx, { afterExceptionReference, limit: 100 });
+            for (const state of page.states) {
+              if (
+                state.environment !== configuration.environment ||
+                state.providerAccountReference !== configuration.providerAccountReference
+              )
+                continue;
+              if (inDay(state.capturedAt)) {
+                capturedCount += 1;
+                captured += BigInt(state.amountMinor);
+              }
+              if (state.outcome !== null && inDay(state.outcome.providerObservedAt)) {
+                refundedCount += 1;
+                refunded += BigInt(state.amountMinor);
+              }
+            }
+            afterExceptionReference = page.nextAfterExceptionReference;
+          } while (afterExceptionReference !== null);
+          return {
+            captured: {
+              count: capturedCount,
+              amountMinor: captured.toString(),
+              currencyCode: "CAD" as const,
+            },
+            refunded: {
+              count: refundedCount,
+              amountMinor: refunded.toString(),
               currencyCode: "CAD" as const,
             },
           };

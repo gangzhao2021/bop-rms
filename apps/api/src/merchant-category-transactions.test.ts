@@ -727,3 +727,37 @@ it("keeps per-instance registration isolated while the locator accepts each real
   expect(first.events).toEqual(["BEGIN", "COMMIT"]);
   expect(second.events).toEqual(["BEGIN", "COMMIT"]);
 });
+// v15 finding: a read-only caller opts into rerunning a conflicted transaction; a persistent
+// conflict stays visible (the route answers retry later); other callers keep the bounded outcome.
+it("reruns read-only work on a transaction conflict only when asked, and keeps a persistent one visible", async () => {
+  const conflict = () =>
+    Object.assign(new Error("synthetic conflict"), {
+      code: "TENANT_DATABASE_TRANSACTION_CONFLICT",
+    });
+  let failures = 1,
+    calls = 0;
+  const source: PersistentMerchantBffOptions["transactions"] = {
+    async run(work) {
+      calls++;
+      if (failures-- > 0) throw conflict();
+      return work({ query: async () => ({ rows: [], rowCount: 0 }) });
+    },
+  };
+  const host = createMerchantCategoryTransactions(source);
+  const work = async (tx: Transaction) => {
+    await host.registerBeforeCommit(tx, async () => undefined);
+    return "current";
+  };
+  await expect(host.transactions.run(work, { retryConflict: true })).resolves.toBe("current");
+  expect(calls).toBe(2);
+  failures = 1;
+  calls = 0;
+  await expect(host.transactions.run(work)).rejects.toBeInstanceOf(CatalogError);
+  expect(calls).toBe(1);
+  failures = 10;
+  calls = 0;
+  await expect(host.transactions.run(work, { retryConflict: true })).rejects.toMatchObject({
+    code: "TENANT_DATABASE_TRANSACTION_CONFLICT",
+  });
+  expect(calls).toBe(4);
+});

@@ -237,6 +237,14 @@ export async function createInternalMerchant(
           href: "/app/operations/payment-reconciliation",
           permission: "operations.order-exception.manage",
         },
+        // v15 finding: open exceptions and payment differences (Owner, Store Manager); the store
+        // system alerts send staff here, so the page must be reachable from the navigation.
+        {
+          screenId: "OPS-ORDER-EXCEPTION",
+          label: "Exceptions",
+          href: "/operations/order-exceptions",
+          permission: "operations.order-exception.manage",
+        },
         // WP-2423 Q14: sales, item, hourly and tip reports with CSV export (Owner, Store Manager).
         {
           screenId: "RPT-OPS-DASHBOARD",

@@ -216,3 +216,62 @@ test("@production a store that never published is told customers cannot open its
   await expect(panel.getByLabel(/Store name customers see \(.*French.*\)/u)).toHaveValue("");
   await expectNoInternalText(page);
 });
+
+// v15 finding: the Store Manager now has "Store setup" in the navigation (they read the Store
+// profile, organization.store.read) but only the Owner changes setup. The setup read answers 403
+// for them; the page says plainly that only the Owner changes setup and shows no failed sections.
+test("@production the Store Manager opens Store setup from the navigation and sees it read-only (v15)", async ({
+  page,
+}) => {
+  await session(page);
+  await page.route("**/merchant/store-setup**", (route) =>
+    route.fulfill({ status: 403, headers, json: { error: "request_denied" } }),
+  );
+  await page.route("**/merchant/store/receipt-profile", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        observedAt: "2026-10-15T16:00:00.000Z",
+        canChange: false,
+        version: 1,
+        recordedAt: "2026-10-15T15:00:00.000Z",
+        details: {
+          gstHstNumber: "000000000RT0001",
+          qstNumber: null,
+          pstNumber: null,
+          privacyNoticeUrl: "https://example.com/privacy",
+        },
+        gaps: { taxRegistrationMissing: false, privacyNoticeMissing: false },
+      },
+    }),
+  );
+  await page.route("**/merchant/store/public-profile", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        observedAt: "2026-10-15T16:00:00.000Z",
+        canChange: false,
+        locales: ["en-CA"],
+        current: published(3, "Maple Noodle House", null),
+        regionCodes,
+      },
+    }),
+  );
+  await page.goto("/app/organization/stores/" + store + "/setup");
+  await expect(
+    page
+      .getByRole("navigation", { name: "Workspace" })
+      .getByRole("link", { name: "Store setup" })
+      .first(),
+  ).toHaveAttribute("href", "/app/organization/stores/" + store + "/setup");
+  await expect(page.getByText("Only the Owner can change Store setup.")).toBeVisible();
+  await expect(page.getByText("does not allow this action", { exact: false })).toHaveCount(0);
+  await expect(page.getByText("could not be loaded", { exact: false })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Refresh saved setup" })).toHaveCount(0);
+  const profile = page.getByRole("region", { name: heading });
+  await expect(profile.getByLabel("Store name customers see")).toHaveValue("Maple Noodle House");
+  await expect(profile.getByText("Only the Owner can change these details.")).toBeVisible();
+  const receipts = page.getByRole("region", { name: "Receipts and privacy" });
+  await expect(receipts.getByLabel("GST/HST registration number")).toHaveValue("000000000RT0001");
+  await expectNoInternalText(page);
+});

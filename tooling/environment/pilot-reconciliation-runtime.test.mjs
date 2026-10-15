@@ -110,7 +110,7 @@ function fixture() {
   };
   const f = {
     createInternalReconciliationLease: () => lease,
-    createPostgresPaymentReconciliationRepository: () => repository,
+    createPostgresPaymentReconciliationRepository: vi.fn(() => repository),
     createInternalReconciliationTerminalOccurrence: () => async () => ({
       status: "Captured",
       occurredAt: at,
@@ -133,6 +133,7 @@ function fixture() {
     f,
   );
   return {
+    f,
     run,
     candidate,
     snapshot,
@@ -154,6 +155,9 @@ it("runs discovered owner candidate through Provider comparison and repository c
     result = await f.runtime.run(f.run);
   expect(result.result.counts.Matched).toBe(1);
   expect(f.repository.commit).toHaveBeenCalledTimes(1);
+  // WP-2423: the repository records resolutions of earlier day differences with new references.
+  const repositoryOptions = f.f.createPostgresPaymentReconciliationRepository.mock.calls[0][0];
+  expect(repositoryOptions.resolutions.nextReference).toBe(f.resources.credentials.reference);
   expect(f.observations.record).not.toHaveBeenCalled();
   expect(f.terminal.record).not.toHaveBeenCalled();
   expect(f.lease.release).toHaveBeenCalledTimes(1);

@@ -9,6 +9,7 @@ import {
   evaluateAlertConditions,
   planChannelDelivery,
   recordChannelDelivery,
+  renderAlert,
   renderMessage,
 } from "./pilot-alerts.mjs";
 
@@ -217,6 +218,24 @@ describe("WP-2423 Q13 messages are plain language and carry no private data", ()
     expect(message.subject).toBe("Main St: 4 problems (urgent)");
     expect(message.text).toContain("What to do:");
     expect(message.text).toContain("Runbook: docs/runbooks/single-store-pilot.md#alert-");
+  });
+  it("says a payment difference is one payment or a day's totals, and where staff resolve each (v15)", () => {
+    const one = renderAlert("reconciliation.differences", { count: 1, oldestAgeMs: 2 * 3600_000 });
+    expect(one.title).toBe("Payment differences need checking");
+    expect(one.summary).toBe(
+      "1 difference between the store's records and the payment provider is still open (oldest 2 hours ago). A difference can be one payment or a business day's totals.",
+    );
+    expect(one.action).toBe(
+      "Open Exceptions to see each difference. For a business day's totals, open Settlement and choose that day; it explains the difference and what to do.",
+    );
+    const many = renderAlert("reconciliation.differences", { count: 3, oldestAgeMs: 5 * MIN });
+    expect(many.summary).toMatch(/^3 differences between .* are still open/u);
+    // No screen that does not exist in the staff navigation, and no identifiers.
+    for (const text of [one.title, one.summary, one.action, many.summary])
+      expect(text).not.toMatch(/Payment reconciliation|payment does not match|[0-9a-f]{8}-/u);
+    expect(renderAlert("settlement.exceptions", { count: 1, oldestAgeMs: MIN }).action).toContain(
+      "Open Settlement",
+    );
   });
   it("names the problem in the subject of a single alert, and resolution plainly", () => {
     const o = healthy();

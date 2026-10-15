@@ -51,3 +51,34 @@ export function dailySettlementRunReference({
     ),
   });
 }
+
+/** The most re-checks one business day may receive; each needs new evidence (see the recheck). */
+export const dailySettlementRecheckLimit = 20;
+/**
+ * WP-2423: the reference of the `recheck`-th later settlement check of one business day (1 is the
+ * first re-check). Derived like the day's own run so the day-end page, the status report and the
+ * worker find the same runs; the time part is the day's end, the rest a digest of day and ordinal.
+ */
+export function dailySettlementRecheckRunReference(day, recheck) {
+  if (!Number.isSafeInteger(recheck) || recheck < 1 || recheck > dailySettlementRecheckLimit)
+    throw Error("DAILY_SETTLEMENT_RECHECK_INVALID");
+  const { key } = dailySettlementRunReference(day);
+  const stamp = Date.parse(day.endsAt).toString(16).padStart(12, "0"),
+    h = createHash("sha256")
+      .update("BOP_INTERNAL_DAILY_RECHECK_V1:" + JSON.stringify([key, recheck]))
+      .digest("hex");
+  return String(
+    parsePaymentReference(
+      stamp.slice(0, 8) +
+        "-" +
+        stamp.slice(8) +
+        "-7" +
+        h.slice(0, 3) +
+        "-" +
+        (8 + (parseInt(h[3], 16) & 3)).toString(16) +
+        h.slice(4, 7) +
+        "-" +
+        h.slice(7, 19),
+    ),
+  );
+}

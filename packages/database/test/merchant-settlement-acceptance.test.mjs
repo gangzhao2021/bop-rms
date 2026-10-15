@@ -217,6 +217,11 @@ it("loads the open business day's settlement with card-machine payments, also wh
       assert.equal(day.businessDate, today);
       assert.equal(day.window.status, "Open");
       assert.deepEqual(day.cardMachine, expected);
+      // WP-2423: Provider charges matching no Order are read (none here), not silently skipped.
+      assert.deepEqual(day.unmatchedProviderCharges, {
+        captured: { count: 0, amountMinor: "0", currencyCode: "CAD" },
+        refunded: { count: 0, amountMinor: "0", currencyCode: "CAD" },
+      });
 
       // The Store's order exceptions (same staff permission), measured here as the nearest
       // acceptance with a real staff session (WP-2423 query budget): the scope is resolved at the

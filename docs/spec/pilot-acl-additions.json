@@ -2172,6 +2172,24 @@
     },
     {
       "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_reconciliation_resolution",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 reconciliation): a later matching settlement check of a business day resolves that day's earlier difference, append-only with an audit record"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_reconciliation_resolution",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 reconciliation): a later matching settlement check of a business day resolves that day's earlier difference, append-only with an audit record"
+    },
+    {
+      "type": "table",
       "schema": "rms_store",
       "object": "store_configuration_operation",
       "column": null,

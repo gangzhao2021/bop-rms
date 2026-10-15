@@ -1,18 +1,104 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
+
+// The real pilot navigation shape (tooling/environment/pilot-merchant.mjs), trimmed per role the
+// way the BFF trims it by permission. The card must not depend on any one of these entries: the
+// server's answer on /merchant/operations-alerts decides (200 Owner/Store Manager, 403 others).
+type PilotRole = "owner" | "store-manager" | "front-of-house";
+const pilotEntries: readonly (readonly [string, string, string, string, readonly PilotRole[]])[] = [
+  [
+    "STORE-SETUP",
+    "Store setup",
+    "/app/organization/stores/01909968-0000-7000-8000-000000000099/setup",
+    "organization.manage",
+    ["owner", "store-manager"],
+  ],
+  ["CAT-PRODUCT-LIST", "Products", "/app/commerce/products", "catalog.manage", ["owner"]],
+  [
+    "OPS-ORDER-QUEUE",
+    "Orders",
+    "/operations/orders",
+    "ordering.operate",
+    ["owner", "store-manager", "front-of-house"],
+  ],
+  [
+    "OPS-ORDER-ENTRY",
+    "Counter order",
+    "/operations/order-entry",
+    "ordering.order.create_staff",
+    ["owner", "store-manager", "front-of-house"],
+  ],
+  [
+    "KIT-KITCHEN-QUEUE",
+    "Kitchen",
+    "/operations/kitchen",
+    "kitchen.operate",
+    ["owner", "store-manager"],
+  ],
+  [
+    "FUL-PICKUP-QUEUE",
+    "Pickup",
+    "/operations/pickup",
+    "fulfillment.operate",
+    ["owner", "store-manager", "front-of-house"],
+  ],
+  [
+    "DIN-FLOOR-BOARD",
+    "Tables",
+    "/operations/dining",
+    "dining.operate",
+    ["owner", "store-manager", "front-of-house"],
+  ],
+  [
+    "PAY-RECONCILIATION",
+    "Settlement",
+    "/app/operations/payment-reconciliation",
+    "operations.order-exception.manage",
+    ["owner", "store-manager"],
+  ],
+  [
+    "OPS-ORDER-EXCEPTION",
+    "Exceptions",
+    "/operations/order-exceptions",
+    "operations.order-exception.manage",
+    ["owner", "store-manager"],
+  ],
+  [
+    "RPT-OPS-DASHBOARD",
+    "Reports",
+    "/app/reports/operations",
+    "reporting.sales.read",
+    ["owner", "store-manager"],
+  ],
+];
+const pilotNavigation = (role: PilotRole) =>
+  pilotEntries
+    .filter((entry) => entry[4].includes(role))
+    .map(([screenId, label, href, permission]) => ({ screenId, label, href, permission }));
 
 // WP-2423 Q13 (DEC-PILOT-ALERTS-BACKUP): the Home shows the Owner and Store Manager what is wrong
 // with the store system and what to do, in Store time, and keeps it current.
-test("@production Home shows store system alerts with what to do, and their resolution (WP-2423 Q13)", async ({
-  page,
-}) => {
-  const scope = {
-    brandLabel: "Synthetic Brand",
-    storeLabel: "Training Store",
-    storeReference: "01909968-0000-7000-8000-000000000099",
-    timeZone: "America/Toronto",
-  };
-  const headers = { "cache-control": "no-store" };
+const scope = {
+  brandLabel: "Synthetic Brand",
+  storeLabel: "Training Store",
+  storeReference: "01909968-0000-7000-8000-000000000099",
+  timeZone: "America/Toronto",
+};
+const headers = { "cache-control": "no-store" };
+
+/**
+ * Routes every read the Home makes for a pilot role. The alerts route answers as the real BFF
+ * does: the board for Owner and Store Manager, 403 for everyone else. Any other merchant read is
+ * recorded as unexpected so a new Home dependency is noticed instead of silently failing.
+ */
+async function pilotHome(page: Page, role: PilotRole, board: () => unknown) {
+  const alertReads: string[] = [];
+  const unexpected: string[] = [];
+  const errors: string[] = [];
+  await page.route("**/merchant/**", (route) => {
+    unexpected.push(new URL(route.request().url()).pathname);
+    return route.fulfill({ status: 404, headers, json: { error: "not_found" } });
+  });
   await page.route("**/merchant/session", (route) =>
     route.fulfill({
       headers,
@@ -27,20 +113,7 @@ test("@production Home shows store system alerts with what to do, and their reso
           storeStatus: "Open",
           freshness: "Current",
           dashboardAvailability: "UnavailableUntilWP1905",
-          navigation: [
-            {
-              screenId: "HOME-OVERVIEW",
-              label: "Overview",
-              href: "/app",
-              permission: "merchant.access",
-            },
-            {
-              screenId: "OPS-ORDER-EXCEPTION",
-              label: "Exceptions",
-              href: "/operations/order-exceptions",
-              permission: "operations.order-exception.manage",
-            },
-          ],
+          navigation: pilotNavigation(role),
         },
       },
     }),
@@ -79,6 +152,26 @@ test("@production Home shows store system alerts with what to do, and their reso
       },
     }),
   );
+  // The "Right now" summaries, empty: this spec is about the store system card.
+  await page.route("**/merchant/orders*", (route) =>
+    route.fulfill({ headers, json: { items: [], nextAfterOrderReference: null } }),
+  );
+  await page.route("**/merchant/pickup/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        source: "CurrentFulfillment",
+        workstation: {
+          deviceReference: "01909968-0000-7000-8000-000000000010",
+          pickupLocationReference: "01909968-0000-7000-8000-000000000011",
+        },
+        storeReference: scope.storeReference,
+        observedAt: "2026-10-15T16:00:00.000Z",
+        nextAfterFulfillmentReference: null,
+        items: [],
+      },
+    }),
+  );
   await page.route("**/merchant/order-exceptions", (route) =>
     route.fulfill({
       headers,
@@ -93,45 +186,59 @@ test("@production Home shows store system alerts with what to do, and their reso
       },
     }),
   );
-  const problem = {
-    monitor: "Reporting",
-    observedAt: "2026-10-15T16:00:00.000Z",
-    active: [
-      {
-        key: "entry.customer",
-        severity: "critical",
-        title: "Customer ordering page is not loading",
-        summary:
-          "The secure customer ordering page has not loaded for 4 minutes. Guests cannot scan, order or pay online.",
-        action:
-          "Pause online ordering if staff screens still work, otherwise follow the store outage procedure. Ask the pilot operator to restart the pilot.",
-        raisedAt: "2026-10-15T15:56:00.000Z",
-      },
-      {
-        key: "certificate.expiring",
-        severity: "warning",
-        title: "Secure connection certificate expires soon",
-        summary:
-          "It expires in 6 days. After that, guests and staff devices will refuse to open the store pages.",
-        action:
-          "Ask the pilot operator to renew the secure connection certificate and trust the new one on staff devices.",
-        raisedAt: "2026-10-15T09:00:00.000Z",
-      },
-    ],
-    recentlyCleared: [],
-    outbound: { email: true, webhooks: 0, heartbeat: false },
-    lastSuccessfulBackupAt: "2026-10-15T08:30:00.000Z",
-  };
-  let board: unknown = problem;
-  const requested: string[] = [];
   await page.route("**/merchant/operations-alerts", (route) => {
-    requested.push(route.request().method());
-    return route.fulfill({ headers, json: board });
+    alertReads.push(route.request().method());
+    return role === "front-of-house"
+      ? route.fulfill({ status: 403, headers, json: { error: "request_denied" } })
+      : route.fulfill({ headers, json: board() });
   });
-  const errors: string[] = [];
   page.on("console", (message) => {
-    if (message.type() === "error") errors.push(message.text());
+    // The browser itself reports the expected 403 as a failed resource load; it is not an app error.
+    if (message.type() !== "error") return;
+    if (message.location().url.endsWith("/merchant/operations-alerts") && role === "front-of-house")
+      return;
+    errors.push(message.text());
   });
+  return { alertReads, unexpected, errors };
+}
+
+const problem = {
+  monitor: "Reporting",
+  observedAt: "2026-10-15T16:00:00.000Z",
+  active: [
+    {
+      key: "entry.customer",
+      severity: "critical",
+      title: "Customer ordering page is not loading",
+      summary:
+        "The secure customer ordering page has not loaded for 4 minutes. Guests cannot scan, order or pay online.",
+      action:
+        "Pause online ordering if staff screens still work, otherwise follow the store outage procedure. Ask the pilot operator to restart the pilot.",
+      raisedAt: "2026-10-15T15:56:00.000Z",
+    },
+    {
+      key: "certificate.expiring",
+      severity: "warning",
+      title: "Secure connection certificate expires soon",
+      summary:
+        "It expires in 6 days. After that, guests and staff devices will refuse to open the store pages.",
+      action:
+        "Ask the pilot operator to renew the secure connection certificate and trust the new one on staff devices.",
+      raisedAt: "2026-10-15T09:00:00.000Z",
+    },
+  ],
+  recentlyCleared: [],
+  outbound: { email: true, webhooks: 0, heartbeat: false },
+  lastSuccessfulBackupAt: "2026-10-15T08:30:00.000Z",
+};
+
+test("@production Home shows store system alerts with what to do, and their resolution (WP-2423 Q13)", async ({
+  page,
+}) => {
+  let board: unknown = problem;
+  const home = await pilotHome(page, "owner", () => board);
+  const requested = home.alertReads;
+  const errors = home.errors;
 
   await page.goto("/app");
   const card = page.getByRole("region", { name: "Store system" });
@@ -185,4 +292,45 @@ test("@production Home shows store system alerts with what to do, and their reso
   ).toBeVisible();
   expect(requested.every((method) => method === "GET")).toBe(true);
   expect(errors).toEqual([]);
+  expect(home.unexpected).toEqual([]);
+});
+
+// v15 finding: the pilot navigation has never had to carry an exceptions entry for the card to
+// appear; the server's answer decides. Owner and Store Manager see it, front of house does not.
+for (const role of ["owner", "store-manager"] as const)
+  test(`@production Home shows the store system card to the ${role === "owner" ? "Owner" : "Store Manager"} with the pilot navigation (v15)`, async ({
+    page,
+  }) => {
+    const home = await pilotHome(page, role, () => problem);
+    await page.goto("/app");
+    const card = page.getByRole("region", { name: "Store system" });
+    await expect(card.getByText("Customer ordering page is not loading")).toBeVisible();
+    await expect(
+      page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Exceptions" }),
+    ).toHaveAttribute("href", "/operations/order-exceptions");
+    await expectNoInternalText(page);
+    expect(home.errors).toEqual([]);
+    expect(home.unexpected).toEqual([]);
+  });
+
+test("@production Home shows front of house no store system card and does not keep asking (v15)", async ({
+  page,
+}) => {
+  await page.clock.install();
+  const home = await pilotHome(page, "front-of-house", () => problem);
+  await page.goto("/app");
+  await expect(page.getByRole("region", { name: "Right now" })).toBeVisible();
+  await expect.poll(() => home.alertReads.length).toBe(1);
+  await expect(page.getByRole("region", { name: "Store system" })).toHaveCount(0);
+  await expect(page.getByText("System alerts could not be read")).toHaveCount(0);
+  await expect(
+    page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Exceptions" }),
+  ).toHaveCount(0);
+  // Two refresh periods later the Home has not asked again: a 403 stops the reading.
+  await page.clock.runFor(130_000);
+  await expect(page.getByRole("region", { name: "Right now" })).toBeVisible();
+  expect(home.alertReads).toHaveLength(1);
+  await expect(page.getByRole("region", { name: "Store system" })).toHaveCount(0);
+  expect(home.errors).toEqual([]);
+  expect(home.unexpected).toEqual([]);
 });

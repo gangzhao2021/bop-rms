@@ -167,7 +167,7 @@ export function createMerchantStorePaymentConfiguration(options: {
       : undefined;
     check();
     let finalized: (() => string) | undefined;
-    const result = await host.transactions.run(async (tx) => {
+    const result = await (write ? host.transactions.run : host.transactions.runRead)(async (tx) => {
       const query = tx.query;
       const deniedScope = (error: unknown): never => {
         if (

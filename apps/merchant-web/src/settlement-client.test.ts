@@ -64,3 +64,57 @@ describe("WP-2423 P1 settlement client", () => {
     });
   });
 });
+
+describe("WP-2423 settlement re-check and unmatched charges", () => {
+  const withRecheck = (count: number, runReference?: string) => {
+    const view = settlementViewFixture();
+    const settlement = view.reconciliation.settlement;
+    const first = settlement.checks[0];
+    if (!first) throw Error("fixture");
+    const run = runReference ?? "018f7700-0000-7000-8000-0000000000b1";
+    return {
+      ...view,
+      reconciliation: {
+        ...view.reconciliation,
+        settlement: {
+          ...settlement,
+          recheck: {
+            run: { ...settlement.run, runReference: run },
+            check: {
+              ...first,
+              checkReference: "018f7700-0000-7000-8000-0000000000b2",
+              runReference: run,
+            },
+            count,
+          },
+        },
+      },
+      unmatchedProviderCharges: {
+        captured: { count: 1, amountMinor: "2260", currencyCode: "CAD" },
+        refunded: { count: 0, amountMinor: "0", currencyCode: "CAD" },
+      },
+    };
+  };
+  it("reads the day's re-check and the unmatched charges", () => {
+    const view = parseSettlementView(withRecheck(2));
+    expect(view.reconciliation?.settlement?.recheck?.count).toBe(2);
+    expect(view.unmatchedProviderCharges?.captured.amountMinor).toBe("2260");
+    // Older servers send neither; the day still reads.
+    expect(
+      parseSettlementView(settlementViewFixture()).reconciliation?.settlement?.recheck,
+    ).toBeNull();
+  });
+  it("refuses a re-check without a count, of the same run, or a malformed unmatched total", () => {
+    expect(() => parseSettlementView(withRecheck(0))).toThrow("Unavailable");
+    const fixture = settlementViewFixture();
+    expect(() =>
+      parseSettlementView(withRecheck(1, fixture.reconciliation.settlement.run.runReference)),
+    ).toThrow("Unavailable");
+    expect(() =>
+      parseSettlementView({
+        ...withRecheck(1),
+        unmatchedProviderCharges: { captured: null, refunded: null },
+      }),
+    ).toThrow("Unavailable");
+  });
+});

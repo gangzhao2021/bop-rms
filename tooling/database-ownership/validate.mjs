@@ -2412,6 +2412,8 @@ async function scanUnsupported(root, module, diagnostics) {
             "payment_reconciliation_run",
             "payment_reconciliation_exception",
             "payment_reconciliation_record",
+            // WP-2423: a later matching settlement check resolves the day's earlier difference.
+            "payment_reconciliation_resolution",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/payment-reconciliation-run-source.ts";
         const acceptedPaymentReconciliationWindowAsset =
@@ -2452,9 +2454,11 @@ async function scanUnsupported(root, module, diagnostics) {
         const acceptedPaymentReconciliationExceptionAsset =
           module.packageName === "@rms/payment" &&
           module.manifest.ownedDatabase?.schema === "rms_payment" &&
-          ["payment_reconciliation_exception", "payment_reconciliation_record"].every((table) =>
-            module.manifest.ownedDatabase?.tables?.includes(table),
-          ) &&
+          [
+            "payment_reconciliation_exception",
+            "payment_reconciliation_record",
+            "payment_reconciliation_resolution",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative ===
             "src/infrastructure/persistence/payment-reconciliation-exception-source.ts";
         const acceptedPaymentCompensationExceptionAsset =

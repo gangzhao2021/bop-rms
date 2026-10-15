@@ -232,6 +232,8 @@ export { createPostgresPaymentReconciliationExceptionSource } from "./infrastruc
 export {
   createPostgresPaymentReconciliationRunSource,
   createPostgresPaymentReconciliationRepository,
+  createPostgresPaymentReconciliationResolutionReader,
+  type PaymentReconciliationResolution,
 } from "./infrastructure/persistence/payment-reconciliation-run-source.js";
 export {
   createPostgresPaymentReconciliationDaySource,

@@ -87,6 +87,8 @@ export function createInternalReconciliationRuntime(
         const repository = f.createPostgresPaymentReconciliationRepository({
           scope: r.scope,
           transactions,
+          // WP-2423: a matching re-check of a business day resolves its earlier difference.
+          resolutions: { nextReference: r.credentials.reference },
           authorize: async (_tx, q) =>
             q.runReference === run.runReference &&
             q.brandReference === run.brandReference &&

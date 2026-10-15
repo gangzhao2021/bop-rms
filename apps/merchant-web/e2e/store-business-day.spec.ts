@@ -164,7 +164,7 @@ test("@production Settlement offers the Store's business day as the latest day",
     }),
   );
   await page.goto("/app/operations/payment-reconciliation");
-  await expect(page.getByRole("heading", { name: "Business day 2026-10-13" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Business day: Tue, Oct 13" })).toBeVisible();
   // The device's calendar says Oct 15; the Store's business day (and settlement) says Oct 14.
   await expect(page.getByRole("textbox", { name: "Business day" })).toHaveAttribute(
     "max",

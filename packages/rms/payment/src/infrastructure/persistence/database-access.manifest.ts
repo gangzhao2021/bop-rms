@@ -35,6 +35,14 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      table: "payment_reconciliation_resolution",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/payment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "financial-compliance",
+      piiClassification: ["indirect_identifier", "payment"],
+    },
+    {
       table: "reconciliation_follow_up_history",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/payment" },

@@ -4,6 +4,7 @@ import {
   parseOrderExceptionSource,
 } from "../../packages/bop/projection/src/index.ts";
 import {
+  createPostgresPaymentReconciliationResolutionReader,
   createPostgresUnmatchedCaptureRefundStore,
   parsePaymentExceptionProjectionSource,
 } from "../../packages/rms/payment/src/index.ts";
@@ -60,7 +61,9 @@ export function createInternalReconciliationProjection(resources) {
 /**
  * Maps a Payment reconciliation exception to the order-exception source. WP-2423 P6: one closed by
  * the Provider-confirmed full refund of its unmatched capture becomes Final, with that refund as the
- * resolution evidence (read from the Payment owner in the same transaction).
+ * resolution evidence (read from the Payment owner in the same transaction). WP-2423: a business
+ * day's difference resolved by a later matching settlement check becomes Final with that check as
+ * the evidence.
  */
 export async function mapInternalReconciliationSource(value, scope, tx) {
   const fail = () => {
@@ -74,7 +77,7 @@ export async function mapInternalReconciliationSource(value, scope, tx) {
   )
     return fail();
   let resolution = null;
-  if (source.state === "Closed") {
+  if (source.state === "Closed" && source.refundDisposition === "ProviderConfirmed") {
     if (!tx) return fail();
     const refund = await createPostgresUnmatchedCaptureRefundStore({
       brandReference: scope.brandReference,
@@ -88,6 +91,14 @@ export async function mapInternalReconciliationSource(value, scope, tx) {
     )
       return fail();
     resolution = refund.request.refundReference;
+  } else if (source.state === "Closed") {
+    if (!tx || source.refundDisposition !== "NotApplicable") return fail();
+    const resolved = await createPostgresPaymentReconciliationResolutionReader({
+      scope: { brandReference: scope.brandReference, storeReference: scope.storeReference },
+      authorize: async (t) => t === tx,
+    })(tx, source.exceptionReference);
+    if (resolved === null || resolved.resolvedAt !== source.closedAt) return fail();
+    resolution = resolved.checkReference;
   } else if (source.state !== "Open") return fail();
   const fields = {
     sourceReference: source.exceptionReference,
@@ -102,7 +113,10 @@ export async function mapInternalReconciliationSource(value, scope, tx) {
     sourceOwner: "Payment",
     sourceStatus: resolution === null ? "Open" : "Final",
     providerState: resolution === null ? "Unknown" : "Confirmed",
-    compensationStatus: resolution === null ? "NotRequested" : "Completed",
+    compensationStatus:
+      resolution === null || source.refundDisposition !== "ProviderConfirmed"
+        ? "NotRequested"
+        : "Completed",
     sourceVersion:
       (source.orderReference === null || source.paymentIntentReference === null ? 1n : 2n) +
       (resolution === null ? 0n : 2n),

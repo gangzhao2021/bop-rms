@@ -606,3 +606,36 @@ it("unknown authentication failure is unavailable rather than permission granted
   await expect(write(f)).rejects.toHaveProperty("code", "RECEIPT_TEMPLATE_UNAVAILABLE");
   expect(f.events).not.toContain("begin");
 });
+// v15 finding: Store setup reads its sections together on page load; one that lost a lock wait,
+// serialization or deadlock reran nothing and answered 503. A read now reruns (it writes nothing).
+const conflict = () =>
+  Object.assign(new Error("synthetic conflict"), { code: "TENANT_DATABASE_TRANSACTION_CONFLICT" });
+const runOf = (f: ReturnType<typeof fixture>) =>
+  f.options.persistence.transactions.run as unknown as ReturnType<typeof vi.fn>;
+it("reruns a read whose transaction met a database conflict, then answers the current artifacts", async () => {
+  const f = fixture();
+  runOf(f).mockImplementationOnce(async () => {
+    throw conflict();
+  });
+  const result = await read(f);
+  expect(result.profile).toBe("DigitalReceiptTemplateArtifactsCurrentV1");
+  expect(runOf(f)).toHaveBeenCalledTimes(2);
+});
+it("keeps a persistent read conflict visible so the route answers retry later", async () => {
+  const f = fixture();
+  runOf(f).mockImplementation(async () => {
+    throw conflict();
+  });
+  await expect(read(f)).rejects.toMatchObject({ code: "TENANT_DATABASE_TRANSACTION_CONFLICT" });
+  expect(runOf(f)).toHaveBeenCalledTimes(4);
+});
+it("never reruns a save on a conflict: the write keeps its bounded outcome", async () => {
+  const f = fixture();
+  runOf(f).mockImplementationOnce(async () => {
+    throw conflict();
+  });
+  const outcome = await write(f).catch((error: unknown) => error);
+  expect(outcome).toBeInstanceOf(Error);
+  expect((outcome as { code?: unknown }).code).not.toBe("TENANT_DATABASE_TRANSACTION_CONFLICT");
+  expect(runOf(f)).toHaveBeenCalledTimes(1);
+});

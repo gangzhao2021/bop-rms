@@ -6,6 +6,7 @@ import { currentOrderQueueFixture } from "./current-order-queue.fixtures.js";
 import { parseOrderExceptionView } from "./OrderExceptionPage.js";
 import {
   OverviewToday,
+  StoreOverview,
   initialOverviewState,
   summarizeExceptions,
   summarizeOrders,
@@ -168,5 +169,25 @@ describe("WP-2423 Q11 follow-up: Home reads only what the role's screens permit"
     expect(
       render({ ...initialOverviewState, orders: hidden, pickups: hidden, exceptions: hidden }),
     ).toBe("");
+  });
+});
+
+describe("v15 finding: the store system card follows the server's answer, not the navigation", () => {
+  it("mounts the alerts card for a pilot Owner or Store Manager navigation without an exceptions entry", () => {
+    // The pilot navigation before this fix carried no OPS-ORDER-EXCEPTION entry, so the card never
+    // rendered although the alerts route answers 200 for these roles. A 403 hides it instead.
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <StoreOverview
+          screens={["MER-WORKSPACE-HOME", "OPS-ORDER-QUEUE", "FUL-PICKUP-QUEUE", "STORE-SETUP"]}
+          csrf="csrf"
+          storeReference="018f0f58-767a-7f3b-a1d0-000000000001"
+          storeLabel="Training Store"
+          fetcher={(async () => new Response("{}", { status: 503 })) as never}
+        />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("Store system");
+    expect(html).toContain("Checking the store system");
   });
 });

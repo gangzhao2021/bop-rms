@@ -5,6 +5,7 @@ import {
   createPostgresPaymentCaptureWindowSource,
   createPostgresOrdinaryRefundWindowSource,
   createPostgresConfirmedCompensationRefundSource,
+  createPostgresUnmatchedCaptureRefundStore,
   parseSettlementReconciliationCandidate,
   parsePaymentInstant,
   parsePaymentReference,
@@ -41,6 +42,13 @@ export function createInternalDailySettlementSource({
   const capture = createPostgresPaymentCaptureWindowSource({ scope, authorize: guard });
   const ordinary = createPostgresOrdinaryRefundWindowSource({ scope, authorize: guard });
   const compensation = createPostgresConfirmedCompensationRefundSource({ scope, authorize: guard });
+  // WP-2423: charges the Provider took that match no Order are Payment-owned records too; they and
+  // their staff-approved refunds count on our side on the day the Provider moved the money.
+  const unmatched = createPostgresUnmatchedCaptureRefundStore({
+    brandReference: r.scope.brandReference,
+    storeReference: r.scope.storeReference,
+    authorize: async (_tx, access) => access === "Read" && guard(),
+  });
   return async (input = undefined) => {
     await guard();
     const window = await readWindow(input),
@@ -104,6 +112,79 @@ export function createInternalDailySettlementSource({
         return fail();
       afterRefundReference = page.nextAfterRefundReference;
     } while (afterRefundReference !== null);
+    let afterExceptionReference = null,
+      pages = 0;
+    const unmatchedTotals = {
+      captureCount: 0,
+      capturedAmountMinor: 0n,
+      refundCount: 0,
+      refundedAmountMinor: 0n,
+      records: [],
+    };
+    do {
+      if (++pages > 100) return fail();
+      await guard();
+      const page = await r.transactions.run((tx) =>
+        unmatched.list(tx, { afterExceptionReference, limit: 100 }),
+      );
+      for (const state of page.states) {
+        if (
+          state.environment !== "Test" ||
+          state.providerAccountReference !== providerAccountReference
+        )
+          continue;
+        const amountMinor = BigInt(state.amountMinor);
+        const capturedInDay =
+          state.capturedAt >= window.startsAt && state.capturedAt < window.endsAt;
+        if (capturedInDay) {
+          unmatchedTotals.captureCount++;
+          unmatchedTotals.capturedAmountMinor += amountMinor;
+        }
+        let refund = null;
+        if (state.status === "Refunded") {
+          await guard();
+          const outcome = bindOrdinaryRefundProviderOutcome(
+            unmatched.providerRequest(state),
+            await simulator.adapter.lookupRefund(unmatched.providerRequest(state)),
+          );
+          await guard();
+          if (
+            outcome.kind !== "RefundObservation" ||
+            outcome.status !== "succeeded" ||
+            outcome.amount.amountMinor !== amountMinor ||
+            outcome.providerRefundReference !== state.outcome?.providerRefundReference ||
+            seenProvider.has(outcome.providerRefundReference) ||
+            outcome.createdAt > state.outcome.providerObservedAt
+          )
+            return fail();
+          seenProvider.add(outcome.providerRefundReference);
+          if (outcome.createdAt >= window.startsAt && outcome.createdAt < window.endsAt) {
+            unmatchedTotals.refundCount++;
+            unmatchedTotals.refundedAmountMinor += amountMinor;
+          }
+          refund = {
+            providerRefundReference: outcome.providerRefundReference,
+            createdAt: outcome.createdAt,
+          };
+        }
+        if (capturedInDay || refund !== null)
+          unmatchedTotals.records.push({
+            exceptionReference: state.reconciliationExceptionReference,
+            providerTransactionReference: state.providerTransactionReference,
+            amountMinor,
+            capturedAt: state.capturedAt,
+            refund,
+          });
+      }
+      if (
+        page.nextAfterExceptionReference !== null &&
+        (page.states.length === 0 ||
+          (afterExceptionReference !== null &&
+            page.nextAfterExceptionReference <= afterExceptionReference))
+      )
+        return fail();
+      afterExceptionReference = page.nextAfterExceptionReference;
+    } while (afterExceptionReference !== null);
     await guard();
     const provider = await simulator.readSettlementWindow({
       brandReference: r.scope.brandReference,
@@ -133,6 +214,7 @@ export function createInternalDailySettlementSource({
         records: evidence,
       },
       provider,
+      unmatched: unmatchedTotals,
     };
     const evidenceDigest = "sha256:" + digest(sources);
     const h = digest([
@@ -163,9 +245,15 @@ export function createInternalDailySettlementSource({
       settlementReference:
         "simset_" + window.businessDate.replaceAll("-", "") + "_" + evidenceDigest.slice(7),
       businessDate: window.businessDate,
-      internalCapturedAmount: money(internal.captures.capturedAmountMinor),
+      internalCapturedAmount: money(
+        internal.captures.capturedAmountMinor + unmatchedTotals.capturedAmountMinor,
+      ),
       providerCapturedAmount: money(provider.capturedAmountMinor),
-      internalRefundedAmount: money(internal.ordinary.refundedAmountMinor + compensationMinor),
+      internalRefundedAmount: money(
+        internal.ordinary.refundedAmountMinor +
+          compensationMinor +
+          unmatchedTotals.refundedAmountMinor,
+      ),
       providerRefundedAmount: money(provider.refundedAmountMinor),
       evidenceObservedAt,
     });

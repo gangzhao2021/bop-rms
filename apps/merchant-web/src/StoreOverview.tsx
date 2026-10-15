@@ -306,8 +306,9 @@ export function StoreOverview({
   }, [load, permitted]);
   return (
     <>
-      {/* WP-2423 Q13: store system alerts, for the roles that handle exceptions (Owner, Manager). */}
-      {permitted.exceptions ? <OperationsAlerts timeZone={timeZone} fetcher={fetcher} /> : null}
+      {/* WP-2423 Q13: store system alerts. The server decides who may read them (Owner, Store
+          Manager); for other roles the card answers 403 and renders nothing. */}
+      <OperationsAlerts timeZone={timeZone} fetcher={fetcher} />
       <OverviewToday state={state} timeZone={timeZone} busy={busy} onRefresh={() => void load()} />
     </>
   );

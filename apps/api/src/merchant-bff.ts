@@ -413,6 +413,9 @@ const navigationAlternatives: Readonly<Record<string, readonly string[]>> = Obje
   "CAT-AVAILABILITY": Object.freeze(["catalog.sku.sold_out.mark"]),
   // WP-2423 Q18 option A: a manager who only resets staff PINs reaches the same page.
   "IAM-SESSION-LIST": Object.freeze(["identity.staff_pin.reset"]),
+  // v15 finding: the Store Manager reads Store setup (screen registry STORE-SETUP: Owner / Store
+  // Manager, restricted steps permission-trimmed); only the Owner changes it.
+  "STORE-SETUP": Object.freeze(["organization.store.read"]),
 });
 /** Actions any one of which admits a navigation entry: its own permission first. */
 export function merchantNavigationActions(item: {
@@ -1067,6 +1070,26 @@ function refundReadFailure(response: express.Response, error: unknown): void {
     return;
   }
   denied(response);
+}
+
+/**
+ * v15 finding: a read that kept meeting a database transaction conflict after its own reruns
+ * (Store setup sections read together on page load) answers "retry later": 503 with Retry-After,
+ * so the page retries instead of reporting an outage. Returns false for any other error.
+ */
+function transactionConflictRetryLater(response: express.Response, error: unknown): boolean {
+  if (
+    error === null ||
+    typeof error !== "object" ||
+    Object.getOwnPropertyDescriptor(error, "code")?.value !== "TENANT_DATABASE_TRANSACTION_CONFLICT"
+  )
+    return false;
+  response
+    .status(503)
+    .set("Cache-Control", NO_STORE)
+    .set("Retry-After", "1")
+    .json({ error: "retry_later" });
+  return true;
 }
 
 function denied(response: express.Response): void {
@@ -2675,6 +2698,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
     });
 
   const storeSetupFailure = (response: express.Response, error: unknown): void => {
+    if (transactionConflictRetryLater(response, error)) return;
     const code = error instanceof StoreSetupOperationError ? error.code : undefined;
     const invalid = code === "STORE_SETUP_OPERATION_INPUT_INVALID";
     const forbidden = code === "STORE_SETUP_OPERATION_PERMISSION_DENIED";
@@ -2882,6 +2906,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
   });
 
   const storeSetupReferenceFailure = (response: express.Response, error: unknown): void => {
+    if (transactionConflictRetryLater(response, error)) return;
     const code = error instanceof StoreSetupReferenceError ? error.code : undefined;
     const invalid = code === "STORE_SETUP_REFERENCE_INPUT_INVALID";
     const forbidden = code === "STORE_SETUP_REFERENCE_PERMISSION_DENIED";
@@ -3015,6 +3040,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
   });
 
   const storePaymentConfigurationFailure = (response: express.Response, error: unknown): void => {
+    if (transactionConflictRetryLater(response, error)) return;
     const code = error instanceof StorePaymentConfigurationError ? error.code : undefined;
     const invalid = code === "STORE_PAYMENT_CONFIGURATION_INPUT_INVALID";
     const forbidden = code === "STORE_PAYMENT_CONFIGURATION_PERMISSION_DENIED";
@@ -3139,6 +3165,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
   );
 
   const receiptTemplateArtifactsFailure = (response: express.Response, error: unknown): void => {
+    if (transactionConflictRetryLater(response, error)) return;
     const code = error instanceof DigitalReceiptTemplateError ? error.code : undefined;
     const invalid = code === "RECEIPT_TEMPLATE_INPUT_INVALID";
     const forbidden = code === "RECEIPT_TEMPLATE_PERMISSION_DENIED";
@@ -4264,6 +4291,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
   );
 
   const receiptTemplateDraftFailure = (response: express.Response, error: unknown): void => {
+    if (transactionConflictRetryLater(response, error)) return;
     const code = error instanceof DigitalReceiptTemplateError ? error.code : undefined;
     const invalid = code === "RECEIPT_TEMPLATE_INPUT_INVALID";
     const forbidden = code === "RECEIPT_TEMPLATE_PERMISSION_DENIED";
@@ -4435,6 +4463,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
   );
 
   const receiptTemplateReviewFailure = (response: express.Response, error: unknown): void => {
+    if (transactionConflictRetryLater(response, error)) return;
     const code = error instanceof DigitalReceiptTemplateError ? error.code : undefined;
     response
       .status(
@@ -4535,6 +4564,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
   });
 
   const receiptTemplatePublishedFailure = (response: express.Response, error: unknown): void => {
+    if (transactionConflictRetryLater(response, error)) return;
     const code = error instanceof DigitalReceiptTemplateError ? error.code : undefined;
     response
       .status(

@@ -10,6 +10,8 @@ import { findInternalText, staticText } from "../e2e/internal-text-patterns.js";
 import { MemoryRouter } from "react-router";
 import {
   StoreSetupDraftPage,
+  StoreSetupHeader,
+  storeSetupOwnerOnly,
   StoreSetupFeeContextEditor,
   validateStoreSetupFeeSelections,
   StoreSetupReferenceEditor,
@@ -367,6 +369,47 @@ it("the ordinary route shell offers refresh without fake Store facts", () => {
   expect(html).toContain("Refresh saved setup");
   expect(html).toContain("Saving a draft does not change the live Store");
   expect(html).not.toContain("Synthetic store");
+});
+it("a Store Manager refused the setup read sees the page read-only, not a permission error (v15)", async () => {
+  // The real client turns the server's 403 on the setup read into Denied.
+  const denied = createStoreSetupClient(
+    vi.fn(async () => new Response(JSON.stringify({ error: "request_denied" }), { status: 403 })),
+  );
+  const refused = await denied
+    .load({ storeReference: id(3), signal: new AbortController().signal })
+    .catch((error: unknown) => error);
+  expect(refused).toBeInstanceOf(StoreSetupClientError);
+  const code = (refused as StoreSetupClientError).code;
+  expect(code).toBe("Denied");
+  expect(storeSetupOwnerOnly(code, null, true)).toBe(true);
+  // Only a refused first read is read-only: an Owner's later refusal, a failed read, or another
+  // Store keep their own messages.
+  expect(storeSetupOwnerOnly(code, workspace(), true)).toBe(false);
+  expect(storeSetupOwnerOnly("Unavailable", null, true)).toBe(false);
+  expect(storeSetupOwnerOnly(code, null, false)).toBe(false);
+  const html = renderToStaticMarkup(
+    <StoreSetupHeader
+      ownerOnly
+      displayName={null}
+      refreshDisabled={false}
+      onRefresh={() => undefined}
+    />,
+  );
+  expect(html).toContain("Only the Owner can change Store setup.");
+  expect(html).not.toContain("Refresh saved setup");
+  expect(html).not.toContain("Saving a draft");
+  expect(html).not.toContain("does not allow");
+  expect(findInternalText([staticText(html)])).toEqual([]);
+  const owner = renderToStaticMarkup(
+    <StoreSetupHeader
+      ownerOnly={false}
+      displayName="Synthetic store"
+      refreshDisabled={false}
+      onRefresh={() => undefined}
+    />,
+  );
+  expect(owner).toContain("Refresh saved setup");
+  expect(owner).not.toContain("Only the Owner");
 });
 it("normal save reacquires exact current root and reserves before its first write, then refreshes before cleanup", async () => {
   const f = fixture();

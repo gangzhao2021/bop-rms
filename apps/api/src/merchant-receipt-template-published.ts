@@ -123,7 +123,7 @@ export function createMerchantReceiptTemplatePublished(options: {
       }
       const cookie = rawInput.sessionCookie;
       let finalized: (() => string) | undefined;
-      const result = await host.transactions.run(async (tx) => {
+      const result = await host.transactions.runRead(async (tx) => {
         const query = tx.query;
         const denied = (error: unknown): never => {
           if (

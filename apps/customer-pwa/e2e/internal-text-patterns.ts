@@ -20,6 +20,9 @@ export const internalTextRules: readonly InternalTextRule[] = [
     name: "identifier",
     pattern: /\bUUID\w*|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-/giu,
   },
+  // Provider and internal record references such as simset_20261014_9df991b5…, ch_3Nx…, re_1Ab…
+  // (a short lowercase prefix, an underscore, then a token with a digit).
+  { name: "internal reference", pattern: /\b[a-z]{2,8}_[A-Za-z0-9_]*\d[A-Za-z0-9_]*\b/gu },
   { name: "UTC", pattern: /\bUTC\b/gu },
   {
     name: "technical term",

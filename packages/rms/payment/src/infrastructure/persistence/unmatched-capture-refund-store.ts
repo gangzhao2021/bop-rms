@@ -66,6 +66,8 @@ export interface UnmatchedCaptureRefundState {
   } | null;
   readonly outcome: {
     readonly providerRefundReference: string;
+    /** When the Provider reported the refund succeeded (the day it counts in settlement). */
+    readonly providerObservedAt: string;
     readonly recordedAt: string;
   } | null;
   readonly status: "Unrefunded" | "Requested" | "Approved" | "Refunded";
@@ -165,6 +167,7 @@ export function createPostgresUnmatchedCaptureRefundStore(options: {
       outcome: outcome
         ? Object.freeze({
             providerRefundReference: String(outcome.provider_refund_reference),
+            providerObservedAt: at(outcome.provider_observed_at),
             recordedAt: at(outcome.recorded_at),
           })
         : null,
@@ -227,6 +230,43 @@ export function createPostgresUnmatchedCaptureRefundStore(options: {
       await scope(tx);
       await allow(tx, "Read", null);
       return load(tx, exceptionReference);
+    },
+    /**
+     * WP-2423: every unmatched capture of the Store and its refund state, a page at a time in
+     * exception order, for the day-end settlement (captures and refunds the Provider reports).
+     */
+    async list(
+      tx: ConsumerTransaction,
+      input: { readonly afterExceptionReference: string | null; readonly limit: number },
+    ) {
+      if (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 100)
+        return fail("UNMATCHED_REFUND_INPUT_INVALID");
+      const after =
+        input.afterExceptionReference === null ? null : reference(input.afterExceptionReference);
+      await scope(tx);
+      await allow(tx, "Read", null);
+      const rows = (
+        await tx.query(
+          "SELECT reconciliation_exception_id::text AS exception_reference FROM rms_payment.provider_capture_exception_evidence WHERE brand_id=$1 AND store_id=$2 AND ($3::uuid IS NULL OR reconciliation_exception_id>$3::uuid) ORDER BY reconciliation_exception_id LIMIT $4",
+          [brand, store, after, input.limit + 1],
+        )
+      ).rows;
+      if (!Array.isArray(rows) || rows.length > input.limit + 1)
+        return fail("UNMATCHED_REFUND_UNAVAILABLE");
+      const states: UnmatchedCaptureRefundState[] = [];
+      for (const row of rows.slice(0, input.limit))
+        states.push(
+          (await load(tx, reference(String(row.exception_reference)))) ??
+            fail("UNMATCHED_REFUND_UNAVAILABLE"),
+        );
+      await allow(tx, "Read", null);
+      return Object.freeze({
+        states: Object.freeze(states),
+        nextAfterExceptionReference:
+          rows.length > input.limit
+            ? (states.at(-1)?.reconciliationExceptionReference ?? null)
+            : null,
+      });
     },
     async request(
       tx: ConsumerTransaction,

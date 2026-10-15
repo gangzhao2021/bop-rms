@@ -55,6 +55,7 @@ const moduleManifestInput =
         "store_payment_configuration_version",
         "store_payment_configuration_operation",
         "reconciliation_follow_up_history",
+        "payment_reconciliation_resolution",
         "provider_capture_exception_evidence",
         "unmatched_capture_refund_request",
         "unmatched_capture_refund_approval",

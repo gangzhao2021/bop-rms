@@ -989,6 +989,41 @@ describe("WP-1310 paid-without-fulfillable public contracts", () => {
     ).toThrow();
   });
 
+  it("WP-2423: closes a business day's difference that a later matching re-check resolved", () => {
+    const input = {
+      exceptionReference: refs.compensationCase,
+      brandReference: refs.brand,
+      storeReference: refs.store,
+      candidateReference: refs.source,
+      reason: "RefundMismatch",
+      severity: "Error",
+      status: "Open",
+      openedAt: now,
+      refundedAt: null,
+    };
+    const scope = { brandReference: refs.brand, storeReference: refs.store };
+    const resolvedAt = new Date(Date.parse(now) + 60_000).toISOString();
+    expect(
+      createPaymentReconciliationExceptionSource({ ...input, resolvedAt }, scope),
+    ).toMatchObject({
+      kind: "ReconciliationRefundMismatch",
+      state: "Closed",
+      refundDisposition: "NotApplicable",
+      operationsDisposition: "Reconciled",
+      closedAt: resolvedAt,
+      updatedAt: resolvedAt,
+    });
+    expect(
+      createPaymentReconciliationExceptionSource({ ...input, resolvedAt: null }, scope),
+    ).toMatchObject({ state: "Open", operationsDisposition: "NotApplicable" });
+    // Never resolved before it opened, and never both refunded and re-checked.
+    for (const bad of [
+      { ...input, resolvedAt: new Date(Date.parse(now) - 1000).toISOString() },
+      { ...input, refundedAt: resolvedAt, resolvedAt },
+    ])
+      expect(() => createPaymentReconciliationExceptionSource(bad, scope)).toThrow();
+  });
+
   it("maps a watchdog receipt without exposing its evidence digest", () => {
     const projected = createPaymentTerminalWatchdogExceptionSource(
       {

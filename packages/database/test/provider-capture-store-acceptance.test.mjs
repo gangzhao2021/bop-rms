@@ -1,16 +1,26 @@
 import process from "node:process";
+import { setTimeout as sleep } from "node:timers/promises";
 import path from "node:path";
 import { createInternalSimulatedProvider } from "../../../tooling/environment/pilot-payment-provider.mjs";
 import { createInternalProviderCaptureReview } from "../../../tooling/environment/pilot-provider-capture-review.mjs";
 import { createInternalReconciliationProjection } from "../../../tooling/environment/pilot-reconciliation-projection.mjs";
+import { createInternalDailySettlementSource } from "../../../tooling/environment/pilot-daily-settlement-source.mjs";
 import assert from "node:assert/strict";
 import pg from "pg";
-import { it } from "vitest";
+import { it, vi } from "vitest";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import {
+  createPaymentReconciliationService,
+  createPostgresPaymentReconciliationDaySource,
+  createPostgresPaymentReconciliationRepository,
   createPostgresProviderCaptureExceptionStore,
   createPostgresUnmatchedCaptureRefundStore,
 } from "../../rms/payment/src/index.ts";
+// WP-2423: the closed business day under test (the Store configuration window is not under test).
+const settlementDay = vi.hoisted(() => ({ current: null }));
+vi.mock("../../../tooling/environment/pilot-settlement-window.mjs", () => ({
+  createInternalClosedSettlementWindow: () => async () => settlementDay.current,
+}));
 const { Client } = pg,
   id = (n) => "01902402-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 it("atomically records unlinked capture evidence with Audit, concurrent replay and scoped access", async () => {
@@ -166,6 +176,11 @@ it("atomically records unlinked capture evidence with Audit, concurrent replay a
         "GRANT SELECT,INSERT ON platform_projection.order_exception_source TO " + role,
       );
       await admin.query("GRANT SELECT ON rms_payment.payment_reconciliation_record TO " + role);
+      // WP-2423 pilot ACL addition (Owner standing approval 2026-10-14): the exception source reads
+      // how a business day's difference was resolved; the settlement run records it.
+      await admin.query(
+        "GRANT SELECT,INSERT ON rms_payment.payment_reconciliation_resolution TO " + role,
+      );
       await admin.query(
         "GRANT SELECT,INSERT ON rms_payment.unmatched_capture_refund_request,rms_payment.unmatched_capture_refund_approval,rms_payment.unmatched_capture_refund_outcome TO " +
           role,
@@ -369,6 +384,9 @@ it("atomically records unlinked capture evidence with Audit, concurrent replay a
         const providerRequest = refunds.providerRequest(approved);
         assert.equal(providerRequest.idempotencyKey, "unmatched-capture-refund:" + id(620));
         assert.equal(providerRequest.context.paymentAttemptReference, id(501));
+        // The Provider times refunds to the second: refund on a later second than the charge so
+        // the two fall on different business days below (WP-2423 v15 Oct 9 shape).
+        await sleep(1100);
         const observation = await simulator.adapter.refundPayment(providerRequest);
         // A lost response is recovered with the same fixed key: the same Provider refund.
         const replay = await simulator.adapter.refundPayment(providerRequest);
@@ -436,6 +454,208 @@ it("atomically records unlinked capture evidence with Audit, concurrent replay a
           assert.equal(record.sourceStatus, source === exception ? "Final" : "Open");
           assert.equal(record.resolutionEvidenceReference, source === exception ? id(610) : null);
         }
+
+        // WP-2423 v15 (business day Oct 9): the Provider took the unmatched charge on one day and
+        // refunded it (staff-approved above) on a later day. The refund day's settlement used to
+        // count our refunds without it ($0.00 against the Provider's $22.60): a false difference.
+        // The day-end source now counts unmatched captures and their refunds from the Payment owner.
+        await admin.query(
+          "GRANT SELECT ON rms_payment.payment_intent,rms_payment.payment_attempt,rms_payment.payment_terminal_fact,rms_payment.ordinary_refund_request,rms_payment.ordinary_refund_observation,rms_payment.payment_compensation_refund,rms_payment.payment_compensation_action_history,rms_payment.payment_reconciliation_run TO " +
+            role,
+        );
+        await admin.query("GRANT SELECT ON ALL TABLES IN SCHEMA rms_payment TO " + role);
+        await admin.query(
+          "GRANT INSERT ON rms_payment.payment_reconciliation_run,rms_payment.payment_reconciliation_record TO " +
+            role,
+        );
+        const listed = await run((tx) =>
+          refunds.list(tx, { afterExceptionReference: null, limit: 100 }),
+        );
+        const charge = listed.states.find(
+          (state) => state.reconciliationExceptionReference === exception,
+        );
+        assert.equal(listed.states.length, 2);
+        assert.equal(charge.status, "Refunded");
+        const refund = await simulator.adapter.lookupRefund(providerRequest);
+        assert.ok(charge.capturedAt < refund.createdAt, charge.capturedAt + " " + refund.createdAt);
+        assert.ok(refund.createdAt <= charge.outcome.providerObservedAt);
+        const refundDayStart = new Date(Date.parse(charge.capturedAt) + 1).toISOString();
+        await sleep(5);
+        const closedAt = new Date().toISOString();
+        const days = {
+          capture: {
+            businessDate: "2026-10-08",
+            startsAt: new Date(Date.parse(charge.capturedAt) - 60_000).toISOString(),
+            endsAt: refundDayStart,
+          },
+          refund: { businessDate: "2026-10-09", startsAt: refundDayStart, endsAt: closedAt },
+        };
+        const prepare = createInternalDailySettlementSource({
+          resources,
+          simulator,
+          providerAccountReference: id(4),
+          active: async () => true,
+        });
+        settlementDay.current = days.refund;
+        const refundDay = await prepare();
+        assert.equal(refundDay.candidate.providerCapturedAmount.amountMinor, 0n);
+        assert.equal(refundDay.candidate.providerRefundedAmount.amountMinor, 2260n);
+        assert.equal(refundDay.candidate.internalRefundedAmount.amountMinor, 2260n);
+        assert.equal(refundDay.candidate.internalCapturedAmount.amountMinor, 0n);
+        settlementDay.current = days.capture;
+        const captureDay = await prepare();
+        assert.equal(captureDay.candidate.providerCapturedAmount.amountMinor, 2260n);
+        assert.equal(captureDay.candidate.internalCapturedAmount.amountMinor, 2260n);
+        assert.equal(captureDay.candidate.providerRefundedAmount.amountMinor, 0n);
+        assert.equal(captureDay.candidate.internalRefundedAmount.amountMinor, 0n);
+
+        // The day as v15 recorded it before the fix, then re-checked with the corrected evidence.
+        const repository = createPostgresPaymentReconciliationRepository({
+          scope: { brandReference: id(2), storeReference: id(3) },
+          transactions: { run },
+          authorize: async () => true,
+          resolutions: { nextReference: () => id(++sequence) },
+        });
+        const settle = (runReference, candidate, scheduledAt = new Date().toISOString()) => {
+          return createPaymentReconciliationService({
+            authorization: { authorize: async () => true },
+            lease: { claim: async () => true, release: async () => undefined },
+            repository,
+            candidates: {
+              claimOperational: async () => [],
+              claimDailySettlement: async () => [candidate],
+            },
+            provider: { retrieveIntent: async () => assert.fail("no Provider call") },
+            observations: { record: async () => assert.fail("no observation") },
+            terminal: {
+              occurrence: async () => assert.fail("no terminal"),
+              record: async () => assert.fail("no terminal"),
+            },
+            references: {
+              generate: () => id(++sequence),
+              exceptionFor: ({ reason }) => id(reason === "RefundMismatch" ? 900 : 901),
+            },
+            clock: { now: () => new Date().toISOString() },
+          }).run({
+            runReference,
+            brandReference: id(2),
+            storeReference: id(3),
+            actorReference: null,
+            mode: "DailySettlement",
+            purpose: "ReconcilePayments",
+            scheduledAt,
+            cutoffAt: scheduledAt,
+            maxCandidates: 1,
+          });
+        };
+        const before = await settle(id(800), {
+          ...refundDay.candidate,
+          settlementReference: "simset_20261009_" + "c".repeat(64),
+          internalRefundedAmount: { amountMinor: 0n, currencyCode: "CAD" },
+        });
+        assert.equal(before.result.checks[0].outcome, "Difference");
+        assert.equal(before.result.checks[0].differenceReason, "RefundMismatch");
+        const exceptionState = async () => {
+          const reader = createInternalReconciliationProjection(resources);
+          assert.deepEqual(await reader(), { projectedCount: 3, scanComplete: true });
+          return (
+            await admin.query(
+              "SELECT DISTINCT ON (source_id) record_json FROM platform_projection.order_exception_source WHERE source_id=$1 ORDER BY source_id,source_version DESC",
+              [id(900)],
+            )
+          ).rows[0].record_json;
+        };
+        assert.equal((await exceptionState()).sourceStatus, "Open");
+        // A Difference check can never resolve it, even written past the owner writer.
+        await assert.rejects(
+          run(async (tx) => {
+            await tx.query(
+              "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+              [id(2), id(3)],
+            );
+            await tx.query(
+              "INSERT INTO rms_payment.payment_reconciliation_resolution VALUES ($1,$2,$3,$4,'MatchedOnRecheck',$5,$6,$7,$8)",
+              [
+                id(900),
+                id(2),
+                id(3),
+                refundDay.candidate.candidateReference,
+                id(800),
+                before.result.checks[0].checkReference,
+                before.result.checks[0].checkedAt,
+                id(950),
+              ],
+            );
+          }),
+          (error) => error.code === "23514",
+        );
+        const after = await settle(id(801), refundDay.candidate);
+        assert.equal(after.status, "Created");
+        assert.equal(after.result.checks[0].outcome, "Matched");
+        const resolutions = await admin.query(
+          "SELECT s.reconciliation_exception_id::text AS exception,s.reconciliation_check_id::text AS check_id,s.resolution,a.action_code,a.target_id::text AS target FROM rms_payment.payment_reconciliation_resolution s JOIN platform_audit.audit_record a ON a.audit_id=s.audit_id",
+        );
+        assert.deepEqual(resolutions.rows, [
+          {
+            exception: id(900),
+            check_id: after.result.checks[0].checkReference,
+            resolution: "MatchedOnRecheck",
+            action_code: "PAYMENT_RECONCILIATION_DIFFERENCE_RESOLVED",
+            target: id(900),
+          },
+        ]);
+        // The same run again changes nothing; history stays append-only.
+        assert.equal(
+          (await settle(id(801), refundDay.candidate, after.result.run.scheduledAt)).status,
+          "Duplicate",
+        );
+        assert.equal(
+          (
+            await admin.query(
+              "SELECT count(*)::int AS n FROM rms_payment.payment_reconciliation_resolution",
+            )
+          ).rows[0].n,
+          1,
+        );
+        await assert.rejects(
+          run((tx) =>
+            tx.query(
+              "UPDATE rms_payment.payment_reconciliation_resolution SET resolution='MatchedOnRecheck'",
+            ),
+          ),
+        );
+        const resolved = await exceptionState();
+        assert.equal(resolved.sourceStatus, "Final");
+        assert.equal(resolved.resolutionEvidenceReference, after.result.checks[0].checkReference);
+        // The day-end page reads the first check and the re-check (the day's current result).
+        const day = await run((tx) =>
+          createPostgresPaymentReconciliationDaySource({
+            scope: { brandReference: id(2), storeReference: id(3) },
+            authorize: async () => true,
+          })(tx, {
+            startsAt: days.refund.startsAt,
+            endsAt: days.refund.endsAt,
+            settlementRunReference: id(800),
+          }),
+        );
+        assert.equal(day.settlement.checks[0].outcome, "Difference");
+        assert.equal(day.settlement.recheck.check.outcome, "Matched");
+        assert.equal(day.settlement.recheck.run.runReference, id(801));
+        // Another Store sees no resolution.
+        await run(async (tx) => {
+          await tx.query(
+            "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+            [id(2), id(999)],
+          );
+          assert.equal(
+            (
+              await tx.query(
+                "SELECT count(*)::int AS n FROM rms_payment.payment_reconciliation_resolution",
+              )
+            ).rows[0].n,
+            0,
+          );
+        });
       } finally {
         simulator?.close();
         if (previousEnvironment === undefined) delete process.env.NODE_ENV;

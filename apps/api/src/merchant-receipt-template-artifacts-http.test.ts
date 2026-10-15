@@ -512,3 +512,17 @@ it("retains historical author independent of current reader", async () => {
   expect(reply.status).toBe(200);
   expect(reply.body).toEqual(historical);
 });
+it("answers a read that kept meeting a transaction conflict as retry later, not an outage (v15)", async () => {
+  const port = endpoints();
+  port.read.mockRejectedValueOnce(
+    Object.assign(new Error("conflict"), { code: "TENANT_DATABASE_TRANSACTION_CONFLICT" }),
+  );
+  const reply = await send(await serve(port), {
+    method: "GET",
+    query: "?storeReference=" + id(3),
+  });
+  expect(reply).toMatchObject({ status: 503, body: { error: "retry_later" } });
+  expect(reply.headers.get("retry-after")).toBe("1");
+  expect(reply.headers.get("cache-control")).toBe("no-store");
+  expect(reply.raw).not.toContain("TENANT_DATABASE");
+});

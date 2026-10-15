@@ -168,9 +168,11 @@ test("@production Settlement shows the day's totals, the run result and differen
   );
   await expect(page.locator("body")).not.toContainText(id(1));
   expect(requested).toEqual([null]);
-  // Staff read store-time wording, never a machine date or code. The provider's own statement
-  // reference is printed on the bank statement, so staff match it as written.
-  await expectNoInternalText(page, ["SETTLE-2026-09-21-01"]);
+  // Staff read store-time wording, never a machine date, code or internal statement reference
+  // (WP-2423 v15 showed "simset_20261014_9df991b5…"): the statement is named by its day.
+  await expect(page.getByText("Provider statement for Mon, Sep 21")).toBeVisible();
+  await expect(page.getByText("SETTLE-2026-09-21-01")).toHaveCount(0);
+  await expectNoInternalText(page);
 
   // A day that is still open: totals so far, no run yet.
   await page.getByRole("textbox", { name: "Business day" }).fill("2026-09-22");
@@ -178,14 +180,14 @@ test("@production Settlement shows the day's totals, the run result and differen
   await expect(page.getByRole("heading", { name: "Business day: Tue, Sep 22" })).toBeVisible();
   await expect(page.getByText("Still open")).toBeVisible();
   await expect(page.getByText("after the business day closes", { exact: false })).toBeVisible();
-  await expectNoInternalText(page, ["SETTLE-2026-09-21-01"]);
+  await expectNoInternalText(page);
   expect(requested.at(-1)).toBe("2026-09-22");
   await page.getByRole("button", { name: "Latest closed day" }).click();
   await expect(page.getByRole("heading", { name: "Business day: Mon, Sep 21" })).toBeVisible();
 
   for (const width of [1440, 390, 320]) {
     await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
-    await expect(page.getByText("SETTLE-2026-09-21-01")).toBeVisible();
+    await expect(page.getByText("Provider statement for Mon, Sep 21")).toBeVisible();
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
@@ -196,4 +198,131 @@ test("@production Settlement shows the day's totals, the run result and differen
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Permission denied" })).toBeVisible();
   await expect(page.getByText("$1,234.50")).toHaveCount(0);
+});
+
+test("@production WP-2423 Settlement explains an open day difference and a day resolved by a re-check", async ({
+  page,
+}) => {
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: { ...scope, timeZone: "America/Toronto" },
+          authorizedStores: [scope],
+          businessDate: "2026-09-22",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "PAY-RECONCILIATION",
+              label: "Settlement",
+              href: "/app/operations/payment-reconciliation",
+              permission: "operations.order-exception.manage",
+            },
+            {
+              screenId: "OPS-ORDER-EXCEPTION",
+              label: "Exceptions",
+              href: "/operations/order-exceptions",
+              permission: "operations.order-exception.manage",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  // The v15 Oct 9 shape: the store counted $0.00 in refunds, the provider $22.60 (the refund of
+  // a charge that matched no order); after the fix the day is checked again and matches.
+  let resolved = false;
+  await page.route("**/merchant/settlement*", (route) => {
+    const base = closedView("2026-09-21");
+    const settlement = base.reconciliation.settlement;
+    const first = {
+      ...settlement.checks[0],
+      outcome: "Difference",
+      differenceReason: "RefundMismatch",
+      settlementReference: "simset_20260921_" + "e".repeat(64),
+      internalRefundedMinor: "1130",
+      providerRefundedMinor: "3390",
+      exceptionReference: id(3),
+    };
+    const recheckRun = {
+      ...settlement.run,
+      runReference: id(20),
+      completedAt: "2026-09-23T16:00:01.000Z",
+    };
+    return route.fulfill({
+      headers,
+      json: {
+        ...base,
+        reconciliation: {
+          ...base.reconciliation,
+          settlement: {
+            ...settlement,
+            run: {
+              ...settlement.run,
+              counts: { ...settlement.run.counts, Matched: 0, Difference: 1 },
+            },
+            checks: [first],
+            recheck: resolved
+              ? {
+                  run: recheckRun,
+                  check: {
+                    ...first,
+                    checkReference: id(21),
+                    runReference: id(20),
+                    checkedAt: "2026-09-23T16:00:00.500Z",
+                    outcome: "Matched",
+                    differenceReason: null,
+                    internalRefundedMinor: "3390",
+                    exceptionReference: null,
+                  },
+                  count: 1,
+                }
+              : null,
+          },
+        },
+        unmatchedProviderCharges: {
+          captured: { count: 0, amountMinor: "0", currencyCode: "CAD" },
+          refunded: { count: 1, amountMinor: "2260", currencyCode: "CAD" },
+        },
+      },
+    });
+  });
+  await page.goto("/app/operations/payment-reconciliation");
+  await expect(
+    page.getByText("Settlement difference · the day's totals differ from the provider statement"),
+  ).toBeVisible();
+  const help = page.getByRole("note").filter({ hasText: "Refunds for this day differ" });
+  await expect(help).toContainText(
+    "The store's records show $11.30 in refunds; the payment provider's statement shows $33.90 ($22.60 more at the payment provider).",
+  );
+  await expect(help).toContainText("checked again automatically when new records arrive");
+  await help.getByRole("link", { name: "Exceptions" }).click();
+  await expect(page).toHaveURL(/\/operations\/order-exceptions$/u);
+  await page.goBack();
+  resolved = true;
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(
+    page.getByText("Settled · the day's totals match the provider statement"),
+  ).toBeVisible();
+  await expect(page.getByText("First check of Mon, Sep 21")).toBeVisible();
+  await expect(page.getByText("Checked again", { exact: true })).toBeVisible();
+  await expect(page.getByText("so that difference is resolved", { exact: false })).toBeVisible();
+  await expect(page.getByText("Refunds for this day differ")).toHaveCount(0);
+  await expect(
+    page.getByText("Refund of an unmatched provider charge: 1 refund · $22.60"),
+  ).toBeVisible();
+  await expectNoInternalText(page);
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/settlement-recheck-${width}.png`, fullPage: true });
+  }
 });

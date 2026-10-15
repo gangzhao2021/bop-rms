@@ -55,7 +55,17 @@ export interface MerchantSettlementView {
   readonly reconciliation: MerchantSettlementReconciliation | null;
   /** Null when the source could not answer or is not composed. */
   readonly cardMachine: MerchantSettlementCardMachine | null;
+  /**
+   * WP-2423: charges the payment provider took in the day that match no Order, and refunds of such
+   * charges in the day. The settlement statement counts both on the store's side; the Captured and
+   * Refunded totals above (the store's own orders) do not. Null when not read.
+   */
+  readonly unmatchedProviderCharges: MerchantSettlementUnmatchedCharges | null;
   readonly projectedAt: string;
+}
+export interface MerchantSettlementUnmatchedCharges {
+  readonly captured: MerchantSettlementAmount;
+  readonly refunded: MerchantSettlementAmount;
 }
 const businessDatePattern = /^\d{4}-\d{2}-\d{2}$/u;
 const sameScope = (a: MerchantSettlementScope, b: MerchantSettlementScope) =>
@@ -113,6 +123,11 @@ export function createMerchantSettlementRead(options: {
     scope: MerchantSettlementScope,
     window: MerchantSettlementWindow,
   ): Promise<MerchantSettlementCardMachine | null>;
+  unmatchedProviderCharges?(
+    tx: ConsumerTransaction,
+    scope: MerchantSettlementScope,
+    window: MerchantSettlementWindow,
+  ): Promise<MerchantSettlementUnmatchedCharges | null>;
   now(): string;
 }) {
   return async (input: {
@@ -154,6 +169,10 @@ export function createMerchantSettlementRead(options: {
           : null;
       const cardMachine =
         options.cardMachine === undefined ? null : await options.cardMachine(tx, scope, window);
+      const unmatchedProviderCharges =
+        options.unmatchedProviderCharges === undefined
+          ? null
+          : await options.unmatchedProviderCharges(tx, scope, window);
       const again = await options.authorize(tx, { sessionCookie: input.sessionCookie, permission });
       if (!again || !sameScope(again, scope)) return unavailable();
       return Object.freeze({
@@ -180,6 +199,7 @@ export function createMerchantSettlementRead(options: {
                 differenceCount: reconciliation.differenceCount,
               }),
         cardMachine,
+        unmatchedProviderCharges,
         projectedAt: options.now(),
       });
     });

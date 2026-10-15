@@ -15,6 +15,7 @@ import {
 import { StorePaymentConfigurationError } from "@rms/payment";
 import { DigitalReceiptTemplateError } from "@rms/printing-device";
 import { BrandStoreTopologyError, BrandConfigurationOperationError } from "@bop/tenant";
+import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 
 type Transaction = Parameters<CategoryPersistenceAuthority["holdUntilTransactionCompletes"]>[0];
 type Check = () => Promise<void>;
@@ -28,6 +29,11 @@ interface State {
 const unavailable = (): never => {
   throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
 };
+/** The database runner's retryable conflict: nothing of the failed attempt was committed. */
+export const isTransactionConflict = (error: unknown): boolean =>
+  error !== null &&
+  typeof error === "object" &&
+  Object.getOwnPropertyDescriptor(error, "code")?.value === "TENANT_DATABASE_TRANSACTION_CONFLICT";
 const bounded = (error: unknown): never => {
   if (
     error instanceof CatalogError ||
@@ -96,10 +102,26 @@ export function createMerchantCategoryTransactions(
     state.checks.set(check, finalAssert);
   };
   const transactions = Object.freeze({
-    async run<T>(work: (tx: Transaction) => Promise<T>): Promise<T> {
+    /**
+     * `retryConflict` (read-only work only): a transaction that failed only on a lock wait,
+     * serialization failure or deadlock is rerun with short backoff; one that keeps conflicting
+     * stays a `TENANT_DATABASE_TRANSACTION_CONFLICT` so the route answers "retry later" (503 with
+     * Retry-After), never a plain outage. Write work keeps its bounded outcome.
+     */
+    async run<T>(
+      work: (tx: Transaction) => Promise<T>,
+      options?: { readonly retryConflict?: boolean },
+    ): Promise<T> {
       if (typeof work !== "function") return unavailable();
+      const retry = options?.retryConflict === true;
       try {
-        return await source.run(async (original) => {
+        return await (retry ? retryTransactionConflict(attempt) : attempt());
+      } catch (error) {
+        if (retry && isTransactionConflict(error)) throw error;
+        return bounded(error);
+      }
+      async function attempt(): Promise<T> {
+        return source.run(async (original) => {
           const state: State = { phase: "work", failed: false, pending: 0, checks: new Map() };
           const tx: Transaction = Object.freeze({
             async query<Row = Record<string, unknown>>(sql: string, values: readonly unknown[]) {
@@ -171,9 +193,11 @@ export function createMerchantCategoryTransactions(
             liveRegistrations.delete(tx);
           }
         });
-      } catch (error) {
-        return bounded(error);
       }
+    },
+    /** Read-only work: a conflicted transaction is rerun (see `run`, `retryConflict`). */
+    runRead<T>(work: (tx: Transaction) => Promise<T>): Promise<T> {
+      return transactions.run(work, { retryConflict: true });
     },
   });
   return Object.freeze({

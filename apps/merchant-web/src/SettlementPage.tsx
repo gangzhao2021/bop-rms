@@ -56,8 +56,66 @@ export function summarizeOutcomes(outcomes: Readonly<Record<SettlementOutcome, n
   if (outcomes.Unavailable > 0) parts.push(`${outcomes.Unavailable} provider unavailable`);
   return parts.join(" · ");
 }
-const settled = (settlement: NonNullable<SettlementReconciliation["settlement"]>) =>
-  settlement.checks.every((check) => check.outcome === "Matched" || check.outcome === "Healed");
+type DaySettlement = NonNullable<SettlementReconciliation["settlement"]>;
+/** WP-2423: the day's current statement checks — its latest re-check when it was checked again. */
+const currentChecks = (settlement: DaySettlement): readonly SettlementCheck[] =>
+  settlement.recheck === null ? settlement.checks : [settlement.recheck.check];
+const settled = (settlement: DaySettlement) =>
+  currentChecks(settlement).every(
+    (check) => check.outcome === "Matched" || check.outcome === "Healed",
+  );
+const ordinal = (n: number) =>
+  n % 10 === 1 && n % 100 !== 11
+    ? `${n}st`
+    : n % 10 === 2 && n % 100 !== 12
+      ? `${n}nd`
+      : n % 10 === 3 && n % 100 !== 13
+        ? `${n}rd`
+        : `${n}th`;
+/** "$22.60 more at the payment provider" / "$22.60 less at the payment provider". */
+function providerGap(ours: string, provider: string | null): string {
+  if (provider === null) return "the payment provider's figure could not be read";
+  const gap = BigInt(provider) - BigInt(ours);
+  return gap === 0n
+    ? "the same"
+    : `${formatSettlementMoney((gap < 0n ? -gap : gap).toString())} ${gap > 0n ? "more" : "less"} at the payment provider`;
+}
+
+/**
+ * WP-2423: what an open difference of the day's totals means and what staff can do, in their
+ * words. A day is checked again automatically when new records arrive.
+ */
+function DayDifferenceHelp({ check }: { readonly check: SettlementCheck }) {
+  const refunds = check.differenceReason === "RefundMismatch";
+  const ours = refunds ? check.internalRefundedMinor : check.internalCapturedMinor;
+  const provider = refunds ? check.providerRefundedMinor : check.providerCapturedMinor;
+  return (
+    <div
+      className="settlement__difference-help"
+      role="note"
+      aria-labelledby="settlement-day-difference"
+    >
+      <h4 id="settlement-day-difference">
+        {refunds ? "Refunds for this day differ" : "Payments for this day differ"}
+      </h4>
+      <p>
+        The store&apos;s records show {formatSettlementMoney(ours)} in{" "}
+        {refunds ? "refunds" : "payments"}; the payment provider&apos;s statement shows{" "}
+        {provider === null ? "an amount that could not be read" : formatSettlementMoney(provider)} (
+        {providerGap(ours, provider)}).
+      </p>
+      <p>
+        <span className="system-alert__label">What to do: </span>
+        {refunds
+          ? "Check whether a refund for this day was made directly with the payment provider, or is still waiting for the provider to confirm it (open the order from Orders). "
+          : "A charge the payment provider took that matches no order is listed in Exceptions as an unmatched charge: review it there and refund it if the guest should not have paid. Otherwise check the day's orders and payments. "}
+        This day is checked again automatically when new records arrive. If it still differs, note
+        what you found on the difference in{" "}
+        <Link to="/operations/order-exceptions">Exceptions</Link> and tell the pilot operator.
+      </p>
+    </div>
+  );
+}
 
 const moneyPair = (ours: string, provider: string | null) =>
   `${formatSettlementMoney(ours)} / ${provider === null ? "—" : formatSettlementMoney(provider)}`;
@@ -277,8 +335,14 @@ export function SettlementReport({
               <>
                 <p className="bop-muted">
                   Settlement run {storeTime(settlement.run.completedAt, zone, true)}
+                  {settlement.recheck === null
+                    ? ""
+                    : ` · checked again ${storeTime(settlement.recheck.run.completedAt, zone, true)}`}
                 </p>
-                <table className="settlement__statement" aria-label="Provider statement">
+                <table
+                  className="settlement__statement"
+                  aria-label={`Provider statement for ${businessDateText(view.businessDate)}`}
+                >
                   <thead>
                     <tr>
                       <th scope="col">Statement</th>
@@ -288,9 +352,28 @@ export function SettlementReport({
                     </tr>
                   </thead>
                   <tbody>
-                    {settlement.checks.map((check) => (
+                    {[
+                      ...settlement.checks.map((check) => ({
+                        check,
+                        label:
+                          settlement.recheck === null
+                            ? `Provider statement for ${businessDateText(view.businessDate)}`
+                            : `First check of ${businessDateText(view.businessDate)}`,
+                      })),
+                      ...(settlement.recheck === null
+                        ? []
+                        : [
+                            {
+                              check: settlement.recheck.check,
+                              label:
+                                settlement.recheck.count === 1
+                                  ? "Checked again"
+                                  : `Checked again (${ordinal(settlement.recheck.count)} time)`,
+                            },
+                          ]),
+                    ].map(({ check, label }) => (
                       <tr key={check.checkReference}>
-                        <td data-label="Statement">{check.settlementReference ?? "—"}</td>
+                        <td data-label="Statement">{label}</td>
                         <td data-label="Result">{resultLabel(check)}</td>
                         <td data-label="Captured">
                           {moneyPair(check.internalCapturedMinor, check.providerCapturedMinor)}
@@ -302,7 +385,49 @@ export function SettlementReport({
                     ))}
                   </tbody>
                 </table>
+                {settlement.recheck !== null &&
+                settled(settlement) &&
+                settlement.checks.some((check) => check.outcome === "Difference") ? (
+                  <p role="note" className="settlement__resolved">
+                    The first check found a difference. The day was checked again after new records
+                    arrived and now matches the provider statement, so that difference is resolved.
+                    Both checks stay in the history.
+                  </p>
+                ) : null}
+                {currentChecks(settlement)
+                  .filter((check) => check.outcome === "Difference")
+                  .map((check) => (
+                    <DayDifferenceHelp key={check.checkReference} check={check} />
+                  ))}
               </>
+            ) : null}
+            {view.unmatchedProviderCharges &&
+            (view.unmatchedProviderCharges.captured.count > 0 ||
+              view.unmatchedProviderCharges.refunded.count > 0) ? (
+              <div className="settlement__unmatched" aria-labelledby="settlement-unmatched">
+                <h4 id="settlement-unmatched">Charges that match no order</h4>
+                <ul>
+                  {view.unmatchedProviderCharges.captured.count > 0 ? (
+                    <li>
+                      Charge the payment provider took that matches no order:{" "}
+                      {plural(view.unmatchedProviderCharges.captured.count, "charge")} ·{" "}
+                      {formatSettlementMoney(view.unmatchedProviderCharges.captured.amountMinor)}.
+                      Review it in <Link to="/operations/order-exceptions">Exceptions</Link>.
+                    </li>
+                  ) : null}
+                  {view.unmatchedProviderCharges.refunded.count > 0 ? (
+                    <li>
+                      Refund of an unmatched provider charge:{" "}
+                      {plural(view.unmatchedProviderCharges.refunded.count, "refund")} ·{" "}
+                      {formatSettlementMoney(view.unmatchedProviderCharges.refunded.amountMinor)}
+                    </li>
+                  ) : null}
+                </ul>
+                <p className="bop-muted">
+                  Not in the Captured and Refunded totals above, which are the store&apos;s own
+                  orders. The provider statement check counts them on the store&apos;s side.
+                </p>
+              </div>
             ) : null}
             <p className="bop-muted">
               {operational.latestRun === null

@@ -55,6 +55,12 @@ export interface SettlementReconciliation {
   readonly settlement: {
     readonly run: SettlementRun;
     readonly checks: readonly SettlementCheck[];
+    /** WP-2423: the day's latest later check (its current result), when it was checked again. */
+    readonly recheck: {
+      readonly run: SettlementRun;
+      readonly check: SettlementCheck;
+      readonly count: number;
+    } | null;
   } | null;
   readonly operational: {
     readonly runCount: number;
@@ -85,6 +91,12 @@ export interface SettlementView {
   /** WP-2423 Q7: the Store's own card machine, apart from online payments; null when unreadable,
    * undefined when the server does not report it. */
   readonly cardMachine?: SettlementCardMachine | null;
+  /** WP-2423: Provider charges matching no order, and their refunds, in the day; null when not
+   * read, undefined when the server does not report them. */
+  readonly unmatchedProviderCharges?: {
+    readonly captured: SettlementAmount;
+    readonly refunded: SettlementAmount;
+  } | null;
   readonly projectedAt: string;
 }
 export interface SettlementCardMachine {
@@ -124,6 +136,11 @@ export function parseSettlementView(value: unknown): SettlementView {
     "reconciliation",
     ...(value !== null && typeof value === "object" && Object.hasOwn(value, "cardMachine")
       ? ["cardMachine"]
+      : []),
+    ...(value !== null &&
+    typeof value === "object" &&
+    Object.hasOwn(value, "unmatchedProviderCharges")
+      ? ["unmatchedProviderCharges"]
       : []),
     "projectedAt",
   ]);
@@ -211,7 +228,15 @@ export function parseSettlementView(value: unknown): SettlementView {
     ]);
     let settlement: SettlementReconciliation["settlement"] = null;
     if (r.settlement !== null) {
-      const s = exact(r.settlement, ["run", "checks"]);
+      const s = exact(r.settlement, [
+        "run",
+        "checks",
+        ...(r.settlement !== null &&
+        typeof r.settlement === "object" &&
+        Object.hasOwn(r.settlement, "recheck")
+          ? ["recheck"]
+          : []),
+      ]);
       const settlementRun = run(s.run);
       if (
         settlementRun.mode !== "DailySettlement" ||
@@ -220,9 +245,27 @@ export function parseSettlementView(value: unknown): SettlementView {
         s.checks.length > 100
       )
         return fail();
+      let recheck: NonNullable<SettlementReconciliation["settlement"]>["recheck"] = null;
+      if (s.recheck !== undefined && s.recheck !== null) {
+        const c = exact(s.recheck, ["run", "check", "count"]);
+        const recheckRun = run(c.run);
+        if (
+          recheckRun.mode !== "DailySettlement" ||
+          recheckRun.runReference === settlementRun.runReference
+        )
+          return fail();
+        const recheckCount = count(c.count);
+        if (recheckCount < 1) return fail();
+        recheck = Object.freeze({
+          run: recheckRun,
+          check: check(c.check, recheckRun.runReference),
+          count: recheckCount,
+        });
+      }
       settlement = Object.freeze({
         run: settlementRun,
         checks: Object.freeze(s.checks.map((item) => check(item, settlementRun.runReference))),
+        recheck,
       });
     }
     const o = exact(r.operational, ["runCount", "latestRun", "paymentCount", "outcomes"]);
@@ -303,6 +346,18 @@ export function parseSettlementView(value: unknown): SettlementView {
               recordedAfterOutageCount: count(c.recordedAfterOutageCount),
               refunded,
             });
+          })(),
+        }),
+    ...(raw.unmatchedProviderCharges === undefined
+      ? {}
+      : {
+          unmatchedProviderCharges: (() => {
+            if (raw.unmatchedProviderCharges === null) return null;
+            const u = exact(raw.unmatchedProviderCharges, ["captured", "refunded"]);
+            const captured = amount(u.captured),
+              refunded = amount(u.refunded);
+            if (captured === null || refunded === null) return fail();
+            return Object.freeze({ captured, refunded });
           })(),
         }),
     projectedAt: instant(raw.projectedAt),

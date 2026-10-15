@@ -35,6 +35,11 @@ export const OPERATIONS_ALERTS_REFRESH_MS = 60_000;
 const invalid = (): never => {
   throw new Error("OPERATIONS_ALERTS_UNAVAILABLE");
 };
+/** The server answered 403: this staff member's role does not handle store system alerts. */
+export const OPERATIONS_ALERTS_NOT_PERMITTED = "OPERATIONS_ALERTS_NOT_PERMITTED";
+const notPermitted = (): never => {
+  throw new Error(OPERATIONS_ALERTS_NOT_PERMITTED);
+};
 const exact = (value: unknown, keys: readonly string[]): Record<string, unknown> =>
   value &&
   typeof value === "object" &&
@@ -124,6 +129,7 @@ export function createOperationsAlertsClient(fetcher: typeof fetch = fetch) {
           signal: controller.signal,
           headers: { Accept: "application/json" },
         });
+        if (response.status === 403) return notPermitted();
         if (
           !response.ok ||
           response.headers.get("cache-control") !== "no-store" ||
@@ -133,7 +139,9 @@ export function createOperationsAlertsClient(fetcher: typeof fetch = fetch) {
         const body = await response.text();
         if (controller.signal.aborted || body.length > 262144) return invalid();
         return parseOperationsAlertView(JSON.parse(body));
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && error.message === OPERATIONS_ALERTS_NOT_PERMITTED)
+          throw error;
         return invalid();
       } finally {
         clearTimeout(timer);
@@ -146,7 +154,9 @@ export function createOperationsAlertsClient(fetcher: typeof fetch = fetch) {
 export type OperationsAlertsRead =
   | { readonly kind: "Loading" }
   | { readonly kind: "Ready"; readonly value: OperationsAlertView }
-  | { readonly kind: "Unavailable" };
+  | { readonly kind: "Unavailable" }
+  /** The role does not handle store system alerts (403): the card is not shown at all. */
+  | { readonly kind: "NotPermitted" };
 
 function outboundNote(outbound: OperationsAlertView["outbound"]): string {
   const channels = [
@@ -170,6 +180,7 @@ export function OperationsAlertsCard({
   readonly busy?: boolean;
   readonly onRefresh?: (() => void) | undefined;
 }) {
+  if (read.kind === "NotPermitted") return null;
   const at = (iso: string) => storeTime(iso, timeZone, true);
   const view = read.kind === "Ready" ? read.value : null;
   const critical =
@@ -265,7 +276,11 @@ export function OperationsAlertsCard({
   );
 }
 
-/** Reads the alert board while the Home is open and visible. */
+/**
+ * Reads the alert board while the Home is open and visible. The server decides who sees it
+ * (operations.order-exception.manage): a 403 hides the card and stops reading, so front-of-house
+ * staff never poll a route they cannot use.
+ */
 export function OperationsAlerts({
   timeZone,
   fetcher,
@@ -277,7 +292,10 @@ export function OperationsAlerts({
   const [read, setRead] = useState<OperationsAlertsRead>({ kind: "Loading" });
   const [busy, setBusy] = useState(false);
   const active = useRef<AbortController | null>(null);
+  const stopped = useRef(false);
+  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const load = useCallback(async () => {
+    if (stopped.current) return;
     active.current?.abort();
     const controller = new AbortController();
     active.current = controller;
@@ -285,19 +303,26 @@ export function OperationsAlerts({
     try {
       const value = await client.load(controller.signal);
       if (!controller.signal.aborted) setRead({ kind: "Ready", value });
-    } catch {
-      if (!controller.signal.aborted) setRead({ kind: "Unavailable" });
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      if (error instanceof Error && error.message === OPERATIONS_ALERTS_NOT_PERMITTED) {
+        stopped.current = true;
+        if (timer.current !== null) clearInterval(timer.current);
+        timer.current = null;
+        setRead({ kind: "NotPermitted" });
+      } else setRead({ kind: "Unavailable" });
     } finally {
       if (!controller.signal.aborted) setBusy(false);
     }
   }, [client]);
   useEffect(() => {
     void load();
-    const timer = setInterval(() => {
+    timer.current = setInterval(() => {
       if (document.visibilityState === "visible") void load();
     }, OPERATIONS_ALERTS_REFRESH_MS);
     return () => {
-      clearInterval(timer);
+      if (timer.current !== null) clearInterval(timer.current);
+      timer.current = null;
       active.current?.abort();
     };
   }, [load]);

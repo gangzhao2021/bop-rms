@@ -59,6 +59,7 @@ import { request as httpRequest } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createMerchantBffRouter,
+  merchantNavigationActions,
   parseMerchantWorkspaceSnapshot,
   type MerchantBffService,
   type MerchantBffRouterOptions,
@@ -2043,6 +2044,7 @@ describe("WP-2423 P1 merchant settlement read route", () => {
       recordedAfterOutageCount: 1,
       refunded: { count: 0, amountMinor: "0", currencyCode: "CAD" as const },
     },
+    unmatchedProviderCharges: null,
     projectedAt: "2026-09-22T09:00:00.000Z",
   };
   const headers = {
@@ -6607,5 +6609,16 @@ describe("WP-2423 Q13 operations alerts read route", () => {
     const result = await request(root, "/merchant/operations-alerts", { headers });
     expect(result.status).toBe(403);
     expect(await result.text()).not.toContain("OPERATIONS");
+  });
+});
+
+describe("v15 finding: Store setup navigation for the Store Manager", () => {
+  it("admits Store setup for staff who read the Store profile; only the Owner changes it", () => {
+    // The pilot entry carries organization.manage (the Owner); a Store Manager holds
+    // organization.store.read and reaches the same page read-only (screen registry STORE-SETUP:
+    // Owner / Store Manager, restricted steps permission-trimmed).
+    expect(
+      merchantNavigationActions({ screenId: "STORE-SETUP", permission: "organization.manage" }),
+    ).toEqual(["organization.manage", "organization.store.read"]);
   });
 });

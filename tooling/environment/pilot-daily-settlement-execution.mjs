@@ -6,6 +6,10 @@ import { createInternalReconciliationRuntime } from "./pilot-reconciliation-runt
 import { createInternalDailySettlementSource } from "./pilot-daily-settlement-source.mjs";
 import { createInternalClosedSettlementWindow } from "./pilot-settlement-window.mjs";
 import { createDailySettlementBacklog } from "./pilot-daily-settlement-backlog.mjs";
+import {
+  createDailySettlementRecheck,
+  withDailySettlementRecheck,
+} from "./pilot-daily-settlement-recheck.mjs";
 import { createPostgresPaymentReconciliationRunSource } from "../../packages/rms/payment/src/index.ts";
 export async function createConfiguredDailySettlementExecution(directory, resources) {
   const installation = await loadPilotInstallation(directory),
@@ -39,7 +43,7 @@ export async function createConfiguredDailySettlementExecution(directory, resour
       scope: resources.scope,
       authorize: active,
     });
-    const runOnce = createDailySettlementBacklog({
+    const shared = {
       coverage,
       scope: resources.scope,
       now: resources.now,
@@ -52,6 +56,11 @@ export async function createConfiguredDailySettlementExecution(directory, resour
       }),
       readRun: (q) => resources.transactions.run((tx) => read(tx, q)),
       execute: (q, c) => runtime.run(q, c),
+    };
+    const runOnce = withDailySettlementRecheck({
+      backlog: createDailySettlementBacklog(shared),
+      recheck: createDailySettlementRecheck(shared),
+      now: resources.now,
     });
     return { runOnce, close: () => simulator.close() };
   } catch (error) {

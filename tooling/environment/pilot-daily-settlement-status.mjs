@@ -1,4 +1,5 @@
 import { createDailySettlementScheduler } from "./pilot-daily-settlement-scheduler.mjs";
+import { readDailySettlementChecks } from "./pilot-daily-settlement-recheck.mjs";
 /** Read existing daily results only. Missing days never trigger reconciliation. */
 export async function readPilotDailySettlementStatus({
   coverage,
@@ -37,7 +38,20 @@ export async function readPilotDailySettlementStatus({
     } catch (error) {
       if (error !== missing) throw error;
     }
-    const check = result?.checks[0];
+    // WP-2423: a later re-check of the day is its current result (a match resolves a difference).
+    const checks = result
+      ? await readDailySettlementChecks({
+          readRun,
+          scope,
+          window: {
+            businessDate: window.businessDate,
+            startsAt: window.startsAt,
+            endsAt: window.endsAt,
+          },
+        })
+      : null;
+    if (result && checks === null) return fail();
+    const check = checks?.latest.checks[0];
     days.push(
       Object.freeze({
         businessDate: window.businessDate,
@@ -46,6 +60,7 @@ export async function readPilotDailySettlementStatus({
         state: result ? "Recorded" : "Missing",
         outcome: check?.outcome ?? null,
         checkedAt: check?.checkedAt ?? null,
+        rechecks: checks?.rechecks.length ?? 0,
       }),
     );
     if (window.startsAt === first.startsAt) {

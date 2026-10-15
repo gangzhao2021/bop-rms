@@ -94,3 +94,22 @@ it("flags machine dates and times however they are joined, as on the v15 sold-ou
     ]),
   ).toEqual([]);
 });
+
+it("flags Provider and internal record references such as the v15 settlement statement id", () => {
+  for (const text of [
+    "Statement simset_20261014_9df991b5c0ffee",
+    "Charge ch_3NxSYNTHETIC1 refunded",
+    "Refund re_1AbcSYNTHETIC",
+  ])
+    expect(
+      findInternalText([text]).map((finding) => finding.rule),
+      text,
+    ).toContain("internal reference");
+  // Ordinary words with an underscore-free form or no digit stay allowed.
+  expect(
+    findInternalText([
+      "Provider statement for Wed, Oct 14",
+      "Refund of an unmatched provider charge",
+    ]),
+  ).toEqual([]);
+});
