@@ -9,6 +9,7 @@ import {
 } from "../contracts/staff-pin.js";
 import {
   createArgon2idStaffPinKdf,
+  createStaffPinChoiceTokens,
   createStoreDeviceSecretHasher,
   generateStoreDeviceSecret,
   staffPinBinding,
@@ -135,5 +136,35 @@ describe("store tablet secret", () => {
       hasher.hash(secret),
     );
     expect(() => hasher.hash("short")).toThrow();
+  });
+});
+
+describe("lock-screen choice token", () => {
+  const ref = (n: number) => "0190b3a0-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const front = { brandReference: ref(1), storeReference: ref(2), deviceReference: ref(3) };
+  const patio = { ...front, deviceReference: ref(4) };
+  const people = [ref(10), ref(11), ref(12)];
+  const tokens = createStaffPinChoiceTokens(Buffer.alloc(32, 5));
+  it("names a person on one tablet without carrying their reference", () => {
+    const token = tokens.issue(front, ref(11));
+    expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    expect(token).not.toContain(ref(11));
+    expect(tokens.issue(front, ref(11))).toBe(token);
+    expect(tokens.resolve(front, token, people)).toBe(ref(11));
+    expect(tokens.issue(front, ref(10))).not.toBe(token);
+  });
+  it("names nobody on another tablet, under another key, altered or outside the candidates", () => {
+    const token = tokens.issue(front, ref(11));
+    expect(tokens.resolve(patio, token, people)).toBeNull();
+    expect(tokens.resolve({ ...front, storeReference: ref(9) }, token, people)).toBeNull();
+    expect(
+      createStaffPinChoiceTokens(Buffer.alloc(32, 6)).resolve(front, token, people),
+    ).toBeNull();
+    expect(tokens.resolve(front, token, [ref(10), ref(12)])).toBeNull();
+    const last = token.at(-1) === "A" ? "B" : "A";
+    expect(tokens.resolve(front, token.slice(0, 42) + last, people)).toBeNull();
+    for (const value of [ref(11), "", null, 7, token + "A", token.slice(1)])
+      expect(tokens.resolve(front, value, people)).toBeNull();
+    expect(() => createStaffPinChoiceTokens(Buffer.alloc(16))).toThrow();
   });
 });

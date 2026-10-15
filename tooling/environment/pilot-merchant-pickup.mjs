@@ -5,6 +5,7 @@ import { createAbuseBudgetConsumer } from "../../packages/database/src/index.ts"
 import { createMerchantPickupProof } from "../../apps/api/dist/merchant-pickup-proof.js";
 import { createMerchantPickupNotCollected } from "../../apps/api/dist/merchant-pickup-not-collected.js";
 import { createMerchantPickupHandoff } from "../../apps/api/dist/merchant-pickup-handoff.js";
+import { createMerchantPickupIdentityCheck } from "../../apps/api/dist/merchant-pickup-identity-check.js";
 import { createMerchantPickupQuery } from "../../apps/api/dist/merchant-pickup-query.js";
 export async function createInternalMerchantPickup(
   resources,
@@ -142,10 +143,13 @@ export async function createInternalMerchantPickup(
     nextReference,
     store: handoffStore,
   });
+  // WP-2423: the name and last four phone digits staff compare for an in-person check.
+  const pickupIdentityCheck = createMerchantPickupIdentityCheck({ ...common, store: handoffStore });
   return {
     pickupProof,
     pickupHandoff,
     pickupNotCollected,
+    pickupIdentityCheck,
     pickupQuery: logUnexpected(
       "INTERNAL_PICKUP_QUERY_UNAVAILABLE",
       createMerchantPickupQuery({

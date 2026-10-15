@@ -76,7 +76,12 @@ describe("CUST-PICKUP-CODE contextual screen", () => {
       },
     });
     expect(html).toContain("048 213");
-    expect(html).toContain("Pickup code 0 4 8 2 1 3");
+    // Screen readers hear the digits one by one; the large visual code is hidden from them.
+    expect(html).toContain('<p class="sr-only">Order 1001. Pickup code 0 4 8 2 1 3</p>');
+    expect(html).toContain(
+      '<div class="pickup-code__visual pickup-code__visual--short" aria-hidden="true">',
+    );
+    expect(html).not.toContain('aria-label="Pickup code');
     expect(html).toContain("Show or read this code to staff");
     expect(html).not.toContain("AbCdEfGhIjKlMnOpQrStUQ");
   });

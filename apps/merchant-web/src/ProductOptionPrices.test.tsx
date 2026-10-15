@@ -7,6 +7,7 @@ import {
   dispatchOptionPriceOriginal,
   discoverOptionPriceOriginals,
   OptionPriceRecoveryList,
+  OptionPriceStatus,
 } from "./ProductOptionPrices.js";
 import {
   createOptionPriceAuthoringClient,
@@ -501,4 +502,15 @@ it("renders all discovered originals as explicit separate Resolve choices withou
   expect(markup).toContain("Resolve original price operation 2");
   expect(markup).not.toContain(first.command.operationReference);
   expect(resolve).not.toHaveBeenCalled();
+});
+it("WP-2423: a PIN sign-in refusal offers verification instead of a permission message", () => {
+  const markup = renderToStaticMarkup(
+    <OptionPriceStatus status="FullSignInRequired" csrf="synthetic-csrf" />,
+  );
+  expect(markup).toContain("You signed in with a PIN");
+  expect(markup).toContain("Verify it&#x27;s you");
+  expect(markup).not.toContain("permission");
+  expect(
+    renderToStaticMarkup(<OptionPriceStatus status="Denied" csrf="synthetic-csrf" />),
+  ).toContain("You do not have permission to manage these prices.");
 });

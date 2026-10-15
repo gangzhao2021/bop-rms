@@ -96,6 +96,26 @@ describe("HOME-OVERVIEW Merchant shell", () => {
     expect(html).toContain('role="alert"');
   });
 
+  it("WP-2423: a PIN sign-in refused a Store switch gets the verify step, not a failure", () => {
+    const html = renderToStaticMarkup(
+      <MerchantShell
+        state={{
+          kind: "Ready",
+          switching: false,
+          switchFailed: "FullSignInRequired",
+          csrf: "C".repeat(43),
+          workspace,
+        }}
+        onSwitchStore={vi.fn()}
+      />,
+    );
+    expect(html).toContain("You signed in with a PIN");
+    expect(html).toContain("Verify it&#x27;s you");
+    expect(html).toContain("Your previous Store is unchanged");
+    expect(html).not.toContain("Store switch failed");
+    expect(html).not.toContain("FullSignInRequired");
+  });
+
   it("renders the visibly synthetic showcase without changing normal workspace contracts", () => {
     const html = renderToStaticMarkup(
       <MerchantShell

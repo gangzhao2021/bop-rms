@@ -11,6 +11,7 @@ import {
   createArgon2idStaffPinKdf,
   createIdentityActor,
   createPostgresBrowserSessionStore,
+  createStaffPinChoiceTokens,
   createStoreDeviceSecretHasher,
   setStaffPin,
 } from "../../bop/identity/src/index.ts";
@@ -242,6 +243,20 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
         currentPepperVersion: 1,
       });
       const deviceHasher = createStoreDeviceSecretHasher(randomBytes(32));
+      const choiceTokens = createStaffPinChoiceTokens(randomBytes(32));
+      /** The lock-screen token naming a person on one tablet (as the server would list it). */
+      const tokenOn = async (deviceCookie, actor) => {
+        const row = (
+          await admin.query(
+            "SELECT brand_id::text AS brand,store_id::text AS store,device_id::text AS device FROM bop_identity.store_sign_in_device WHERE device_selector_hash=decode($1,'hex')",
+            [deviceHasher.hash(deviceCookie)],
+          )
+        ).rows[0];
+        return choiceTokens.issue(
+          { brandReference: row.brand, storeReference: row.store, deviceReference: row.device },
+          actor,
+        );
+      };
       const staffPin = createMerchantStaffPin({
         persistence: {
           transactions: api,
@@ -251,6 +266,7 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
         authentication,
         deviceHasher,
         kdf,
+        choiceTokens,
         newReference: reference,
         describeStore: async (_tx, scope) => ({
           label: scope.storeReference === store ? "Pin Store" : "Other Store",
@@ -394,16 +410,25 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
       }
 
       // ── 3. The lock screen lists active members with a PIN (names only); Former is not listed.
+      //       Each person is named by an opaque token for this tablet, never their actor reference.
       const screen = await at(4, () => staffPin.switchScreen(tablet));
       assert.deepEqual(screen, {
         storeLabel: "Pin Store",
         timeZone: "America/Toronto",
         staff: [
-          { choice: ava, name: "Ava" },
-          { choice: cole, name: "Cole" },
-          { choice: manager, name: "Mia" },
+          { choice: await tokenOn(tablet, ava), name: "Ava" },
+          { choice: await tokenOn(tablet, cole), name: "Cole" },
+          { choice: await tokenOn(tablet, manager), name: "Mia" },
         ],
       });
+      for (const actor of [ava, cole, manager, brand, store])
+        assert.ok(!JSON.stringify(screen).includes(actor), "no reference reaches the browser");
+      for (const item of screen.staff) assert.match(item.choice, /^[A-Za-z0-9_-]{43}$/u);
+      assert.deepEqual(
+        await at(4.5, () => staffPin.switchScreen(tablet)),
+        screen,
+        "a list shown a while ago still names the same people",
+      );
       await rejects(
         staffPin.switchScreen(randomBytes(32).toString("base64url")),
         "DeviceNotRegistered",
@@ -412,8 +437,14 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
 
       // ── 4. Switch: a correct PIN starts the person's ordinary session and ends the tablet's
       //       previous session (here Mia's full sign-in held by this browser).
-      const unlock = (choice, pin, sessionCookie = null, deviceCookie = tablet) =>
-        staffPin.unlock({ deviceCookie, sessionCookie, choice, pin });
+      const unlock = async (actor, pin, sessionCookie = null, deviceCookie = tablet) =>
+        staffPin.unlock({
+          deviceCookie,
+          sessionCookie,
+          choice: await tokenOn(deviceCookie, actor),
+          pin,
+        });
+      const coleOnTablet = await tokenOn(tablet, cole);
       const avaSwitch = await at(5, () => unlock(ava, "482913", mia));
       assert.equal(avaSwitch.status, "SignedIn");
       const avaPin = avaSwitch.sessionCookie;
@@ -552,7 +583,7 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
         clock = T(7.5);
         const wrong = await call("/staff-switch/unlock", {
           cookies: { "__Host-bop-store-device": tablet },
-          body: { choice: cole, pin: "111112" },
+          body: { choice: coleOnTablet, pin: "111112" },
         });
         assert.equal(wrong.status, 401);
         assert.deepEqual(await wrong.json(), { error: "pin_rejected" });
@@ -566,14 +597,14 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
               "content-type": "application/json",
               cookie: "__Host-bop-store-device=" + tablet,
             },
-            body: JSON.stringify({ choice: cole, pin: "730418" }),
+            body: JSON.stringify({ choice: coleOnTablet, pin: "730418" }),
           },
         );
         assert.equal(crossSite.status, 403);
         clock = T(7.6);
         const right = await call("/staff-switch/unlock", {
           cookies: { "__Host-bop-store-device": tablet },
-          body: { choice: cole, pin: "730418" },
+          body: { choice: coleOnTablet, pin: "730418" },
         });
         assert.equal(right.status, 200);
         assert.deepEqual(await right.json(), { status: "SignedIn", next: "/operations/orders" });
@@ -718,8 +749,8 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
         [manager, "100006"],
         [manager, "100007"],
         [manager, "100008"],
-        [former, "381904"],
-        [id(999), "100009"],
+        [ava, "100009"],
+        [ava, "100010"],
       ];
       for (const [k, [who, pin]] of spray.entries())
         assert.deepEqual(await at(31 + k * 0.5, () => unlock(who, pin, null, patio)), {
@@ -735,18 +766,19 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
         "SignedIn",
       );
       assert.equal((await at(46, () => unlock(cole, "730419", null, patio))).status, "SignedIn");
-      // Former (no longer at this Store) is refused with their old, correct PIN; nobody's
-      // existence is revealed beyond the list: the same answer as a wrong PIN.
-      assert.deepEqual(await at(47, () => unlock(former, "381904", null, patio)), {
-        status: "Rejected",
-      });
+      // Former (no longer at this Store) is named by no token on this tablet: even their old,
+      // correct PIN is never checked, and the tablet is told to read its list again.
+      await rejects(
+        at(47, () => unlock(former, "381904", null, patio)),
+        "NotListed",
+      );
       const formerRows = (
         await admin.query(
-          "SELECT outcome,rejection_reason,credential_version FROM bop_identity.staff_pin_attempt WHERE actor_id=$1",
+          "SELECT count(*)::int AS n FROM bop_identity.staff_pin_attempt WHERE actor_id=$1",
           [former],
         )
-      ).rows;
-      assert.ok(formerRows.every((row) => row.rejection_reason === "NoActivePin"));
+      ).rows[0].n;
+      assert.equal(formerRows, 0);
 
       // ── 8. A manager resets Ava's PIN: her PIN sessions end, the PIN stops working, she sets a
       //       new one after a full sign-in. A PIN session of the manager cannot reset.
@@ -806,7 +838,8 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
         "Reset",
       );
       assert.equal((await at(52, () => set(avaFull3, "604827"))).state, "Set");
-      assert.equal((await at(53, () => unlock(ava, "604827"))).status, "SignedIn");
+      const avaOnFront2 = await at(53, () => unlock(ava, "604827"));
+      assert.equal(avaOnFront2.status, "SignedIn");
       const avaCredential = (
         await admin.query(
           "SELECT credential_version,status FROM bop_identity.staff_pin_credential WHERE actor_id=$1",
@@ -859,15 +892,115 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
         "DeviceNotRegistered",
       );
 
+      // ── 9b. A token only names someone on the tablet that listed them: another tablet's token,
+      //        a token for someone not at this Store or an altered token names nobody; a raw actor
+      //        reference or no choice is refused outright. None checks a PIN or records an attempt.
+      const attemptsBefore = (
+        await admin.query("SELECT count(*)::int AS n FROM bop_identity.staff_pin_attempt")
+      ).rows[0].n;
+      const patioCole = await tokenOn(patio, cole);
+      const altered = (patioCole[0] === "A" ? "B" : "A") + patioCole.slice(1);
+      for (const [choice, code] of [
+        [await tokenOn(tablet, cole), "NotListed"],
+        [await tokenOn(patio, id(999)), "NotListed"],
+        [await tokenOn(patio, otherManager), "NotListed"],
+        [altered, "NotListed"],
+        [patioCole.slice(0, 42) + (patioCole[42] === "A" ? "B" : "A"), "NotListed"],
+        [cole, "Denied"],
+        ["", "Denied"],
+        [null, "Denied"],
+      ])
+        await rejects(
+          at(55.2, () =>
+            staffPin.unlock({ deviceCookie: patio, sessionCookie: null, choice, pin: "730419" }),
+          ),
+          code,
+        );
+      assert.equal(
+        (await admin.query("SELECT count(*)::int AS n FROM bop_identity.staff_pin_attempt")).rows[0]
+          .n,
+        attemptsBefore,
+      );
+
+      // ── 9c. A full sign-in on a registered tablet ends that tablet's PIN session at once (not
+      //        at the next PIN sign-in); other tablets' PIN sessions and other browsers are kept.
+      assert.equal((await sessionRow(avaOnFront2.sessionCookie)).status, "Active");
+      const colePatio = (
+        await admin.query(
+          "SELECT s.session_id::text AS session FROM bop_identity.staff_pin_session p JOIN bop_identity.authentication_session s USING (session_id) JOIN bop_identity.store_sign_in_device d ON d.device_id=p.device_id WHERE d.label='Patio' AND s.status='Active'",
+        )
+      ).rows;
+      assert.equal(colePatio.length, 1, "Cole's PIN session on the patio tablet is active");
+      const elsewhere = await at(55.4, () =>
+        signIn(manager, (tx, session) => staffPin.endTabletPinSessions(tx, null, session)),
+      );
+      assert.equal((await sessionRow(elsewhere)).status, "Active");
+      assert.equal((await sessionRow(avaOnFront2.sessionCookie)).status, "Active");
+      // A revoked tablet's cookie no longer names a tablet: nothing ends.
+      await at(55.4, () =>
+        signIn(manager, (tx, session) => staffPin.endTabletPinSessions(tx, kitchenTablet, session)),
+      );
+      assert.equal((await sessionRow(avaOnFront2.sessionCookie)).status, "Active");
+      const miaOnFront = await at(55.5, () =>
+        signIn(manager, (tx, session) => staffPin.endTabletPinSessions(tx, tablet, session)),
+      );
+      assert.equal((await sessionRow(miaOnFront)).status, "Active", "the new sign-in is kept");
+      assert.deepEqual(await sessionRow(avaOnFront2.sessionCookie), {
+        session: (await sessionRow(avaOnFront2.sessionCookie)).session,
+        actor: ava,
+        status: "Revoked",
+        revocation_reason: "Logout",
+      });
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT status FROM bop_identity.authentication_session WHERE session_id=$1",
+            [colePatio[0].session],
+          )
+        ).rows[0].status,
+        "Active",
+        "another tablet's PIN session is kept",
+      );
+      assert.equal((await sessionRow(elsewhere)).status, "Active");
+      // The sign-in path that cannot share the session's transaction (OIDC callback) does the same.
+      const coleFullOnPatio = await at(55.6, () => signIn(cole));
+      const coleFullSession = await at(55.6, () =>
+        authentication.authorize({ sessionCookie: coleFullOnPatio }),
+      );
+      assert.deepEqual(
+        await at(55.6, () =>
+          staffPin.afterFullSignIn({ deviceCookie: patio, session: coleFullSession }),
+        ),
+        { signedOut: 1 },
+      );
+      assert.deepEqual(
+        await at(55.6, () =>
+          staffPin.afterFullSignIn({ deviceCookie: "nope", session: coleFullSession }),
+        ),
+        { signedOut: 0 },
+      );
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT status FROM bop_identity.authentication_session WHERE session_id=$1",
+            [colePatio[0].session],
+          )
+        ).rows[0].status,
+        "Revoked",
+      );
+      assert.equal((await sessionRow(coleFullOnPatio)).status, "Active");
+
       // ── 10. Another Store's tablet: lists that Store's people only; Ava's PIN does not work there.
       const omar = await at(56, () => signIn(otherManager));
       const other = await at(56, () =>
         staffPin.registerDevice({ sessionCookie: omar, csrf, deviceCookie: null, label: "Other" }),
       );
       assert.deepEqual((await at(57, () => staffPin.switchScreen(other.deviceCookie))).staff, []);
-      assert.deepEqual(await at(57, () => unlock(ava, "604827", null, other.deviceCookie)), {
-        status: "Rejected",
-      });
+      // Ava is not one of that Store's people: no token there names her, no PIN is checked.
+      await rejects(
+        at(57, () => unlock(ava, "604827", null, other.deviceCookie)),
+        "NotListed",
+      );
       // Omar's overview at the other Store does not see this Store's tablets.
       const omarView = await at(57, () =>
         staffPin.overview({ sessionCookie: omar, deviceCookie: tablet }),
@@ -904,7 +1037,7 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
       });
       assert.deepEqual(
         counts,
-        { d: 1, c: 0, a: 1, s: 0 },
+        { d: 1, c: 0, a: 0, s: 0 },
         "the other Store sees only its own rows",
       );
       const unscoped = await api.run(
@@ -969,6 +1102,7 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
       assert.equal(byCode.IDENTITY_STAFF_PIN_SET, 6);
       assert.equal(byCode.IDENTITY_STAFF_PIN_RESET, 1);
       assert.equal(byCode.IDENTITY_STAFF_PIN_LOCKED, 1);
+      assert.equal(byCode.IDENTITY_STAFF_PIN_TABLET_SIGNED_OUT, 2);
       const attempts = (
         await admin.query(
           "SELECT outcome,count(*)::int AS n FROM bop_identity.staff_pin_attempt GROUP BY outcome ORDER BY outcome",

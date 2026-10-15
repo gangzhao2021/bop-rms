@@ -1,4 +1,10 @@
 import { useRef, useState } from "react";
+import { FullSignInPrompt } from "./FullSignInPrompt.js";
+import {
+  FULL_SIGN_IN_REQUIRED,
+  isFullSignInRequired,
+  type FullSignInRequired,
+} from "./full-sign-in.js";
 import { serviceOperationReference } from "./service-control-client.js";
 
 export interface UnmatchedCaptureRefundView {
@@ -12,7 +18,7 @@ export interface UnmatchedCaptureRefundView {
   readonly refundedAt?: string | null;
   readonly providerResult?: "Unknown";
 }
-type Failure = "Denied" | "SameApprover" | "Changed" | "Unknown";
+type Failure = "Denied" | FullSignInRequired | "SameApprover" | "Changed" | "Unknown";
 
 /** Whole-cent CAD from integer minor units; never binary floating point. */
 export function formatMinorCad(amountMinor: string): string {
@@ -21,6 +27,7 @@ export function formatMinorCad(amountMinor: string): string {
   return "CAD " + String(BigInt(padded.slice(0, -2))) + "." + padded.slice(-2);
 }
 export function unmatchedRefundFailure(status: number, error: unknown): Failure {
+  if (isFullSignInRequired(status, { error })) return FULL_SIGN_IN_REQUIRED;
   return status === 403
     ? "Denied"
     : status === 422 && error === "UNMATCHED_REFUND_SAME_APPROVER"
@@ -88,7 +95,8 @@ export function UnmatchedCaptureRefundAction({
       if (!response.ok || body === null) {
         const next = unmatchedRefundFailure(response.status, body?.error);
         setFailure(next);
-        if (next !== "Unknown") intent.current = null;
+        // Unknown, or a PIN sign-in to confirm first: a retry keeps the same idempotency key.
+        if (next !== "Unknown" && next !== FULL_SIGN_IN_REQUIRED) intent.current = null;
         return;
       }
       if (step !== "status" && body.providerResult !== "Unknown") intent.current = null;
@@ -100,7 +108,7 @@ export function UnmatchedCaptureRefundAction({
       setBusy(false);
     }
   };
-  const failureText: Record<Failure, string> = {
+  const failureText: Record<Exclude<Failure, FullSignInRequired>, string> = {
     Denied: "You do not have refund authority for this Store.",
     SameApprover: "The person who requested this refund cannot approve it. Ask another manager.",
     Changed: "This refund changed. Review it again.",
@@ -115,7 +123,11 @@ export function UnmatchedCaptureRefundAction({
         {view?.status === "NotApplicable" ? (
           <p>No Provider charge without a matching order is recorded for this exception.</p>
         ) : null}
-        <p role="status">{failure ? failureText[failure] : busy ? "Loading…" : null}</p>
+        {failure === FULL_SIGN_IN_REQUIRED ? (
+          <FullSignInPrompt csrf={csrf} fetcher={fetcher} />
+        ) : (
+          <p role="status">{failure ? failureText[failure] : busy ? "Loading…" : null}</p>
+        )}
       </section>
     );
   const amount = formatMinorCad(view.amountMinor ?? "");
@@ -188,14 +200,19 @@ export function UnmatchedCaptureRefundAction({
           </button>
         </>
       ) : null}
+      {failure === FULL_SIGN_IN_REQUIRED ? (
+        <FullSignInPrompt csrf={csrf} fetcher={fetcher} />
+      ) : null}
       <p role="status">
-        {failure
-          ? failureText[failure]
-          : busy
-            ? "Working…"
-            : view.providerResult === "Unknown"
-              ? "Approved. The Provider did not confirm yet; retry sending to recover its result."
-              : null}
+        {failure === FULL_SIGN_IN_REQUIRED
+          ? null
+          : failure
+            ? failureText[failure]
+            : busy
+              ? "Working…"
+              : view.providerResult === "Unknown"
+                ? "Approved. The Provider did not confirm yet; retry sending to recover its result."
+                : null}
       </p>
     </section>
   );

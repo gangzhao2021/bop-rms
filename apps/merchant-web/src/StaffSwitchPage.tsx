@@ -116,10 +116,13 @@ export function StaffSwitchView({
   onChoose,
   onKey,
   onBack,
+  listChanged = false,
 }: {
   readonly load: SwitchLoad;
   readonly entry: SwitchEntry | null;
   readonly now: number;
+  /** The person picked was no longer on the list; it has been read again. */
+  readonly listChanged?: boolean;
   readonly onRetry: () => void;
   readonly onChoose: (person: SwitchStaffChoice) => void;
   readonly onKey: (key: PinKey) => void;
@@ -180,6 +183,11 @@ export function StaffSwitchView({
           <h2 id="staff-switch-who" tabIndex={-1}>
             Who&apos;s working?
           </h2>
+          {listChanged ? (
+            <p role="status" className="staff-switch__note">
+              The staff list has changed. Choose your name again.
+            </p>
+          ) : null}
           {load.staff.length === 0 ? (
             <p>No one has set a PIN for this store yet.</p>
           ) : (
@@ -262,6 +270,7 @@ export function StaffSwitchPage({ client }: { readonly client?: StaffPinClient }
   const [pin, setPin] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<SwitchMessage | null>(null);
+  const [listChanged, setListChanged] = useState(false);
   const [heldUntil, setHeldUntil] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const active = useRef<AbortController | null>(null);
@@ -351,6 +360,12 @@ export function StaffSwitchPage({ client }: { readonly client?: StaffPinClient }
           read(false);
           return;
         }
+        // The person left the list (removed, or their PIN reset) since it was shown.
+        if (error instanceof StaffPinError && error.code === "NotListed") {
+          back();
+          setListChanged(true);
+          return;
+        }
         const next = switchMessageFor(error);
         setMessage(next);
         if (next.kind === "Locked") setHeldUntil(Date.parse(next.until));
@@ -358,7 +373,7 @@ export function StaffSwitchPage({ client }: { readonly client?: StaffPinClient }
         lastKey.current = Date.now();
       },
     );
-  }, [busy, person, pin, read, source]);
+  }, [back, busy, person, pin, read, source]);
 
   // A held keypad opens again on time; a forgotten keypad goes back to the list.
   useEffect(() => {
@@ -384,9 +399,11 @@ export function StaffSwitchPage({ client }: { readonly client?: StaffPinClient }
       load={load}
       entry={entry}
       now={now}
+      listChanged={listChanged}
       onRetry={() => read(false)}
       onChoose={(chosen) => {
         lastKey.current = Date.now();
+        setListChanged(false);
         setPin("");
         setMessage(null);
         setHeldUntil(null);

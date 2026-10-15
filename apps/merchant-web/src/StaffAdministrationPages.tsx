@@ -3,6 +3,8 @@ import { SourceTime, StaffTime } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./RoleAdministrationPages.js";
+import { FullSignInPrompt } from "./FullSignInPrompt.js";
+import { FULL_SIGN_IN_REQUIRED_TEXT, needsFullSignIn } from "./full-sign-in.js";
 import {
   StaffPageError,
   parseStaffPageView,
@@ -18,6 +20,7 @@ import {
 const copy: Record<StaffPageErrorCode | "Loading", string> = {
   Loading: "Loading Store staff…",
   PermissionDenied: "Staff administration permission is required for this action.",
+  FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
   NotFound: "This staff member is not assigned to the selected Store.",
   Conflict: "The staff or role state changed. Refresh and try again.",
   LastOwner: "The Store must keep at least one active Owner. Assign another Owner first.",
@@ -37,11 +40,13 @@ function Member({
   member,
   view,
   client,
+  csrf,
   reload,
 }: {
   readonly member: StaffMemberView;
   readonly view: StaffPageView;
   readonly client: StaffPageClient;
+  readonly csrf: string;
   readonly reload: () => void;
 }) {
   const [name, setName] = useState(member.displayName ?? ""),
@@ -240,7 +245,16 @@ function Member({
           )}
         </StatePanel>
       ) : null}
-      {error ? (
+      {error && needsFullSignIn(error) ? (
+        <StatePanel heading="Confirm it's you" status>
+          <FullSignInPrompt csrf={csrf} />
+          {pending ? (
+            <button disabled={busy} onClick={() => void run(pending)}>
+              Try again
+            </button>
+          ) : null}
+        </StatePanel>
+      ) : error ? (
         <StatePanel heading="Change not applied" tone="error" status>
           <p>{copy[error]}</p>
           {pending && error === "Offline" ? (
@@ -259,9 +273,11 @@ function Member({
 function Page({
   screenId,
   client,
+  csrf,
 }: {
   readonly screenId: StaffPageView["screenId"];
   readonly client: StaffPageClient;
+  readonly csrf: string;
 }) {
   const { id } = useParams();
   const [state, setState] = useState<State>({ kind: "Loading" });
@@ -337,6 +353,7 @@ function Page({
                 member={member}
                 view={view}
                 client={client}
+                csrf={csrf}
                 reload={reload}
               />
             ) : null}
@@ -348,15 +365,21 @@ function Page({
 }
 export function StaffListPage({
   client = unavailableStaffPageClient,
+  csrf = "",
 }: {
   readonly client?: StaffPageClient;
+  /** Session token for the "Verify it's you" step on a PIN sign-in. */
+  readonly csrf?: string;
 }) {
-  return <Page screenId="IAM-USER-LIST" client={client} />;
+  return <Page screenId="IAM-USER-LIST" client={client} csrf={csrf} />;
 }
 export function StaffDetailPage({
   client = unavailableStaffPageClient,
+  csrf = "",
 }: {
   readonly client?: StaffPageClient;
+  /** Session token for the "Verify it's you" step on a PIN sign-in. */
+  readonly csrf?: string;
 }) {
-  return <Page screenId="IAM-USER-DETAIL" client={client} />;
+  return <Page screenId="IAM-USER-DETAIL" client={client} csrf={csrf} />;
 }

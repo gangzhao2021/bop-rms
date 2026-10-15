@@ -526,6 +526,48 @@ publication requires explicit operator recovery; this function never deletes
 an existing target or rotates it. It does not install system/browser trust,
 configure real Store TLS or alter the current runtime.
 
+Staff devices must trust this exact certificate (an approved, recorded trust-store
+entry for the current user only), not click through the browser warning. A click-through
+browser, like a Playwright context with `ignoreHTTPSErrors`, fails the TLS handshake of
+every new connection and restarts each request; with the page's parallel HTTP/1.1
+connections Chromium can exhaust the main stylesheet's restart budget
+(`net::ERR_TOO_MANY_RETRIES`), so screens render unstyled on some fresh loads
+(WP-2423, 2026-10-15). Automated browsers against the pilot entry launch Chromium with
+`pilotChromiumTrustArguments(certificatePem)` from `pilot-tls-trust.mjs`, which trusts
+only that certificate's public key, instead of `ignoreHTTPSErrors`. The certificate lasts
+30 days: renew it (with its trust entry) before it expires.
+
+### Renewing the local pilot certificate
+
+`provisionPilotTls` never rotates and refuses an expired pair, so renew the pair before
+it expires (WP-2423). From the repository root, as the owner of the runtime directory:
+
+```bash
+NODE_ENV=development node tooling/environment/pilot-provision-tls.mjs renew /absolute/private/runtime-directory expected_database_name [within_days]
+```
+
+`renewPilotTls` applies the same development-mode, owner-only `0700` directory and matching
+InternalTest profile checks, and needs a complete owner-only `0600` pair whose key matches
+the certificate (it may already be expired). A pair with more than `within_days` (default 7,
+at most 30) left is retained unchanged. Otherwise it generates a new key and a new 30-day
+certificate with the same subject and alternative names, validates it, keeps the previous
+pair as hard links in a new owner-only `tls-backup-<time>` directory and then replaces
+`customer-tls-key.pem` and `customer-tls-cert.pem`. It prints the new expiry, the backup
+name and the new public-key pin; it never prints key material, installs trust or restarts
+anything. A second renewal into an existing backup name is refused.
+
+After a renewal:
+
+1. Restart the HTTPS entry and every service that reads the certificate (for a container
+   installation, restart its containers); a running server keeps the old certificate.
+2. Replace the trusted certificate on every staff device and browser profile with the new
+   `customer-tls-cert.pem` (an approved, recorded trust entry for the current user) and
+   remove the old entry. Automated browsers derive the pin from the new file.
+3. Reload open screens.
+
+If the replacement is interrupted, the directory may hold a mismatched pair that
+provisioning refuses; restore both files from the backup directory and run renewal again.
+
 ### Explicit local security initialization
 
 After an authorized initializer supplies a matching InternalTest profile in an

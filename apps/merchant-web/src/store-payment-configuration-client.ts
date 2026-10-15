@@ -12,6 +12,7 @@ import {
   StoreSetupClientError,
   type StoreSetupScope,
 } from "./store-setup-client.js";
+import { FULL_SIGN_IN_REQUIRED, responseNeedsFullSignIn } from "./full-sign-in.js";
 export { StoreSetupClientError as StorePaymentConfigurationClientError };
 export interface StorePaymentConfigurationContent {
   readonly customerOnlineCardEnabled: boolean;
@@ -418,6 +419,8 @@ export function createStorePaymentConfigurationClient(fetcher: typeof fetch = fe
       if (captured !== epoch || options.csrf !== csrf || options.signal !== signal)
         return fail("ScopeChanged");
       if (controller.signal.aborted) return fail(body ? "OutcomeUnknown" : "Unavailable");
+      // A PIN sign-in that is not yet confirmed: nothing was saved; verify, then send it again.
+      if (await responseNeedsFullSignIn(response)) return fail(FULL_SIGN_IN_REQUIRED);
       if (response.status === 403) return fail("Denied");
       if (response.status === 409) return fail("Conflict");
       if (response.status === 400) return fail("Invalid");

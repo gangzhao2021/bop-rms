@@ -737,6 +737,7 @@ export async function createInternalMerchant(
             authentication: service,
             deviceHasher: keys.deviceHasher,
             kdf: keys.kdf,
+            choiceTokens: keys.choiceTokens,
             newReference: () => resources.credentials.reference(),
             describeStore: async (tx, scope) => {
               if (
@@ -986,7 +987,7 @@ export async function createInternalMerchant(
     references: { next: () => resources.credentials.reference() },
     locale: "en",
   });
-  const { pickupQuery, pickupProof, pickupHandoff, pickupNotCollected } =
+  const { pickupQuery, pickupProof, pickupHandoff, pickupNotCollected, pickupIdentityCheck } =
     await createInternalMerchantPickup(resources, { persistence, service });
   // WP-2423 Q4: store hours and holiday editing — a manager drafts, the owner approves and publishes.
   const storeConfiguration = await createInternalStoreConfiguration(resources, {
@@ -1013,7 +1014,14 @@ export async function createInternalMerchant(
   return {
     ordinaryRefundReconciliation,
     ordinaryRefundSend,
-    issue: session.issue,
+    // WP-2423 Q18: a full sign-in on a registered tablet ends the PIN sessions left on it, in the
+    // transaction that creates the new session.
+    issue: (selector, purpose, deviceCookie) =>
+      staffPin === undefined || deviceCookie === undefined
+        ? session.issue(selector, purpose)
+        : session.issue(selector, purpose, (tx, created) =>
+            staffPin.endTabletPinSessions(tx, deviceCookie, created),
+          ),
     staffChoices: session.staffChoices,
     persistence,
     service,
@@ -1025,6 +1033,7 @@ export async function createInternalMerchant(
     pickupProof,
     pickupHandoff,
     pickupNotCollected,
+    pickupIdentityCheck,
     orderAcceptance,
     bff: {
       // WP-2423 Q18: TEST-ONLY staff sign-in page of the InternalTest pilot (the Cognito sign-in is
@@ -1196,6 +1205,7 @@ export async function createInternalMerchant(
       pickupProof,
       pickupHandoff,
       pickupNotCollected,
+      pickupIdentityCheck,
       orderAcceptance,
       exactOrigin: "https://127.0.0.1:4443",
       acceptedHost: "127.0.0.1:4443",

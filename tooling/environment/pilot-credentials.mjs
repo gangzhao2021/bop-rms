@@ -14,6 +14,7 @@ import {
   createGuestSessionCredentialProvider,
   createGuestBindingCredentialProvider,
   createStoreDeviceSecretHasher,
+  createStaffPinChoiceTokens,
 } from "../../packages/bop/identity/src/index.ts";
 import { createPickupCredentialProvider } from "../../packages/rms/fulfillment/src/index.ts";
 export function createInternalCredentialLoaders({ file, loadProfile, expectedDatabaseName }) {
@@ -165,7 +166,8 @@ export function createInternalCredentialLoaders({ file, loadProfile, expectedDat
     };
   }
   /**
-   * WP-2423 Q18 option A: the staff PIN pepper and the shared-tablet secret key, each derived for
+   * WP-2423 Q18 option A: the staff PIN pepper, the shared-tablet secret key and the lock-screen
+   * choice key, each derived for
    * its own purpose from the existing workforce selector key (no new key file entry). TEST-ONLY:
    * a live store keeps both in the managed secret store (capability gap "Secrets").
    */
@@ -184,7 +186,8 @@ export function createInternalCredentialLoaders({ file, loadProfile, expectedDat
       );
     try {
       const pepper = derive("bop-rms/internal-test/staff-pin-pepper/v1"),
-        device = derive("bop-rms/internal-test/store-device-selector/v1");
+        device = derive("bop-rms/internal-test/store-device-selector/v1"),
+        choice = derive("bop-rms/internal-test/staff-pin-choice/v1");
       try {
         return Object.freeze({
           kdf: createArgon2idStaffPinKdf({
@@ -192,10 +195,12 @@ export function createInternalCredentialLoaders({ file, loadProfile, expectedDat
             currentPepperVersion: 1,
           }),
           deviceHasher: createStoreDeviceSecretHasher(device),
+          choiceTokens: createStaffPinChoiceTokens(choice),
         });
       } finally {
         pepper.fill(0);
         device.fill(0);
+        choice.fill(0);
       }
     } finally {
       root.fill(0);

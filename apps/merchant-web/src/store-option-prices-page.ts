@@ -1,6 +1,10 @@
+import { FULL_SIGN_IN_REQUIRED, isFullSignInRequired } from "./full-sign-in.js";
+
 /** WP-2423 slice 4.3: PRICE-OPTION-LIST view contract, money text and same-origin client. */
 export type OptionPriceErrorCode =
   | "PermissionDenied"
+  /** Refused because the person signed in with a PIN; they confirm it is them and retry. */
+  | typeof FULL_SIGN_IN_REQUIRED
   | "NotFound"
   | "Conflict"
   | "ApprovalRequired"
@@ -119,6 +123,8 @@ export function createOptionPriceClient(
     }
     if (!response.ok) {
       const payload = (await response.json().catch(() => null)) as { error?: unknown } | null;
+      if (isFullSignInRequired(response.status, payload))
+        throw new OptionPricePageError(FULL_SIGN_IN_REQUIRED);
       const code = String(payload?.error) as OptionPriceErrorCode;
       throw new OptionPricePageError(
         codes.has(code) ? code : response.status === 403 ? "PermissionDenied" : "Unavailable",

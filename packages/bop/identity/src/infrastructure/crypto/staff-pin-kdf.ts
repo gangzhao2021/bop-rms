@@ -162,3 +162,55 @@ export function createStoreDeviceSecretHasher(key: Uint8Array): StoreDeviceSecre
 export function generateStoreDeviceSecret(): string {
   return randomBytes(32).toString("base64url");
 }
+
+/**
+ * How the tablet lock screen names each person without sending their actor reference to the
+ * browser: HMAC-SHA256, under a purpose-separated server key, of the registered tablet (Brand,
+ * Store, tablet registration) and the person. The token is stable for that tablet registration,
+ * so a list shown a while ago still works, but it cannot be made without the key, names nobody on
+ * another tablet or after the tablet is registered again, and reveals nothing about the person.
+ * The server maps it back by recomputing it for the Store's members.
+ */
+export interface StaffPinChoiceScope {
+  readonly brandReference: string;
+  readonly storeReference: string;
+  readonly deviceReference: string;
+}
+export interface StaffPinChoiceTokens {
+  issue(scope: StaffPinChoiceScope, actorReference: string): string;
+  /** The candidate the token names on this tablet, or null. */
+  resolve(scope: StaffPinChoiceScope, token: unknown, candidates: readonly string[]): string | null;
+}
+const CHOICE_TOKEN = /^[A-Za-z0-9_-]{43}$/u;
+export function createStaffPinChoiceTokens(key: Uint8Array): StaffPinChoiceTokens {
+  if (key.byteLength !== 32) unavailable();
+  const held = Buffer.from(key);
+  const mac = (scope: StaffPinChoiceScope, actorReference: string) =>
+    createHmac("sha256", held)
+      .update(
+        "bop-rms/staff-pin-choice/v1:" +
+          scope.brandReference +
+          ":" +
+          scope.storeReference +
+          ":" +
+          scope.deviceReference +
+          ":" +
+          actorReference,
+        "utf8",
+      )
+      .digest();
+  return Object.freeze({
+    issue: (scope: StaffPinChoiceScope, actorReference: string) =>
+      mac(scope, actorReference).toString("base64url"),
+    resolve(scope: StaffPinChoiceScope, token: unknown, candidates: readonly string[]) {
+      if (typeof token !== "string" || !CHOICE_TOKEN.test(token)) return null;
+      const submitted = Buffer.from(token, "base64url");
+      if (submitted.byteLength !== 32 || submitted.toString("base64url") !== token) return null;
+      let found: string | null = null;
+      // Every candidate is compared, so the time taken does not depend on who is named.
+      for (const candidate of candidates)
+        if (timingSafeEqual(mac(scope, candidate), submitted) && found === null) found = candidate;
+      return found;
+    },
+  });
+}

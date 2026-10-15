@@ -202,6 +202,11 @@ it("retains malformed/lost reply as OutcomeUnknown and maps bounded denial/confl
   await expect(c.execute(p, { csrf })).rejects.toMatchObject({ code: "OutcomeUnknown" });
   f.mockImplementation(async () => response({ error: "request_denied" }, 403));
   await expect(c.resolve(p.cursor, { csrf })).rejects.toMatchObject({ code: "Denied" });
+  // A PIN sign-in that is not confirmed is not a missing permission.
+  f.mockImplementation(async () => response({ error: "full_sign_in_required" }, 403));
+  await expect(c.resolve(p.cursor, { csrf })).rejects.toMatchObject({
+    code: "FullSignInRequired",
+  });
   f.mockImplementation(async () => response({ error: "tax_config_authoring_conflict" }, 409));
   await expect(c.resolve(p.cursor, { csrf })).rejects.toMatchObject({ code: "Conflict" });
   f.mockImplementation(async () => response({ unexpected: true }));

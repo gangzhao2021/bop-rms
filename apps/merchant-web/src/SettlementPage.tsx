@@ -9,7 +9,7 @@ import {
   type SettlementReconciliation,
   type SettlementView,
 } from "./settlement-client.js";
-import { useStoreBusinessDay } from "./StoreBusinessDay.js";
+import { businessDateText, useStoreBusinessDay } from "./StoreBusinessDay.js";
 import { Freshness, storeTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 
@@ -97,7 +97,7 @@ export function SettlementReport({
     <div className="settlement">
       <section className="store-card settlement__day" aria-labelledby="settlement-day">
         <header>
-          <h3 id="settlement-day">Business day {view.businessDate}</h3>
+          <h3 id="settlement-day">Business day: {businessDateText(view.businessDate)}</h3>
           <span className="status-chip" data-state={open ? "open" : "closed"}>
             {open ? "Still open" : "Closed"}
           </span>
@@ -210,7 +210,7 @@ export function SettlementReport({
       {view.currentDaySelfApprovedRefunds !== null &&
       view.currentDaySelfApprovedRefunds.count > 0 ? (
         <p role="status" className="settlement__self-approved-today">
-          Today so far ({view.currentDaySelfApprovedRefunds.businessDate}):{" "}
+          Today so far ({businessDateText(view.currentDaySelfApprovedRefunds.businessDate)}):{" "}
           {view.currentDaySelfApprovedRefunds.count} refund
           {view.currentDaySelfApprovedRefunds.count === 1 ? "" : "s"} ·{" "}
           {formatSettlementMoney(view.currentDaySelfApprovedRefunds.amountMinor)} approved by the

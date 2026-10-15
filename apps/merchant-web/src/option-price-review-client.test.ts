@@ -203,6 +203,7 @@ it.each(["Draft", "InReview", "Approved", "Published", "Archived", "Superseded"]
 );
 it.each([
   ["Denied", 403, "request_denied"],
+  ["FullSignInRequired", 403, "full_sign_in_required"],
   ["Conflict", 409, "option_price_conflict"],
   ["Invalid", 400, "option_price_invalid"],
   ["FeatureDisabled", 409, "option_price_feature_disabled"],
@@ -214,6 +215,19 @@ it.each([
     expect(p.pending).toBe(false);
   },
 );
+it("WP-2423: a PIN sign-in refusal of a later review attempt keeps the unknown original", async () => {
+  const f = vi
+      .fn<typeof fetch>()
+      .mockRejectedValueOnce(new Error("private transport detail"))
+      .mockResolvedValueOnce(response({ error: "full_sign_in_required" }, 403))
+      .mockResolvedValueOnce(response(receipt())),
+    p = prepare(f);
+  await expect(p.execute({ csrf })).rejects.toMatchObject({ code: "OutcomeUnknown" });
+  await expect(p.resolve({ csrf })).rejects.toMatchObject({ code: "FullSignInRequired" });
+  expect(p.pending).toBe(true);
+  expect((await p.resolve({ csrf })).outcome).toBe("Committed");
+  expect(p.pending).toBe(false);
+});
 it.each([
   ["Denied", 403, "request_denied"],
   ["Conflict", 409, "option_price_conflict"],

@@ -1,4 +1,9 @@
 import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
+import {
+  FULL_SIGN_IN_REQUIRED,
+  isFullSignInRequired,
+  type FullSignInRequired,
+} from "./full-sign-in.js";
 /** WP-2423 / DEC-PRICE-STORE-ASSIGNMENT: PRICE-BOOK-LIST / PRICE-BOOK-EDITOR view contract and client. */
 export type PriceErrorCode =
   | "PermissionDenied"
@@ -13,6 +18,8 @@ export type PriceErrorCode =
   | "Invalid"
   | "SoleOperatorNotInEffect"
   | "NeedsReverification"
+  /** A PIN sign-in must confirm it is the staff member first (not a missing permission). */
+  | FullSignInRequired
   | "Offline"
   | "Unavailable";
 export class PricePageError extends Error {
@@ -213,6 +220,8 @@ export function createPriceClient(csrf: string, fetcher: typeof fetch = fetch): 
         error?: unknown;
         sellableReferences?: unknown;
       } | null;
+      if (isFullSignInRequired(response.status, payload))
+        throw new PricePageError(FULL_SIGN_IN_REQUIRED);
       const code = String(payload?.error) as PriceErrorCode;
       throw new PricePageError(
         codes.has(code) ? code : response.status === 403 ? "PermissionDenied" : "Unavailable",

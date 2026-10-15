@@ -345,6 +345,7 @@ it("retains the exact detached command, context and operation across explicit re
 });
 it.each([
   ["Denied", 403, "request_denied"],
+  ["FullSignInRequired", 403, "full_sign_in_required"],
   ["Conflict", 409, "option_price_conflict"],
   ["FeatureDisabled", 409, "option_price_feature_disabled"],
   ["Invalid", 400, "option_price_invalid"],
@@ -386,6 +387,20 @@ it.each([
     expect(JSON.parse(String(f.mock.calls[2]?.[1]?.body))).toEqual({ command: command() });
   },
 );
+it("WP-2423: a PIN sign-in refusal of a later attempt keeps the unknown original for the retry", async () => {
+  const f = vi
+    .fn<typeof fetch>()
+    .mockRejectedValueOnce(new Error("private transport detail"))
+    .mockResolvedValueOnce(response({ error: "full_sign_in_required" }, 403))
+    .mockResolvedValueOnce(response(receipt()));
+  const p = prepare(f);
+  await expect(p.execute({ csrf })).rejects.toMatchObject({ code: "OutcomeUnknown" });
+  await expect(p.resolve({ csrf })).rejects.toMatchObject({ code: "FullSignInRequired" });
+  expect(p.pending).toBe(true);
+  expect((await p.resolve({ csrf })).outcome).toBe("Committed");
+  expect(p.pending).toBe(false);
+  expect(f.mock.calls[1]?.[1]?.body).toBe(f.mock.calls[2]?.[1]?.body);
+});
 it("only actual original Abandoned clears unknown without a business state", async () => {
   const f = vi
       .fn<typeof fetch>()

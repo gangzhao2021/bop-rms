@@ -9,6 +9,7 @@ import {
 } from "./refund-approval-client.js";
 import { describeRefundReason, escalationReasonLabel, formatCad } from "./refund-reasons.js";
 import { StepUpVerification } from "./StepUpVerification.js";
+import { ApprovalFailureNotice } from "./RefundApprovalsPage.js";
 
 const id = (n: number) => "01909974-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const csrf = "c".repeat(43);
@@ -254,4 +255,50 @@ it("WP-2423 Q5: reads the server's own verification and names role refusals apar
   const command = { orderReference: id(1), requestReference: id(2), approvalReference: id(4) };
   for (const code of ["NotPermitted", "RequesterNotEligible", "Denied"])
     await expect(client.approve(command, csrf)).rejects.toMatchObject({ code });
+});
+
+it("WP-2423: approve and decline refused on a PIN sign-in ask to confirm it is them", async () => {
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(json({ error: "full_sign_in_required" }, 403))
+    .mockResolvedValueOnce(json({ error: "request_denied" }, 403))
+    .mockResolvedValueOnce(json({ error: "full_sign_in_required" }, 403))
+    .mockResolvedValueOnce(json({ error: "request_denied" }, 403));
+  const client = createRefundApprovalClient(fetcher);
+  const approval = {
+    orderReference: id(1),
+    requestReference: id(2),
+    approvalReference: id(7),
+  };
+  await expect(client.approve(approval, csrf)).rejects.toMatchObject({
+    code: "FullSignInRequired",
+  });
+  await expect(client.approve(approval, csrf)).rejects.toMatchObject({ code: "Denied" });
+  const decline = {
+    orderReference: id(1),
+    requestReference: id(2),
+    operationReference: id(8),
+    reasonCode: "NOT_ELIGIBLE" as const,
+  };
+  await expect(client.decline(decline, csrf)).rejects.toMatchObject({
+    code: "FullSignInRequired",
+  });
+  await expect(client.decline(decline, csrf)).rejects.toMatchObject({ code: "Denied" });
+});
+
+it("WP-2423: an approval refused on a PIN sign-in shows the verification step", () => {
+  const html = renderToStaticMarkup(
+    createElement(ApprovalFailureNotice, { outcome: { kind: "SignIn" }, csrf }),
+  );
+  expect(html).toContain("You signed in with a PIN");
+  expect(html).toContain("Verify it&#x27;s you");
+  expect(html).not.toContain("Sign in again");
+  const failed = renderToStaticMarkup(
+    createElement(ApprovalFailureNotice, {
+      outcome: { kind: "Failed", retry: false, message: "Your session has ended." },
+      csrf,
+    }),
+  );
+  expect(failed).toContain("Your session has ended.");
+  expect(failed).not.toContain("You signed in with a PIN");
 });

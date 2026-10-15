@@ -2,6 +2,8 @@ import { AppFrame, StatePanel } from "@bop-rms/ui";
 import type { ReactNode } from "react";
 import type { MerchantWorkspaceSnapshot } from "./merchant-workspace.js";
 import { StaffSignInLink } from "./StaffSession.js";
+import { FullSignInPrompt } from "./FullSignInPrompt.js";
+import { FULL_SIGN_IN_REQUIRED } from "./full-sign-in.js";
 import { businessDateText, useStoreBusinessDay } from "./StoreBusinessDay.js";
 import { Freshness } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
@@ -14,7 +16,10 @@ type MerchantShellState =
   | {
       readonly kind: "Ready";
       readonly switching: boolean;
-      readonly switchFailed: boolean;
+      /** FullSignInRequired: a PIN sign-in must be confirmed before switching Store. */
+      readonly switchFailed: boolean | typeof FULL_SIGN_IN_REQUIRED;
+      /** Session token for the "Verify it's you" step. */
+      readonly csrf?: string;
       readonly workspace: MerchantWorkspaceSnapshot;
     };
 
@@ -108,7 +113,12 @@ export function MerchantShell({
       }
     >
       <section id="overview" aria-label="Store overview">
-        {ready.switchFailed ? (
+        {ready.switchFailed === FULL_SIGN_IN_REQUIRED ? (
+          <>
+            <p role="status">Your previous Store is unchanged. After you verify, switch again.</p>
+            <FullSignInPrompt csrf={ready.csrf ?? ""} />
+          </>
+        ) : ready.switchFailed ? (
           <p className="command-error" role="alert">
             Store switch failed. Your previous Store is unchanged.
           </p>

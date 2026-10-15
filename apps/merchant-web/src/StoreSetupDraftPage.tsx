@@ -1,4 +1,6 @@
 import { StoreConfigurationOrdinaryPanel } from "./StoreConfigurationOrdinaryPanel.js";
+import { FullSignInPrompt } from "./FullSignInPrompt.js";
+import { FULL_SIGN_IN_REQUIRED_TEXT } from "./full-sign-in.js";
 import { ReceiptTemplateStoreSelection } from "./ReceiptTemplateStoreSelection.js";
 import { ReceiptTemplateArtifactEditor } from "./ReceiptTemplateArtifactEditor.js";
 import { ReceiptTemplateDraftEditor } from "./ReceiptTemplateDraftEditor.js";
@@ -240,6 +242,7 @@ const messages: Record<StoreSetupClientError["code"], string> = {
     "The selected Store or signed-in session changed. Open setup for the current Store.",
   Stale: "The current settings check expired. Refresh to read the current Store again.",
   NotRegistered: "No tax classifications are set up for this Brand yet.",
+  FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
 };
 const root = (view: StoreSetupWorkspace) => ({
   reference: view.setup.snapshot?.setupDraftReference ?? null,
@@ -1822,7 +1825,17 @@ export function StorePaymentConfigurationEditor({
         Saving these rules does not turn on card payments by itself: the payment provider account
         must be set up, and the rules approved and published.
       </p>
-      {error && (
+      {error === "FullSignInRequired" ? (
+        <>
+          <FullSignInPrompt csrf={csrf} />
+          {pending ? (
+            <p role="status">
+              After you verify, choose Recover original payment save. If it shows the save did not
+              go through, save again — your choices are kept.
+            </p>
+          ) : null}
+        </>
+      ) : error ? (
         <p role="alert">
           {error === "Denied"
             ? "You cannot access payment configuration in the current Store."
@@ -1834,7 +1847,7 @@ export function StorePaymentConfigurationEditor({
                   ? "Check the three payment channel settings."
                   : "Payment settings could not be loaded. Refresh when connected; an earlier save remains protected."}
         </p>
-      )}
+      ) : null}
       {notice && <p role="status">{notice}</p>}
       {busy && <p role="status">Loading payment configuration…</p>}
       {pending && (

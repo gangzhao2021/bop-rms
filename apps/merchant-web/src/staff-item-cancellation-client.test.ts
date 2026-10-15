@@ -114,6 +114,10 @@ it("WP-2423 Q6 step 2: maps every refusal to a clear outcome", () => {
   expect(itemCancelFailure(404, "order_cancellation_not_found")).toBe("NotCancellable");
   expect(itemCancelFailure(503, "order_cancellation_unavailable")).toBe("Unknown");
   expect(itemCancelFailure(500, null)).toBe("Unknown");
+  // A PIN sign-in that is not confirmed is not a missing permission.
+  expect(itemCancelFailure(403, "full_sign_in_required")).toBe("FullSignInRequired");
+  expect(itemCancelFailure(403, null)).toBe("Denied");
+  expect(itemCancelFailure(401, "full_sign_in_required")).toBe("Denied");
 });
 
 it("WP-2423 Q6 step 2: a lost answer retries the same operation; a settled one starts a new one", async () => {
@@ -154,6 +158,26 @@ it("WP-2423 Q6 step 2: a lost answer retries the same operation; a settled one s
   expect(sentBody(fetcher, 3)).toMatchObject({
     operationReference: id(501),
     reasonCode: "STORE_ERROR",
+  });
+  expect(client.pendingIntent()).toBeNull();
+});
+
+it("WP-2423: a PIN sign-in refusal keeps the same cancellation for the retry after verifying", async () => {
+  let n = 500;
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(json({ error: "full_sign_in_required" }, 403))
+    .mockResolvedValueOnce(json(cancelled()));
+  const client = createStaffItemCancellationClient(csrf, fetcher, () => id(n++));
+  expect(await client.cancel(selection, "SOLD_OUT")).toEqual({
+    ok: false,
+    failure: "FullSignInRequired",
+  });
+  expect(client.pendingIntent()?.operationReference).toBe(id(500));
+  expect(await client.cancel(selection, "STORE_ERROR")).toMatchObject({ ok: true });
+  expect(sentBody(fetcher, 1)).toMatchObject({
+    operationReference: id(500),
+    reasonCode: "SOLD_OUT",
   });
   expect(client.pendingIntent()).toBeNull();
 });

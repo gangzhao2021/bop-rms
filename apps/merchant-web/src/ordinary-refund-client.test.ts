@@ -429,3 +429,18 @@ it("WP-2423 Q5: reads each request's progress and who may record requests", asyn
   for (let i = 0; i < 3; i++)
     await expect(client.items(id(1), csrf)).rejects.toMatchObject({ code: "Unavailable" });
 });
+it("WP-2423: a PIN sign-in refusal asks to confirm it is them; a plain 403 stays denied", async () => {
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response(preview))
+    .mockResolvedValueOnce(response({ error: "full_sign_in_required" }, 403))
+    .mockResolvedValueOnce(response({ error: "forbidden" }, 403))
+    .mockResolvedValueOnce(response(recorded, 202));
+  const operation = createOrdinaryRefundClient(fetcher).prepareRequest(command());
+  await operation.preview(csrf);
+  await expect(operation.submit(csrf)).rejects.toMatchObject({ code: "FullSignInRequired" });
+  await expect(operation.submit(csrf)).rejects.toMatchObject({ code: "Denied" });
+  // After confirming, the same request is retried and recorded once.
+  await expect(operation.submit(csrf)).resolves.toMatchObject({ status: "RequestRecorded" });
+  expect(new Set(fetcher.mock.calls.slice(1).map((call) => call[1]?.body)).size).toBe(1);
+});

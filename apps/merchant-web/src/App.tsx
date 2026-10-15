@@ -53,6 +53,7 @@ import { createProductClient } from "./product-pages.js";
 import { createStockCountClient } from "./stock-count-pages.js";
 import { createStoreWasteClient } from "./store-waste-pages.js";
 import { createStaffPageClient } from "./staff-administration-pages.js";
+import { FULL_SIGN_IN_REQUIRED, needsFullSignIn } from "./full-sign-in.js";
 import {
   createMerchantWorkspaceClient,
   type MerchantWorkspaceClient,
@@ -401,7 +402,8 @@ type WorkspaceState =
       readonly kind: "Ready";
       readonly csrf: string;
       readonly switching: boolean;
-      readonly switchFailed: boolean;
+      /** FullSignInRequired: a PIN sign-in must be confirmed before switching Store. */
+      readonly switchFailed: boolean | typeof FULL_SIGN_IN_REQUIRED;
       readonly workspace: MerchantWorkspaceSnapshot;
     };
 
@@ -508,8 +510,12 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         switchFailed: false,
         workspace: refreshed.workspace,
       });
-    } catch {
-      setState({ ...current, switching: false, switchFailed: true });
+    } catch (error) {
+      setState({
+        ...current,
+        switching: false,
+        switchFailed: needsFullSignIn(error) ? FULL_SIGN_IN_REQUIRED : true,
+      });
     } finally {
       switching.current = false;
     }
@@ -664,6 +670,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                 <StaffListPage
                   key={state.workspace.selectedScope.storeReference + state.csrf}
                   client={createStaffPageClient(state.csrf)}
+                  csrf={state.csrf}
                 />
               ) : (
                 <StaffListPage />
@@ -679,6 +686,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                 <StaffDetailPage
                   key={state.workspace.selectedScope.storeReference + state.csrf}
                   client={createStaffPageClient(state.csrf)}
+                  csrf={state.csrf}
                 />
               ) : (
                 <StaffDetailPage />
@@ -694,6 +702,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                 <RoleListPage
                   key={state.workspace.selectedScope.storeReference + state.csrf}
                   client={createRoleAdministrationPageClient(state.csrf)}
+                  csrf={state.csrf}
                 />
               ) : (
                 <RoleListPage />
@@ -709,6 +718,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                 <RoleEditorPage
                   key={state.workspace.selectedScope.storeReference + state.csrf}
                   client={createRoleAdministrationPageClient(state.csrf)}
+                  csrf={state.csrf}
                 />
               ) : (
                 <RoleEditorPage />
@@ -901,6 +911,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                 <StoreOptionPricesPage
                   key={state.workspace.selectedScope.storeReference + state.csrf}
                   client={createOptionPriceClient(state.csrf)}
+                  csrf={state.csrf}
                 />
               ) : (
                 <StoreOptionPricesPage />
@@ -916,6 +927,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                 <StorePriceListPage
                   key={state.workspace.selectedScope.storeReference + state.csrf}
                   client={createPriceClient(state.csrf)}
+                  csrf={state.csrf}
                 />
               ) : (
                 <StorePriceListPage />

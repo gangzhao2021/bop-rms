@@ -815,6 +815,52 @@ export async function recordStaffPinSession(
 }
 
 /**
+ * Inside the transaction that creates a full sign-in on a registered tablet: ends every session a
+ * PIN started on that tablet (one person per tablet), so the person who used the tablet before is
+ * signed out at once rather than at the next PIN sign-in. Audited only when a session ended.
+ */
+export async function endStaffPinSessionsOnDevice(
+  tx: Transaction,
+  input: Scope & {
+    readonly deviceReference: string;
+    /** The new full sign-in session (kept) and its person. */
+    readonly sessionReference: string;
+    readonly actorReference: string;
+    readonly at: string;
+    readonly auditReference: string;
+  },
+  policy: StaffPinAuditPolicy,
+): Promise<{ readonly signedOut: number }> {
+  const scope = scopeOf(input);
+  const device = ref(input.deviceReference),
+    session = ref(input.sessionReference),
+    actor = ref(input.actorReference),
+    observedAt = instant(input.at);
+  await setScope(tx, scope);
+  await lockDevice(tx, scope, device);
+  const ended = await revoke(
+    tx,
+    "UPDATE bop_identity.authentication_session s SET status='Revoked',revocation_reason='Logout',revoked_at=$5,version=s.version+1 FROM bop_identity.staff_pin_session p WHERE p.brand_id=$1 AND p.store_id=$2 AND p.device_id=$3 AND s.session_id=p.session_id AND s.session_id<>$4 AND s.status='Active' AND s.created_at<=$5 RETURNING s.session_id",
+    [scope.brandReference, scope.storeReference, device, session, observedAt],
+  );
+  if (ended.length > 0)
+    await audit(tx, policy, {
+      auditReference: ref(input.auditReference),
+      scope,
+      actorReference: actor,
+      actionCode: "IDENTITY_STAFF_PIN_TABLET_SIGNED_OUT",
+      targetType: "AuthenticationSession",
+      targetReference: session,
+      reasonCode: "FULL_SIGN_IN_ON_TABLET",
+      correlationReference: session,
+      occurredAt: observedAt,
+      deviceReference: device,
+      afterSummary: { signedOutOnTablet: ended.length },
+    });
+  return Object.freeze({ signedOut: ended.length });
+}
+
+/**
  * Whether a session was started with a PIN, and if so until when a second-factor step-up made in
  * that session lets it do sensitive actions (null: none recent). Any Store may be selected.
  */

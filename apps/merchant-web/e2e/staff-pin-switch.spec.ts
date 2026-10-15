@@ -41,7 +41,11 @@ const navigation = [
   },
 ];
 
-async function signedIn(page: Page, signedInNow: { value: boolean } = { value: true }) {
+async function signedIn(
+  page: Page,
+  signedInNow: { value: boolean } = { value: true },
+  links: readonly (typeof navigation)[number][] = navigation,
+) {
   await page.route("**/merchant/session", (route) =>
     signedInNow.value
       ? route.fulfill({
@@ -57,7 +61,7 @@ async function signedIn(page: Page, signedInNow: { value: boolean } = { value: t
               storeStatus: "Open",
               freshness: "Current",
               dashboardAvailability: "UnavailableUntilWP1905",
-              navigation,
+              navigation: links,
             },
           },
         })
@@ -421,6 +425,51 @@ test("@production staff switch on a shared tablet: wrong PIN, lockout, busy tabl
   expect(page.url()).not.toContain("482913");
 });
 
+test("@production a person who left the list since it was shown: the tablet reads it again", async ({
+  page,
+}) => {
+  await signedIn(page, { value: false });
+  // The lock screen names people by opaque tablet tokens, never by account references.
+  const ana = "A".repeat(43),
+    dee = "D".repeat(43);
+  let reads = 0;
+  await page.route("**/merchant/staff-switch", (route) => {
+    reads++;
+    return route.fulfill({
+      headers,
+      json: {
+        storeLabel: "Queen St",
+        timeZone: zone,
+        staff:
+          reads === 1
+            ? [
+                { choice: ana, name: "Ana Lopez" },
+                { choice: dee, name: "Dee Moss" },
+              ]
+            : [{ choice: ana, name: "Ana Lopez" }],
+        fullSignIn: testEntry,
+      },
+    });
+  });
+  const attempts: Record<string, unknown>[] = [];
+  await page.route("**/merchant/staff-switch/unlock", (route) => {
+    attempts.push(json(route));
+    return route.fulfill({ status: 409, headers, json: { error: "staff_not_listed" } });
+  });
+  await page.goto("/operations/switch-staff");
+  await page.getByRole("button", { name: "Dee Moss" }).click();
+  await page.keyboard.type("482913");
+  await expect(page.getByRole("heading", { name: "Who's working?" })).toBeVisible();
+  await expect(page.getByText("The staff list has changed. Choose your name again.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Dee Moss" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Ana Lopez" })).toBeVisible();
+  expect(attempts).toEqual([{ choice: dee, pin: "482913" }]);
+  await expect(page.locator("main")).not.toContainText(dee);
+  // Choosing again clears the notice.
+  await page.getByRole("button", { name: "Ana Lopez" }).click();
+  await expect(page.getByText("The staff list has changed.")).toHaveCount(0);
+});
+
 test("@production a tablet that is not set up, or offline, says what to do", async ({ page }) => {
   await signedIn(page, { value: false });
   let mode: "offline" | "unregistered" | "empty" = "offline";
@@ -545,5 +594,92 @@ test("@production a PIN sign-in needs the authenticator code for PIN and tablet 
     "Confirm it's you with your authenticator app, or sign in with your account",
   );
   await expect(page.getByRole("heading", { name: "Staff PINs" })).toHaveCount(0);
+  // The guidance is shown once, in the verification section only.
+  await expect(page.getByText(/You signed in with a PIN\. Confirm it's you/u)).toHaveCount(1);
+  await expect(page.getByText("Not done")).toHaveCount(0);
   await checkScreen(page, "tablets-full-sign-in", [1440, 390]);
+});
+
+test("@production a price change on a PIN sign-in asks to confirm it's you, not for permission", async ({
+  page,
+}) => {
+  await signedIn(page, { value: true }, [
+    ...navigation,
+    {
+      screenId: "PRICE-BOOK-LIST",
+      label: "Prices",
+      href: "/app/commerce/pricing",
+      permission: "pricing.price_book.read",
+    },
+  ]);
+  let verifiedUntil: string | null = null;
+  await page.route("**/merchant/staff-pin", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        pin: { state: "Set", changedAt: "2026-10-01T15:00:00.000Z", lockedUntil: null },
+        signIn: "Pin",
+        verifiedUntil,
+      },
+    }),
+  );
+  await page.route("**/merchant/identity/step-up", (route) => {
+    if (route.request().method() === "GET")
+      return route.fulfill({ headers, json: { validUntil: verifiedUntil } });
+    expect(route.request().headers()["x-bop-csrf"]).toBe(csrf);
+    expect(json(route)).toEqual({ purpose: "PinSessionElevation", code: "123456" });
+    verifiedUntil = minutesFromNow(15);
+    return route.fulfill({
+      headers,
+      json: { status: "Verified", verifiedAt: new Date().toISOString(), validUntil: verifiedUntil },
+    });
+  });
+  await page.route("**/merchant/commerce/pricing/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "PRICE-BOOK-LIST",
+        sourceAsOf: "2026-10-14T18:00:00.000Z",
+        viewer: "staff-ana",
+        permissions: { mayRead: true, mayEdit: true, mayApprove: true },
+        currencyCode: "CAD",
+        storeAssignment: null,
+        assignmentHistory: [],
+        sellables: [],
+        menuSellables: [],
+        books: [],
+      },
+    }),
+  );
+  const commands: Record<string, unknown>[] = [];
+  await page.route("**/merchant/commerce/pricing/command", (route) => {
+    commands.push(json(route));
+    return verifiedUntil === null
+      ? route.fulfill({ status: 403, headers, json: { error: "full_sign_in_required" } })
+      : route.fulfill({ headers, json: {} });
+  });
+
+  await page.goto("/app/commerce/pricing");
+  await page.getByRole("button", { name: "Create draft" }).click();
+  const prompt = page.getByRole("region", { name: "Confirm it's you" });
+  await expect(prompt).toContainText(
+    "You signed in with a PIN. Confirm it's you with your authenticator app, or sign in with your account, to do this.",
+  );
+  await expect(
+    prompt.getByRole("button", { name: "Sign out and sign in with your account" }),
+  ).toBeVisible();
+  await expect(page.getByText(/permission/u)).toHaveCount(0);
+  await expect(page.getByText("Not created")).toHaveCount(0);
+  await checkScreen(page, "prices-full-sign-in", [1440, 390]);
+
+  await prompt.getByRole("button", { name: "Verify it's you" }).click();
+  const code = prompt.getByRole("dialog", { name: "Confirm it is you" });
+  await code.getByLabel("Six-digit code").fill("123456");
+  await code.getByRole("button", { name: "Verify" }).click();
+  await expect(prompt).toContainText("Verified. Try again now.");
+  // The same request is sent again, so it cannot be done twice.
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect(prompt).toHaveCount(0);
+  expect(commands).toHaveLength(2);
+  expect(commands[1]).toEqual(commands[0]);
 });

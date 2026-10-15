@@ -1,3 +1,8 @@
+import {
+  FULL_SIGN_IN_REQUIRED,
+  responseNeedsFullSignIn,
+  type FullSignInRequired,
+} from "./full-sign-in.js";
 export interface OrdinaryRefundPreparationCommand {
   readonly operationReference: string;
   readonly orderReference: string;
@@ -7,7 +12,10 @@ export interface OrdinaryRefundPreparationCommand {
   readonly approvalReference: string | null;
 }
 export class OrdinaryRefundPreparationClientError extends Error {
-  constructor(readonly code: "PermissionDenied" | "Conflict" | "Unavailable" | "OutcomeUnknown") {
+  constructor(
+    readonly code:
+      "PermissionDenied" | FullSignInRequired | "Conflict" | "Unavailable" | "OutcomeUnknown",
+  ) {
     super("Refund preparation could not be confirmed");
     this.name = "OrdinaryRefundPreparationClientError";
   }
@@ -77,6 +85,8 @@ export function createOrdinaryRefundPreparationClient(fetcher: typeof fetch = fe
             });
             if (controller.signal.aborted)
               throw new OrdinaryRefundPreparationClientError("OutcomeUnknown");
+            if (await responseNeedsFullSignIn(response))
+              throw new OrdinaryRefundPreparationClientError(FULL_SIGN_IN_REQUIRED);
             if (response.status === 401 || response.status === 403)
               throw new OrdinaryRefundPreparationClientError("PermissionDenied");
             if (response.status === 409) throw new OrdinaryRefundPreparationClientError("Conflict");

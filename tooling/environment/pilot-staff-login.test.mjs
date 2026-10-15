@@ -93,6 +93,27 @@ it("explicitly selects one configured identity and preserves the secure session 
   );
   expect(f.res.headers["Cache-Control"]).toBe("no-store");
 });
+it("passes a registered-tablet cookie so the full sign-in ends the tablet's PIN session", async () => {
+  const tablet = "t".repeat(43);
+  const f = setup();
+  await f.post({
+    ...base,
+    headers: {
+      ...base.headers,
+      cookie: "__Host-bop-merchant=old; __Host-bop-store-device=" + tablet,
+    },
+    body: { ...base.body, staffSelector: "reviewer" },
+  });
+  expect(f.issue).toHaveBeenCalledExactlyOnceWith("reviewer", "Workforce", tablet);
+  expect(f.res.statusCode).toBe(303);
+  const malformed = setup();
+  await malformed.post({
+    ...base,
+    headers: { ...base.headers, cookie: "__Host-bop-store-device=short" },
+    body: { ...base.body, staffSelector: "reviewer" },
+  });
+  expect(malformed.issue).toHaveBeenCalledExactlyOnceWith("reviewer", "Workforce");
+});
 it("preserves the original single-identity POST without adding a multi-identity default", async () => {
   const single = setup(true);
   await single.post({ ...base, body: { confirmation: "DEMO_STAFF_LOGIN" } });

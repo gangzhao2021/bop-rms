@@ -11,6 +11,7 @@ export interface SignInEntry {
   readonly testOnly: boolean;
 }
 export interface SwitchStaffChoice {
+  /** Opaque token the server gave this tablet for the person; sent back as is with the PIN. */
   readonly choice: string;
   readonly name: string;
 }
@@ -57,6 +58,8 @@ export type StaffPinFailure =
   | "Locked"
   | "Busy"
   | "NotRegistered"
+  /** The person picked is no longer on this tablet's list (it changed since it was shown). */
+  | "NotListed"
   | "Invalid"
   | "FullSignInRequired"
   | "Denied"
@@ -348,6 +351,7 @@ export function createStaffPinClient(
       }
       if (status === 404 && code === "device_not_registered")
         throw new StaffPinError("NotRegistered");
+      if (status === 409 && code === "staff_not_listed") throw new StaffPinError("NotListed");
       throw new StaffPinError("Unavailable");
     },
     async pinStatus(signal?: AbortSignal) {

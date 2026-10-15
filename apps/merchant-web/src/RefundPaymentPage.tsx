@@ -10,6 +10,8 @@ import { WorkspacePage } from "./WorkspacePage.js";
 import { createOrdinaryRefundClient, OrdinaryRefundClientError } from "./ordinary-refund-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { StepUpVerification } from "./StepUpVerification.js";
+import { FullSignInPrompt } from "./FullSignInPrompt.js";
+import { FULL_SIGN_IN_REQUIRED_TEXT, needsFullSignIn } from "./full-sign-in.js";
 import { createRefundApprovalClient, type RefundApprovalEntry } from "./refund-approval-client.js";
 import {
   declineReasonLabel,
@@ -32,11 +34,13 @@ const amount = (value: string | null) =>
       "." +
       (BigInt(value) % 100n).toString().padStart(2, "0");
 const errorMessage = (error: unknown) =>
-  error instanceof OrdinaryRefundClientError && error.code === "Denied"
-    ? "Your current permissions do not allow this refund workflow."
-    : error instanceof OrdinaryRefundClientError && error.code === "Conflict"
-      ? "The payment or refund selection changed. Refresh before trying again."
-      : "Unable to refresh this information. Check your connection and try again.";
+  needsFullSignIn(error)
+    ? FULL_SIGN_IN_REQUIRED_TEXT
+    : error instanceof OrdinaryRefundClientError && error.code === "Denied"
+      ? "Your current permissions do not allow this refund workflow."
+      : error instanceof OrdinaryRefundClientError && error.code === "Conflict"
+        ? "The payment or refund selection changed. Refresh before trying again."
+        : "Unable to refresh this information. Check your connection and try again.";
 /** WP-2423 Q5: what is left of the captured amount after confirmed and pending refunds. */
 function refundableMinor(context: Context): bigint {
   if (
@@ -169,7 +173,8 @@ function RefundPreparationAction({
   onPending: (pending: boolean) => void;
 }) {
   const [state, setState] = useState<"Idle" | "Busy" | "Unknown" | "Recorded">("Idle"),
-    [message, setMessage] = useState("");
+    [message, setMessage] = useState(""),
+    [signIn, setSignIn] = useState(false);
   const intent = useRef<ReturnType<typeof preparationClient.prepare> | null>(null),
     pending = useRef<AbortController | null>(null);
   useEffect(() => () => pending.current?.abort(), []);
@@ -184,6 +189,7 @@ function RefundPreparationAction({
     pending.current = controller;
     setState("Busy");
     setMessage("");
+    setSignIn(false);
     onPending(true);
     try {
       intent.current ??= preparationClient.prepare({
@@ -205,7 +211,12 @@ function RefundPreparationAction({
       }
     } catch (error) {
       if (!controller.signal.aborted) {
-        if (
+        if (needsFullSignIn(error)) {
+          // WP-2423: confirm the PIN sign-in, then retry this same preparation.
+          setState("Idle");
+          onPending(false);
+          setSignIn(true);
+        } else if (
           error instanceof OrdinaryRefundPreparationClientError &&
           error.code !== "OutcomeUnknown"
         ) {
@@ -240,6 +251,7 @@ function RefundPreparationAction({
         {state === "Unknown" ? "Retry same refund preparation" : "Prepare refund execution"}
       </button>
       {message ? <p role="status">{message}</p> : null}
+      {signIn ? <FullSignInPrompt csrf={csrf} /> : null}
     </div>
   );
 }
@@ -404,6 +416,8 @@ function RefundWizard({
     [preview, setPreview] = useState<Preview | null>(null),
     [confirmed, setConfirmed] = useState(false),
     [message, setMessage] = useState(""),
+    // WP-2423: the request was refused on an unconfirmed PIN sign-in (retry the same one after).
+    [signIn, setSignIn] = useState(false),
     [state, setState] = useState<"Idle" | "Busy" | "Unknown" | "Recorded">("Idle");
   const [preparing, setPreparing] = useState<ReadonlySet<string>>(new Set());
   const operationReference = useRef<string | null>(null);
@@ -433,6 +447,7 @@ function RefundWizard({
   const verificationCurrent = () =>
     verifiedUntil !== null && Date.parse(verifiedUntil) > Date.now();
   const clearPreview = () => {
+    setSignIn(false);
     setPreview(null);
     setConfirmed(false);
     operation.current = null;
@@ -575,6 +590,7 @@ function RefundWizard({
     pending.current = controller;
     setState("Busy");
     setMessage("");
+    setSignIn(false);
     try {
       const result = await operation.current.submit(csrf, controller.signal);
       if (!controller.signal.aborted) {
@@ -599,6 +615,10 @@ function RefundWizard({
           setMessage(
             "Request result unknown. Keep this page open and retry the same request; do not start another refund.",
           );
+        } else if (needsFullSignIn(error)) {
+          // Keep the confirmed request: once verified, the same request is recorded once.
+          setState("Idle");
+          setSignIn(true);
         } else {
           setState("Idle");
           clearPreview();
@@ -855,6 +875,7 @@ function RefundWizard({
       {state === "Unknown" ? (
         <button onClick={() => void submit()}>Retry same refund request</button>
       ) : null}
+      {signIn && state !== "Busy" ? <FullSignInPrompt csrf={csrf} /> : null}
       <p ref={status} tabIndex={-1} role="status">
         {state === "Busy" ? "Working…" : message}
       </p>

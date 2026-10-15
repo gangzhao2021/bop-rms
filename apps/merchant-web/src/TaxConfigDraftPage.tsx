@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AppFrame } from "@bop-rms/ui";
-import { TaxConfigMaterialPanel } from "./TaxConfigMaterialPanel.js";
+import { TaxConfigAlert, TaxConfigMaterialPanel } from "./TaxConfigMaterialPanel.js";
+import { FULL_SIGN_IN_REQUIRED_TEXT } from "./full-sign-in.js";
 import { TaxConfigEvidenceMaterialPanel } from "./TaxConfigEvidenceMaterialPanel.js";
 import { TaxConfigCandidatePanel } from "./TaxConfigCandidatePanel.js";
 import { canonicalPublicationValue as canonical } from "./product-publication-command-client-v2.js";
@@ -181,6 +182,7 @@ const errorText = (error: unknown) =>
     ? {
         Invalid: "Check the entered fields and explicit UTC instants.",
         Denied: "Permission denied. The original operation remains available for recovery.",
+        FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
         FeatureDisabled: "Tax configuration is disabled for this scope.",
         Conflict:
           "The saved Draft changed. Refresh it before making another change. A pending original must be recovered first.",
@@ -436,11 +438,7 @@ export function TaxConfigDraftPage({
           approval are provided.
         </p>
         {busy && <p role="status">Loading current Tax configuration…</p>}
-        {error && (
-          <p role="alert" tabIndex={-1} ref={alert}>
-            {error}
-          </p>
-        )}
+        <TaxConfigAlert error={error} csrf={csrf} alertRef={alert} />
         {message && <p role="status">{message}</p>}
         {!ready && !busy && (
           <button type="button" onClick={() => setReloadKey((n) => n + 1)}>

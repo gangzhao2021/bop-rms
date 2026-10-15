@@ -125,6 +125,9 @@ it("WP-2423: offers an in-person handoff when the pickup code expired or was nev
   expect(render("Locked")).toContain("Hand over after checking in person");
   expect(render("Locked")).toContain("Too many wrong codes · check in person");
   expect(render("Locked")).not.toContain("Check pickup code");
+  // The reason stays on the card after the queue re-reads (WP-2423).
+  expect(render("Locked")).toContain("Too many wrong codes for this order. Check the customer");
+  expect(render("Expired")).not.toContain("Too many wrong codes for this order");
 });
 it("WP-2423: confirms a recorded handover in plain words on the queue", () => {
   const html = renderToStaticMarkup(

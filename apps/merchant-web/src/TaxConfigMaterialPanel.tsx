@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type Ref } from "react";
+import { FullSignInPrompt } from "./FullSignInPrompt.js";
+import { FULL_SIGN_IN_REQUIRED_TEXT } from "./full-sign-in.js";
 import { createTaxConfigMaterialClient } from "./tax-config-material-client.js";
 import { createTaxConfigMaterialPendingJournal } from "./tax-config-material-pending-journal.js";
 import {
@@ -130,6 +132,27 @@ export async function saveTaxConfigRegistrationMaterial(
   input.onReserved(prepared.cursor);
   return finishTaxConfigMaterialOriginal({ ...input, cursor: prepared.cursor, prepared });
 }
+/**
+ * A Tax workspace failure line. A refusal because the person signed in with a PIN shows how to
+ * confirm it is them (then recover or retry the same original) instead of a permission message.
+ */
+export function TaxConfigAlert({
+  error,
+  csrf,
+  alertRef,
+}: {
+  readonly error: string | null;
+  readonly csrf: string;
+  readonly alertRef?: Ref<HTMLParagraphElement> | undefined;
+}) {
+  if (!error) return null;
+  if (error === FULL_SIGN_IN_REQUIRED_TEXT) return <FullSignInPrompt csrf={csrf} />;
+  return (
+    <p role="alert" tabIndex={-1} ref={alertRef}>
+      {error}
+    </p>
+  );
+}
 function errorText(error: unknown) {
   const code = error instanceof Error && "code" in error ? String(error.code) : "Unavailable";
   switch (code) {
@@ -137,6 +160,8 @@ function errorText(error: unknown) {
       return "The original save outcome is unknown. Recover it before editing.";
     case "Denied":
       return "Current permission does not allow this action. The original request is retained.";
+    case "FullSignInRequired":
+      return FULL_SIGN_IN_REQUIRED_TEXT;
     case "Conflict":
       return "The material or registration source changed. Refresh before preparing a new save.";
     case "ScopeChanged":
@@ -306,11 +331,7 @@ export function TaxConfigMaterialPanel({
         applicable is a declaration, not a publishing waiver.
       </p>
       {busy && <p role="status">Loading Tax registration materials…</p>}
-      {error && (
-        <p role="alert" tabIndex={-1} ref={alert}>
-          {error}
-        </p>
-      )}
+      <TaxConfigAlert error={error} csrf={csrf} alertRef={alert} />
       {message && <p role="status">{message}</p>}
       {!ready && !busy && (
         <button type="button" disabled={disabled} onClick={() => setReload((n) => n + 1)}>

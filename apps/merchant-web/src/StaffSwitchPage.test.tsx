@@ -24,11 +24,12 @@ const ready: SwitchLoad = {
   fullSignIn: entry,
 };
 const noop = () => undefined;
-const view = (load: SwitchLoad, current: SwitchEntry | null = null) =>
+const view = (load: SwitchLoad, current: SwitchEntry | null = null, listChanged = false) =>
   renderToStaticMarkup(
     <StaffSwitchView
       load={load}
       entry={current}
+      listChanged={listChanged}
       now={Date.parse("2026-10-14T19:30:00.000Z")}
       onRetry={noop}
       onChoose={noop}
@@ -100,6 +101,13 @@ describe("screen", () => {
     expect(html).toContain("TEST-ONLY");
     expect(html).toContain("choose “My PIN” to set one");
     plain(html.replace("TEST-ONLY", ""));
+  });
+  it("asks to choose again when the person picked left the list", () => {
+    const html = view(ready, null, true);
+    expect(html).toContain("The staff list has changed. Choose your name again.");
+    expect(html).toContain(">Ana</button>");
+    plain(html.replace("TEST-ONLY", ""));
+    expect(view(ready)).not.toContain("The staff list has changed");
   });
   it("shows only how many digits were typed, never the digits", () => {
     const html = view(ready, {

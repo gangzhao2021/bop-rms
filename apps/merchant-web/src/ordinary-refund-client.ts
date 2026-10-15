@@ -1,5 +1,13 @@
+import {
+  FULL_SIGN_IN_REQUIRED,
+  responseNeedsFullSignIn,
+  type FullSignInRequired,
+} from "./full-sign-in.js";
+
 export class OrdinaryRefundClientError extends Error {
-  constructor(readonly code: "Denied" | "Conflict" | "Unavailable" | "OutcomeUnknown") {
+  constructor(
+    readonly code: "Denied" | FullSignInRequired | "Conflict" | "Unavailable" | "OutcomeUnknown",
+  ) {
     super("Refund request could not be confirmed");
   }
 }
@@ -188,6 +196,8 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
         },
       });
       if (controller.signal.aborted) return fail();
+      if (await responseNeedsFullSignIn(response))
+        throw new OrdinaryRefundClientError(FULL_SIGN_IN_REQUIRED);
       if (response.status === 401 || response.status === 403)
         throw new OrdinaryRefundClientError("Denied");
       if (response.status === 409) throw new OrdinaryRefundClientError("Conflict");
@@ -217,7 +227,9 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
     } catch (error) {
       if (
         error instanceof OrdinaryRefundClientError &&
-        (error.code === "Denied" || error.code === "Conflict")
+        (error.code === "Denied" ||
+          error.code === FULL_SIGN_IN_REQUIRED ||
+          error.code === "Conflict")
       )
         throw error;
       throw new OrdinaryRefundClientError(mutation ? "OutcomeUnknown" : "Unavailable");

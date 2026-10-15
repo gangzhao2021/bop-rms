@@ -19,6 +19,8 @@ import {
 import { serviceOperationReference } from "./service-control-client.js";
 import { createOrdinaryRefundClient } from "./ordinary-refund-client.js";
 import { SoleOperatorSection } from "./SoleOperatorSection.js";
+import { FullSignInPrompt } from "./FullSignInPrompt.js";
+import { needsFullSignIn } from "./full-sign-in.js";
 import type { SoleOperatorStatus } from "./refund-approval-client.js";
 
 const pollIntervalMs = 3000,
@@ -35,7 +37,23 @@ type Outcome =
       readonly progress: "Sending" | "Refunded" | "StillPending";
     }
   | { readonly kind: "Declined"; readonly declinedAt: string }
-  | { readonly kind: "Failed"; readonly message: string; readonly retry: boolean };
+  | { readonly kind: "Failed"; readonly message: string; readonly retry: boolean }
+  /** WP-2423: refused on an unconfirmed PIN sign-in; verify, then approve or decline again. */
+  | { readonly kind: "SignIn" };
+
+/** Why an approval or decline did not go through; a PIN sign-in shows how to confirm it is them. */
+export function ApprovalFailureNotice({
+  outcome,
+  csrf,
+  fetcher,
+}: {
+  readonly outcome: Outcome;
+  readonly csrf: string;
+  readonly fetcher?: typeof fetch | undefined;
+}) {
+  if (outcome.kind === "SignIn") return <FullSignInPrompt csrf={csrf} fetcher={fetcher} />;
+  return outcome.kind === "Failed" ? <p role="alert">{outcome.message}</p> : null;
+}
 
 const person = (entry: RefundApprovalEntry) =>
   entry.requestedByYou ? "You" : (entry.requesterName ?? "The staff member who asked");
@@ -134,6 +152,10 @@ function ApprovalCard({
         setOutcome({ kind: "Declined", declinedAt: result.declinedAt });
     } catch (error) {
       if (controller.signal.aborted) return;
+      if (needsFullSignIn(error)) {
+        setOutcome({ kind: "SignIn" });
+        return;
+      }
       const code = error instanceof RefundApprovalClientError ? error.code : "OutcomeUnknown";
       setOutcome({
         kind: "Failed",
@@ -179,6 +201,10 @@ function ApprovalCard({
       if (!unknown) void follow();
     } catch (error) {
       if (controller.signal.aborted) return;
+      if (needsFullSignIn(error)) {
+        setOutcome({ kind: "SignIn" });
+        return;
+      }
       const code = error instanceof RefundApprovalClientError ? error.code : "OutcomeUnknown";
       const party = error instanceof RefundApprovalClientError ? error.party : null;
       setOutcome({
@@ -400,7 +426,7 @@ function ApprovalCard({
       {!entry.canApprove && !entry.requestedByYou ? (
         <p>Only an owner or finance member who did not ask for this refund can approve it.</p>
       ) : null}
-      {outcome.kind === "Failed" ? <p role="alert">{outcome.message}</p> : null}
+      <ApprovalFailureNotice outcome={outcome} csrf={csrf} fetcher={fetcher} />
       {outcome.kind === "Sent" ? (
         <div role="status">
           <p>

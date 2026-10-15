@@ -3,6 +3,8 @@
  * one Owner running the Brand alone may approve their own refunds — read and turned on or off.
  * Only the Brand Owner can read it; others get Denied and the section is not shown.
  */
+import { FULL_SIGN_IN_REQUIRED, isFullSignInRequired } from "./full-sign-in.js";
+
 export type SoleOperatorState = "On" | "Off";
 export type SoleOperatorRefundStatus = "Effective" | "NotSet" | "OtherApprovers";
 export const soleOperatorReasons = {
@@ -37,7 +39,13 @@ export interface SoleOperatorView {
   readonly verifiedUntil: string | null;
 }
 export type SoleOperatorFailure =
-  "Denied" | "NeedsReverification" | "Changed" | "NoChange" | "Unavailable" | "OutcomeUnknown";
+  | "Denied"
+  | typeof FULL_SIGN_IN_REQUIRED
+  | "NeedsReverification"
+  | "Changed"
+  | "NoChange"
+  | "Unavailable"
+  | "OutcomeUnknown";
 export class SoleOperatorClientError extends Error {
   constructor(readonly code: SoleOperatorFailure) {
     super("Sole operator setting could not be confirmed");
@@ -260,6 +268,9 @@ export function createSoleOperatorClient(fetcher: typeof fetch = fetch) {
         throw new SoleOperatorClientError("Changed");
       if (response.status === 409 && error === "no_change")
         throw new SoleOperatorClientError("NoChange");
+      // A PIN sign-in that has not been confirmed: the same person may go ahead after verifying.
+      if (isFullSignInRequired(response.status, data))
+        throw new SoleOperatorClientError(FULL_SIGN_IN_REQUIRED);
       if (response.status === 401 || response.status === 403)
         throw new SoleOperatorClientError("Denied");
       if (response.status === 422) throw new SoleOperatorClientError("Unavailable");

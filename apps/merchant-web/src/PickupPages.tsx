@@ -1,4 +1,4 @@
-import { PickupProofForm } from "./PickupProofForm.js";
+import { PickupProofForm, pickupCodeLockedText } from "./PickupProofForm.js";
 import { PickupHandoffForm } from "./PickupHandoffForm.js";
 import { PickupNotCollectedAction, pickupHoldMinutes } from "./PickupNotCollectedAction.js";
 import { businessDateText, useStoreBusinessDay } from "./StoreBusinessDay.js";
@@ -211,6 +211,12 @@ function PickupCard({
           </div>
         ) : null}
       </dl>
+      {!completed && item.proofReadiness === "Locked" ? (
+        // WP-2423: the check that locked the code re-reads the queue; the reason stays said here.
+        <p className="pickup-queue__locked" role="status">
+          {pickupCodeLockedText}
+        </p>
+      ) : null}
       {!completed ? (
         <div className="card-actions">
           {inPersonEligible && workstation && proofContext ? (

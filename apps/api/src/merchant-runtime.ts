@@ -52,6 +52,7 @@ import { createMerchantProductListQuery } from "./merchant-product-list-query.js
 import { createMerchantPickupQuery } from "./merchant-pickup-query.js";
 import { createMerchantPickupProof } from "./merchant-pickup-proof.js";
 import { createMerchantPickupHandoff } from "./merchant-pickup-handoff.js";
+import { createMerchantPickupIdentityCheck } from "./merchant-pickup-identity-check.js";
 import { createMerchantKitchenQuery } from "./merchant-kitchen-query.js";
 import { createMerchantKitchenCommand } from "./merchant-kitchen-command.js";
 import { createMerchantKitchenRework } from "./merchant-kitchen-rework.js";
@@ -390,6 +391,12 @@ export function createMerchantRuntime(options: MerchantRuntimeOptions): Merchant
       ? {}
       : {
           pickupHandoff: createMerchantPickupHandoff({
+            ...options.pickupHandoff,
+            persistence: options.persistence,
+            authentication: service,
+          }),
+          // WP-2423: the in-person check reads the name and phone digits under the same owner.
+          pickupIdentityCheck: createMerchantPickupIdentityCheck({
             ...options.pickupHandoff,
             persistence: options.persistence,
             authentication: service,

@@ -8,6 +8,18 @@ const require = createRequire(new URL("../../apps/api/package.json", import.meta
 const unavailable = () => {
   throw new Error("INTERNAL_STAFF_LOGIN_UNAVAILABLE");
 };
+const deviceCookiePattern = /^[A-Za-z0-9_-]{43}$/u;
+/** The registered-tablet cookie (WP-2423 Q18), or undefined; the value is never logged. */
+function tabletCookie(req) {
+  const header = req.headers.cookie;
+  if (typeof header !== "string" || header.length > 4096) return undefined;
+  const found = header
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part.startsWith("__Host-bop-store-device="))
+    .map((part) => part.slice("__Host-bop-store-device=".length));
+  return found.length === 1 && deviceCookiePattern.test(found[0]) ? found[0] : undefined;
+}
 const escape = (value) =>
   value.replace(
     /[&<>"']/gu,
@@ -142,7 +154,12 @@ export function installInternalStaffLogin(app, merchant) {
         )
           return res.status(400).json({ code: "INTERNAL_STAFF_LOGIN_DENIED" });
         const purpose = kitchenDisplay ? "KitchenDisplay" : "Workforce";
-        const credentials = await issue(requested, purpose);
+        // On a registered tablet the full sign-in also ends the PIN session left on it.
+        const tablet = tabletCookie(req);
+        const credentials =
+          tablet === undefined
+            ? await issue(requested, purpose)
+            : await issue(requested, purpose, tablet);
         if (
           typeof credentials?.sessionCookie !== "string" ||
           !/^[A-Za-z0-9_-]{43}$/u.test(credentials.sessionCookie)

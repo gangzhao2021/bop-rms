@@ -1,5 +1,6 @@
 import {
   checkStaffPin,
+  endStaffPinSessionsOnDevice,
   findStoreSignInDevice,
   generateStoreDeviceSecret,
   listStoreSignInDevices,
@@ -14,6 +15,7 @@ import {
   setStaffPin,
   type AuthenticationSession,
   parseRawBrowserCredential,
+  type StaffPinChoiceTokens,
   type StaffPinKdf,
   type StaffPinProblem,
   type StaffPinState,
@@ -37,8 +39,9 @@ import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js"
  *   its secret goes to an HttpOnly cookie only, the database keeps a keyed hash.
  * - A staff member signed in fully (merchant.access) sets their own PIN at the selected Store.
  * - On a registered, unrevoked tablet the lock screen lists the Store's active members who have a
- *   PIN; a correct PIN issues that person's ordinary WorkforceStandard session, recorded as
- *   PIN-issued, and ends the tablet's previous session.
+ *   PIN, each named by an opaque per-tablet token (never the actor reference); a correct PIN
+ *   issues that person's ordinary WorkforceStandard session, recorded as PIN-issued, and ends the
+ *   tablet's previous session. A full sign-in on the tablet also ends its PIN sessions.
  * - A manager (identity.staff_pin.reset) resets a PIN; the person sets a new one after a full
  *   sign-in. A PIN session cannot register/remove tablets, reset or set PINs (and the BFF refuses
  *   other sensitive actions) until it is verified with the MFA step-up or replaced by a full sign-in.
@@ -52,6 +55,8 @@ export class MerchantStaffPinError extends Error {
       | "NotFound"
       | "AlreadyRegistered"
       | "NotSet"
+      /** The lock-screen choice names nobody on this tablet now (list changed or not genuine). */
+      | "NotListed"
       | "Unavailable",
   ) {
     super(code);
@@ -80,6 +85,7 @@ export type StaffSwitchResult =
   | { readonly status: "Throttled"; readonly retryAfterSeconds: number };
 
 const DEVICE_COOKIE = /^[A-Za-z0-9_-]{43}$/u;
+const CHOICE = /^[A-Za-z0-9_-]{43}$/u;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const active = (member: StoreMember) =>
   member.membershipLifecycle === "Active" && member.assignmentLifecycle === "Active";
@@ -90,6 +96,8 @@ export function createMerchantStaffPin(options: {
   readonly authentication: Pick<MerchantBffService, "authorize">;
   readonly deviceHasher: StoreDeviceSecretHasher;
   readonly kdf: StaffPinKdf;
+  /** Opaque per-tablet names of the people on the lock screen (server-held key). */
+  readonly choiceTokens: StaffPinChoiceTokens;
   newReference(): string;
   /** The Store's name and time zone for the lock screen (no session there). */
   describeStore(
@@ -137,7 +145,7 @@ export function createMerchantStaffPin(options: {
     typeof cookie === "string" && DEVICE_COOKIE.test(cookie)
       ? options.deviceHasher.hash(cookie)
       : null;
-  async function tablet(tx: Tx, cookie: unknown) {
+  async function tablet(tx: Query, cookie: unknown) {
     const hash = deviceHash(cookie);
     if (hash === null) return null;
     const found = await findStoreSignInDevice(tx, { selectorHash: hash });
@@ -176,6 +184,29 @@ export function createMerchantStaffPin(options: {
       .authorize({ sessionCookie: input.sessionCookie, csrf: input.csrf })
       .catch(() => fail("Denied"));
 
+  type SignedInSession = Pick<AuthenticationSession, "sessionReference" | "actor" | "createdAt">;
+  async function endTabletPinSessions(
+    tx: Query,
+    deviceCookie: unknown,
+    session: SignedInSession,
+  ): Promise<{ readonly signedOut: number }> {
+    const device = await tablet(tx, deviceCookie);
+    if (device === null || session.actor.actorReference === null) return { signedOut: 0 };
+    return endStaffPinSessionsOnDevice(
+      tx,
+      {
+        brandReference: device.brandReference,
+        storeReference: device.storeReference,
+        deviceReference: device.deviceReference,
+        sessionReference: session.sessionReference,
+        actorReference: session.actor.actorReference,
+        at: session.createdAt,
+        auditReference: reference(),
+      },
+      policy,
+    );
+  }
+
   return Object.freeze({
     /** Whether this browser holds a registered, unrevoked Store tablet cookie. */
     async isRegisteredDevice(deviceCookie: unknown): Promise<boolean> {
@@ -205,13 +236,17 @@ export function createMerchantStaffPin(options: {
                 actorReferences: members.map((member) => member.actorReference),
               });
         const profile = await options.describeStore(tx, { ...scope, at });
+        const named = { ...scope, deviceReference: device.deviceReference };
         return Object.freeze({
           storeLabel: profile.label,
           timeZone: profile.timeZone,
           staff: members
             .filter((member) => states.get(member.actorReference)?.state === "Set")
             .map((member) =>
-              Object.freeze({ choice: member.actorReference, name: String(member.displayName) }),
+              Object.freeze({
+                choice: options.choiceTokens.issue(named, member.actorReference),
+                name: String(member.displayName),
+              }),
             )
             .sort((a, b) => a.name.localeCompare(b.name, "en")),
         });
@@ -225,8 +260,8 @@ export function createMerchantStaffPin(options: {
       readonly choice: unknown;
       readonly pin: unknown;
     }): Promise<StaffSwitchResult> {
-      if (typeof input.choice !== "string" || !uuid.test(input.choice)) return fail("Denied");
-      const choice = input.choice;
+      if (typeof input.choice !== "string" || !CHOICE.test(input.choice)) return fail("Denied");
+      const token = input.choice;
       const attemptReference = reference(),
         auditReference = reference(),
         lockAuditReference = reference();
@@ -237,9 +272,18 @@ export function createMerchantStaffPin(options: {
           brandReference: device.brandReference,
           storeReference: device.storeReference,
         };
+        // The token names one of this Store's current people on this tablet; anything else (someone
+        // who has left, another tablet's list, a made-up value) names nobody and checks no PIN.
+        const members = await listStoreMembers(directory(tx), scope);
+        const choice = options.choiceTokens.resolve(
+          { ...scope, deviceReference: device.deviceReference },
+          token,
+          members.map((member) => member.actorReference),
+        );
+        if (choice === null) return fail("NotListed");
         // Someone no longer working here is treated exactly like a person without a PIN.
-        const eligible = (await namedMembers(tx, scope)).some(
-          (member) => member.actorReference === choice,
+        const eligible = members.some(
+          (member) => member.actorReference === choice && active(member),
         );
         const result = await checkStaffPin(
           tx,
@@ -257,9 +301,9 @@ export function createMerchantStaffPin(options: {
           options.kdf,
           policy,
         );
-        return { result, device };
+        return { result, device, choice };
       });
-      const { result, device } = checked;
+      const { result, device, choice } = checked;
       if (result.status === "DeviceInactive") return fail("DeviceNotRegistered");
       if (result.status !== "Verified") return result;
       let previous: string | null = null;
@@ -297,6 +341,21 @@ export function createMerchantStaffPin(options: {
         })
         .catch(() => fail("Unavailable"));
       return Object.freeze({ status: "SignedIn" as const, sessionCookie: issued.sessionCookie });
+    },
+
+    /**
+     * Inside the transaction creating a full sign-in: when this browser is a registered tablet,
+     * ends the PIN sessions started on it (the previous person is signed out at once).
+     */
+    endTabletPinSessions,
+
+    /** After a full sign-in that could not run inside its session's transaction (OIDC callback). */
+    async afterFullSignIn(input: {
+      readonly deviceCookie: unknown;
+      readonly session: SignedInSession;
+    }): Promise<{ readonly signedOut: number }> {
+      if (deviceHash(input.deviceCookie) === null) return { signedOut: 0 };
+      return run((tx) => endTabletPinSessions(tx, input.deviceCookie, input.session));
     },
 
     /** The signed-in staff member's own PIN and how this session was started. */

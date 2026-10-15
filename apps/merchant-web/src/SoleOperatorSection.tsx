@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
 import { StepUpVerification } from "./StepUpVerification.js";
+import { FullSignInPrompt } from "./FullSignInPrompt.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import {
   createSoleOperatorClient,
@@ -63,6 +64,8 @@ export function SoleOperatorSection({
   const [reason, setReason] = useState<SoleOperatorReason | "">("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "status" | "alert"; text: string } | null>(null);
+  // A PIN sign-in was refused: show the "Verify it's you" step; the retry keeps the same change.
+  const [fullSignIn, setFullSignIn] = useState(false);
   // One identity per intended change: a retry after an unknown result is recorded once.
   const operation = useRef(serviceOperationReference());
   const reload = useCallback(() => setRefresh((value) => value + 1), []);
@@ -107,6 +110,7 @@ export function SoleOperatorSection({
     if (busy || reason === "" || !verified) return;
     setBusy(true);
     setMessage(null);
+    setFullSignIn(false);
     try {
       const result = await client.current.change(
         {
@@ -127,6 +131,11 @@ export function SoleOperatorSection({
       onChanged?.();
     } catch (error) {
       const code = error instanceof SoleOperatorClientError ? error.code : "OutcomeUnknown";
+      if (code === "FullSignInRequired") {
+        // Nothing was recorded; keep the same change so "Try again" after verifying sends it once.
+        setFullSignIn(true);
+        return;
+      }
       if (code !== "OutcomeUnknown") operation.current = serviceOperationReference();
       setMessage({
         tone: "alert",
@@ -217,6 +226,7 @@ export function SoleOperatorSection({
           {busy ? "Saving…" : target === "On" ? "Turn on sole operator" : "Turn off sole operator"}
         </button>
       </div>
+      {fullSignIn ? <FullSignInPrompt csrf={csrf} fetcher={fetcher} /> : null}
       {message ? <p role={message.tone === "alert" ? "alert" : "status"}>{message.text}</p> : null}
     </section>
   );

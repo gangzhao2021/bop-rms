@@ -39,7 +39,7 @@ describe("WP-2423 P1 settlement report", () => {
   });
   it("shows the day, totals, the settlement statement and each payment needing attention in Store time", () => {
     const html = render(settlementViewFixture());
-    expect(html).toContain("Business day 2026-09-21");
+    expect(html).toContain("Business day: Mon, Sep 21");
     expect(html).toContain(">Closed<");
     expect(html).toContain("Sep 21, 2026, 4:00 AM");
     expect(html).toContain("$1,234.50");
@@ -147,7 +147,7 @@ describe("WP-2423 Q19 current day beside a closed day", () => {
       },
     });
     expect(html).toContain(
-      "Today so far (2026-09-22): 1 refund · $116.00 approved by the owner alone.",
+      "Today so far (Tue, Sep 22): 1 refund · $116.00 approved by the owner alone.",
     );
     expect(
       render({

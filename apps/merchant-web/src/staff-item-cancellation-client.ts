@@ -1,4 +1,5 @@
 import type { StaffCancellationReason } from "./current-order-queue-client.js";
+import { FULL_SIGN_IN_REQUIRED, isFullSignInRequired } from "./full-sign-in.js";
 import { serviceOperationReference } from "./service-control-client.js";
 
 /**
@@ -174,9 +175,12 @@ export type ItemCancelFailure =
   | "LegacyStock"
   | "NotCancellable"
   | "Denied"
+  /** Refused because the person signed in with a PIN; they confirm it is them and retry. */
+  | typeof FULL_SIGN_IN_REQUIRED
   | "Unknown";
 
 export function itemCancelFailure(status: number, error: string | null): ItemCancelFailure {
+  if (isFullSignInRequired(status, { error })) return FULL_SIGN_IN_REQUIRED;
   if (status === 401 || status === 403) return "Denied";
   if (status === 409)
     return error === "order_preparation_started"
@@ -265,9 +269,9 @@ export function createStaffItemCancellationClient(
     /** The intent a retry would send again, or null when the next submit starts a new one. */
     pendingIntent: () => pending,
     /**
-     * Cancel the selected items. An unknown result keeps the same operation reference (and the
-     * same selection and reason) so the retry recovers the first attempt's result; any settled
-     * answer ends the intent.
+     * Cancel the selected items. An unknown result, or a refusal until the person confirms their
+     * PIN sign-in, keeps the same operation reference (and the same selection and reason) so the
+     * retry recovers or completes the first attempt; any settled answer ends the intent.
      */
     async cancel(selection: ItemCancelSelection, reasonCode: StaffCancellationReason) {
       pending ??= Object.freeze({
@@ -287,7 +291,8 @@ export function createStaffItemCancellationClient(
         { ...sent, operationReference: intent.operationReference, reasonCode: intent.reasonCode },
         (value) => parseItemCancelResult(value, sent),
       );
-      if (answer.ok || answer.failure !== "Unknown") pending = null;
+      if (answer.ok || (answer.failure !== "Unknown" && answer.failure !== FULL_SIGN_IN_REQUIRED))
+        pending = null;
       return answer;
     },
     /** Ask for the refund status of an earlier item cancellation; never resends a refund. */

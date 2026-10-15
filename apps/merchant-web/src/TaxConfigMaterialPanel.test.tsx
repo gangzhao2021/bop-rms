@@ -2,7 +2,9 @@
 // acceptance separately proves IndexedDB, Session/IAM and persistence.
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import { FULL_SIGN_IN_REQUIRED_TEXT } from "./full-sign-in.js";
 import {
+  TaxConfigAlert,
   TaxConfigMaterialPanel,
   saveTaxConfigRegistrationMaterial,
   finishTaxConfigMaterialOriginal,
@@ -426,4 +428,20 @@ it("does not invent registration source pins when the actual source is absent", 
   ).rejects.toMatchObject({ code: "Unavailable" });
   expect(f.load()).toBeNull();
   expect(f.events).not.toContain("dispatch");
+});
+
+it("WP-2423: a PIN sign-in refusal offers verification instead of a permission message", () => {
+  const markup = renderToStaticMarkup(
+    <TaxConfigAlert error={FULL_SIGN_IN_REQUIRED_TEXT} csrf="synthetic-csrf" />,
+  );
+  expect(markup).toContain("You signed in with a PIN");
+  expect(markup).toContain("Verify it&#x27;s you");
+  expect(markup).toContain("Sign out and sign in with your account");
+  expect(markup).not.toContain("permission");
+  const denied = renderToStaticMarkup(
+    <TaxConfigAlert error="Current permission does not allow this action." csrf="synthetic-csrf" />,
+  );
+  expect(denied).toContain('role="alert"');
+  expect(denied).not.toContain("Verify it&#x27;s you");
+  expect(renderToStaticMarkup(<TaxConfigAlert error={null} csrf="synthetic-csrf" />)).toBe("");
 });

@@ -1,3 +1,4 @@
+import { FULL_SIGN_IN_REQUIRED_TEXT } from "./full-sign-in.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createStoreConfigurationOrdinaryClient,
@@ -142,6 +143,7 @@ const messages: Record<StoreSetupClientError["code"], string> = {
   Unavailable:
     "Store configuration could not be loaded. Try again; any request still waiting is kept.",
   NotRegistered: "No tax classifications are set up for this Brand yet.",
+  FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
   OutcomeUnknown:
     "The result is unknown. Recover the original request before sending another command.",
 };

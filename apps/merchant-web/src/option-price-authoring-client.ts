@@ -13,6 +13,7 @@ import {
   publicationValueDigest as digest,
 } from "./product-publication-command-client-v2.js";
 import { parseOptionSetAuthoringScope } from "./option-set-authoring-client.js";
+import { FULL_SIGN_IN_REQUIRED, isFullSignInRequired } from "./full-sign-in.js";
 
 export type OptionPriceAuthoringScope = ReturnType<typeof parseOptionSetAuthoringScope>;
 export type OptionPriceQueryScope =
@@ -21,6 +22,8 @@ export type OptionPriceAuthoringAction = "CreateDraft" | "ReplaceDraft" | "Publi
 export type OptionPriceAuthoringClientCode =
   | "Invalid"
   | "Denied"
+  /** Refused because the person signed in with a PIN; they confirm it is them and retry. */
+  | typeof FULL_SIGN_IN_REQUIRED
   | "FeatureDisabled"
   | "Conflict"
   | "Unavailable"
@@ -776,6 +779,9 @@ export function createOptionPriceAuthoringClient(fetcher: typeof fetch = globalT
       const value: unknown = JSON.parse(text);
       if (response.status !== 200) {
         const error = record(copy(value), ["error"]).error;
+        // A PIN sign-in that is not confirmed: refused before the request was processed.
+        if (isFullSignInRequired(response.status, { error }))
+          return serverError(FULL_SIGN_IN_REQUIRED);
         if ((response.status === 401 || response.status === 403) && error === "request_denied")
           return serverError("Denied");
         if (response.status === 409 && error === "option_price_conflict")
@@ -909,6 +915,16 @@ export function createOptionPriceAuthoringClient(fetcher: typeof fetch = globalT
           return result;
         } catch (e) {
           const attemptCode = e instanceof OptionPriceAuthoringClientError ? e.code : "Unavailable";
+          // Refused until the PIN sign-in is confirmed: this attempt was not processed, so the
+          // original stays exactly as uncertain (or not) as it was before it.
+          if (
+            e instanceof OptionPriceAuthoringClientError &&
+            definitive.has(e) &&
+            e.code === FULL_SIGN_IN_REQUIRED
+          ) {
+            pending = wasPending;
+            throw e;
+          }
           if (
             !wasPending &&
             !resolve &&

@@ -469,7 +469,14 @@ test.describe("@production order status HTTP continuity", () => {
     }, id(1));
     const main = page.getByRole("main");
     await expect(main.getByText("048 213", { exact: true })).toBeVisible();
-    await expect(main.getByLabel("Pickup code 0 4 8 2 1 3")).toBeVisible();
+    // Screen readers hear the code digit by digit; the large code itself is hidden from them.
+    await expect(
+      main.getByText("Order 1001. Pickup code 0 4 8 2 1 3", { exact: true }),
+    ).toHaveCount(1);
+    await expect(main.locator(".pickup-code__visual--short")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
     await expect(main).not.toContainText(longCode);
     await expect(main).toContainText("Show or read this code to staff");
     await expectNoInternalText(page);

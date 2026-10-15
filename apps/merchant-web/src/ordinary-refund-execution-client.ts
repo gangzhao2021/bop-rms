@@ -1,3 +1,8 @@
+import {
+  FULL_SIGN_IN_REQUIRED,
+  responseNeedsFullSignIn,
+  type FullSignInRequired,
+} from "./full-sign-in.js";
 export interface RefundSendCommand {
   operationReference: string;
   orderReference: string;
@@ -12,13 +17,14 @@ export interface RefundReconciliationCommand {
   observationReference: string;
   auditReference: string;
 }
+type ExecutionFailure = "PermissionDenied" | FullSignInRequired | "Unavailable" | "OutcomeUnknown";
 export class OrdinaryRefundExecutionError extends Error {
-  constructor(readonly code: "PermissionDenied" | "Unavailable" | "OutcomeUnknown") {
+  constructor(readonly code: ExecutionFailure) {
     super("Refund execution could not be confirmed");
     this.name = "OrdinaryRefundExecutionError";
   }
 }
-const fail = (code: "PermissionDenied" | "Unavailable" | "OutcomeUnknown"): never => {
+const fail = (code: ExecutionFailure): never => {
   throw new OrdinaryRefundExecutionError(code);
 };
 const ref = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -80,6 +86,7 @@ export function createOrdinaryRefundExecutionClient(fetcher: typeof fetch = fetc
             signal: controller.signal,
           });
           if (controller.signal.aborted) return fail("OutcomeUnknown");
+          if (await responseNeedsFullSignIn(response)) return fail(FULL_SIGN_IN_REQUIRED);
           if (response.status === 401 || response.status === 403) return fail("PermissionDenied");
           if (
             response.headers.get("cache-control") !== "no-store" ||

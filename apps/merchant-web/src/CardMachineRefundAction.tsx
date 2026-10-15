@@ -1,11 +1,26 @@
 import { useRef, useState } from "react";
 import type { CurrentOrderQueue } from "./current-order-queue-client.js";
+import { FullSignInPrompt } from "./FullSignInPrompt.js";
+import {
+  FULL_SIGN_IN_REQUIRED,
+  FULL_SIGN_IN_REQUIRED_TEXT,
+  isFullSignInRequired,
+  type FullSignInRequired,
+} from "./full-sign-in.js";
 import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
 
 type Order = CurrentOrderQueue["items"][number];
 type Batch = Order["batches"][number];
-type Outcome = "Idle" | "Pending" | "Recorded" | "NothingOwed" | "Invalid" | "Denied" | "Unknown";
+type Outcome =
+  | "Idle"
+  | "Pending"
+  | "Recorded"
+  | "NothingOwed"
+  | "Invalid"
+  | "Denied"
+  | FullSignInRequired
+  | "Unknown";
 
 /** The last part of the card machine's slip; never a card number (at most 12 digits). */
 export function validSlipReference(value: string): boolean {
@@ -21,6 +36,7 @@ export function cardMachineRefundOutcome(
   error: string | null,
 ): Exclude<Outcome, "Idle" | "Pending"> {
   if (status >= 200 && status < 300) return "Recorded";
+  if (isFullSignInRequired(status, { error })) return FULL_SIGN_IN_REQUIRED;
   if (status === 403) return "Denied";
   if (status === 409 && error === "nothing_to_refund") return "NothingOwed";
   if (status === 400) return "Invalid";
@@ -35,8 +51,24 @@ const message: Record<Exclude<Outcome, "Idle">, string> = {
   Invalid: "Check the slip reference: letters and numbers only, never the card number.",
   Denied:
     "Only a store manager or owner can record this refund. Ask them to record it after refunding on the card machine.",
+  FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
   Unknown: "Result unknown. Record it again; the same refund is never counted twice.",
 };
+
+/** The dialog's answer line; a PIN sign-in refusal shows how to confirm it is them instead. */
+export function CardMachineRefundStatus({
+  outcome,
+  csrf,
+  fetcher,
+}: {
+  readonly outcome: Outcome;
+  readonly csrf: string;
+  readonly fetcher?: typeof fetch | undefined;
+}) {
+  if (outcome === "Idle" || outcome === "Recorded") return null;
+  if (outcome === FULL_SIGN_IN_REQUIRED) return <FullSignInPrompt csrf={csrf} fetcher={fetcher} />;
+  return <p role={outcome === "Pending" ? "status" : "alert"}>{message[outcome]}</p>;
+}
 
 /**
  * WP-2423 Q7 (DEC-COUNTER-PAYMENT-RECORD decision 4): a cancelled counter order was paid on the
@@ -107,7 +139,8 @@ export function CardMachineRefundAction({
     } catch {
       next = "Unknown";
     }
-    if (next !== "Unknown") operation.current = null;
+    // Unknown or a PIN sign-in to confirm first: a retry keeps the same operation.
+    if (next !== "Unknown" && next !== FULL_SIGN_IN_REQUIRED) operation.current = null;
     setOutcome(next);
     if (next === "Recorded" || next === "NothingOwed") {
       dialog.current?.close();
@@ -153,9 +186,9 @@ export function CardMachineRefundAction({
           <p id={titleId + "-hint"} className="field-hint">
             The approval or reference code printed on the refund slip. Never the card number.
           </p>
-          {outcome !== "Idle" && outcome !== "Recorded" ? (
-            <p role={outcome === "Pending" ? "status" : "alert"}>{message[outcome]}</p>
-          ) : null}
+          {outcome === FULL_SIGN_IN_REQUIRED ? null : (
+            <CardMachineRefundStatus outcome={outcome} csrf={csrf} fetcher={fetcher} />
+          )}
           <div className="card-actions">
             <button
               type="submit"
@@ -172,6 +205,10 @@ export function CardMachineRefundAction({
             </button>
           </div>
         </form>
+        {/* Outside the form: the verification step has its own form. */}
+        {outcome === FULL_SIGN_IN_REQUIRED ? (
+          <CardMachineRefundStatus outcome={outcome} csrf={csrf} fetcher={fetcher} />
+        ) : null}
       </dialog>
     </div>
   );

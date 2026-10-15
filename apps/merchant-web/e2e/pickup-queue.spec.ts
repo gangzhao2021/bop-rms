@@ -664,6 +664,15 @@ test("@production Pickup accepts the typed six-digit code, explains wrong codes 
       },
     });
   });
+  // WP-2423: the in-person check shows the name and only the last four phone digits.
+  const identityReads: Record<string, unknown>[] = [];
+  await page.route("**/merchant/pickup/identity-check", (route) => {
+    identityReads.push(route.request().postDataJSON());
+    return route.fulfill({
+      headers,
+      json: { status: "Available", name: "Sam Lee", phoneLast4: "0123" },
+    });
+  });
   const sent: Record<string, unknown>[] = [];
   await page.route("**/merchant/pickup/proof", (route) => {
     sent.push(route.request().postDataJSON());
@@ -705,6 +714,30 @@ test("@production Pickup accepts the typed six-digit code, explains wrong codes 
   await page.keyboard.press("Enter");
   await expect(page.getByText("Too many wrong codes · check in person")).toBeVisible();
   expect(reads).toBeGreaterThan(readsBeforeLock);
+  // The reason stays said on the card after the queue re-reads, not the wrong-code text.
+  await expect(
+    page.getByText("Too many wrong codes for this order. Check the customer in person instead", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await expect(page.getByText("That code doesn't match this order.", { exact: false })).toHaveCount(
+    0,
+  );
+  // The pickup code value reads on one or two lines, never one word per line.
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    const value = page.locator(".pickup-queue__card dl > div").first().locator("dd");
+    const lines = await value.evaluate(
+      (element) =>
+        element.getBoundingClientRect().height / parseFloat(getComputedStyle(element).lineHeight),
+    );
+    expect(lines).toBeLessThan(2.5);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/pickup-locked-${width}.png`, fullPage: true });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
   await expect(
     page.getByRole("button", { name: "Hand over after checking in person" }),
   ).toBeVisible();
@@ -714,6 +747,13 @@ test("@production Pickup accepts the typed six-digit code, explains wrong codes 
   await expect(
     dialog.getByText("Too many wrong pickup codes were entered for this order", { exact: false }),
   ).toBeVisible();
+  await expect(dialog.getByText("Sam Lee", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("0123", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("definition").filter({ hasText: "0123" })).toHaveText("•••• 0123");
+  expect(identityReads).toEqual([
+    { orderReference: id(3), storeReference: scope.storeReference, fulfillmentReference: id(1) },
+  ]);
+  await page.screenshot({ path: "test-results/pickup-in-person-check-1440.png", fullPage: true });
   await expectNoInternalText(page);
   // The code never reaches browser storage or the address bar.
   expect(page.url()).not.toContain("048213");

@@ -6,6 +6,7 @@ import {
 } from "./catalog-product-command-values.js";
 import { canonicalPublicationValue as canonical } from "./product-publication-command-client-v2.js";
 import { parseOptionSetAuthoringScope } from "./option-set-authoring-client.js";
+import { FULL_SIGN_IN_REQUIRED, isFullSignInRequired } from "./full-sign-in.js";
 import type {
   OptionPriceAuthoringScope,
   OptionPriceAuthoringClientCode,
@@ -362,6 +363,9 @@ export function createOptionPriceReviewClient(fetcher: typeof fetch = globalThis
       const value: unknown = JSON.parse(text);
       if (response.status !== 200) {
         const error = record(copy(value), ["error"]).error;
+        // A PIN sign-in that is not confirmed: refused before the request was processed.
+        if (isFullSignInRequired(response.status, { error }))
+          return serverError(FULL_SIGN_IN_REQUIRED);
         if ((response.status === 401 || response.status === 403) && error === "request_denied")
           return serverError("Denied");
         if (response.status === 409 && error === "option_price_conflict")
@@ -476,6 +480,16 @@ export function createOptionPriceReviewClient(fetcher: typeof fetch = globalThis
           return result;
         } catch (e) {
           const attemptCode = e instanceof OptionPriceReviewClientError ? e.code : "Unavailable";
+          // Refused until the PIN sign-in is confirmed: this attempt was not processed, so the
+          // original stays exactly as uncertain (or not) as it was before it.
+          if (
+            e instanceof OptionPriceReviewClientError &&
+            definitive.has(e) &&
+            e.code === FULL_SIGN_IN_REQUIRED
+          ) {
+            pending = wasPending;
+            throw e;
+          }
           if (
             !wasPending &&
             !resolve &&

@@ -78,3 +78,17 @@ it("accepts only a closed reconciliation acknowledgment without a settlement cla
     true,
   );
 });
+it("WP-2423: a PIN sign-in refusal asks to confirm it is them; a plain 403 stays denied", async () => {
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response({ error: "full_sign_in_required" }, 403))
+    .mockResolvedValueOnce(response({ error: "forbidden" }, 403))
+    .mockResolvedValueOnce(response({ status: "DispatchRecorded" }));
+  const intent = createOrdinaryRefundExecutionClient(fetcher).prepareSend(command());
+  await expect(intent.execute("a".repeat(43))).rejects.toMatchObject({
+    code: "FullSignInRequired",
+  });
+  await expect(intent.execute("a".repeat(43))).rejects.toMatchObject({ code: "PermissionDenied" });
+  await expect(intent.execute("a".repeat(43))).resolves.toEqual({ status: "DispatchRecorded" });
+  expect(new Set(fetcher.mock.calls.map((call) => call[1]?.body)).size).toBe(1);
+});

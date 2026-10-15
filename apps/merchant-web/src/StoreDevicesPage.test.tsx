@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { findInternalText, staticText } from "../e2e/internal-text-patterns.js";
 import { StaffPinError, type StoreDevicesRead } from "./staff-pin-client.js";
 import {
+  commandFailureOutcome,
   commandFailureText,
   FULL_SIGN_IN_GUIDANCE,
   removedText,
@@ -37,7 +38,11 @@ const full: StoreDevicesRead = {
   ],
 };
 const noop = () => undefined;
-const view = (load: DevicesLoad, needsVerification = false) =>
+const view = (
+  load: DevicesLoad,
+  needsVerification = false,
+  message: { readonly tone: "neutral" | "error"; readonly text: string } | null = null,
+) =>
   renderToStaticMarkup(
     <StoreDevicesView
       load={load}
@@ -46,7 +51,7 @@ const view = (load: DevicesLoad, needsVerification = false) =>
       now={now}
       label=""
       busy={false}
-      message={null}
+      message={message}
       needsVerification={needsVerification}
       verification={<button type="button">Verify with authenticator app</button>}
       pending={null}
@@ -112,6 +117,26 @@ describe("Shared tablets & PINs", () => {
     const verify = view({ kind: "Ready", read: full }, true);
     expect(verify).toContain("You signed in with a PIN. Confirm it&#x27;s you");
     expect(verify).toContain("Verify with authenticator app");
+  });
+  it("shows the PIN sign-in guidance once when a change or the list needs verification", () => {
+    const guidance = "You signed in with a PIN. Confirm it&#x27;s you";
+    const outcome = commandFailureOutcome(new StaffPinError("FullSignInRequired"), "Register");
+    expect(outcome).toEqual({ needsVerification: true, message: null });
+    const afterCommand = view({ kind: "Ready", read: full }, true, outcome.message);
+    expect(afterCommand.split(guidance)).toHaveLength(2);
+    expect(afterCommand).not.toContain("Not done");
+    const afterLoad = view({ kind: "NeedsVerification" }, true);
+    expect(afterLoad.split(guidance)).toHaveLength(2);
+    expect(afterLoad).not.toContain("Couldn&#x27;t load this page");
+    expect(afterLoad).toContain("Verify with authenticator app");
+    plain(afterLoad);
+    expect(commandFailureOutcome(new StaffPinError("Denied"), "Register")).toEqual({
+      needsVerification: false,
+      message: {
+        tone: "error",
+        text: "You don't have permission to do this. Ask the store owner.",
+      },
+    });
   });
   it("explains outcomes and conflicts", () => {
     expect(removedText("Front counter", 0)).toBe(

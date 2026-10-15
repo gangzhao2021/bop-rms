@@ -54,7 +54,9 @@ private installation remain protected; the separately approved batch600 imported
 into the current Windows user's Root store, with normal Windows HTTPS verification.
 No LocalMachine trust was changed. See the
 [certificate scope and rollback](../spec/design/pilot-windows-demo-tls-trust-proposal.md);
-the certificate expires2026-10-20. Future cloud migration must preserve paired database/simulator and
+the certificate expires2026-10-20; renew it beforehand with the `renew` mode of
+`pilot-provision-tls.mjs`, restart the services and replace the trusted certificate on each
+device ([renewal steps](../../tooling/environment/README.md#renewing-the-local-pilot-certificate)). Future cloud migration must preserve paired database/simulator and
 installation recovery material, replace local demo identity/payment with approved
 services when entering real operations, and prove host startup/recovery there.
 

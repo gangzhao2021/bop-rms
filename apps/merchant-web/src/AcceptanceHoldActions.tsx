@@ -1,5 +1,12 @@
 import { useRef, useState } from "react";
 import type { CurrentOrderQueue } from "./current-order-queue-client.js";
+import { FullSignInPrompt } from "./FullSignInPrompt.js";
+import {
+  FULL_SIGN_IN_REQUIRED,
+  FULL_SIGN_IN_REQUIRED_TEXT,
+  isFullSignInRequired,
+  type FullSignInRequired,
+} from "./full-sign-in.js";
 import { storeTime } from "./StoreTime.js";
 
 type Order = CurrentOrderQueue["items"][number];
@@ -57,14 +64,42 @@ export function AcceptanceHoldNotice({
   );
 }
 
-type Outcome = "Idle" | "Pending" | "Done" | "NotHeld" | "Denied" | "Unknown";
+type Outcome = "Idle" | "Pending" | "Done" | "NotHeld" | "Denied" | FullSignInRequired | "Unknown";
 const message: Record<Exclude<Outcome, "Idle">, string> = {
   Pending: "Refunding…",
   Done: "Refund chosen. The customer's payment is being refunded in full.",
   NotHeld: "This order was already accepted or closed. Refresh to see it.",
   Denied: "Only a store manager or owner can refund this order.",
+  FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
   Unknown: "Result unknown. Try again; the refund is only made once.",
 };
+
+/** The refund answer for a held order; a PIN sign-in refusal is not a missing permission. */
+export function acceptanceHoldRefundOutcome(
+  status: number,
+  payload: unknown,
+): Exclude<Outcome, "Idle" | "Pending"> {
+  if (status >= 200 && status < 300) return "Done";
+  if (isFullSignInRequired(status, payload)) return FULL_SIGN_IN_REQUIRED;
+  if (status === 403) return "Denied";
+  if (status === 409 || status === 400) return "NotHeld";
+  return "Unknown";
+}
+
+/** The dialog's answer line; a PIN sign-in refusal shows how to confirm it is them instead. */
+export function AcceptanceHoldRefundStatus({
+  outcome,
+  csrf,
+  fetcher,
+}: {
+  readonly outcome: Outcome;
+  readonly csrf: string;
+  readonly fetcher?: typeof fetch | undefined;
+}) {
+  if (outcome === "Idle" || outcome === "Done") return null;
+  if (outcome === FULL_SIGN_IN_REQUIRED) return <FullSignInPrompt csrf={csrf} fetcher={fetcher} />;
+  return <p role="status">{message[outcome]}</p>;
+}
 
 /**
  * WP-2423 Q9-G1: the decision for one held order. Accepting uses the ordinary Accept action
@@ -107,13 +142,14 @@ export function AcceptanceHoldDecision({
           holdReference: hold.holdReference,
         }),
       });
-      next = response.ok
-        ? "Done"
-        : response.status === 403
-          ? "Denied"
-          : response.status === 409 || response.status === 400
-            ? "NotHeld"
-            : "Unknown";
+      let payload: unknown = null;
+      if (response.status === 403)
+        try {
+          payload = await response.json();
+        } catch {
+          payload = null;
+        }
+      next = acceptanceHoldRefundOutcome(response.ok ? 200 : response.status, payload);
     } catch {
       next = "Unknown";
     }
@@ -173,7 +209,7 @@ export function AcceptanceHoldDecision({
           The order will not be made. The customer is refunded in full to their original payment
           method and sees that the store could not accept it.
         </p>
-        {outcome !== "Idle" && outcome !== "Done" ? <p role="status">{message[outcome]}</p> : null}
+        <AcceptanceHoldRefundStatus outcome={outcome} csrf={csrf} fetcher={fetcher} />
         <div className="card-actions">
           <button type="button" onClick={() => void refund()} disabled={outcome === "Pending"}>
             Refund order

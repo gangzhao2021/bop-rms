@@ -301,3 +301,19 @@ it("WP-2423 Q18 option A: a PIN sign-in issues an ordinary session for a configu
   await session.issue("author");
   expect(finalized).toHaveLength(1);
 });
+it("WP-2423 Q18: a full sign-in on a registered tablet finalizes in the transaction creating it", async () => {
+  const f = setup(),
+    session = await f.create();
+  const finalized = [];
+  await expect(session.issue("author", "Workforce", "not a function")).rejects.toThrow(
+    /^INTERNAL_MERCHANT_DENIED$/,
+  );
+  await session.issue("author", "KitchenDisplay", async (tx, created) => {
+    finalized.push(created);
+  });
+  expect(finalized).toHaveLength(1);
+  expect(finalized[0].sessionReference).toBe(seam.created[0].sessionReference);
+  expect(finalized[0].actor.actorReference).toBe(id(4));
+  await session.issue("author");
+  expect(finalized).toHaveLength(1);
+});

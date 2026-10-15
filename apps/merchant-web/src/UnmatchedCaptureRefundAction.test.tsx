@@ -27,3 +27,8 @@ it("WP-2423 P6: names denied, same-approver and changed outcomes; anything else 
   expect(unmatchedRefundFailure(409, "UNMATCHED_REFUND_STATE_CONFLICT")).toBe("Changed");
   expect(unmatchedRefundFailure(502, null)).toBe("Unknown");
 });
+
+it("WP-2423: a PIN sign-in refusal is not a missing refund authority", () => {
+  expect(unmatchedRefundFailure(403, "full_sign_in_required")).toBe("FullSignInRequired");
+  expect(unmatchedRefundFailure(403, "UNMATCHED_REFUND_PERMISSION_DENIED")).toBe("Denied");
+});

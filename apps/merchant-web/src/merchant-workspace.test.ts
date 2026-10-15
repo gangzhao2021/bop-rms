@@ -187,6 +187,22 @@ describe("Merchant workspace client boundary", () => {
     await expect(createMerchantWorkspaceClient(request).bootstrap()).resolves.toBeNull();
   });
 
+  it("WP-2423: a PIN sign-in refusal is told apart from any other refused Store switch", async () => {
+    const csrf = "C".repeat(43);
+    const refused = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ error: "full_sign_in_required" }, { status: 403 }))
+      .mockResolvedValueOnce(Response.json({ error: "forbidden" }, { status: 403 }));
+    const client = createMerchantWorkspaceClient(refused);
+    await expect(client.switchStore(csrf, storeReference)).rejects.toMatchObject({
+      code: "FullSignInRequired",
+    });
+    await expect(client.switchStore(csrf, storeReference)).rejects.toThrow(
+      "MERCHANT_STORE_SWITCH_DENIED",
+    );
+    expect(refused).toHaveBeenCalledTimes(2);
+  });
+
   it("posts only the selected reference with in-memory CSRF and requires fresh selected scope", async () => {
     const nextCsrf = "D".repeat(43);
     const request = vi

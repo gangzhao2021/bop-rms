@@ -1,5 +1,8 @@
+import { FULL_SIGN_IN_REQUIRED, isFullSignInRequired } from "./full-sign-in.js";
+
 export type RoleAdministrationPageErrorCode =
   | "PermissionDenied"
+  | typeof FULL_SIGN_IN_REQUIRED
   | "NotFound"
   | "FeatureDisabled"
   | "Stale"
@@ -276,6 +279,8 @@ export function createRoleAdministrationPageClient(
     }
     if (!response.ok) {
       const payload = (await response.json().catch(() => null)) as { error?: unknown } | null;
+      if (isFullSignInRequired(response.status, payload))
+        throw new RoleAdministrationPageError(FULL_SIGN_IN_REQUIRED);
       throw new RoleAdministrationPageError(
         errorCodes[String(payload?.error)] ??
           (response.status === 403 ? "PermissionDenied" : "Unavailable"),

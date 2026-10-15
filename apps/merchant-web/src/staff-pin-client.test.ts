@@ -173,6 +173,8 @@ describe("requests", () => {
     expect(busy.code).toBe("Busy");
     expect(busy.detail.retryAfterSeconds).toBe(120);
     expect((await unlock(404, { error: "device_not_registered" })).code).toBe("NotRegistered");
+    expect((await unlock(409, { error: "staff_not_listed" })).code).toBe("NotListed");
+    expect((await unlock(409, { error: "other" })).code).toBe("Unavailable");
     expect((await unlock(503, { error: "staff_switch_unavailable" })).code).toBe("Unavailable");
     expect((await unlock(429, null)).detail.retryAfterSeconds).toBe(60);
     const offline = createStaffPinClient(

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { expectNoInternalText } from "./internal-text-guard";
 
 const id = (n: number) => "018f7700-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const scope = {
@@ -148,7 +149,7 @@ test("@production Settlement shows the day's totals, the run result and differen
       .getByRole("link", { name: "Settlement" })
       .first(),
   ).toHaveAttribute("aria-current", "page");
-  await expect(page.getByRole("heading", { name: "Business day 2026-09-21" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Business day: Mon, Sep 21" })).toBeVisible();
   await expect(page.getByText("$1,234.50", { exact: true })).toBeVisible();
   await expect(page.getByText("14 payments", { exact: true })).toBeVisible();
   await expect(page.getByText("$1,223.20")).toBeVisible();
@@ -167,16 +168,20 @@ test("@production Settlement shows the day's totals, the run result and differen
   );
   await expect(page.locator("body")).not.toContainText(id(1));
   expect(requested).toEqual([null]);
+  // Staff read store-time wording, never a machine date or code. The provider's own statement
+  // reference is printed on the bank statement, so staff match it as written.
+  await expectNoInternalText(page, ["SETTLE-2026-09-21-01"]);
 
   // A day that is still open: totals so far, no run yet.
   await page.getByRole("textbox", { name: "Business day" }).fill("2026-09-22");
   await page.getByRole("button", { name: "Show", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Business day 2026-09-22" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Business day: Tue, Sep 22" })).toBeVisible();
   await expect(page.getByText("Still open")).toBeVisible();
   await expect(page.getByText("after the business day closes", { exact: false })).toBeVisible();
+  await expectNoInternalText(page, ["SETTLE-2026-09-21-01"]);
   expect(requested.at(-1)).toBe("2026-09-22");
   await page.getByRole("button", { name: "Latest closed day" }).click();
-  await expect(page.getByRole("heading", { name: "Business day 2026-09-21" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Business day: Mon, Sep 21" })).toBeVisible();
 
   for (const width of [1440, 390, 320]) {
     await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });

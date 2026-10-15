@@ -318,6 +318,10 @@ export function installMerchantStaffPinRoutes(
           denied(response);
           return;
         }
+        if (error instanceof MerchantStaffPinError && error.code === "NotListed") {
+          response.status(409).json({ error: "staff_not_listed" });
+          return;
+        }
         unavailable(response, "staff_switch_unavailable");
       });
   });

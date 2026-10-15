@@ -77,3 +77,16 @@ it("distinguishes exact unconfigured response from uncertain server failures", a
   await expect(intent.execute(csrf)).rejects.toMatchObject({ code: "Unavailable" });
   await expect(intent.execute(csrf)).rejects.toMatchObject({ code: "OutcomeUnknown" });
 });
+it("WP-2423: a PIN sign-in refusal asks to confirm it is them; a plain 403 stays denied", async () => {
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response({ error: "full_sign_in_required" }, 403))
+    .mockResolvedValueOnce(response({ error: "forbidden" }, 403))
+    .mockResolvedValueOnce(response(recorded));
+  const intent = createOrdinaryRefundPreparationClient(fetcher).prepare(command());
+  await expect(intent.execute(csrf)).rejects.toMatchObject({ code: "FullSignInRequired" });
+  await expect(intent.execute(csrf)).rejects.toMatchObject({ code: "PermissionDenied" });
+  // After confirming, the same intent is retried.
+  await expect(intent.execute(csrf)).resolves.toEqual(recorded);
+  expect(new Set(fetcher.mock.calls.map((call) => call[1]?.body)).size).toBe(1);
+});

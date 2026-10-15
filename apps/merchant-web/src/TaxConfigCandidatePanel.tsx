@@ -20,6 +20,8 @@ import {
 } from "./tax-config-authoring-client.js";
 import { canonicalPublicationValue as canonical } from "./product-publication-command-client-v2.js";
 import { serviceOperationReference } from "./service-control-client.js";
+import { TaxConfigAlert } from "./TaxConfigMaterialPanel.js";
+import { FULL_SIGN_IN_REQUIRED, FULL_SIGN_IN_REQUIRED_TEXT } from "./full-sign-in.js";
 type Client = ReturnType<typeof createTaxConfigCandidateClient>;
 type Journal = ReturnType<typeof createTaxConfigCandidatePendingJournal>;
 interface Operation {
@@ -173,13 +175,15 @@ export function TaxConfigCandidatePanel({
   function fail(error: unknown) {
     const code = error instanceof TaxConfigAuthoringClientError ? error.code : "Unavailable";
     setError(
-      code === "Denied"
-        ? "Current permission refused this request. The original remains recoverable."
-        : code === "Conflict"
-          ? "Saved source changed. Refresh and select the current sources; an unresolved original is retained."
-          : code === "FeatureDisabled"
-            ? "Tax authoring is disabled. Any original request remains retained."
-            : "The request could not be confirmed. Retained originals must be recovered before preparing again.",
+      code === FULL_SIGN_IN_REQUIRED
+        ? FULL_SIGN_IN_REQUIRED_TEXT
+        : code === "Denied"
+          ? "Current permission refused this request. The original remains recoverable."
+          : code === "Conflict"
+            ? "Saved source changed. Refresh and select the current sources; an unresolved original is retained."
+            : code === "FeatureDisabled"
+              ? "Tax authoring is disabled. Any original request remains retained."
+              : "The request could not be confirmed. Retained originals must be recovered before preparing again.",
     );
   }
   async function run(work: (o: Operation) => Promise<void>, recovery = false) {
@@ -285,11 +289,7 @@ export function TaxConfigCandidatePanel({
         does not establish professional approval, legal conclusions or publication eligibility.
       </p>
       {busy && <p role="status">Loading saved candidate sources…</p>}
-      {error && (
-        <p role="alert" tabIndex={-1} ref={alert}>
-          {error}
-        </p>
-      )}
+      <TaxConfigAlert error={error} csrf={csrf} alertRef={alert} />
       {message && <p role="status">{message}</p>}
       {pending ? (
         <section aria-label="Original candidate recovery">

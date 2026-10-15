@@ -8067,6 +8067,14 @@ body:has(.product-complete-draft) .bop-shell__header,
   background: var(--bop-color-surface-raised);
   font-weight: 600;
 }
+/* WP-2423: five wrong pickup codes locked code checks; staff check the customer in person. */
+.pickup-queue__locked {
+  margin: 0;
+  padding: 8px 10px;
+  border-inline-start: 4px solid var(--bop-color-danger);
+  background: var(--bop-color-surface-raised);
+  font-weight: 600;
+}
 /* WP-2423: the order just handed over on this device. */
 .pickup-queue__handed-over {
   margin: 0;
@@ -8100,6 +8108,14 @@ body:has(.product-complete-draft) .bop-shell__header,
 .pickup-queue__earlier-section > p {
   margin: 0;
   color: var(--bop-color-text-muted);
+}
+/* WP-2423: label above value in the pickup card (the shared two-column row left the value one
+   word wide at desktop widths); the pickup code row spans the card. */
+.workspace-page .pickup-queue__card dl div {
+  grid-template-columns: minmax(0, 1fr);
+}
+.workspace-page .pickup-queue__card dl div:first-child {
+  grid-column: 1 / -1;
 }
 /* DEC-KITCHEN-STALE-TICKETS: earlier business days' kitchen tickets, collapsed and apart. */
 .kitchen-earlier-days {
@@ -8421,6 +8437,36 @@ body:has(.product-complete-draft) .bop-shell__header,
 .pickup-handoff-dialog > button {
   margin: 0 8px 8px 0;
 }
+/* WP-2423: the name and phone digits on the order, for the in-person check. */
+.pickup-identity {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(12rem, 100%), 1fr));
+  gap: 12px;
+  margin: 0 0 12px;
+  padding: 12px;
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-raised);
+}
+.pickup-identity div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.pickup-identity dt {
+  color: var(--bop-color-text-muted);
+  font-size: 12px;
+}
+.pickup-identity dd {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.pickup-identity__digits {
+  font-family: var(--bop-font-mono);
+  letter-spacing: 0.08em;
+}
 
 /* ---------------------------------------------------------------------------------------------
  * WP-2423 (design "A"): staff PIN quick switch — the shared tablet's lock screen, "My PIN" in
@@ -8723,7 +8769,8 @@ body:has(.product-complete-draft) .bop-shell__header,
   color: var(--bop-color-text-muted);
   font-size: 13px;
 }
-.store-devices__verify {
+.store-devices__verify,
+.full-sign-in-prompt {
   display: grid;
   gap: 8px;
   margin-block: 16px;
@@ -8731,7 +8778,8 @@ body:has(.product-complete-draft) .bop-shell__header,
   border-left: 4px solid var(--bop-color-warning);
   background: var(--bop-color-surface-raised);
 }
-.store-devices__verify p {
+.store-devices__verify p,
+.full-sign-in-prompt p {
   margin: 0;
 }
 .store-devices__confirm [data-variant="destructive"]:not(:disabled) {

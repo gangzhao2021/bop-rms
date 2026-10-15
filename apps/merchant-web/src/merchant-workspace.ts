@@ -1,3 +1,5 @@
+import { FULL_SIGN_IN_REQUIRED, responseNeedsFullSignIn } from "./full-sign-in.js";
+
 export interface MerchantStoreOption {
   readonly brandLabel: string;
   readonly storeLabel: string;
@@ -298,6 +300,15 @@ export function parseMerchantWorkspace(value: unknown): MerchantWorkspaceSnapsho
   });
 }
 
+/** A Store switch refused because the person signed in with a PIN that is not yet confirmed. */
+export class MerchantStoreSwitchError extends Error {
+  readonly code = FULL_SIGN_IN_REQUIRED;
+  constructor() {
+    super("MERCHANT_STORE_SWITCH_FULL_SIGN_IN_REQUIRED");
+    this.name = "MerchantStoreSwitchError";
+  }
+}
+
 export interface MerchantWorkspaceClient {
   bootstrap(): Promise<MerchantSessionBootstrap | null>;
   switchStore(csrf: string, targetStoreReference: string): Promise<MerchantSessionBootstrap>;
@@ -353,6 +364,7 @@ export function createMerchantWorkspaceClient(
         },
         body: JSON.stringify({ targetStoreReference }),
       });
+      if (await responseNeedsFullSignIn(response)) throw new MerchantStoreSwitchError();
       if (!response.ok) throw new Error("MERCHANT_STORE_SWITCH_DENIED");
       const input = record(await response.json(), ["workspace"]);
       const workspace = parseMerchantWorkspace(input.workspace);

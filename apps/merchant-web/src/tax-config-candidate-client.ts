@@ -8,6 +8,7 @@ import {
   publicationValueDigest as hashValue,
 } from "./product-publication-command-client-v2.js";
 import { parseStoreSetupScope, type StoreSetupScope } from "./store-setup-client.js";
+import { FULL_SIGN_IN_REQUIRED, isFullSignInRequired } from "./full-sign-in.js";
 import { TaxConfigAuthoringClientError } from "./tax-config-authoring-client.js";
 export { TaxConfigAuthoringClientError as TaxConfigCandidateClientError } from "./tax-config-authoring-client.js";
 const fail = (code: TaxConfigAuthoringClientError["code"] = "Invalid"): never => {
@@ -787,6 +788,11 @@ export function createTaxConfigCandidateClient(fetcher: typeof fetch = fetch) {
       const value: unknown = JSON.parse(text);
       if (!response.ok) {
         const error = safe(() => record(value, ["error"])).error;
+        // A PIN sign-in that is not confirmed: refused before the request was processed.
+        if (isFullSignInRequired(response.status, { error })) {
+          definitive = true;
+          return fail(FULL_SIGN_IN_REQUIRED);
+        }
         if (response.status === 403 && error === "request_denied") {
           definitive = true;
           return fail("Denied");

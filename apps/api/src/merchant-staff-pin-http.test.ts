@@ -114,19 +114,22 @@ describe("staff PIN HTTP", () => {
       { status: "Rejected" },
       { status: "Locked", lockedUntil: "2026-10-14T20:15:00.000Z" },
       { status: "Throttled", retryAfterSeconds: 120 },
+      "NotListed",
     ] as const;
     let index = 0;
     const seen: unknown[] = [];
     const call = await start({
       unlock: async (input) => {
         seen.push(input);
-        return outcomes[index++] as never;
+        const outcome = outcomes[index++];
+        if (outcome === "NotListed") throw new MerchantStaffPinError("NotListed");
+        return outcome as never;
       },
     });
     const send = () =>
       call("/staff-switch/unlock", {
         cookie: "__Host-bop-store-device=" + tablet,
-        body: { choice: "0190b3a0-0000-7000-8000-000000000003", pin: "482913" },
+        body: { choice: "q".repeat(43), pin: "482913" },
       });
     const signedIn = await send();
     expect(signedIn.status).toBe(200);
@@ -147,7 +150,13 @@ describe("staff PIN HTTP", () => {
       "120",
       { error: "device_busy", retryAfterSeconds: 120 },
     ]);
-    expect(seen[0]).toMatchObject({ deviceCookie: tablet, pin: "482913" });
+    // A choice that names nobody on this tablet now: the tablet reads the list again.
+    const notListed = await send();
+    expect([notListed.status, await notListed.json()]).toEqual([
+      409,
+      { error: "staff_not_listed" },
+    ]);
+    expect(seen[0]).toMatchObject({ deviceCookie: tablet, choice: "q".repeat(43), pin: "482913" });
     // No tablet cookie, a cross-site form, or extra fields are refused before any check.
     expect((await call("/staff-switch/unlock", { body: { choice: "a", pin: "1" } })).status).toBe(
       404,
@@ -170,7 +179,7 @@ describe("staff PIN HTTP", () => {
         })
       ).status,
     ).toBe(403);
-    expect(seen).toHaveLength(4);
+    expect(seen).toHaveLength(5);
   });
 
   it("clears the cookie of a tablet that is no longer registered", async () => {

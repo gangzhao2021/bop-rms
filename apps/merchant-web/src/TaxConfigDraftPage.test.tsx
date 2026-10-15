@@ -309,6 +309,20 @@ it("recovery dispatches Resolve before current sources and denied recovery keeps
   expect(fetcher.mock.calls[0]?.[0]).toContain("/resolve-original");
   expect(fetcher).toHaveBeenCalledTimes(1);
   expect(f.load()).toEqual(cursor);
+  // WP-2423: a PIN sign-in refusal also keeps the original for recovery after verifying.
+  const pin = vi
+    .fn<typeof fetch>()
+    .mockImplementation(async () => response({ error: "full_sign_in_required" }, 403));
+  await expect(
+    finishTaxConfigDraftOriginal({
+      client: createTaxConfigAuthoringClient(pin),
+      journal: f.journal,
+      cursor,
+      csrf,
+      signal,
+    }),
+  ).rejects.toMatchObject({ code: "FullSignInRequired" });
+  expect(f.load()).toEqual(cursor);
 });
 
 it("requires explicit new-Draft time zone and produces actual Toronto offsets from UTC inputs", () => {

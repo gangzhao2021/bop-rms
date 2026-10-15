@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
 import { parseCurrentOrderQueue } from "./current-order-queue-client.js";
 import {
+  StaffCancelStatus,
   StaffOrderCancelAction,
   staffCancelBody,
   staffCancelOutcome,
@@ -76,6 +77,8 @@ it("WP-2423 Q6: maps the server's answer", () => {
   expect(staffCancelOutcome(409, null)).toBe("NotCancellable");
   expect(staffCancelOutcome(404, "order_cancellation_not_found")).toBe("NotCancellable");
   expect(staffCancelOutcome(403, "request_denied")).toBe("Denied");
+  expect(staffCancelOutcome(403, null)).toBe("Denied");
+  expect(staffCancelOutcome(403, "full_sign_in_required")).toBe("FullSignInRequired");
   expect(staffCancelOutcome(503, "order_cancellation_unavailable")).toBe("Unknown");
   expect(staffCancelOutcome(500, null)).toBe("Unknown");
 });
@@ -137,4 +140,16 @@ it("WP-2423 Q6: summarises a cancelled pickup and a cancelled dine-in batch", ()
     ],
   });
   expect(staffCancellationSummary(dining.item, dining.batch)).toBe("Batch 1 cancelled · refunded");
+});
+
+it("WP-2423: a PIN sign-in refusal asks the person to confirm it is them, not that they lack permission", () => {
+  const html = renderToStaticMarkup(
+    <StaffCancelStatus outcome="FullSignInRequired" csrf="synthetic-csrf" />,
+  );
+  expect(html).toContain("You signed in with a PIN");
+  expect(html).toContain("Verify it&#x27;s you");
+  expect(html).not.toContain("store manager or owner");
+  expect(
+    renderToStaticMarkup(<StaffCancelStatus outcome="Denied" csrf="synthetic-csrf" />),
+  ).toContain("Only a store manager or owner can cancel a paid order");
 });

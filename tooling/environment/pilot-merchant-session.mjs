@@ -291,9 +291,14 @@ export async function createInternalMerchantSession(
       }
       return { sessionCookie: cookie };
     },
-    /** `KitchenDisplay` issues the IDR-0039 named KDS Operator Session for the same named Actor. */
-    async issue(selector, purpose = "Workforce") {
+    /**
+     * `KitchenDisplay` issues the IDR-0039 named KDS Operator Session for the same named Actor;
+     * `finalize`, when given, runs in the transaction creating the session (WP-2423 Q18: ends
+     * the PIN sessions left on a registered tablet).
+     */
+    async issue(selector, purpose = "Workforce", finalize) {
       if (purpose !== "Workforce" && purpose !== "KitchenDisplay") return denied();
+      if (finalize !== undefined && typeof finalize !== "function") return denied();
       const entries = await roster(),
         entry =
           selector === undefined
@@ -311,18 +316,23 @@ export async function createInternalMerchantSession(
         csrf = identity.credentials.generate();
       const context =
         configuration.environment + ":session:" + sessionReference + ":" + actor.actorReference;
-      await store.createSession({
-        sessionReference,
-        actor,
-        policyCode: purpose === "KitchenDisplay" ? "NamedKdsOperator" : "WorkforceStandard",
-        sessionSelectorHash: identity.hasher.hash(cookie),
-        csrfSelectorHash: identity.hasher.hash(csrf),
-        encryptedSecrets: await identity.envelopes.encrypt(
-          JSON.stringify({ tokenBundle: "INTERNAL_TEST_NO_EXTERNAL_TOKEN", csrf }),
-          context,
-        ),
-        observedAt: at,
-      });
+      if (finalize !== undefined) finalizers.set(sessionReference, finalize);
+      try {
+        await store.createSession({
+          sessionReference,
+          actor,
+          policyCode: purpose === "KitchenDisplay" ? "NamedKdsOperator" : "WorkforceStandard",
+          sessionSelectorHash: identity.hasher.hash(cookie),
+          csrfSelectorHash: identity.hasher.hash(csrf),
+          encryptedSecrets: await identity.envelopes.encrypt(
+            JSON.stringify({ tokenBundle: "INTERNAL_TEST_NO_EXTERNAL_TOKEN", csrf }),
+            context,
+          ),
+          observedAt: at,
+        });
+      } finally {
+        finalizers.delete(sessionReference);
+      }
       return { sessionCookie: cookie, csrf };
     },
   };

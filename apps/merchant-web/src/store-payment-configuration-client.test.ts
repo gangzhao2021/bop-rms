@@ -185,6 +185,16 @@ it.each([
   await expect(c.execute(p, { csrf })).rejects.toMatchObject({ code });
   expect(f).toHaveBeenCalledTimes(1);
 });
+it("WP-2423: a PIN sign-in refusal is not reported as a missing permission", async () => {
+  const f = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(response({ error: "full_sign_in_required" }, 403))
+      .mockResolvedValueOnce(response({ error: "forbidden" }, 403)),
+    c = createStorePaymentConfigurationClient(f),
+    p = await c.prepare(prepare());
+  await expect(c.execute(p, { csrf })).rejects.toMatchObject({ code: "FullSignInRequired" });
+  await expect(c.execute(p, { csrf })).rejects.toMatchObject({ code: "Denied" });
+});
 it("invalid original credentials, content getters and injected Provider data fail before dispatch", async () => {
   let called = false;
   const v = { ...content };

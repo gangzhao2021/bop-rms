@@ -1,5 +1,7 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
+import { FullSignInPrompt } from "./FullSignInPrompt.js";
+import { FULL_SIGN_IN_REQUIRED_TEXT, needsFullSignIn } from "./full-sign-in.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import {
@@ -21,6 +23,7 @@ type State =
 const copy = {
   Loading: "Loading authorized role metadata…",
   PermissionDenied: "Role administration permission is required.",
+  FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
   NotFound: "The requested role is unavailable in this scope.",
   FeatureDisabled: "Role administration is disabled.",
   Stale: "The projection is stale. Refresh before acting.",
@@ -122,11 +125,13 @@ function Editor({
   view,
   role,
   client,
+  csrf,
   reload,
 }: {
   readonly view: RoleAdministrationPageView;
   readonly role: RoleAdministrationItemView;
   readonly client: RoleAdministrationPageClient;
+  readonly csrf: string;
   readonly reload: () => void;
 }) {
   const navigate = useNavigate();
@@ -299,7 +304,16 @@ function Editor({
             </button>
           ) : null}
         </div>
-        {error ? (
+        {error && needsFullSignIn(error) ? (
+          <StatePanel heading="Confirm it's you" status>
+            <FullSignInPrompt csrf={csrf} />
+            {pending ? (
+              <button disabled={busy} onClick={() => void run(pending)}>
+                Try again
+              </button>
+            ) : null}
+          </StatePanel>
+        ) : error ? (
           <StatePanel heading="Change not applied" tone="error" status>
             <p>{copy[error]}</p>
             {pending && error === "Offline" ? (
@@ -318,10 +332,12 @@ function Editor({
 function Screen({
   view,
   client,
+  csrf,
   reload,
 }: {
   readonly view: RoleAdministrationPageView;
   readonly client: RoleAdministrationPageClient;
+  readonly csrf: string;
   readonly reload: () => void;
 }) {
   const [query, setQuery] = useState(""),
@@ -413,6 +429,7 @@ function Screen({
                 view={view}
                 role={role}
                 client={client}
+                csrf={csrf}
                 reload={reload}
               />
             ) : null}
@@ -425,9 +442,11 @@ function Screen({
 function Page({
   screenId,
   client,
+  csrf,
 }: {
   readonly screenId: RoleAdministrationPageView["screenId"];
   readonly client: RoleAdministrationPageClient;
+  readonly csrf: string;
 }) {
   const { id } = useParams();
   const [state, setState] = useState<State>({ kind: "Loading" });
@@ -463,22 +482,28 @@ function Page({
     };
   }, [client, id, screenId, generation]);
   return state.kind === "Found" ? (
-    <Screen view={state.view} client={client} reload={reload} />
+    <Screen view={state.view} client={client} csrf={csrf} reload={reload} />
   ) : (
     <Status state={state.kind} />
   );
 }
 export function RoleListPage({
   client = unavailableRoleAdministrationPageClient,
+  csrf = "",
 }: {
   readonly client?: RoleAdministrationPageClient;
+  /** Session token for the "Verify it's you" step on a PIN sign-in. */
+  readonly csrf?: string;
 }) {
-  return <Page screenId="IAM-ROLE-LIST" client={client} />;
+  return <Page screenId="IAM-ROLE-LIST" client={client} csrf={csrf} />;
 }
 export function RoleEditorPage({
   client = unavailableRoleAdministrationPageClient,
+  csrf = "",
 }: {
   readonly client?: RoleAdministrationPageClient;
+  /** Session token for the "Verify it's you" step on a PIN sign-in. */
+  readonly csrf?: string;
 }) {
-  return <Page screenId="IAM-ROLE-EDITOR" client={client} />;
+  return <Page screenId="IAM-ROLE-EDITOR" client={client} csrf={csrf} />;
 }

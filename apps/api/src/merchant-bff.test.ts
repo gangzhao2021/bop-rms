@@ -1640,6 +1640,66 @@ it("protects Pickup handoff and exposes only typed public failures", async () =>
   ).toBe(503);
 });
 
+it("WP-2423: protects the in-person pickup check details and never caches them", async () => {
+  const read = vi.fn<NonNullable<MerchantBffRouterOptions["pickupIdentityCheck"]>>();
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      pickupIdentityCheck: read,
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  const root = `http://127.0.0.1:${address.port}`;
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const submit = (extra: Record<string, string> = {}, path = "/merchant/pickup/identity-check") =>
+    request(root, path, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
+  expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
+  expect((await submit({ "X-BOP-CSRF": "" })).status).toBe(403);
+  expect((await submit({}, "/merchant/pickup/identity-check?order=other")).status).toBe(403);
+  expect(read).not.toHaveBeenCalled();
+  read.mockResolvedValueOnce({ status: "Available", name: "Sam Lee", phoneLast4: "0123" });
+  const ok = await submit();
+  expect(ok.status).toBe(200);
+  expect(ok.headers.get("cache-control")).toBe("no-store");
+  expect(await ok.json()).toEqual({ status: "Available", name: "Sam Lee", phoneLast4: "0123" });
+  for (const [code, status] of [
+    ["PICKUP_HANDOFF_INPUT_INVALID", 400],
+    ["PICKUP_HANDOFF_PERMISSION_DENIED", 403],
+    ["PICKUP_HANDOFF_NOT_READY", 422],
+  ] as const) {
+    read.mockRejectedValueOnce(new PickupHandoffError(code));
+    const response = await submit();
+    expect(response.status).toBe(status);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ error: code });
+  }
+  read.mockRejectedValueOnce(new Error("private SQL"));
+  expect(await (await submit()).json()).toEqual({ error: "request_denied" });
+  const unconfigured = await serve(fakeService());
+  expect(
+    (
+      await request(unconfigured, "/merchant/pickup/identity-check", {
+        method: "POST",
+        body: "{}",
+        headers,
+      })
+    ).status,
+  ).toBe(503);
+});
+
 it("protects Pickup proof and exposes only typed public failures", async () => {
   const query = vi.fn<NonNullable<MerchantBffRouterOptions["pickupProof"]>>();
   const root = await serve(
@@ -6416,3 +6476,70 @@ describe("DEC-KITCHEN-STALE-TICKETS close route", () => {
     ).toBe(503);
   });
 });
+
+it("WP-2423: the Orders list and pickup queue rerun a deadlocked read and never call it a refusal", async () => {
+  // On a first load both reads fence the same Orders in different orders and may deadlock.
+  const conflict = () =>
+    Object.assign(new Error("conflict"), { code: "TENANT_DATABASE_TRANSACTION_CONFLICT" });
+  const view = {
+    items: [],
+    nextAfterOrderReference: null,
+    lines: null,
+    pickupContact: null,
+    paymentPosition: null,
+  };
+  const queue = vi.fn<NonNullable<MerchantBffRouterOptions["orderQueue"]>>();
+  const query = vi.fn<NonNullable<MerchantBffRouterOptions["pickupQuery"]>>();
+  const root = await serve(
+    fakeService(),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    queue,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    query,
+  );
+  const headers = { ...safeHeaders, Cookie: "__Host-bop-merchant=" + sessionCookie };
+  queue.mockRejectedValueOnce(conflict()).mockResolvedValueOnce(view);
+  const orders = await request(root, "/merchant/orders", { headers });
+  expect(orders.status).toBe(200);
+  expect(queue).toHaveBeenCalledTimes(2);
+  queue.mockReset();
+  queue.mockImplementation(async () => {
+    throw conflict();
+  });
+  const busy = await request(root, "/merchant/orders", { headers });
+  expect([busy.status, await busy.json()]).toEqual([503, { error: "retry_later" }]);
+  const pickupResult = { items: [] } as unknown as Awaited<
+    ReturnType<NonNullable<MerchantBffRouterOptions["pickupQuery"]>>
+  >;
+  query.mockRejectedValueOnce(conflict()).mockResolvedValueOnce(pickupResult);
+  const pickup = await request(root, "/merchant/pickup/query", {
+    method: "POST",
+    body: "{}",
+    headers: { ...headers, "X-BOP-CSRF": csrf, "Content-Type": "application/json" },
+  });
+  expect(pickup.status).toBe(200);
+  expect(query).toHaveBeenCalledTimes(2);
+  // Anything else stays a plain refusal.
+  query.mockRejectedValueOnce(new Error("synthetic-private-source"));
+  const refused = await request(root, "/merchant/pickup/query", {
+    method: "POST",
+    body: "{}",
+    headers: { ...headers, "X-BOP-CSRF": csrf, "Content-Type": "application/json" },
+  });
+  expect(refused.status).toBe(403);
+}, 15000);

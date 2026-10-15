@@ -4,6 +4,8 @@ import {
   OrdinaryRefundExecutionError,
 } from "./ordinary-refund-execution-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
+import { FullSignInPrompt } from "./FullSignInPrompt.js";
+import { needsFullSignIn } from "./full-sign-in.js";
 const client = createOrdinaryRefundExecutionClient();
 export function RefundExecutionAction({
   orderReference,
@@ -28,7 +30,9 @@ export function RefundExecutionAction({
   onFinancialChange: () => void;
 }) {
   const [confirmed, setConfirmed] = useState(false),
-    [message, setMessage] = useState("");
+    [message, setMessage] = useState(""),
+    // WP-2423: refused on an unconfirmed PIN sign-in; the same send/check is retried after.
+    [signIn, setSignIn] = useState(false);
   const [active, setActive] = useState<"send" | "reconcile" | null>(null),
     [unknown, setUnknown] = useState<"send" | "reconcile" | null>(null),
     [sent, setSent] = useState(phase !== "Prepared");
@@ -52,6 +56,7 @@ export function RefundExecutionAction({
     pending.current = controller;
     setActive(kind);
     setMessage("");
+    setSignIn(false);
     onPending(true);
     try {
       const intent =
@@ -93,12 +98,15 @@ export function RefundExecutionAction({
           !(error instanceof OrdinaryRefundExecutionError) || error.code === "OutcomeUnknown";
         setUnknown(uncertain ? kind : null);
         onPending(uncertain);
+        setSignIn(needsFullSignIn(error));
         setMessage(
-          uncertain
-            ? "Result unknown. Keep this page open and retry the same operation."
-            : error instanceof OrdinaryRefundExecutionError && error.code === "PermissionDenied"
-              ? "Current session or permission does not allow this action. Restore access before retrying."
-              : "Refund execution is not configured. Contact the pilot operator.",
+          needsFullSignIn(error)
+            ? ""
+            : uncertain
+              ? "Result unknown. Keep this page open and retry the same operation."
+              : error instanceof OrdinaryRefundExecutionError && error.code === "PermissionDenied"
+                ? "Current session or permission does not allow this action. Restore access before retrying."
+                : "Refund execution is not configured. Contact the pilot operator.",
         );
       }
     } finally {
@@ -141,6 +149,7 @@ export function RefundExecutionAction({
         <p role="status">{active === "send" ? "Sending refund…" : "Checking refund result…"}</p>
       ) : null}
       {message ? <p role="status">{message}</p> : null}
+      {signIn ? <FullSignInPrompt csrf={csrf} /> : null}
     </section>
   );
 }

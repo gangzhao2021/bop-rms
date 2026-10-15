@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { moneyText, parseMoney, parseOptionPriceView } from "./store-option-prices-page.js";
+import {
+  OptionPricePageError,
+  createOptionPriceClient,
+  moneyText,
+  parseMoney,
+  parseOptionPriceView,
+} from "./store-option-prices-page.js";
 
 describe("WP-2423 option price page helpers", () => {
   it("reads and writes money in minor units without floating point", () => {
@@ -23,5 +29,19 @@ describe("WP-2423 option price page helpers", () => {
         currency: { code: "CAD", minorUnitExponent: 2 },
       }).products,
     ).toEqual([]);
+  });
+  it("maps a PIN sign-in refusal apart from a missing permission", async () => {
+    const answer = (status: number, body: unknown) =>
+      createOptionPriceClient("synthetic-csrf", () =>
+        Promise.resolve(new Response(JSON.stringify(body), { status })),
+      ).command?.({ action: "Publish", operationReference: "op", rules: [] });
+    const code = (promise: Promise<unknown> | undefined) =>
+      (promise ?? Promise.resolve()).then(
+        () => "ok",
+        (error: unknown) => (error instanceof OptionPricePageError ? error.code : "other"),
+      );
+    expect(await code(answer(403, { error: "full_sign_in_required" }))).toBe("FullSignInRequired");
+    expect(await code(answer(403, { error: "request_denied" }))).toBe("PermissionDenied");
+    expect(await code(answer(503, { error: "full_sign_in_required" }))).toBe("Unavailable");
   });
 });

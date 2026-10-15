@@ -333,6 +333,7 @@ it("unknown and malformed successful write responses remain OutcomeUnknown", asy
 });
 it.each([
   [403, "request_denied", "Denied"],
+  [403, "full_sign_in_required", "FullSignInRequired"],
   [400, "tax_config_authoring_invalid", "Invalid"],
   [409, "tax_config_authoring_conflict", "Conflict"],
   [503, "tax_config_authoring_feature_disabled", "FeatureDisabled"],

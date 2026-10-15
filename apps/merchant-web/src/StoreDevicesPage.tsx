@@ -31,7 +31,9 @@ import {
 export type DevicesLoad =
   | { readonly kind: "Loading" }
   | { readonly kind: "Ready"; readonly read: StoreDevicesRead }
-  | { readonly kind: "Denied" | "Offline" | "Failed" };
+  | { readonly kind: "Denied" | "Offline" | "Failed" }
+  /** A PIN sign-in must confirm it is the staff member first; the guidance says so once. */
+  | { readonly kind: "NeedsVerification" };
 
 export type PendingAction =
   | { readonly kind: "Remove"; readonly device: StoreDevice }
@@ -72,6 +74,25 @@ export function commandFailureText(error: unknown, action: "Register" | PendingA
       return `${action.person.name} has no PIN to reset. The list is refreshed.`;
   }
   return "Nothing changed. Try again.";
+}
+
+/**
+ * What a refused command changes on the page. A PIN sign-in that must confirm it is the staff
+ * member gets the verification section only: its guidance is not repeated in a "Not done" panel.
+ */
+export function commandFailureOutcome(
+  error: unknown,
+  action: "Register" | PendingAction,
+): {
+  readonly needsVerification: boolean;
+  readonly message: { readonly tone: "error"; readonly text: string } | null;
+} {
+  if (error instanceof StaffPinError && error.code === "FullSignInRequired")
+    return { needsVerification: true, message: null };
+  return {
+    needsVerification: false,
+    message: { tone: "error", text: commandFailureText(error, action) },
+  };
 }
 
 export function removedText(label: string, signedOut: number): string {
@@ -148,7 +169,7 @@ export function StoreDevicesView({
           {verification}
         </section>
       ) : null}
-      {load.kind === "Loading" ? (
+      {load.kind === "NeedsVerification" ? null : load.kind === "Loading" ? (
         <p role="status">Loading shared tablets and PINs…</p>
       ) : load.kind === "Denied" ? (
         <StatePanel heading="No access" tone="error" status>
@@ -346,7 +367,11 @@ export function StoreDevicesPage({
       (error: unknown) => {
         if (controller.signal.aborted) return;
         const code = error instanceof StaffPinError ? error.code : "Unavailable";
-        if (code === "FullSignInRequired") setNeedsVerification(true);
+        if (code === "FullSignInRequired") {
+          setNeedsVerification(true);
+          setLoad({ kind: "NeedsVerification" });
+          return;
+        }
         setLoad({
           kind: code === "Denied" ? "Denied" : code === "Offline" ? "Offline" : "Failed",
         });
@@ -367,9 +392,9 @@ export function StoreDevicesPage({
   }, [pending]);
 
   const failed = (error: unknown, action: "Register" | PendingAction) => {
-    if (error instanceof StaffPinError && error.code === "FullSignInRequired")
-      setNeedsVerification(true);
-    setMessage({ tone: "error", text: commandFailureText(error, action) });
+    const outcome = commandFailureOutcome(error, action);
+    if (outcome.needsVerification) setNeedsVerification(true);
+    setMessage(outcome.message);
     if (
       error instanceof StaffPinError &&
       ["AlreadyRegistered", "NotFound", "PinNotSet"].includes(error.code)

@@ -24,7 +24,9 @@ export class StoreSetupClientError extends Error {
       | "ScopeChanged"
       | "Stale"
       // WP-2423 Q15/Q16: the Brand has no tax classifications to choose from yet.
-      | "NotRegistered",
+      | "NotRegistered"
+      // WP-2423: refused because the person signed in with a PIN that is not yet confirmed.
+      | "FullSignInRequired",
   ) {
     super("Store setup could not be confirmed");
     this.name = "StoreSetupClientError";

@@ -5,6 +5,8 @@ import {
   type CurrentOrderQueue,
   type StaffCancellationReason,
 } from "./current-order-queue-client.js";
+import { FullSignInPrompt } from "./FullSignInPrompt.js";
+import { FULL_SIGN_IN_REQUIRED, FULL_SIGN_IN_REQUIRED_TEXT } from "./full-sign-in.js";
 import { orderMoney } from "./order-money.js";
 import {
   createStaffItemCancellationClient,
@@ -53,6 +55,8 @@ export function itemCancelFailureText(order: Order, failure: ItemCancelFailure) 
       return "These items can no longer be cancelled. Close to refresh the order.";
     case "Denied":
       return "This cancellation was refused. Only a store manager or owner can cancel paid items; refresh if your session changed.";
+    case "FullSignInRequired":
+      return FULL_SIGN_IN_REQUIRED_TEXT;
     case "Unknown":
       return "Result unknown. Retry the same cancellation to recover its result.";
   }
@@ -71,6 +75,37 @@ type PreviewState =
   | { readonly kind: "Ready"; readonly key: string; readonly value: ItemCancelPreview }
   | { readonly kind: "Failed"; readonly failure: ItemCancelFailure };
 type Outcome = "Idle" | "Pending" | { readonly scope: ItemCancelScope } | ItemCancelFailure;
+
+/** Failures after which the client keeps the same attempt for the retry. */
+const keepsIntent = (outcome: Outcome) =>
+  outcome === "Unknown" || outcome === FULL_SIGN_IN_REQUIRED;
+/** Failures that leave the order as it was shown (nothing to re-read on close). */
+const leavesOrder = (failure: ItemCancelFailure) =>
+  failure === "Unknown" || failure === "Denied" || failure === FULL_SIGN_IN_REQUIRED;
+
+/** The dialog's answer line; a PIN sign-in refusal shows how to confirm it is them instead. */
+export function ItemCancelStatus({
+  order,
+  outcome,
+  csrf,
+  fetcher,
+}: {
+  readonly order: Order;
+  readonly outcome: Outcome;
+  readonly csrf: string;
+  readonly fetcher?: typeof fetch | undefined;
+}) {
+  if (outcome === FULL_SIGN_IN_REQUIRED) return <FullSignInPrompt csrf={csrf} fetcher={fetcher} />;
+  return (
+    <p role="status">
+      {outcome === "Pending"
+        ? "Cancelling…"
+        : typeof outcome === "string" && outcome !== "Idle"
+          ? itemCancelFailureText(order, outcome)
+          : null}
+    </p>
+  );
+}
 
 /**
  * WP-2423 Q6 step 2: cancel some items of a paid batch before the kitchen starts them. Staff pick
@@ -109,7 +144,7 @@ export function StaffItemCancelAction({
     (line) => line.orderBatchReference === batch.orderBatchReference && line.cancellation === null,
   );
   const key = [...selected].sort().join(",");
-  const retrying = outcome === "Unknown" && client.pendingIntent() !== null;
+  const retrying = keepsIntent(outcome) && client.pendingIntent() !== null;
   const locked = retrying || outcome === "Pending";
   useEffect(() => {
     if (key === "" || order.currentVersion === null) {
@@ -133,8 +168,7 @@ export function StaffItemCancelAction({
         if (answer.ok) setPreview({ kind: "Ready", key, value: answer.value });
         else {
           setPreview({ kind: "Failed", failure: answer.failure });
-          if (answer.failure !== "Unknown" && answer.failure !== "Denied")
-            refreshOnClose.current = true;
+          if (!leavesOrder(answer.failure)) refreshOnClose.current = true;
         }
       })
       .catch(() => undefined);
@@ -169,11 +203,10 @@ export function StaffItemCancelAction({
       return;
     }
     setOutcome(answer.failure);
-    if (answer.failure !== "Unknown" && answer.failure !== "Denied") refreshOnClose.current = true;
+    if (!leavesOrder(answer.failure)) refreshOnClose.current = true;
   };
   const settled = typeof outcome === "object";
-  const failed = typeof outcome === "string" && outcome !== "Idle" && outcome !== "Pending";
-  const formOpen = outcome === "Idle" || outcome === "Pending" || outcome === "Unknown";
+  const formOpen = outcome === "Idle" || outcome === "Pending" || keepsIntent(outcome);
   const titleId = "staff-cancel-items-" + batch.orderBatchReference;
   const previewId = titleId + "-refund";
   const count = selected.size;
@@ -305,13 +338,7 @@ export function StaffItemCancelAction({
             </button>
           </div>
         </form>
-        <p role="status">
-          {outcome === "Pending"
-            ? "Cancelling…"
-            : failed
-              ? itemCancelFailureText(order, outcome)
-              : null}
-        </p>
+        <ItemCancelStatus order={order} outcome={outcome} csrf={csrf} fetcher={fetcher} />
         {!formOpen ? (
           <button type="button" onClick={() => dialog.current?.close()}>
             Close
@@ -323,8 +350,18 @@ export function StaffItemCancelAction({
 }
 
 type RefundCheck =
-  "Idle" | "Checking" | "Pending" | "Refunded" | "Failed" | "Denied" | "Unavailable";
-const refundCheckText: Record<Exclude<RefundCheck, "Idle">, string> = {
+  | "Idle"
+  | "Checking"
+  | "Pending"
+  | "Refunded"
+  | "Failed"
+  | "Denied"
+  | typeof FULL_SIGN_IN_REQUIRED
+  | "Unavailable";
+const refundCheckText: Record<
+  Exclude<RefundCheck, "Idle" | typeof FULL_SIGN_IN_REQUIRED>,
+  string
+> = {
   Checking: "Checking the refund…",
   Pending: "The refund is still pending with the payment provider. Check again later.",
   Refunded: "Refunded.",
@@ -358,7 +395,11 @@ export function ItemRefundCheck({
     setState("Checking");
     const answer = await client.checkRefund(orderReference, cancellationReference);
     if (!answer.ok) {
-      setState(answer.failure === "Denied" ? "Denied" : "Unavailable");
+      setState(
+        answer.failure === "Denied" || answer.failure === FULL_SIGN_IN_REQUIRED
+          ? answer.failure
+          : "Unavailable",
+      );
       return;
     }
     setState(answer.value.status);
@@ -369,7 +410,11 @@ export function ItemRefundCheck({
       <button type="button" disabled={state === "Checking"} onClick={() => void check()}>
         Check refund
       </button>
-      <span role="status">{state === "Idle" ? null : refundCheckText[state]}</span>
+      {state === FULL_SIGN_IN_REQUIRED ? (
+        <FullSignInPrompt csrf={csrf} fetcher={fetcher} />
+      ) : (
+        <span role="status">{state === "Idle" ? null : refundCheckText[state]}</span>
+      )}
     </span>
   );
 }

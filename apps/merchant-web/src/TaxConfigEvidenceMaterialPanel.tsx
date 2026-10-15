@@ -19,7 +19,8 @@ import {
   type TaxConfigAuthoringCurrent,
   type TaxConfigAuthoringScope,
 } from "./tax-config-authoring-client.js";
-import { finishTaxConfigMaterialOriginal } from "./TaxConfigMaterialPanel.js";
+import { finishTaxConfigMaterialOriginal, TaxConfigAlert } from "./TaxConfigMaterialPanel.js";
+import { FULL_SIGN_IN_REQUIRED, FULL_SIGN_IN_REQUIRED_TEXT } from "./full-sign-in.js";
 import { canonicalPublicationValue as canonical } from "./product-publication-command-client-v2.js";
 import { serviceOperationReference } from "./service-control-client.js";
 type Client = ReturnType<typeof createTaxConfigMaterialClient>;
@@ -338,11 +339,13 @@ export function TaxConfigEvidenceMaterialPanel({
       e instanceof SyntaxError ||
         (e instanceof TaxConfigAuthoringClientError && e.code === "Invalid")
         ? "Check the material fields, structured JSON and saved source checksums. No qualification is inferred."
-        : e instanceof TaxConfigAuthoringClientError && e.code === "Conflict"
-          ? "Saved source changed. Refresh the current sources. Any original remains retained."
-          : e instanceof TaxConfigAuthoringClientError && e.code === "Denied"
-            ? "Current permission refused the request. Recover the retained original when access is restored."
-            : "The material request could not be confirmed. Any original is retained for recovery.",
+        : e instanceof TaxConfigAuthoringClientError && e.code === FULL_SIGN_IN_REQUIRED
+          ? FULL_SIGN_IN_REQUIRED_TEXT
+          : e instanceof TaxConfigAuthoringClientError && e.code === "Conflict"
+            ? "Saved source changed. Refresh the current sources. Any original remains retained."
+            : e instanceof TaxConfigAuthoringClientError && e.code === "Denied"
+              ? "Current permission refused the request. Recover the retained original when access is restored."
+              : "The material request could not be confirmed. Any original is retained for recovery.",
     );
   async function run(work: (o: Operation) => Promise<void>, recover = false) {
     if (busy || (!recover && locked)) return;
@@ -500,11 +503,7 @@ export function TaxConfigEvidenceMaterialPanel({
         qualification are not evaluated.
       </p>
       {busy && <p role="status">Loading saved material sources…</p>}
-      {error && (
-        <p ref={alert} role="alert" tabIndex={-1}>
-          {error}
-        </p>
-      )}
+      <TaxConfigAlert error={error} csrf={csrf} alertRef={alert} />
       {message && <p role="status">{message}</p>}
       {pending ? (
         <section aria-label="Evidence original recovery">

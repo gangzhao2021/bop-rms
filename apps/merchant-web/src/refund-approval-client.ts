@@ -1,4 +1,9 @@
 import { escalationReasons, type EscalationReason } from "./ordinary-refund-client.js";
+import {
+  FULL_SIGN_IN_REQUIRED,
+  isFullSignInRequired,
+  type FullSignInRequired,
+} from "./full-sign-in.js";
 
 /** WP-2423 Q5: why an owner declines a refund (codes stay server-owned). */
 export const declineReasons = [
@@ -43,6 +48,8 @@ export type ApprovalFailure =
   | "RequesterNotEligible"
   /** WP-2423 Q19: self-approval asked for, but another person now holds refund approval. */
   | "SoleOperatorNotInEffect"
+  /** WP-2423: refused on a PIN sign-in that is not confirmed yet (verify, then retry the same). */
+  | FullSignInRequired
   | "Unavailable"
   | "OutcomeUnknown";
 export class RefundApprovalClientError extends Error {
@@ -474,6 +481,8 @@ export function createRefundApprovalClient(fetcher: typeof fetch = fetch) {
 /** An approval or decline the server refused, named without internal detail. */
 function refusal(status: number, data: unknown): never {
   const error = errorCode(data);
+  if (isFullSignInRequired(status, data))
+    throw new RefundApprovalClientError(FULL_SIGN_IN_REQUIRED);
   if (status === 422 && error === "same_person") throw new RefundApprovalClientError("SamePerson");
   if (status === 409 && error === "needs_reverification") {
     const party =

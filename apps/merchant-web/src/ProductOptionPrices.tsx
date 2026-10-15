@@ -21,6 +21,8 @@ import {
   type OptionPricePendingOriginal,
 } from "./option-price-pending-journal.js";
 import { serviceOperationReference } from "./service-control-client.js";
+import { FullSignInPrompt } from "./FullSignInPrompt.js";
+import { FULL_SIGN_IN_REQUIRED, FULL_SIGN_IN_REQUIRED_TEXT } from "./full-sign-in.js";
 import { canonicalPublicationValue } from "./product-publication-command-client-v2.js";
 
 interface Props {
@@ -58,6 +60,7 @@ export const optionPriceEmptyFields: Fields = {
 const messages: Record<string, string> = {
   Loading: "Reading current prices and recovery record…",
   Denied: "You do not have permission to manage these prices.",
+  FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
   FeatureDisabled: "Option price management is disabled for this Store.",
   Conflict: "The saved price or source changed. Refresh before preparing another operation.",
   Stale:
@@ -82,6 +85,24 @@ function errorCode(error: unknown): string {
   )
     return error.code;
   return "Unavailable";
+}
+/** The page's answer line; a PIN sign-in refusal shows how to confirm it is them instead. */
+export function OptionPriceStatus({
+  status,
+  csrf,
+}: {
+  readonly status: string;
+  readonly csrf: string;
+}) {
+  if (status === "") return null;
+  if (status === FULL_SIGN_IN_REQUIRED) return <FullSignInPrompt csrf={csrf} />;
+  return (
+    <p role={status === "Recorded" || status === "Loading" ? "status" : "alert"}>
+      {status === "Recorded"
+        ? "The original terminal was recorded. Reading current state…"
+        : (messages[status] ?? messages.Unavailable)}
+    </p>
+  );
 }
 function boundary(value: string) {
   if (
@@ -432,7 +453,13 @@ export function ProductOptionPrices({
       : [...discovered, pending];
   const hasOriginals = originals.length > 0;
   const stale = !view || clock >= Date.parse(view.validUntil),
-    locked = busy || hasOriginals || !journalReady || stale || status !== "";
+    // A PIN sign-in refusal does not lock the form: after verifying, the same action is retried.
+    locked =
+      busy ||
+      hasOriginals ||
+      !journalReady ||
+      stale ||
+      (status !== "" && status !== FULL_SIGN_IN_REQUIRED);
   function chooseRule(value: string) {
     setRuleId(value);
     setReview(null);
@@ -968,13 +995,7 @@ export function ProductOptionPrices({
         busy={busy}
         onResolve={(original) => void resolve(original)}
       />
-      {status && (
-        <p role={status === "Recorded" || status === "Loading" ? "status" : "alert"}>
-          {status === "Recorded"
-            ? "The original terminal was recorded. Reading current state…"
-            : (messages[status] ?? messages.Unavailable)}
-        </p>
-      )}
+      <OptionPriceStatus status={status} csrf={csrf} />
     </section>
   );
 }

@@ -2,7 +2,9 @@ import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router";
+import { FullSignInPrompt } from "./FullSignInPrompt.js";
 import { newOperationReference } from "./RoleAdministrationPages.js";
+import { FULL_SIGN_IN_REQUIRED, FULL_SIGN_IN_REQUIRED_TEXT } from "./full-sign-in.js";
 import {
   OptionPricePageError,
   moneyText,
@@ -20,6 +22,7 @@ import {
 const copy: Record<OptionPriceErrorCode | "Loading", string> = {
   Loading: "Loading option prices…",
   PermissionDenied: "You do not have permission for this price action.",
+  FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
   NotFound: "That option is no longer offered on the product. Refresh and check.",
   Conflict: "Prices changed since you opened the page. Refresh and check again.",
   ApprovalRequired:
@@ -32,8 +35,14 @@ const key = (binding: string, option: string) => binding + ":" + option;
 
 export function StoreOptionPricesPage({
   client = unavailableOptionPriceClient,
+  csrf,
+  fetcher,
 }: {
   readonly client?: OptionPriceClient;
+  /** For confirming a PIN sign-in when a change is refused until then. */
+  readonly csrf?: string | undefined;
+  /** For the authenticator check (tests). */
+  readonly fetcher?: typeof fetch | undefined;
 }) {
   const [state, setState] = useState<
     | { readonly kind: "Loading" | OptionPriceErrorCode }
@@ -44,7 +53,11 @@ export function StoreOptionPricesPage({
   const [everywhere, setEverywhere] = useState<Record<string, string>>({});
   const [pending, setPending] = useState<OptionPriceCommand | null>(null);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<{ tone: "error" | "neutral"; text: string } | null>(null);
+  const [message, setMessage] = useState<{
+    tone: "error" | "neutral";
+    text: string;
+    fullSignIn?: boolean;
+  } | null>(null);
   const reload = useCallback(() => setGeneration((value) => value + 1), []);
   useEffect(() => {
     let active = true;
@@ -121,8 +134,10 @@ export function StoreOptionPricesPage({
       setMessage({ tone: "neutral", text: done });
     } catch (error) {
       const code = error instanceof OptionPricePageError ? error.code : "Unavailable";
-      if (code !== "Offline" && code !== "Unavailable") setPending(null);
-      setMessage({ tone: "error", text: copy[code] });
+      // Offline, unavailable or a PIN sign-in to confirm: retry sends the same request again.
+      if (code !== "Offline" && code !== "Unavailable" && code !== FULL_SIGN_IN_REQUIRED)
+        setPending(null);
+      setMessage({ tone: "error", text: copy[code], fullSignIn: code === FULL_SIGN_IN_REQUIRED });
     } finally {
       setBusy(false);
     }
@@ -180,7 +195,9 @@ export function StoreOptionPricesPage({
         </div>
         <Link to="/app/commerce/option-sets">Options</Link>
       </header>
-      {message ? (
+      {message?.fullSignIn === true && csrf !== undefined ? (
+        <FullSignInPrompt csrf={csrf} fetcher={fetcher} />
+      ) : message ? (
         <StatePanel
           heading={message.tone === "error" ? "Not done" : "Done"}
           tone={message.tone}

@@ -95,6 +95,24 @@ it("WP-2423 Q19: changes the setting with a reason for the target state and name
   expect(fetcher).toHaveBeenCalledTimes(6);
 });
 
+it("WP-2423: a PIN sign-in refusal is not reported as a missing permission", async () => {
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(json({ error: "full_sign_in_required" }, 403))
+    .mockResolvedValueOnce(json({ error: "brand_owner_required" }, 403));
+  const client = createSoleOperatorClient(fetcher);
+  const command = {
+    state: "Off" as const,
+    reasonCode: "OWNER_CHOICE" as const,
+    expectedVersion: 1,
+    operationReference: id(1),
+  };
+  await expect(client.change(command, csrf)).rejects.toMatchObject({
+    code: "FullSignInRequired",
+  });
+  await expect(client.change(command, csrf)).rejects.toMatchObject({ code: "Denied" });
+});
+
 it("WP-2423 Q19: the section renders nothing until the Brand Owner's setting is read", () => {
   expect(parseSoleOperatorView(view).state).toBe("On");
   const html = renderToStaticMarkup(

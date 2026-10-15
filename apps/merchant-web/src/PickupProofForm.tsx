@@ -10,6 +10,9 @@ import type { PickupQueueItem, PickupWorkstation } from "./pickup.js";
 import { browserOffline } from "./stale-read.js";
 
 const client = createPickupProofClient();
+/** WP-2423: said when five wrong codes lock code checks, and kept on the order's card after. */
+export const pickupCodeLockedText =
+  "Too many wrong codes for this order. Check the customer in person instead: the order number with the name or the last four digits of the phone on the order.";
 type Intent = ReturnType<typeof client.prepare>;
 export function PickupProofForm({
   item,
@@ -183,9 +186,7 @@ export function PickupProofForm({
         {status === "Idle" && wrongCode === "Format"
           ? "Pickup codes have 6 digits. Ask the customer to read the code again."
           : null}
-        {status === "Locked"
-          ? "Too many wrong codes for this order. Check the customer in person instead: the order number with the name or the last four digits of the phone on the order."
-          : null}
+        {status === "Locked" ? pickupCodeLockedText : null}
         {status === "Rejected"
           ? "That code could not be checked. Refresh the list, then try again."
           : null}

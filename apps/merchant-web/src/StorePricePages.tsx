@@ -1,9 +1,11 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./RoleAdministrationPages.js";
 import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
+import { FullSignInPrompt } from "./FullSignInPrompt.js";
+import { FULL_SIGN_IN_REQUIRED, FULL_SIGN_IN_REQUIRED_TEXT } from "./full-sign-in.js";
 import {
   PricePageError,
   dollarsToMinor,
@@ -39,6 +41,7 @@ const copy: Record<PriceErrorCode | "Loading", string> = {
   SoleOperatorNotInEffect:
     "Someone else now holds price approval, so they must publish this. Refresh to see who.",
   NeedsReverification: "Confirm it is you with your authenticator code, then publish again.",
+  FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
   Offline: "Offline. Nothing was confirmed; retry sends the same request again.",
   Unavailable: "Prices are unavailable.",
 };
@@ -74,6 +77,29 @@ function usePriceView<V>(
   }, [client, priceBookReference, parse, generation]);
   return { state, reload };
 }
+/** The refusal of a PIN sign-in gets the verification step instead of a "Not done" panel. */
+export function PriceCommandMessage({
+  message,
+  csrf,
+  fetcher,
+  heading,
+  children,
+}: {
+  readonly message: { readonly text: string; readonly fullSignIn: boolean };
+  readonly csrf: string | undefined;
+  readonly fetcher: typeof fetch | undefined;
+  readonly heading: string;
+  readonly children?: ReactNode;
+}) {
+  if (message.fullSignIn && csrf !== undefined)
+    return <FullSignInPrompt csrf={csrf} fetcher={fetcher} />;
+  return (
+    <StatePanel heading={heading} tone="error" status>
+      <p>{message.text}</p>
+      {children}
+    </StatePanel>
+  );
+}
 function Failure({ code }: { readonly code: PriceErrorCode | "Loading" }) {
   return (
     <StatePanel heading="Prices" tone={code === "Loading" ? "neutral" : "error"} status>
@@ -93,6 +119,8 @@ function useCommand(client: PriceClient, onDone: (result: unknown, command: Pric
     tone: "error" | "neutral";
     text: string;
     sellables: readonly string[];
+    /** A PIN sign-in must confirm it is the staff member; the same request is retried after. */
+    fullSignIn: boolean;
   } | null>(null);
   const send = async (fresh: PriceCommand) => {
     if (!client.command) return;
@@ -106,11 +134,15 @@ function useCommand(client: PriceClient, onDone: (result: unknown, command: Pric
       onDone(result, command);
     } catch (error) {
       const code = error instanceof PricePageError ? error.code : "Unavailable";
-      if (code !== "Offline" && code !== "Unavailable") setPending(null);
+      // Nothing was done when the request was refused for a PIN sign-in, so the same request is
+      // sent again after the person confirms it is them.
+      if (code !== "Offline" && code !== "Unavailable" && code !== FULL_SIGN_IN_REQUIRED)
+        setPending(null);
       setMessage({
         tone: "error",
         text: copy[code],
         sellables: error instanceof PricePageError ? error.sellableReferences : [],
+        fullSignIn: code === FULL_SIGN_IN_REQUIRED,
       });
     } finally {
       setBusy(false);
@@ -121,8 +153,14 @@ function useCommand(client: PriceClient, onDone: (result: unknown, command: Pric
 
 export function StorePriceListPage({
   client = unavailablePriceClient,
+  csrf,
+  fetcher,
 }: {
   readonly client?: PriceClient;
+  /** For confirming a PIN sign-in before a price change. */
+  readonly csrf?: string;
+  /** For the authenticator check (tests). */
+  readonly fetcher?: typeof fetch;
 }) {
   const navigate = useNavigate();
   const { state } = usePriceView(client, null, parsePriceBookListView);
@@ -166,9 +204,12 @@ export function StorePriceListPage({
         )}
       </section>
       {message ? (
-        <StatePanel heading="Not created" tone="error" status>
-          <p>{message.text}</p>
-        </StatePanel>
+        <PriceCommandMessage
+          message={message}
+          csrf={csrf}
+          fetcher={fetcher}
+          heading="Not created"
+        />
       ) : null}
       {view.permissions.mayEdit ? (
         <form
@@ -264,16 +305,25 @@ export function StorePriceListPage({
 export function StorePriceEditorPage({
   client = unavailablePriceClient,
   csrf,
+  fetcher,
 }: {
   readonly client?: PriceClient;
   /** For the second-factor check of a sole operator's own publication. */
   readonly csrf?: string;
+  /** For the authenticator check (tests). */
+  readonly fetcher?: typeof fetch;
 }) {
   const params = useParams();
   const reference = parsePriceRouteReference(params.id);
   if (reference === null) return <Failure code="NotFound" />;
   return (
-    <PriceBookEditor key={reference} client={client} priceBookReference={reference} csrf={csrf} />
+    <PriceBookEditor
+      key={reference}
+      client={client}
+      priceBookReference={reference}
+      csrf={csrf}
+      fetcher={fetcher}
+    />
   );
 }
 
@@ -281,10 +331,12 @@ function PriceBookEditor({
   client,
   priceBookReference,
   csrf,
+  fetcher,
 }: {
   readonly client: PriceClient;
   readonly priceBookReference: string;
   readonly csrf: string | undefined;
+  readonly fetcher: typeof fetch | undefined;
 }) {
   const { state, reload } = usePriceView(client, priceBookReference, parsePriceBookEditorView);
   const [amounts, setAmounts] = useState<Record<string, string>>({});
@@ -361,8 +413,7 @@ function PriceBookEditor({
         </StatePanel>
       ) : null}
       {message ? (
-        <StatePanel heading="Not done" tone="error" status>
-          <p>{message.text}</p>
+        <PriceCommandMessage message={message} csrf={csrf} fetcher={fetcher} heading="Not done">
           {message.sellables.length > 0 ? (
             <ul>
               {message.sellables.map((reference) => (
@@ -370,7 +421,7 @@ function PriceBookEditor({
               ))}
             </ul>
           ) : null}
-        </StatePanel>
+        </PriceCommandMessage>
       ) : null}
       {view.uncovered.length > 0 && book.lifecycle !== "Archived" ? (
         <StatePanel heading="Missing prices" status>

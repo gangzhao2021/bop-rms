@@ -1,6 +1,9 @@
 /** WP-2423: Section 88 IAM-USER-LIST / IAM-USER-DETAIL view contract and same-origin client. */
+import { FULL_SIGN_IN_REQUIRED, isFullSignInRequired } from "./full-sign-in.js";
+
 export type StaffPageErrorCode =
   | "PermissionDenied"
+  | typeof FULL_SIGN_IN_REQUIRED
   | "NotFound"
   | "Conflict"
   | "LastOwner"
@@ -252,6 +255,8 @@ export function createStaffPageClient(csrf: string, fetcher: typeof fetch = fetc
     }
     if (!response.ok) {
       const payload = (await response.json().catch(() => null)) as { error?: unknown } | null;
+      if (isFullSignInRequired(response.status, payload))
+        throw new StaffPageError(FULL_SIGN_IN_REQUIRED);
       throw new StaffPageError(
         codes[String(payload?.error)] ??
           (response.status === 403 ? "PermissionDenied" : "Unavailable"),

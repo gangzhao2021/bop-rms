@@ -4,6 +4,12 @@ import {
   type CurrentOrderQueue,
   type StaffCancellationReason,
 } from "./current-order-queue-client.js";
+import { FullSignInPrompt } from "./FullSignInPrompt.js";
+import {
+  FULL_SIGN_IN_REQUIRED,
+  FULL_SIGN_IN_REQUIRED_TEXT,
+  isFullSignInRequired,
+} from "./full-sign-in.js";
 import { serviceOperationReference } from "./service-control-client.js";
 
 type Order = CurrentOrderQueue["items"][number];
@@ -41,6 +47,7 @@ type Outcome =
   | "VersionConflict"
   | "NotCancellable"
   | "Denied"
+  | typeof FULL_SIGN_IN_REQUIRED
   | "Unknown";
 
 interface Intent {
@@ -64,13 +71,15 @@ export function staffCancelBody(order: Order, batch: Batch, intent: Intent) {
 
 /**
  * Cancelled (also an idempotent replay), kitchen already started, a stale order version, no longer
- * cancellable, denied, or unknown (retry the same operation to recover its result).
+ * cancellable, denied, refused until a PIN sign-in is confirmed (verify, then retry the same
+ * operation), or unknown (retry the same operation to recover its result).
  */
 export function staffCancelOutcome(
   status: number,
   error: string | null,
 ): Exclude<Outcome, "Idle" | "Pending"> {
   if (status >= 200 && status < 300) return "Cancelled";
+  if (isFullSignInRequired(status, { error })) return FULL_SIGN_IN_REQUIRED;
   if (status === 403) return "Denied";
   if (status === 409)
     return error === "order_preparation_started"
@@ -91,8 +100,27 @@ const message: Record<Exclude<Outcome, "Idle">, string> = {
   NotCancellable: "This order can no longer be cancelled. Close to refresh it.",
   Denied:
     "This cancellation was refused. Only a store manager or owner can cancel a paid order; refresh if your session changed.",
+  FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
   Unknown: "Result unknown. Retry the same cancellation to recover its result.",
 };
+
+/** Retry keeps the same operation: the result is unknown, or a PIN sign-in must be confirmed first. */
+const keepsIntent = (outcome: Outcome) =>
+  outcome === "Unknown" || outcome === FULL_SIGN_IN_REQUIRED;
+
+/** The dialog's answer line; a PIN sign-in refusal shows how to confirm it is them instead. */
+export function StaffCancelStatus({
+  outcome,
+  csrf,
+  fetcher,
+}: {
+  readonly outcome: Outcome;
+  readonly csrf: string;
+  readonly fetcher?: typeof fetch | undefined;
+}) {
+  if (outcome === FULL_SIGN_IN_REQUIRED) return <FullSignInPrompt csrf={csrf} fetcher={fetcher} />;
+  return <p role="status">{outcome === "Idle" ? null : message[outcome]}</p>;
+}
 
 /**
  * WP-2423 Q6: cancel a paid pickup order, or one dine-in batch, before the kitchen starts. The
@@ -156,16 +184,18 @@ export function StaffOrderCancelAction({
     } catch {
       next = "Unknown";
     }
-    // Only an unknown result keeps the same operation for a safe retry.
-    if (next !== "Unknown") intent.current = null;
+    // Only an unknown result, or a refusal until the PIN sign-in is confirmed, keeps the same
+    // operation for a safe retry.
+    if (!keepsIntent(next)) intent.current = null;
     setOutcome(next);
     // Cancelled re-reads at once; any other settled answer stays readable until the dialog closes.
     if (next === "Cancelled") {
       dialog.current?.close();
       onSettled();
-    } else if (next !== "Unknown" && next !== "Denied") refreshOnClose.current = true;
+    } else if (!keepsIntent(next) && next !== "Denied") refreshOnClose.current = true;
   };
-  const retrying = outcome === "Unknown" && intent.current !== null;
+  const retrying = keepsIntent(outcome) && intent.current !== null;
+  const formOpen = outcome === "Idle" || outcome === "Pending" || keepsIntent(outcome);
   return (
     <div className="card-actions order-cancel-action">
       <button
@@ -204,7 +234,7 @@ export function StaffOrderCancelAction({
             : "Only this batch is cancelled; the rest of the table's order continues."}
         </p>
         <form
-          hidden={outcome !== "Idle" && outcome !== "Pending" && outcome !== "Unknown"}
+          hidden={!formOpen}
           onSubmit={(event) => {
             event.preventDefault();
             void submit();
@@ -249,8 +279,8 @@ export function StaffOrderCancelAction({
             </button>
           </div>
         </form>
-        <p role="status">{outcome === "Idle" ? null : message[outcome]}</p>
-        {outcome !== "Idle" && outcome !== "Pending" && outcome !== "Unknown" ? (
+        <StaffCancelStatus outcome={outcome} csrf={csrf} fetcher={fetcher} />
+        {!formOpen ? (
           <button type="button" onClick={() => dialog.current?.close()}>
             Close
           </button>

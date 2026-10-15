@@ -142,22 +142,20 @@ export function PickupCodePanel({
           ) : null}
           <h3>{state.view.storeDisplayName}</h3>
           <p>{state.view.pickupInstruction}</p>
+          {/* Screen readers hear the code one character at a time; the large code is visual only. */}
+          <p className="sr-only">
+            {`Order ${state.view.orderNumber}. Pickup code ${(state.view.counterCode ?? state.view.proofValue).split("").join(" ")}`}
+          </p>
           {state.view.counterCode ? (
             // WP-2423 (DEC-PICKUP-COUNTER-CODE): six digits staff can type, read in two groups.
-            <div
-              className="pickup-code__visual pickup-code__visual--short"
-              aria-label={`Pickup code ${state.view.counterCode.split("").join(" ")}`}
-            >
+            <div className="pickup-code__visual pickup-code__visual--short" aria-hidden="true">
               <span>Order {state.view.orderNumber}</span>
               <code>
                 {state.view.counterCode.slice(0, 3)} {state.view.counterCode.slice(3)}
               </code>
             </div>
           ) : (
-            <div
-              className="pickup-code__visual"
-              aria-label={`Pickup code ${state.view.proofValue.split("").join(" ")}`}
-            >
+            <div className="pickup-code__visual" aria-hidden="true">
               <span>Order {state.view.orderNumber}</span>
               <code>{state.view.proofValue}</code>
             </div>

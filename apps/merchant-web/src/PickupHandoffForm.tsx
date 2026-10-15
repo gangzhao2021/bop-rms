@@ -4,7 +4,70 @@ import type { PickupVerification } from "./pickup-proof-client.js";
 import type { PickupQueueItem, PickupWorkstation } from "./pickup.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { browserOffline } from "./stale-read.js";
+import {
+  readPickupIdentityCheck,
+  type PickupIdentityOutcome,
+} from "./pickup-identity-check-client.js";
 const client = createPickupHandoffClient();
+
+/**
+ * WP-2423: what staff compare in person: the name on the order and the phone's last four digits
+ * (the rest of the phone is never sent to this device). Shown only in the open dialog.
+ */
+export function PickupIdentityDetails({
+  details,
+  onRetry,
+}: {
+  readonly details: PickupIdentityOutcome | "Loading" | null;
+  readonly onRetry: () => void;
+}) {
+  if (details === null) return null;
+  if (details === "Loading") return <p role="status">Loading the name and phone on the order…</p>;
+  if (details.status === "Available")
+    return (
+      <dl className="pickup-identity" aria-label="Details on the order">
+        <div>
+          <dt>Name on the order</dt>
+          <dd>{details.name}</dd>
+        </div>
+        <div>
+          <dt>Phone ends in</dt>
+          <dd>
+            {details.phoneLast4 === null ? (
+              "No phone on the order"
+            ) : (
+              <>
+                <span aria-hidden="true">•••• </span>
+                <span className="pickup-identity__digits">{details.phoneLast4}</span>
+              </>
+            )}
+          </dd>
+        </div>
+      </dl>
+    );
+  if (details.status === "Removed" || details.status === "NotGiven")
+    return (
+      <p role="status">
+        {details.status === "Removed"
+          ? "The customer's name and phone were deleted after the retention period."
+          : "The customer did not leave a name or phone for this order."}{" "}
+        Check the order number and ask the customer what they ordered. If you are not sure, ask a
+        manager before handing it over.
+      </p>
+    );
+  if (details.status === "NotEligible")
+    return (
+      <p role="status">This order changed. Close this and refresh the list before handing over.</p>
+    );
+  return (
+    <p role="status">
+      The name and phone on the order can&apos;t be shown right now.{" "}
+      <button type="button" onClick={onRetry}>
+        Try again
+      </button>
+    </p>
+  );
+}
 export function PickupHandoffForm({
   item,
   verification,
@@ -43,9 +106,33 @@ export function PickupHandoffForm({
     [mask, setMask] = useState(""),
     [confirmed, setConfirmed] = useState(false);
   const locked = status === "Pending" || status === "Unknown";
+  // WP-2423: the name and phone digits to compare, read when the in-person dialog opens and
+  // dropped when it closes.
+  const [details, setDetails] = useState<PickupIdentityOutcome | "Loading" | null>(null);
+  const detailsRequest = useRef<AbortController | null>(null);
+  const loadDetails = () => {
+    if (!inPerson || browserOffline()) return;
+    detailsRequest.current?.abort();
+    const active = new AbortController();
+    detailsRequest.current = active;
+    setDetails("Loading");
+    void readPickupIdentityCheck({ item, storeReference, csrf, signal: active.signal }).then(
+      (result) => {
+        if (!active.signal.aborted) setDetails(result);
+      },
+    );
+  };
+  // No phone on the order to compare: only the name check can be chosen.
+  const phoneUnavailable =
+    details !== null &&
+    details !== "Loading" &&
+    (details.status === "Removed" ||
+      details.status === "NotGiven" ||
+      (details.status === "Available" && details.phoneLast4 === null));
   useEffect(
     () => () => {
       controller.current?.abort();
+      detailsRequest.current?.abort();
       intent.current?.dispose();
     },
     [],
@@ -116,7 +203,13 @@ export function PickupHandoffForm({
     item.execution?.items.filter((line) => line.readyQuantity > line.handedOverQuantity) ?? [];
   return (
     <>
-      <button disabled={status !== "Idle" || paused} onClick={() => dialog.current?.showModal()}>
+      <button
+        disabled={status !== "Idle" || paused}
+        onClick={() => {
+          dialog.current?.showModal();
+          loadDetails();
+        }}
+      >
         {inPerson ? "Hand over after checking in person" : "Review pickup handoff"}
       </button>
       {status === "Completed" || status === "InProgress" ? (
@@ -133,6 +226,8 @@ export function PickupHandoffForm({
         ref={dialog}
         aria-labelledby={"handoff-" + item.fulfillmentReference}
         onClose={() => {
+          detailsRequest.current?.abort();
+          setDetails(null);
           if (status === "Rejected" || status === "Completed" || status === "InProgress")
             resultAnnouncement.current?.focus();
         }}
@@ -166,6 +261,7 @@ export function PickupHandoffForm({
             on the order before handing over.
           </p>
         ) : null}
+        {inPerson ? <PickupIdentityDetails details={details} onRetry={loadDetails} /> : null}
         {status === "Idle" ? (
           <form
             autoComplete="off"
@@ -185,7 +281,7 @@ export function PickupHandoffForm({
                 >
                   <option value="">Select what you checked</option>
                   <option value="OrderNumberAndName">Order number and name on the order</option>
-                  <option value="OrderNumberAndPhoneLast4">
+                  <option value="OrderNumberAndPhoneLast4" disabled={phoneUnavailable}>
                     Order number and last four digits of the phone
                   </option>
                 </select>

@@ -187,6 +187,7 @@ import { FulfillmentReadinessError } from "@rms/fulfillment";
 import type { createMerchantPickupProof } from "./merchant-pickup-proof.js";
 import type { createMerchantPickupHandoff } from "./merchant-pickup-handoff.js";
 import type { createMerchantPickupNotCollected } from "./merchant-pickup-not-collected.js";
+import type { createMerchantPickupIdentityCheck } from "./merchant-pickup-identity-check.js";
 import {
   StaffOrderCancellationError,
   type createMerchantOrderStaffCancellation,
@@ -218,6 +219,7 @@ import {
   installMerchantStaffPinRoutes,
   resolveStaffSignInEntry,
   staffPinFullSignInGate,
+  storeDeviceCookieName,
 } from "./merchant-staff-pin-http.js";
 import {
   MerchantRefundApprovalError,
@@ -575,6 +577,8 @@ export interface MerchantBffRouterOptions {
   readonly pickupProof?: ReturnType<typeof createMerchantPickupProof>;
   readonly pickupHandoff?: ReturnType<typeof createMerchantPickupHandoff>;
   readonly pickupNotCollected?: ReturnType<typeof createMerchantPickupNotCollected>;
+  /** WP-2423: the name and last four phone digits staff compare for an in-person pickup check. */
+  readonly pickupIdentityCheck?: ReturnType<typeof createMerchantPickupIdentityCheck>;
   /** WP-2423 Q6: staff cancel a paid order or batch before the kitchen starts it. */
   readonly orderStaffCancellation?: ReturnType<typeof createMerchantOrderStaffCancellation>;
   /** WP-2423 Q9-G1: a manager refunds an order paid while the Store was offline. */
@@ -1689,8 +1693,11 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       response.status(503).json({ error: "order_queue_unavailable" });
       return;
     }
-    void options
-      .orderQueue({ sessionCookie, afterOrderReference: null, orderReference: order })
+    const orderQueue = options.orderQueue;
+    // A deadlock with a concurrent pickup/order read (each fences several Orders) is retried.
+    void retryTransactionConflict(() =>
+      orderQueue({ sessionCookie, afterOrderReference: null, orderReference: order }),
+    )
       .then((view) => {
         const item = view.items[0];
         if (item === undefined || view.lines === null) {
@@ -1764,7 +1771,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
                   : { status: "NotGiven" },
         });
       })
-      .catch(() => denied(response));
+      .catch((error: unknown) => refundReadFailure(response, error));
   });
 
   router.get("/orders", safeRead(options), (request, response) => {
@@ -1788,8 +1795,13 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       response.status(503).json({ error: "order_queue_unavailable" });
       return;
     }
-    void options
-      .orderQueue({ sessionCookie, afterOrderReference: after ?? null })
+    const orderQueue = options.orderQueue;
+    // WP-2423: the Orders list and the pickup queue each fence several Orders in their own order;
+    // on a first load they run together and may deadlock. The read is rerun (nothing committed);
+    // a conflict that persists is "retry later", never a permission refusal.
+    void retryTransactionConflict(() =>
+      orderQueue({ sessionCookie, afterOrderReference: after ?? null }),
+    )
       .then((view) =>
         response.json({
           items: view.items.map((item) => ({
@@ -1841,7 +1853,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           nextAfterOrderReference: view.nextAfterOrderReference,
         }),
       )
-      .catch(() => denied(response));
+      .catch((error: unknown) => refundReadFailure(response, error));
   });
 
   router.get("/tasks", safeRead(options), (request, response) => {
@@ -2085,7 +2097,14 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         state: request.query.state,
         authCookie: cookie(request, "__Host-bop-auth"),
       })
-      .then((result) => {
+      .then(async (result) => {
+        // WP-2423 Q18: a full sign-in on a registered tablet signs out the PIN session left on it.
+        const staffPin = staffPinRoutes.staffPin;
+        const tablet = cookie(request, storeDeviceCookieName);
+        if (staffPin !== undefined && tablet !== null)
+          await retryTransactionConflict(() =>
+            staffPin.afterFullSignIn({ deviceCookie: tablet, session: result.session }),
+          ).catch(() => undefined);
         response.set("Set-Cookie", result.cookies.map(serializeCookie));
         response.redirect(303, result.postLoginPath);
       })
@@ -7261,12 +7280,13 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       response.status(503).json({ error: "pickup_queue_unavailable" });
       return;
     }
-    void options
-      .pickupQuery({ sessionCookie, csrf, query: request.body })
+    const pickupQuery = options.pickupQuery;
+    // A read: a deadlock with a concurrent Orders read is rerun, never shown as a refusal.
+    void retryTransactionConflict(() => pickupQuery({ sessionCookie, csrf, query: request.body }))
       .then((result) => response.json(result))
       .catch((error: unknown) => {
         if (!(error instanceof FulfillmentReadinessError)) {
-          denied(response);
+          refundReadFailure(response, error);
           return;
         }
         const status = {
@@ -7298,6 +7318,45 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
     }
     void options
       .pickupHandoff({ sessionCookie, csrf, command: request.body })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => {
+        if (!(error instanceof PickupHandoffError)) {
+          denied(response);
+          return;
+        }
+        const status = {
+          PICKUP_HANDOFF_INPUT_INVALID: 400,
+          PICKUP_HANDOFF_PERMISSION_DENIED: 403,
+          PICKUP_HANDOFF_NOT_READY: 422,
+          PICKUP_HANDOFF_VERIFICATION_FAILED: 422,
+          PICKUP_HANDOFF_ALREADY_COMPLETED: 409,
+          PICKUP_HANDOFF_VERSION_CONFLICT: 409,
+        }[error.code];
+        response.status(status).json({ error: error.code });
+      });
+  });
+
+  // WP-2423: what staff compare when checking a pickup customer in person (no usable code).
+  router.post("/pickup/identity-check", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    // Personal details: never cached by the browser or a proxy.
+    response.setHeader("Cache-Control", NO_STORE);
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.pickupIdentityCheck) {
+      response.status(503).json({ error: "pickup_identity_check_unavailable" });
+      return;
+    }
+    void options
+      .pickupIdentityCheck({ sessionCookie, csrf, query: request.body })
       .then((result) => response.json(result))
       .catch((error: unknown) => {
         if (!(error instanceof PickupHandoffError)) {
