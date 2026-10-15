@@ -20,9 +20,14 @@ export async function refundReadAccess(
     observedAt: string;
   },
   role: Role,
+  /** The Session's profile (store scope `kdsOperatorProfileAllows`): a kitchen display sign-in
+   * reads no refunds, whatever the Actor's roles allow. */
+  profileAllows: (action: string) => boolean,
   /** WP-2423 Q19: an Owner may also request while sole operator is in effect for them. */
   soleOperatorEffective?: () => Promise<boolean>,
 ): Promise<{ readonly canRead: boolean; readonly canRequest: boolean }> {
+  if (!profileAllows("payment.refund.request") || !profileAllows("payment.refund.approve"))
+    return Object.freeze({ canRead: false, canRequest: false });
   const request = await workforce(tx, { ...base, permissionCode: "payment.refund.request" });
   const requestRole =
     request.decision.effect === "Allow"

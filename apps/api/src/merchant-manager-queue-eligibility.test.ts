@@ -207,3 +207,14 @@ it("denies absent current Store assignment", async () => {
   await expect(prepareMerchantManagerQueueEligibility(tx, source, input)).rejects.toThrow();
   expect(mocks.roles).not.toHaveBeenCalled();
 });
+
+it("a kitchen display sign-in is never Queue-eligible, whatever its roles hold", async () => {
+  mocks.session.mockResolvedValue({
+    ...session,
+    policy: { ...session.policy, code: "NamedKdsOperator" },
+  });
+  await expect(prepareMerchantManagerQueueEligibility(tx, source, input)).rejects.toThrow(
+    "MERCHANT_QUEUE_ELIGIBILITY_UNAVAILABLE",
+  );
+  expect(mocks.roles).not.toHaveBeenCalled();
+});

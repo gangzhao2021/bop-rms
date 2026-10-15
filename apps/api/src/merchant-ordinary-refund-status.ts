@@ -124,6 +124,7 @@ export function createMerchantOrdinaryRefundStatus(options: {
                   observedAt: String(current.context.resolvedAt),
                 },
                 role,
+                current.kdsOperatorProfileAllows,
               )
             ).canRead;
           if (!(await readable())) return deny();

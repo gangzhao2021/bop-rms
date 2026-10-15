@@ -119,4 +119,18 @@ describe("DEC-PERM-CATALOG Store permission catalog", () => {
         "catalog.tax-classification.manage",
       );
   });
+  it("lets only the Owner and Store Manager set up shared tablets and reset staff PINs (v15)", () => {
+    const codes = ["identity.store_device.manage", "identity.staff_pin.reset"];
+    for (const role of ["owner", "store-manager"] as const)
+      for (const code of codes) expect(storeRoleTemplateActions(role), role).toContain(code);
+    for (const role of ["front-of-house", "kitchen", "inventory-manager"] as const)
+      for (const code of codes) expect(storeRoleTemplateActions(role), role).not.toContain(code);
+    for (const [role, held] of Object.entries(brandRoleTemplates))
+      for (const code of codes) expect(held, role).not.toContain(code);
+    for (const code of codes)
+      expect(storePermissionCatalog().find((entry) => entry.code === code)).toMatchObject({
+        module: "identity",
+        risk: "High",
+      });
+  });
 });

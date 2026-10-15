@@ -21,6 +21,9 @@ const purposes = {
   SoleOperatorSetting: "ORGANIZATION_SOLE_OPERATOR_SETTING",
   // WP-2423 Q19 step 2: approving one's own work alone at a Brand gate (sole operator).
   SoleOperatorApproval: "ORGANIZATION_SOLE_OPERATOR_APPROVAL",
+  // WP-2423 Q18 option A: a staff member signed in with a PIN confirms it is them before a
+  // sensitive action (refunds, price, staff and role changes, tablets and PINs).
+  PinSessionElevation: "IDENTITY_PIN_SESSION_ELEVATION",
 } as const;
 export class MerchantStepUpError extends Error {
   constructor(readonly code: "Denied" | "NotSetUp") {
@@ -51,7 +54,8 @@ export function createMerchantMfaStepUp(options: {
       raw.purpose !== "RefundRequest" &&
       raw.purpose !== "RefundApproval" &&
       raw.purpose !== "SoleOperatorSetting" &&
-      raw.purpose !== "SoleOperatorApproval"
+      raw.purpose !== "SoleOperatorApproval" &&
+      raw.purpose !== "PinSessionElevation"
     )
       throw new MerchantStepUpError("Denied");
     const purposeCode = purposes[raw.purpose];

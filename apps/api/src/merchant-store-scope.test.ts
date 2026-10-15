@@ -473,4 +473,14 @@ describe("IDR-0039 named KDS Operator profile", () => {
     const scope = await resolve("fulfillment.operate");
     expect(await scope.allowed()).toBe(true);
   });
+  it("exposes the same profile limit to the Brand-level scopes", async () => {
+    ports.session.mockResolvedValue(session(2, "NamedKdsOperator"));
+    const scope = await resolve();
+    expect(scope.kdsOperatorProfileAllows("catalog.sku.sold_out.mark")).toBe(true);
+    expect(scope.kdsOperatorProfileAllows("catalog.sku.availability.manage")).toBe(false);
+    ports.session.mockResolvedValue(session());
+    expect((await resolve()).kdsOperatorProfileAllows("catalog.sku.availability.manage")).toBe(
+      true,
+    );
+  });
 });

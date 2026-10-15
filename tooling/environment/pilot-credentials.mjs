@@ -10,8 +10,10 @@ import {
   hkdfSync,
 } from "node:crypto";
 import {
+  createArgon2idStaffPinKdf,
   createGuestSessionCredentialProvider,
   createGuestBindingCredentialProvider,
+  createStoreDeviceSecretHasher,
 } from "../../packages/bop/identity/src/index.ts";
 import { createPickupCredentialProvider } from "../../packages/rms/fulfillment/src/index.ts";
 export function createInternalCredentialLoaders({ file, loadProfile, expectedDatabaseName }) {
@@ -162,10 +164,48 @@ export function createInternalCredentialLoaders({ file, loadProfile, expectedDat
       },
     };
   }
+  /**
+   * WP-2423 Q18 option A: the staff PIN pepper and the shared-tablet secret key, each derived for
+   * its own purpose from the existing workforce selector key (no new key file entry). TEST-ONLY:
+   * a live store keeps both in the managed secret store (capability gap "Secrets").
+   */
+  async function createInternalStaffPinCredentials() {
+    const saved = await load(),
+      root = Buffer.from(saved.keys.merchantSelector, "hex");
+    const derive = (purpose) =>
+      Buffer.from(
+        hkdfSync(
+          "sha256",
+          root,
+          Buffer.from(expectedDatabaseName, "utf8"),
+          Buffer.from(purpose, "utf8"),
+          32,
+        ),
+      );
+    try {
+      const pepper = derive("bop-rms/internal-test/staff-pin-pepper/v1"),
+        device = derive("bop-rms/internal-test/store-device-selector/v1");
+      try {
+        return Object.freeze({
+          kdf: createArgon2idStaffPinKdf({
+            peppers: new Map([[1, pepper]]),
+            currentPepperVersion: 1,
+          }),
+          deviceHasher: createStoreDeviceSecretHasher(device),
+        });
+      } finally {
+        pepper.fill(0);
+        device.fill(0);
+      }
+    } finally {
+      root.fill(0);
+    }
+  }
   return {
     provisionInternalTestCredentials,
     createInternalTestCredentials,
     createInternalMerchantCredentials,
     createInternalCatalogCursorKey,
+    createInternalStaffPinCredentials,
   };
 }

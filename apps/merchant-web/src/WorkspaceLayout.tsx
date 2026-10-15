@@ -7,6 +7,8 @@ const ownNavigation = [
   /^\/operations\/(kitchen|dining)(\/|$)/u,
   /^\/app\/organization\/brands\/[^/]+$/u,
   /^\/app\/commerce\/products\/new$/u,
+  // WP-2423 (design "A"): the shared tablet's staff PIN switch is a full-screen lock screen.
+  /^\/operations\/switch-staff$/u,
 ];
 export const usesWorkspaceLayout = (path: string) =>
   (path === "/app" || path.startsWith("/app/") || path.startsWith("/operations/")) &&

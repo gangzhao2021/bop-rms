@@ -98,7 +98,7 @@ export function installInternalStaffLogin(app, merchant) {
       return res
         .type("html")
         .send(
-          `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DEMO Staff</title><main><h1>DEMO Store staff</h1><p>Local internal testing only. Choose a configured test identity. Access still depends on current permissions.</p>${forms}</main></html>`,
+          `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DEMO Staff</title><main><h1>DEMO Store staff</h1><p>Local internal testing only. Choose a configured test identity. Access still depends on current permissions.</p>${forms}<h2>Shared tablet</h2><p>On a tablet a manager has set up for staff PINs, staff switch with their own 6-digit PIN.</p><p><a href="/operations/switch-staff">Switch staff with a PIN</a></p></main></html>`,
         );
     } catch {
       return res.status(503).json({ code: "INTERNAL_STAFF_LOGIN_UNAVAILABLE" });

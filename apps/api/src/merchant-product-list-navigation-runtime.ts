@@ -34,6 +34,7 @@ import { createMerchantSelectedContext } from "./merchant-selected-context.js";
 import { merchantProductListRequiredFields } from "./merchant-product-list-query.js";
 import type { createMerchantCategoryTransactions } from "./merchant-category-transactions.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { kdsOperatorProfileAllows } from "./merchant-kds-operator-profile.js";
 
 type Host = ReturnType<typeof createMerchantCategoryTransactions>;
 type Transaction = Parameters<Host["registerBeforeCommit"]>[0];
@@ -234,6 +235,8 @@ export function createMerchantProductListNavigationRuntime(options: {
         ? [request.permission, request.action]
         : [request.permission, request.action, "catalog.product.read", "catalog.sku.read"],
     );
+    // A kitchen display sign-in holds no Brand-level authority outside its profile.
+    if (brandActions.some((action) => !kdsOperatorProfileAllows(session, action))) return null;
     const held = await permissions.authorizeActionsWithRoles({
       tenantContext: createTenantContext(actor, context.brand, null, check()),
       membership,

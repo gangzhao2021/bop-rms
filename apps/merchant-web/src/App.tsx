@@ -21,6 +21,7 @@ import {
 import { Navigate, Route, Routes, useLocation } from "react-router";
 import { usesWorkspaceLayout, WorkspaceLayout } from "./WorkspaceLayout.js";
 import { StaffSessionGuard, StaffSignedOutPanel, StaffSwitchButton } from "./StaffSession.js";
+import { StaffPinControls } from "./StaffPinControls.js";
 import { isOperationalScreen } from "./staff-session.js";
 import { StoreTimeZoneContext } from "./StoreTime.js";
 import { StoreBusinessDayProvider } from "./StoreBusinessDay.js";
@@ -383,6 +384,9 @@ const PlatformTemplateWorkspace = lazyPage(
   "PlatformTemplateWorkspace",
 );
 const SupportCasePage = lazyPage(() => import("./SupportCasePages.js"), "SupportCasePage");
+// WP-2423 (design "A"): staff PIN quick switch on a shared tablet, and its management page.
+const StaffSwitchPage = lazyPage(() => import("./StaffSwitchPage.js"), "StaffSwitchPage");
+const StoreDevicesPage = lazyPage(() => import("./StoreDevicesPage.js"), "StoreDevicesPage");
 const MetricCatalogPage = lazyPage(() => import("./MetricPages.js"), "MetricCatalogPage");
 const MetricDetailPage = lazyPage(() => import("./MetricPages.js"), "MetricDetailPage");
 const DataQualityPage = lazyPage(() => import("./DataQualityPages.js"), "DataQualityPage");
@@ -1659,6 +1663,28 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
             </SessionPending>
           }
         />
+        {/* WP-2423 (design "A"): staff switch to themselves with their PIN; no sign-in needed. */}
+        <Route path="/operations/switch-staff" element={<StaffSwitchPage />} />
+        {/* WP-2423 (design "A"): Section 88 IAM-SESSION-LIST — shared tablets and staff PINs. */}
+        <Route
+          path="/app/organization/sessions"
+          element={
+            <SessionPending pending={sessionPending}>
+              {demo === null && state.kind === "Ready" && !state.switching ? (
+                <StoreDevicesPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  csrf={state.csrf}
+                  storeLabel={state.workspace.selectedScope.storeLabel}
+                  timeZone={state.workspace.selectedScope.timeZone}
+                />
+              ) : (
+                <WorkspacePage title="Shared tablets & PINs">
+                  <StaffSignedOutPanel message="Sign in to manage this store's shared tablets and staff PINs." />
+                </WorkspacePage>
+              )}
+            </SessionPending>
+          }
+        />
         <Route path="*" element={<Navigate replace to="/app" />} />
       </Routes>
     </Suspense>
@@ -1681,7 +1707,17 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
             items={state.workspace.navigation}
             path={pathname}
             storeLabel={state.workspace.selectedScope.storeLabel}
-            footer={demo === null ? <StaffSwitchButton /> : null}
+            footer={
+              demo === null ? (
+                <>
+                  <StaffSwitchButton />
+                  <StaffPinControls
+                    csrf={state.csrf}
+                    timeZone={state.workspace.selectedScope.timeZone}
+                  />
+                </>
+              ) : null
+            }
           >
             {routes}
           </WorkspaceLayout>
@@ -1693,7 +1729,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           routes
         )}
         {/* WP-2423 Q18: keep the Session alive while staff work; warn before it ends. */}
-        {state.kind === "Ready" && demo === null ? (
+        {state.kind === "Ready" && demo === null && pathname !== "/operations/switch-staff" ? (
           <StaffSessionGuard
             key={state.csrf}
             csrf={state.csrf}

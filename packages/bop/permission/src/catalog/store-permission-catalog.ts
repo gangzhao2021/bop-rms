@@ -36,8 +36,12 @@
  * by the Brand tax classification registry, is held by whoever reads both Products and tax
  * configuration (Brand Owner, Menu Manager), so the Owner can see fee classification choices in
  * Store setup. Registering classifications (`catalog.tax-classification.manage`) is unchanged.
+ * v15 (2026-10-14, WP-2423 Q18 option A, DEC-STAFF-SESSION-CONTINUITY section 5): staff PIN on
+ * shared Store tablets. identity.store_device.manage registers and removes the Store's shared
+ * tablets; identity.staff_pin.reset resets a staff member's PIN. Owner and Store Manager hold both;
+ * every staff member sets their own PIN with merchant.access after a full sign-in.
  */
-export const storePermissionCatalogVersion = 14 as const;
+export const storePermissionCatalogVersion = 15 as const;
 export type PermissionRisk = "Low" | "Medium" | "High";
 export interface StorePermissionDefinition {
   readonly code: string;
@@ -79,6 +83,17 @@ const catalog: readonly StorePermissionDefinition[] = Object.freeze([
     ["identity.role.approve", "Approve or reject a Store role change", "High"],
     ["identity.role.activate", "Activate an approved Store role version", "High"],
     ["identity.role.deactivate", "Deactivate a Store role", "High"],
+    // v15 (WP-2423 Q18 option A): shared tablets and staff PINs.
+    [
+      "identity.store_device.manage",
+      "Register and remove the Store's shared tablets for staff PIN sign-in",
+      "High",
+    ],
+    [
+      "identity.staff_pin.reset",
+      "Reset a staff member's PIN for the Store's shared tablets",
+      "High",
+    ],
   ]),
   ...define("feature", [
     ["feature.control.change", "Edit Store feature control drafts", "High"],
@@ -445,6 +460,9 @@ export const storeRoleTemplates: Readonly<Record<StoreRoleTemplateCode, readonly
       "organization.staff.read",
       "identity.role.read",
       "identity.role.approve",
+      // v15 (WP-2423 Q18 option A): sets up shared tablets and resets staff PINs.
+      "identity.store_device.manage",
+      "identity.staff_pin.reset",
       ...pick([
         "ordering.order.",
         "kitchen.",

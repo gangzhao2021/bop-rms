@@ -8,6 +8,7 @@ import { parseBusinessAction, parsePolicyReference, parsePolicyVersion } from "@
 import {
   createMerchantCurrentBrandScope,
   createMerchantCurrentBrandAdministrationScope,
+  readMerchantCurrentBrandAuthority,
   type MerchantBrandAdministrationPolicyPort,
 } from "./merchant-current-brand-scope.js";
 const id = (n: number) => "0190ed60-0000-7000-8000-" + String(n).padStart(12, "0");
@@ -215,6 +216,36 @@ it("retains the shortest natural permission boundary and rejects malformed actio
     other.authorizeActionsWithValidity(["organization.manage", "organization.manage"]),
   ).rejects.toThrow();
   expect(g.calls).toHaveLength(count);
+});
+
+it("a kitchen display sign-in gets no current Brand authority even when the Owner's roles allow it", async () => {
+  const f = fixture();
+  f.session.policy_code = "NamedKdsOperator";
+  f.session.idle_expires_at = new Date("2026-09-10T11:00:00.000Z");
+  await expect(f.resolve()).rejects.toThrow("BRAND_SERVICE_PERMISSION_DENIED");
+  expect(f.assess).toHaveBeenCalled();
+});
+it("limits a kitchen display Session's current Brand decisions to its profile", async () => {
+  const f = fixture();
+  const read = (code: string) =>
+    readMerchantCurrentBrandAuthority(
+      f.tx,
+      { actor: f.state.actor, policy: { code } } as never,
+      id(3),
+      at,
+      ["catalog.sku.sold_out.mark", "catalog.sku.availability.manage", "catalog.product.manage"],
+      { authorizeActionsWithRoles: f.assess } as never,
+    );
+  expect((await read("NamedKdsOperator")).decisions.map((d) => [d.action, d.effect])).toEqual([
+    ["catalog.sku.sold_out.mark", "Allow"],
+    ["catalog.sku.availability.manage", "Deny"],
+    ["catalog.product.manage", "Deny"],
+  ]);
+  expect((await read("WorkforceStandard")).decisions.map((d) => d.effect)).toEqual([
+    "Allow",
+    "Allow",
+    "Allow",
+  ]);
 });
 
 function administrationFixture() {

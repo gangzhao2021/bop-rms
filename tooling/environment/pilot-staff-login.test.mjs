@@ -75,6 +75,8 @@ it("renders escaped aliases with native keyboard buttons and no identity/grant f
   expect(f.res.body).toContain('name="staffSelector" value="reviewer"');
   expect(f.res.body).toContain('name="confirmation" value="DEMO_STAFF_LOGIN"');
   expect(f.res.body).not.toContain("actorReference");
+  // WP-2423 Q18 option A: the PIN lock screen of a registered shared tablet is reachable here.
+  expect(f.res.body).toContain('<a href="/operations/switch-staff">Switch staff with a PIN</a>');
   expect(f.res.body).not.toContain("catalog.product.approve");
   expect(f.res.headers["Cache-Control"]).toBe("no-store");
   expect(f.res.headers["Referrer-Policy"]).toBe("same-origin");

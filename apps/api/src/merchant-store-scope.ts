@@ -15,19 +15,9 @@ type TransactionPermissionPolicy = ReturnType<
 import { createMerchantSelectedContext } from "./merchant-selected-context.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 
-/** IDR-0039 least-privilege named KDS Operator profile: whatever the Actor's roles allow,
- * a NamedKdsOperator Session can only enter the workspace and operate the Kitchen (WP-2423 Q26:
- * including a remake; DEC-KITCHEN-STALE-TICKETS: a manager signed in at the kitchen screen closing
- * an earlier day's ticket; WP-2423 Q17: marking an item sold out for today and bringing today's
- * mark back, without the manager-level availability permission — the Actor's roles must still
- * allow each). */
-export const kdsOperatorProfileActions: ReadonlySet<string> = new Set([
-  "merchant.access",
-  "kitchen.operate",
-  "kitchen.work_item.rework",
-  "kitchen.ticket.close_stale",
-  "catalog.sku.sold_out.mark",
-]);
+import { kdsOperatorProfileAllows } from "./merchant-kds-operator-profile.js";
+/** Re-exported from the one shared kitchen display profile (merchant-kds-operator-profile.ts). */
+export { kdsOperatorProfileActions } from "./merchant-kds-operator-profile.js";
 
 /** Current Workforce session, selected Tenant/Brand/Store and per-action policy.
  * Returned allowed rechecks the same selection and actor in this transaction.
@@ -114,11 +104,7 @@ function createMerchantStoreScopeResolver(
       fresh: Awaited<ReturnType<typeof selectedContext>>,
       requestedAction: string,
     ) => {
-      if (
-        session.policy.code === "NamedKdsOperator" &&
-        !kdsOperatorProfileActions.has(requestedAction)
-      )
-        return null;
+      if (!kdsOperatorProfileAllows(session, requestedAction)) return null;
       const memberships = createPostgresCurrentMembershipSource(tx, fresh.context);
       const membership = resolveActiveMembership(
         await memberships.findMemberships(actorReference, context.brand.brandReference),
@@ -177,6 +163,9 @@ function createMerchantStoreScopeResolver(
       store,
       actorReference,
       sessionReference: session.sessionReference,
+      /** Brand-level scopes apply the same kitchen display profile limit to this Session. */
+      kdsOperatorProfileAllows: (requestedAction: string) =>
+        kdsOperatorProfileAllows(session, requestedAction),
       initialAuthorization,
       initialObservedAt: context.resolvedAt,
       allowed,

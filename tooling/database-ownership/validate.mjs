@@ -1114,6 +1114,19 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "bop_identity" &&
           module.manifest.ownedDatabase?.tables?.includes("workforce_mfa_step_up") &&
           moduleRelative === "src/infrastructure/persistence/workforce-mfa-step-up-store.ts";
+        // WP-2423 Q18 option A: registered Store tablets, staff PINs, PIN checks and PIN sessions.
+        const acceptedStaffPinAsset =
+          module.packageName === "@bop/identity" &&
+          module.manifest.ownedDatabase?.schema === "bop_identity" &&
+          [
+            "store_sign_in_device",
+            "staff_pin_credential",
+            "staff_pin_attempt",
+            "staff_pin_session",
+            "authentication_session",
+            "workforce_mfa_step_up",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/staff-pin-store.ts";
         const acceptedCurrentWorkforceInvitationAsset =
           module.packageName === "@bop/identity" &&
           module.manifest.ownedDatabase?.schema === "bop_identity" &&
@@ -3543,6 +3556,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedReconciliationFollowUpAsset &&
           !acceptedUnmatchedCaptureRefundAsset &&
           !acceptedWorkforceMfaStepUpAsset &&
+          !acceptedStaffPinAsset &&
           !acceptedProviderCaptureExceptionAsset &&
           !acceptedPaymentReconciliationExceptionAsset &&
           !acceptedOrdinaryRefundCaptureAsset &&

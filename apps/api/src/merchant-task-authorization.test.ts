@@ -211,3 +211,31 @@ it("authorizes claim through the current policy without enabling terminal action
     f.authorization.authorize({ ...request, action: "task.complete" }),
   ).rejects.toThrow();
 });
+
+it("refuses every task action to a kitchen display sign-in without consulting policy", async () => {
+  const f = fixture();
+  const kitchen = createAuthenticationSession({
+    sessionReference: id(1),
+    actor: session.actor,
+    status: "Active",
+    policyCode: "NamedKdsOperator",
+    maxActiveSessions: 5,
+    idleTimeoutMinutes: 60,
+    absoluteTimeoutMinutes: 720,
+    version: 1,
+    authenticatedAt: from,
+    createdAt: from,
+    lastSeenAt: from,
+    idleExpiresAt: "2026-09-20T11:00:00.000Z",
+    absoluteExpiresAt: "2026-09-20T22:00:00.000Z",
+    rotatedFromSessionReference: null,
+    revocationReason: null,
+    revokedAt: null,
+  });
+  f.sessionPort.mockResolvedValue(kitchen);
+  for (const action of ["task.create", "task.assign", "task.claim"])
+    await expect(f.authorization.authorize({ ...request, action })).rejects.toThrow(
+      "MERCHANT_TASK_AUTHORIZATION_UNAVAILABLE",
+    );
+  expect(mocks.authorize).not.toHaveBeenCalled();
+});

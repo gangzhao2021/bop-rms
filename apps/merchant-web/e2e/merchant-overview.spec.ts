@@ -263,6 +263,17 @@ test("@production Home reads only the summaries the staff member's screens permi
       },
     }),
   );
+  // WP-2423 (design "A"): the footer's "My PIN" reads the signed-in member's PIN status.
+  await page.route("**/merchant/staff-pin", (route) =>
+    route.fulfill({
+      headers: { "cache-control": "no-store" },
+      json: {
+        pin: { state: "Set", changedAt: "2026-09-20T16:00:00.000Z", lockedUntil: null },
+        signIn: "Account",
+        verifiedUntil: null,
+      },
+    }),
+  );
   const requested: string[] = [];
   for (const path of [
     "**/merchant/orders*",

@@ -8421,3 +8421,320 @@ body:has(.product-complete-draft) .bop-shell__header,
 .pickup-handoff-dialog > button {
   margin: 0 8px 8px 0;
 }
+
+/* ---------------------------------------------------------------------------------------------
+ * WP-2423 (design "A"): staff PIN quick switch — the shared tablet's lock screen, "My PIN" in
+ * the workspace footer, and Shared tablets & PINs (IAM-SESSION-LIST).
+ * ------------------------------------------------------------------------------------------- */
+.staff-switch.bop-shell__main {
+  display: grid;
+  align-content: start;
+  gap: 24px;
+  width: min(44rem, 100%);
+  min-height: 100vh;
+  padding: clamp(16px, 4vw, 40px);
+}
+.staff-switch__header {
+  display: grid;
+  gap: 12px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--bop-color-border-default);
+}
+.staff-switch__brand {
+  margin: 0;
+}
+.staff-switch__brand strong {
+  padding: 2px 6px;
+  border-radius: var(--bop-radius-control);
+  color: var(--bop-color-on-primary);
+  background: var(--bop-color-brand-primary);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+.staff-switch__header h1 {
+  margin: 0;
+  font-size: clamp(22px, 3vw, 28px);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+.staff-switch__panel {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.staff-switch__panel h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.staff-switch__panel p,
+.staff-switch__footer p {
+  margin: 0;
+}
+.staff-switch__people {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.staff-switch__person,
+.staff-switch__key,
+.staff-switch__action,
+.staff-switch__back {
+  font: inherit;
+  color: var(--bop-color-text-default);
+  background: var(--bop-color-surface-default);
+  border: 1px solid var(--bop-color-border-strong);
+  border-radius: var(--bop-radius-control);
+  cursor: pointer;
+}
+.staff-switch__person {
+  width: 100%;
+  min-height: 72px;
+  padding: 12px 16px;
+  font-size: 18px;
+  font-weight: 600;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+.staff-switch__person:hover,
+.staff-switch__key:hover:not(:disabled),
+.staff-switch__back:hover:not(:disabled) {
+  background: var(--bop-color-surface-raised);
+}
+.staff-switch__action {
+  justify-self: start;
+  min-height: 48px;
+  padding: 0 20px;
+  color: var(--bop-color-on-primary);
+  background: var(--bop-color-brand-primary);
+}
+.staff-switch__dots {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  padding: 8px 0;
+}
+.staff-switch__dots span {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--bop-color-border-strong);
+  border-radius: 50%;
+}
+.staff-switch__dots span[data-filled="true"] {
+  background: var(--bop-color-brand-primary);
+}
+.staff-switch__count {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  text-align: center;
+}
+.staff-switch__message:empty {
+  display: none;
+}
+.staff-switch__message {
+  padding: 12px 16px;
+  border-left: 4px solid var(--bop-color-danger);
+  background: var(--bop-color-surface-raised);
+}
+.staff-switch__message[data-kind="SigningIn"] {
+  border-left-color: var(--bop-color-success);
+}
+.staff-switch__keypad {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  width: min(24rem, 100%);
+  justify-self: center;
+}
+.staff-switch__key {
+  min-height: 64px;
+  font-size: 24px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.staff-switch__key[data-key="Delete"],
+.staff-switch__key[data-key="Clear"] {
+  font-size: 16px;
+}
+.staff-switch__key:disabled,
+.staff-switch__back:disabled {
+  border-color: var(--bop-color-border-default);
+  color: var(--bop-color-text-muted);
+  background: var(--bop-color-surface-raised);
+  cursor: not-allowed;
+}
+.staff-switch__back {
+  justify-self: center;
+  min-height: 48px;
+  padding: 0 16px;
+  border-color: var(--bop-color-border-default);
+}
+.staff-switch__footer {
+  display: grid;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--bop-color-border-default);
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.staff-switch__note {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+}
+
+/* "My PIN" and the PIN sign-in notice in the workspace footer. */
+.staff-pin {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+.staff-pin__open,
+.staff-pin__prompt,
+.staff-pin__notice .step-up-verification > button {
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-size: 14px;
+  text-align: start;
+  cursor: pointer;
+}
+.staff-pin__prompt {
+  border-color: var(--bop-color-border-strong);
+  font-weight: 600;
+}
+.staff-pin__notice {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-left: 4px solid var(--bop-color-warning);
+  background: var(--bop-color-surface-raised);
+  font-size: 13px;
+}
+.staff-pin__notice p {
+  margin: 0;
+}
+.staff-pin__dialog form {
+  display: grid;
+  gap: 8px;
+}
+.staff-pin__dialog label {
+  font-size: 14px;
+  font-weight: 600;
+}
+.staff-pin__dialog p {
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+.staff-pin__dialog .card-actions,
+.store-devices__confirm .card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.staff-pin__dialog button,
+.store-devices__confirm button {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--bop-color-border-strong);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.staff-pin__dialog button[type="submit"] {
+  color: var(--bop-color-on-primary);
+  background: var(--bop-color-brand-primary);
+}
+.staff-pin__dialog button:disabled,
+.store-devices__confirm button:disabled {
+  color: var(--bop-color-text-muted);
+  background: var(--bop-color-surface-raised);
+  cursor: not-allowed;
+}
+.staff-pin__dialog input {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid #8a8a8a;
+  border-radius: var(--bop-radius-control);
+  color: var(--bop-color-text-default);
+  background: var(--bop-color-surface-default);
+}
+.staff-pin__dialog input:focus {
+  border-color: var(--bop-color-border-strong);
+}
+.staff-pin__rules {
+  color: var(--bop-color-text-muted);
+}
+.staff-pin__result:empty {
+  display: none;
+}
+.staff-pin__result[data-tone="error"] {
+  color: var(--bop-color-danger);
+}
+.staff-pin__result[data-tone="done"] {
+  color: var(--bop-color-success);
+}
+.staff-pin__verify {
+  margin-bottom: 12px;
+  padding: 12px;
+  border-left: 4px solid var(--bop-color-warning);
+  background: var(--bop-color-surface-raised);
+}
+.workspace-sidebar__compact .staff-pin {
+  margin-top: 8px;
+}
+
+/* Shared tablets & PINs. */
+.store-devices__intro {
+  max-width: 48rem;
+  color: var(--bop-color-text-muted);
+}
+.store-devices__section {
+  min-width: 0;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--bop-color-border-default);
+}
+.workspace-page .store-devices__section h2 {
+  font-size: 20px;
+}
+.store-devices__register {
+  display: grid;
+  gap: 8px;
+  max-width: 32rem;
+}
+.store-devices__register label {
+  margin-bottom: 0;
+}
+.store-devices__register button {
+  justify-self: start;
+}
+.store-devices__hint {
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+}
+.store-devices__verify {
+  display: grid;
+  gap: 8px;
+  margin-block: 16px;
+  padding: 16px;
+  border-left: 4px solid var(--bop-color-warning);
+  background: var(--bop-color-surface-raised);
+}
+.store-devices__verify p {
+  margin: 0;
+}
+.store-devices__confirm [data-variant="destructive"]:not(:disabled) {
+  border-color: var(--bop-color-danger);
+  color: var(--bop-color-danger);
+}

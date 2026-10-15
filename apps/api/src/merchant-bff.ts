@@ -213,6 +213,12 @@ import { PickupHandoffError, PickupProofError } from "@rms/fulfillment";
 import { UnmatchedCaptureRefundError } from "@rms/payment";
 import type { createMerchantUnmatchedCaptureRefund } from "./merchant-unmatched-capture-refund.js";
 import { MerchantStepUpError, type createMerchantMfaStepUp } from "./merchant-mfa-step-up.js";
+import type { createMerchantStaffPin } from "./merchant-staff-pin.js";
+import {
+  installMerchantStaffPinRoutes,
+  resolveStaffSignInEntry,
+  staffPinFullSignInGate,
+} from "./merchant-staff-pin-http.js";
 import {
   MerchantRefundApprovalError,
   type createMerchantOrdinaryRefundApproval,
@@ -376,6 +382,8 @@ const merchantNavigation = Object.freeze({
   "DEV-KDS-PROFILE": ["/app/integrations/kds-profiles", "integration.manage"],
   "IAM-ROLE-LIST": ["/app/organization/roles", "identity.role.read"],
   "IAM-USER-LIST": ["/app/organization/users", "organization.staff.read"],
+  // WP-2423 Q18 option A: shared tablets and staff PINs (Section 88 IAM-SESSION-LIST).
+  "IAM-SESSION-LIST": ["/app/organization/sessions", "identity.store_device.manage"],
   "INV-ITEM-LIST": ["/app/supply/items", "inventory.item.read"],
   "INV-LOCATION-LIST": ["/app/supply/locations", "inventory.location.read"],
   "INV-OPENING-COUNT": ["/app/supply/opening-count", "inventory.count.read"],
@@ -396,6 +404,8 @@ const merchantNavigation = Object.freeze({
  */
 const navigationAlternatives: Readonly<Record<string, readonly string[]>> = Object.freeze({
   "CAT-AVAILABILITY": Object.freeze(["catalog.sku.sold_out.mark"]),
+  // WP-2423 Q18 option A: a manager who only resets staff PINs reaches the same page.
+  "IAM-SESSION-LIST": Object.freeze(["identity.staff_pin.reset"]),
 });
 /** Actions any one of which admits a navigation entry: its own permission first. */
 export function merchantNavigationActions(item: {
@@ -689,6 +699,11 @@ export interface MerchantBffRouterOptions {
    * InternalTest pilot passes its TEST-ONLY staff sign-in page, labelled as such for staff.
    */
   readonly signInEntry?: { readonly path: string; readonly testOnly: boolean };
+  /**
+   * WP-2423 Q18 option A: shared-tablet staff PIN (tablet registration, own PIN, lock screen,
+   * manager reset) and the gate that refuses sensitive actions of an unverified PIN session.
+   */
+  readonly staffPin?: ReturnType<typeof createMerchantStaffPin>;
 }
 
 const defaultSignInEntry = Object.freeze({
@@ -1369,6 +1384,15 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
     response.set("Cache-Control", NO_STORE);
     next();
   });
+  // WP-2423 Q18 option A: an unverified PIN session cannot do sensitive actions; the shared-tablet
+  // PIN routes (lock screen, own PIN, tablets, reset).
+  const staffPinRoutes = {
+    exactOrigin: options.exactOrigin,
+    fullSignIn: options.signInEntry ?? defaultSignInEntry,
+    ...(options.staffPin === undefined ? {} : { staffPin: options.staffPin }),
+  };
+  router.use(staffPinFullSignInGate(staffPinRoutes));
+  installMerchantStaffPinRoutes(router, staffPinRoutes);
 
   router.get("/catalog/products/draft-baseline", safeRead(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");
@@ -2100,13 +2124,15 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
   });
 
   // WP-2423 Q18: where to sign in (public; no Session needed to find the sign-in page).
-  router.get("/sign-in-entry", safeRead(options), (_request, response) => {
-    const entry = options.signInEntry ?? defaultSignInEntry;
-    if (!signInPathPattern.test(entry.path) || typeof entry.testOnly !== "boolean") {
-      response.status(503).set("Cache-Control", NO_STORE).json({ error: "sign_in_unavailable" });
-      return;
-    }
-    response.set("Cache-Control", NO_STORE).json({ path: entry.path, testOnly: entry.testOnly });
+  // WP-2423 Q18 option A: on a registered shared tablet, the staff PIN lock screen.
+  router.get("/sign-in-entry", safeRead(options), (request, response) => {
+    void resolveStaffSignInEntry(request, staffPinRoutes).then((entry) => {
+      if (!signInPathPattern.test(entry.path) || typeof entry.testOnly !== "boolean") {
+        response.status(503).set("Cache-Control", NO_STORE).json({ error: "sign_in_unavailable" });
+        return;
+      }
+      response.set("Cache-Control", NO_STORE).json({ path: entry.path, testOnly: entry.testOnly });
+    });
   });
 
   // WP-2423 Q18: the Session deadlines. 401 `session_ended` only when the Session has genuinely

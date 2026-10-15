@@ -136,6 +136,8 @@ it("preserves configured refund roles, provider and Pickup workstation without g
       "staffTotpVerifier",
       // WP-2423 Q11: table QR codes signed with the TEST-ONLY local QR key.
       "createInternalTableQr",
+      // WP-2423 Q18 option A: TEST-ONLY derived staff PIN pepper and shared-tablet key.
+      "createInternalStaffPinCredentials",
     ].sort(),
   );
   expect(typeof dependencies.refundUnmatchedCapture).toBe("function");

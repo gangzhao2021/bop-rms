@@ -165,6 +165,8 @@ export async function createInternalMerchantSession(
     }
   };
   const selection = createPostgresBrowserSessionSelectionStore({ validate: validateAssociation });
+  // WP-2423 Q18 option A: work a staff PIN sign-in runs in the transaction creating its session.
+  const finalizers = new Map();
   const crypto = await createInternalMerchantCredentials();
   const unavailable = async () => {
     throw new Error("INTERNAL_EXTERNAL_LOGIN_UNAVAILABLE");
@@ -201,6 +203,8 @@ export async function createInternalMerchantSession(
     currentActor,
     onSessionCreated: async (tx, record) => {
       await selection.write(tx, record.session, scope, clock());
+      const finalize = finalizers.get(record.session.sessionReference);
+      if (finalize !== undefined) await finalize(tx, record.session);
       if (record.session.policy.code !== "NamedKdsOperator") return;
       // IDR-0039 / WP-2423: Kitchen records the named operator Start in the same transaction and
       // derives a handover from the latest prior operator at this Store whose shift ended.
@@ -250,6 +254,42 @@ export async function createInternalMerchantSession(
             Object.freeze({ selector: entry.selector, label: "DEMO staff " + entry.selector }),
           ),
       );
+    },
+    /**
+     * WP-2423 Q18 option A: the ordinary WorkforceStandard session a verified staff PIN issues on a
+     * registered tablet, for a configured test identity only; `finalize` records it as PIN-issued
+     * (and ends the tablet's previous session) in the same transaction.
+     */
+    async issueForPin(actorReference, finalize) {
+      if (typeof finalize !== "function") return denied();
+      const entries = await roster(),
+        entry = entries.find((value) => value.actorReference === actorReference);
+      if (!entry) return denied();
+      const at = instant(clock()),
+        actor = await currentActor(null, entry.actorReference, at, at);
+      const sessionReference = credentials.reference(),
+        cookie = identity.credentials.generate(),
+        csrf = identity.credentials.generate();
+      const context =
+        configuration.environment + ":session:" + sessionReference + ":" + actor.actorReference;
+      finalizers.set(sessionReference, finalize);
+      try {
+        await store.createSession({
+          sessionReference,
+          actor,
+          policyCode: "WorkforceStandard",
+          sessionSelectorHash: identity.hasher.hash(cookie),
+          csrfSelectorHash: identity.hasher.hash(csrf),
+          encryptedSecrets: await identity.envelopes.encrypt(
+            JSON.stringify({ tokenBundle: "INTERNAL_TEST_NO_EXTERNAL_TOKEN", csrf }),
+            context,
+          ),
+          observedAt: at,
+        });
+      } finally {
+        finalizers.delete(sessionReference);
+      }
+      return { sessionCookie: cookie };
     },
     /** `KitchenDisplay` issues the IDR-0039 named KDS Operator Session for the same named Actor. */
     async issue(selector, purpose = "Workforce") {

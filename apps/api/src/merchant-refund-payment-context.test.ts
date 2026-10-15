@@ -1,5 +1,6 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { createMerchantRefundPaymentContext } from "./merchant-refund-payment-context.js";
+import { kdsOperatorProfileAllows } from "./merchant-kds-operator-profile.js";
 const d = vi.hoisted(() => ({
   resolve: vi.fn(),
   workforce: vi.fn(),
@@ -29,6 +30,7 @@ function setup() {
     store: { storeReference: id(3) },
     actorReference: id(4),
     allowed,
+    kdsOperatorProfileAllows: vi.fn<(action: string) => boolean>(() => true),
   };
   d.resolve.mockResolvedValue(current);
   const run = vi.fn(async (work: (tx: object) => Promise<unknown>) => work(tx));
@@ -48,7 +50,7 @@ function setup() {
     csrf: "synthetic-csrf",
     query: { paymentIntentReference: id(8) },
   };
-  return { tx, allowed, run, authorize, configure, operation, input };
+  return { tx, allowed, current, run, authorize, configure, operation, input };
 }
 const binding = {
   paymentIntentReference: id(8),
@@ -113,6 +115,15 @@ it.each([null, { ...terminal, outcome: "Failed" }])(
     expect(d.position).not.toHaveBeenCalled();
   },
 );
+it("denies a kitchen display sign-in before any refund permission or payment lookup", async () => {
+  const f = setup();
+  f.current.kdsOperatorProfileAllows.mockImplementation((action: string) =>
+    kdsOperatorProfileAllows({ policy: { code: "NamedKdsOperator" } }, action),
+  );
+  await expect(f.operation(f.input)).rejects.toThrow();
+  expect(d.workforce).not.toHaveBeenCalled();
+  expect(d.binding).not.toHaveBeenCalled();
+});
 it("denies non-manager read before payment lookup", async () => {
   const f = setup();
   d.workforce.mockResolvedValue({ decision: { effect: "Allow" }, activeRoleCodes: ["kitchen"] });

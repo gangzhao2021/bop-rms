@@ -183,6 +183,8 @@ export function createMerchantCategoryAuthority(options: {
       selected.actorReference !== actor ||
       selected.sessionReference !== session ||
       selectedContext.resolvedAt < input.observedAt ||
+      // A kitchen display sign-in holds no Brand-level catalog authority (its profile).
+      !selected.kdsOperatorProfileAllows("catalog.manage") ||
       !(await selected.allowed())
     )
       return fail("CATALOG_PERMISSION_DENIED");
@@ -211,6 +213,8 @@ export function createMerchantCategoryAuthority(options: {
     );
     const policy = createPostgresCurrentPermissionPolicySource(tx);
     const authorize = async (action: string) => {
+      // A kitchen display sign-in holds no Brand-level authority outside its profile.
+      if (!selected.kdsOperatorProfileAllows(action)) return fail("CATALOG_PERMISSION_DENIED");
       const result = await policy.authorizeWithRoles({
         tenantContext: brandContext,
         membership,

@@ -12,6 +12,7 @@ import {
   createInitiallyAuthorizedMerchantStoreScope,
 } from "./merchant-store-scope.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { limitDecisionToProfile } from "./merchant-kds-operator-profile.js";
 
 /** Selected Store access establishes navigation only. Brand actions require
  * their own current Brand-scoped policy decision; a Store grant is insufficient.
@@ -56,6 +57,8 @@ export function createMerchantBrandScope(
         current.actorReference !== selected.actorReference
       )
         return null;
+      // A kitchen display sign-in holds no Brand-level authority outside its profile.
+      if (!current.kdsOperatorProfileAllows(action)) return null;
       const fresh = createTenantContext(
         current.context.actor,
         current.context.brand,
@@ -206,7 +209,7 @@ export function createMerchantBrandScope(
         check();
         const decision = result.decision;
         if (decision.scopeKind !== "Brand" || decision.action !== action) return null;
-        return decision;
+        return limitDecisionToProfile(contextSource.kdsOperatorProfileAllows, decision);
       };
       const { fresh, membership } = await currentMembership(before);
       const result = await (
@@ -227,9 +230,12 @@ export function createMerchantBrandScope(
         )
       )
         return null;
-      const decisions = [...result.decisions];
       const after = await current();
       if (!after) return null;
+      // A kitchen display sign-in holds no Brand-level authority outside its profile.
+      const decisions = result.decisions.map((decision) =>
+        limitDecisionToProfile(after.kdsOperatorProfileAllows, decision),
+      );
       // Navigation readers leave Store scope. Recheck the final action after
       // this separate admission checkpoint and retain its original boundary.
       // The owning Permission read also restores Brand RLS for caller SQL.

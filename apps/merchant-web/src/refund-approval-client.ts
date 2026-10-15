@@ -15,7 +15,12 @@ export type DeclineReason = (typeof declineReasons)[number];
  * sends the refund. The six-digit code is sent once and never kept, logged or shown again.
  */
 export type StepUpPurpose =
-  "RefundRequest" | "RefundApproval" | "SoleOperatorSetting" | "SoleOperatorApproval";
+  | "RefundRequest"
+  | "RefundApproval"
+  | "SoleOperatorSetting"
+  | "SoleOperatorApproval"
+  /** WP-2423: a PIN sign-in confirms it is the staff member before sensitive changes. */
+  | "PinSessionElevation";
 export type StepUpFailure =
   "CodeRejected" | "CodeAlreadyUsed" | "TooManyAttempts" | "NotSetUp" | "Denied" | "Unavailable";
 export class StepUpError extends Error {

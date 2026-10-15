@@ -15,6 +15,7 @@ import { createTenantContext, type TenantContext } from "@bop/tenant";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { createMerchantSelectedContext } from "./merchant-selected-context.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { kdsOperatorProfileAllows } from "./merchant-kds-operator-profile.js";
 
 const unavailable = (): never => {
   throw new Error("MERCHANT_TASK_AUTHORIZATION_UNAVAILABLE");
@@ -81,6 +82,8 @@ export function createMerchantTaskAuthorization(
           String(actor.actorReference) !== input.actorReference
         )
           return unavailable();
+        // A kitchen display sign-in reaches only its profile, whatever the Actor's roles allow.
+        if (!kdsOperatorProfileAllows(session, input.action)) return unavailable();
         const selected = await options.context(tx, session);
         if (
           selected.tenantReference !== scope.tenantReference ||

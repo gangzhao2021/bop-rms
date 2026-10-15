@@ -37,6 +37,7 @@ export function StepUpVerification({
   label,
   fetcher,
   loadServerStatus = true,
+  explanation,
 }: {
   readonly purpose: StepUpPurpose;
   readonly csrf: string;
@@ -47,6 +48,8 @@ export function StepUpVerification({
   readonly fetcher?: typeof fetch | undefined;
   /** Read the server's current verification on first display (off when the page shares it). */
   readonly loadServerStatus?: boolean;
+  /** What a verification allows, when it is not the default refunds and approvals wording. */
+  readonly explanation?: string | undefined;
 }) {
   const client = useRef(createRefundApprovalClient(fetcher ?? fetch));
   const dialog = useRef<HTMLDialogElement>(null);
@@ -141,9 +144,8 @@ export function StepUpVerification({
       >
         <h2 id={titleId}>Confirm it is you</h2>
         <p>
-          Open your authenticator app and enter the six-digit code shown for this store. Codes
-          change every 30 seconds. After you verify, approvals and refunds can go ahead for 15
-          minutes.
+          {explanation ??
+            "Open your authenticator app and enter the six-digit code shown for this store. Codes change every 30 seconds. After you verify, approvals and refunds can go ahead for 15 minutes."}
         </p>
         <form
           onSubmit={(event) => {

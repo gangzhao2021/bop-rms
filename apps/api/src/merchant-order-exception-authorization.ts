@@ -12,6 +12,7 @@ import { createPostgresCurrentPermissionPolicySource } from "@bop/permission";
 import { createTenantContext, type TenantContext } from "@bop/tenant";
 import type { ConsumerTransaction } from "@bop/eventing";
 import type { MerchantExceptionScope } from "./merchant-order-exception-read.js";
+import { kdsOperatorProfileAllows } from "./merchant-kds-operator-profile.js";
 
 /** Transaction-bound public adapters resolve credentials, selected scope and current policy. */
 export function createMerchantOrderExceptionAuthorization(options: {
@@ -41,6 +42,8 @@ export function createMerchantOrderExceptionAuthorization(options: {
         actor.actorReference === null
       )
         return null;
+      // A kitchen display sign-in reaches only its profile, whatever the Actor's roles allow.
+      if (!kdsOperatorProfileAllows(session, input.permission)) return null;
       const selected = await options.context(tx, session);
       if (
         !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(

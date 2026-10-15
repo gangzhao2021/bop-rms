@@ -29,6 +29,10 @@ import {
   parseBusinessAction,
 } from "@bop/permission";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import {
+  kdsOperatorProfileAllows,
+  limitDecisionToProfile,
+} from "./merchant-kds-operator-profile.js";
 
 export type MerchantCurrentBrandOptions = Pick<
   PersistentMerchantBffOptions,
@@ -61,6 +65,19 @@ type Authority<C> = Readonly<{
 const denied = (): never => {
   throw new Error("BRAND_SERVICE_PERMISSION_DENIED");
 };
+
+/** A kitchen display sign-in holds no Brand-level authority outside its profile (Owner approval
+ * 2026-10-14: "批准收紧"); the same shared limit as the Store and Brand scopes. */
+function profileDecisions<D extends PolicyDecision["decisions"][number]>(
+  session: AuthenticationSession,
+  decisions: readonly D[],
+): readonly D[] {
+  return Object.freeze(
+    decisions.map((decision) =>
+      limitDecisionToProfile((action) => kdsOperatorProfileAllows(session, action), decision),
+    ),
+  );
+}
 
 /** Shared actual-owner composition for the session-creation hook and current
  * cookie path. The supplied session must already come from the Identity owner. */
@@ -101,7 +118,7 @@ export async function readMerchantCurrentBrandAuthority(
     return denied();
   return Object.freeze({
     context,
-    decisions: permission.decisions,
+    decisions: profileDecisions(session, permission.decisions),
     validUntil: permission.validUntil,
   });
 }
@@ -148,7 +165,7 @@ export async function readMerchantCurrentBrandAdministrationAuthority(
     return denied();
   return Object.freeze({
     context,
-    decisions: permission.decisions,
+    decisions: profileDecisions(session, permission.decisions),
     validUntil: permission.validUntil,
   });
 }

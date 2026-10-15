@@ -9,6 +9,8 @@ import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { seedOrdinaryRefundStorePublication } from "../test-support/ordinary-refund-store-publication.mjs";
 import { productApiGrants } from "../test-support/merchant-api-grants.mjs";
 import { syntheticMerchantBrandScope } from "../test-support/merchant-brand-scope.mjs";
+import { seedMerchantAcceptanceSession } from "../test-support/merchant-acceptance-session.mjs";
+import { seedOrdinaryRefundSession } from "../test-support/ordinary-refund-session.mjs";
 
 const { Client } = pg;
 const id = (n) => "01909a1f-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -337,6 +339,235 @@ it("manages which items a Store sells with Brand and Store authority", async () 
           )
         ).rows[0].n,
         14,
+      );
+    } finally {
+      for (const name of [role, worker]) {
+        await admin.query("DROP OWNED BY " + name).catch(() => undefined);
+        await admin.query("DROP ROLE IF EXISTS " + name).catch(() => undefined);
+      }
+      await admin.end();
+    }
+  });
+});
+
+/**
+ * WP-2423 (Owner approval 2026-10-14, "批准收紧"): a kitchen display sign-in holds only the kitchen
+ * profile at Brand level too. The Owner's own kitchen display Session may mark an item sold out for
+ * today, but never offer, stop offering or mark it "until further notice" — while the same Owner's
+ * ordinary Session keeps every Brand action. Real Session, Membership, roles and Permission policy,
+ * real Store and Brand scopes, under the restricted pilot API role.
+ */
+it("limits an Owner's kitchen display sign-in to sold out today at Brand level", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_kds_brand" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    const role = "wp2423_kdsb_" + context.runId,
+      worker = "wp2423_kdsb_w_" + context.runId;
+    const tenantReference = id(1),
+      brandReference = id(2),
+      storeReference = id(3),
+      owner = id(4),
+      sku = id(12),
+      at = "2026-10-08T01:00:00.000Z",
+      from = "2026-10-08T00:59:00.000Z",
+      until = "2026-10-08T02:00:00.000Z",
+      names = JSON.stringify({ "en-CA": "Mocha" });
+    let clock = Date.parse(at);
+    const now = () => new Date((clock += 1000)).toISOString();
+    let reference = 0x9000;
+    const next = () => "019a0000-0000-7000-8000-" + (++reference).toString(16).padStart(12, "0");
+    const scope = { tenantReference, brandReference, storeReference };
+    try {
+      await seedOrdinaryRefundStorePublication({
+        client: admin,
+        scope,
+        firstCapturedAt: "2026-10-08T00:00:00.000Z",
+      });
+      await admin.query(
+        "INSERT INTO rms_catalog.product(product_id,brand_id,internal_code,product_type,lifecycle,aggregate_version,created_at,created_by_actor_id,updated_at) VALUES($1,$2,'MOCHA','PreparedFood','Active',1,$3,$4,$3)",
+        [id(10), brandReference, from, owner],
+      );
+      await admin.query(
+        "INSERT INTO rms_catalog.product_version(product_version_id,product_id,brand_id,status,default_locale,localized_names_json,created_at,updated_at) VALUES($1,$2,$3,'Draft','en-CA',$4::jsonb,$5,$5)",
+        [id(11), id(10), brandReference, names, from],
+      );
+      await admin.query(
+        `INSERT INTO rms_catalog.sku(sku_id,product_id,brand_id,product_version_id,sku_code,lifecycle,localized_names_json,variant_selections_json,variant_digest,unit_of_sale,unit_quantity,created_at,created_by_actor_id) VALUES($1,$2,$3,$4,'MOCHA-REGULAR-12-OZ','Active','{"en-CA":"Regular (12 oz)"}'::jsonb,'[]'::jsonb,$5,'EACH',1,$6,$7)`,
+        [sku, id(10), brandReference, id(11), "sha256:" + "a".repeat(64), from, owner],
+      );
+      for (const name of [role, worker])
+        await admin.query(
+          "CREATE ROLE " + name + " NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
+        );
+      const root = new URL("../../../docs/spec/", import.meta.url);
+      const matrices = await Promise.all(
+        ["pilot-acl-matrix.json", "pilot-acl-additions.json"].map(async (file) =>
+          JSON.parse(await readFile(new URL(file, root), "utf8")),
+        ),
+      );
+      await admin.query(renderPilotAclSql(matrices, { api: role, worker }));
+      for (const sql of [...productApiGrants, ...availabilityApiGrants])
+        await admin.query(sql.replaceAll("ROLE_", role));
+      const transactions = {
+        async run(work) {
+          await admin.query("BEGIN");
+          try {
+            await admin.query("SET LOCAL ROLE " + role);
+            const value = await work(admin);
+            await admin.query("COMMIT");
+            return value;
+          } catch (error) {
+            await admin.query("ROLLBACK");
+            throw error;
+          }
+        },
+      };
+      // The Store Owner role (all Store codes it needs here) and the Session started as a kitchen
+      // display; then the Owner's Brand role with the Brand-level availability authority.
+      const kitchen = await seedMerchantAcceptanceSession({
+        admin,
+        runner: transactions,
+        scope,
+        actor: owner,
+        at,
+        extraPermissions: [
+          "catalog.sku.read",
+          "catalog.sku.availability.manage",
+          "catalog.sku.sold_out.mark",
+        ],
+        authenticationPolicyCode: "NamedKdsOperator",
+        referencePrefix: "01909a40",
+        sessionReferencePrefix: "01909a41",
+      });
+      const bid = (n) => "01909a42-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+      await admin.query(
+        "INSERT INTO bop_permission.role VALUES($1,$2,NULL,'synthetic_brand_owner','Active',$3,$4,1,$3,$3)",
+        [bid(1), brandReference, from, until],
+      );
+      await admin.query(
+        "INSERT INTO bop_permission.role_assignment VALUES($1,$2,$3,NULL,$4,$5,NULL,'Active',$6,$7,1,$6,$6)",
+        [
+          bid(2),
+          bid(1),
+          "01909a40-0000-7000-8000-000000000001",
+          owner,
+          brandReference,
+          from,
+          until,
+        ],
+      );
+      for (const [i, action] of ["catalog.sku.read", "catalog.sku.availability.manage"].entries()) {
+        const permission = (
+          await admin.query(
+            "SELECT permission_id FROM bop_permission.permission_definition WHERE action_code=$1",
+            [action],
+          )
+        ).rows[0].permission_id;
+        await admin.query(
+          "INSERT INTO bop_permission.permission_grant VALUES ($1,$2,$3,$4,NULL,'Active',$5,$6,1,$5,$5)",
+          [bid(10 + i), bid(1), permission, brandReference, from, until],
+        );
+      }
+      // The same Owner's ordinary sign-in.
+      const ordinary = await seedOrdinaryRefundSession({
+        client: admin,
+        runner: () => transactions,
+        scope,
+        requester: owner,
+        at,
+        referencePrefix: "01909a43",
+      });
+      const availability = (session) => {
+        const service = createMerchantAvailability({
+          persistence: {
+            ...session.persistence,
+            now,
+            publication: {
+              configurationType: "STORE_CONFIGURATION",
+              purposeCode: "STORE_CONFIGURATION",
+              requiredLiveGateRequirementCodes: ["SYNTHETIC_STORE_READY"],
+            },
+            transactions,
+          },
+          authentication: session.authentication,
+          references: { next },
+          locale: "en-CA",
+        });
+        const input = { sessionCookie: session.sessionCookie, csrf: session.csrf };
+        return {
+          query: () => service.query(input),
+          call: (body) => service.command({ ...input, body }),
+        };
+      };
+      const atKitchen = availability(kitchen),
+        atDesk = availability(ordinary);
+
+      assert.deepEqual((await atDesk.query()).permissions, {
+        mayOffer: true,
+        mayMarkSoldOut: true,
+        mayMarkUntilBack: true,
+      });
+      assert.equal(
+        (await atDesk.call({ action: "Offer", operationReference: next(), skuReference: sku })).item
+          .status,
+        "Available",
+      );
+      // At the kitchen display the same Owner holds only the today-only mark.
+      assert.deepEqual((await atKitchen.query()).permissions, {
+        mayOffer: false,
+        mayMarkSoldOut: true,
+        mayMarkUntilBack: false,
+      });
+      for (const body of [
+        { action: "StopOffering", operationReference: next(), skuReference: sku },
+        { action: "Offer", operationReference: next(), skuReference: sku },
+        { action: "SoldOut", operationReference: next(), skuReference: sku, until: "UntilBack" },
+      ])
+        await assert.rejects(atKitchen.call(body), { code: "PermissionDenied" });
+      assert.deepEqual(
+        (
+          await atKitchen.call({
+            action: "SoldOut",
+            operationReference: next(),
+            skuReference: sku,
+            until: "EndOfDay",
+          })
+        ).item,
+        { status: "SoldOut", soldOutUntil: "2026-10-08T08:00:00.000Z" },
+      );
+      assert.equal(
+        (
+          await atKitchen.call({
+            action: "BackInStock",
+            operationReference: next(),
+            skuReference: sku,
+          })
+        ).item.status,
+        "Available",
+      );
+      // The kitchen display's refusals changed nothing: only the desk's offer and the kitchen's
+      // today-only mark and its return are recorded.
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT reason_code,lifecycle FROM rms_catalog.availability_rule ORDER BY created_at,availability_rule_id",
+          )
+        ).rows.map((r) => [r.reason_code, r.lifecycle]),
+        [
+          ["STORE_OFFERED", "Active"],
+          ["SOLD_OUT", "Inactive"],
+        ],
+      );
+      // The ordinary sign-in still stops offering it.
+      assert.equal(
+        (
+          await atDesk.call({
+            action: "StopOffering",
+            operationReference: next(),
+            skuReference: sku,
+          })
+        ).item.status,
+        "NotOffered",
       );
     } finally {
       for (const name of [role, worker]) {

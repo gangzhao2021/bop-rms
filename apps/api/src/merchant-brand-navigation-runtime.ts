@@ -29,6 +29,7 @@ import {
 } from "./merchant-brand-store-topology-capability.js";
 import type { createMerchantCategoryTransactions } from "./merchant-category-transactions.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { kdsOperatorProfileAllows } from "./merchant-kds-operator-profile.js";
 type Host = ReturnType<typeof createMerchantCategoryTransactions>;
 type Transaction = Parameters<Host["registerBeforeCommit"]>[0];
 type Selected = Awaited<ReturnType<ReturnType<typeof createMerchantSelectedContext>>>;
@@ -239,6 +240,8 @@ export function createMerchantBrandNavigationRuntime(
       navigation.scopeKind !== "Store"
     )
       return null;
+    // A kitchen display sign-in holds no Brand-level authority outside its profile.
+    if (!kdsOperatorProfileAllows(session, "organization.manage")) return null;
     const decision = await authorize({
       tenantContext: createTenantContext(actor, context.brand, null, check()),
       membership,

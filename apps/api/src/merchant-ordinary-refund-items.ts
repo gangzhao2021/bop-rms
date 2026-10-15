@@ -149,6 +149,7 @@ export function createMerchantOrdinaryRefundItems(options: {
                 observedAt: String(current.context.resolvedAt),
               },
               role,
+              current.kdsOperatorProfileAllows,
               soleOperatorEffective,
             );
           const access = await readAccess();

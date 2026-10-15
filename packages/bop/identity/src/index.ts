@@ -288,6 +288,10 @@ export * from "./infrastructure/persistence/browser-brand-session-selection-stor
 export { createPostgresCurrentWorkforceMfaSource } from "./infrastructure/persistence/current-workforce-mfa-source.js";
 export * from "./infrastructure/persistence/workforce-mfa-step-up-store.js";
 export * from "./infrastructure/crypto/workforce-totp.js";
+// WP-2423 Q18 option A: device-bound staff PIN (registered tablets, PIN credentials, PIN sessions).
+export * from "./contracts/staff-pin.js";
+export * from "./infrastructure/crypto/staff-pin-kdf.js";
+export * from "./infrastructure/persistence/staff-pin-store.js";
 
 export * from "./infrastructure/persistence/guest-entry-admission-store.js";
 

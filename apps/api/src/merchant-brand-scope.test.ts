@@ -1,5 +1,5 @@
 import { createIdentityActor } from "@bop/identity";
-import { beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createBrand, createStore, createTenantContext } from "@bop/tenant";
 import {
   createPostgresCurrentPermissionPolicySource,
@@ -12,6 +12,7 @@ import {
   parseEvidenceInstant,
 } from "@bop/permission";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
+import { kdsOperatorProfileAllows } from "./merchant-kds-operator-profile.js";
 const ports = vi.hoisted(() => ({
   resolve: vi.fn(),
   storeFactory: vi.fn(),
@@ -115,6 +116,7 @@ const selected = () => ({
   initialObservedAt: at,
   initialAuthorization: navigationDecision(),
   allowed: async () => true,
+  kdsOperatorProfileAllows: () => true,
   authorizationValidUntil: (): string | null => null,
 });
 beforeEach(() => {
@@ -548,4 +550,52 @@ it("uses the identical transaction Permission owner in Store admission, Brand ac
   }
   expect(ports.storeFactory.mock.calls.every((args) => args[1] === policy)).toBe(true);
   expect(ports.initialFactory.mock.calls.every((args) => args[1] === policy)).toBe(true);
+});
+
+describe("kitchen display sign-in at Brand level (Owner approval 2026-10-14)", () => {
+  const kitchen = () => ({
+    ...selected(),
+    kdsOperatorProfileAllows: (action: string) =>
+      kdsOperatorProfileAllows({ policy: { code: "NamedKdsOperator" } }, action),
+  });
+  it.each(["catalog.sku.availability.manage", "catalog.product.manage", "catalog.sku.read"])(
+    "refuses Brand-level %s even when the Owner's roles allow it, before any Brand policy read",
+    async (action) => {
+      ports.resolve.mockResolvedValue(kitchen());
+      const scope = await resolve();
+      expect(await scope.authorizeAction(action)).toBeNull();
+      expect(ports.authorize).not.toHaveBeenCalledWith(expect.objectContaining({ action }));
+    },
+  );
+  it("still decides profile actions by the Actor's roles", async () => {
+    ports.resolve.mockResolvedValue(kitchen());
+    const scope = await resolve();
+    expect(await scope.authorizeAction("catalog.sku.sold_out.mark")).toMatchObject({
+      effect: "Allow",
+      action: "catalog.sku.sold_out.mark",
+    });
+  });
+  it("denies out-of-profile actions in a batch, including the rechecked last action", async () => {
+    ports.resolve.mockResolvedValue(kitchen());
+    const scope = await resolve();
+    const result = await scope.authorizeActionsWithValidity([
+      "catalog.sku.sold_out.mark",
+      "catalog.product.manage",
+      "catalog.sku.availability.manage",
+    ]);
+    expect(result?.decisions.map((d) => [d.action, d.effect])).toEqual([
+      ["catalog.sku.sold_out.mark", "Allow"],
+      ["catalog.product.manage", "Deny"],
+      ["catalog.sku.availability.manage", "Deny"],
+    ]);
+    expect(result?.decisions[1]).toMatchObject({ reason: "DEFAULT_DENY", source: "DefaultDeny" });
+  });
+  it("leaves ordinary sessions to their Brand role policy", async () => {
+    const scope = await resolve();
+    expect(await scope.authorizeAction("catalog.sku.availability.manage")).toMatchObject({
+      effect: "Allow",
+    });
+    const result = await scope.authorizeActionsWithValidity(["catalog.product.manage"]);
+    expect(result?.decisions[0]).toMatchObject({ effect: "Allow" });
+  });
 });

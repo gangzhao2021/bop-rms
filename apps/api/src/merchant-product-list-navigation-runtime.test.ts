@@ -62,6 +62,8 @@ vi.mock("./merchant-selected-context.js", () => ({
     },
 }));
 
+/** WP-2423: whether the fixture Session was started as a kitchen display. */
+const kitchenDisplay = { on: false };
 const id = (n: number) => `01902421-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const at = "2026-10-04T12:00:00.000Z";
 const after = (ms: number) => new Date(Date.parse(at) + ms).toISOString();
@@ -133,15 +135,15 @@ function fixture(sessionAge = 1000, target: Options["target"] = "Product") {
     sessionReference: id(5),
     actor,
     status: "Active",
-    policyCode: "WorkforceStandard",
+    policyCode: kitchenDisplay.on ? "NamedKdsOperator" : "WorkforceStandard",
     maxActiveSessions: 5,
-    idleTimeoutMinutes: 30,
+    idleTimeoutMinutes: kitchenDisplay.on ? 60 : 30,
     absoluteTimeoutMinutes: 720,
     version: 1,
     authenticatedAt: after(-sessionAge),
     createdAt: after(-sessionAge),
     lastSeenAt: after(-sessionAge),
-    idleExpiresAt: after(1800000 - sessionAge),
+    idleExpiresAt: after((kitchenDisplay.on ? 3600000 : 1800000) - sessionAge),
     absoluteExpiresAt: after(43200000 - sessionAge),
     rotatedFromSessionReference: null,
     revocationReason: null,
@@ -725,4 +727,15 @@ it("Option retains the future definition transition under its original final gua
       );
     }),
   ).rejects.toMatchObject({ code: "CATALOG_DEPENDENCY_UNAVAILABLE" });
+});
+
+it("a kitchen display sign-in never shows the product list, before any Brand policy read", async () => {
+  kitchenDisplay.on = true;
+  try {
+    const f = fixture();
+    await expect(f.execute()).resolves.toBe(false);
+    expect(f.actions.map((a) => a.action)).toEqual(["merchant.access"]);
+  } finally {
+    kitchenDisplay.on = false;
+  }
 });

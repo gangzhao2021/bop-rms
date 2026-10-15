@@ -118,6 +118,7 @@ export function createMerchantRefundPaymentContext(options: {
             observedAt: String(current.context.resolvedAt),
           },
           role,
+          current.kdsOperatorProfileAllows,
           soleOperatorEffective,
         );
         viewer.canRequest = access.canRequest;

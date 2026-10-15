@@ -45,6 +45,7 @@ function setup() {
     store: { storeReference: id(3) },
     actorReference: id(4),
     allowed,
+    kdsOperatorProfileAllows: () => true,
   };
   d.resolve.mockResolvedValue(current);
   const run = vi.fn(async (work: (tx: object) => Promise<unknown>) => work(tx));

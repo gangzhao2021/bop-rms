@@ -43,6 +43,7 @@ export interface MerchantNavigationItem {
     | "DEV-KDS-PROFILE"
     | "IAM-ROLE-LIST"
     | "IAM-USER-LIST"
+    | "IAM-SESSION-LIST"
     | "INV-ITEM-LIST"
     | "INV-LOCATION-LIST"
     | "INV-OPENING-COUNT"
@@ -100,6 +101,8 @@ const NAVIGATION = Object.freeze({
   "DEV-KDS-PROFILE": ["/app/integrations/kds-profiles", "integration.manage"],
   "IAM-ROLE-LIST": ["/app/organization/roles", "identity.role.read"],
   "IAM-USER-LIST": ["/app/organization/users", "organization.staff.read"],
+  // WP-2423 (design "A"): shared tablets for staff PINs and PIN resets.
+  "IAM-SESSION-LIST": ["/app/organization/sessions", "identity.store_device.manage"],
   "INV-ITEM-LIST": ["/app/supply/items", "inventory.item.read"],
   "INV-LOCATION-LIST": ["/app/supply/locations", "inventory.location.read"],
   "INV-OPENING-COUNT": ["/app/supply/opening-count", "inventory.count.read"],

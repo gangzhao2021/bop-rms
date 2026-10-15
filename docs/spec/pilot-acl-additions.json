@@ -3006,6 +3006,96 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (WP-2423 pickup code): wrong pickup code checks, five lock code checks for that order (never the code typed)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "store_sign_in_device",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 staff PIN, Owner chose A)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "store_sign_in_device",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 staff PIN, Owner chose A)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "store_sign_in_device",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 staff PIN, Owner chose A)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "staff_pin_credential",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 staff PIN, Owner chose A)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "staff_pin_credential",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 staff PIN, Owner chose A)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "staff_pin_credential",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 staff PIN, Owner chose A)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "staff_pin_attempt",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 staff PIN, Owner chose A)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "staff_pin_attempt",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 staff PIN, Owner chose A)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "staff_pin_session",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 staff PIN, Owner chose A)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "staff_pin_session",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 staff PIN, Owner chose A)"
     }
   ]
 }

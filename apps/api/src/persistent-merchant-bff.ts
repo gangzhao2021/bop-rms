@@ -6,6 +6,7 @@ import {
 import { createMerchantProductListNavigationRuntime } from "./merchant-product-list-navigation-runtime.js";
 import { createMerchantCategoryTransactions } from "./merchant-category-transactions.js";
 import { createMerchantServicePauseProof } from "./merchant-service-pause-proof.js";
+import { kdsOperatorProfileAllows } from "./merchant-kds-operator-profile.js";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import {
   createPostgresCurrentStorePublicationProof,
@@ -232,6 +233,8 @@ export function createPersistentMerchantBffService(
       }
     };
     const allowed = async (action: string) => {
+      // A kitchen display sign-in sees and reaches only its profile (shared with every scope).
+      if (!kdsOperatorProfileAllows(session, action)) return false;
       if (!reuse)
         return (
           (await policy.authorize({ tenantContext: context, membership, storeAssignment, action }))
@@ -352,12 +355,14 @@ export function createPersistentMerchantBffService(
                 validateAssociation,
                 ...hold,
               }).allows()
-            : await allowsProductListNavigation(
+            : // A kitchen display sign-in holds no Brand-level authority outside its profile.
+              kdsOperatorProfileAllows(session, "catalog.manage") &&
+              (await allowsProductListNavigation(
                 tx,
                 selected,
                 session.sessionReference,
                 legacyNavigation,
-              );
+              ));
         if (show) navigation.push(item);
         continue;
       }

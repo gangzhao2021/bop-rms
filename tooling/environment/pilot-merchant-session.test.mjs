@@ -281,3 +281,23 @@ it("issues the IDR-0039 named KDS Operator policy only for an explicit kitchen d
     validUntil: "2099-01-01T01:00:00.000Z",
   });
 });
+it("WP-2423 Q18 option A: a PIN sign-in issues an ordinary session for a configured identity and finalizes it in the same transaction", async () => {
+  const f = setup(),
+    session = await f.create();
+  const finalized = [];
+  await expect(session.issueForPin(id(9), async () => undefined)).rejects.toThrow(
+    /^INTERNAL_MERCHANT_DENIED$/,
+  );
+  await expect(session.issueForPin(id(4))).rejects.toThrow(/^INTERNAL_MERCHANT_DENIED$/);
+  const issued = await session.issueForPin(id(4), async (tx, created) => {
+    finalized.push({ tx, created });
+  });
+  expect(issued.sessionCookie).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+  expect(seam.created.map((value) => value.policyCode)).toEqual(["WorkforceStandard"]);
+  expect(finalized).toHaveLength(1);
+  expect(finalized[0].created.sessionReference).toBe(seam.created[0].sessionReference);
+  expect(finalized[0].created.actor.actorReference).toBe(id(4));
+  // A later ordinary sign-in runs no PIN work.
+  await session.issue("author");
+  expect(finalized).toHaveLength(1);
+});

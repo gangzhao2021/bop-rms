@@ -8,6 +8,7 @@ import { createPostgresCurrentPermissionPolicySource } from "@bop/permission";
 import type { ConsumerTransaction } from "@bop/eventing";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { createMerchantSelectedContext } from "./merchant-selected-context.js";
+import { kdsOperatorProfileAllows } from "./merchant-kds-operator-profile.js";
 const fail = (): never => {
   throw new Error("MERCHANT_QUEUE_ELIGIBILITY_UNAVAILABLE");
 };
@@ -73,6 +74,8 @@ export async function prepareMerchantManagerQueueEligibility(
       String(session.actor.actorReference) !== actorReference
     )
       return fail();
+    // A kitchen display sign-in reaches only its profile, whatever the Actor's roles allow.
+    if (!kdsOperatorProfileAllows(session, "task.claim")) return fail();
     const selected = await createMerchantSelectedContext({
       now,
       validateSelection: async (...args) => (await source.validateAssociation(...args)) === true,

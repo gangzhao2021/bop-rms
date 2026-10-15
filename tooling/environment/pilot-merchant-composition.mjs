@@ -190,6 +190,8 @@ export function composeMerchantDependencies(
         expectedDatabaseName: installation.database,
         ...account,
       }),
+    // WP-2423 Q18 option A: staff PIN pepper and shared-tablet key (TEST-ONLY derived keys).
+    createInternalStaffPinCredentials: credentials.createInternalStaffPinCredentials,
     createInternalMerchantSession: (r) =>
       f.createInternalMerchantSession(r, {
         loadEmployee: () => installation.loadCustomerData("internal-test-merchant.json"),

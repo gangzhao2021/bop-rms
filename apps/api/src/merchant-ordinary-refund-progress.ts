@@ -97,6 +97,7 @@ export function createMerchantOrdinaryRefundProgress(options: {
                 tx,
                 { ...scope, actorReference: String(current.actorReference), observedAt },
                 role,
+                current.kdsOperatorProfileAllows,
               )
             ).canRead;
           if (!(await readable())) return deny();

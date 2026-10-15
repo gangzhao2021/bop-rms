@@ -67,6 +67,11 @@ import { createMerchantOrderAcceptanceHoldRefund } from "../../apps/api/dist/mer
 import { createInternalStoreConfiguration } from "./pilot-store-configuration.mjs";
 import { createInternalStoreSetupBff } from "./pilot-store-setup.mjs";
 import { createMerchantMfaStepUp } from "../../apps/api/dist/merchant-mfa-step-up.js";
+import { createMerchantStaffPin } from "../../apps/api/dist/merchant-staff-pin.js";
+import {
+  createPostgresMerchantOrganizationSource,
+  parseStoreReference,
+} from "../../packages/bop/tenant/src/index.ts";
 import { createMerchantRefundSoleOperatorResolver } from "../../apps/api/dist/merchant-sole-operator.js";
 import { createMerchantSoleOperator } from "../../apps/api/dist/merchant-sole-operator-setting.js";
 import { createMerchantStoreReceiptProfile } from "../../apps/api/dist/merchant-store-receipt-profile.js";
@@ -101,6 +106,7 @@ export async function createInternalMerchant(
     staffTotpVerifier,
     createInternalCounterOrder,
     createInternalTableQr,
+    createInternalStaffPinCredentials,
   },
 ) {
   const session = await createInternalMerchantSession(resources);
@@ -350,6 +356,13 @@ export async function createInternalMerchant(
           label: "Roles",
           href: "/app/organization/roles",
           permission: "identity.role.read",
+        },
+        // WP-2423 Q18 option A: register shared tablets and reset staff PINs.
+        {
+          screenId: "IAM-SESSION-LIST",
+          label: "Shared tablets & PINs",
+          href: "/app/organization/sessions",
+          permission: "identity.store_device.manage",
         },
       ],
     }),
@@ -713,6 +726,37 @@ export async function createInternalMerchant(
           retentionPolicyCode: "SECURITY_AUDIT",
           retentionPolicyVersion: 1,
         });
+  // WP-2423 Q18 option A: staff switch on a registered shared tablet with a six-digit PIN.
+  const staffPin =
+    createInternalStaffPinCredentials === undefined
+      ? undefined
+      : await (async () => {
+          const keys = await createInternalStaffPinCredentials();
+          return createMerchantStaffPin({
+            persistence,
+            authentication: service,
+            deviceHasher: keys.deviceHasher,
+            kdf: keys.kdf,
+            newReference: () => resources.credentials.reference(),
+            describeStore: async (tx, scope) => {
+              if (
+                scope.brandReference !== selected.brandReference ||
+                scope.storeReference !== selected.storeReference
+              )
+                throw new Error("INTERNAL_STAFF_PIN_STORE_DENIED");
+              const store = await createPostgresMerchantOrganizationSource(tx, {
+                ...selected,
+                observedAt: scope.at,
+              }).getStore(parseStoreReference(selected.storeReference));
+              if (!store) throw new Error("INTERNAL_STAFF_PIN_STORE_UNAVAILABLE");
+              return { label: store.displayName, timeZone: store.timeZone };
+            },
+            issueSession: (actorReference, finalize) =>
+              session.issueForPin(actorReference, finalize),
+            retentionPolicyCode: "SECURITY_AUDIT",
+            retentionPolicyVersion: 1,
+          });
+        })();
   const diningClosing = createMerchantDiningClosingCommand({
     exceptionTaskPolicy: resolveInternalDiningTaskPolicy({
       queue,
@@ -986,6 +1030,7 @@ export async function createInternalMerchant(
       // WP-2423 Q18: TEST-ONLY staff sign-in page of the InternalTest pilot (the Cognito sign-in is
       // an external gate); staff see it labelled as test sign-in.
       signInEntry: { path: "/internal-test/staff", testOnly: true },
+      ...(staffPin === undefined ? {} : { staffPin }),
       // WP-2423 Q4: busy mode — a manager pauses and resumes taking new online orders.
       ...(() => {
         const control = createMerchantServiceControl({

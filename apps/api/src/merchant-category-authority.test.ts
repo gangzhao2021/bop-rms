@@ -51,6 +51,7 @@ function fixture() {
     actorReference: ACTOR,
     sessionReference: uuid("91"),
     allowed: async () => true,
+    kdsOperatorProfileAllows: () => true,
   };
   state.resolve.mockReset();
   state.resolve.mockResolvedValue(selected);
@@ -93,7 +94,7 @@ it("rejects accessors without executing them", async () => {
   expect(getter).not.toHaveBeenCalled();
   expect(state.resolve).not.toHaveBeenCalled();
 });
-it.each(["session", "tenant", "actor", "store_access", "future"])(
+it.each(["session", "tenant", "actor", "store_access", "kitchen_display", "future"])(
   "rejects current selection mismatch %s before Brand owner reads",
   async (kind) => {
     const f = fixture();
@@ -107,7 +108,9 @@ it.each(["session", "tenant", "actor", "store_access", "future"])(
             ? { actorReference: uuid("99") }
             : kind === "store_access"
               ? { allowed: async () => false }
-              : {}),
+              : kind === "kitchen_display"
+                ? { kdsOperatorProfileAllows: (action: string) => action === "merchant.access" }
+                : {}),
     });
     const value = {
       ...f.query,
