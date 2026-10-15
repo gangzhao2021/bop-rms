@@ -34,6 +34,7 @@ const id = (n: number) => "0190fad7-0000-7000-8000-" + String(n).padStart(12, "0
 beforeEach(() => vi.resetAllMocks());
 function setup() {
   const allowed = vi.fn(async () => true),
+    authorizeAction = vi.fn(async (): Promise<unknown> => ({ effect: "Allow" })),
     authenticate = vi.fn(async () => ({ sessionReference: id(8) })),
     tx = { query: vi.fn() },
     run = vi.fn(async (work: (tx: object) => Promise<unknown>) => work(tx));
@@ -43,7 +44,7 @@ function setup() {
     store: { storeReference: id(3) },
     actorReference: id(4),
     allowed,
-    authorizeAction: vi.fn(),
+    authorizeAction,
   });
   mock.fence.mockResolvedValue({
     diningSessionReference: id(5),
@@ -76,7 +77,7 @@ function setup() {
       expectedSessionVersion: 2,
     },
   };
-  return { allowed, authenticate, run, input, handler };
+  return { allowed, authorizeAction, authenticate, run, input, handler };
 }
 it.each(["Begin", "Finalize"])("routes %s through domain with server time", async (action) => {
   const f = setup();
@@ -118,9 +119,26 @@ it("rejects conflicting retry action", async () => {
 });
 it("rejects absent current permission before fence", async () => {
   const f = setup();
-  f.allowed.mockResolvedValue(false);
-  await expect(f.handler(f.input)).rejects.toThrow();
+  f.authorizeAction.mockResolvedValue(null);
+  await expect(f.handler(f.input)).rejects.toMatchObject({
+    code: "DINING_CLOSING_PERMISSION_DENIED",
+  });
   expect(mock.fence).not.toHaveBeenCalled();
+});
+it("WP-2423: resolves the caller in full once at the start and once before the reply", async () => {
+  const f = setup();
+  await f.handler(f.input);
+  expect(mock.scope).toHaveBeenCalledOnce();
+  expect(f.authorizeAction).toHaveBeenCalledOnce();
+  // Owner reads are fenced by the run itself; only the final re-check resolves the caller again.
+  expect(f.allowed).toHaveBeenCalledOnce();
+});
+it("WP-2423: a permission withdrawn during the close refuses the reply", async () => {
+  const f = setup();
+  f.allowed.mockResolvedValue(false);
+  await expect(f.handler(f.input)).rejects.toMatchObject({
+    code: "DINING_CLOSING_PERMISSION_DENIED",
+  });
 });
 it("rejects CSRF failure before transaction", async () => {
   const f = setup();
@@ -184,20 +202,23 @@ it.each([
     const f = setup();
     mock.sessionOrders.mockResolvedValue(new Map(cancellations === null ? [] : [[id(5), id(11)]]));
     mock.cancellations.mockResolvedValue(cancellations ?? []);
-    await f.handler(f.input);
-    const ports = mock.ports.mock.calls[0]?.[0] as {
-      authorization: { authorize(request: unknown): Promise<{ audit: { reasonCode: string } }> };
-    };
-    const scope = (await mock.scope.mock.results[0]?.value) as {
-      authorizeAction: ReturnType<typeof vi.fn>;
-    };
-    scope.authorizeAction.mockResolvedValue({ effect: "Allow" });
-    const decision = await ports.authorization.authorize({
-      session: { diningSessionReference: id(5) },
-      operation: "Begin",
-      observedAt: at,
+    let decision: { audit: { reasonCode: string } } | null = null;
+    // The domain asks for the staff authorization while the command's run is in progress.
+    mock.begin.mockImplementation(async () => {
+      const ports = mock.ports.mock.calls[0]?.[0] as {
+        authorization: {
+          authorize(request: unknown): Promise<{ audit: { reasonCode: string } }>;
+        };
+      };
+      decision = await ports.authorization.authorize({
+        session: { diningSessionReference: id(5) },
+        operation: "Begin",
+        observedAt: at,
+      });
+      return { status: "Applied", session: { phase: "Closing", version: 3 } };
     });
-    expect(decision.audit.reasonCode).toBe(reason);
+    await f.handler(f.input);
+    expect(decision).toMatchObject({ audit: { reasonCode: reason } });
     if (cancellations !== null)
       expect(mock.cancellations).toHaveBeenCalledWith(expect.anything(), [id(11)]);
   },

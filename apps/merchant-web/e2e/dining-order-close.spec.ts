@@ -112,7 +112,9 @@ test("@production order closure retries the same intent then renders read-only h
   await page.route("**/merchant/orders/close", async (route) => {
     expect(route.request().headers()["x-bop-csrf"]).toBe("a".repeat(43));
     bodies.push(route.request().postData() ?? "");
-    if (bodies.length === 1) return route.abort("failed");
+    // WP-2423: the first send and both automatic re-checks are lost; the staff retry is lost too,
+    // and its automatic re-check reports the real result.
+    if (bodies.length <= 4) return route.abort("failed");
     committed = true;
     return route.fulfill({
       headers,
@@ -145,8 +147,8 @@ test("@production order closure retries the same intent then renders read-only h
     page.getByRole("button", { name: "Confirm served quantity", exact: true }),
   ).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Refresh orders", exact: true })).toBeEnabled();
-  expect(bodies).toHaveLength(2);
-  expect(bodies[1]).toBe(bodies[0]);
+  expect(bodies).toHaveLength(5);
+  for (const body of bodies) expect(body).toBe(bodies[0]);
   expect(JSON.parse(bodies[0] ?? "{}")).toMatchObject({
     orderReference: id(1),
     expectedOrderVersion: 4,

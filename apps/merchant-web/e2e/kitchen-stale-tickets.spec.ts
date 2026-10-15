@@ -177,7 +177,7 @@ test("@production DEC-KITCHEN-STALE-TICKETS: an earlier day's ticket is kept apa
   await expect(earlier.getByText("1 ticket")).toBeVisible();
   await expect(page.getByText("Pork dumplings")).toBeHidden();
   await earlier.getByText("From earlier days — check and close").click();
-  const ticket = page.getByRole("region", { name: "Order 2 · Pickup, From Fri, Oct 9" });
+  const ticket = page.getByRole("region", { name: "Pickup · Order 2, From Fri, Oct 9" });
   await expect(ticket.getByText("From Fri, Oct 9")).toBeVisible();
   await expect(ticket.getByText("waiting 4 days")).toBeVisible();
   await expect(ticket.getByText("Pork dumplings")).toBeVisible();
@@ -207,7 +207,7 @@ test("@production DEC-KITCHEN-STALE-TICKETS: an earlier day's ticket is kept apa
   await page.reload();
   await page.locator("details.kitchen-earlier-days").getByText("From earlier days").click();
   await page.getByRole("button", { name: "Close ticket" }).click();
-  const dialog = page.getByRole("dialog", { name: "Close Order 2 · Pickup from Fri, Oct 9?" });
+  const dialog = page.getByRole("dialog", { name: "Close Pickup · Order 2 from Fri, Oct 9?" });
   await expect(dialog).toBeVisible();
   await expect(
     dialog.getByText("does not refund or cancel the order", { exact: false }),

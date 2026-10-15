@@ -80,6 +80,7 @@ export function parseTableClosePlan(value: unknown, expected: { order: string; s
       "state",
       "openItemCount",
       "startedItemCount",
+      "readyItemCount",
       "cancellableItemReferences",
       "refund",
       "cancelsAt",
@@ -105,14 +106,16 @@ export function parseTableClosePlan(value: unknown, expected: { order: string; s
     )
       return fail();
     const openItemCount = count(round.openItemCount),
-      startedItemCount = count(round.startedItemCount);
-    if (startedItemCount > openItemCount) return fail();
+      startedItemCount = count(round.startedItemCount),
+      readyItemCount = count(round.readyItemCount);
+    if (startedItemCount > openItemCount || readyItemCount > startedItemCount) return fail();
     return Object.freeze({
       orderBatchReference: batch,
       sequence: count(round.sequence, 2147483647),
       state,
       openItemCount,
       startedItemCount,
+      readyItemCount,
       cancellableItemReferences: Object.freeze(cancellable),
       refund,
       cancelsAt: round.cancelsAt === null ? null : instant(round.cancelsAt),

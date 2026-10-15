@@ -64,7 +64,7 @@ test("@production serving retains its intent after a lost response and locks ref
               },
             ],
             canRequestAcceptance: false,
-            currentPhase: "Accepted",
+            currentPhase: committed ? "Fulfilled" : "Ready",
             currentVersion: 2,
             unfulfillable: null,
             pickupNotCollected: false,
@@ -138,6 +138,8 @@ test("@production serving retains its intent after a lost response and locks ref
     page.getByText("Fulfilled · Ordered 2 · Served 2 · Remaining 0", { exact: true }),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Refresh orders", exact: true })).toBeEnabled();
+  // WP-2423: the order's status is reread as soon as the item is served (before the 10 s poll).
+  await expect(page.locator(".order-workbench-phase")).toHaveText("Served", { timeout: 5_000 });
   expect(bodies).toHaveLength(2);
   expect(bodies[1]).toBe(bodies[0]);
   expect(JSON.parse(bodies[0] ?? "{}")).toMatchObject({

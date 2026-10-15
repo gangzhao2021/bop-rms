@@ -72,6 +72,9 @@ function reworkView(
             quantity: option.quantity,
           })),
     orderLabel: preparation?.orderLabel ?? null,
+    // WP-2423: the business day of the remade item's round, so a remake for an earlier day's
+    // order is never mistaken for today's order with the same number.
+    businessDate: preparation?.businessDate ?? null,
     customerNote: preparation?.customerNote ?? null,
     allergens: preparation?.allergens ?? { status: "Unavailable" as const },
   });

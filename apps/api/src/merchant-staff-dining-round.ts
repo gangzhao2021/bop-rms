@@ -42,6 +42,7 @@ export const staffDiningRoundErrorCodes = [
   "STAFF_ROUND_PERMISSION_DENIED",
   "STAFF_ROUND_STORE_NOT_TAKING_ORDERS",
   "STAFF_ROUND_TABLE_UNAVAILABLE",
+  "STAFF_ROUND_TABLE_QR_MISSING",
   "STAFF_ROUND_TABLE_CART_HAS_ITEMS",
   "STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS",
   "STAFF_ROUND_ITEM_UNAVAILABLE",
@@ -110,13 +111,17 @@ export interface StaffTableGuestPipeline extends Pick<
       }
     | { readonly status: "TableUnavailable" }
   >;
-  /** Enters with the table's printed QR, as a guest scanning it would. */
+  /**
+   * Enters with the table's printed QR, as a guest scanning it would. `NoTableQr`: the table has
+   * no current code (never created, or turned off), so no guest can join it this way.
+   */
   enter(input: {
     readonly tableReference: string;
     readonly requestedAt: string;
   }): Promise<
     | { readonly status: "Established"; readonly credentials: CounterGuestCredentials }
     | { readonly status: "NotAccepting" }
+    | { readonly status: "NoTableQr" }
   >;
   join(
     credentials: CounterGuestCredentials,
@@ -403,16 +408,20 @@ export function createMerchantStaffDiningRound(options: {
         !(await options.pipeline.takesOrder({ recordedAfterOutage: command.recordedAfterOutage }))
       )
         return fail("STAFF_ROUND_STORE_NOT_TAKING_ORDERS");
+      // DEC-STAFF-DINE-IN-ROUND (2026-10-15): enter with the table's code before the table is
+      // opened, so a table without a code (or a Store not taking orders) is refused with nothing
+      // changed — never an empty dining session left seated on the floor.
+      const entered = await options.pipeline.enter({
+        tableReference: command.tableReference,
+        requestedAt: now(),
+      });
+      if (entered.status === "NoTableQr") return fail("STAFF_ROUND_TABLE_QR_MISSING");
+      if (entered.status !== "Established") return fail("STAFF_ROUND_STORE_NOT_TAKING_ORDERS");
       const table = await options.pipeline.openTable(
         { sessionCookie: input.sessionCookie, csrf: input.csrf },
         { tableReference: command.tableReference },
       );
       if (table.status !== "Opened") return fail("STAFF_ROUND_TABLE_UNAVAILABLE");
-      const entered = await options.pipeline.enter({
-        tableReference: command.tableReference,
-        requestedAt: now(),
-      });
-      if (entered.status !== "Established") return fail("STAFF_ROUND_STORE_NOT_TAKING_ORDERS");
       const joined = await options.pipeline.join(entered.credentials, {
         joinCredential: table.joinCredential,
         operationReference: options.nextReference(),

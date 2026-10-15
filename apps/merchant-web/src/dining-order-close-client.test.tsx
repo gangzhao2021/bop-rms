@@ -15,6 +15,8 @@ const command = () => ({
   expectedClosureVersion: 0,
   reasonCode: "ORDER_COMPLETED",
 });
+// One send, no automatic re-check (the re-check is tested on its own below).
+const once = { delaysMs: [], recheckTimeoutMs: 1000 };
 const response = (extra: Record<string, unknown> = {}) =>
   new Response(
     JSON.stringify({
@@ -31,7 +33,7 @@ it("keeps original intent on unknown-result retry even if caller mutates input",
     .mockRejectedValueOnce(new Error("offline"))
     .mockResolvedValueOnce(response());
   const input = command();
-  const op = createDiningOrderCloseClient(fetcher).prepare(input);
+  const op = createDiningOrderCloseClient(fetcher, once).prepare(input);
   input.expectedOrderVersion = 99;
   await expect(op.execute("A".repeat(43))).rejects.toMatchObject({ code: "OutcomeUnknown" });
   await expect(op.execute("A".repeat(43))).resolves.toMatchObject({
@@ -62,7 +64,10 @@ it.each([
   { secret: "private" },
 ])("treats mismatched success as unknown %j", async (change) => {
   await expect(
-    createDiningOrderCloseClient(vi.fn(async () => response(change)))
+    createDiningOrderCloseClient(
+      vi.fn(async () => response(change)),
+      once,
+    )
       .prepare(command())
       .execute("A".repeat(43)),
   ).rejects.toMatchObject({ code: "OutcomeUnknown" });
@@ -75,6 +80,7 @@ it.each([
   await expect(
     createDiningOrderCloseClient(
       vi.fn(async () => new Response("private", { status: Number(status) })),
+      once,
     )
       .prepare(command())
       .execute("A".repeat(43)),
@@ -123,6 +129,7 @@ it("WP-2423 B759: a refusal is told apart from a missing permission, with what i
   const refused = async (status: number, body: unknown) => {
     const client = createDiningOrderCloseClient(
       vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(body), { status })),
+      once,
     );
     return client
       .prepare(command())
@@ -143,4 +150,49 @@ it("WP-2423 B759: a refusal is told apart from a missing permission, with what i
   expect(texts).toHaveLength(3);
   expect(texts[0]).toMatch(/refund is still being made/u);
   for (const text of texts) expect(text).not.toMatch(/[A-Z]{2,}_[A-Z]/u);
+});
+
+it("WP-2423: a lost answer is re-checked with the same operation and reports the real result", async () => {
+  const fast = { delaysMs: [0, 0], recheckTimeoutMs: 1000 };
+  // Timed out / dropped twice, then the server answers the same operation: already closed.
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockRejectedValueOnce(new Error("timeout"))
+    .mockResolvedValueOnce(new Response("busy", { status: 503 }))
+    .mockResolvedValueOnce(response());
+  await expect(
+    createDiningOrderCloseClient(fetcher, fast).prepare(command()).execute("A".repeat(43)),
+  ).resolves.toMatchObject({ status: "AlreadyCommitted", closureVersion: 1 });
+  expect(fetcher).toHaveBeenCalledTimes(3);
+  for (const call of fetcher.mock.calls) expect(call[1]?.body).toBe(JSON.stringify(command()));
+  // A re-check that is refused reports the refusal, not an unknown result.
+  const refused = vi
+    .fn<typeof fetch>()
+    .mockRejectedValueOnce(new Error("timeout"))
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "order_not_ready", reasons: ["REFUND_PENDING"] }), {
+        status: 409,
+      }),
+    );
+  await expect(
+    createDiningOrderCloseClient(refused, fast).prepare(command()).execute("A".repeat(43)),
+  ).rejects.toMatchObject({ code: "NotReady", reasons: ["REFUND_PENDING"] });
+  // Unknown only when every re-check is lost too; nothing beyond the bounded re-checks is sent.
+  const offline = vi.fn<typeof fetch>().mockRejectedValue(new Error("offline"));
+  await expect(
+    createDiningOrderCloseClient(offline, fast).prepare(command()).execute("A".repeat(43)),
+  ).rejects.toMatchObject({ code: "OutcomeUnknown" });
+  expect(offline).toHaveBeenCalledTimes(3);
+  // Leaving the screen stops the re-checks.
+  const controller = new AbortController();
+  const stopped = vi.fn<typeof fetch>().mockImplementation(async () => {
+    controller.abort();
+    throw new Error("offline");
+  });
+  await expect(
+    createDiningOrderCloseClient(stopped, { delaysMs: [1000], recheckTimeoutMs: 1000 })
+      .prepare(command())
+      .execute("A".repeat(43), controller.signal),
+  ).rejects.toMatchObject({ code: "OutcomeUnknown" });
+  expect(stopped).toHaveBeenCalledOnce();
 });

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { appendFile, readFile } from "node:fs/promises";
+import { performance } from "node:perf_hooks";
+import process from "node:process";
 import { setTimeout as delay } from "node:timers/promises";
 import { URL } from "node:url";
 import pg from "pg";
@@ -934,6 +936,7 @@ it("enters a dine-in round by staff, takes its card-machine payment and marks it
         amountDueMinor: null,
         paidOnCardMachine: {
           amountMinor: String(round2Total + tipMinor),
+          refundedMinor: "0",
           takenAt: String(saved.takenAt),
         },
       });
@@ -2013,7 +2016,46 @@ async function exerciseGuestsLeftOrderClose({
     referencePrefix: "01909962",
     sessionReferencePrefix: "01909961",
   });
-  const persistence = { ...manager.persistence, now };
+  // WP-2423 query budget: every statement the restricted role runs for these commands is counted,
+  // so the Order close and the table close are held to a cost a busy Store can afford.
+  let statements = 0;
+  const counted = {
+    run: (work) =>
+      manager.persistence.transactions.run((tx) =>
+        work({
+          query: (sql, values) => {
+            statements += 1;
+            return tx.query(sql, values);
+          },
+        }),
+      ),
+  };
+  const persistence = { ...manager.persistence, now, transactions: counted };
+  // Before (0e1a9130, v15 7-8.5 s per close): every owner read re-resolved the caller in full
+  // (Session, selection, membership, store assignment, permission packet), so a one-round table's
+  // Order close ran 7,757 statements, its refusal 2,318, a replay 534, Begin 196 and Finalize 3,148.
+  // Now the caller is resolved once at the start and once before the reply.
+  const budgets = {
+    "order close refused": 260,
+    "table begin": 150,
+    "close plan": 400,
+    "order close": 700,
+    "order close replay": 120,
+    "table finalize": 450,
+  };
+  const measured = async (label, work) => {
+    const before = statements,
+      started = performance.now();
+    const result = await work();
+    const cost = { statements: statements - before, ms: Math.round(performance.now() - started) };
+    if (process.env.WP2423_COST_LOG)
+      await appendFile(process.env.WP2423_COST_LOG, label + " " + JSON.stringify(cost) + "\n");
+    assert.ok(
+      cost.statements <= budgets[label],
+      label + " ran " + cost.statements + " statements (budget " + budgets[label] + ")",
+    );
+    return { result, ...cost };
+  };
   const session = { sessionCookie: manager.sessionCookie, csrf: manager.csrf };
   const refundConfiguration = async () => ({
     providerAccountReference: provider,
@@ -2103,19 +2145,24 @@ async function exerciseGuestsLeftOrderClose({
   const openReasons = ["EVIDENCE_INCOMPLETE", "EXECUTION_NOT_FINAL", "FULFILLMENT_NOT_FINAL"];
   assert.deepEqual([...open.closeBlockers], openReasons);
   // The close is refused with what is outstanding, never as a permission refusal; nothing written.
-  await assert.rejects(closeOrder(closeInput(open.orderVersion)), notReady(openReasons));
+  await measured("order close refused", () =>
+    assert.rejects(closeOrder(closeInput(open.orderVersion)), notReady(openReasons)),
+  );
   assert.deepEqual(await written(), nothing);
 
   // The table is put into Closing first (no new rounds); the Order close continues from there.
-  const begun = await closeTable({
-    ...session,
-    command: {
-      action: "Begin",
-      diningSessionReference,
-      operationReference: fresh(),
-      expectedSessionVersion: await sessionVersion(),
-    },
-  });
+  const beginVersion = await sessionVersion();
+  const { result: begun } = await measured("table begin", () =>
+    closeTable({
+      ...session,
+      command: {
+        action: "Begin",
+        diningSessionReference,
+        operationReference: fresh(),
+        expectedSessionVersion: beginVersion,
+      },
+    }),
+  );
   assert.deepEqual([begun.status, begun.phase], ["Applied", "Closing"]);
 
   // ── The manager resolves the rounds (GUEST_LEFT). Round 2 was refunded on the machine in full:
@@ -2239,11 +2286,14 @@ async function exerciseGuestsLeftOrderClose({
   assert.equal(providerRefunded, roundTotal);
 
   // ── Everything resolved: nothing left in the dialog and the Order closes.
-  const resolved = await plan();
+  const { result: resolved } = await measured("close plan", plan);
   assert.deepEqual(states(resolved), []);
   assert.deepEqual([...resolved.closeBlockers], []);
   const operationReference = fresh();
-  const closed = await closeOrder(closeInput(resolved.orderVersion, operationReference));
+  const closing = await measured("order close", () =>
+    closeOrder(closeInput(resolved.orderVersion, operationReference)),
+  );
+  const closed = closing.result;
   assert.deepEqual(closed, {
     status: "Committed",
     closedOrderVersion: resolved.orderVersion,
@@ -2267,25 +2317,29 @@ async function exerciseGuestsLeftOrderClose({
   const once = { closures: 1, finalities: 1, audits: 2 };
   assert.deepEqual(await written(), once);
   // A retry of the same close reports it, writing nothing; another close is told it is closed.
-  assert.deepEqual(await closeOrder(closeInput(resolved.orderVersion, operationReference)), {
-    ...closed,
-    status: "AlreadyCommitted",
-  });
+  const replayed = await measured("order close replay", () =>
+    closeOrder(closeInput(resolved.orderVersion, operationReference)),
+  );
+  assert.deepEqual(replayed.result, { ...closed, status: "AlreadyCommitted" });
   await assert.rejects(closeOrder(closeInput(resolved.orderVersion)), {
     code: "ORDER_CLOSE_ALREADY_CLOSED",
   });
   assert.deepEqual(await written(), once);
 
   // ── The table is released from Closing.
-  const finalized = await closeTable({
-    ...session,
-    command: {
-      action: "Finalize",
-      diningSessionReference,
-      operationReference: fresh(),
-      expectedSessionVersion: await sessionVersion(),
-    },
-  });
+  const finalizeVersion = await sessionVersion();
+  const finalizing = await measured("table finalize", () =>
+    closeTable({
+      ...session,
+      command: {
+        action: "Finalize",
+        diningSessionReference,
+        operationReference: fresh(),
+        expectedSessionVersion: finalizeVersion,
+      },
+    }),
+  );
+  const finalized = finalizing.result;
   assert.deepEqual([finalized.status, finalized.phase], ["Applied", "Closed"]);
 
   // ── The manager's Order close permission is withdrawn: refused as such, before anything else.

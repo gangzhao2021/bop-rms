@@ -105,9 +105,29 @@ function parseStaffRound(value: unknown, orderType: unknown) {
   if (typeof raw.recordedAfterOutage !== "boolean" || orderType !== "DineIn") return fail();
   let paid = null;
   if (raw.paidOnCardMachine !== null) {
-    const p = exact(raw.paidOnCardMachine, ["amountMinor", "takenAt"]);
-    if (typeof p.amountMinor !== "string" || !minorPattern.test(p.amountMinor)) return fail();
-    paid = Object.freeze({ amountMinor: p.amountMinor, takenAt: instant(p.takenAt) });
+    // WP-2423: what was refunded on the machine for the round (older servers don't send it).
+    const withRefunded =
+      typeof raw.paidOnCardMachine === "object" &&
+      Object.hasOwn(raw.paidOnCardMachine, "refundedMinor");
+    const p = exact(raw.paidOnCardMachine, [
+      "amountMinor",
+      "takenAt",
+      ...(withRefunded ? ["refundedMinor"] : []),
+    ]);
+    const refunded = withRefunded ? p.refundedMinor : "0";
+    if (
+      typeof p.amountMinor !== "string" ||
+      !minorPattern.test(p.amountMinor) ||
+      typeof refunded !== "string" ||
+      !minorPattern.test(refunded) ||
+      BigInt(refunded) > BigInt(p.amountMinor)
+    )
+      return fail();
+    paid = Object.freeze({
+      amountMinor: p.amountMinor,
+      takenAt: instant(p.takenAt),
+      refundedMinor: refunded,
+    });
   }
   const due = raw.amountDueMinor ?? null;
   if (

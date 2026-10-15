@@ -370,7 +370,8 @@ it("composes the staff table round from the dine-in customer path, without the g
   expect(p.payment).toBe(payment);
   expect(p.openTable).toBe("openTable");
   expect(await p.tableQrToken("table-1")).toBe("table-qr");
-  await expect(p.tableQrToken("table-2")).rejects.toThrow("INTERNAL_TABLE_QR_UNAVAILABLE");
+  // No current code: null, so the staff command refuses before opening the table.
+  expect(await p.tableQrToken("table-2")).toBeNull();
   expect(await p.joinRequest()).toBe("abuse");
   // Entry with the table QR while closed (paper rounds): the staff command's rule decides.
   const entered = await p.entry.options.sources({}, {});

@@ -18,6 +18,10 @@ import {
 } from "@rms/ordering";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import {
+  withMerchantTransactionAuthorization,
+  type MerchantTransactionAuthority,
+} from "./merchant-transaction-authorization.js";
+import {
   createDiningSettledSessionEvidence,
   createDiningSessionClosingEvidence,
 } from "./dining-settled-session-evidence.js";
@@ -59,15 +63,44 @@ export function createMerchantDiningClosingCommand(options: {
       operationReference: parseDiningReference(raw.operationReference),
       expectedSessionVersion: parsePositiveDiningVersion(raw.expectedSessionVersion),
     };
-    return options.persistence.transactions.run(async (transaction) => {
-      const current = await resolve(
+    // WP-2423: one authorized run. The caller and its `dining.session.close` permission are
+    // resolved in full once at the start and once more before the reply; owner reads in between
+    // are fenced by the run's guard (no query). Re-resolving the caller inside every owner read
+    // (as before) cost ~3,000 statements to finalize a one-order table.
+    return options.persistence.transactions.run((transaction) =>
+      withMerchantTransactionAuthorization(
+        {
           transaction,
-          input.sessionCookie,
-          "dining.session.close",
-          authenticated.sessionReference,
-        ).catch(denied),
-        allowed = async () => (await current.allowed()) === true;
-      if (!(await allowed())) return denied();
+          resolve: async () => {
+            const current = await resolve(
+              transaction,
+              input.sessionCookie,
+              "dining.session.close",
+              authenticated.sessionReference,
+            ).catch(denied);
+            const permission = await current.authorizeAction("dining.session.close");
+            if (permission?.effect !== "Allow") return denied();
+            return { current, permission };
+          },
+          recheck: async ({ current }) => (await current.allowed()) === true,
+          denied,
+        },
+        (authority) => closeInRun(transaction, authority),
+      ),
+    );
+    async function closeInRun(
+      transaction: Parameters<
+        Parameters<PersistentMerchantBffOptions["transactions"]["run"]>[0]
+      >[0],
+      authority: MerchantTransactionAuthority<{
+        current: Awaited<ReturnType<typeof resolve>>;
+        permission: NonNullable<
+          Awaited<ReturnType<Awaited<ReturnType<typeof resolve>>["authorizeAction"]>>
+        >;
+      }>,
+    ) {
+      const { current, permission: closePermission } = authority.scope,
+        allowed = () => authority.guard();
       const scope = {
         tenantReference: current.selected.tenantReference,
         brandReference: String(current.context.brand.brandReference),
@@ -190,16 +223,16 @@ export function createMerchantDiningClosingCommand(options: {
         hashes,
         authorization: {
           authorize: async (request) => {
-            const permission = await current.authorizeAction("dining.session.close");
+            // The permission decided for this run at its start (re-checked before the reply).
             if (
-              permission?.effect !== "Allow" ||
+              !(await allowed()) ||
               request.session.diningSessionReference !== command.diningSessionReference
             )
               return null;
             return {
               kind: "Staff",
               tenantContext: current.context,
-              permission,
+              permission: closePermission,
               audit: {
                 auditId: options.newReference(),
                 brandId: scope.brandReference,
@@ -272,6 +305,6 @@ export function createMerchantDiningClosingCommand(options: {
         phase: result.session.phase,
         sessionVersion: result.session.version,
       });
-    });
+    }
   };
 }

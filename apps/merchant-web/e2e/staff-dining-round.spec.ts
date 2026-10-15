@@ -559,3 +559,45 @@ test("@production the Tables page warns before a staff round's payment time ends
   }
   await expectNoInternalText(page);
 });
+
+test("@production a table without a QR code can't take a staff order; staff are told why and where to fix it", async ({
+  page,
+}) => {
+  await signIn(page);
+  // DEC-STAFF-DINE-IN-ROUND (2026-10-15): T5 never had a code created (v15 DEMO-01/03).
+  const bare = {
+    ...table,
+    tableReference: id(77),
+    stableLabel: "T5",
+    currentDiningSessionReference: null,
+    elapsedMinutes: null,
+    qrCodeValidUntil: null,
+  };
+  await page.unroute("**/merchant/dining/tables");
+  await page.route("**/merchant/dining/tables", (route) =>
+    route.fulfill({
+      headers,
+      json: { canOperateTables: false, items: [table, bare], nextAfterTableReference: null },
+    }),
+  );
+  const rounds: unknown[] = [];
+  await page.route("**/merchant/dining/staff-rounds", (route) => {
+    rounds.push(route.request().postDataJSON());
+    return route.fulfill({ status: 409, headers, json: { error: "table_qr_missing" } });
+  });
+  await page.route("**/merchant/counter/menu**", (route) => route.fulfill({ headers, json: menu }));
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T5", exact: true }).click();
+  const section = page.getByRole("region", { name: "Take an order for this table" });
+  await expect(section).toContainText(
+    "Orders can't be taken for table T5 yet: it has no table QR code. Ask a manager to create one on the Table QR codes page, then take the order.",
+  );
+  await expect(section.getByRole("link", { name: /Take order for table/u })).toHaveCount(0);
+  await expectNoInternalText(page);
+  // Opened directly (old bookmark): the order page says the same before anything is sent.
+  await page.goto(`/operations/order-entry?table=${id(77)}`);
+  await expect(
+    page.getByText("This table has no table QR code yet", { exact: true }),
+  ).toBeVisible();
+  expect(rounds).toHaveLength(0);
+});

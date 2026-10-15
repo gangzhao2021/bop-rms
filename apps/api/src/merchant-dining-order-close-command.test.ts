@@ -1,7 +1,6 @@
 import { beforeEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   scope: vi.fn(),
-  authority: vi.fn(),
   receipt: vi.fn(),
   position: vi.fn(),
   proof: vi.fn(),
@@ -11,9 +10,6 @@ const mocks = vi.hoisted(() => ({
   readiness: vi.fn(),
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => mocks.scope }));
-vi.mock("./merchant-order-closure-authority.js", () => ({
-  createMerchantOrderClosureAuthority: () => mocks.authority,
-}));
 vi.mock("./dining-settled-close-evidence.js", () => ({
   createDiningSettledCloseEvidence: () => ({ load: mocks.proof, readiness: mocks.readiness }),
 }));
@@ -49,7 +45,6 @@ function setup() {
     actorReference: actor,
     allowed,
   });
-  mocks.authority.mockResolvedValue(true);
   mocks.readiness.mockResolvedValue({ orderVersion: 3, reasons: [] });
   mocks.receipt.mockResolvedValue(null);
   mocks.position.mockResolvedValue({
@@ -217,5 +212,17 @@ it("B759: an already closed Order, a session failure and an internal failure are
   mocks.prepared.mockRejectedValue(new Error("SETTLED_ORDER_CLOSE_UNAVAILABLE"));
   await expect(f.run()).rejects.toMatchObject({ code: "ORDER_CLOSE_UNAVAILABLE" });
   f.authentication.authorize.mockRejectedValue(new Error("denied"));
+  await expect(f.run()).rejects.toMatchObject({ code: "ORDER_CLOSE_PERMISSION_DENIED" });
+});
+
+it("WP-2423: resolves the caller in full once at the start and once before the reply", async () => {
+  const f = setup();
+  expect((await f.run()).status).toBe("Committed");
+  expect(mocks.scope).toHaveBeenCalledOnce();
+  expect(f.allowed).toHaveBeenCalledTimes(2);
+});
+it("WP-2423: a permission withdrawn during the close refuses the reply", async () => {
+  const f = setup();
+  f.allowed.mockResolvedValueOnce(true).mockResolvedValue(false);
   await expect(f.run()).rejects.toMatchObject({ code: "ORDER_CLOSE_PERMISSION_DENIED" });
 });

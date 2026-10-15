@@ -109,6 +109,7 @@ const planRound = (
   state,
   openItemCount: 1,
   startedItemCount: 0,
+  readyItemCount: 0,
   cancellableItemReferences: [],
   refund,
   cancelsAt: null,
@@ -229,17 +230,17 @@ test("@production a manager closes out a table whose guests left: rounds cancell
     "Round 1: never sent to the kitchen and already refunded in full. It will be closed; nothing more is refunded.",
   );
   await expect(guests).toContainText(
-    "Round 4: paid CAD 11.30 online but never sent to the kitchen. It will be cancelled and the guest refunded.",
+    "Round 4: paid $11.30 online but never sent to the kitchen. It will be cancelled and the guest refunded.",
   );
   await expect(guests).toContainText(
-    "Round 9: 1 item not started in the kitchen. It will be cancelled; then refund CAD 5.93 on the card machine",
+    "Round 9: 1 item not started in the kitchen. It will be cancelled; then refund $5.93 on the card machine",
   );
   await expect(guests).toContainText(
     "Round 10: 1 item not started in the kitchen, already refunded in full. It will be cancelled; nothing is left to refund.",
   );
-  await expect(guests).not.toContainText("CAD 0.00");
+  await expect(guests).not.toContainText("$0.00");
   await expect(guests).toContainText(
-    "refunds CAD 11.30 to the guest online and CAD 5.93 to refund on the card machine",
+    "refunds $11.30 to the guest online and $5.93 to refund on the card machine",
   );
   await expect(dialog.getByRole("button", { name: /^Close table/u })).toHaveCount(0);
   const confirm = guests.getByRole("button", { name: "Cancel 4 rounds and refund", exact: true });
@@ -266,7 +267,7 @@ test("@production a manager closes out a table whose guests left: rounds cancell
   await expect(retry).toBeEnabled();
   await expect(guests).toContainText("nothing is cancelled or refunded twice");
   // The list is read again after the failed step: round 1, already closed out, is gone.
-  await expect(guests).toContainText("Round 4: paid CAD 11.30 online");
+  await expect(guests).toContainText("Round 4: paid $11.30 online");
   await expect(guests).not.toContainText("Round 1:");
   await retry.click();
   await expect(dialog.getByRole("button", { name: "Close table T2", exact: true })).toBeVisible();
@@ -395,7 +396,10 @@ test("@production B759: a table left in Closing names what still stops it, then 
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
-    await page.screenshot({ path: `test-results/dining-b759-closing-${width}.png`, fullPage: true });
+    await page.screenshot({
+      path: `test-results/dining-b759-closing-${width}.png`,
+      fullPage: true,
+    });
   }
   await dialog.getByRole("checkbox", { name: "The guests at table T2 have left" }).check();
   await dialog.getByRole("button", { name: "Close table T2", exact: true }).click();

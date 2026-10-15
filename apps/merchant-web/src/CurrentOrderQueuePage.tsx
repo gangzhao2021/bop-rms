@@ -92,7 +92,7 @@ export function filterCurrentOrderItems(
     (order) =>
       (!orderNumber || order.orderNumber.toLocaleLowerCase() === orderNumber) &&
       (filters.type === "All" || order.orderType === filters.type) &&
-      (filters.channel === "All" || order.sourceChannel === filters.channel) &&
+      (filters.channel === "All" || orderChannel(order) === filters.channel) &&
       (filters.phase === "All" ||
         (filters.phase === "OutageHeld"
           ? order.acceptanceHold !== null
@@ -327,18 +327,45 @@ export function cardMachineOwed(order: CurrentOrderQueue["items"][number]): stri
   return owed > 0n ? owed.toString() : null;
 }
 /**
+ * WP-2423: a card-machine payment and its refunds as staff read them: "Paid on card machine
+ * $46.81 · refunded in full", "· $12.00 refunded", and what staff cancellations still leave to
+ * refund on the machine ("· $5.93 to refund on the card machine"). Refunded is what was recorded
+ * as refunded on the machine (cancellations of rounds or items, and ordinary refunds), as the
+ * order's settlement counts it.
+ */
+export function cardMachinePaymentText(paid: bigint, refunded: bigint, toRefund = 0n): string {
+  const money = (minor: bigint) =>
+    orderMoney({ amountMinor: minor.toString(), currencyCode: "CAD" });
+  return (
+    "Paid on card machine " +
+    money(paid) +
+    (refunded >= paid
+      ? " · refunded in full"
+      : refunded > 0n
+        ? ` · ${money(refunded)} refunded`
+        : "") +
+    (toRefund > 0n && refunded < paid ? ` · ${money(toRefund)} to refund on the card machine` : "")
+  );
+}
+/**
  * WP-2423 D5: what a table's staff-entered rounds took on the Store's card machine ("Paid on card
- * machine $24.86"), shown beside what guests paid online so the two add up to what was taken.
- * Null when no round was paid on the machine.
+ * machine $24.86"), shown beside what guests paid online so the two add up to what was taken, with
+ * what was refunded on the machine since. Null when no round was paid on the machine.
  */
 export function cardMachineRoundsText(order: CurrentOrderQueue["items"][number]): string | null {
-  const total = order.batches.reduce(
-    (sum, batch) => sum + BigInt(batch.staffRound?.paidOnCardMachine?.amountMinor ?? "0"),
-    0n,
-  );
-  return total === 0n
-    ? null
-    : "Paid on card machine " + orderMoney({ amountMinor: total.toString(), currencyCode: "CAD" });
+  let paid = 0n,
+    refunded = 0n,
+    toRefund = 0n;
+  for (const batch of order.batches) {
+    const machine = batch.staffRound?.paidOnCardMachine;
+    if (machine == null) continue;
+    paid += BigInt(machine.amountMinor);
+    refunded += BigInt(machine.refundedMinor ?? "0");
+    const cancellation = batch.staffCancellation;
+    if (cancellation?.refundMethod === "CardMachine" && cancellation.refundStatus === "Pending")
+      toRefund += BigInt(cancellation.refundAmountMinor ?? "0");
+  }
+  return paid === 0n ? null : cardMachinePaymentText(paid, refunded, toRefund);
 }
 
 /**
@@ -415,18 +442,52 @@ function OnlineRefundNote({
     </p>
   );
 }
+/**
+ * WP-2423: an order's current status in staff words. Dine-in is Fulfilled once every item not
+ * cancelled was served at the table (Dining's served records over the kitchen's Ready), which
+ * staff read as "Served"; a pickup order handed over reads "Picked up".
+ */
+export function orderPhaseLabel(
+  order: Pick<CurrentOrderQueue["items"][number], "currentPhase" | "orderType">,
+): string {
+  switch (order.currentPhase) {
+    case null:
+      return "Status not loaded · refresh";
+    case "InProgress":
+      return "In progress";
+    case "Fulfilled":
+      return order.orderType === "DineIn" ? "Served" : "Picked up";
+    default:
+      return order.currentPhase;
+  }
+}
+/**
+ * WP-2423: the channel an order is listed and filtered under. A table's Order takes the channel of
+ * its first round: when staff entered that round for the table it is "Staff" (taken by staff),
+ * not the guests' QR code. Later rounds keep their own "Entered by staff" marker on the order.
+ */
+export function orderChannel(
+  order: Pick<CurrentOrderQueue["items"][number], "orderType" | "sourceChannel" | "batches">,
+): string {
+  return order.orderType === "DineIn" &&
+    order.batches.find((batch) => batch.sequence === 1)?.staffRound != null
+    ? "Staff"
+    : order.sourceChannel;
+}
 /** Staff-facing words for an order's type and the channel it came in through (never codes). */
 export const orderTypeLabel = { DineIn: "Dine-in", Pickup: "Pickup" } as const;
 export function orderChannelLabel(channel: string): string {
-  return channel === "Qr"
-    ? "QR code"
-    : channel === "Web"
-      ? "Website"
-      : channel === "Pos"
-        ? "Counter"
-        : channel === "Api"
-          ? "Partner integration"
-          : "Other";
+  return channel === "Staff"
+    ? "Taken by staff"
+    : channel === "Qr"
+      ? "QR code"
+      : channel === "Web"
+        ? "Website"
+        : channel === "Pos"
+          ? "Counter"
+          : channel === "Api"
+            ? "Partner integration"
+            : "Other";
 }
 
 /** WP-2423 item 5: minutes before an unpaid round's cancellation when staff are warned urgently. */
@@ -754,7 +815,7 @@ export function CurrentOrderQueueRows({
                   </span>
                 </h2>
                 <span>
-                  {orderTypeLabel[order.orderType]} · {orderChannelLabel(order.sourceChannel)}
+                  {orderTypeLabel[order.orderType]} · {orderChannelLabel(orderChannel(order))}
                 </span>
               </span>
               <span
@@ -779,9 +840,7 @@ export function CurrentOrderQueueRows({
                       ? cardMachineOwed(order) !== null
                         ? "Expired · refund on card machine"
                         : "Expired · refunded"
-                      : order.currentPhase === "InProgress"
-                        ? "In progress"
-                        : (order.currentPhase ?? "Status not loaded · refresh")}
+                      : orderPhaseLabel(order)}
               </span>
               <span className="order-workbench-batches">
                 {
@@ -811,11 +870,10 @@ export function CurrentOrderQueueRows({
                 {/* WP-2423 Q7: a counter order — paid on the Store's card machine, or a paper order. */}
                 {order.counter?.paidOnCardMachine ? (
                   <span className="order-counter-paid">
-                    Paid on card machine{" "}
-                    {orderMoney({
-                      amountMinor: order.counter.paidOnCardMachine.amountMinor,
-                      currencyCode: "CAD",
-                    })}
+                    {cardMachinePaymentText(
+                      BigInt(order.counter.paidOnCardMachine.amountMinor),
+                      BigInt(order.counter.paidOnCardMachine.refundedMinor),
+                    )}
                   </span>
                 ) : null}
                 {/* WP-2423: an online order — paid online, and any refund of that payment. */}
@@ -862,7 +920,7 @@ export function CurrentOrderQueueRows({
                 </div>
                 <div>
                   <dt>Channel</dt>
-                  <dd>{orderChannelLabel(order.sourceChannel)}</dd>
+                  <dd>{orderChannelLabel(orderChannel(order))}</dd>
                 </div>
                 <div>
                   <dt>Submitted</dt>
@@ -1032,6 +1090,7 @@ export function CurrentOrderDetails({
   csrf,
   locked,
   onBusy,
+  onChanged,
   lines,
   fetcher,
 }: {
@@ -1039,6 +1098,8 @@ export function CurrentOrderDetails({
   readonly csrf: string;
   readonly locked: boolean;
   readonly onBusy: (busy: boolean) => void;
+  /** WP-2423: an item was served or the table closed; reread the order's status now. */
+  readonly onChanged?: (() => void) | undefined;
   /** The Order's items, or null when they are not shown (the queue entry is closed). */
   readonly lines?: React.ReactNode;
   readonly fetcher?: typeof fetch | undefined;
@@ -1062,6 +1123,7 @@ export function CurrentOrderDetails({
           csrf={csrf}
           locked={locked}
           onBusy={onBusy}
+          onChanged={onChanged}
           fetcher={fetcher}
         />
       ) : null}
@@ -1362,6 +1424,7 @@ export function CurrentOrderQueuePage({
                   <option value="Api">Partner integration</option>
                   <option value="Pos">Counter</option>
                   <option value="Qr">QR code</option>
+                  <option value="Staff">Taken by staff</option>
                   <option value="Web">Website</option>
                 </select>
               </label>
@@ -1378,7 +1441,7 @@ export function CurrentOrderQueuePage({
                   <option value="Ready">Ready</option>
                   <option value="Rejected">Rejected</option>
                   <option value="Cancelled">Cancelled</option>
-                  <option value="Fulfilled">Fulfilled</option>
+                  <option value="Fulfilled">Served or picked up</option>
                   <option value="OutageHeld">Paid during an outage — decide</option>
                   <option value="Expired">Expired · refunded</option>
                   <option value="AwaitingPayment">Awaiting payment</option>
@@ -1456,6 +1519,7 @@ export function CurrentOrderQueuePage({
                   order={order}
                   csrf={csrf}
                   locked={servingBusy}
+                  onChanged={refreshInPlace}
                   onBusy={(busy) => {
                     if (busy) servingOrders.current.add(order.orderReference);
                     else servingOrders.current.delete(order.orderReference);

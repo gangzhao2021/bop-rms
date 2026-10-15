@@ -52,18 +52,45 @@ export function DiningOrderProgress({
   csrf,
   locked = false,
   onBusy,
+  onChanged,
   fetcher,
 }: {
   readonly orderReference: string;
   readonly csrf: string;
   readonly locked?: boolean;
   readonly onBusy?: (busy: boolean) => void;
+  /**
+   * WP-2423: after an item was served or the Order/session closed, so the order's status (its
+   * header: "Ready" becomes "Served") is reread at once instead of at the next background poll.
+   */
+  readonly onChanged?: (() => void) | undefined;
   /** WP-2423 P5: an injected transport (the local demo). */
   readonly fetcher?: typeof fetch | undefined;
 }) {
   const [state, setState] = useState<State>({ kind: "Idle" });
   const [busy, setBusy] = useState(false);
   const active = useRef<AbortController | null>(null);
+  // WP-2423: a command in flight pauses the page's background reread (onBusy). If this panel is
+  // closed meanwhile (the order collapsed), its command is abandoned and never reports back, so
+  // the pause is released here; otherwise the order's status would stay as it was.
+  const busyRef = useRef(false);
+  const onBusyRef = useRef(onBusy);
+  onBusyRef.current = onBusy;
+  useEffect(
+    () => () => {
+      if (busyRef.current) onBusyRef.current?.(false);
+    },
+    [],
+  );
+  const markBusy = (value: boolean) => {
+    busyRef.current = value;
+    setBusy(value);
+    onBusy?.(value);
+  };
+  const changed = () => {
+    void load();
+    onChanged?.();
+  };
   useEffect(() => {
     setState({ kind: "Idle" });
     return () => {
@@ -119,22 +146,16 @@ export function DiningOrderProgress({
             view={state.view}
             csrf={csrf}
             locked={busy || locked}
-            onBusy={(value) => {
-              setBusy(value);
-              onBusy?.(value);
-            }}
-            onClosed={() => void load()}
+            onBusy={markBusy}
+            onClosed={changed}
           />
           <DiningSessionCloseAction
             key={state.view.diningSessionReference + ":" + state.view.sessionVersion}
             view={state.view}
             csrf={csrf}
             locked={busy || locked}
-            onBusy={(value) => {
-              setBusy(value);
-              onBusy?.(value);
-            }}
-            onClosed={() => void load()}
+            onBusy={markBusy}
+            onClosed={changed}
           />
           <DiningProgressView
             view={state.view}
@@ -145,11 +166,8 @@ export function DiningOrderProgress({
                 item={item}
                 csrf={csrf}
                 locked={busy || locked}
-                onBusy={(value) => {
-                  setBusy(value);
-                  onBusy?.(value);
-                }}
-                onServed={() => void load()}
+                onBusy={markBusy}
+                onServed={changed}
               />
             )}
           />

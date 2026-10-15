@@ -127,6 +127,7 @@ it("WP-2423 D4: a lost result is retried with the same requests; confirmed steps
     plan,
     csrf,
     fetcher,
+    recovery: { delaysMs: [], recheckTimeoutMs: 1000 },
   };
   await expect(closeTableSession(input)).rejects.toMatchObject({ code: "OutcomeUnknown" });
   await closeTableSession(input);

@@ -6,13 +6,20 @@ import {
   type TableCloseRound,
 } from "./dining-table-close-plan-client.js";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
+import { orderMoney } from "./order-money.js";
 import { storeTime } from "./StoreTime.js";
 
-const cad = (minor: string | bigint) => {
-  const value = BigInt(minor);
-  return `CAD ${(value / 100n).toString()}.${(value % 100n).toString().padStart(2, "0")}`;
-};
+/** The plan's amounts are the store's CAD minor units; the app's one money format ("$11.30"). */
+const cad = (minor: string | bigint) =>
+  orderMoney({ amountMinor: BigInt(minor).toString(), currencyCode: "CAD" });
 const items = (count: number) => `${String(count)} item${count === 1 ? "" : "s"}`;
+/** Started items by kitchen readiness: still being made, or marked ready and waiting to be served. */
+const startedText = (started: number, ready: number) =>
+  ready === 0
+    ? `${items(started)} already being made`
+    : ready === started
+      ? `${items(ready)} ready to serve`
+      : `${items(started - ready)} being made and ${String(ready)} ready to serve`;
 
 /**
  * DEC-TABLE-CLOSE-GUESTS-LEFT: one round of a table whose guests left, in staff words — what it is
@@ -53,10 +60,15 @@ export function guestsLeftRoundText(
       return (
         `${name}: ${items(round.cancellableItemReferences.length)} not started will be cancelled and ` +
         (partlyRefund === null ? "refunded" : `${cad(partlyRefund)} refunded`) +
-        `. ${items(round.startedItemCount)} already being made: serve them, or mark them served on the Orders page.`
+        `. ${startedText(round.startedItemCount, round.readyItemCount)}: serve them, or mark them served on the Orders page.`
       );
     case "BeingMade":
-      return `${name}: ${items(round.openItemCount)} already being made or paid on the card machine. Serve them, or mark them served on the Orders page.`;
+      // Paid on the card machine, items not started yet cannot be cancelled one by one.
+      return round.startedItemCount === round.openItemCount
+        ? `${name}: ${startedText(round.openItemCount, round.readyItemCount)}. Serve them, or mark them served on the Orders page.`
+        : round.readyItemCount === 0
+          ? `${name}: ${items(round.openItemCount)} already being made or paid on the card machine. Serve them, or mark them served on the Orders page.`
+          : `${name}: ${items(round.openItemCount - round.readyItemCount)} being made or paid on the card machine and ${String(round.readyItemCount)} ready to serve. Serve them, or mark them served on the Orders page.`;
     case "RefundOnCardMachine":
       return `${name}: cancelled. Refund ${cad(round.refund?.amountMinor ?? "0")} on the card machine and record it on the Orders page.`;
     case "Refunding":

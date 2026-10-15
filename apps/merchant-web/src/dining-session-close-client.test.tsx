@@ -10,6 +10,7 @@ const command = (action: "Begin" | "Finalize" = "Begin") => ({
   expectedSessionVersion: 4,
   action,
 });
+const once = { delaysMs: [], recheckTimeoutMs: 1000 };
 const response = (phase = "Closing", extra: Record<string, unknown> = {}) =>
   new Response(JSON.stringify({ status: "AlreadyApplied", sessionVersion: 5, phase, ...extra }), {
     headers: { "content-type": "application/json", "cache-control": "no-store" },
@@ -22,7 +23,7 @@ it.each(["Begin", "Finalize"] as const)(
       .mockRejectedValueOnce(new Error("offline"))
       .mockResolvedValueOnce(response(action === "Begin" ? "Closing" : "Closed"));
     const input = command(action),
-      op = createDiningSessionCloseClient(fetcher).prepare(input);
+      op = createDiningSessionCloseClient(fetcher, once).prepare(input);
     input.expectedSessionVersion = 9;
     await expect(op.execute("A".repeat(43))).rejects.toMatchObject({ code: "OutcomeUnknown" });
     await expect(op.execute("A".repeat(43))).resolves.toMatchObject({
@@ -51,7 +52,10 @@ it.each([
   { secret: "private" },
 ])("rejects mismatched receipt %j", async (change) => {
   await expect(
-    createDiningSessionCloseClient(vi.fn(async () => response("Closing", change)))
+    createDiningSessionCloseClient(
+      vi.fn(async () => response("Closing", change)),
+      once,
+    )
       .prepare(command())
       .execute("A".repeat(43)),
   ).rejects.toMatchObject({ code: "OutcomeUnknown" });
@@ -90,4 +94,17 @@ it("uses owner phase to offer each confirmed step", () => {
   expect(render({ closureStatus: "Open", sessionPhase: "Closing" })).toContain(
     "Finalize session closing",
   );
+});
+
+it("WP-2423: a lost Finalize answer is re-checked with the same operation", async () => {
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockRejectedValueOnce(new Error("timeout"))
+    .mockResolvedValueOnce(response("Closed"));
+  await expect(
+    createDiningSessionCloseClient(fetcher, { delaysMs: [0], recheckTimeoutMs: 1000 })
+      .prepare(command("Finalize"))
+      .execute("A".repeat(43)),
+  ).resolves.toMatchObject({ status: "AlreadyApplied", phase: "Closed" });
+  expect(fetcher.mock.calls[1]?.[1]?.body).toBe(fetcher.mock.calls[0]?.[1]?.body);
 });

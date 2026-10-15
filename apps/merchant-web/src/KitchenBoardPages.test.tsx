@@ -28,7 +28,13 @@ import {
 import { staleRetryDelayMs } from "./stale-read.js";
 import { kitchenClockAt, kitchenClockTickMs, subscribeKitchenClock } from "./kitchen-clock.js";
 import { kitchenBoardFixture, kitchenItemFixture } from "./kitchen-board.fixtures.js";
-import { parseKitchenBoardView, parseKitchenWorkItemDetailView } from "./kitchen-board.js";
+import {
+  kitchenOrderText,
+  parseKitchenBoardView,
+  parseKitchenWorkItemDetailView,
+} from "./kitchen-board.js";
+import { KitchenRemakeLane } from "./KitchenRework.js";
+import type { KitchenReworkView } from "./kitchen-rework-client.js";
 import { StoreBusinessDayContext } from "./StoreBusinessDay.js";
 import { StoreTimeZoneContext } from "./StoreTime.js";
 import { findInternalText, staticText } from "../e2e/internal-text-patterns.js";
@@ -88,7 +94,7 @@ describe("WP-1804 Kitchen Board screens", () => {
       expect(html).toContain(value);
     // WP-2423 Q2: modifiers are on the card itself; the Order is named by number, not reference.
     expect(html).toContain("<li>Extra mushrooms × 2</li>");
-    expect(html).toContain("Order 14 · Table T4");
+    expect(html).toContain("Table T4 · Order 14");
     expect(html).not.toContain("018f0f58-767a-7f3b-a1d0-000000000402");
     expect(html).not.toContain("018f0f58-767a-7f3b-a1d0-000000000403");
     expect(html).not.toContain("Exception: None");
@@ -238,7 +244,7 @@ describe("WP-1804 Kitchen Board screens", () => {
         <KitchenBoardStatePanel state="CommandFailed" />
       </MemoryRouter>,
     );
-    expect(html).toContain('class="kitchen-board-eyebrow">Order 14 · Table T4</p>');
+    expect(html).toContain('class="kitchen-board-eyebrow">Table T4 · Order 14</p>');
     expect(html).not.toContain("KIT-WORK-ITEM");
     expect(html).not.toContain("Ticket display reference unavailable");
     expect(html).not.toContain("Order display reference unavailable");
@@ -701,8 +707,8 @@ describe("WP-2423 Q2 kitchen order context", () => {
       </MemoryRouter>,
     );
     // Oldest Order first, its two items together, then the newer pickup.
-    expect(html.indexOf("Order 14 · Table T4")).toBeLessThan(html.indexOf("Order 15 · Pickup"));
-    expect(html.indexOf("Miso soup")).toBeLessThan(html.indexOf("Order 15 · Pickup"));
+    expect(html.indexOf("Table T4 · Order 14")).toBeLessThan(html.indexOf("Pickup · Order 15"));
+    expect(html.indexOf("Miso soup")).toBeLessThan(html.indexOf("Pickup · Order 15"));
     expect(html).toContain(
       '<p class="kitchen-work-item__note"><span>Note:</span> Synthetic note: no onions</p>',
     );
@@ -831,6 +837,7 @@ describe("WP-2423 Q26 kitchen remakes (Handoff Section 26.6)", () => {
     displayName: "Mushroom rice bowl",
     selectedOptions: [{ displayName: "Extra mushrooms", quantity: 2 }],
     orderLabel: { orderNumber: "14", orderType: "DineIn" as const, tableLabel: "T4" },
+    businessDate: null,
     customerNote: null,
     ...overrides,
   });
@@ -880,7 +887,7 @@ describe("WP-2423 Q26 kitchen remakes (Handoff Section 26.6)", () => {
     expect(html).toContain('aria-label="Remakes"');
     expect(html).toContain("Remake · Dropped");
     expect(html).toContain("Why:</span> Slipped off the pass");
-    expect(html).toContain("Order 14 · Table T4");
+    expect(html).toContain("Table T4 · Order 14");
     expect(html).toContain("Start remake");
     expect(html).not.toContain("DROPPED");
     const back = render(true, [
@@ -889,11 +896,40 @@ describe("WP-2423 Q26 kitchen remakes (Handoff Section 26.6)", () => {
     expect(back).toContain("Back in progress · Marked done too early");
     expect(back).toContain("Remake done");
   });
+  it("WP-2423: tickets sharing a number lead with where they go; an earlier day's remake says its day", () => {
+    // v15: a pickup remake and a table round both numbered 2 (numbers restart each business day).
+    expect(kitchenOrderText({ orderNumber: "2", orderType: "Pickup", tableLabel: null })).toBe(
+      "Pickup · Order 2",
+    );
+    expect(kitchenOrderText({ orderNumber: "2", orderType: "DineIn", tableLabel: "DEMO-02" })).toBe(
+      "Table DEMO-02 · Order 2",
+    );
+    expect(kitchenOrderText({ orderNumber: "2", orderType: "DineIn", tableLabel: null })).toBe(
+      "Dine-in · Order 2",
+    );
+    const lane = (businessDate: string | null) =>
+      renderToStaticMarkup(
+        <KitchenRemakeLane
+          items={[
+            rework({
+              businessDate,
+              orderLabel: { orderNumber: "2", orderType: "Pickup", tableLabel: null },
+            }) as KitchenReworkView,
+          ]}
+          today="2026-08-12"
+          readOnly={false}
+          onAdvance={() => undefined}
+        />,
+      );
+    expect(lane("2026-08-11")).toMatch(/Pickup · Order 2 · From [^<]+Aug 11/u);
+    expect(lane("2026-08-12")).not.toContain("From ");
+    expect(lane(null)).not.toContain("From ");
+  });
   it("offers Remake on finished dishes and the recent list only to those who may remake", () => {
     const allowed = render(true);
     expect(allowed).toContain('class="kitchen-remake-button"');
     expect(allowed).toContain("Recently finished · 1");
-    expect(allowed).toContain('aria-label="Remake Mushroom rice bowl, Order 14 · Table T4"');
+    expect(allowed).toContain('aria-label="Remake Mushroom rice bowl, Table T4 · Order 14"');
     const denied = render(false);
     expect(denied).not.toContain('class="kitchen-remake-button"');
     expect(denied).not.toContain("Recently finished");
@@ -988,7 +1024,7 @@ describe("DEC-KITCHEN-STALE-TICKETS earlier business days on the kitchen board",
         ticketReference: old.ticketReference,
         businessDate: "2026-08-07",
         ticketVersion: "3",
-        orderLabel: "Order 14 · Table T4",
+        orderLabel: "Table T4 · Order 14",
       }),
     ]);
     expect(kitchenWaitText(12)).toBe("12 min");
@@ -1022,6 +1058,7 @@ describe("DEC-KITCHEN-STALE-TICKETS earlier business days on the kitchen board",
       displayName: "Mushroom rice bowl",
       selectedOptions: [],
       orderLabel: { orderNumber, orderType: "Pickup" as const, tableLabel: null },
+      businessDate: null,
       customerNote: null,
     });
     const reworks = [remake("2"), remake("6")];
@@ -1032,7 +1069,7 @@ describe("DEC-KITCHEN-STALE-TICKETS earlier business days on the kitchen board",
       search: "6",
     });
     expect(found.todayMatches.map((item) => item.displayName)).toEqual(["Mushroom rice bowl"]);
-    expect(found.earlierShown.map((ticket) => ticket.orderLabel)).toEqual(["Order 6 · Pickup"]);
+    expect(found.earlierShown.map((ticket) => ticket.orderLabel)).toEqual(["Pickup · Order 6"]);
     expect(found.reworks.map((rework) => rework.orderLabel?.orderNumber)).toEqual(["6"]);
     const other = kitchenBoardSearch({
       items: view.items,

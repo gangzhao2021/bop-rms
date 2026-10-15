@@ -128,7 +128,8 @@ test("@production session closing advances both steps and recovers a lost finali
     expect(command.expectedSessionVersion).toBe(3);
     phase = "Closed";
     version = 4;
-    if (bodies.length === 2) return route.abort("failed");
+    // WP-2423: Finalize's answer and both automatic re-checks are lost; the staff retry succeeds.
+    if (bodies.length <= 4) return route.abort("failed");
     return route.fulfill({
       headers,
       json: { status: "AlreadyApplied", phase, sessionVersion: version },
@@ -156,8 +157,8 @@ test("@production session closing advances both steps and recovers a lost finali
   await expect(page.getByText("Dining session: Closed", { exact: true })).toBeVisible();
   await expect(confirm).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Refresh orders", exact: true })).toBeEnabled();
-  expect(bodies).toHaveLength(3);
-  expect(bodies[2]).toBe(bodies[1]);
+  expect(bodies).toHaveLength(5);
+  for (const body of bodies.slice(2)) expect(body).toBe(bodies[1]);
   expect(JSON.parse(bodies[0] ?? "{}").operationReference).not.toBe(
     JSON.parse(bodies[1] ?? "{}").operationReference,
   );

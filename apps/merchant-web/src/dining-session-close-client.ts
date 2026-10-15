@@ -1,3 +1,8 @@
+import {
+  defaultCommandOutcomeRecovery,
+  withCommandOutcomeRecovery,
+  type CommandOutcomeRecovery,
+} from "./command-outcome-recovery.js";
 export interface DiningSessionCloseCommand {
   readonly operationReference: string;
   readonly diningSessionReference: string;
@@ -48,7 +53,10 @@ function commandSnapshot(command: DiningSessionCloseCommand): DiningSessionClose
 }
 
 /** One immutable operation per user intent. Transport failures never create a new operation. */
-export function createDiningSessionCloseClient(fetcher: typeof fetch = fetch) {
+export function createDiningSessionCloseClient(
+  fetcher: typeof fetch = fetch,
+  recovery: CommandOutcomeRecovery = defaultCommandOutcomeRecovery,
+) {
   return Object.freeze({
     prepare(command: DiningSessionCloseCommand) {
       const snapshot = commandSnapshot(command);
@@ -57,67 +65,77 @@ export function createDiningSessionCloseClient(fetcher: typeof fetch = fetch) {
         async execute(csrf: string, signal?: AbortSignal) {
           if (typeof csrf !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(csrf) || signal?.aborted)
             return invalid();
-          const controller = new AbortController();
-          const abort = () => controller.abort();
-          signal?.addEventListener("abort", abort, { once: true });
-          const timeout = setTimeout(abort, 15000);
-          try {
-            const response = await fetcher("/merchant/dining/closing", {
-              method: "POST",
-              credentials: "same-origin",
-              cache: "no-store",
-              redirect: "error",
-              signal: controller.signal,
-              body,
-              headers: {
-                Accept: "application/json",
-                "Content-Type": "application/json",
-                "X-BOP-CSRF": csrf,
-              },
-            });
-            if (controller.signal.aborted)
-              throw new DiningSessionCloseClientError("OutcomeUnknown");
-            if (response.status === 401 || response.status === 403)
-              throw new DiningSessionCloseClientError("PermissionDenied");
-            if (response.status === 409) throw new DiningSessionCloseClientError("Conflict");
-            if (
-              !response.ok ||
-              response.headers.get("cache-control") !== "no-store" ||
-              !response.headers.get("content-type")?.toLowerCase().startsWith("application/json")
-            )
-              throw new DiningSessionCloseClientError("OutcomeUnknown");
-            const text = await response.text();
-            if (controller.signal.aborted || text.length > 1024)
-              throw new DiningSessionCloseClientError("OutcomeUnknown");
-            const value: unknown = JSON.parse(text);
-            if (
-              !value ||
-              typeof value !== "object" ||
-              Array.isArray(value) ||
-              Object.keys(value).length !== 3
-            )
-              throw new DiningSessionCloseClientError("OutcomeUnknown");
-            const result = value as Record<string, unknown>;
-            if (
-              (result.status !== "Applied" && result.status !== "AlreadyApplied") ||
-              result.sessionVersion !== snapshot.expectedSessionVersion + 1 ||
-              result.phase !== (snapshot.action === "Begin" ? "Closing" : "Closed")
-            )
-              throw new DiningSessionCloseClientError("OutcomeUnknown");
-            return Object.freeze({
-              status: result.status,
-              sessionVersion: result.sessionVersion,
-              phase: result.phase,
-            });
-          } catch (error) {
-            if (error instanceof DiningSessionCloseClientError) throw error;
-            throw new DiningSessionCloseClientError("OutcomeUnknown");
-          } finally {
-            clearTimeout(timeout);
-            signal?.removeEventListener("abort", abort);
-          }
+          // WP-2423: a lost answer is re-checked with this same operation (applied once).
+          return withCommandOutcomeRecovery({
+            recovery,
+            firstTimeoutMs: 15000,
+            signal,
+            send: (timeoutMs) => send(csrf, signal, timeoutMs),
+            lost: (error) =>
+              error instanceof DiningSessionCloseClientError && error.code === "OutcomeUnknown",
+          });
         },
       });
+      async function send(csrf: string, signal: AbortSignal | undefined, timeoutMs: number) {
+        const controller = new AbortController();
+        const abort = () => controller.abort();
+        signal?.addEventListener("abort", abort, { once: true });
+        const timeout = setTimeout(abort, timeoutMs);
+        try {
+          const response = await fetcher("/merchant/dining/closing", {
+            method: "POST",
+            credentials: "same-origin",
+            cache: "no-store",
+            redirect: "error",
+            signal: controller.signal,
+            body,
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+              "X-BOP-CSRF": csrf,
+            },
+          });
+          if (controller.signal.aborted) throw new DiningSessionCloseClientError("OutcomeUnknown");
+          if (response.status === 401 || response.status === 403)
+            throw new DiningSessionCloseClientError("PermissionDenied");
+          if (response.status === 409) throw new DiningSessionCloseClientError("Conflict");
+          if (
+            !response.ok ||
+            response.headers.get("cache-control") !== "no-store" ||
+            !response.headers.get("content-type")?.toLowerCase().startsWith("application/json")
+          )
+            throw new DiningSessionCloseClientError("OutcomeUnknown");
+          const text = await response.text();
+          if (controller.signal.aborted || text.length > 1024)
+            throw new DiningSessionCloseClientError("OutcomeUnknown");
+          const value: unknown = JSON.parse(text);
+          if (
+            !value ||
+            typeof value !== "object" ||
+            Array.isArray(value) ||
+            Object.keys(value).length !== 3
+          )
+            throw new DiningSessionCloseClientError("OutcomeUnknown");
+          const result = value as Record<string, unknown>;
+          if (
+            (result.status !== "Applied" && result.status !== "AlreadyApplied") ||
+            result.sessionVersion !== snapshot.expectedSessionVersion + 1 ||
+            result.phase !== (snapshot.action === "Begin" ? "Closing" : "Closed")
+          )
+            throw new DiningSessionCloseClientError("OutcomeUnknown");
+          return Object.freeze({
+            status: result.status,
+            sessionVersion: result.sessionVersion,
+            phase: result.phase,
+          });
+        } catch (error) {
+          if (error instanceof DiningSessionCloseClientError) throw error;
+          throw new DiningSessionCloseClientError("OutcomeUnknown");
+        } finally {
+          clearTimeout(timeout);
+          signal?.removeEventListener("abort", abort);
+        }
+      }
     },
   });
 }

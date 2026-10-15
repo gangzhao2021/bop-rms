@@ -102,20 +102,20 @@ describe("WP-2423 a confirmed kitchen step shows at once", () => {
   });
   it("says what the cook just did in plain words", () => {
     const item = { displayName: "Latte", requiredQuantity: 2 };
-    expect(kitchenStepText("Order 6 · Pickup", item, accepted.result)).toBe(
-      "Order 6 · Pickup · Latte accepted.",
+    expect(kitchenStepText("Pickup · Order 6", item, accepted.result)).toBe(
+      "Pickup · Order 6 · Latte accepted.",
     );
     expect(
-      kitchenStepText("Order 6 · Pickup", item, {
+      kitchenStepText("Pickup · Order 6", item, {
         outcome: "ProgressRecorded",
         completedQuantity: 1,
       }),
-    ).toBe("Order 6 · Pickup · Latte 1 of 2 done.");
+    ).toBe("Pickup · Order 6 · Latte 1 of 2 done.");
     expect(
-      kitchenStepText("Order 6 · Pickup", item, {
+      kitchenStepText("Pickup · Order 6", item, {
         outcome: "OrderItemReady",
         completedQuantity: 2,
       }),
-    ).toBe("Order 6 · Pickup · Latte ready.");
+    ).toBe("Pickup · Order 6 · Latte ready.");
   });
 });

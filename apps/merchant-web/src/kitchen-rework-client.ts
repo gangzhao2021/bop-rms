@@ -53,6 +53,8 @@ export interface KitchenReworkView {
     readonly orderType: "Pickup" | "DineIn";
     readonly tableLabel: string | null;
   } | null;
+  /** WP-2423: the business day of the remade item's round (null when unknown). */
+  readonly businessDate: string | null;
   readonly customerNote: string | null;
 }
 export interface KitchenReworkBoard {
@@ -141,6 +143,10 @@ function parseView(value: unknown): KitchenReworkView {
             orderType: label.orderType === "DineIn" ? "DineIn" : "Pickup",
             tableLabel: optionalText(label.tableLabel),
           }),
+    businessDate:
+      typeof raw.businessDate === "string" && /^\d{4}-\d{2}-\d{2}$/u.test(raw.businessDate)
+        ? raw.businessDate
+        : null,
     customerNote: optionalText(raw.customerNote),
   });
 }

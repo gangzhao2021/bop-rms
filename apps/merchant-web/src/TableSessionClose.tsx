@@ -14,6 +14,7 @@ import {
   DiningSessionCloseClientError,
 } from "./dining-session-close-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
+import type { CommandOutcomeRecovery } from "./command-outcome-recovery.js";
 import { TableGuestsLeft } from "./TableGuestsLeft.js";
 import { closeReasonTexts } from "./dining-close-reasons.js";
 import type { StaffDiningTable, StaffDiningTableSession } from "./dining-session-client.js";
@@ -73,9 +74,11 @@ export async function closeTableSession(input: {
   readonly csrf: string;
   readonly signal?: AbortSignal;
   readonly fetcher?: typeof fetch | undefined;
+  /** How a lost answer is re-checked with the same operation (tests shorten it). */
+  readonly recovery?: CommandOutcomeRecovery | undefined;
 }): Promise<void> {
   const { plan, session, progress, csrf, signal } = input;
-  const sessions = createDiningSessionCloseClient(input.fetcher);
+  const sessions = createDiningSessionCloseClient(input.fetcher, input.recovery);
   let version = session.version;
   if (session.phase === "Active") {
     plan.begin ??= sessions.prepare({
@@ -96,7 +99,7 @@ export async function closeTableSession(input: {
     progress.closureStatus === "Open" &&
     (progress.phase === "Fulfilled" || progress.phase === "Cancelled")
   ) {
-    plan.order ??= createDiningOrderCloseClient(input.fetcher).prepare({
+    plan.order ??= createDiningOrderCloseClient(input.fetcher, input.recovery).prepare({
       operationReference: serviceOperationReference(),
       orderReference: progress.orderReference,
       expectedOrderVersion: progress.currentOrderVersion,
@@ -367,8 +370,9 @@ export function TableSessionClose({
       )}
       {outcome === "Unknown" ? (
         <p role="alert">
-          We couldn&apos;t confirm the table was closed (the connection may have dropped). Try
-          closing again; nothing is done twice.
+          We couldn&apos;t reach the server to confirm whether the table was closed, even after
+          checking again. Check this device&apos;s connection, then press Try closing again: it
+          reports what already happened and nothing is done twice.
         </p>
       ) : outcome === "Denied" ? (
         <p role="alert">

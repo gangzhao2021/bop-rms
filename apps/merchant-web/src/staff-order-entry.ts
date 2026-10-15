@@ -12,6 +12,7 @@ export class CounterOrderClientError extends Error {
       | "PermissionDenied"
       | "StoreNotTakingOrders"
       | "TableUnavailable"
+      | "TableHasNoQr"
       | "TableCartHasItems"
       | "TableCheckoutInProgress"
       | "ItemUnavailable"
@@ -405,6 +406,7 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
       if (code === "table_checkout_in_progress")
         throw new CounterOrderClientError("TableCheckoutInProgress");
       if (code === "table_unavailable") throw new CounterOrderClientError("TableUnavailable");
+      if (code === "table_qr_missing") throw new CounterOrderClientError("TableHasNoQr");
       if (code === "store_not_taking_dine_in_orders")
         throw new CounterOrderClientError("StoreNotTakingOrders");
       if (code === "order_not_priced") throw new CounterOrderClientError("NotPriced");

@@ -14,7 +14,9 @@ import {
   filterCurrentOrderItems,
   acceptanceWindow,
   awaitingBatchReferences,
+  orderChannel,
   orderChannelLabel,
+  orderPhaseLabel,
   orderTypeLabel,
   paymentDueText,
   paymentDueTier,
@@ -866,6 +868,40 @@ it("WP-2423: words an unpaid round's payment state for staff", () => {
     "Partner integration",
     "Other",
   ]);
+  expect(orderChannelLabel("Staff")).toBe("Taken by staff");
+});
+
+it("WP-2423: a table order whose first round staff entered is listed and filtered as taken by staff", () => {
+  const batch = (sequence: number, staff: boolean) => ({
+    sequence,
+    staffRound: staff
+      ? { recordedAfterOutage: false, paidOnCardMachine: null, amountDueMinor: null }
+      : null,
+  });
+  type Order = Parameters<typeof orderChannel>[0];
+  const order = (orderType: string, batches: unknown[]) =>
+    ({ orderType, sourceChannel: "Qr", batches }) as unknown as Order;
+  expect(orderChannel(order("DineIn", [batch(1, true), batch(2, false)]))).toBe("Staff");
+  // Guests opened the table by QR code; a later staff round keeps its own "Entered by staff".
+  expect(orderChannel(order("DineIn", [batch(1, false), batch(2, true)]))).toBe("Qr");
+  expect(orderChannel(order("Pickup", [batch(1, false)]))).toBe("Qr");
+  const items = [
+    order("DineIn", [batch(1, true)]),
+    order("DineIn", [batch(1, false)]),
+  ] as unknown as Parameters<typeof filterCurrentOrderItems>[0];
+  const all = { orderNumber: "", type: "All", channel: "All", phase: "All" };
+  expect(filterCurrentOrderItems(items, { ...all, channel: "Staff" })).toEqual([items[0]]);
+  expect(filterCurrentOrderItems(items, { ...all, channel: "Qr" })).toEqual([items[1]]);
+});
+
+it("WP-2423: a dine-in order whose items were all served reads Served, not Ready", () => {
+  expect(orderPhaseLabel({ orderType: "DineIn", currentPhase: "Fulfilled" })).toBe("Served");
+  expect(orderPhaseLabel({ orderType: "DineIn", currentPhase: "Ready" })).toBe("Ready");
+  expect(orderPhaseLabel({ orderType: "Pickup", currentPhase: "Fulfilled" })).toBe("Picked up");
+  expect(orderPhaseLabel({ orderType: "DineIn", currentPhase: "InProgress" })).toBe("In progress");
+  expect(orderPhaseLabel({ orderType: "DineIn", currentPhase: null })).toBe(
+    "Status not loaded · refresh",
+  );
 });
 
 it("WP-2423 Q10: shows who the pickup is for and how to reach them, only from the detail", () => {

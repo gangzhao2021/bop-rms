@@ -726,7 +726,18 @@ it("WP-2423 Q7 slice 2: reads a round staff entered for the table and its card-m
     recordedAfterOutage: true,
     paidOnCardMachine: { amountMinor: "2560", takenAt: "2026-09-14T00:10:00.000Z" },
   };
-  expect(parse(dining(paid))).toEqual({ ...paid, amountDueMinor: null });
+  // An older server without the machine refunds reads as nothing refunded.
+  expect(parse(dining(paid))).toEqual({
+    ...paid,
+    paidOnCardMachine: { ...paid.paidOnCardMachine, refundedMinor: "0" },
+    amountDueMinor: null,
+  });
+  // WP-2423: what was refunded on the machine for the round.
+  const refunded = {
+    ...paid,
+    paidOnCardMachine: { ...paid.paidOnCardMachine, refundedMinor: "2560" },
+  };
+  expect(parse(dining(refunded))).toEqual({ ...refunded, amountDueMinor: null });
   expect(parse(dining(null))).toBeNull();
   // Older servers without the key read as no staff round.
   expect(
@@ -740,6 +751,8 @@ it("WP-2423 Q7 slice 2: reads a round staff entered for the table and its card-m
       paidOnCardMachine: { amountMinor: "25.60", takenAt: paid.paidOnCardMachine.takenAt },
     }),
     dining({ ...paid, extra: true }),
+    dining({ ...paid, paidOnCardMachine: { ...paid.paidOnCardMachine, refundedMinor: "2561" } }),
+    dining({ ...paid, paidOnCardMachine: { ...paid.paidOnCardMachine, refundedMinor: "1.5" } }),
     dining({ ...paid, amountDueMinor: "100" }),
     dining({ recordedAfterOutage: false, paidOnCardMachine: null, amountDueMinor: "0" }),
     dining({ recordedAfterOutage: false, paidOnCardMachine: null, amountDueMinor: "1.5" }),

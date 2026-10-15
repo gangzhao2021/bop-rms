@@ -478,7 +478,7 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { name: "Additional detail", exact: true })).toBeVisible();
   // WP-2423 Q2: the detail names its Order and table, and shows the Customer's note.
-  await expect(page.getByText("Order 14 · Table T4", { exact: true })).toBeVisible();
+  await expect(page.getByText("Table T4 · Order 14", { exact: true })).toBeVisible();
   await expect(page.locator(".kitchen-work-item__note")).toHaveText(
     "Note: Synthetic note: no onions",
   );
@@ -1031,7 +1031,7 @@ test("@production Kitchen commands preserve intent and wait for projection versi
   await page.keyboard.press("Enter");
   // WP-2423: the confirmed step shows at once, in plain words, before the queue catches up.
   await expect(
-    page.getByRole("heading", { name: "Order 21 · Pickup · Synthetic rice accepted." }),
+    page.getByRole("heading", { name: "Pickup · Order 21 · Synthetic rice accepted." }),
   ).toBeVisible();
   await expect(page.getByText("The queue now reflects", { exact: false })).toHaveCount(0);
   expect(commands[1]).toEqual(commands[0]);
@@ -1059,7 +1059,7 @@ test("@production Kitchen commands preserve intent and wait for projection versi
   conflict = false;
   await start.click();
   await expect(
-    page.getByRole("heading", { name: "Order 21 · Pickup · Synthetic rice started." }),
+    page.getByRole("heading", { name: "Pickup · Order 21 · Synthetic rice started." }),
   ).toBeVisible();
   await expect(complete).toBeEnabled();
   Object.assign(item, {
@@ -1071,7 +1071,7 @@ test("@production Kitchen commands preserve intent and wait for projection versi
   await expect(complete).toBeEnabled();
   await complete.click();
   await expect(
-    page.getByRole("heading", { name: "Order 21 · Pickup · Synthetic rice done and ready." }),
+    page.getByRole("heading", { name: "Pickup · Order 21 · Synthetic rice done and ready." }),
   ).toBeVisible();
   expect(commands[5]?.quantityDelta).toBe(2);
   Object.assign(item, {
@@ -1083,7 +1083,7 @@ test("@production Kitchen commands preserve intent and wait for projection versi
   });
   await refresh.click();
   await expect(
-    page.getByRole("heading", { name: "Order 21 · Pickup · Synthetic rice done and ready." }),
+    page.getByRole("heading", { name: "Pickup · Order 21 · Synthetic rice done and ready." }),
   ).toBeVisible();
   await expect(complete).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Mark ready", exact: true })).toHaveCount(0);

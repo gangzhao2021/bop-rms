@@ -90,3 +90,23 @@
    72 小时内）重新录入该轮并记录收款，不会重复收费（刷卡机已扣的那笔即补录的收款）。运维手册的断网流程适用。
 6. **授权与迁移**：迁移 `2000_056`（放宽取消原因与触发器，无新表）；不新增数据库授权（api 已有取消记录、修订、发件箱、审计与 Payment
    读取的授权），不改权限目录。
+
+## 实现决定（2026-10-15，v15 实测"无桌码的桌点单 503 并留下空会话"，协调人按商用原则决定，Owner 可推翻）
+
+v15 DEMO-01/03 没有签发桌码，"Take order for table"返回 503 并留下一个没有订单的 Active 堂食会话（先开台、后用桌码进入时失败）。
+
+1. **店员轮次仍经桌码进入，不另开无码通道**。店员录入的一轮按决定 2 以本桌客人的身份走顾客同一路径；Dining 契约要求顾客会话的
+   `qrRevocationVersion` 等于桌台当前 `qrVersion`，之后的购物车、报价、结账、提交每一步都按该桌码校验会话。"不凭桌码开台"需要新增一种
+   绕过桌码作废规则的客人会话，等于重开已接受的 Guest/Dining 契约（AGENTS 不得重开已接受决定），且会让被停用的码所在桌仍可被
+   当作客人入口。真实门店里桌码是桌台上线的一次性设置（店长在 Table QR codes 页"Create code"，可稍后打印），不是每次点单的前提；
+   因此选"按钮不可用并说明原因与去处"。被停用（Turned off）的桌同样处理。
+2. **桌台页（DIN-FLOOR-BOARD）**：没有可用桌码的桌不显示"Take order for table"，改为"Orders can't be taken for table T yet: it has no
+   table QR code."，有 `dining.table.qr.manage` 的员工看到指向 Table QR codes 页的链接（"Create one on Table QR codes (it can be printed
+   later), then take the order."），其他员工看到"Ask a manager to create one on the Table QR codes page…"。点单页直接打开该桌时同样先说明，
+   不发送任何请求。
+3. **不留空会话**：服务端命令改为先用桌码进入（只读桌码与签发一个尚未加入任何桌的客人会话，不改变桌台），再开台/换发桌台加入码；
+   无桌码时在开台前拒绝，返回 409 `table_qr_missing`（页面："T has no table QR code, so orders can't be taken for it yet. Nothing was sent
+   or charged…"），桌台与会话不变。门店不接单同样在开台前拒绝（原有）。
+4. **剩余风险（已知）**：开台之后的步骤（加入、绑定）若因内部故障失败，仍可能留下没有订单的会话；店员没有 `dining.session.close`
+   不能补偿关闭，系统补偿关闭需要新增 Dining 的"放弃空会话"命令与审计（未做，记为后续）。此时桌台页显示该桌已入座且无订单，
+   店长在桌台页直接关桌（无订单时无需结单）。

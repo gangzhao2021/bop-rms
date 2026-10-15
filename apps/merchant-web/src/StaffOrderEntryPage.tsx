@@ -70,6 +70,10 @@ const menuError: Record<string, [string, string]> = {
     "This table can't take an order now",
     "It may be marked unavailable or its session may be closing. Check it on the Tables page.",
   ],
+  TableHasNoQr: [
+    "This table has no table QR code yet",
+    "Orders for a table use its code. Ask a manager to create one on the Table QR codes page, then take the order.",
+  ],
   TableUnknown: ["Table not found", "Open the table from the Tables page to take its order."],
   Unavailable: [
     "The menu could not be loaded",
@@ -93,6 +97,8 @@ function placeErrorText(
       return "A guest at this table is paying on their phone right now. Wait a minute, then send again.";
     case "TableUnavailable":
       return `${table ?? "This table"} can't take an order now (marked unavailable, or its session is closing). Check the table on the Tables page.`;
+    case "TableHasNoQr":
+      return `${table ?? "This table"} has no table QR code, so orders can't be taken for it yet. Nothing was sent or charged. Ask a manager to create one on the Table QR codes page, then send the order again.`;
     case "ItemUnavailable": {
       const line = error.lineIndex === null ? undefined : lines[error.lineIndex];
       return line
@@ -280,6 +286,7 @@ export function StaffOrderEntryPage({
         if (found !== undefined) {
           if (found.lifecycle !== "Published" || found.operationalState !== "Available")
             throw new CounterOrderClientError("TableUnavailable");
+          if (found.qrCodeValidUntil === null) throw new CounterOrderClientError("TableHasNoQr");
           setTableLabel(found.stableLabel);
           return;
         }
@@ -298,7 +305,9 @@ export function StaffOrderEntryPage({
           kind: "Error",
           code:
             error instanceof CounterOrderClientError &&
-            (error.code === "PermissionDenied" || error.code === "TableUnavailable")
+            (error.code === "PermissionDenied" ||
+              error.code === "TableUnavailable" ||
+              error.code === "TableHasNoQr")
               ? error.code
               : "Unavailable",
         });

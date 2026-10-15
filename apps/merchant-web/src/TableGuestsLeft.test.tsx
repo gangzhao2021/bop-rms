@@ -15,6 +15,7 @@ const round = (overrides: Partial<TableCloseRound>): TableCloseRound => ({
   state: "PaidNotSent",
   openItemCount: 2,
   startedItemCount: 0,
+  readyItemCount: 0,
   cancellableItemReferences: [],
   refund: { method: "Online", amountMinor: "1130" },
   cancelsAt: null,
@@ -32,6 +33,7 @@ const wire = {
       state: "PaidNotSent",
       openItemCount: 1,
       startedItemCount: 0,
+      readyItemCount: 0,
       cancellableItemReferences: [],
       refund: { method: "Online", amountMinor: "1130" },
       cancelsAt: null,
@@ -42,6 +44,7 @@ const wire = {
       state: "AlreadyRefunded",
       openItemCount: 1,
       startedItemCount: 0,
+      readyItemCount: 0,
       cancellableItemReferences: [],
       refund: { method: "Online", amountMinor: "0" },
       cancelsAt: null,
@@ -88,14 +91,15 @@ it("DEC-TABLE-CLOSE-GUESTS-LEFT: words each round for staff, with amounts and no
     ),
   ];
   expect(texts[0]).toBe(
-    "Round 4: paid CAD 11.30 online but never sent to the kitchen. It will be cancelled and the guest refunded.",
+    "Round 4: paid $11.30 online but never sent to the kitchen. It will be cancelled and the guest refunded.",
   );
   expect(texts[1]).toContain("refund it on the card machine");
   expect(texts[2]).toContain("already refunded in full");
   expect(texts[3]).toContain("cancelled automatically at 15:20");
-  expect(texts[4]).toContain("CAD 4.50 refunded");
+  expect(texts[4]).toContain("$4.50 refunded");
   expect(texts[5]).toContain("mark them served");
-  expect(texts[6]).toContain("Refund CAD 5.93 on the card machine");
+  expect(texts.join(" ")).not.toContain("CAD");
+  expect(texts[6]).toContain("Refund $5.93 on the card machine");
   // v15 DEMO-02 round 16: accepted, refunded in full on the card machine item by item already.
   const refunded = guestsLeftRoundText(
     round({
@@ -171,4 +175,43 @@ it("WP-2423 B759: the plan carries the close evaluation's reasons, strictly", ()
   delete missing.closeBlockers;
   expect(() => parseTableClosePlan(missing, expected)).toThrow();
   expect(() => parseTableClosePlan({ ...wire, closeBlockers: ["not a code"] }, expected)).toThrow();
+});
+
+it("WP-2423: started items are worded by kitchen readiness (ready to serve vs being made)", () => {
+  const now = Date.parse("2026-10-15T19:00:00.000Z");
+  const text = (overrides: Partial<TableCloseRound>, preview: string | null = null) =>
+    guestsLeftRoundText(round({ refund: null, ...overrides }), "America/Toronto", now, preview);
+  // v15: the kitchen marked the only open item ready; it is not "being made" any more.
+  expect(
+    text({ state: "BeingMade", openItemCount: 1, startedItemCount: 1, readyItemCount: 1 }),
+  ).toBe("Round 4: 1 item ready to serve. Serve them, or mark them served on the Orders page.");
+  expect(
+    text({ state: "BeingMade", openItemCount: 3, startedItemCount: 3, readyItemCount: 1 }),
+  ).toContain("2 items being made and 1 ready to serve.");
+  expect(
+    text({ state: "BeingMade", openItemCount: 2, startedItemCount: 2, readyItemCount: 0 }),
+  ).toContain("2 items already being made.");
+  // Paid on the card machine with an item not started yet.
+  expect(
+    text({ state: "BeingMade", openItemCount: 3, startedItemCount: 1, readyItemCount: 1 }),
+  ).toContain("2 items being made or paid on the card machine and 1 ready to serve.");
+  expect(
+    text(
+      {
+        state: "PartlyStarted",
+        openItemCount: 2,
+        startedItemCount: 1,
+        readyItemCount: 1,
+        cancellableItemReferences: [id(30)],
+      },
+      "450",
+    ),
+  ).toBe(
+    "Round 4: 1 item not started will be cancelled and $4.50 refunded. 1 item ready to serve: serve them, or mark them served on the Orders page.",
+  );
+});
+
+it("WP-2423: a plan claiming more ready items than started is refused", () => {
+  const value = { ...wire, rounds: wire.rounds.map((round) => ({ ...round, readyItemCount: 1 })) };
+  expect(() => parseTableClosePlan(value, { order: id(3), session: id(2) })).toThrow();
 });

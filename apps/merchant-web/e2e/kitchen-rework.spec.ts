@@ -177,7 +177,7 @@ test("@production WP-2423 Q26: the kitchen remakes a dropped dish and puts a dis
   const recent = page.getByText("Recently finished · 1");
   await expect(recent).toBeVisible();
   await recent.click();
-  await page.getByRole("button", { name: "Remake Beef noodle soup, Order 21 · Table T4" }).click();
+  await page.getByRole("button", { name: "Remake Beef noodle soup, Table T4 · Order 21" }).click();
 
   const dialog = page.getByRole("dialog", { name: "Remake Beef noodle soup" });
   await expect(dialog).toBeVisible();
@@ -206,7 +206,7 @@ test("@production WP-2423 Q26: the kitchen remakes a dropped dish and puts a dis
 
   const lane = page.getByRole("region", { name: "Remakes" });
   await expect(lane.getByText("Remake · Dropped")).toBeVisible();
-  await expect(lane.getByText("Order 21 · Table T4")).toBeVisible();
+  await expect(lane.getByText("Table T4 · Order 21")).toBeVisible();
   await expect(lane.getByText("Slipped off the pass")).toBeVisible();
   await expect(lane).not.toContainText("DROPPED");
   await expectLayout(page, "kitchen-remake-lane");
@@ -223,7 +223,7 @@ test("@production WP-2423 Q26: the kitchen remakes a dropped dish and puts a dis
 
   // Marked done by mistake: back in progress, nothing wasted.
   await page.getByRole("button", { name: "Dismiss" }).click();
-  await page.getByRole("button", { name: "Remake Beef noodle soup, Order 21 · Table T4" }).click();
+  await page.getByRole("button", { name: "Remake Beef noodle soup, Table T4 · Order 21" }).click();
   await dialog.getByLabel("Not ready yet — marked done by mistake").check();
   await expect(dialog.getByText("Nothing is recorded as waste", { exact: false })).toBeVisible();
   await dialog.getByRole("button", { name: "Put back in progress" }).click();
@@ -257,7 +257,7 @@ test("@production WP-2423 Q26: past two minutes a dish can no longer be put back
   );
   await page.goto("/operations/kitchen");
   await page.getByText("Recently finished · 1").click();
-  await page.getByRole("button", { name: "Remake Beef noodle soup, Order 21 · Table T4" }).click();
+  await page.getByRole("button", { name: "Remake Beef noodle soup, Table T4 · Order 21" }).click();
   const dialog = page.getByRole("dialog", { name: "Remake Beef noodle soup" });
   await dialog.getByLabel("Not ready yet — marked done by mistake").check();
   await dialog.getByRole("button", { name: "Put back in progress" }).click();

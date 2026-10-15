@@ -95,7 +95,11 @@ export function DiningOrderCloseAction({
         </button>
       ) : null}
       {state === "Unknown" ? (
-        <p role="status">The result is unknown. Retry the same request to recover its result.</p>
+        <p role="status">
+          We couldn&apos;t reach the server to confirm whether the order was closed, even after
+          checking again. Check this device&apos;s connection, then retry: it reports what already
+          happened and nothing is done twice.
+        </p>
       ) : state === "Denied" ? (
         <div role="status">
           <p>The order wasn&apos;t closed.</p>

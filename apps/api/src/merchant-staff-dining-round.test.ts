@@ -192,8 +192,8 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
     const placed = await send();
     expect(calls).toEqual([
       "takesOrder",
-      "openTable",
       "enter",
+      "openTable",
       "join",
       "bind",
       "selectCart",
@@ -301,7 +301,16 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
     const blocked = setup();
     blocked.pipeline.openTable.mockResolvedValueOnce({ status: "TableUnavailable" } as never);
     await expect(blocked.send()).rejects.toMatchObject({ code: "STAFF_ROUND_TABLE_UNAVAILABLE" });
-    expect(blocked.pipeline.enter).not.toHaveBeenCalled();
+    expect(blocked.pipeline.join).not.toHaveBeenCalled();
+  });
+
+  it("DEC-STAFF-DINE-IN-ROUND: a table without a QR code is refused before the table is opened", async () => {
+    const { send, pipeline } = setup();
+    pipeline.enter.mockResolvedValueOnce({ status: "NoTableQr" } as never);
+    await expect(send()).rejects.toMatchObject({ code: "STAFF_ROUND_TABLE_QR_MISSING" });
+    // No dining session is started or code issued for a round that can't be entered.
+    expect(pipeline.openTable).not.toHaveBeenCalled();
+    expect(pipeline.join).not.toHaveBeenCalled();
   });
 
   it("takes a paper round after closing and refuses a new one while the store is closed", async () => {

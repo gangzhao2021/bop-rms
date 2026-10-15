@@ -181,6 +181,15 @@ describe("staff table guest pipeline", () => {
     return { options, pipeline: createStaffTableGuestPipeline(options as never) };
   };
 
+  it("DEC-STAFF-DINE-IN-ROUND: a table without a current QR code is reported, nothing entered", async () => {
+    const { options, pipeline } = setup();
+    options.tableQrToken.mockResolvedValueOnce(null as never);
+    expect(
+      await pipeline.enter({ tableReference: id(30), requestedAt: "2026-10-15T18:00:00.000Z" }),
+    ).toEqual({ status: "NoTableQr" });
+    expect(options.entry.establish).not.toHaveBeenCalled();
+  });
+
   it("enters with the table's printed QR and joins with the one-time table code", async () => {
     const { options, pipeline } = setup();
     const entered = await pipeline.enter({

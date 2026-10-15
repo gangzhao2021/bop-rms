@@ -54,20 +54,9 @@ export function kitchenAgeTier(minutes: number): "ok" | "warning" | "late" {
 import { playKitchenChime } from "./alert-chime.js";
 export { playKitchenChime };
 
-/** WP-2423 Q2: "Order 14 · Table T4", "Order 5 · Pickup"; never a Customer's name. */
+/** WP-2423 Q2: "Table T4 · Order 14", "Pickup · Order 5"; never a Customer's name. */
 export function kitchenOrderLabel(item: KitchenBoardItem): string {
-  const label = item.orderLabel;
-  if (!label) return "Order details unavailable";
-  return (
-    "Order " +
-    label.orderNumber +
-    " · " +
-    (label.orderType === "Pickup"
-      ? "Pickup"
-      : label.tableLabel
-        ? "Table " + label.tableLabel
-        : "Dine-in")
-  );
+  return kitchenOrderText(item.orderLabel);
 }
 /** WP-2423 Q2: a lane's items with each Order's work together, oldest Order first. */
 export function groupKitchenItemsByOrder(items: readonly KitchenBoardItem[]) {
@@ -405,6 +394,7 @@ import {
 import { Link, useLocation, useParams } from "react-router";
 import {
   KitchenBoardClientError,
+  kitchenOrderText,
   parseKitchenBoardView,
   parseKitchenRouteReference,
   parseKitchenWorkItemDetailView,
@@ -1301,6 +1291,7 @@ export function KitchenBoardScreen({
           <div className="kitchen-board-lanes kitchen-board-remakes">
             <KitchenRemakeLane
               items={board.reworks}
+              today={today}
               readOnly={remakeReadOnly}
               onAdvance={remakes.onAdvance}
             />

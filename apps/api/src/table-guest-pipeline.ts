@@ -114,8 +114,8 @@ export function createStaffTableCode(options: {
 export function createStaffTableGuestPipeline(options: {
   takesOrder(input: { readonly recordedAfterOutage: boolean }): Promise<boolean>;
   openTable: StaffTableGuestPipeline["openTable"];
-  /** The table's current printed QR token (as a guest scans it). */
-  tableQrToken(tableReference: string): Promise<string>;
+  /** The table's current printed QR token (as a guest scans it); null when it has none. */
+  tableQrToken(tableReference: string): Promise<string | null>;
   entry: CustomerEntryPort;
   join: { join(input: unknown, request: unknown): Promise<unknown> };
   /** The join request's trusted context (abuse budget), as the customer route builds it. */
@@ -147,10 +147,12 @@ export function createStaffTableGuestPipeline(options: {
     takesOrder: (input) => options.takesOrder(input),
     openTable: (staff, input) => options.openTable(staff, input),
     async enter(input) {
+      const qrToken = await options.tableQrToken(input.tableReference);
+      if (qrToken === null) return Object.freeze({ status: "NoTableQr" as const });
       const result = (await options.entry.establish({
         entryRequestReference: options.nextReference(),
         operationReference: options.nextReference(),
-        qrToken: await options.tableQrToken(input.tableReference),
+        qrToken,
         requestedAt: input.requestedAt,
       })) as {
         status: string;

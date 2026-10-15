@@ -460,11 +460,11 @@ async function createInternalStaffDiningRound(
       regenerate: (staff, command) => owner.regenerate({ ...staff, command }),
       nextReference: reference,
     }),
-    // The table's printed QR, as a guest scanning it would enter.
+    // The table's printed QR, as a guest scanning it would enter; null when it has none (the
+    // staff command then refuses before opening the table).
     tableQrToken: async (tableReference) => {
       const token = await configuredEntry.dining.currentToken(tableReference);
-      if (typeof token !== "string") throw new Error("INTERNAL_TABLE_QR_UNAVAILABLE");
-      return token;
+      return typeof token === "string" ? token : null;
     },
     entry: createPersistentCustomerEntryComposition({
       ...entry.persistent,

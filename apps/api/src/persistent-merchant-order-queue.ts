@@ -21,6 +21,7 @@ import {
 } from "@rms/fulfillment";
 import {
   createPostgresCardMachinePaymentStore,
+  type CardMachinePaymentRecord,
   listStoreOrderBatchPaymentOutcomes,
   listStoreOrderBatchesWithOnlinePayment,
   listStoreOrderOnlinePaidTotals,
@@ -347,7 +348,16 @@ export function createPersistentMerchantOrderQueue(options: {
             string,
             {
               recordedAfterOutage: boolean;
-              paidOnCardMachine: { amountMinor: string; takenAt: string } | null;
+              /**
+               * refundedMinor: what was refunded on the machine for this round (staff
+               * cancellations of the round or its items, and ordinary refunds), as the order's
+               * settlement counts card-machine refunds.
+               */
+              paidOnCardMachine: {
+                amountMinor: string;
+                takenAt: string;
+                refundedMinor: string;
+              } | null;
               /** WP-2423 D5: what to charge on the card machine while it is unpaid (else null). */
               amountDueMinor: string | null;
             }
@@ -424,16 +434,24 @@ export function createPersistentMerchantOrderQueue(options: {
               authorize: stillAllowed,
             });
             const rounds = await roundEntries.listByOrders(businessTransaction, orderReferences);
-            // One Payment read for every staff round on the page.
-            const roundPayments = await cardPayments.listByBatches(
-              businessTransaction,
-              [...rounds].map(([batch, round]) => ({
-                orderReference: round.orderReference,
-                orderBatchReference: batch,
-              })),
-            );
+            // One Payment read (payments and their refunds) for every staff round on the page.
+            const roundPayments = new Map<
+              string,
+              { payment: CardMachinePaymentRecord; refundedMinor: bigint }
+            >();
+            for (const recorded of (
+              await cardPayments.listByOrders(businessTransaction, [
+                ...new Set([...rounds.values()].map((round) => String(round.orderReference))),
+              ])
+            ).values())
+              for (const { payment, refunds } of recorded)
+                roundPayments.set(String(payment.orderBatchReference), {
+                  payment,
+                  refundedMinor: refunds.reduce((sum, refund) => sum + refund.amountMinor, 0n),
+                });
             for (const [batch, round] of rounds) {
-              const paid = roundPayments.get(batch) ?? null;
+              const machine = roundPayments.get(batch) ?? null;
+              const paid = machine?.payment ?? null;
               // WP-2423 D5: an unpaid round can be paid from Orders too, for the amount the
               // card-machine record checks (quote with tax plus the tip staff keyed), while its
               // Dining payment clock is open. The amount is rebuilt from five owners' records, so
@@ -473,6 +491,7 @@ export function createPersistentMerchantOrderQueue(options: {
                     : {
                         amountMinor: paid.preparation.total.amountMinor.toString(),
                         takenAt: String(paid.takenAt),
+                        refundedMinor: (machine?.refundedMinor ?? 0n).toString(),
                       },
               });
             }

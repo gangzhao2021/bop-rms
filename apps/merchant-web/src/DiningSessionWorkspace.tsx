@@ -123,6 +123,7 @@ export function DiningSessionWorkspace({
   timeZone,
   navigation,
   canTakeOrders = false,
+  tableQrHref,
 }: {
   readonly csrf: string;
   readonly storeLabel: string;
@@ -131,6 +132,8 @@ export function DiningSessionWorkspace({
   readonly navigation?: ReactNode;
   /** WP-2423 Q7 slice 2: the staff member may enter a round for a table (staff ordering). */
   readonly canTakeOrders?: boolean;
+  /** The Table QR codes page, when this staff member may create codes there. */
+  readonly tableQrHref?: string | undefined;
 }) {
   const [tables, setTables] = useState<StaffDiningTable[]>([]),
     [next, setNext] = useState<string | null>(null),
@@ -623,12 +626,29 @@ export function DiningSessionWorkspace({
                       Order for guests who can&apos;t or won&apos;t use their phone, or enter a
                       paper order after an outage. It joins this table&apos;s order.
                     </p>
-                    <Link
-                      className="dining-take-order"
-                      to={`/operations/order-entry?table=${encodeURIComponent(selected.tableReference)}`}
-                    >
-                      Take order for table {selected.stableLabel}
-                    </Link>
+                    {selected.qrCodeValidUntil === null ? (
+                      // DEC-STAFF-DINE-IN-ROUND (2026-10-15): a staff round joins the table the
+                      // way a guest does, through the table's code, so it needs one first.
+                      <p role="note">
+                        Orders can&apos;t be taken for table {selected.stableLabel} yet: it has no
+                        table QR code.{" "}
+                        {tableQrHref !== undefined ? (
+                          <>
+                            Create one on <a href={tableQrHref}>Table QR codes</a> (it can be
+                            printed later), then take the order.
+                          </>
+                        ) : (
+                          "Ask a manager to create one on the Table QR codes page, then take the order."
+                        )}
+                      </p>
+                    ) : (
+                      <Link
+                        className="dining-take-order"
+                        to={`/operations/order-entry?table=${encodeURIComponent(selected.tableReference)}`}
+                      >
+                        Take order for table {selected.stableLabel}
+                      </Link>
+                    )}
                   </section>
                 ) : null}
                 <section aria-label="Dining session action">

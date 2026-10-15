@@ -59,6 +59,8 @@ export interface TableCloseRound {
   readonly openItemCount: number;
   /** Of those, items already being made, ready or partly served. */
   readonly startedItemCount: number;
+  /** Of the started ones, items the kitchen marked ready and not yet served (ready to serve). */
+  readonly readyItemCount: number;
   /** PartlyStarted: the lines that can still be cancelled (kitchen not started). */
   readonly cancellableItemReferences: readonly string[];
   /** What the round's cancellation refunds (whole remaining payment, tip included), or owes. */
@@ -260,11 +262,16 @@ export function createMerchantDiningTableClosePlan(options: {
                 item.phase === "InProgress" || item.phase === "Ready" || item.deliveredQuantity > 0,
             );
             const startedItemCount = started.reduce((sum, item) => sum + item.remainingQuantity, 0);
+            // Kitchen readiness: Ready items wait at the pass (a partly served item stays Ready).
+            const readyItemCount = open
+              .filter((item) => item.phase === "Ready")
+              .reduce((sum, item) => sum + item.remainingQuantity, 0);
             const base = {
               orderBatchReference: reference,
               sequence: batch.sequence,
               openItemCount,
               startedItemCount,
+              readyItemCount,
               cancellableItemReferences: Object.freeze([] as string[]),
               refund: null,
               cancelsAt: null,

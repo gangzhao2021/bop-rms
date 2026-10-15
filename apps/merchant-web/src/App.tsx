@@ -1527,6 +1527,10 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                   canTakeOrders={state.workspace.navigation.some(
                     (item) => item.screenId === "OPS-ORDER-ENTRY",
                   )}
+                  tableQrHref={
+                    state.workspace.navigation.find((item) => item.screenId === "DIN-TABLE-LIST")
+                      ?.href
+                  }
                   navigation={state.workspace.navigation.map((item) => (
                     <a
                       key={item.screenId}

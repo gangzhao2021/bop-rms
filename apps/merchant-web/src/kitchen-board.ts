@@ -423,3 +423,24 @@ export const unavailableKitchenBoardClient: KitchenBoardClient = Object.freeze({
   loadQueue: () => Promise.reject(new KitchenBoardClientError("Unavailable")),
   loadWorkItem: () => Promise.reject(new KitchenBoardClientError("Unavailable")),
 });
+
+/**
+ * WP-2423 Q2: how a ticket names its Order, where it goes first ("Table T4 · Order 14",
+ * "Pickup · Order 5"): order numbers restart each business day and a table opened on an earlier
+ * day keeps its number, so two tickets can share a number; the destination tells them apart.
+ * Never a Customer's name.
+ */
+export function kitchenOrderText(
+  label: Pick<KitchenOrderLabel, "orderNumber" | "orderType" | "tableLabel"> | null | undefined,
+): string {
+  if (!label) return "Order details unavailable";
+  return (
+    (label.orderType === "Pickup"
+      ? "Pickup"
+      : label.tableLabel
+        ? "Table " + label.tableLabel
+        : "Dine-in") +
+    " · Order " +
+    label.orderNumber
+  );
+}

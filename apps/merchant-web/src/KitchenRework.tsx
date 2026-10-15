@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { StatePanel } from "@bop-rms/ui";
-import type { KitchenBoardItem } from "./kitchen-board.js";
+import { kitchenOrderText, type KitchenBoardItem } from "./kitchen-board.js";
 import {
   createKitchenReworkClient,
   kitchenReworkBadge,
@@ -13,6 +13,7 @@ import {
   type KitchenReworkView,
 } from "./kitchen-rework-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
+import { earlierDayText, fromEarlierKitchenDay } from "./KitchenEarlierDays.js";
 
 type CommandState =
   | { readonly kind: "Idle" }
@@ -201,17 +202,7 @@ export function KitchenReworkStatus({
 }
 
 function orderText(label: KitchenReworkView["orderLabel"]): string {
-  if (!label) return "Order details unavailable";
-  return (
-    "Order " +
-    label.orderNumber +
-    " · " +
-    (label.orderType === "Pickup"
-      ? "Pickup"
-      : label.tableLabel
-        ? "Table " + label.tableLabel
-        : "Dine-in")
-  );
+  return kitchenOrderText(label);
 }
 
 /** Open remakes first in their own lane, clearly marked; finished ones stay out of the way. */
@@ -219,8 +210,11 @@ export function KitchenRemakeLane({
   items,
   readOnly,
   onAdvance,
+  today,
 }: {
   readonly items: readonly KitchenReworkView[];
+  /** The Store's current business day: a remake for an earlier day's order says its day. */
+  readonly today?: string | null | undefined;
   readonly readOnly: boolean;
   readonly onAdvance: (rework: KitchenReworkView) => void;
 }) {
@@ -240,7 +234,12 @@ export function KitchenRemakeLane({
             data-status={rework.status}
           >
             <p className="kitchen-remake-badge">{kitchenReworkBadge(rework.reasonCode)}</p>
-            <h4 className="kitchen-order-group__label">{orderText(rework.orderLabel)}</h4>
+            <h4 className="kitchen-order-group__label">
+              {orderText(rework.orderLabel)}
+              {fromEarlierKitchenDay(rework, today) && rework.businessDate
+                ? ` · ${earlierDayText(rework.businessDate)}`
+                : ""}
+            </h4>
             <div className="kitchen-work-item__summary">
               <h3>{rework.displayName}</h3>
             </div>
