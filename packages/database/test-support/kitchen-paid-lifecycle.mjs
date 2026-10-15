@@ -439,6 +439,8 @@ export async function exercisePaidKitchenLifecycle({
         limit: 50,
       });
       assert.equal(response.status, 200);
+      // WP-2423: the named KDS operator Session unlocks the board through the real HTTP read.
+      assert.equal(response.body.operatorStatus, "Named");
       assert.equal(response.body.items.length, ticket.workItems.length);
       assert.ok(
         response.body.items.every(

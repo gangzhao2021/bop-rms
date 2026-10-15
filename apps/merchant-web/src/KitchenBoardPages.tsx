@@ -92,6 +92,74 @@ export function isActiveKitchenWork(item: KitchenBoardItem): boolean {
   return item.execution !== undefined && item.execution.readyAt === null;
 }
 
+/** IDR-0039 handover belongs to a kitchen display sign-in, never to a counter/office sign-in. */
+export function kitchenHandoverOffered(
+  named: boolean,
+  operator: KitchenBoardView["operatorStatus"] | null,
+): boolean {
+  return named && operator !== null && operator !== "Unverified";
+}
+
+/** WP-2423: how the board names who is using it, in staff words. */
+export function kitchenOperatorText(status: KitchenBoardView["operatorStatus"]): string {
+  return {
+    Named: "Kitchen display",
+    Locked: "Kitchen display locked",
+    HandoverRequired: "Handover needed",
+    Unavailable: "Kitchen display sign-in not confirmed",
+    Unverified: "View only",
+  }[status];
+}
+
+/**
+ * WP-2423 / IDR-0039: kitchen steps need this device's kitchen display sign-in ("Start kitchen
+ * display"). A counter or office sign-in sees the board but cannot change it, and is told how to
+ * start the kitchen display here instead of being left with a dead board.
+ */
+function KitchenBoardLock({
+  operatorStatus,
+  freshnessStatus,
+}: {
+  readonly operatorStatus: KitchenBoardView["operatorStatus"];
+  readonly freshnessStatus: KitchenBoardView["freshnessStatus"];
+}) {
+  if (operatorStatus === "Unverified")
+    return (
+      <div className="kitchen-board-lock">
+        <StatePanel heading="View only on this screen" tone="neutral" status>
+          <p>
+            You are signed in for the counter or office, so this screen cannot change tickets. To
+            work tickets on this device, start the kitchen display: this signs you out here, then
+            choose “Start kitchen display” for yourself.
+          </p>
+          <StaffSwitchButton label="Start kitchen display here" />
+        </StatePanel>
+      </div>
+    );
+  if (operatorStatus === "Named" && freshnessStatus !== "Fresh")
+    return (
+      <div className="kitchen-board-lock">
+        <StatePanel heading="Catching up with new orders" tone="offline" status>
+          <p>
+            Kitchen steps are paused until the board is up to date. It checks again on its own;
+            press Refresh if this stays.
+          </p>
+        </StatePanel>
+      </div>
+    );
+  return (
+    <div className="kitchen-board-lock">
+      <StatePanel heading="Kitchen display paused" tone="offline" status>
+        <p>
+          {operatorStatus === "HandoverRequired"
+            ? "The previous cook’s shift must be handed over first. Use Hand over / sign out, then start the kitchen display again."
+            : "This device’s kitchen display sign-in can no longer be confirmed. Use Hand over / sign out, then start the kitchen display again."}
+        </p>
+      </StatePanel>
+    </div>
+  );
+}
+
 /**
  * WP-2423 Q3: what the published menu declares for this item, in plain words. Modifiers can add
  * allergens the base disclosure does not cover; without a disclosure the cook is told so.
@@ -175,7 +243,7 @@ import {
   type KitchenQueueSearch,
   type KitchenWorkItemDetailView,
 } from "./kitchen-board.js";
-import { StaffSignInLink } from "./StaffSession.js";
+import { StaffSignInLink, StaffSwitchButton } from "./StaffSession.js";
 
 export type LoadState<T> =
   | { readonly kind: "Loading" }
@@ -341,12 +409,6 @@ function WorkCard({
     Acknowledged: "Allergen acknowledged",
     Unavailable: "Allergen status unavailable",
   }[item.allergenCue];
-  const exceptionLabel =
-    item.exceptionStatus === "Reported"
-      ? "Exception reported"
-      : item.exceptionStatus === "Unavailable"
-        ? "Exception status unavailable"
-        : null;
   return (
     <article
       className={`kitchen-work-item${!showDetails && !showActions ? " kitchen-work-item--detail" : ""}`}
@@ -418,7 +480,7 @@ function WorkCard({
             data-kind="exception"
             data-value={item.exceptionStatus}
           >
-            {exceptionLabel}
+            Exception reported
           </span>
         ) : null}
       </div>
@@ -789,25 +851,24 @@ export function KitchenBoardScreen({
       role="search"
       aria-label="Filter Kitchen work items"
     >
-      <label>
-        <span
-          className={
-            layout === "mobile" ? "kitchen-board-filter-label" : "kitchen-filter-visually-hidden"
-          }
-        >
-          Station
-        </span>
-        <select
-          value={activeStation}
-          disabled={!stationFilterAvailable}
-          onChange={(event) => setStation(event.currentTarget.value)}
-        >
-          <option value="All">{stationFilterAvailable ? "All stations" : "Unavailable"}</option>
-          {stations.map((value) => (
-            <option key={value}>{value}</option>
-          ))}
-        </select>
-      </label>
+      {/* WP-2423: a filter is offered only when every loaded item carries that fact. */}
+      {stationFilterAvailable ? (
+        <label>
+          <span
+            className={
+              layout === "mobile" ? "kitchen-board-filter-label" : "kitchen-filter-visually-hidden"
+            }
+          >
+            Station
+          </span>
+          <select value={activeStation} onChange={(event) => setStation(event.currentTarget.value)}>
+            <option value="All">All stations</option>
+            {stations.map((value) => (
+              <option key={value}>{value}</option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       <label>
         <span
           className={
@@ -826,49 +887,45 @@ export function KitchenBoardScreen({
           <option>Cancelled</option>
         </select>
       </label>
-      <label>
-        <span
-          className={
-            layout === "mobile" ? "kitchen-board-filter-label" : "kitchen-filter-visually-hidden"
-          }
-        >
-          Allergen
-        </span>
-        <select
-          value={activeAllergen}
-          disabled={!allergenFilterAvailable}
-          onChange={(event) => setAllergen(event.currentTarget.value)}
-        >
-          <option value="All">
-            {allergenFilterAvailable ? (layout === "mobile" ? "All" : "Allergen") : "Unavailable"}
-          </option>
-          <option>None</option>
-          <option>ReviewRequired</option>
-          <option>Acknowledged</option>
-          <option>Unavailable</option>
-        </select>
-      </label>
-      <label>
-        <span
-          className={
-            layout === "mobile" ? "kitchen-board-filter-label" : "kitchen-filter-visually-hidden"
-          }
-        >
-          Exception
-        </span>
-        <select
-          value={activeException}
-          disabled={!exceptionFilterAvailable}
-          onChange={(event) => setException(event.currentTarget.value)}
-        >
-          <option value="All">
-            {exceptionFilterAvailable ? (layout === "mobile" ? "All" : "Exception") : "Unavailable"}
-          </option>
-          <option>None</option>
-          <option>Reported</option>
-          <option>Unavailable</option>
-        </select>
-      </label>
+      {allergenFilterAvailable ? (
+        <label>
+          <span
+            className={
+              layout === "mobile" ? "kitchen-board-filter-label" : "kitchen-filter-visually-hidden"
+            }
+          >
+            Allergen
+          </span>
+          <select
+            value={activeAllergen}
+            onChange={(event) => setAllergen(event.currentTarget.value)}
+          >
+            <option value="All">{layout === "mobile" ? "All" : "Allergen"}</option>
+            <option value="None">No allergen cue</option>
+            <option value="ReviewRequired">Needs allergen review</option>
+            <option value="Acknowledged">Allergen checked</option>
+          </select>
+        </label>
+      ) : null}
+      {exceptionFilterAvailable ? (
+        <label>
+          <span
+            className={
+              layout === "mobile" ? "kitchen-board-filter-label" : "kitchen-filter-visually-hidden"
+            }
+          >
+            Exception
+          </span>
+          <select
+            value={activeException}
+            onChange={(event) => setException(event.currentTarget.value)}
+          >
+            <option value="All">{layout === "mobile" ? "All" : "Exception"}</option>
+            <option value="None">No exception</option>
+            <option value="Reported">Exception reported</option>
+          </select>
+        </label>
+      ) : null}
       {layout === "mobile" || hasFilters ? (
         <button
           type="button"
@@ -884,21 +941,13 @@ export function KitchenBoardScreen({
         </button>
       ) : null}
       {layout === "mobile" ? (
-        <>
-          <button
-            className="kitchen-filter-sheet__done"
-            type="button"
-            onClick={() => filterSheetRef.current?.close()}
-          >
-            Done
-          </button>
-          <p className="kitchen-filter-sheet__note">
-            Filters apply only to fields present for every loaded work item.
-            {view.operatorStatus === "Named"
-              ? ""
-              : " Allergen and exception filters are unavailable here; the KDS Session and device lock are unverified, and board actions are disabled."}
-          </p>
-        </>
+        <button
+          className="kitchen-filter-sheet__done"
+          type="button"
+          onClick={() => filterSheetRef.current?.close()}
+        >
+          Done
+        </button>
       ) : null}
     </div>
   );
@@ -920,9 +969,7 @@ export function KitchenBoardScreen({
                 checkedAt={checkedAt}
               />
               <span data-operator={view.operatorStatus}>
-                {view.operatorStatus === "Unverified"
-                  ? "KDS session unverified"
-                  : `${view.operatorStatus} operator`}
+                {kitchenOperatorText(view.operatorStatus)}
               </span>
               {autoRefresh && !stale ? <span>Auto-refresh every 10 s</span> : null}
             </p>
@@ -959,15 +1006,10 @@ export function KitchenBoardScreen({
         {stale ? (
           <StaleReadNotice stale={stale} className="kitchen-board-lock kitchen-board-stale" />
         ) : readOnly ? (
-          <div className="kitchen-board-lock">
-            <StatePanel heading="Board locked — read-only" tone="offline" status>
-              <p>
-                {view.operatorStatus === "Unverified"
-                  ? "KDS session or device lock is unverified. Kitchen commands are disabled."
-                  : "A fresh projection and named unlocked operator session are required for Kitchen commands."}
-              </p>
-            </StatePanel>
-          </div>
+          <KitchenBoardLock
+            operatorStatus={view.operatorStatus}
+            freshnessStatus={view.freshnessStatus}
+          />
         ) : null}
         <header className="kitchen-queue-heading">
           <h2>Queue</h2>
@@ -1096,8 +1138,13 @@ export function KitchenBoardScreen({
           </StatePanel>
         ) : (
           <div className="kitchen-board-lanes">
-            {stationLanes.map((lane, laneIndex) => {
-              const stationName = lane.stationLabel ?? "Station labels unavailable";
+            {stationLanes.map((lane) => {
+              // WP-2423: a Store without named stations sees its work as one "All work" lane, or
+              // numbered lanes when the source separates stations without naming them.
+              const unnamed = stationLanes.filter((entry) => entry.stationLabel === null);
+              const stationName =
+                lane.stationLabel ??
+                (unnamed.length > 1 ? `Station ${unnamed.indexOf(lane) + 1}` : "All work");
               const stationItems = lane.items;
               return (
                 <section
@@ -1105,8 +1152,8 @@ export function KitchenBoardScreen({
                   role="region"
                   key={lane.key}
                   aria-label={
-                    lane.stationLabel === null
-                      ? `Kitchen work items; station labels unavailable; lane ${laneIndex + 1} of ${stationLanes.length}`
+                    lane.stationLabel === null && unnamed.length === 1
+                      ? "All kitchen work"
                       : `${stationName} station`
                   }
                 >
@@ -1217,9 +1264,7 @@ export function KitchenWorkItemScreen({
             <p className="kitchen-board-freshness">
               <Freshness status={view.freshnessStatus} at={view.projectedAt} />
               <span data-operator={view.operatorStatus}>
-                {view.operatorStatus === "Unverified"
-                  ? "KDS session unverified"
-                  : `${view.operatorStatus} operator`}
+                {kitchenOperatorText(view.operatorStatus)}
               </span>
             </p>
           </div>
@@ -1236,15 +1281,10 @@ export function KitchenWorkItemScreen({
           </div>
         </header>
         {readOnly ? (
-          <div className="kitchen-board-lock">
-            <StatePanel heading="Board locked — read-only" tone="offline" status>
-              <p>
-                {view.operatorStatus === "Unverified"
-                  ? "The current source cannot verify a named KDS operator session or device lock. Kitchen commands are disabled."
-                  : "A fresh projection and named unlocked operator session are required for Kitchen commands."}
-              </p>
-            </StatePanel>
-          </div>
+          <KitchenBoardLock
+            operatorStatus={view.operatorStatus}
+            freshnessStatus={view.freshnessStatus}
+          />
         ) : null}
         <section className="kitchen-work-item-screen__content" aria-labelledby="work-item-current">
           <h3 id="work-item-current">Current work</h3>
@@ -1263,18 +1303,6 @@ export function KitchenWorkItemScreen({
             <p>Only recorded milestones are shown.</p>
           </header>
           <dl>
-            <div>
-              <dt>Recipe &amp; handling snapshots</dt>
-              <dd>Unavailable</dd>
-            </div>
-            <div>
-              <dt>Allergen acknowledgements</dt>
-              <dd>Unavailable</dd>
-            </div>
-            <div>
-              <dt>Timers &amp; dependencies</dt>
-              <dd>Unavailable</dd>
-            </div>
             <div className="kitchen-work-item-screen__history-row">
               <dt>Work item history</dt>
               <dd>
@@ -1362,7 +1390,12 @@ function useClient({ client, csrf, storeLabel, storeReference }: KitchenPageProp
     [client, csrf, storeLabel, storeReference],
   );
 }
-function KitchenBoardContent(props: KitchenPageProps) {
+function KitchenBoardContent(
+  props: KitchenPageProps & {
+    /** Who the board says is using it, so the page offers handover only to the kitchen display. */
+    readonly onOperatorStatus?: (status: KitchenBoardView["operatorStatus"]) => void;
+  },
+) {
   const client = useClient(props),
     [revision, setRevision] = useState(0);
   const [search, setSearch] = useState<KitchenQueueSearch | null>(null);
@@ -1399,6 +1432,11 @@ function KitchenBoardContent(props: KitchenPageProps) {
     true,
   );
   const stale = state.kind === "Found" ? state.stale : undefined;
+  const operatorStatus = state.kind === "Found" ? state.view.operatorStatus : null;
+  const { onOperatorStatus } = props;
+  useEffect(() => {
+    if (operatorStatus !== null) onOperatorStatus?.(operatorStatus);
+  }, [operatorStatus, onOperatorStatus]);
   const actions = useKitchenActions({
     csrf: props.csrf,
     storeReference: props.storeReference,
@@ -1646,6 +1684,9 @@ export function KitchenBoardPage(
     return () => document.removeEventListener("visibilitychange", cover);
   }, []);
   const named = Boolean(props.csrf && props.storeReference);
+  // A counter or office sign-in has no kitchen shift to hand over; its board offers
+  // "Start kitchen display here" instead (WP-2423).
+  const [operator, setOperator] = useState<KitchenBoardView["operatorStatus"] | null>(null);
   const awake = useKitchenScreenAwake(!covered && handover !== "SignedOut");
   const signOut =
     props.signOut ??
@@ -1692,18 +1733,20 @@ export function KitchenBoardPage(
     <>
       {named ? (
         <p>
-          <button
-            disabled={handover === "SigningOut"}
-            onClick={() => {
-              setHandover("SigningOut");
-              signOut().then(
-                () => setHandover("SignedOut"),
-                () => setHandover("Failed"),
-              );
-            }}
-          >
-            Hand over / sign out
-          </button>
+          {kitchenHandoverOffered(named, operator) ? (
+            <button
+              disabled={handover === "SigningOut"}
+              onClick={() => {
+                setHandover("SigningOut");
+                signOut().then(
+                  () => setHandover("SignedOut"),
+                  () => setHandover("Failed"),
+                );
+              }}
+            >
+              Hand over / sign out
+            </button>
+          ) : null}
           <span className="kitchen-screen-awake" data-state={awake} role="status">
             {awake === "Held"
               ? " Screen kept on"
@@ -1719,7 +1762,7 @@ export function KitchenBoardPage(
           ) : null}
         </p>
       ) : null}
-      <KitchenBoardContent key={resumed} {...props} />
+      <KitchenBoardContent key={resumed} {...props} onOperatorStatus={setOperator} />
     </>
   );
 }

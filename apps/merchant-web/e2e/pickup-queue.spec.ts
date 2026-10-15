@@ -92,10 +92,10 @@ test("@production Pickup paging, current scope and permission recovery", async (
   await page.keyboard.press("W");
   await expect(stateFilter).toHaveValue("Waiting");
   await expect(heading("Order " + first)).toBeVisible();
-  await page.keyboard.press("Tab");
-  await expect(page.getByRole("combobox", { name: "Claim", exact: true })).toBeFocused();
-  await page.keyboard.press("Tab");
-  await expect(page.getByRole("combobox", { name: "Exception", exact: true })).toBeFocused();
+  // WP-2423: the pilot source has no claim or exception facts, so those filters are not offered.
+  await expect(page.getByRole("combobox", { name: "Claim", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("combobox", { name: "Exception", exact: true })).toHaveCount(0);
+  await expect(page.locator("option").filter({ hasText: "Unavailable" })).toHaveCount(0);
   await page.keyboard.press("Tab");
   await expect(clearFilters).toBeFocused();
   await page.keyboard.press("Enter");
@@ -108,12 +108,7 @@ test("@production Pickup paging, current scope and permission recovery", async (
   // Dead placeholder actions are gone from the pilot queue.
   await expect(page.getByRole("button", { name: "Claim", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Report exception", exact: true })).toHaveCount(0);
-  await page.getByRole("combobox").nth(1).selectOption("Unavailable");
-  await page.getByRole("combobox").nth(2).selectOption("Unavailable");
-  await expect(heading("Order " + first)).toBeVisible();
-  await clearFilters.click();
-  await expect(page.getByRole("combobox").nth(1)).toHaveValue("All");
-  await expect(page.getByRole("combobox").nth(2)).toHaveValue("All");
+  await expect(page.locator("article").first()).not.toContainText("Unavailable");
   for (const width of [1440, 390, 320]) {
     await page.setViewportSize({ width, height: 844 });
     expect(

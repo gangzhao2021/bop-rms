@@ -76,7 +76,13 @@ export function StaffSignedOutPanel({
  * WP-2423 Q18: "Switch staff" on a shared tablet — ends this staff member's Session and opens the
  * sign-in so the next person signs in as themselves. Nothing of the previous Session stays usable.
  */
-export function StaffSwitchButton({ client }: { readonly client?: StaffSessionClient }) {
+export function StaffSwitchButton({
+  client,
+  label = "Switch staff",
+}: {
+  readonly client?: StaffSessionClient;
+  readonly label?: string;
+}) {
   const source = useMemo(() => client ?? createStaffSessionClient(), [client]);
   const [state, setState] = useState<"Idle" | "Working" | "Failed">("Idle");
   return (
@@ -97,7 +103,7 @@ export function StaffSwitchButton({ client }: { readonly client?: StaffSessionCl
           })();
         }}
       >
-        {state === "Working" ? "Signing out…" : "Switch staff"}
+        {state === "Working" ? "Signing out…" : label}
       </button>
       {state === "Failed" ? (
         <p role="alert" className="staff-session__hint">

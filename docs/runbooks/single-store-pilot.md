@@ -490,7 +490,10 @@ customer menu or `Orders` loads on mobile data, the host is up and only the stor
 6. **Kitchen tablet failure only**: sign in on the backup device as the kitchen staff member
    (today the internal-test staff page, "Start kitchen display as …"; real staff accounts wait for the
    Cognito gate), open `Kitchen`, set the device never to sleep. The board shows the current tickets
-   again; nothing was lost. No paper needed unless no device is available.
+   again; nothing was lost. No paper needed unless no device is available. A device signed in with
+   the ordinary staff sign-in ("Enter as …", for the counter or office) shows `Kitchen` as
+   "View only on this screen"; press "Start kitchen display here" (it signs that staff member out)
+   and choose "Start kitchen display as …" so Accept, Start and Mark ready work on that device.
 7. **Host down**: call the pilot operator. Operator restarts the pilot (v15:
    `PILOT_UID=… PILOT_GID=… PILOT_RUNTIME_DIRECTORY=.local/pilot-v15 docker compose -f compose.pilot.yaml up -d pilot`,
    then confirm `/ready` returns 200; details in

@@ -184,16 +184,12 @@ function PickupCard({
           <dt>Packages</dt>
           <dd>{item.packageCount ?? "Not set"}</dd>
         </div>
-        <div>
-          <dt>Allergen</dt>
-          <dd>
-            {item.allergenCue === "Present"
-              ? "Allergen present"
-              : item.allergenCue === "None"
-                ? "No cue"
-                : "Unavailable"}
-          </dd>
-        </div>
+        {item.allergenCue !== "Unavailable" ? (
+          <div>
+            <dt>Allergen</dt>
+            <dd>{item.allergenCue === "Present" ? "Allergen present" : "No cue"}</dd>
+          </div>
+        ) : null}
         {item.exceptionStatus === "Reported" ? (
           <div>
             <dt>Exception</dt>
@@ -268,6 +264,12 @@ export function PickupQueueScreen({
   const [exceptionFilter, setExceptionFilter] = useState("All");
   const [orderQuery, setOrderQuery] = useState("");
   const readOnly = view.freshnessStatus !== "Fresh";
+  const claimFilterAvailable =
+    view.items.length > 0 && view.items.every((item) => item.claimStatus !== "Unavailable");
+  const exceptionFilterAvailable =
+    view.items.length > 0 && view.items.every((item) => item.exceptionStatus !== "Unavailable");
+  const activeClaim = claimFilterAvailable ? claimFilter : "All";
+  const activeException = exceptionFilterAvailable ? exceptionFilter : "All";
   const query = orderQuery.trim().toLocaleLowerCase();
   const items = view.items.filter(
     (item) =>
@@ -277,11 +279,11 @@ export function PickupQueueScreen({
           .includes(query)) &&
       (filter === "All" ||
         (filter === "Waiting" ? item.phase !== "Completed" : item.phase === filter)) &&
-      (claimFilter === "All" || item.claimStatus === claimFilter) &&
-      (exceptionFilter === "All" || item.exceptionStatus === exceptionFilter),
+      (activeClaim === "All" || item.claimStatus === activeClaim) &&
+      (activeException === "All" || item.exceptionStatus === activeException),
   );
   const hasLocalFilters =
-    Boolean(query) || filter !== "All" || claimFilter !== "All" || exceptionFilter !== "All";
+    Boolean(query) || filter !== "All" || activeClaim !== "All" || activeException !== "All";
   const visibleReferences = new Set(items.map((item) => item.fulfillmentReference));
   // WP-2423 Q26: earlier business days' orders are grouped apart so their repeated numbers are not
   // mistaken for today's orders.
@@ -344,30 +346,33 @@ export function PickupQueueScreen({
               <option value="Completed">Completed</option>
             </select>
           </label>
-          <label>
-            Claim
-            <select
-              value={claimFilter}
-              onChange={(event) => setClaimFilter(event.currentTarget.value)}
-            >
-              <option>All</option>
-              <option>Unclaimed</option>
-              <option>Claimed</option>
-              <option>Unavailable</option>
-            </select>
-          </label>
-          <label>
-            Exception
-            <select
-              value={exceptionFilter}
-              onChange={(event) => setExceptionFilter(event.currentTarget.value)}
-            >
-              <option>All</option>
-              <option>None</option>
-              <option>Reported</option>
-              <option>Unavailable</option>
-            </select>
-          </label>
+          {/* WP-2423: a filter is offered only when the loaded pickups carry that fact. */}
+          {claimFilterAvailable ? (
+            <label>
+              Claim
+              <select
+                value={claimFilter}
+                onChange={(event) => setClaimFilter(event.currentTarget.value)}
+              >
+                <option value="All">All</option>
+                <option value="Unclaimed">Not claimed</option>
+                <option value="Claimed">Claimed</option>
+              </select>
+            </label>
+          ) : null}
+          {exceptionFilterAvailable ? (
+            <label>
+              Exception
+              <select
+                value={exceptionFilter}
+                onChange={(event) => setExceptionFilter(event.currentTarget.value)}
+              >
+                <option value="All">All</option>
+                <option value="None">No exception</option>
+                <option value="Reported">Exception reported</option>
+              </select>
+            </label>
+          ) : null}
           <button
             type="button"
             disabled={!hasLocalFilters}

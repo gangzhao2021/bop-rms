@@ -1629,16 +1629,14 @@
 .kitchen-filter-sheet .kitchen-board-filters button {
   justify-content: center;
 }
+/* Each offered filter takes a full row; Clear filters and Done share the last row. */
+.kitchen-filter-sheet .kitchen-board-filters label {
+  grid-column: 1 / -1;
+}
 .kitchen-filter-sheet__done {
   border-color: var(--bop-color-border-strong);
   background: var(--bop-color-brand-primary);
   color: var(--bop-color-on-primary);
-}
-.kitchen-filter-sheet__note {
-  grid-column: 1 / -1;
-  margin: 0;
-  color: var(--bop-color-text-muted);
-  font-size: 13px;
 }
 .kitchen-board-lanes {
   display: grid;

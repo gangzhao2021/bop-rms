@@ -29,6 +29,36 @@ describe("WP-1805 Pickup screens", () => {
     ])
       expect(html).not.toContain(value);
   });
+  it("WP-2423: offers claim and exception filters only when the pickups carry those facts", () => {
+    const fixture = pickupQueueFixture();
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <PickupQueueScreen
+          view={parsePickupQueueView({
+            ...fixture,
+            items: fixture.items.map((item) => ({
+              ...item,
+              claimStatus: "Unavailable",
+              exceptionStatus: "Unavailable",
+              allergenCue: "Unavailable",
+            })),
+          })}
+        />
+      </MemoryRouter>,
+    );
+    expect(html).not.toContain("Claim<select");
+    expect(html).not.toContain("Exception<select");
+    expect(html).not.toContain("Unavailable");
+    const known = renderToStaticMarkup(
+      <MemoryRouter>
+        <PickupQueueScreen view={parsePickupQueueView(fixture)} />
+      </MemoryRouter>,
+    );
+    expect(known).toContain("Claim<select");
+    expect(known).toContain('<option value="Unclaimed">Not claimed</option>');
+    expect(known).toContain("Exception<select");
+    expect(known).not.toContain("<option>Unavailable</option>");
+  });
   it("shows completed pickups as handed over without waiting or handoff actions", () => {
     const fixture = pickupQueueFixture();
     const html = renderToStaticMarkup(

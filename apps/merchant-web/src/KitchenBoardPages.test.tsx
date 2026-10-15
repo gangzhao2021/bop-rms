@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   KitchenBoardPage,
   KitchenBoardScreen,
+  kitchenHandoverOffered,
   KitchenBoardStatePanel,
   KitchenWorkItemScreen,
   kitchenAgeTier,
@@ -112,7 +113,7 @@ describe("WP-1804 Kitchen Board screens", () => {
     expect(html).not.toContain("Claim");
     expect(html).not.toContain("Unavailable here");
   });
-  it("keeps station-unlabeled work visible and disables a meaningless station filter", () => {
+  it("keeps station-unlabeled work visible and hides a meaningless station filter", () => {
     const unlabeledItem = {
       ...kitchenItemFixture(),
       workItemReference: "018f0f58-767a-7f3b-a1d0-000000000411",
@@ -129,17 +130,14 @@ describe("WP-1804 Kitchen Board screens", () => {
         />
       </MemoryRouter>,
     );
-    expect(html).toContain(
-      'aria-label="Kitchen work items; station labels unavailable; lane 2 of 2"',
-    );
-    expect(html).toContain("Station labels unavailable</h3>");
+    expect(html).toContain('aria-label="All kitchen work"');
+    expect(html).toContain("All work</h3>");
+    expect(html).not.toMatch(/station labels unavailable/iu);
     expect(html).toContain("Mushroom rice bowl");
     expect(html).toContain("Unlabeled rice bowl");
     expect(html).toContain('aria-label="Hot line station"');
-    expect(html).toContain(
-      '<span class="kitchen-filter-visually-hidden">Station</span><select disabled="">',
-    );
-    expect(html).toContain('<option value="All" selected="">Unavailable</option>');
+    // WP-2423: no reachable stub — a filter the source cannot answer is not offered.
+    expect(html).not.toContain('<span class="kitchen-filter-visually-hidden">Station</span>');
     expect(html).not.toContain("Hold/Prioritize");
   });
   it("groups by source station reference without displaying the reference", () => {
@@ -184,7 +182,8 @@ describe("WP-1804 Kitchen Board screens", () => {
     expect(html).toContain("First station item");
     expect(html).toContain("Second same-station item");
     expect(html).toContain("Other station item");
-    expect(html).toContain("Station labels unavailable</h3>");
+    expect(html).toContain("Station 1</h3>");
+    expect(html).toContain("Station 2</h3>");
     expect(html).not.toContain(firstStation);
     expect(html).not.toContain(secondStation);
   });
@@ -196,8 +195,17 @@ describe("WP-1804 Kitchen Board screens", () => {
         />
       </MemoryRouter>,
     );
-    expect(html).toContain("Board locked — read-only");
-    expect(html).toContain("named unlocked operator");
+    expect(html).toContain("Kitchen display paused");
+    expect(html).toContain("Use Hand over / sign out, then start the kitchen display again.");
+    expect(html).toContain('data-operator="Locked">Kitchen display locked');
+    const catchingUp = renderToStaticMarkup(
+      <MemoryRouter>
+        <KitchenBoardScreen
+          view={parseKitchenBoardView({ ...kitchenBoardFixture(), freshnessStatus: "Stale" })}
+        />
+      </MemoryRouter>,
+    );
+    expect(catchingUp).toContain("Catching up with new orders");
   });
   it("renders a privacy-minimized child and safe failure", () => {
     const board = kitchenBoardFixture();
@@ -226,9 +234,10 @@ describe("WP-1804 Kitchen Board screens", () => {
     expect(html).not.toContain("018f0f58-767a-7f3b-a1d0-000000000403");
     expect(html).toContain("Additional detail</h3>");
     expect(html).toContain("Only recorded milestones are shown.");
-    expect(html).toContain("Recipe &amp; handling snapshots");
-    expect(html).toContain("Allergen acknowledgements");
-    expect(html).toContain("Timers &amp; dependencies");
+    // WP-2423: facts the source does not record are not listed as "Unavailable" rows.
+    expect(html).not.toContain("Recipe &amp; handling snapshots");
+    expect(html).not.toContain("Timers &amp; dependencies");
+    expect(html).not.toContain(">Unavailable<");
     expect(html).toContain("Work item history");
     expect(html).toContain("Work item created");
     expect(html).toContain(
@@ -237,7 +246,8 @@ describe("WP-1804 Kitchen Board screens", () => {
     expect(html).toContain("Modifiers");
     expect(html).toContain("Extra mushrooms");
     expect(html).toContain("× 2");
-    expect(html).toContain("KDS session unverified");
+    expect(html).toContain('data-operator="Unverified">View only');
+    expect(html).toContain("View only on this screen");
     expect(html).toContain("18 min");
     expect(html).toContain("Take actions from the queue. Your filters are kept when you return.");
     expect(html).toContain("Action not confirmed");
@@ -287,7 +297,7 @@ describe("WP-1804 Kitchen Board screens", () => {
     expect(html).not.toContain("unavailable from this projection");
     expect(html.indexOf("Work item created")).toBeLessThan(html.indexOf("Accepted"));
     expect(html.indexOf("Accepted")).toBeLessThan(html.indexOf("Order item marked ready"));
-    expect(html).toContain("Timers &amp; dependencies</dt><dd>Unavailable</dd>");
+    expect(html).not.toContain("<dd>Unavailable</dd>");
   });
   it("distinguishes a projection-backed empty modifier list", () => {
     const html = renderToStaticMarkup(
@@ -342,20 +352,16 @@ it("offers manual refresh and does not claim unavailable operator or safety fact
       <KitchenBoardScreen view={view} onRefresh={() => undefined} />
     </MemoryRouter>,
   );
-  expect(html).toContain("Board locked — read-only");
+  expect(html).toContain("Kitchen display paused");
+  expect(html).toContain("sign-in can no longer be confirmed");
   // WP-2423 Q3: no menu disclosure is said plainly; sourceless cues are not shown as placeholders.
   expect(html).toContain("Allergens not available · check the recipe");
   expect(html).not.toContain("Allergen / exception cues unavailable");
   expect(html).not.toContain("Exception status unavailable");
-  expect(html).toContain(
-    "Filters apply only to fields present for every loaded work item. Allergen and exception filters are unavailable here",
-  );
-  expect(html).toMatch(
-    /<span class="kitchen-filter-visually-hidden">Allergen<\/span><select disabled="">/,
-  );
-  expect(html).toMatch(
-    /<span class="kitchen-filter-visually-hidden">Exception<\/span><select disabled="">/,
-  );
+  expect(html).not.toContain("Filters apply only");
+  expect(html).not.toContain('<span class="kitchen-filter-visually-hidden">Allergen</span>');
+  expect(html).not.toContain('<span class="kitchen-filter-visually-hidden">Exception</span>');
+  expect(html).not.toContain("<option>Unavailable</option>");
   expect(html).toContain(">Refresh</button>");
   expect(html).not.toContain("Refresh from source");
   expect(html).not.toContain("Named operator</dd>");
@@ -451,12 +457,8 @@ it("drops restored allergen and exception filters when the projection omits thos
   );
   expect(html).toContain("Mushroom rice bowl");
   expect(html).not.toContain("No matching work");
-  expect(html).toMatch(
-    /<span class="kitchen-filter-visually-hidden">Allergen<\/span><select disabled=""><option value="All" selected="">Unavailable/,
-  );
-  expect(html).toMatch(
-    /<span class="kitchen-filter-visually-hidden">Exception<\/span><select disabled=""><option value="All" selected="">Unavailable/,
-  );
+  expect(html).not.toContain('<span class="kitchen-filter-visually-hidden">Allergen</span>');
+  expect(html).not.toContain('<span class="kitchen-filter-visually-hidden">Exception</span>');
 });
 
 it("does not present permission as proof of an active named operator session", () => {
@@ -467,12 +469,15 @@ it("does not present permission as proof of an active named operator session", (
       />
     </MemoryRouter>,
   );
-  expect(html).toContain("KDS session unverified");
-  expect(html).toContain(
-    "KDS session or device lock is unverified. Kitchen commands are disabled.",
-  );
+  // WP-2423: a counter/office sign-in sees the board and is told how to start the kitchen display.
+  expect(html).toContain('data-operator="Unverified">View only');
+  expect(html).toContain("View only on this screen");
+  expect(html).toContain("You are signed in for the counter or office");
+  expect(html).toContain(">Start kitchen display here</button>");
   expect(html).toContain('disabled=""');
   expect(html).not.toContain("Unverified operator");
+  expect(html).not.toContain("KDS");
+  expect(html).not.toContain("device lock");
 });
 
 describe("IDR-0039 named-operator KDS handover", () => {
@@ -486,7 +491,13 @@ describe("IDR-0039 named-operator KDS handover", () => {
         />
       </MemoryRouter>,
     );
-    expect(named).toContain("Hand over / sign out");
+    // Offered once the board has read who is using it, and never to a counter/office sign-in.
+    expect(named).not.toContain("Hand over / sign out");
+    expect(kitchenHandoverOffered(true, "Named")).toBe(true);
+    expect(kitchenHandoverOffered(true, "Locked")).toBe(true);
+    expect(kitchenHandoverOffered(true, "Unverified")).toBe(false);
+    expect(kitchenHandoverOffered(true, null)).toBe(false);
+    expect(kitchenHandoverOffered(false, "Named")).toBe(false);
     const anonymous = renderToStaticMarkup(
       <MemoryRouter>
         <KitchenBoardPage />

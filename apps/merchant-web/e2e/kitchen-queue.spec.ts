@@ -203,27 +203,24 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   );
   await expect(page.getByText(/^Last checked \d\d:\d\d/u)).toBeVisible();
   await expect(page.getByText("Auto-refresh every 10 s", { exact: true })).toBeVisible();
-  await expect(page.getByText("KDS session unverified", { exact: true })).toBeVisible();
+  // WP-2423: a counter/office sign-in sees the board, view only, with a way to start the kitchen
+  // display on this device; no technical wording.
+  await expect(page.getByText("View only", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "View only on this screen" })).toBeVisible();
   await expect(
-    page.getByText("KDS session or device lock is unverified. Kitchen commands are disabled.", {
-      exact: true,
-    }),
-  ).toBeVisible();
+    page.getByRole("button", { name: "Start kitchen display here", exact: true }),
+  ).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Hand over / sign out" })).toHaveCount(0);
+  await expect(page.locator("body")).not.toContainText("KDS");
+  await expect(page.locator("body")).not.toContainText("device lock");
   await expect(page.getByRole("button", { name: "Accept", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Start", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Complete quantity", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Mark ready", exact: true })).toBeDisabled();
-  await expect(page.getByRole("combobox", { name: "Station", exact: true })).toBeDisabled();
-  await expect(page.getByRole("combobox", { name: "Allergen", exact: true })).toBeDisabled();
-  await expect(page.getByRole("combobox", { name: "Exception", exact: true })).toBeDisabled();
-  for (const label of ["Station", "Allergen", "Exception"]) {
-    const filter = page.getByRole("combobox", { name: label, exact: true });
-    expect(
-      await filter.evaluate(
-        (select) => (select as HTMLSelectElement).selectedOptions[0]?.textContent,
-      ),
-    ).toBe("Unavailable");
-  }
+  // WP-2423: filters the source cannot answer are not offered (no "Unavailable" stubs).
+  for (const label of ["Station", "Allergen", "Exception"])
+    await expect(page.getByRole("combobox", { name: label, exact: true })).toHaveCount(0);
+  await expect(page.locator("option").filter({ hasText: "Unavailable" })).toHaveCount(0);
   // A navigation whose only link is the current page is kept in the DOM but not shown.
   const primaryNav = page.getByRole("navigation", { name: "Primary", includeHidden: true });
   await expect(
@@ -262,17 +259,14 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   await expect(clearFilters).toBeEnabled();
   await clearFilters.click();
   await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
-  await expect(page.getByRole("combobox", { name: "Allergen", exact: true })).toBeDisabled();
-  await expect(page.getByRole("combobox", { name: "Exception", exact: true })).toBeDisabled();
-  const unavailableStationLanes = page.getByRole("region", {
-    name: /^Kitchen work items; station labels unavailable; lane \d+ of 3$/u,
-  });
-  await expect(unavailableStationLanes).toHaveCount(3);
-  await expect(unavailableStationLanes.first()).toBeVisible();
+  const unnamedStationLanes = page.getByRole("region", { name: /^Station \d station$/u });
+  await expect(unnamedStationLanes).toHaveCount(3);
+  await expect(unnamedStationLanes.first()).toBeVisible();
+  await expect(page.locator("body")).not.toContainText("station labels unavailable");
   for (const stationReference of [id(5), id(15), id(16)]) {
     await expect(page.locator("body")).not.toContainText(stationReference);
   }
-  await expect(page.getByRole("heading", { name: "Board locked — read-only" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "View only on this screen" })).toBeVisible();
   const accept = page.getByRole("button", { name: "Accept", exact: true });
   const refresh = page.getByRole("button", { name: "Refresh", exact: true });
   await expect(accept).toBeDisabled();
@@ -309,7 +303,7 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
           .filter((track) => Number.parseFloat(track) > 0).length,
     );
     expect(mobileColumns).toBe(1);
-    const lockNotice = page.getByRole("heading", { name: "Board locked — read-only" });
+    const lockNotice = page.getByRole("heading", { name: "View only on this screen" });
     expect((await filterToggle.boundingBox())?.y).toBeLessThan(
       (await lockNotice.boundingBox())?.y ?? 0,
     );
@@ -335,19 +329,10 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
       "grid-template-columns",
       /\d+(\.\d+)?px\s+\d+(\.\d+)?px/u,
     );
-    for (const label of ["Station", "Work state", "Allergen", "Exception"]) {
-      await expect(filterSheet.getByText(label, { exact: true })).toBeVisible();
-    }
-    expect(
-      await filterSheet
-        .getByRole("combobox", { name: "Station" })
-        .evaluate((select) => (select as HTMLSelectElement).selectedOptions[0]?.textContent),
-    ).toBe("Unavailable");
-    await expect(
-      filterSheet.getByText(
-        "Filters apply only to fields present for every loaded work item. Allergen and exception filters are unavailable here; the KDS Session and device lock are unverified, and board actions are disabled.",
-      ),
-    ).toBeVisible();
+    await expect(filterSheet.getByText("Work state", { exact: true })).toBeVisible();
+    for (const label of ["Station", "Allergen", "Exception"])
+      await expect(filterSheet.getByText(label, { exact: true })).toHaveCount(0);
+    await expect(filterSheet).not.toContainText("Unavailable");
     const clearBox = await filterSheet.getByRole("button", { name: "Clear filters" }).boundingBox();
     const doneBox = await filterSheet.getByRole("button", { name: "Done" }).boundingBox();
     expect(clearBox).not.toBeNull();
@@ -363,8 +348,8 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
     await expect(filterToggle).toBeFocused();
     await filterToggle.click();
     await expect(filterSheet.getByRole("combobox", { name: "Work state" })).toBeVisible();
-    await expect(filterSheet.getByRole("combobox", { name: "Allergen" })).toBeDisabled();
-    await expect(filterSheet.getByRole("combobox", { name: "Exception" })).toBeDisabled();
+    await expect(filterSheet.getByRole("combobox", { name: "Allergen" })).toHaveCount(0);
+    await expect(filterSheet.getByRole("combobox", { name: "Exception" })).toHaveCount(0);
     await filterSheet.getByRole("button", { name: "Done" }).click();
     await expect(filterSheet).not.toBeVisible();
     await filterToggle.click();
@@ -436,7 +421,8 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   await expect(page.locator("#kitchen-reference-search-hint-desktop")).toHaveText(
     "Exact reference only. The value stays in this page session and is not added to the URL.",
   );
-  await expect(page.locator(".kitchen-board-filters--desktop select")).toHaveCount(4);
+  // Only Work state is offered: the source carries no station names, cues or exceptions.
+  await expect(page.locator(".kitchen-board-filters--desktop select")).toHaveCount(1);
   await page.screenshot({ path: "test-results/kitchen-board-1440.png", fullPage: true });
   const exactReferenceInput = page.getByRole("textbox", { name: "Exact reference" });
   await exactReferenceInput.fill("not-a-reference");
@@ -514,20 +500,17 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   await expect(page.getByText("Extra mushrooms", { exact: true })).toBeVisible();
   await expect(page.getByText("× 2", { exact: true })).toBeVisible();
   await expect(page.getByText(id(11), { exact: true })).toHaveCount(0);
-  for (const detail of [
-    "Recipe & handling snapshots",
-    "Allergen acknowledgements",
-    "Timers & dependencies",
-    "Work item history",
-  ]) {
-    await expect(page.getByText(detail, { exact: true })).toBeVisible();
-  }
+  // WP-2423: only recorded facts are listed; no "Unavailable" rows.
+  await expect(page.getByText("Work item history", { exact: true })).toBeVisible();
+  for (const detail of ["Recipe & handling snapshots", "Timers & dependencies"])
+    await expect(page.getByText(detail, { exact: true })).toHaveCount(0);
   const detailsGroup = page.locator(".kitchen-work-item-screen__details dl");
-  await expect(detailsGroup.locator("> div")).toHaveCount(4);
+  await expect(detailsGroup.locator("> div")).toHaveCount(1);
+  await expect(detailsGroup).not.toContainText("Unavailable");
   await expect(detailsGroup.locator("> div").last()).toContainText("Work item created");
   await expect(page.getByText("18 min", { exact: true })).toBeVisible();
   await expect(page.locator(".kitchen-work-item--detail")).toHaveAttribute("data-age", "late");
-  await expect(page.getByText("KDS session unverified", { exact: true })).toBeVisible();
+  await expect(page.getByText("View only", { exact: true })).toBeVisible();
   await expect(
     page.getByText("Take actions from the queue. Your filters are kept when you return.", {
       exact: true,
@@ -846,7 +829,10 @@ test("@production Kitchen queue writes out work states and tiers waiting time", 
   );
   await page.goto("/operations/kitchen");
   await expect(page.locator(".kitchen-work-item")).toHaveCount(4);
-  await page.locator(".kitchen-board-filters--desktop select").nth(1).selectOption("All");
+  await page
+    .locator(".kitchen-board-filters--desktop")
+    .getByRole("combobox", { name: "Work state" })
+    .selectOption("All");
   await expect(page.locator(".kitchen-work-item")).toHaveCount(5);
   const card = (name: string) => page.locator(".kitchen-work-item").filter({ hasText: name });
   const expectations = [
@@ -1001,6 +987,10 @@ test("@production Kitchen commands preserve intent and wait for projection versi
     complete = page.getByRole("button", { name: "Complete quantity", exact: true }),
     refresh = page.getByRole("button", { name: "Refresh", exact: true });
   await expect(accept).toBeEnabled();
+  // WP-2423: the kitchen display sign-in hands over; it is not asked to start the display again.
+  await expect(page.getByRole("button", { name: "Hand over / sign out" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start kitchen display here" })).toHaveCount(0);
+  await expect(page.getByText("Kitchen display", { exact: true }).first()).toBeVisible();
   for (const width of [1440, 390, 320]) {
     await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
     if (width < 768) {
@@ -1316,4 +1306,84 @@ test("@production Kitchen keeps the last tickets read-only offline and recovers 
     await expect(page.getByText("Auto-refresh every 10 s", { exact: true })).toBeVisible();
   }
   expect(commands).toBe(0);
+});
+
+// WP-2423: a counter/office sign-in opening Kitchen is told how to start the kitchen display on
+// this device; the button signs it out and opens the sign-in where "Start kitchen display" lives.
+test("@production a view-only Kitchen starts the kitchen display on this device", async ({
+  page,
+}) => {
+  const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const scope = {
+    brandLabel: "Training Brand",
+    storeLabel: "Training Store",
+    storeReference: id(99),
+  };
+  const headers = { "cache-control": "no-store" };
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-09-19",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "KIT-KITCHEN-QUEUE",
+              label: "Kitchen",
+              href: "/operations/kitchen",
+              permission: "kitchen.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  await page.route("**/merchant/kitchen/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        storeReference: scope.storeReference,
+        operatorStatus: "Unverified",
+        projectionName: "kitchen_work_queue_v1",
+        projectionVersion: 1,
+        projectionGenerationReference: id(6),
+        projectedAt: new Date().toISOString(),
+        partial: false,
+        stale: false,
+        freshnessStatus: "Fresh",
+        items: [],
+        nextCursor: null,
+      },
+    }),
+  );
+  let loggedOut = 0;
+  await page.route("**/merchant/logout", (route) => {
+    loggedOut += 1;
+    return route.fulfill({ status: 204 });
+  });
+  await page.route("**/merchant/sign-in-entry", (route) =>
+    route.fulfill({ headers, json: { path: "/internal-test/staff", testOnly: true } }),
+  );
+  await page.route("**/internal-test/staff", (route) =>
+    route.fulfill({ contentType: "text/html", body: "<h1>DEMO Store staff</h1>" }),
+  );
+  await page.goto("/operations/kitchen");
+  await expect(page.getByRole("heading", { name: "View only on this screen" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Hand over / sign out" })).toHaveCount(0);
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expectNoHorizontalOverflow(page);
+    await page.screenshot({ path: `test-results/kitchen-view-only-${width}.png`, fullPage: true });
+  }
+  await page.getByRole("button", { name: "Start kitchen display here", exact: true }).click();
+  await expect(page).toHaveURL(/\/internal-test\/staff$/u);
+  expect(loggedOut).toBe(1);
 });
