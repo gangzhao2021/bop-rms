@@ -201,6 +201,9 @@ export function createPostgresPaymentReceiptCoverageSource(options: {
           const intent = record.intent,
             preparation = intent.preparation;
           const fact = await terminal.read(intent.paymentIntentReference);
+          // WP-2423 Q5: a round left off the receipt because it is not charged yet may have a
+          // guest checkout still in progress (no terminal outcome): nothing was charged by now.
+          if (!fact && !expected.has(preparation.orderBatchReference)) continue;
           if (
             !fact ||
             fact.orderReference !== request.orderReference ||
@@ -208,8 +211,8 @@ export function createPostgresPaymentReceiptCoverageSource(options: {
             fact.recordedAt > request.observedAt
           )
             return unavailable();
-          // WP-2423 Q5: a round left off the receipt (cancelled because its payment failed) may
-          // only have payments whose durable terminal outcome is Failed: nothing was charged.
+          // WP-2423 Q5: a round left off the receipt (cancelled because its payment failed, or not
+          // paid yet) may only have payments whose durable terminal outcome is Failed.
           const outsideReceipt = !expected.has(preparation.orderBatchReference);
           if (outsideReceipt && fact.outcome !== "Failed") return unavailable();
           const observations = await transaction.query(

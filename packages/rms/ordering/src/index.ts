@@ -312,6 +312,7 @@ export {
   loadOrderNotAcceptedClosure,
   listStorePaidOrderBatches,
   listStoreConfirmedOrderBatches,
+  listStoreOrderBatchPayments,
   listStoreKitchenOrderLabels,
   loadMerchantOrderLines,
   type MerchantOrderLine,
@@ -413,6 +414,8 @@ export {
   type StaffOrderCancellationRecord,
   type StaffOrderCancellationPlan,
   type StaffOrderCancellationPayment,
+  type StaffOrderCancellationPreviousPhase,
+  type StaffOrderCancellationRefundDisposition,
 } from "./application/staff-order-cancellation.js";
 export {
   createPostgresStaffOrderCancellationStore,

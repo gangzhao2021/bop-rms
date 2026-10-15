@@ -10,6 +10,31 @@ import { StoreTimeZoneContext, storeTime } from "./StoreTime.js";
 
 const defaultClient = createOrdinaryRefundClient();
 type Outcome = "Idle" | "Pending" | "Conflict" | "Denied" | "SignIn" | "Unknown";
+type Recorded = Awaited<
+  ReturnType<ReturnType<typeof createOrdinaryRefundClient>["recordCardMachineRefund"]>
+>;
+
+/** WP-2423 item 4: the confirmation staff see once the machine refund is recorded. */
+export function cardMachineRefundRecordedText(
+  result: Pick<Recorded, "amountMinor" | "refundedAt" | "receipt">,
+  amountLabel: string,
+  requestedMinor: string,
+  /** The Store's time zone (UTC, labelled, when not known). */
+  timeZone: string | undefined,
+): string {
+  const amount =
+    result.amountMinor === requestedMinor
+      ? amountLabel
+      : orderMoney({ amountMinor: result.amountMinor, currencyCode: "CAD" });
+  return (
+    `Card-machine refund recorded: ${amount} refunded on the card machine at ${storeTime(result.refundedAt, timeZone, true)}.` +
+    (result.receipt === "Issued"
+      ? " The customer's digital receipt now shows the refund."
+      : result.receipt === "NotIssued"
+        ? " The digital receipt could not be updated yet; record it again later to retry (the refund is not counted twice)."
+        : " The card machine's refund slip is the customer's receipt.")
+  );
+}
 
 /**
  * WP-2423 item 4 (DEC-COUNTER-PAYMENT-RECORD, partial refunds): a recorded refund request of a
@@ -33,7 +58,8 @@ export function CardMachineRequestRefund({
   /** The amount as the page around it writes it (one money style per page). */
   readonly amountLabel?: string;
   readonly csrf: string;
-  readonly onRecorded: () => void;
+  /** Called with the confirmation once recorded; the page then rereads the request. */
+  readonly onRecorded: (confirmation: string) => void;
   readonly client?: ReturnType<typeof createOrdinaryRefundClient>;
 }) {
   const timeZone = useContext(StoreTimeZoneContext);
@@ -67,15 +93,9 @@ export function CardMachineRequestRefund({
       );
       operation.current = null;
       setOutcome("Idle");
-      setDone(
-        `Recorded: ${result.amountMinor === amountMinor ? amount : orderMoney({ amountMinor: result.amountMinor, currencyCode: "CAD" })} refunded on the card machine at ${storeTime(result.refundedAt, timeZone, true)}.` +
-          (result.receipt === "Issued"
-            ? " The customer's digital receipt now shows the refund."
-            : result.receipt === "NotIssued"
-              ? " The digital receipt could not be updated yet; record it again later to retry (the refund is not counted twice)."
-              : " The card machine's refund slip is the customer's receipt."),
-      );
-      onRecorded();
+      const confirmation = cardMachineRefundRecordedText(result, amount, amountMinor, timeZone);
+      setDone(confirmation);
+      onRecorded(confirmation);
     } catch (error) {
       if (needsFullSignIn(error)) setOutcome("SignIn");
       else if (error instanceof OrdinaryRefundClientError && error.code === "Conflict") {

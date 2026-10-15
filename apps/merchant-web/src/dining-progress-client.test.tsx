@@ -78,7 +78,13 @@ it("sends only Order reference using protected no-store POST", async () => {
 it.each([401, 403, 404, 503])("handles HTTP %i without displaying payload", async (status) => {
   const client = createDiningProgressClient(vi.fn(async () => new Response("private", { status })));
   await expect(client.load(id(1), "A".repeat(43))).rejects.toMatchObject({
-    code: status === 401 || status === 403 ? "PermissionDenied" : "Unavailable",
+    // WP-2423 item 2: a missing order is told apart from a connection problem.
+    code:
+      status === 401 || status === 403
+        ? "PermissionDenied"
+        : status === 404
+          ? "NotFound"
+          : "Unavailable",
   });
 });
 it("rejects cacheable responses and already-aborted requests", async () => {

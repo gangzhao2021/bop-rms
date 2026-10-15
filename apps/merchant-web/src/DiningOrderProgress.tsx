@@ -84,7 +84,12 @@ export function DiningOrderProgress({
       if (!controller.signal.aborted) setState({ kind: "Ready", view });
     } catch (error) {
       if (!controller.signal.aborted)
-        setState({ kind: error instanceof DiningProgressError ? error.code : "Unavailable" });
+        setState({
+          kind:
+            error instanceof DiningProgressError && error.code === "PermissionDenied"
+              ? "PermissionDenied"
+              : "Unavailable",
+        });
     }
   };
   return (

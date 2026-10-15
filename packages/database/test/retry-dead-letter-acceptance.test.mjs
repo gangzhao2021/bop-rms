@@ -447,7 +447,8 @@ async function prove(context) {
     );
     const leaseTokenA = nextId();
     const leaseTokenB = nextId();
-    const now = new Date().toISOString();
+    // Retry policy version 2 waits at least 1 s before the first retry (equal jitter).
+    const now = new Date(Date.now() + 2_000).toISOString();
     const [consumerClaimA, consumerClaimB] = await Promise.all([
       inScope(first, { brandId: brandA }, (transaction) =>
         claimConsumerRetryBatch(transaction, {

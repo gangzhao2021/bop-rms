@@ -18,6 +18,7 @@ import {
   createPostgresKitchenWorkLifecycleStore,
 } from "../../rms/kitchen/src/index.ts";
 import {
+  listStorePaidOrderBatches,
   createPostgresDiningOrderItemStateReader,
   createPostgresOrderCompensationCandidateReader,
   createPostgresStaffOrderCancellationReader,
@@ -27,6 +28,7 @@ import {
   createPostgresCardMachinePaymentStore,
 } from "../../rms/payment/src/index.ts";
 import { createMerchantOrderStaffCancellation } from "../../../apps/api/src/merchant-order-staff-cancellation.ts";
+import { createMerchantDiningTableClosePlan } from "../../../apps/api/src/merchant-dining-table-close-plan.ts";
 import { createPaymentCompensationComposition } from "../../../apps/api/src/payment-compensation-composition.ts";
 import { createMerchantCardMachineCancellationRefund } from "../../../apps/api/src/merchant-card-machine-refund.ts";
 import { withoutCardMachinePayments } from "../../../tooling/environment/pilot-compensation-candidates.mjs";
@@ -152,6 +154,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
         ).rows[0].at.toISOString(),
       );
       const time = (offset) => new Date(base + offset).toISOString();
+      const baseTime = time;
       const businessDate = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto" }).format(
         new Date(time(-minutes(40))),
       );
@@ -436,8 +439,13 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
           cardMachine = false,
           // WP-2423 Q7: paid, but Ordering found it could not be fulfilled (never accepted).
           unfulfillable = false,
+          // DEC-TABLE-CLOSE-GUESTS-LEFT: paid, recorded as waiting for acceptance, never accepted.
+          awaiting = false,
+          // Later submission times (stock ledger movements must stay in time order).
+          shift = 0,
         },
       ) {
+        const time = (offset) => baseTime(offset + shift);
         const order = {
           order: id(n + 1),
           guest: id(n + 2),
@@ -735,6 +743,42 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
               ],
             );
           }
+          if (awaiting) {
+            await admin.query(
+              "INSERT INTO rms_ordering.order_payment_acceptance_wait (wait_id,brand_id,store_id,order_id,order_batch_id,submission_id,payment_event_id,source_digest,evaluated_at,record_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+              [
+                refs.disposition,
+                brand,
+                store,
+                order.order,
+                refs.batch,
+                refs.submission,
+                refs.event,
+                hash(["wait", b]),
+                paidAt,
+                {
+                  disposition: "AwaitingAcceptance",
+                  reason: "OrderAcceptancePending",
+                  dispositionReference: refs.disposition,
+                  brandReference: brand,
+                  storeReference: store,
+                  orderReference: order.order,
+                  orderBatchReference: refs.batch,
+                  submissionReference: refs.submission,
+                  paymentTransactionReference: refs.transaction,
+                  paymentIntentReference: refs.intent,
+                  paymentAttemptReference: refs.attempt,
+                  paymentEventReference: refs.event,
+                  sourceVersion: version,
+                  sourceCheckpoint: refs.submission,
+                  sourceDigest: hash(["wait-source", b]),
+                  evaluatedAt: paidAt,
+                },
+              ],
+            );
+            order.batches.push(refs);
+            continue;
+          }
           if (unfulfillable) {
             await admin.query(
               "INSERT INTO rms_ordering.order_payment_disposition_record (disposition_id,brand_id,store_id,order_id,order_batch_id,submission_id,payment_transaction_id,payment_intent_id,payment_attempt_id,payment_event_id,source_checkpoint,correlation_id,source_version,source_digest,evaluated_at,disposition,reason,kitchen_release_disposition) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'PaidWithoutFulfillableOrder','CapacityExpired','Blocked')",
@@ -1016,6 +1060,10 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
             );
           },
           nextReference: fresh,
+          resolveRefundConfiguration: async () => ({
+            providerAccountReference: provider,
+            environment: "Test",
+          }),
         });
       }
       const cancel = (order, k, overrides = {}, options = {}) =>
@@ -1057,8 +1105,43 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
         cardMachine: true,
         unfulfillable: true,
       });
+      // DEC-TABLE-CLOSE-GUESTS-LEFT (scenario at the end): rounds paid, never accepted.
+      const leftCard = await seedOrder(9000, {
+        type: "DineIn",
+        batches: [1],
+        quantity: "1",
+        cardMachine: true,
+        awaiting: true,
+      });
+      // TEST-ONLY fixture: the machine payment was already refunded in full on the machine.
+      await admin.query(
+        "INSERT INTO rms_payment.card_machine_refund (tenant_id,brand_id,store_id,card_machine_refund_id,card_machine_payment_id,order_id,operation_id,intent_digest,source_kind,source_id,amount_minor,currency_code,slip_reference,refunded_at,recorded_at,actor_id,audit_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'UnfulfillableOrder',$9,$10,'CAD',NULL,$11,$11,$12,$13)",
+        [
+          tenant,
+          brand,
+          store,
+          id(9901),
+          leftCard.batches[0].transaction,
+          leftCard.order,
+          id(9902),
+          hash(["fixture-refund"]),
+          id(9903),
+          leftCard.batches[0].totalMinor,
+          time(-minutes(5)),
+          staff,
+          id(9904),
+        ],
+      );
+      const waitingPickup = await seedOrder(11000, { batches: [1], quantity: "1", awaiting: true });
       const dineIn = await seedOrder(5000, { type: "DineIn", batches: [1, 2], quantity: "1.5" });
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "10" });
+      const left = await seedOrder(8000, {
+        type: "DineIn",
+        batches: [1, 1],
+        quantity: "1",
+        awaiting: true,
+        shift: minutes(15),
+      });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "14" });
 
       // The kitchen accepted the first item of the pickup Order (still Queued, not started).
       assert.equal((await kitchen(pickup).accept(0)).outcome, "Accepted");
@@ -1217,7 +1300,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       assert.equal(releases.length, 1);
       assert.equal(releases[0].performedBy, staff);
       assert.equal(releases[0].reasonCode, "STAFF_CANCELLED_BEFORE_PREPARATION");
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "8" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "12" });
 
       // Payment's compensation source: the CancelledByStaff disposition, discovered only by the
       // refund workload (includeStaffCancellations).
@@ -1271,7 +1354,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
         code: "ORDER_CANCELLATION_NOT_CANCELLABLE",
       });
       assert.deepEqual(await counts(), before);
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "8" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "12" });
 
       // ── Scenario 2: one item already started (In Progress): refused, nothing written.
       const startedKitchen = kitchen(started);
@@ -1282,7 +1365,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       await assert.rejects(cancel(started, 0), { code: "ORDER_CANCELLATION_PREPARATION_STARTED" });
       assert.deepEqual(await counts(), before);
       assert.deepEqual(await itemStatuses(started.batches[0].ticket), ["In Progress", "Queued"]);
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "8" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "12" });
 
       // ── Scenario 3a: the kitchen starts first and holds its row locks; the cancellation waits,
       // then sees the started item and is refused.
@@ -1358,7 +1441,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
           0,
         );
       }
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "7" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "11" });
 
       // ── Scenario 6: dine-in Order with an initial and an additional Batch; staff cancel the
       // additional Batch only. The Order stays open; the first Batch is unaffected.
@@ -1386,7 +1469,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       ]);
       assert.deepEqual(await itemStatuses(dineIn.batches[0].ticket), ["Queued"]);
       assert.deepEqual(await itemStatuses(dineIn.batches[1].ticket), ["Cancelled", "Cancelled"]);
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "5.5" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "9.5" });
       const diningState = await scoped((tx) =>
         createPostgresDiningOrderItemStateReader({
           brandReference: brand,
@@ -1412,7 +1495,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       dineIn.version = 5;
       assert.equal((await cancel(dineIn, 0)).status, "Cancelled");
       assert.deepEqual(await itemStatuses(dineIn.batches[0].ticket), ["Cancelled"]);
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "4" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "8" });
 
       // ── Scenario 7: the refund workload opens one compensation case for the staff-cancelled
       // payment attempt and refunds the whole capture including tip, through Payment's runtime
@@ -1615,13 +1698,19 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
           to: new Date(Date.now() + 60_000).toISOString(),
         }),
       );
-      assert.equal(machineDay.paymentCount, 2);
+      // Includes the never-accepted table round paid on the machine and refunded there (fixture).
+      assert.equal(machineDay.paymentCount, 3);
       assert.equal(
         machineDay.takenMinor,
-        BigInt(cardTotal) + BigInt(expired.batches[0].totalMinor),
+        BigInt(cardTotal) +
+          BigInt(expired.batches[0].totalMinor) +
+          BigInt(leftCard.batches[0].totalMinor),
       );
-      assert.equal(machineDay.refundCount, 1);
-      assert.equal(machineDay.refundedMinor, BigInt(cardTotal));
+      assert.equal(machineDay.refundCount, 2);
+      assert.equal(
+        machineDay.refundedMinor,
+        BigInt(cardTotal) + BigInt(leftCard.batches[0].totalMinor),
+      );
       assert.equal(
         (
           await admin.query(
@@ -1662,6 +1751,227 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       );
       await scoped(async (tx) => {
         await assert.rejects(tx.query("DELETE FROM rms_payment.card_machine_refund", []));
+      });
+
+      // ── DEC-TABLE-CLOSE-GUESTS-LEFT: a manager closing a table whose guests left cancels the
+      // rounds they paid for that were never accepted (never reached the kitchen), with the reason
+      // GUEST_LEFT. Online: Payment refunds the whole payment (compensation candidate). Already
+      // refunded in full (here a card-machine refund recorded as fixture): closed, nothing owed, no
+      // compensation. The waiting payment is settled; the round can never be accepted afterwards.
+      // What the close dialog shows before confirming: both rounds paid online, never sent to the
+      // kitchen, each refunding its whole payment (tip included).
+      const closePlan = (order) =>
+        createMerchantDiningTableClosePlan({
+          persistence: {
+            transactions: transactions({ guc: false }),
+            now: () => new Date(Math.floor(Date.now())).toISOString(),
+          },
+          authentication: { authorize: async () => ({ sessionReference: id(12) }) },
+          resolveRefundConfiguration: async () => ({
+            providerAccountReference: provider,
+            environment: "Test",
+          }),
+        })({
+          sessionCookie: "synthetic-session",
+          csrf: "synthetic-csrf",
+          query: { orderReference: order.order, diningSessionReference: order.session },
+        });
+      const planBefore = await closePlan(left);
+      assert.equal(planBefore.orderVersion, 2);
+      assert.deepEqual(
+        planBefore.rounds.map((round) => [round.sequence, round.state, round.refund]),
+        [
+          [1, "PaidNotSent", { method: "Online", amountMinor: String(left.batches[0].totalMinor) }],
+          [2, "PaidNotSent", { method: "Online", amountMinor: String(left.batches[1].totalMinor) }],
+        ],
+      );
+      assert.deepEqual(planBefore.totals, {
+        onlineMinor: String(left.batches[0].totalMinor + left.batches[1].totalMinor),
+        cardMachineMinor: "0",
+      });
+      // The card round already refunded on the machine: closing it refunds nothing more.
+      assert.deepEqual(
+        (await closePlan(leftCard)).rounds.map((round) => [round.state, round.refund]),
+        [["AlreadyRefunded", { method: "CardMachine", amountMinor: "0" }]],
+      );
+      const stockBeforeLeft = await stock();
+      before = await counts();
+      // A second round of the same table (first round still waiting) at the Order's version.
+      const leftOnline = await cancel(left, 1, { reasonCode: "GUEST_LEFT" });
+      assert.equal(leftOnline.status, "Cancelled");
+      assert.equal(leftOnline.refundMethod, "Online");
+      assert.equal(leftOnline.refundStatus, "Pending");
+      const leftRow = (
+        await admin.query(
+          "SELECT cancellation_id::text AS id,previous_phase,refund_disposition,reason_code,payment_disposition_id::text AS disposition,expected_order_version,cancelled_order_version FROM rms_ordering.order_staff_cancellation WHERE order_batch_id=$1",
+          [left.batches[1].batch],
+        )
+      ).rows;
+      assert.deepEqual(
+        leftRow.map((row) => ({ ...row, id: undefined })),
+        [
+          {
+            id: undefined,
+            previous_phase: "Submitted",
+            refund_disposition: "Refund",
+            reason_code: "GUEST_LEFT",
+            disposition: left.batches[1].disposition,
+            expected_order_version: 2,
+            cancelled_order_version: 3,
+          },
+        ],
+      );
+      after = await counts();
+      assert.equal(after.staff, before.staff + 1);
+      assert.equal(after.revisions, before.revisions + 1);
+      assert.equal(after.kitchen, before.kitchen, "no kitchen work existed for the round");
+      assert.equal(after.reservations, before.reservations + 1);
+      // The round's reserved stock is released.
+      assert.equal(
+        Number((await stock()).reserved),
+        Number(stockBeforeLeft.reserved) - 1,
+        "reserved stock of the cancelled round returns",
+      );
+      // Ordering now reads the round Cancelled without any acceptance.
+      const leftState = await scoped((tx) =>
+        createPostgresDiningOrderItemStateReader({
+          brandReference: brand,
+          storeReference: store,
+          authorize: async () => true,
+        }).load({
+          transaction: tx,
+          brandReference: brand,
+          storeReference: store,
+          orderReference: left.order,
+          diningSessionReference: left.session,
+          guestSessionReference: left.guest,
+          observedAt: new Date().toISOString(),
+        }),
+      );
+      const leftBatch = leftState.batches.find(
+        (entry) => entry.orderBatchReference === left.batches[1].batch,
+      );
+      assert.equal(leftBatch.acceptance, null);
+      assert.equal(leftBatch.staffCancellation.previousPhase, "Submitted");
+      // The cancelled round no longer waits for acceptance (Orders stops offering Accept); the
+      // other round of the table still does.
+      const waiting = await scoped((tx) =>
+        listStorePaidOrderBatches(tx, { brandReference: brand, storeReference: store }, [
+          left.order,
+        ]),
+      );
+      assert.equal(waiting.awaitingAcceptance.has(left.batches[1].batch), false);
+      assert.equal(waiting.awaitingAcceptance.has(left.batches[0].batch), true);
+      // Payment refunds it in full: the staff cancellation is a compensation candidate.
+      const leftDiscover = await scoped(async (tx) =>
+        withoutCardMachinePayments(
+          tx,
+          { brandReference: brand, storeReference: store },
+          await createPostgresOrderCompensationCandidateReader({
+            scope: { brandReference: brand, storeReference: store },
+            includeStaffCancellations: true,
+            authorize: async (_tx, input) =>
+              input.purpose === "DiscoverPaidWithoutFulfillableOrder",
+          })(tx, { afterDispositionReference: null, limit: 100 }),
+          async () => true,
+        ),
+      );
+      assert.ok(
+        leftDiscover.candidates.some(
+          (candidate) =>
+            candidate.dispositionReference === leftRow[0].id &&
+            candidate.reason === "CancelledByStaff" &&
+            candidate.paymentIntentReference === left.batches[1].intent,
+        ),
+      );
+      // The cancelled round can never be accepted afterwards (Ordering's guard).
+      await assert.rejects(
+        admin.query(
+          "INSERT INTO rms_ordering.order_acceptance_record (acceptance_id,operation_id,brand_id,store_id,order_id,order_batch_id,expected_order_version,accepted_order_version,actor_type,actor_id,purpose_code,permission_code,reason_code,workflow_version_id,transition_id,source_digest,accepted_at) VALUES ($1,$2,$3,$4,$5,$6,3,4,'User',$7,'OrderAcceptance','order.accept','SYNTHETIC_TEST',$8,$9,$10,now())",
+          [
+            id(9910),
+            id(9911),
+            brand,
+            store,
+            left.order,
+            left.batches[1].batch,
+            staff,
+            id(9912),
+            id(9913),
+            hash(["late-accept"]),
+          ],
+        ),
+      );
+      // The remaining first round (the Order's version moved) and the already refunded card round.
+      const leftFirst = await cancel(left, 0, {
+        reasonCode: "GUEST_LEFT",
+        expectedOrderVersion: 3,
+      });
+      assert.equal(leftFirst.status, "Cancelled");
+      const leftCardResult = await cancel(leftCard, 0, {
+        reasonCode: "GUEST_LEFT",
+        expectedOrderVersion: 1,
+      });
+      assert.equal(leftCardResult.status, "Cancelled");
+      assert.equal(leftCardResult.refundMethod, "CardMachine");
+      assert.equal(leftCardResult.refundStatus, "Refunded");
+      const cardLeftRow = (
+        await admin.query(
+          "SELECT cancellation_id::text AS id,previous_phase,refund_disposition,expected_order_version FROM rms_ordering.order_staff_cancellation WHERE order_batch_id=$1",
+          [leftCard.batches[0].batch],
+        )
+      ).rows[0];
+      assert.deepEqual(
+        { ...cardLeftRow, id: undefined },
+        {
+          id: undefined,
+          previous_phase: "Submitted",
+          refund_disposition: "AlreadyRefunded",
+          expected_order_version: 1,
+        },
+      );
+      // Nothing more is owed: no compensation candidate, and the card machine owes nothing.
+      const cardDiscover = await scoped(async (tx) =>
+        createPostgresOrderCompensationCandidateReader({
+          scope: { brandReference: brand, storeReference: store },
+          includeStaffCancellations: true,
+          authorize: async (_tx, input) => input.purpose === "DiscoverPaidWithoutFulfillableOrder",
+        })(tx, { afterDispositionReference: null, limit: 100 }),
+      );
+      assert.ok(
+        !cardDiscover.candidates.some(
+          (candidate) => candidate.dispositionReference === cardLeftRow.id,
+        ),
+      );
+      // After closing out: nothing left at the card round; the online rounds wait for their refund
+      // (Payment's compensation), which keeps the table open until it is made.
+      assert.deepEqual((await closePlan(leftCard)).rounds, []);
+      const planAfter = await closePlan(left);
+      assert.deepEqual(
+        planAfter.rounds.map((round) => [round.sequence, round.state]),
+        [
+          [1, "Refunding"],
+          [2, "Refunding"],
+        ],
+      );
+      assert.deepEqual(planAfter.totals, { onlineMinor: "0", cardMachineMinor: "0" });
+      // A pickup can never be cancelled as a never-accepted round, and a round without a recorded
+      // payment is not eligible either (it is cancelled by the System when its payment time ends).
+      await assert.rejects(cancel(waitingPickup, 0, { reasonCode: "GUEST_LEFT" }), {
+        code: "ORDER_CANCELLATION_NOT_CANCELLABLE",
+      });
+      // The audit names the reason and that the round was never accepted.
+      const leftAudit = (
+        await admin.query(
+          "SELECT reason_code,after_summary_json AS after_summary FROM platform_audit.audit_record WHERE action_code='ORDER_CANCELLED_BY_STAFF' AND target_id=$1",
+          [left.batches[1].batch],
+        )
+      ).rows[0];
+      assert.equal(leftAudit.reason_code, "GUEST_LEFT");
+      assert.deepEqual(leftAudit.after_summary, {
+        phase: "Cancelled",
+        previousPhase: "Submitted",
+        refund: "Refund",
       });
 
       // History stays append-only for the API role.

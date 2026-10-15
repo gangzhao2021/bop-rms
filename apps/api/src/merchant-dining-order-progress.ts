@@ -101,6 +101,8 @@ export function createMerchantDiningOrderProgress(options: {
             authorize: allowed,
             authorizeKitchen: allowed,
             authorizeDining: allowed,
+            // WP-2423 item 2: a table whose every round was cancelled is still shown (and closable).
+            includeCancelled: true,
           }).load({
             transaction: businessTransaction,
             ...scope,

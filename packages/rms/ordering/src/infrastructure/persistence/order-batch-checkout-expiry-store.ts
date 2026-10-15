@@ -784,6 +784,58 @@ export async function listStoreDiningBatchPaymentDeadlines(
 }
 
 /**
+ * WP-2423 item 3: when a Dining-owned round's payment window started, for a round whose Dining
+ * checkout commitment never requested payment (the guest's browser closed between the round being
+ * submitted and payment being requested). The window starts at the later of the round's submission
+ * and its capacity link, rounded up to the stored millisecond, so the window never ends before the
+ * deadline staff and the guest were shown. Null when no such Dining-owned round exists. Read only;
+ * the caller authorizes, owns the transaction and holds the payment operation fence.
+ */
+export async function loadDiningBatchPaymentWindowStart(
+  transaction: ConsumerTransaction,
+  scope: StoreScope,
+  value: unknown,
+): Promise<string | null> {
+  const raw = readClosedRecord(value, [
+    "orderReference",
+    "orderBatchReference",
+    "submissionReference",
+    "commitmentReference",
+    "paymentOperationReference",
+  ]);
+  const identity = [
+    raw.orderReference,
+    raw.orderBatchReference,
+    raw.submissionReference,
+    raw.commitmentReference,
+    raw.paymentOperationReference,
+  ].map((reference) => parseOrderingReference(reference));
+  await storeContext(transaction, scope);
+  const found = await transaction.query(
+    `SELECT to_char(CASE WHEN date_trunc('milliseconds',s.at)<s.at
+        THEN date_trunc('milliseconds',s.at)+interval '1 millisecond' ELSE s.at END AT TIME ZONE 'UTC',
+      'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "windowStartsAt"
+    FROM (SELECT GREATEST(b.submitted_at,l.created_at) AS at
+      FROM rms_ordering.order_batch b
+      JOIN rms_ordering.order_capacity_link l ON l.brand_id=b.brand_id AND l.store_id=b.store_id
+        AND l.order_id=b.order_id AND l.order_batch_id=b.order_batch_id AND l.submission_id=b.submission_id
+      WHERE b.brand_id=$1 AND b.store_id=$2 AND b.order_id=$3 AND b.order_batch_id=$4
+        AND b.submission_id=$5 AND l.commitment_id=$6 AND l.payment_operation_id=$7
+        AND l.link_json->>'owner'='Dining') s
+    LIMIT 2`,
+    [
+      parseOrderingReference(scope.brandReference),
+      parseOrderingReference(scope.storeReference),
+      ...identity,
+    ],
+  );
+  if (!Array.isArray(found.rows) || found.rows.length > 1) return fail();
+  if (found.rows.length === 0) return null;
+  const row = readClosedRecord(found.rows[0], ["windowStartsAt"]);
+  return parseOrderingInstant(row.windowStartsAt);
+}
+
+/**
  * WP-2423: dine-in rounds of the given Orders the System cancelled because their payment failed
  * and the payment window ended (never charged). Read only; the caller authorizes.
  */

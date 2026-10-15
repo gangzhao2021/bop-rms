@@ -69,9 +69,9 @@ test("@production Tables board shows open time in hours or days and flags long-o
     page
       .locator(".dining-table-tile")
       .filter({ has: page.getByRole("button", { name: "Select " + label, exact: true }) });
-  await expect(tile("T1")).toContainText("Open 3 h 20 min");
+  await expect(tile("T1")).toContainText("Seated · open 3 h 20 min");
   await expect(tile("T1")).not.toContainText("Open for a long time");
-  await expect(tile("T2")).toContainText("Open 24 days");
+  await expect(tile("T2")).toContainText("Guests may have left · open 24 days");
   await expect(tile("T2")).toContainText("Open for a long time — if the guests have left");
   await expect(tile("T3")).toContainText("No table QR code. Ask a manager to print one.");
   await expect(page.getByText(/34992|min elapsed/u)).toHaveCount(0);

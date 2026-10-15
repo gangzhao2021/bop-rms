@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { URL } from "node:url";
@@ -22,6 +22,7 @@ import {
 } from "../../rms/ordering/src/index.ts";
 import {
   createCardMachinePaymentEnvelope,
+  createPaymentProviderSnapshot,
   createPostgresCardMachinePaymentStore,
   createPostgresOrdinaryRefundApprovalQueueRuntime,
   createPostgresPaymentReceiptCoverageSource,
@@ -43,7 +44,11 @@ import { createMerchantOrdinaryRefundItems } from "../../../apps/api/src/merchan
 import { createMerchantOrdinaryRefundStatus } from "../../../apps/api/src/merchant-ordinary-refund-status.ts";
 import { createMerchantRefundPaymentContext } from "../../../apps/api/src/merchant-refund-payment-context.ts";
 import { createMerchantCardMachineOrdinaryRefund } from "../../../apps/api/src/merchant-card-machine-ordinary-refund.ts";
-import { hasDigitalReceipt } from "../../../apps/api/src/refund-receipt-issuance.ts";
+import {
+  createRefundReceiptIssuance,
+  hasDigitalReceipt,
+} from "../../../apps/api/src/refund-receipt-issuance.ts";
+import { refreshInternalOrderReceiptObservations } from "../../../tooling/environment/pilot-receipt-observations.mjs";
 import { createInternalRefundWorkforceContext } from "../../../tooling/environment/pilot-refund-workforce.mjs";
 import { standardRefundRoleMapping } from "../../../tooling/environment/pilot-refund-role-mapping.mjs";
 import { createCustomerAdditionalDiningSubmissionStore } from "../../../apps/api/src/customer-additional-dining-submission-store.ts";
@@ -986,6 +991,50 @@ it("enters a dine-in round by staff, takes its card-machine payment and marks it
         payInput: payInput(staffSession),
       });
 
+      // ── v15 2026-10-15: round 2 was paid while a third round staff entered was still unpaid
+      // (Ordering facts of round 3 seeded by the owner, test-only: the round writer path is the
+      // one round 2 took above). The table's receipt covers the paid rounds and leaves round 3
+      // off; round 3 is then cancelled unpaid and the card-machine refunds of round 2 append
+      // refund versions to that receipt.
+      const R3 = await seedUnpaidRound(admin, {
+        from: R2.batch.orderBatchReference,
+        at: time(-minutes(2)),
+        id: (k) => id(0x3000 + k),
+      });
+      const refreshReceiptObservations = receiptObservationRefresh({
+        admin,
+        runner: transactions({ guc: true }),
+        scope,
+        provider,
+        fresh,
+        now,
+      });
+      await exerciseCardMachineRoundReceipt({
+        admin,
+        context,
+        // The pilot's business consumers run on the API role's grants (consumer inbox included).
+        worker: api,
+        tenant,
+        scope,
+        ownerScope,
+        provider,
+        orderReference,
+        items1,
+        items2,
+        unpaid: R3,
+        saved,
+        paid1At: time(-minutes(38)),
+        refreshReceiptObservations,
+        time,
+      });
+      await cancelUnpaidRound(admin, {
+        tenant,
+        scope,
+        orderReference,
+        round: R3,
+        id: (k) => id(0x3400 + k),
+      });
+
       await exerciseCardMachinePartialRefund({
         admin,
         one,
@@ -999,24 +1048,7 @@ it("enters a dine-in round by staff, takes its card-machine payment and marks it
         saved,
         staffSession,
         elsewhere,
-        time,
-      });
-
-      await exerciseCardMachineRoundReceipt({
-        admin,
-        context,
-        // The pilot's business consumers run on the API role's grants (consumer inbox included).
-        worker: api,
-        tenant,
-        scope,
-        ownerScope,
-        provider,
-        orderReference,
-        items1,
-        items2,
-        saved,
-        paid1At: time(-minutes(38)),
-        onlineIntent: pay1.paymentIntent,
+        refreshReceiptObservations,
         time,
       });
     } finally {
@@ -1059,6 +1091,7 @@ async function exerciseCardMachinePartialRefund({
   saved,
   staffSession,
   elsewhere,
+  refreshReceiptObservations,
   time,
 }) {
   const id = (n) => "01a3ff00-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -1317,7 +1350,15 @@ async function exerciseCardMachinePartialRefund({
     retentionPolicyCode: "FINANCIAL_COMPLIANCE",
     retentionPolicyVersion: 1,
   });
-  const receipts = [];
+  const receipts = [],
+    issuedReceipts = [];
+  const receiptVersions = () =>
+    one(
+      "SELECT version::int AS version,kind,receipt_record_json#>>'{snapshot,paymentStatus}' AS status,receipt_record_json#>>'{snapshot,refundedTotal,amountMinor}' AS refunded FROM rms_ordering.digital_receipt_record WHERE order_id=$1 ORDER BY version",
+      [orderReference],
+    );
+  const versionsBefore = (await receiptVersions()).length;
+  assert.ok(versionsBefore >= 1, "the table's receipt was issued before the refunds");
   const machineRefund = (selected = { persistence, authentication }) =>
     createMerchantCardMachineOrdinaryRefund({
       persistence: selected.persistence,
@@ -1325,13 +1366,43 @@ async function exerciseCardMachinePartialRefund({
       resolveConfiguration: refundConfiguration,
       businessDate,
       nextReference: fresh,
-      // The pilot's port: a refund version follows only when the Order has a digital receipt.
+      // The pilot's port: a refund version follows only when the Order has a digital receipt;
+      // its online round's Provider is asked again first, then the refund version is appended.
       issueRefundReceipt: async ({ orderReference: order }) => {
         const has = await transactions().run((tx) =>
           hasDigitalReceipt(tx, { ...scope, orderReference: order, authorize: async () => true }),
         );
         receipts.push(has);
-        return has ? "Issued" : "NoDigitalReceipt";
+        if (!has) return "NoDigitalReceipt";
+        const freshAfter = now();
+        await refreshReceiptObservations(order);
+        const issued = await transactions({ guc: true }).run((tx) =>
+          createRefundReceiptIssuance({
+            scope: { ...ownerScope, providerAccountReference: provider, environment: "Test" },
+            authorize: async () => true,
+            authorizeSources: async () => true,
+            authorizeOrder: async () => true,
+            identities: () => ({ recordReference: fresh(), operationReference: fresh() }),
+            audit: async (record, operationReference) => ({
+              auditId: fresh(),
+              brandId: scope.brandReference,
+              storeId: scope.storeReference,
+              actor: { type: "System" },
+              actionCode: "DIGITAL_RECEIPT_APPEND",
+              targetType: "DigitalReceipt",
+              targetId: record.recordReference,
+              reasonCode: "SYNTHETIC_REFUND_RECEIPT",
+              correlationId: operationReference,
+              occurredAt: record.recordedAt,
+              sourceChannel: "SYSTEM",
+              dataClassification: "Restricted",
+              retentionPolicyCode: "AUDIT_DEFAULT",
+              retentionPolicyVersion: 1,
+            }),
+          })(tx, { orderReference: order, observedAt: now(), freshAfter }),
+        );
+        issuedReceipts.push(issued.status);
+        return "Issued";
       },
     });
   const secrets = new Map([manager, owner].map((a) => [a, randomBytes(20)]));
@@ -1403,9 +1474,16 @@ async function exerciseCardMachinePartialRefund({
     }),
   );
   const listed = await refundItems({ ...session("manager"), query: { orderReference } });
+  const paidRounds = listed.items.filter((item) => item.paymentCaptured);
   assert.deepEqual(
-    [...new Set(listed.items.map((item) => [item.orderBatchReference, item.paymentMethod].join()))],
+    [...new Set(paidRounds.map((item) => [item.orderBatchReference, item.paymentMethod].join()))],
     [R1.batch.orderBatchReference + ",Online", R2.batch.orderBatchReference + ",CardMachine"],
+  );
+  // The round cancelled unpaid is listed as not paid, with nothing to refund.
+  assert.ok(
+    listed.items
+      .filter((item) => !item.paymentCaptured)
+      .every((item) => item.paymentMethod === null && item.unclaimedQuantity === 0),
   );
 
   // ── Request A: one unit of the round's first item (no approval needed).
@@ -1492,8 +1570,18 @@ async function exerciseCardMachinePartialRefund({
   const madeA = await machineRefund()(recordA());
   assert.deepEqual(
     [madeA.status, madeA.amountMinor, madeA.receipt],
-    ["Recorded", String(amountA), "NoDigitalReceipt"],
+    ["Recorded", String(amountA), "Issued"],
   );
+  // v15 2026-10-15: the refund version follows the receipt of the paid rounds, the cancelled
+  // unpaid round left off as before.
+  assert.deepEqual((await receiptVersions()).slice(versionsBefore), [
+    {
+      version: versionsBefore + 1,
+      kind: "Refund",
+      status: "PartiallyRefunded",
+      refunded: String(amountA),
+    },
+  ]);
   assert.equal((await machineRefund()(recordA())).status, "AlreadyRecorded");
   await assert.rejects(machineRefund()(recordA({ operationReference: id(0xb02) })), {
     code: "CARD_MACHINE_REFUND_NOTHING_OWED",
@@ -1552,9 +1640,11 @@ async function exerciseCardMachinePartialRefund({
       [R2.batch.orderBatchReference, captured, amountA, 0n],
     ],
   );
-  // The record and its replay both checked for a digital receipt (a replay retries a version that
-  // could not be issued); this table's guests have none yet.
-  assert.deepEqual(receipts, [false, false]);
+  // The record and its replay both checked the digital receipt (a replay retries a version that
+  // could not be issued); the replay finds the refund version already there.
+  assert.deepEqual(receipts, [true, true]);
+  assert.deepEqual(issuedReceipts, ["Created", "Existing"]);
+  assert.equal((await receiptVersions()).length, versionsBefore + 1);
 
   // ── The business day changes: the rest of the round now needs the owner's approval.
   assert.ok(Date.now() < boundaryAt, "request A was made before the business day changed");
@@ -1649,6 +1739,12 @@ async function exerciseCardMachinePartialRefund({
     query: { paymentIntentReference: saved.paymentIntentReference },
   });
   assert.deepEqual([done.confirmedRefundMinor, done.pendingRefundMinor], [String(captured), "0"]);
+  assert.deepEqual((await receiptVersions()).at(-1), {
+    version: versionsBefore + 2,
+    kind: "Refund",
+    status: "PartiallyRefunded",
+    refunded: String(captured),
+  });
   // Nothing is left to request on the round.
   await assert.rejects(
     request.preview({
@@ -1862,9 +1958,10 @@ async function exerciseCardMachineRoundReceipt({
   orderReference,
   items1,
   items2,
+  unpaid,
   saved,
   paid1At,
-  onlineIntent,
+  refreshReceiptObservations,
   time,
 }) {
   let n = 0xd200;
@@ -1973,14 +2070,12 @@ async function exerciseCardMachineRoundReceipt({
       },
       {
         providerAccountReference: provider,
-        // As the pilot's refresh: the online round's Provider is asked again (a fresh snapshot
-        // equal to the last one); the card-machine round has nothing to ask.
+        // The pilot's refresh (real Ordering/Payment reads and observation writes under the API
+        // role): the online round's Provider is asked again (simulated: a fresh snapshot equal to
+        // the last one); the card-machine round has nothing to ask; the unpaid round is skipped.
         refreshObservations: async (_resources, event) => {
           refreshed.push(event.payload.orderReference);
-          await admin.query(
-            "INSERT INTO rms_payment.payment_provider_observation SELECT (jsonb_populate_record(NULL::rms_payment.payment_provider_observation, to_jsonb(o) || jsonb_build_object('provider_observation_id',$1::text,'provider_observed_at',$2::text,'recorded_at',$2::text))).* FROM rms_payment.payment_provider_observation o WHERE o.payment_intent_id=$3 AND o.observation_kind='Snapshot' ORDER BY o.provider_observed_at DESC LIMIT 1",
-            [fresh(), new Date(Math.floor(Date.now() / 1000) * 1000).toISOString(), onlineIntent],
-          );
+          await refreshReceiptObservations(event.payload.orderReference);
         },
         createReceipt: async (_resources, runner) => ({
           issueOriginal: (request) =>
@@ -2005,6 +2100,9 @@ async function exerciseCardMachineRoundReceipt({
     const latest = receipts.rows.at(-1).record.snapshot;
     const lines = new Set(latest.lines.map((line) => line.lineReference));
     for (const item of [...items1, ...items2]) assert.ok(lines.has(item.orderItemReference));
+    // v15 2026-10-15: the round still waiting for its card-machine payment is not on the receipt
+    // (nothing was charged for it) and does not stop the receipt of the paid rounds.
+    for (const item of unpaid.items) assert.ok(!lines.has(item), "the unpaid round is left off");
     // A replay of the same event does nothing new.
     await runAs(worker).run((tx) => consumer.consume(tx, envelope));
     assert.equal(
@@ -2022,4 +2120,119 @@ async function exerciseCardMachineRoundReceipt({
       await admin.query("DROP ROLE " + name).catch(() => undefined);
     }
   }
+}
+
+/**
+ * v15 2026-10-15 (test-only owner seed): a later round of the table Order that staff entered and
+ * nobody has paid yet. Its Ordering facts (the round and its items, every reference renamed) are
+ * copied from round 2 by the database owner with triggers and foreign keys skipped for the seed
+ * only; no payment exists for it.
+ */
+async function seedUnpaidRound(admin, { from, at, id }) {
+  const batch = id(1);
+  const rows = (
+    await admin.query(
+      "SELECT order_item_id::text AS item,source_cart_line_id::text AS line FROM rms_ordering.order_item WHERE order_batch_id=$1 ORDER BY ordinal",
+      [from],
+    )
+  ).rows;
+  assert.ok(rows.length > 0);
+  const items = [];
+  await admin.query("SET session_replication_role = replica");
+  try {
+    await admin.query(
+      "INSERT INTO rms_ordering.order_batch (order_batch_id,brand_id,store_id,order_id,submission_id,source_cart_id,source_cart_version,checkout_validation_id,quote_id,submitted_by_actor_id,submitted_at) SELECT $2,brand_id,store_id,order_id,$3,$4,source_cart_version,$5,$6,submitted_by_actor_id,$7 FROM rms_ordering.order_batch WHERE order_batch_id=$1",
+      [from, batch, id(2), id(3), id(4), id(5), at],
+    );
+    for (const [index, row] of rows.entries()) {
+      const item = id(0x10 + index),
+        line = id(0x20 + index);
+      await admin.query(
+        "INSERT INTO rms_ordering.order_item (order_item_id,brand_id,store_id,order_id,order_batch_id,source_cart_line_id,quantity,catalog_snapshot_digest,quote_input_digest,transaction_snapshot_json,snapshot_captured_at,ordinal) SELECT $2,brand_id,store_id,order_id,$3,$4,quantity,catalog_snapshot_digest,quote_input_digest,replace(replace(replace(transaction_snapshot_json::text,$5::text,$8::text),$6::text,$9::text),$7::text,$10::text)::jsonb,snapshot_captured_at,ordinal FROM rms_ordering.order_item WHERE order_item_id=$1",
+        [row.item, item, batch, line, from, row.item, row.line, batch, item, line],
+      );
+      items.push(item);
+    }
+  } finally {
+    await admin.query("SET session_replication_role = origin");
+  }
+  return Object.freeze({ orderBatchReference: batch, items: Object.freeze(items) });
+}
+
+/** The System's cancellation of that round when its payment window ended unpaid (owner seed). */
+async function cancelUnpaidRound(admin, { tenant, scope, orderReference, round, id }) {
+  const sha = "sha256:" + "c".repeat(64);
+  await admin.query("SET session_replication_role = replica");
+  try {
+    await admin.query(
+      "INSERT INTO rms_ordering.order_batch_checkout_cancellation (cancellation_id,operation_id,tenant_id,brand_id,store_id,order_id,order_batch_id,submission_id,payment_operation_id,expiry_record_id,expiry_evidence_digest,expected_order_version,cancelled_order_version,expected_source_checkpoint,workflow_version_id,transition_id,order_item_ids,cancelled_at,phase,reason_code) SELECT $1,$2,$3,b.brand_id,b.store_id,b.order_id,b.order_batch_id,b.submission_id,$4,$5,$6,10,11,$7,$8,$9,$10::uuid[],date_trunc('milliseconds',clock_timestamp()),'Cancelled','PAYMENT_NOT_STARTED' FROM rms_ordering.order_batch b WHERE b.order_batch_id=$11 AND b.order_id=$12 AND b.brand_id=$13",
+      [
+        id(1),
+        id(2),
+        tenant,
+        id(3),
+        id(4),
+        sha,
+        id(5),
+        id(6),
+        id(7),
+        round.items,
+        round.orderBatchReference,
+        orderReference,
+        scope.brandReference,
+      ],
+    );
+  } finally {
+    await admin.query("SET session_replication_role = origin");
+  }
+}
+
+/**
+ * The pilot's receipt observation refresh (`refreshInternalOrderReceiptObservations`: real Ordering
+ * and Payment reads, observation writes under the API role). The Provider is simulated: it answers
+ * with the online round's last recorded state, observed now.
+ */
+function receiptObservationRefresh({ admin, runner, scope, provider, fresh, now }) {
+  const money = (value) => ({ amountMinor: BigInt(value), currencyCode: "CAD" });
+  const simulator = {
+    adapter: {
+      retrieveIntent: async (request) => {
+        const [row] = (
+          await admin.query(
+            "SELECT o.normalized_status,o.provider_transaction_reference,o.requested_minor::text AS requested,o.authorized_minor::text AS authorized,o.captured_minor::text AS captured,o.refunded_minor::text AS refunded,i.payment_method,i.capture_mode FROM rms_payment.payment_provider_observation o JOIN rms_payment.payment_intent i ON i.payment_intent_id=o.payment_intent_id WHERE o.provider_intent_reference=$1 AND o.observation_kind='Snapshot' ORDER BY o.provider_observed_at DESC LIMIT 1",
+            [request.providerIntentReference],
+          )
+        ).rows;
+        assert.ok(row, "only a recorded online payment is asked again");
+        return createPaymentProviderSnapshot({
+          kind: "Snapshot",
+          context: request.context,
+          providerIntentReference: request.providerIntentReference,
+          providerTransactionReference: row.provider_transaction_reference,
+          paymentMethod: row.payment_method,
+          captureMode: row.capture_mode,
+          status: row.normalized_status,
+          requestedAmount: money(row.requested),
+          authorizedAmount: money(row.authorized),
+          capturedAmount: money(row.captured),
+          refundedAmount: money(row.refunded),
+          observedAt: now(),
+          evidenceDigest: "sha256:" + createHash("sha256").update(fresh()).digest("hex"),
+        });
+      },
+    },
+    close: () => undefined,
+  };
+  const resources = {
+    scope,
+    now,
+    publicProfile: { binding: { validUntil: new Date(Date.now() + 3_600_000).toISOString() } },
+    transactions: runner,
+    credentials: { reference: fresh },
+  };
+  return (orderReference) =>
+    refreshInternalOrderReceiptObservations(resources, orderReference, async () => true, {
+      providerAccountReference: provider,
+      createSimulatedProvider: async () => simulator,
+    });
 }

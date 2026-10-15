@@ -1,4 +1,5 @@
 import { kitchenStepText, useKitchenActions } from "./use-kitchen-actions.js";
+import { useKitchenClock } from "./kitchen-clock.js";
 import {
   KitchenRecentlyFinished,
   KitchenRemakeDialog,
@@ -599,6 +600,7 @@ function WorkCard({
   item,
   readOnly,
   observedAt,
+  ageAt,
   onAction,
   onRemake,
   showDetails = true,
@@ -609,6 +611,8 @@ function WorkCard({
   readonly item: KitchenBoardItem;
   readonly readOnly: boolean;
   readonly observedAt: string;
+  /** The ticking clock ages are measured against (falls back to the projection time). */
+  readonly ageAt?: string;
   readonly onAction?: (item: KitchenBoardItem, action: KitchenAction) => void;
   /** WP-2423 Q26: offered on finished dishes when the operator may remake them. */
   readonly onRemake?: ((item: KitchenBoardItem) => void) | undefined;
@@ -619,7 +623,7 @@ function WorkCard({
 }) {
   const age = Math.max(
     0,
-    Math.floor((Date.parse(observedAt) - Date.parse(item.createdAt)) / 60_000),
+    Math.floor((Date.parse(ageAt ?? observedAt) - Date.parse(item.createdAt)) / 60_000),
   );
   const allergenLabel = {
     None: "No allergen cue",
@@ -890,6 +894,8 @@ export function KitchenBoardScreen({
   /** WP-2423 Q17: where the cook marks an item sold out for today, when the role may. */
   readonly soldOutHref?: string | undefined;
 }) {
+  // WP-2423 follow-up: ages follow the clock and each poll, not only changes to the work.
+  const clockAt = useKitchenClock(view.projectedAt, checkedAt);
   const location = useLocation();
   const restored = restoredQueueScope(location.state);
   const [station, setStation] = useState(restored?.station ?? "All");
@@ -1320,9 +1326,7 @@ export function KitchenBoardScreen({
               {earlierTickets.map((ticket) => {
                 const waited = Math.max(
                   0,
-                  Math.floor(
-                    (Date.parse(view.projectedAt) - Date.parse(ticket.createdAt)) / 60_000,
-                  ),
+                  Math.floor((Date.parse(clockAt) - Date.parse(ticket.createdAt)) / 60_000),
                 );
                 return (
                   <section
@@ -1361,6 +1365,7 @@ export function KitchenBoardScreen({
                         {...(guardedAction ? { onAction: guardedAction } : {})}
                         onRemake={onRemake}
                         observedAt={view.projectedAt}
+                        ageAt={clockAt}
                       />
                     ))}
                   </section>
@@ -1437,6 +1442,7 @@ export function KitchenBoardScreen({
                             {...(guardedAction ? { onAction: guardedAction } : {})}
                             onRemake={onRemake}
                             observedAt={view.projectedAt}
+                            ageAt={clockAt}
                             detailState={{
                               station: activeStation,
                               status,
@@ -1493,6 +1499,7 @@ export function KitchenWorkItemScreen({
   readonly onRefresh?: () => void;
   readonly navigation?: ReactNode;
 }) {
+  const clockAt = useKitchenClock(view.projectedAt);
   const location = useLocation();
   const queueState = restoredQueueScope(location.state);
   const readOnly = view.freshnessStatus !== "Fresh" || view.operatorStatus !== "Named";
@@ -1549,6 +1556,7 @@ export function KitchenWorkItemScreen({
             item={view.item}
             readOnly
             observedAt={view.projectedAt}
+            ageAt={clockAt}
             showDetails={false}
             showActions={false}
             showModifiers

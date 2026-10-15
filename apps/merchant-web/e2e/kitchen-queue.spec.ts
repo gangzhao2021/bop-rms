@@ -183,6 +183,8 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
           },
     );
   });
+  // Ticket ages follow the device clock; pin it to the projection time so the ages are stable.
+  await page.clock.setFixedTime(new Date(projectedAt));
   await page.goto("/operations/kitchen");
   await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Training Store", exact: true })).toBeVisible();
@@ -815,6 +817,7 @@ test("@production Kitchen queue writes out work states and tiers waiting time", 
   await page.route("**/merchant/kitchen/query", (route) =>
     route.fulfill({ headers, json: { ...metadata, items, nextCursor: null } }),
   );
+  await page.clock.setFixedTime(new Date(at));
   await page.goto("/operations/kitchen");
   await expect(page.locator(".kitchen-work-item")).toHaveCount(4);
   await page

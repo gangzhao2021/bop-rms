@@ -8,6 +8,8 @@ import {
   parseOrderingReference,
   parseOrderBatchCheckoutExpiry,
   createPostgresOrderBatchCheckoutExpiryStore,
+  diningCheckoutPaymentWindowMinutes,
+  loadDiningBatchPaymentWindowStart,
 } from "@rms/ordering";
 import { createDiningCheckoutTimeoutObservation } from "./dining-checkout-timeout-observation.js";
 const fail = (): never => {
@@ -74,11 +76,39 @@ export function createDiningCheckoutExpiryRecorder(options: {
             String(observation.orderBatchReference) !== identity.orderBatchReference
           )
             return fail();
-          if (observation.status === "NotStarted")
-            return Object.freeze({ status: "NotStarted" as const });
-          if (observation.status === "NotDue") return Object.freeze({ status: "NotDue" as const });
+          // WP-2423 item 3: a round whose commitment never requested payment (the guest's browser
+          // closed after submitting) is past due once payment can no longer be requested and the
+          // window that started when the round was submitted has ended; whether a payment exists is
+          // decided later, under the same fence, by the cancellation.
+          let clock: { paymentRequestedAt: string; capacityExpiresAt: string };
+          if (observation.status === "NotStarted") {
+            if (String(observation.observedAt) < String(observation.preparationValidUntil))
+              return Object.freeze({ status: "NotStarted" as const });
+            const windowStartsAt = await loadDiningBatchPaymentWindowStart(transaction, scope, {
+              ...identity,
+              submissionReference: observation.submissionReference,
+              commitmentReference: observation.commitmentReference,
+              paymentOperationReference: observation.paymentOperationReference,
+            });
+            if (windowStartsAt === null || !(await authorize(transaction))) return fail();
+            clock = {
+              paymentRequestedAt: windowStartsAt,
+              capacityExpiresAt: new Date(
+                Date.parse(windowStartsAt) + diningCheckoutPaymentWindowMinutes * 60_000,
+              ).toISOString(),
+            };
+            if (String(observation.observedAt) < clock.capacityExpiresAt)
+              return Object.freeze({ status: "NotDue" as const });
+          } else if (observation.status === "NotDue") {
+            return Object.freeze({ status: "NotDue" as const });
+          } else {
+            clock = {
+              paymentRequestedAt: String(observation.paymentRequestedAt),
+              capacityExpiresAt: String(observation.capacityExpiresAt),
+            };
+          }
           const paymentEvidence =
-            observation.status === "Unresolved"
+            observation.status === "Unresolved" || observation.status === "NotStarted"
               ? null
               : {
                   paymentIntentReference: observation.paymentIntentReference,
@@ -89,7 +119,7 @@ export function createDiningCheckoutExpiryRecorder(options: {
                   occurredAt: observation.terminalOccurredAt,
                 };
           const status =
-            observation.status === "Unresolved"
+            observation.status === "Unresolved" || observation.status === "NotStarted"
               ? "AwaitingPaymentResolution"
               : observation.status === "Failed"
                 ? "PaymentFailed"
@@ -104,8 +134,8 @@ export function createDiningCheckoutExpiryRecorder(options: {
             submissionReference: observation.submissionReference,
             commitmentReference: observation.commitmentReference,
             paymentOperationReference: observation.paymentOperationReference,
-            paymentRequestedAt: observation.paymentRequestedAt,
-            capacityExpiresAt: observation.capacityExpiresAt,
+            paymentRequestedAt: clock.paymentRequestedAt,
+            capacityExpiresAt: clock.capacityExpiresAt,
             observedAt: observation.observedAt,
             paymentEvidence,
           };

@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   history: vi.fn(),
   clock: vi.fn(),
   progress: vi.fn(),
+  windowStart: vi.fn(),
 }));
 vi.mock("@rms/payment", () => ({
   createPostgresPaymentOperationFence: () => ({ acquire: mocks.fence }),
@@ -14,6 +15,7 @@ vi.mock("@rms/payment", () => ({
 vi.mock("@rms/ordering", async (original) => ({
   ...(await original<typeof import("@rms/ordering")>()),
   createPostgresOrderBatchCheckoutExpiryStore: () => ({ load: mocks.history }),
+  loadDiningBatchPaymentWindowStart: (...args: unknown[]) => mocks.windowStart(...args),
 }));
 vi.mock("@rms/dining", async (original) => ({
   ...(await original<typeof import("@rms/dining")>()),
@@ -96,7 +98,8 @@ async function fixture() {
     authorizeKitchen: async () => true,
     authorizeDining: async () => true,
   });
-  return { source, expiry, progress, clock, tx, authorize };
+  mocks.windowStart.mockReset().mockResolvedValue(at);
+  return { source, expiry, progress, clock, prepared, tx, authorize };
 }
 it("binds latest expiry, real owner clock and current progress in the same transaction", async () => {
   const f = await fixture(),
@@ -133,3 +136,42 @@ it("WP-2423 item 5: loads an unresolved round only under the fence and as the la
   // The fence is taken, then the evidence differs from the latest recorded (failed) one.
   expect(mocks.fence).toHaveBeenCalledTimes(1);
 });
+
+it("WP-2423 item 3: accepts a never-requested round's expiry stated from Ordering's window start", async () => {
+  const f = await fixture();
+  const unresolved = { ...f.expiry, status: "AwaitingPaymentResolution", paymentEvidence: null };
+  mocks.history.mockResolvedValue([unresolved]);
+  mocks.clock.mockResolvedValue(f.prepared);
+  expect(f.prepared.paymentRequestedAt).toBeNull();
+  expect(String(f.prepared.preparationValidUntil) <= unresolved.observedAt).toBe(true);
+  const result = await f.source.load(f.tx, unresolved);
+  expect(result.expiry).toEqual(unresolved);
+  expect(mocks.windowStart.mock.calls[0]?.[0]).toBe(f.tx);
+  expect(mocks.windowStart.mock.calls[0]?.[2]).toEqual({
+    orderReference: f.clock.orderReference,
+    orderBatchReference: f.clock.orderBatchReference,
+    submissionReference: f.clock.submissionReference,
+    commitmentReference: f.clock.commitmentReference,
+    paymentOperationReference: f.clock.paymentOperationReference,
+  });
+});
+it.each(["window", "missing", "failed", "preparation"])(
+  "WP-2423 item 3: refuses a never-requested round's expiry with a mismatched %s",
+  async (kind) => {
+    const f = await fixture();
+    const unresolved = { ...f.expiry, status: "AwaitingPaymentResolution", paymentEvidence: null };
+    const subject = kind === "failed" ? f.expiry : unresolved;
+    mocks.history.mockResolvedValue([subject]);
+    mocks.clock.mockResolvedValue(
+      kind === "preparation"
+        ? { ...f.prepared, preparationValidUntil: "2026-09-11T10:31:00.001Z" }
+        : f.prepared,
+    );
+    if (kind === "window") mocks.windowStart.mockResolvedValue("2026-09-11T10:00:00.001Z");
+    if (kind === "missing") mocks.windowStart.mockResolvedValue(null);
+    await expect(f.source.load(f.tx, subject)).rejects.toThrow(
+      "DINING_BATCH_CANCELLATION_SOURCE_UNAVAILABLE",
+    );
+    expect(mocks.progress).not.toHaveBeenCalled();
+  },
+);

@@ -20,7 +20,11 @@ import {
   unpaidCancelledBatches,
   unpaidCancelledTotal,
 } from "./CurrentOrderQueuePage.js";
-import { parseCurrentOrderDetail, parseCurrentOrderQueue } from "./current-order-queue-client.js";
+import {
+  ordersAwaitingAcceptance,
+  parseCurrentOrderDetail,
+  parseCurrentOrderQueue,
+} from "./current-order-queue-client.js";
 import { AcceptanceHoldNotice, acceptanceHoldText } from "./AcceptanceHoldActions.js";
 import { currentOrderQueueFixture } from "./current-order-queue.fixtures.js";
 it("renders actual Accepted version and visibly unresolved state without fabricated summaries", () => {
@@ -1045,4 +1049,33 @@ it("WP-2423: says an online order is paid, and what happened to the payment", ()
     <CurrentOrderQueueRows single view={parse(order())} paymentPosition={position("500")} />,
   );
   expect(single).toContain("Paid online $11.30 · partly refunded");
+});
+
+it("WP-2423 follow-up: counts a table whose later round awaits acceptance as one waiting order", () => {
+  const fixture = currentOrderQueueFixture();
+  const [ready, awaiting, accepted] = fixture.items;
+  if (!ready || !awaiting?.batches[0] || !accepted?.batches[0]) throw new Error("fixture");
+  const firstRound = { ...accepted.batches[0], canCancel: false };
+  const laterRound = "018f7600-0000-7000-8000-000000000032";
+  const table = {
+    ...accepted,
+    orderReference: "018f7600-0000-7000-8000-000000000031",
+    orderType: "DineIn" as const,
+    batches: [
+      firstRound,
+      {
+        ...firstRound,
+        orderBatchReference: laterRound,
+        sequence: 2,
+        acceptanceStatus: "NotAccepted",
+        canRequestAcceptance: true,
+      },
+    ],
+    canRequestAcceptance: false,
+  };
+  const view = parseCurrentOrderQueue({ ...fixture, items: [table, ready, awaiting] }, null);
+  expect(awaitingBatchReferences(view)).toEqual(
+    new Set([laterRound, awaiting.batches[0].orderBatchReference]),
+  );
+  expect(ordersAwaitingAcceptance(view)).toBe(2);
 });

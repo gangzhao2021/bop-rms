@@ -23,7 +23,7 @@ export type DiningRoundStatus =
 export type DiningRoundPayment =
   "Paid" | "Awaiting" | "Failed" | "NotCharged" | "Refunded" | "RefundPending";
 export type DiningCancellationReason =
-  "CustomerRequest" | "SoldOut" | "StoreError" | "DuplicateOrder";
+  "CustomerRequest" | "SoldOut" | "StoreError" | "DuplicateOrder" | "GuestLeft";
 
 export interface DiningRound {
   readonly roundNumber: number;
@@ -110,6 +110,7 @@ const reasons: readonly DiningCancellationReason[] = [
   "SoldOut",
   "StoreError",
   "DuplicateOrder",
+  "GuestLeft",
 ];
 
 function invalid(): never {

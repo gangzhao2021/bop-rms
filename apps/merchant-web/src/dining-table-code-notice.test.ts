@@ -4,6 +4,8 @@ import {
   longOpenSessionMinutes,
   staffRoundPaymentNotice,
   tableCodeNotice,
+  tableFloorStatus,
+  tableMatchesStateFilter,
 } from "./DiningSessionWorkspace.js";
 import type { StaffDiningTable } from "./dining-session-client.js";
 
@@ -73,4 +75,32 @@ it("WP-2423 item 5: warns before a staff round's payment time ends, urgently in 
   expect(staffRoundPaymentNotice(two, now, "America/Toronto")?.text).toMatch(
     /^2 rounds entered by staff await/u,
   );
+});
+
+it("WP-2423 follow-up: a table with an open session reads as seated, never available", () => {
+  const session = "01909988-0000-7000-8000-000000000009";
+  const seated = { ...table, currentDiningSessionReference: session, elapsedMinutes: 200 };
+  const longOpen = { ...table, currentDiningSessionReference: session, elapsedMinutes: 34992 };
+  const unknown = { ...table, currentDiningSessionReference: session, elapsedMinutes: null };
+  const blocked = { ...table, operationalState: "TemporarilyBlocked" as const };
+  expect(tableFloorStatus(table)).toEqual({ state: "Available", label: "Available" });
+  expect(tableFloorStatus(blocked)).toEqual({
+    state: "Unavailable",
+    label: "Temporarily unavailable",
+  });
+  expect(tableFloorStatus(seated)).toEqual({ state: "Seated", label: "Seated · open 3 h 20 min" });
+  expect(tableFloorStatus(longOpen)).toEqual({
+    state: "LongOpen",
+    label: "Guests may have left · open 24 days",
+  });
+  expect(tableFloorStatus(unknown)).toEqual({ state: "Seated", label: "Seated" });
+  expect(tableFloorStatus({ ...seated, operationalState: "TemporarilyBlocked" }).label).toBe(
+    "Seated · open 3 h 20 min · Temporarily unavailable",
+  );
+  const tables = [table, blocked, seated, longOpen];
+  const pick = (filter: string) => tables.filter((t) => tableMatchesStateFilter(t, filter));
+  expect(pick("All")).toEqual(tables);
+  expect(pick("Available")).toEqual([table]);
+  expect(pick("Seated")).toEqual([seated, longOpen]);
+  expect(pick("TemporarilyBlocked")).toEqual([blocked]);
 });

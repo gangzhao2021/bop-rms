@@ -37,6 +37,8 @@ import {
   CurrentOrderQueueError,
   type CurrentOrderDetail,
   type CurrentOrderQueue,
+  isAwaitingAcceptance,
+  ordersAwaitingAcceptance,
   type OrderPickupContact,
 } from "./current-order-queue-client.js";
 
@@ -570,9 +572,7 @@ function AcceptanceDeadline({
         {acceptanceHoldText(order.acceptanceHold, now)}
       </span>
     );
-  const window = order.batches.some((batch) => batch.canRequestAcceptance)
-    ? acceptanceWindow(order.acceptBy, now)
-    : null;
+  const window = isAwaitingAcceptance(order) ? acceptanceWindow(order.acceptBy, now) : null;
   return window === null ? null : (
     <span className="order-accept-by" data-tier={window.tier}>
       {window.tier === "lapsed"
@@ -1121,7 +1121,7 @@ export function CurrentOrderQueuePage({
     seenAwaiting.current = awaiting;
     const urgent = state.view.items.filter(
       (order) =>
-        order.batches.some((batch) => batch.canRequestAcceptance) &&
+        isAwaitingAcceptance(order) &&
         acceptanceWindow(order.acceptBy, now)?.tier === "urgent" &&
         !urgentAlerted.current.has(order.orderReference),
     );
@@ -1129,12 +1129,7 @@ export function CurrentOrderQueuePage({
     if (soundOn && (arrived.length > 0 || urgent.length > 0) && audio.current)
       playKitchenChime(audio.current);
   }, [state, now, soundOn]);
-  const awaitingCount =
-    state.kind === "Ready"
-      ? state.view.items.filter((order) =>
-          order.batches.some((batch) => batch.canRequestAcceptance),
-        ).length
-      : 0;
+  const awaitingCount = state.kind === "Ready" ? ordersAwaitingAcceptance(state.view) : 0;
   // WP-2423 Q1: a background tab still shows how many orders wait for acceptance.
   useEffect(() => {
     const base = document.title.replace(/^\(\d+\) /u, "");

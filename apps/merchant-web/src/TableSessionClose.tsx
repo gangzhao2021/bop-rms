@@ -14,6 +14,7 @@ import {
   DiningSessionCloseClientError,
 } from "./dining-session-close-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
+import { TableGuestsLeft } from "./TableGuestsLeft.js";
 import type { StaffDiningTable, StaffDiningTableSession } from "./dining-session-client.js";
 
 const plural = (count: number, one: string, many: string) =>
@@ -88,13 +89,18 @@ export async function closeTableSession(input: {
     }
     version += 1;
   }
-  if (progress !== null && progress.closureStatus === "Open" && progress.phase === "Fulfilled") {
+  // WP-2423 item 2: an Order whose every round was cancelled is closed too (nothing was served).
+  if (
+    progress !== null &&
+    progress.closureStatus === "Open" &&
+    (progress.phase === "Fulfilled" || progress.phase === "Cancelled")
+  ) {
     plan.order ??= createDiningOrderCloseClient(input.fetcher).prepare({
       operationReference: serviceOperationReference(),
       orderReference: progress.orderReference,
       expectedOrderVersion: progress.currentOrderVersion,
       expectedClosureVersion: progress.closureVersion,
-      reasonCode: "ORDER_COMPLETED",
+      reasonCode: progress.phase === "Cancelled" ? "ORDER_CANCELLED" : "ORDER_COMPLETED",
     });
     if (!plan.done.has("order")) {
       await plan.order.execute(csrf, signal);
@@ -114,7 +120,7 @@ export async function closeTableSession(input: {
 type Check =
   | { readonly kind: "Checking" }
   | { readonly kind: "Ready"; readonly progress: DiningProgress | null }
-  | { readonly kind: "Failed"; readonly denied: boolean };
+  | { readonly kind: "Failed"; readonly denied: boolean; readonly missing?: boolean };
 type Outcome = null | "Unknown" | "Refused" | "Denied";
 
 /**
@@ -133,7 +139,10 @@ export function TableSessionClose({
   onClosed,
   onRefresh,
   fetcher,
+  timeZone,
 }: {
+  /** The Store's time zone, for when an unpaid round is cancelled automatically. */
+  readonly timeZone?: string | undefined;
   readonly table: StaffDiningTable;
   readonly session: StaffDiningTableSession;
   readonly csrf: string;
@@ -173,6 +182,7 @@ export function TableSessionClose({
           setCheck({
             kind: "Failed",
             denied: error instanceof DiningProgressError && error.code === "PermissionDenied",
+            missing: error instanceof DiningProgressError && error.code === "NotFound",
           });
       });
     return () => controller.abort();
@@ -180,14 +190,38 @@ export function TableSessionClose({
   useEffect(() => () => pending.current?.abort(), []);
 
   const progress = check.kind === "Ready" ? check.progress : null;
+  // DEC-TABLE-CLOSE-GUESTS-LEFT: rounds still open (undefined while read, null when unknown).
+  const [openRounds, setOpenRounds] = useState<number | null | undefined>(
+    orderReference === null ? 0 : undefined,
+  );
   const blockers = check.kind === "Ready" ? tableCloseBlockers(table, progress) : [];
+  const guestsLeft =
+    orderReference !== null && check.kind === "Ready" ? (
+      <TableGuestsLeft
+        orderReference={orderReference}
+        diningSessionReference={table.currentDiningSessionReference as string}
+        tableLabel={table.stableLabel}
+        csrf={csrf}
+        timeZone={timeZone}
+        locked={locked || submitting}
+        attempt={attempt}
+        onPlan={setOpenRounds}
+        onResolved={() => {
+          setAttempt((value) => value + 1);
+          onRefresh();
+        }}
+        fetcher={fetcher}
+      />
+    ) : null;
+  // The rounds the plan lists keep the table open even when no item is waiting (refunds).
+  const planBlocks = typeof openRounds === "number" && openRounds > 0;
   const ordersLink =
     orderReference === null ? null : (
       <Link to={`/operations/orders/${orderReference}`}>Open this table&apos;s order</Link>
     );
 
   const close = async () => {
-    if (pending.current || check.kind !== "Ready" || blockers.length > 0) return;
+    if (pending.current || check.kind !== "Ready" || blockers.length > 0 || planBlocks) return;
     if (outcome !== "Unknown" && (!confirmed || locked)) return;
     const controller = new AbortController();
     pending.current = controller;
@@ -242,21 +276,26 @@ export function TableSessionClose({
         <p role="status">
           {check.denied
             ? "You can't check this table's orders with your current access. Ask an Owner or Store Manager to close it."
-            : "Couldn't check this table's orders. Check the connection and try again."}{" "}
+            : check.missing
+              ? "This table's order wasn't found at this store. Refresh the tables and try again."
+              : "Couldn't check this table's orders. Check the connection and try again."}{" "}
           {check.denied ? null : (
             <button type="button" onClick={() => setAttempt((value) => value + 1)}>
               Check again
             </button>
           )}
         </p>
-      ) : blockers.length > 0 ? (
+      ) : blockers.length > 0 || planBlocks ? (
         <div role="note">
           <p>This table can&apos;t be closed yet:</p>
-          <ul>
-            {blockers.map((text) => (
-              <li key={text}>{text}</li>
-            ))}
-          </ul>
+          {blockers.length > 0 ? (
+            <ul>
+              {blockers.map((text) => (
+                <li key={text}>{text}</li>
+              ))}
+            </ul>
+          ) : null}
+          {guestsLeft}
           <p>
             {ordersLink}{" "}
             <button type="button" onClick={() => setAttempt((value) => value + 1)}>
@@ -264,6 +303,8 @@ export function TableSessionClose({
             </button>
           </p>
         </div>
+      ) : openRounds === undefined ? (
+        guestsLeft
       ) : (
         <>
           <p>

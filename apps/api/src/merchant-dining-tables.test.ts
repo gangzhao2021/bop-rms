@@ -32,9 +32,11 @@ const id = (n: number) => "01909988-0000-7000-8000-" + n.toString(16).padStart(1
 type Options = Parameters<typeof createMerchantDiningTables>[0];
 function setup() {
   const allowed = vi.fn(async () => true),
-    authorizeAction = vi.fn(async (): Promise<{ effect: "Allow" | "Deny" }> => ({
-      effect: "Allow",
-    })),
+    authorizeAction = vi.fn<(action?: string) => Promise<{ effect: "Allow" | "Deny" }>>(
+      async () => ({
+        effect: "Allow",
+      }),
+    ),
     // One permission read answers every action the page needs (WP-2423 query budget).
     authorizeActions = vi.fn(
       async (actions: readonly string[]) =>

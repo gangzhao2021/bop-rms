@@ -189,6 +189,7 @@ test("@production a manager refunds an item of a card-machine payment and record
             state: recorded ? "Confirmed" : "NotDispatched",
             method: "CardMachine",
             refundedOnCardMachineAt: recorded ? "2026-10-15T15:02:00.000Z" : null,
+            cardMachineSlipReference: recorded ? "REF 5521" : null,
             executionOperationReference: null,
             executionApprovalReference: null,
             amountMinor: "621",
@@ -270,7 +271,14 @@ test("@production a manager refunds an item of a card-machine payment and record
   await page.getByRole("button", { name: "Refunded CAD 6.21 on card machine" }).click();
   await expect(page.getByText(/Result unknown\. Record it again/u)).toBeVisible();
   await page.getByRole("button", { name: "Refunded CAD 6.21 on card machine" }).click();
-  await expect(page.getByText(/Recorded: CAD 6\.21 refunded on the card machine/u)).toBeVisible();
+  await expect(
+    page.getByText(/^Card-machine refund recorded: CAD 6\.21 refunded on the card machine/u),
+  ).toBeVisible();
+  // Without a reload: the request, its status and the payment amounts are reread from the server.
+  await expect(requests).toContainText("Refunded on the card machine");
+  await expect(page.getByText(/Slip reference: REF 5521\./u)).toBeVisible();
+  await expect(summary).toContainText("Payment state: Partly refunded");
+  await expect(summary).not.toContainText("Captured");
   // The retry reused the same operation: the refund is counted once.
   expect(records).toHaveLength(2);
   expect(records[1]).toBe(records[0]);
@@ -280,8 +288,6 @@ test("@production a manager refunds an item of a card-machine payment and record
     slipReference: "REF 5521",
     refundedAt: null,
   });
-  await page.getByRole("button", { name: "Refresh recorded requests" }).click();
-  await expect(requests).toContainText("Refunded on the card machine");
   expect(providerCalls).toEqual([]);
   await expectNoInternalText(page);
 });

@@ -16,6 +16,7 @@ import {
 import {
   createPostgresCardMachinePaymentStore,
   createPostgresPaymentCompensationRefundPositionSource,
+  readPaymentRemainingRefundable,
 } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -71,7 +72,8 @@ export async function readCardMachineCancellationRefund(
   record: Pick<
     StaffOrderCancellationRecord,
     "orderReference" | "orderBatchReference" | "cancellationReference"
-  >,
+  > &
+    Partial<Pick<StaffOrderCancellationRecord, "refundDisposition">>,
   authorize: () => Promise<boolean>,
 ): Promise<{
   readonly status: StaffOrderRefundStatus;
@@ -96,6 +98,13 @@ export async function readCardMachineCancellationRefund(
       refund.sourceReference === String(record.cancellationReference),
   );
   const refunded = refunds.reduce((sum, refund) => sum + refund.amountMinor, 0n);
+  // DEC-TABLE-CLOSE-GUESTS-LEFT: refunded on the machine in full before the round was cancelled.
+  if (record.refundDisposition === "AlreadyRefunded")
+    return Object.freeze({
+      status: "Refunded" as const,
+      amountMinor: refunded.toString(),
+      cardMachinePaymentReference: payment.cardMachinePaymentReference,
+    });
   return Object.freeze({
     status: own === undefined ? ("Pending" as const) : ("Refunded" as const),
     amountMinor: (own?.amountMinor ?? payment.preparation.total.amountMinor - refunded).toString(),
@@ -139,9 +148,12 @@ export async function readStaffCancellationRefundStatus(
   record: Pick<
     StaffOrderCancellationRecord,
     "orderReference" | "paymentTransactionReference" | "paymentAttemptReference"
-  >,
+  > &
+    Partial<Pick<StaffOrderCancellationRecord, "refundDisposition">>,
   authorize: () => Promise<boolean>,
 ): Promise<StaffOrderRefundStatus> {
+  // DEC-TABLE-CLOSE-GUESTS-LEFT: an ordinary refund had already returned it in full.
+  if (record.refundDisposition === "AlreadyRefunded") return "Refunded";
   const position = await readStaffCancellationRefundPosition(transaction, scope, record, authorize);
   return position.confirmedMinor > 0n && position.pendingMinor === 0n ? "Refunded" : "Pending";
 }
@@ -171,6 +183,14 @@ export function createMerchantOrderStaffCancellation(options: {
     scope: { tenantReference: string; brandReference: string; storeReference: string },
   ): Promise<void>;
   nextReference(): string;
+  /**
+   * DEC-TABLE-CLOSE-GUESTS-LEFT: the Store's Provider account, to read what is left to refund of a
+   * never-accepted round paid online. Without it such a round is not cancellable here.
+   */
+  resolveRefundConfiguration?(
+    transaction: ConsumerTransaction,
+    scope: { tenantReference: string; brandReference: string; storeReference: string },
+  ): Promise<{ providerAccountReference: string; environment: "Test" | "Live" }>;
 }) {
   const resolveScope = createMerchantStoreScope(options.persistence);
   return async (input: {
@@ -246,7 +266,7 @@ export function createMerchantOrderStaffCancellation(options: {
           const refundStatus =
             card !== null
               ? card.status
-              : status === "Cancelled"
+              : status === "Cancelled" && record.refundDisposition !== "AlreadyRefunded"
                 ? ("Pending" as const)
                 : await readStaffCancellationRefundStatus(tx, selected, record, allowed);
           if (!(await allowed())) return fail("ORDER_CANCELLATION_PERMISSION_DENIED");
@@ -288,6 +308,46 @@ export function createMerchantOrderStaffCancellation(options: {
                 : "ORDER_CANCELLATION_NOT_CANCELLABLE",
           );
         const plan = prepared.plan;
+        // DEC-TABLE-CLOSE-GUESTS-LEFT: a never-accepted round whose payment was already refunded in
+        // full owes nothing more; otherwise Payment refunds what is left (all of it, tip included).
+        let refundDisposition: "Refund" | "AlreadyRefunded" = "Refund";
+        if (plan.previousPhase === "Submitted") {
+          // The staff member was resolved at the start of this transaction and is again before
+          // the reply; these Payment reads only confirm they run in it, for this Order.
+          const cardStore = createPostgresCardMachinePaymentStore({
+            scope: selected,
+            authorize: async (t, value) => t === tx && value.orderReference === orderReference,
+          });
+          const card = await cardStore.loadByBatch(tx, orderReference, orderBatchReference);
+          let remainingMinor: bigint;
+          if (card !== null) {
+            const refunds = await cardStore.refunds(tx, card.cardMachinePaymentReference);
+            remainingMinor =
+              card.preparation.total.amountMinor -
+              refunds.reduce((sum, refund) => sum + refund.amountMinor, 0n);
+          } else {
+            if (options.resolveRefundConfiguration === undefined)
+              return fail("ORDER_CANCELLATION_NOT_CANCELLABLE");
+            const configuration = await options.resolveRefundConfiguration(tx, selected);
+            const position = await readPaymentRemainingRefundable(tx, {
+              scope: {
+                ...selected,
+                providerAccountReference: configuration.providerAccountReference,
+                environment: configuration.environment,
+              },
+              orderReference,
+              paymentTransactionReference: String(plan.payment.paymentTransactionReference),
+              paymentIntentReference: String(plan.payment.paymentIntentReference),
+              paymentAttemptReference: String(plan.payment.paymentAttemptReference),
+              observedAt: parseOrderingInstant(options.persistence.now()),
+              authorize: async (t, query) => t === tx && query.orderReference === orderReference,
+            });
+            remainingMinor = position.remainingMinor;
+          }
+          if (remainingMinor < 0n) return fail("ORDER_CANCELLATION_UNAVAILABLE");
+          if (remainingMinor === 0n) refundDisposition = "AlreadyRefunded";
+          if (!(await allowed())) return fail("ORDER_CANCELLATION_PERMISSION_DENIED");
+        }
         const cancellationReference = String(parseOrderingReference(options.nextReference()));
         const cancelledAt = parseOrderingInstant(options.persistence.now());
         // Kitchen after the Ordering fence (foreign owner fences first): every item still unstarted.
@@ -316,6 +376,7 @@ export function createMerchantOrderStaffCancellation(options: {
           auditReference: options.nextReference(),
           terminationAuditReference: options.nextReference(),
           cancelledAt,
+          refundDisposition,
         });
         const record = created.record;
         // Stock reserved at submission returns in the same transaction, or nothing is cancelled.

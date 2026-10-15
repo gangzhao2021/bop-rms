@@ -263,6 +263,7 @@ it("binds status to request operation and rejects contradictory completion or mo
     state: "NotDispatched",
     method: "Online",
     refundedOnCardMachineAt: null,
+    cardMachineSlipReference: null,
     executionOperationReference: null,
     executionApprovalReference: null,
     amountMinor: "1130",
@@ -461,6 +462,7 @@ it("WP-2423 item 4: reads card-machine payments, items, request status and recor
     state: "Confirmed",
     method: "CardMachine",
     refundedOnCardMachineAt: "2026-09-20T12:10:00.000Z",
+    cardMachineSlipReference: "AUTH 1234",
     executionOperationReference: null,
     executionApprovalReference: null,
     amountMinor: "565",
@@ -507,6 +509,7 @@ it("WP-2423 item 4: reads card-machine payments, items, request status and recor
     method: "CardMachine",
     state: "Confirmed",
     refundedOnCardMachineAt: "2026-09-20T12:10:00.000Z",
+    cardMachineSlipReference: "AUTH 1234",
   });
   await expect(client.status(id(1), id(3), csrf)).rejects.toMatchObject({ code: "Unavailable" });
   const command = {
@@ -532,4 +535,63 @@ it("WP-2423 item 4: reads card-machine payments, items, request status and recor
     client.recordCardMachineRefund({ ...command, slipReference: "4111 1111 1111 1111" }, csrf),
   ).rejects.toThrow();
   expect(fetcher).toHaveBeenCalledTimes(6);
+});
+
+it("WP-2423 item 4: shows a recorded card-machine slip reference, never a card number or one not yet recorded", async () => {
+  const payment = {
+    paymentAttemptReference: id(7),
+    paymentIntentReference: id(6),
+    state: "Confirmed",
+    method: "CardMachine",
+    refundedOnCardMachineAt: "2026-09-20T12:10:00.000Z",
+    cardMachineSlipReference: null,
+    executionOperationReference: null,
+    executionApprovalReference: null,
+    amountMinor: "565",
+    confirmedMinor: "565",
+    pendingMinor: "0",
+  };
+  const status = (entry: Record<string, unknown>) => ({
+    orderReference: id(1),
+    requestReference: id(2),
+    operationReference: id(3),
+    observedAt: "2026-09-20T12:11:00.000Z",
+    currencyCode: "CAD",
+    amountMinor: "565",
+    payments: [{ ...payment, ...entry }],
+  });
+  const fetcher = vi.fn<typeof fetch>();
+  const client = createOrdinaryRefundClient(fetcher);
+  // Recorded without a slip reference (it is optional).
+  fetcher.mockResolvedValueOnce(response(status({})));
+  expect(
+    (await client.status(id(1), id(3), csrf)).payments[0]?.cardMachineSlipReference,
+  ).toBeNull();
+  for (const invalid of [
+    { cardMachineSlipReference: "4111 1111 1111 1111" },
+    { cardMachineSlipReference: "" },
+    { cardMachineSlipReference: 1234 },
+    {
+      state: "NotDispatched",
+      refundedOnCardMachineAt: null,
+      confirmedMinor: "0",
+      pendingMinor: "565",
+      cardMachineSlipReference: "AUTH 1234",
+    },
+    {
+      method: "Online",
+      state: "NotDispatched",
+      refundedOnCardMachineAt: null,
+      confirmedMinor: "0",
+      pendingMinor: "565",
+      cardMachineSlipReference: "AUTH 1234",
+    },
+  ]) {
+    fetcher.mockResolvedValueOnce(response(status(invalid)));
+    await expect(client.status(id(1), id(3), csrf)).rejects.toMatchObject({ code: "Unavailable" });
+  }
+  const missing: Partial<typeof payment> = { ...payment };
+  delete missing.cardMachineSlipReference;
+  fetcher.mockResolvedValueOnce(response({ ...status({}), payments: [missing] }));
+  await expect(client.status(id(1), id(3), csrf)).rejects.toMatchObject({ code: "Unavailable" });
 });

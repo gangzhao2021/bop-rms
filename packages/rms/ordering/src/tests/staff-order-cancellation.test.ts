@@ -100,6 +100,7 @@ describe("staff cancellation record", () => {
       "SOLD_OUT",
       "STORE_ERROR",
       "DUPLICATE_ORDER",
+      "GUEST_LEFT",
     ]);
     expect(staffOrderCancellationPolicy.permissionCode).toBe("ordering.order.cancel");
   });
@@ -156,6 +157,9 @@ interface State {
   completed: boolean;
   accepted: boolean;
   paid: boolean;
+  /** DEC-TABLE-CLOSE-GUESTS-LEFT: a payment recorded as waiting for acceptance. */
+  waiting: boolean;
+  disposed: boolean;
   version: number;
   prior: unknown[];
   revisionInsert: number;
@@ -172,6 +176,8 @@ function storeFixture(overrides: Partial<State> = {}) {
     completed: false,
     accepted: true,
     paid: true,
+    waiting: false,
+    disposed: false,
     version: 2,
     prior: [],
     revisionInsert: 1,
@@ -208,6 +214,28 @@ function storeFixture(overrides: Partial<State> = {}) {
                 attempt: id(13),
                 event: id(14),
                 confirmed_at: new Date("2026-10-11T09:51:00.000Z"),
+              },
+            ]
+          : [],
+      );
+    if (sql.includes("AS disposed")) return result([{ disposed: state.disposed }]);
+    if (sql.includes("FROM rms_ordering.order_payment_acceptance_wait"))
+      return result(
+        state.waiting
+          ? [
+              {
+                wait: id(10),
+                submission,
+                event: id(14),
+                evaluated_at: new Date("2026-10-11T09:51:30.000Z"),
+                record_json: {
+                  disposition: "AwaitingAcceptance",
+                  dispositionReference: id(10),
+                  paymentTransactionReference: id(11),
+                  paymentIntentReference: id(12),
+                  paymentAttemptReference: id(13),
+                  paymentEventReference: id(14),
+                },
               },
             ]
           : [],
@@ -276,7 +304,7 @@ describe("prepare", () => {
       expectedOrderVersion: 2,
       actorReference: actor,
     });
-    expect(result).toEqual({ status: "Ready", plan });
+    expect(result).toEqual({ status: "Ready", plan: { ...plan, previousPhase: "Accepted" } });
     const sql = f.query.mock.calls.map((call) => call[0]);
     expect(sql[1]).toContain("pg_advisory_xact_lock");
     expect(f.query.mock.calls[1]?.[1]).toEqual([
@@ -401,8 +429,9 @@ describe("commit", () => {
     expect(revision).toBeGreaterThan(0);
     expect(staff).toBeGreaterThan(revision);
     expect(f.query.mock.calls[staff]?.[1]).toContainEqual([id(8), id(9)]);
-    expect(sql[staff]).toContain("previous_phase,permission_code");
-    expect(sql[staff]).toContain("'Accepted','ordering.order.cancel'");
+    expect(sql[staff]).toContain("previous_phase,refund_disposition,permission_code");
+    expect(sql[staff]).toContain("'ordering.order.cancel'");
+    expect(f.query.mock.calls[staff]?.[1]?.slice(-2)).toEqual(["Accepted", "Refund"]);
     expect(mocks.audit).toHaveBeenCalledWith(
       f.tx,
       expect.objectContaining({ targetType: "OrderBatch", targetId: batch }),
@@ -556,5 +585,120 @@ describe("reader and discovery", () => {
         id(77),
       ]),
     ).rejects.toThrow("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+  });
+});
+
+describe("DEC-TABLE-CLOSE-GUESTS-LEFT: a paid round never accepted", () => {
+  const prepare = (f: ReturnType<typeof storeFixture>, version = 2) =>
+    f.store.prepare(f.tx, {
+      orderReference: order,
+      orderBatchReference: batch,
+      expectedOrderVersion: version,
+      actorReference: actor,
+    });
+  it("plans a dine-in round from its waiting payment, never a pickup", async () => {
+    const f = storeFixture({ orderType: "DineIn", accepted: false, paid: false, waiting: true });
+    expect(await prepare(f)).toEqual({
+      status: "Ready",
+      plan: { ...plan, orderType: "DineIn", previousPhase: "Submitted" },
+    });
+    const pickup = storeFixture({ accepted: false, paid: false, waiting: true });
+    expect(await prepare(pickup)).toEqual({ status: "NotEligible", reason: "NotConfirmed" });
+  });
+  it("refuses a round with no waiting payment or one already disposed", async () => {
+    expect(
+      await prepare(storeFixture({ orderType: "DineIn", accepted: false, paid: false })),
+    ).toEqual({ status: "NotEligible", reason: "NotConfirmed" });
+    expect(
+      await prepare(
+        storeFixture({
+          orderType: "DineIn",
+          accepted: false,
+          paid: false,
+          waiting: true,
+          disposed: true,
+        }),
+      ),
+    ).toEqual({ status: "NotEligible", reason: "NotConfirmed" });
+  });
+  it("cancels the first round at Order version 1 and records Submitted / AlreadyRefunded", async () => {
+    const f = storeFixture({
+      orderType: "DineIn",
+      accepted: false,
+      paid: false,
+      waiting: true,
+      version: 1,
+    });
+    const prepared = await prepare(f, 1);
+    if (prepared.status !== "Ready") throw new Error("not ready");
+    const created = await f.store.commit(f.tx, {
+      ...commitInput("DineIn"),
+      plan: prepared.plan,
+      reasonCode: "GUEST_LEFT",
+      refundDisposition: "AlreadyRefunded",
+    });
+    expect(created.record).toMatchObject({
+      previousPhase: "Submitted",
+      refundDisposition: "AlreadyRefunded",
+      reasonCode: "GUEST_LEFT",
+      expectedOrderVersion: 1,
+      cancelledOrderVersion: 2,
+    });
+    const sql = f.query.mock.calls.map((call) => call[0]);
+    const staff = sql.findIndex((value) =>
+      value.startsWith("INSERT INTO rms_ordering.order_staff_cancellation"),
+    );
+    expect(f.query.mock.calls[staff]?.[1]?.slice(-2)).toEqual(["Submitted", "AlreadyRefunded"]);
+  });
+  it("never records AlreadyRefunded for an accepted round", async () => {
+    const f = storeFixture({ orderType: "DineIn" });
+    await expect(
+      f.store.commit(f.tx, { ...commitInput("DineIn"), refundDisposition: "AlreadyRefunded" }),
+    ).rejects.toThrow();
+  });
+  it("parses older records as Accepted / Refund and refuses mismatched phases", () => {
+    expect(parseStaffOrderCancellationRecord(record())).toMatchObject({
+      previousPhase: "Accepted",
+      refundDisposition: "Refund",
+    });
+    expect(() =>
+      parseStaffOrderCancellationRecord(record({ previousPhase: "Submitted" })),
+    ).toThrow();
+    expect(
+      parseStaffOrderCancellationRecord(
+        record({
+          orderType: "DineIn",
+          previousPhase: "Submitted",
+          refundDisposition: "AlreadyRefunded",
+          expectedOrderVersion: 1,
+          cancelledOrderVersion: 2,
+        }),
+      ).refundDisposition,
+    ).toBe("AlreadyRefunded");
+    expect(() =>
+      parseStaffOrderCancellationRecord(record({ refundDisposition: "AlreadyRefunded" })),
+    ).toThrow();
+  });
+  it("opens no compensation for an already refunded round", async () => {
+    const row = {
+      ...record({
+        orderType: "DineIn",
+        previousPhase: "Submitted",
+        refundDisposition: "AlreadyRefunded",
+      }),
+    };
+    const tx = {
+      query: vi.fn(async (sql: string) =>
+        sql.includes("FROM rms_ordering.order_staff_cancellation")
+          ? { rows: [row], rowCount: 1 }
+          : { rows: [], rowCount: 0 },
+      ),
+    } as unknown as ConsumerTransaction;
+    expect(
+      await createPostgresStaffOrderCancellationReader({
+        brandReference: brand,
+        storeReference: store,
+      }).loadCompensationByPaymentEvent({ transaction: tx, paymentEventReference: id(14) }),
+    ).toBeNull();
   });
 });

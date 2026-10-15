@@ -7,6 +7,8 @@ import {
 } from "@rms/dining";
 import {
   createPostgresOrderBatchCheckoutExpiryStore,
+  diningCheckoutPaymentWindowMinutes,
+  loadDiningBatchPaymentWindowStart,
   parseOrderBatchCheckoutExpiry,
   parseOrderingReference,
   parseOrderingInstant,
@@ -87,10 +89,34 @@ export function createDiningBatchCancellationSource(options: {
           "submissionReference",
           "paymentOperationReference",
           "commitmentReference",
-          "paymentRequestedAt",
-          "capacityExpiresAt",
         ] as const)
           if (String(clock[key]) !== String(expiry[key])) return unavailable();
+        if (clock.paymentRequestedAt === null) {
+          // WP-2423 item 3: the commitment never requested payment and no longer can; its window
+          // started when the round was submitted (Ordering's record), which the expiry must state.
+          const windowStartsAt = await loadDiningBatchPaymentWindowStart(transaction, scope, {
+            orderReference: expiry.orderReference,
+            orderBatchReference: expiry.orderBatchReference,
+            submissionReference: expiry.submissionReference,
+            commitmentReference: expiry.commitmentReference,
+            paymentOperationReference: expiry.paymentOperationReference,
+          });
+          if (
+            expiry.status !== "AwaitingPaymentResolution" ||
+            clock.capacityExpiresAt !== null ||
+            String(clock.preparationValidUntil) > String(expiry.observedAt) ||
+            windowStartsAt === null ||
+            expiry.paymentRequestedAt !== windowStartsAt ||
+            expiry.capacityExpiresAt !==
+              new Date(
+                Date.parse(windowStartsAt) + diningCheckoutPaymentWindowMinutes * 60_000,
+              ).toISOString() ||
+            !(await allowed(transaction))
+          )
+            return unavailable();
+        } else
+          for (const key of ["paymentRequestedAt", "capacityExpiresAt"] as const)
+            if (String(clock[key]) !== String(expiry[key])) return unavailable();
         const progress = await createDiningOrderDeliveryProgress({
           ...scope,
           diningScope: scope,

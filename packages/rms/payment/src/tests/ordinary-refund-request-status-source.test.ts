@@ -86,6 +86,7 @@ it("reads a recorded request as not dispatched with its amount still reserved", 
       confirmedMinor: "0",
       pendingMinor: "6000",
       refundedOnCardMachineAt: null,
+      cardMachineSlipReference: null,
     },
   ]);
   expect(d.context).toHaveBeenCalledWith(tx, query);
@@ -185,6 +186,7 @@ it("WP-2423 item 4: a card-machine refund is pending until recorded on the machi
       confirmedMinor: "0",
       pendingMinor: "6000",
       refundedOnCardMachineAt: null,
+      cardMachineSlipReference: null,
     },
   ]);
   expect(d.prepared).not.toHaveBeenCalled();
@@ -192,6 +194,7 @@ it("WP-2423 item 4: a card-machine refund is pending until recorded on the machi
   d.machineRefund.mockResolvedValue({
     cardMachinePaymentReference: leg.paymentTransactionReference,
     amountMinor: 6000n,
+    slipReference: "RF4821",
     refundedAt: "2026-09-20T11:50:00.000Z",
     recordedAt: "2026-09-20T11:55:00.000Z",
   });
@@ -200,15 +203,20 @@ it("WP-2423 item 4: a card-machine refund is pending until recorded on the machi
     confirmedMinor: "6000",
     pendingMinor: "0",
     refundedOnCardMachineAt: "2026-09-20T11:50:00.000Z",
+    cardMachineSlipReference: "RF4821",
   });
   // Recorded after the instant being read: still pending at that instant.
   d.machineRefund.mockResolvedValue({
     cardMachinePaymentReference: leg.paymentTransactionReference,
     amountMinor: 6000n,
+    slipReference: "RF4822",
     refundedAt: "2026-09-20T12:05:00.000Z",
     recordedAt: "2026-09-20T12:06:00.000Z",
   });
-  expect((await make()(tx, query)).payments[0]?.state).toBe("NotDispatched");
+  expect((await make()(tx, query)).payments[0]).toMatchObject({
+    state: "NotDispatched",
+    cardMachineSlipReference: null,
+  });
   // A recorded amount that differs from the request is never shown as its refund.
   d.machineRefund.mockResolvedValue({
     cardMachinePaymentReference: leg.paymentTransactionReference,

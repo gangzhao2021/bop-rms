@@ -1,5 +1,5 @@
 export class DiningProgressError extends Error {
-  constructor(readonly code: "PermissionDenied" | "Unavailable") {
+  constructor(readonly code: "PermissionDenied" | "NotFound" | "Unavailable") {
     super("Dining progress unavailable");
   }
 }
@@ -135,6 +135,8 @@ export function createDiningProgressClient(fetcher: typeof fetch = fetch) {
         });
         if (response.status === 401 || response.status === 403)
           throw new DiningProgressError("PermissionDenied");
+        // WP-2423 item 2: the table's order is not (or no longer) a dine-in order here.
+        if (response.status === 404) throw new DiningProgressError("NotFound");
         if (
           !response.ok ||
           response.headers.get("cache-control") !== "no-store" ||

@@ -106,6 +106,10 @@ export function createPostgresOrderPaymentAcceptanceWaitStore(options: {
       await appendAuditRecordInTransaction(tx, audit);
       return { status: "Created" as const, record: r };
     },
+    /**
+     * Waits with no payment disposition yet. A wait resolved by a staff cancellation of the never
+     * accepted round (DEC-TABLE-CLOSE-GUESTS-LEFT) is settled by that record and is not resumed.
+     */
     async listUnresolved(
       tx: ConsumerTransaction,
       limit: number,
@@ -116,7 +120,7 @@ export function createPostgresOrderPaymentAcceptanceWaitStore(options: {
         afterEventReference === null ? null : parseOrderingReference(afterEventReference);
       await scope(tx, "ListPaymentWaits");
       const found = await tx.query(
-        "SELECT w.payment_event_id FROM rms_ordering.order_payment_acceptance_wait w WHERE w.brand_id=$1 AND w.store_id=$2 AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_payment_disposition_record d WHERE d.brand_id=w.brand_id AND d.store_id=w.store_id AND d.payment_event_id=w.payment_event_id) AND ($4::uuid IS NULL OR w.payment_event_id>$4::uuid) ORDER BY w.payment_event_id LIMIT $3",
+        "SELECT w.payment_event_id FROM rms_ordering.order_payment_acceptance_wait w WHERE w.brand_id=$1 AND w.store_id=$2 AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_payment_disposition_record d WHERE d.brand_id=w.brand_id AND d.store_id=w.store_id AND d.payment_event_id=w.payment_event_id) AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation c WHERE c.brand_id=w.brand_id AND c.store_id=w.store_id AND c.payment_event_id=w.payment_event_id) AND ($4::uuid IS NULL OR w.payment_event_id>$4::uuid) ORDER BY w.payment_event_id LIMIT $3",
         [brand, store, limit, after],
       );
       if (found.rows.length > limit) return unavailable();

@@ -182,6 +182,7 @@ import type { createMerchantDiningServeCommand } from "./merchant-dining-serve-c
 import type { createMerchantDiningTableCommand } from "./merchant-dining-table-command.js";
 import type { createMerchantDiningTableQr } from "./merchant-dining-table-qr.js";
 import type { createMerchantDiningOrderProgress } from "./merchant-dining-order-progress.js";
+import type { createMerchantDiningTableClosePlan } from "./merchant-dining-table-close-plan.js";
 import type { createMerchantPickupQuery } from "./merchant-pickup-query.js";
 import { FulfillmentReadinessError } from "@rms/fulfillment";
 import type { createMerchantPickupProof } from "./merchant-pickup-proof.js";
@@ -709,6 +710,8 @@ export interface MerchantBffRouterOptions {
   /** WP-2423 Q11: table QR codes (DIN-TABLE-LIST). */
   readonly diningTableQr?: ReturnType<typeof createMerchantDiningTableQr>;
   readonly diningOrderProgress?: ReturnType<typeof createMerchantDiningOrderProgress>;
+  /** DEC-TABLE-CLOSE-GUESTS-LEFT: the open rounds of a table whose guests left, and their refunds. */
+  readonly diningTableClosePlan?: ReturnType<typeof createMerchantDiningTableClosePlan>;
   readonly diningItemService?: ReturnType<typeof createMerchantDiningItemService>;
   readonly serviceControl?: (
     input: Parameters<ReturnType<typeof createMerchantServiceControl>>[0],
@@ -5444,6 +5447,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             // WP-2423 item 4: refunded on the Store's card machine (recorded) or online.
             method: payment.method,
             refundedOnCardMachineAt: payment.refundedOnCardMachineAt,
+            // The reference on the machine's refund slip (not secret; never a card number).
+            cardMachineSlipReference: payment.cardMachineSlipReference,
             executionOperationReference: payment.executionOperationReference,
             executionApprovalReference: payment.executionApprovalReference,
             amountMinor: payment.amountMinor,
@@ -8064,6 +8069,55 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         });
       })
       .catch(() => denied(response));
+  });
+
+  // DEC-TABLE-CLOSE-GUESTS-LEFT: what closing a table whose guests left resolves and refunds.
+  router.post("/dining/table-close-plan", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.diningTableClosePlan) {
+      response.status(503).json({ error: "dining_table_close_plan_unavailable" });
+      return;
+    }
+    void options
+      .diningTableClosePlan({ sessionCookie, csrf, query: request.body })
+      .then((plan) => {
+        if (!plan) {
+          response.status(404).json({ error: "dining_table_close_plan_not_found" });
+          return;
+        }
+        response.json({
+          orderReference: plan.orderReference,
+          diningSessionReference: plan.diningSessionReference,
+          orderVersion: plan.orderVersion,
+          observedAt: plan.observedAt,
+          rounds: plan.rounds.map((round) => ({
+            orderBatchReference: round.orderBatchReference,
+            sequence: round.sequence,
+            state: round.state,
+            openItemCount: round.openItemCount,
+            startedItemCount: round.startedItemCount,
+            cancellableItemReferences: round.cancellableItemReferences,
+            refund: round.refund,
+            cancelsAt: round.cancelsAt,
+          })),
+          totals: plan.totals,
+        });
+      })
+      .catch((error: unknown) => {
+        if (error instanceof Error && error.message === "DINING_TABLE_CLOSE_PLAN_PERMISSION_DENIED")
+          denied(response);
+        else response.status(503).json({ error: "dining_table_close_plan_unavailable" });
+      });
   });
 
   router.post("/dining/serve", sameOriginMutation(options), (request, response) => {

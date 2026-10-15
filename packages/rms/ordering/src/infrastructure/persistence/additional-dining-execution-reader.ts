@@ -72,15 +72,20 @@ export function createPostgresAdditionalDiningExecutionReader(
               cancellation.cancelledAt > observedAt)
           )
             throw new AdditionalDiningBatchStoreError();
+          // A staff cancellation follows the acceptance, or cancels a paid round never accepted.
           if (
             staffCancellation &&
-            (acceptance === null ||
-              cancellation !== null ||
+            (cancellation !== null ||
               staffCancellation.submissionReference !== snapshot.batch.submissionReference ||
-              staffCancellation.expectedOrderVersion < acceptance.acceptedOrderVersion ||
               staffCancellation.cancelledOrderVersion > current.orderVersion ||
-              staffCancellation.cancelledAt < acceptance.acceptedAt ||
-              staffCancellation.cancelledAt > observedAt)
+              staffCancellation.cancelledAt > observedAt ||
+              (staffCancellation.previousPhase === "Submitted"
+                ? acceptance !== null ||
+                  staffCancellation.expectedOrderVersion < appendedVersion ||
+                  staffCancellation.cancelledAt < snapshot.batch.submittedAt
+                : acceptance === null ||
+                  staffCancellation.expectedOrderVersion < acceptance.acceptedOrderVersion ||
+                  staffCancellation.cancelledAt < acceptance.acceptedAt))
           )
             throw new AdditionalDiningBatchStoreError();
           if ((await authorize(transaction)) !== true) throw new AdditionalDiningBatchStoreError();

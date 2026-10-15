@@ -171,6 +171,8 @@ export function createMerchantDiningOrderCloseCommand(options: {
         authorize,
         authorizeKitchen: authorize,
         authorizeDining: authorize,
+        // WP-2423 item 2: an Order whose every round was cancelled can be closed (nothing owed).
+        includeCancelled: true,
       };
       const evidence = createDiningSettledCloseEvidence(sourceOptions);
       const observedAt = prior ? String(prior.occurredAt) : now;

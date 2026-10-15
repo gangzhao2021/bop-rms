@@ -53,6 +53,8 @@ export const staffCancellationReasons = [
   "SOLD_OUT",
   "STORE_ERROR",
   "DUPLICATE_ORDER",
+  // DEC-TABLE-CLOSE-GUESTS-LEFT: a manager closed the table after the guests left.
+  "GUEST_LEFT",
 ] as const;
 export type StaffCancellationReason = (typeof staffCancellationReasons)[number];
 const minorPattern = /^(0|[1-9][0-9]{0,17})$/;
@@ -503,6 +505,16 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
   return Object.freeze({ items: Object.freeze(items), nextAfterOrderReference: next });
 }
 export type CurrentOrderQueue = ReturnType<typeof parseCurrentOrderQueue>;
+/**
+ * WP-2423 follow-up: an order waits for acceptance when any of its rounds does (a pickup's only
+ * round, or a table's later round). Home, the Orders page, its tab title and its chime all use this.
+ */
+export function isAwaitingAcceptance(order: CurrentOrderQueue["items"][number]): boolean {
+  return order.batches.some((batch) => batch.canRequestAcceptance);
+}
+export function ordersAwaitingAcceptance(view: Pick<CurrentOrderQueue, "items">): number {
+  return view.items.filter(isAwaitingAcceptance).length;
+}
 const money = (value: unknown) => {
   const raw = exact(value, ["amountMinor", "currencyCode"]);
   if (

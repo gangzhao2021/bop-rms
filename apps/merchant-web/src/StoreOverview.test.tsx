@@ -1,7 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
-import { parseCurrentOrderQueue } from "./current-order-queue-client.js";
+import {
+  isAwaitingAcceptance,
+  ordersAwaitingAcceptance,
+  parseCurrentOrderQueue,
+} from "./current-order-queue-client.js";
 import { currentOrderQueueFixture } from "./current-order-queue.fixtures.js";
 import { parseOrderExceptionView } from "./OrderExceptionPage.js";
 import {
@@ -24,6 +28,34 @@ describe("WP-2423 P2 store overview", () => {
       dineIn: true,
       more: false,
     });
+  });
+  it("counts a table whose later round awaits acceptance, the same way the Orders page does", () => {
+    const fixture = currentOrderQueueFixture();
+    const [ready, , accepted] = fixture.items;
+    if (!ready || !accepted?.batches[0]) throw new Error("fixture");
+    const firstRound = { ...accepted.batches[0], canCancel: false };
+    const table = {
+      ...accepted,
+      orderReference: "018f7600-0000-7000-8000-000000000031",
+      orderNumber: "ORD-1004",
+      orderType: "DineIn" as const,
+      initialBatchReference: firstRound.orderBatchReference,
+      batches: [
+        firstRound,
+        {
+          ...firstRound,
+          orderBatchReference: "018f7600-0000-7000-8000-000000000032",
+          sequence: 2,
+          acceptanceStatus: "NotAccepted",
+          canRequestAcceptance: true,
+        },
+      ],
+      canRequestAcceptance: false,
+    };
+    const queue = parseCurrentOrderQueue({ ...fixture, items: [table, ready] }, null);
+    expect(queue.items.map(isAwaitingAcceptance)).toEqual([true, false]);
+    expect(ordersAwaitingAcceptance(queue)).toBe(1);
+    expect(summarizeOrders(queue).awaitingAcceptance).toBe(1);
   });
   it("counts only dine-in orders as ready to serve; pickups ready for collection come from Fulfillment", () => {
     const fixture = currentOrderQueueFixture();

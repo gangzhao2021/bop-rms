@@ -4,7 +4,9 @@ import { URL } from "node:url";
 import pg from "pg";
 import { it } from "vitest";
 import {
+  createPostgresDiningOrderItemStateReader,
   createPostgresDiningBatchCancellationCandidates,
+  createPostgresDiningCheckoutExpiryCandidates,
   createPostgresOrderBatchCheckoutCancellationStore,
   createPostgresStaffDiningRoundEntryStore,
   diningCheckoutPaymentWindowMinutes,
@@ -14,12 +16,24 @@ import {
 } from "../../rms/ordering/src/index.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+import { seedJourneyPayment } from "../test-support/dine-in-journey-seed.mjs";
+import { createDiningCheckoutExpiryRecorder } from "../../../apps/api/src/dining-checkout-expiry-recorder.ts";
+import { createDiningBatchCancellation } from "../../../apps/api/src/dining-batch-cancellation.ts";
 
 const { Client } = pg;
 const id = (n) => "0190a7c3-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const sha = (c) => "sha256:" + c.repeat(64);
 const [tenant, brand, store, otherStore, staff, table, session] = [1, 2, 3, 4, 5, 6, 7].map(id);
 const minutes = (n) => n * 60_000;
+const counts = async (admin) =>
+  (
+    await admin.query(
+      "SELECT (SELECT count(*)::int FROM rms_ordering.order_batch_checkout_cancellation) AS cancellations," +
+        "(SELECT count(*)::int FROM rms_ordering.order_revision WHERE kind='BatchCancellation') AS revisions," +
+        "(SELECT count(*)::int FROM platform_eventing.outbox_event WHERE event_type='OrderCancelled') AS events," +
+        "(SELECT count(*)::int FROM platform_audit.audit_record WHERE action_code='ORDERING_BATCH_CHECKOUT_CANCELLED') AS audits",
+    )
+  ).rows[0];
 
 /**
  * WP-2423 item 5 (DEC-STAFF-DINE-IN-ROUND 实现决定): an unpaid dine-in round with no payment ever
@@ -542,6 +556,32 @@ it("closes a never-paid staff round with an OrderCancelled event and refuses rou
         null,
       );
 
+      // WP-2423 item 2: the Order whose only round was cancelled stays readable for staff (to show
+      // and close its table); customer/checkout reads still treat it as no payable Order.
+      const cancelledOrder = (includeCancelled) =>
+        scoped((tx) =>
+          createPostgresDiningOrderItemStateReader({
+            brandReference: brand,
+            storeReference: store,
+            authorize: async () => true,
+            includeCancelled,
+          }).load({
+            transaction: tx,
+            brandReference: brand,
+            storeReference: store,
+            orderReference: neverPaid.refs.order,
+            diningSessionReference: session,
+            guestSessionReference: neverPaid.refs.guest,
+            observedAt: new Date().toISOString(),
+          }),
+        );
+      assert.equal(await cancelledOrder(false), null);
+      const staffView = await cancelledOrder(true);
+      assert.equal(staffView.orderVersion, 2);
+      assert.equal(staffView.batches.length, 1);
+      assert.equal(staffView.batches[0].cancellation?.reasonCode, "PAYMENT_NOT_STARTED");
+      assert.equal(staffView.batches[0].acceptance, null);
+
       // Append-only history.
       await scoped(async (tx) => {
         await assert.rejects(
@@ -559,6 +599,458 @@ it("closes a never-paid staff round with an OrderCancelled event and refuses rou
           )
         ).rows[0].reason_code,
         "PAYMENT_NOT_STARTED",
+      );
+    } finally {
+      for (const name of [role, worker]) {
+        await admin.query("DROP OWNED BY " + name);
+        await admin.query("DROP ROLE " + name);
+      }
+      await admin.end();
+    }
+  });
+});
+
+/**
+ * WP-2423 item 3: a guest round whose Dining checkout commitment never requested payment (the
+ * guest's browser closed between submitting the round and payment being requested) stayed
+ * "Prepared" forever, so the expiry sweep returned NotStarted and the round was never closed. Its
+ * payment window starts when the round was submitted: the sweep records it as awaiting payment only
+ * once payment can no longer be requested and that window has ended, and the cancellation then
+ * proves from Payment, under the payment operation fence, that no payment exists. A round with an
+ * online payment is left alone. The real API compositions run as the restricted NOBYPASSRLS role
+ * holding the rendered pilot grants; owner facts are seeded by the database owner (test-only: seed
+ * triggers and foreign keys are skipped; the role's writes run every trigger).
+ */
+it("records and closes a guest round whose payment was never requested, never one with a payment", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_unrequested" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    const role = "wp2423_unreq_" + context.runId,
+      worker = "wp2423_unreq_w_" + context.runId;
+    assert.match(role, /^wp2423_unreq_[a-f0-9]+$/u);
+    try {
+      for (const name of [role, worker])
+        await admin.query(
+          "CREATE ROLE " + name + " NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
+        );
+      const root = new URL("../../../docs/spec/", import.meta.url);
+      const matrices = await Promise.all(
+        ["pilot-acl-matrix.json", "pilot-acl-additions.json"].map(async (file) =>
+          JSON.parse(await readFile(new URL(file, root), "utf8")),
+        ),
+      );
+      await admin.query(renderPilotAclSql(matrices, { api: role, worker }));
+      const base = Date.parse(
+        (
+          await admin.query("SELECT date_trunc('milliseconds',clock_timestamp()) AS at")
+        ).rows[0].at.toISOString(),
+      );
+      const time = (offset) => new Date(base + offset).toISOString();
+      // The round was submitted 40 minutes ago; Dining prepared its commitment 3 s earlier, valid
+      // for 5 minutes; payment was never requested.
+      const submittedAt = time(-minutes(40)),
+        preparedAt = time(-minutes(40) - 3000),
+        preparationValidUntil = time(-minutes(35) - 3000),
+        windowEndsAt = time(-minutes(10));
+
+      async function guestRound(n) {
+        const k = n * 100;
+        const refs = {
+          order: id(k + 1),
+          batch: id(k + 2),
+          submission: id(k + 3),
+          item: id(k + 4),
+          guest: id(k + 5),
+          operation: id(k + 6),
+          commitment: id(k + 7),
+          cart: id(k + 9),
+          quote: id(k + 10),
+        };
+        await admin.query(
+          "INSERT INTO rms_ordering.order_header (order_id,brand_id,store_id,business_date,order_number,order_type,source_channel,dining_session_id,created_by_actor_id,submitted_by_actor_id,aggregate_version,canonical_phase,closure_status,payment_status,created_at) VALUES ($1,$2,$3,'2026-10-15',$4,'DineIn','Qr',$5,$6,$6,1,'Submitted','Open','NotReported',$7)",
+          [refs.order, brand, store, String(n), session, refs.guest, submittedAt],
+        );
+        await admin.query(
+          "INSERT INTO rms_ordering.order_submission_record (submission_id,brand_id,store_id,order_id,guest_session_id,intent_digest,source_cart_id,source_cart_version,quote_id,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,1,$8,$9)",
+          [
+            refs.submission,
+            brand,
+            store,
+            refs.order,
+            refs.guest,
+            sha("1"),
+            refs.cart,
+            refs.quote,
+            submittedAt,
+          ],
+        );
+        await admin.query(
+          "INSERT INTO rms_ordering.order_batch (order_batch_id,brand_id,store_id,order_id,submission_id,source_cart_id,source_cart_version,checkout_validation_id,quote_id,submitted_by_actor_id,submitted_at) VALUES ($1,$2,$3,$4,$5,$6,1,$7,$8,$9,$10)",
+          [
+            refs.batch,
+            brand,
+            store,
+            refs.order,
+            refs.submission,
+            refs.cart,
+            id(k + 11),
+            refs.quote,
+            refs.guest,
+            submittedAt,
+          ],
+        );
+        await admin.query(
+          "INSERT INTO rms_ordering.order_item (order_item_id,brand_id,store_id,order_id,order_batch_id,source_cart_line_id,quantity,catalog_snapshot_digest,quote_input_digest,transaction_snapshot_json,snapshot_captured_at) VALUES ($1,$2,$3,$4,$5,$6,1,$7,$7,$8,$9)",
+          [
+            refs.item,
+            brand,
+            store,
+            refs.order,
+            refs.batch,
+            id(k + 12),
+            sha("2"),
+            { catalog: {}, pricing: {} },
+            submittedAt,
+          ],
+        );
+        await admin.query(
+          "INSERT INTO rms_ordering.order_revision (revision_id,brand_id,store_id,order_id,kind,version,expected_version,previous_revision_id,initial_submission_id,occurred_at) VALUES ($1,$2,$3,$4,'Initial',1,0,NULL,$1,$5)",
+          [refs.submission, brand, store, refs.order, submittedAt],
+        );
+        await admin.query(
+          "INSERT INTO rms_ordering.checkout_session_allocation (brand_id,store_id,create_operation_id,guest_session_id,cart_id,cart_version,quote_id,quote_version,checkout_session_id,submission_id,payment_operation_id,allocated_at) VALUES ($1,$2,$3,$4,$5,1,$6,1,$7,$8,$9,$10)",
+          [
+            brand,
+            store,
+            id(k + 20),
+            refs.guest,
+            refs.cart,
+            refs.quote,
+            id(k + 21),
+            refs.submission,
+            refs.operation,
+            preparedAt,
+          ],
+        );
+        await admin.query(
+          "INSERT INTO rms_ordering.order_capacity_link (brand_id,store_id,submission_id,order_id,order_batch_id,commitment_id,payment_operation_id,created_at,link_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+          [
+            brand,
+            store,
+            refs.submission,
+            refs.order,
+            refs.batch,
+            refs.commitment,
+            refs.operation,
+            submittedAt,
+            {
+              owner: "Dining",
+              commitmentReference: refs.commitment,
+              commitmentVersion: 1,
+              ownerContextReference: session,
+              ownerIntentDigest: sha("a"),
+              ownerSnapshotDigest: sha("b"),
+              brandReference: brand,
+              storeReference: store,
+              orderReference: refs.order,
+              orderBatchReference: refs.batch,
+              submissionReference: refs.submission,
+              cartReference: refs.cart,
+              cartVersion: 1,
+              quoteReference: refs.quote,
+              guestSessionReference: refs.guest,
+              paymentOperationReference: refs.operation,
+              preparedAt,
+              validUntil: preparationValidUntil,
+            },
+          ],
+        );
+        // Dining's commitment stayed "Prepared": payment was never requested.
+        await admin.query(
+          "INSERT INTO rms_dining.dining_checkout_commitment (tenant_id,brand_id,store_id,commitment_id,session_id,submission_id,payment_operation_id,version,previous_version,state,recorded_at,record_json) VALUES ($1,$2,$3,$4,$5,$6,$7,1,NULL,'Prepared',$8,$9)",
+          [
+            tenant,
+            brand,
+            store,
+            refs.commitment,
+            session,
+            refs.submission,
+            refs.operation,
+            preparedAt,
+            {
+              commitmentReference: refs.commitment,
+              brandReference: brand,
+              storeReference: store,
+              diningSessionReference: session,
+              tableReference: table,
+              participantReference: id(k + 22),
+              guestSessionReference: refs.guest,
+              cartReference: refs.cart,
+              quoteReference: refs.quote,
+              submissionReference: refs.submission,
+              orderReference: refs.order,
+              orderBatchReference: refs.batch,
+              paymentOperationReference: refs.operation,
+              sessionVersion: 1,
+              tableAssignmentVersion: 1,
+              participantVersion: 1,
+              cartVersion: 1,
+              intentHash: "c".repeat(64),
+              preparedAt,
+              preparationValidUntil,
+              state: "Prepared",
+              orderingLinkedAt: null,
+              paymentRequestedAt: null,
+              capacityExpiresAt: null,
+            },
+          ],
+        );
+        return { refs };
+      }
+
+      await admin.query("SET session_replication_role = replica");
+      let unrequested, withPayment;
+      try {
+        unrequested = await guestRound(5);
+        withPayment = await guestRound(6);
+        // An online payment exists for the second round's payment operation.
+        const k = 0x6000;
+        await seedJourneyPayment(admin, {
+          scope: { brandReference: brand, storeReference: store },
+          providerAccountReference: id(800),
+          round: {
+            f: {
+              request: {
+                record: {
+                  order: { orderReference: withPayment.refs.order },
+                  guestSessionReference: withPayment.refs.guest,
+                },
+              },
+            },
+            batch: {
+              orderBatchReference: withPayment.refs.batch,
+              submissionReference: withPayment.refs.submission,
+              sourceCartReference: withPayment.refs.cart,
+              sourceCartVersion: 1,
+              quoteReference: withPayment.refs.quote,
+            },
+          },
+          refs: {
+            paymentIntent: id(k + 1),
+            attempt: id(k + 2),
+            observation: id(k + 3),
+            webhook: id(k + 4),
+            transaction: id(k + 5),
+            paymentEvent: id(k + 6),
+            projection: id(k + 7),
+            preparation: id(k + 8),
+            commitment: withPayment.refs.commitment,
+            paymentOperation: withPayment.refs.operation,
+            providerIntent: "pi_SYNTHETICUNREQUESTED",
+            providerEvent: "evt_SYNTHETICUNREQUESTED",
+          },
+          outcome: "Succeeded",
+          requestedAt: time(-minutes(39)),
+          occurredAt: time(-minutes(38)),
+          totalMinor: 1000,
+        });
+      } finally {
+        await admin.query("SET session_replication_role = origin");
+      }
+
+      const transactions = {
+        async run(work) {
+          const client = new Client(context.clientConfig);
+          await client.connect();
+          try {
+            await client.query("BEGIN");
+            await client.query("SET LOCAL ROLE " + role);
+            await client.query("SET LOCAL lock_timeout='5s'");
+            await client.query(
+              "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+              [tenant, brand, store],
+            );
+            const result = await work({ query: (sql, values) => client.query(sql, [...values]) });
+            await client.query("COMMIT");
+            return result;
+          } catch (error) {
+            await client.query("ROLLBACK");
+            throw error;
+          } finally {
+            await client.end();
+          }
+        },
+      };
+      let sequence = 0x7000;
+      const fresh = () => id(sequence++);
+      const scope = { tenantReference: tenant, brandReference: brand, storeReference: store };
+      const recorderAt = (at) =>
+        createDiningCheckoutExpiryRecorder({
+          scope: { ...scope, providerAccountReference: id(800), environment: "Test" },
+          transactions,
+          authorize: async () => true,
+          now: () => at,
+          newReference: fresh,
+        });
+      const candidates = await transactions.run((tx) =>
+        createPostgresDiningCheckoutExpiryCandidates({
+          brandReference: brand,
+          storeReference: store,
+          authorize: async () => true,
+        }).discover(tx, { observedAt: time(0), after: null, limit: 10 }),
+      );
+      assert.deepEqual(
+        candidates.map((c) => c.orderBatchReference),
+        [unrequested.refs.batch, withPayment.refs.batch],
+      );
+      const [unrequestedCandidate, paidCandidate] = candidates;
+      const expiries = () =>
+        admin.query(
+          "SELECT order_batch_id::text AS batch,status,payment_requested_at AS requested,capacity_expires_at AS expires FROM rms_ordering.order_batch_checkout_expiry ORDER BY order_batch_id",
+        );
+
+      // While payment could still be requested nothing is recorded; once it no longer can, still
+      // nothing until the window that started at submission has ended.
+      assert.deepEqual(await recorderAt(time(-minutes(36))).record(unrequestedCandidate), {
+        status: "NotStarted",
+      });
+      assert.deepEqual(await recorderAt(time(-minutes(11))).record(unrequestedCandidate), {
+        status: "NotDue",
+      });
+      assert.equal((await expiries()).rows.length, 0);
+
+      // After the window the round is recorded as awaiting payment, from its submission time.
+      const sweepAt = time(-minutes(9));
+      const recorded = await recorderAt(sweepAt).record(unrequestedCandidate);
+      assert.equal(recorded.status, "Created");
+      assert.equal(recorded.record.status, "AwaitingPaymentResolution");
+      assert.equal(recorded.record.paymentRequestedAt, submittedAt);
+      assert.equal(recorded.record.capacityExpiresAt, windowEndsAt);
+      assert.equal(recorded.record.paymentEvidence, null);
+      // The next sweep finds the same evidence and appends nothing.
+      assert.equal(
+        (await recorderAt(time(-minutes(8))).record(unrequestedCandidate)).status,
+        "Existing",
+      );
+      const paidRecorded = await recorderAt(sweepAt).record(paidCandidate);
+      assert.equal(paidRecorded.record.status, "AwaitingPaymentResolution");
+      assert.deepEqual(
+        (await expiries()).rows.map((row) => [
+          row.batch,
+          row.status,
+          row.requested.toISOString(),
+          row.expires.toISOString(),
+        ]),
+        [
+          [unrequested.refs.batch, "AwaitingPaymentResolution", submittedAt, windowEndsAt],
+          [withPayment.refs.batch, "AwaitingPaymentResolution", submittedAt, windowEndsAt],
+        ],
+      );
+
+      // The cancellation: Payment is re-read under the fence. The round with an online payment is
+      // left alone; the never-paid one passes to the current-source and policy step.
+      const policies = [];
+      const cancellationAt = time(-minutes(5));
+      const service = createDiningBatchCancellation({
+        scope,
+        now: () => cancellationAt,
+        transactions,
+        newReference: fresh,
+        authorize: async () => true,
+        authorizeKitchen: async () => true,
+        authorizeDining: async () => true,
+        inventory: async () => {
+          throw new Error("inventory must not be reached");
+        },
+        resolvePolicy: async (_tx, evidence) => {
+          policies.push(evidence);
+          return null;
+        },
+      });
+      const before = await counts(admin);
+      assert.deepEqual(
+        await service.cancel({ operationReference: id(0x7900), expiry: paidRecorded.record }),
+        { status: "NotEligible", reason: "PaymentStarted" },
+      );
+      assert.equal(policies.length, 0);
+      await assert.rejects(
+        service.cancel({ operationReference: id(0x7901), expiry: recorded.record }),
+        /DINING_BATCH_CANCELLATION_UNAVAILABLE/u,
+      );
+      assert.equal(policies.length, 1);
+      const evidence = policies[0];
+      assert.deepEqual(evidence.expiry, recorded.record);
+      assert.deepEqual(
+        evidence.items.map((item) => [
+          item.orderBatchReference,
+          item.orderItemReference,
+          item.phase,
+        ]),
+        [[unrequested.refs.batch, unrequested.refs.item, "Submitted"]],
+      );
+      assert.deepEqual(await counts(admin), before);
+
+      // The never-paid round is cancelled with the reason PAYMENT_NOT_STARTED on that evidence.
+      const created = await transactions.run((tx) =>
+        createPostgresOrderBatchCheckoutCancellationStore({
+          ...scope,
+          now: () => new Date().toISOString(),
+          authorize: async () => true,
+          fence: async () => true,
+          source: async () => evidence,
+          workflow: async () => true,
+          eventReference: () => id(0x7a00),
+          audit: async (record) => ({
+            auditId: id(0x7a01),
+            brandId: brand,
+            storeId: store,
+            actor: { type: "System" },
+            actionCode: "ORDERING_BATCH_CHECKOUT_CANCELLED",
+            targetType: "OrderBatch",
+            targetId: record.orderBatchReference,
+            correlationId: record.operationReference,
+            reasonCode: record.reasonCode,
+            occurredAt: record.cancelledAt,
+            sourceChannel: "SYSTEM",
+            dataClassification: "Restricted",
+            retentionPolicyCode: "AUDIT_DEFAULT",
+            retentionPolicyVersion: 1,
+          }),
+        }).append(tx, {
+          cancellationReference: id(0x7a02),
+          operationReference: id(0x7901),
+          ...scope,
+          orderReference: unrequested.refs.order,
+          orderBatchReference: unrequested.refs.batch,
+          submissionReference: unrequested.refs.submission,
+          paymentOperationReference: unrequested.refs.operation,
+          expiryRecordReference: recorded.record.recordReference,
+          expiryEvidenceDigest: recorded.record.evidenceDigest,
+          expectedOrderVersion: evidence.orderVersion,
+          cancelledOrderVersion: evidence.orderVersion + 1,
+          expectedSourceCheckpoint: evidence.checkpoint,
+          workflowVersionReference: id(900),
+          transitionReference: id(901),
+          orderItemReferences: [unrequested.refs.item],
+          cancelledAt: cancellationAt,
+          phase: "Cancelled",
+          reasonCode: "PAYMENT_NOT_STARTED",
+        }),
+      );
+      assert.equal(created.status, "Created");
+      assert.deepEqual(await counts(admin), {
+        cancellations: before.cancellations + 1,
+        revisions: before.revisions + 1,
+        events: before.events + 1,
+        audits: before.audits + 1,
+      });
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT order_batch_id::text AS batch,reason_code FROM rms_ordering.order_batch_checkout_cancellation",
+          )
+        ).rows,
+        [{ batch: unrequested.refs.batch, reason_code: "PAYMENT_NOT_STARTED" }],
       );
     } finally {
       for (const name of [role, worker]) {

@@ -31,6 +31,7 @@ import { createMerchantDiningSessionStart } from "../../apps/api/dist/merchant-d
 import { createMerchantDiningTableCommand } from "../../apps/api/dist/merchant-dining-table-command.js";
 import { createMerchantDiningTables } from "../../apps/api/dist/merchant-dining-tables.js";
 import { createMerchantDiningClosingCommand } from "../../apps/api/dist/merchant-dining-closing-command.js";
+import { createMerchantDiningTableClosePlan } from "../../apps/api/dist/merchant-dining-table-close-plan.js";
 import { createMerchantDiningOrderCloseCommand } from "../../apps/api/dist/merchant-dining-order-close-command.js";
 import { createDiningOrderCloseConfiguration } from "../../apps/api/dist/dining-order-close-configuration.js";
 import { createPersistentMerchantTaskInbox } from "../../apps/api/dist/persistent-merchant-task-inbox.js";
@@ -503,6 +504,14 @@ export async function createInternalMerchant(
     persistence,
     authentication: service,
     nextReference: () => resources.credentials.reference(),
+    // DEC-TABLE-CLOSE-GUESTS-LEFT: what is left to refund of a never-accepted round paid online.
+    resolveRefundConfiguration: async (tx, scope) => {
+      const configuration = await refundConfiguration(tx, scope);
+      return {
+        providerAccountReference: configuration.providerAccountReference,
+        environment: configuration.environment,
+      };
+    },
     installContext: async (tx, scope) => {
       for (const key of ["tenantReference", "brandReference", "storeReference"])
         if (scope[key] !== selected[key])
@@ -981,6 +990,18 @@ export async function createInternalMerchant(
     authentication: service,
     tableAvailabilityCommandEnabled: true,
   });
+  // DEC-TABLE-CLOSE-GUESTS-LEFT: the close dialog's per-round plan (Owner, Store Manager).
+  const diningTableClosePlan = createMerchantDiningTableClosePlan({
+    persistence,
+    authentication: service,
+    resolveRefundConfiguration: async (tx, scope) => {
+      const configuration = await refundConfiguration(tx, scope);
+      return {
+        providerAccountReference: configuration.providerAccountReference,
+        environment: configuration.environment,
+      };
+    },
+  });
   const diningOrderProgress = createMerchantDiningOrderProgress({
     locale: "en-CA",
     persistence,
@@ -1350,6 +1371,7 @@ export async function createInternalMerchant(
       taskInbox,
       diningServe,
       diningOrderProgress,
+      diningTableClosePlan,
       diningItemService,
       service,
       orderQueue,

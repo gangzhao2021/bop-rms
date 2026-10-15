@@ -70,7 +70,9 @@ export async function refreshInternalOrderReceiptObservations(
         orderBatchReference: batch.orderBatchReference,
         observedAt: resources.now(),
       });
-      if (!paid) throw new Error("INTERNAL_RECEIPT_UNPAID_BATCH");
+      // WP-2423 Q5: a round not paid yet (e.g. a staff round still to be paid on the card
+      // machine) is not on the receipt; its own payment refreshes and issues the next version.
+      if (!paid) continue;
       const current = await captured.resolve(transaction, paid.paymentEvent),
         prior = current.payment.providerOutcome;
       // WP-2423 item 4: a round paid on the Store's card machine has no Provider to ask; its

@@ -190,6 +190,7 @@ for (const recovery of ["retry", "history"] as const)
               state: recoveredPhase ?? (preparedOperation ? "Prepared" : "NotDispatched"),
               method: "Online",
               refundedOnCardMachineAt: null,
+              cardMachineSlipReference: null,
               executionOperationReference: preparedOperation,
               executionApprovalReference: null,
               amountMinor: "1130",

@@ -102,6 +102,9 @@ export function createPostgresOrdinaryRefundRequestStatusSource(options: {
             confirmedMinor: (done ? amountMinor : 0n).toString(),
             pendingMinor: (done ? 0n : amountMinor).toString(),
             refundedOnCardMachineAt: done ? String(recorded.refundedAt) : null,
+            // WP-2423 item 4: the reference printed on the machine's refund slip (never a card
+            // number; validated when recorded), so staff can match the slip to the request.
+            cardMachineSlipReference: done ? recorded.slipReference : null,
           }),
         );
         continue;
@@ -158,6 +161,7 @@ export function createPostgresOrdinaryRefundRequestStatusSource(options: {
           confirmedMinor: (result?.position.confirmedMinor ?? 0n).toString(),
           pendingMinor: (result?.position.pendingMinor ?? amountMinor).toString(),
           refundedOnCardMachineAt: null,
+          cardMachineSlipReference: null,
         }),
       );
     }

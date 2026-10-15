@@ -4,6 +4,7 @@ import {
   diningCheckoutPaymentWindowMinutes,
   listStoreDiningBatchPaymentDeadlines,
   listStoreUnpaidBatchCancellations,
+  loadDiningBatchPaymentWindowStart,
 } from "../infrastructure/persistence/order-batch-checkout-expiry-store.js";
 
 const id = (n: number) => `0190ee31-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -87,4 +88,49 @@ it("WP-2423: refuses foreign, duplicate or malformed rows and oversized requests
   const many = Array.from({ length: 101 }, (_, n) => id(1000 + n));
   await expect(listStoreDiningBatchPaymentDeadlines(fixture([]).tx, scope, many)).rejects.toThrow();
   await expect(listStoreUnpaidBatchCancellations(fixture([]).tx, scope, many)).rejects.toThrow();
+});
+
+it("WP-2423 item 3: reads when a never-requested round's payment window started", async () => {
+  const round = {
+    orderReference: id(10),
+    orderBatchReference: id(20),
+    submissionReference: id(30),
+    commitmentReference: id(40),
+    paymentOperationReference: id(50),
+  };
+  const f = fixture([{ windowStartsAt: "2026-09-20T07:36:57.527Z" }]);
+  expect(await loadDiningBatchPaymentWindowStart(f.tx, scope, round)).toBe(
+    "2026-09-20T07:36:57.527Z",
+  );
+  expect(f.query.mock.calls[0]?.[0]).toContain("set_config('bop.brand_id'");
+  const sql = String(f.query.mock.calls[1]?.[0]);
+  expect(sql).toContain("GREATEST(b.submitted_at,l.created_at)");
+  expect(sql).toContain("link_json->>'owner'='Dining'");
+  expect((f.query.mock.calls[1] as unknown[] | undefined)?.[1]).toEqual([
+    scope.brandReference,
+    scope.storeReference,
+    id(10),
+    id(20),
+    id(30),
+    id(40),
+    id(50),
+  ]);
+  expect(await loadDiningBatchPaymentWindowStart(fixture([]).tx, scope, round)).toBeNull();
+  for (const rows of [
+    [
+      { windowStartsAt: "2026-09-20T07:36:57.527Z" },
+      { windowStartsAt: "2026-09-20T07:36:57.527Z" },
+    ],
+    [{ windowStartsAt: "soon" }],
+    [{ windowStartsAt: "2026-09-20T07:36:57.527Z", extra: 1 }],
+  ])
+    await expect(
+      loadDiningBatchPaymentWindowStart(fixture(rows).tx, scope, round),
+    ).rejects.toThrow();
+  await expect(
+    loadDiningBatchPaymentWindowStart(fixture([]).tx, scope, { ...round, extra: 1 }),
+  ).rejects.toThrow();
+  await expect(
+    loadDiningBatchPaymentWindowStart(fixture([]).tx, scope, { ...round, orderReference: "x" }),
+  ).rejects.toThrow();
 });

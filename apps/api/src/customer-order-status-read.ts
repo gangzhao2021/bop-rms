@@ -53,6 +53,8 @@ const customerCancellationReasons = Object.freeze({
   SOLD_OUT: "SoldOut",
   STORE_ERROR: "StoreError",
   DUPLICATE_ORDER: "DuplicateOrder",
+  // DEC-TABLE-CLOSE-GUESTS-LEFT: the table was closed after the party left.
+  GUEST_LEFT: "GuestLeft",
 } as const);
 
 /** Current Guest credentials are resolved inside the same transaction as the owner projection. */

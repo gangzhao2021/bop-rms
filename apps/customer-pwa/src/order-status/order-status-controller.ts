@@ -263,7 +263,7 @@ function parseSources(
         if (
           !expected.has(orderBatchReference) ||
           seen.has(orderBatchReference) ||
-          !["CustomerRequest", "SoldOut", "StoreError", "DuplicateOrder"].includes(
+          !["CustomerRequest", "SoldOut", "StoreError", "DuplicateOrder", "GuestLeft"].includes(
             String(entry.reason),
           ) ||
           !["Pending", "Refunded"].includes(String(entry.refundStatus))
@@ -304,7 +304,7 @@ function parseSources(
           !Array.isArray(entry.orderItemReferences) ||
           entry.orderItemReferences.length < 1 ||
           entry.orderItemReferences.length > batch.items.length ||
-          !["CustomerRequest", "SoldOut", "StoreError", "DuplicateOrder"].includes(
+          !["CustomerRequest", "SoldOut", "StoreError", "DuplicateOrder", "GuestLeft"].includes(
             String(entry.reason),
           ) ||
           !["Pending", "Refunded"].includes(String(entry.refundStatus))

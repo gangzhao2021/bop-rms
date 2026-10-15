@@ -83,11 +83,12 @@ export function createReceiptIssuanceSources(options: {
         return true;
       };
       await authorize();
-      // WP-2423 Q5: rounds cancelled because their payment failed were never charged.
+      // WP-2423 Q5: only rounds charged by now are on the receipt.
       const order = await receiptChargedOrder(
         tx,
-        scope,
+        options.scope,
         parseReceiptOrderSnapshot(await options.order(tx, request)),
+        request.observedAt,
       );
       if (
         order.orderReference !== request.orderReference ||

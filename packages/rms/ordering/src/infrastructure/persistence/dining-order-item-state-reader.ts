@@ -7,14 +7,21 @@ import { readStaffOrderCancellations } from "./staff-order-cancellation-store.js
 import type { StaffItemCancellationRecord } from "../../application/staff-item-cancellation.js";
 import { readStaffItemCancellations } from "./staff-item-cancellation-store.js";
 
-type Options = Parameters<typeof createPostgresDiningOrderPreparationSource>[0];
+type Options = Parameters<typeof createPostgresDiningOrderPreparationSource>[0] & {
+  /**
+   * WP-2423 item 2 (staff reads only): also read an Order whose every round was cancelled, so
+   * staff can see it and close its table. Customer and checkout reads never set it.
+   */
+  readonly includeCancelled?: boolean;
+};
 type Input = Parameters<
   ReturnType<typeof createPostgresDiningOrderPreparationSource>["resolveCurrent"]
 >[0];
 
 /** Complete immutable item membership and per-Batch acceptance under the Order fence.
  * `cancellation` is the unpaid checkout cancellation (never with acceptance); `staffCancellation`
- * (WP-2423 Q6) is a staff cancellation of a paid Batch, always after its acceptance. Either makes
+ * (WP-2423 Q6) is a staff cancellation of a paid Batch, after its acceptance or, for a round never
+ * accepted (previousPhase Submitted, table closure), without one. Either makes
  * the Batch Cancelled. `itemStaffCancellation` (step 2a) cancels that one line only.
  * Kitchen progress and serving remain separate owner facts, never inferred here.
  */
@@ -22,7 +29,9 @@ export function createPostgresDiningOrderItemStateReader(options: Options) {
   const current = createPostgresDiningOrderPreparationSource(options);
   return Object.freeze({
     async load(input: Input) {
-      const state = await current.resolveCurrent(input);
+      const state = options.includeCancelled
+        ? await current.resolveCurrentIncludingCancelled(input)
+        : await current.resolveCurrent(input);
       if (!state) return null;
       const rows = await input.transaction.query(
         "SELECT i.order_item_id,i.order_batch_id,i.quantity,s.submission_kind,a.batch_sequence FROM rms_ordering.order_batch b " +
@@ -165,12 +174,15 @@ export function createPostgresDiningOrderItemStateReader(options: Options) {
         const cancellation = cancellations.get(orderBatchReference) ?? null;
         const staffCancellation = staffCancellations.get(orderBatchReference) ?? null;
         if (acceptance && cancellation) throw new Error("ORDER_ITEM_STATE_UNAVAILABLE");
-        // A staff cancellation always follows this Batch's acceptance.
+        // A staff cancellation follows this Batch's acceptance, or (DEC-TABLE-CLOSE-GUESTS-LEFT)
+        // cancels a paid round that was never accepted, which then has no acceptance at all.
         if (
           staffCancellation &&
-          (!acceptance ||
-            acceptance.acceptedOrderVersion > staffCancellation.expectedOrderVersion ||
-            acceptance.acceptedAt > staffCancellation.cancelledAt)
+          (staffCancellation.previousPhase === "Submitted"
+            ? acceptance !== null
+            : !acceptance ||
+              acceptance.acceptedOrderVersion > staffCancellation.expectedOrderVersion ||
+              acceptance.acceptedAt > staffCancellation.cancelledAt)
         )
           throw new Error("ORDER_ITEM_STATE_UNAVAILABLE");
         if (

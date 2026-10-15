@@ -168,6 +168,11 @@ function command(value: RefundRequestCommand) {
     ...(withNote ? { note: String(raw.note).trim() } : {}),
   });
 }
+/** A card-machine refund slip's approval/reference code; too many digits could be a card number. */
+const slipReferenceShape = (value: unknown): value is string =>
+  typeof value === "string" &&
+  /^[A-Za-z0-9][A-Za-z0-9 #./-]{0,39}$/u.test(value) &&
+  value.replace(/[^0-9]/gu, "").length <= 12;
 export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
   const send = async (
     path: string,
@@ -366,6 +371,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
             "state",
             "method",
             "refundedOnCardMachineAt",
+            "cardMachineSlipReference",
             "executionOperationReference",
             "executionApprovalReference",
             "amountMinor",
@@ -384,7 +390,12 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
             (cardMachine &&
               entry.state === "Confirmed" &&
               (typeof entry.refundedOnCardMachineAt !== "string" ||
-                !Number.isFinite(Date.parse(entry.refundedOnCardMachineAt))))
+                !Number.isFinite(Date.parse(entry.refundedOnCardMachineAt)))) ||
+            // The slip reference of a recorded card-machine refund (optional, never a card number).
+            (entry.cardMachineSlipReference !== null &&
+              (!cardMachine ||
+                entry.state !== "Confirmed" ||
+                !slipReferenceShape(entry.cardMachineSlipReference)))
           )
             return fail();
           if (
@@ -425,6 +436,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
             state: entry.state,
             method: entry.method as "Online" | "CardMachine",
             refundedOnCardMachineAt: entry.refundedOnCardMachineAt as string | null,
+            cardMachineSlipReference: entry.cardMachineSlipReference as string | null,
             amountMinor,
             confirmedMinor,
             pendingMinor,
@@ -657,9 +669,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
         refundedAt: value.refundedAt,
       };
       if (
-        (body.slipReference !== null &&
-          (!/^[A-Za-z0-9][A-Za-z0-9 #./-]{0,39}$/u.test(body.slipReference) ||
-            body.slipReference.replace(/[^0-9]/gu, "").length > 12)) ||
+        (body.slipReference !== null && !slipReferenceShape(body.slipReference)) ||
         (body.refundedAt !== null && !Number.isFinite(Date.parse(body.refundedAt)))
       )
         return fail();

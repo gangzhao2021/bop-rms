@@ -178,3 +178,22 @@ it("WP-2423 D4: offers closing a table nobody ordered at, behind a confirmation"
   expect(checking).toContain("Checking this table");
   expect(checking).not.toContain("Close table T12");
 });
+
+it("WP-2423 item 2: a table whose every round was cancelled closes its cancelled order too", async () => {
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(json({ status: "Applied", phase: "Closing", sessionVersion: 5 }))
+    .mockResolvedValueOnce(json({ status: "Committed", closureVersion: 1, closedOrderVersion: 6 }))
+    .mockResolvedValueOnce(json({ status: "Applied", phase: "Closed", sessionVersion: 6 }));
+  await closeTableSession({
+    diningSessionReference: id(2),
+    session: { phase: "Active", version: 4, orderReference: id(3) },
+    progress: { ...progress, phase: "Cancelled", items: [item("Cancelled", 1, 7)] },
+    plan: { done: new Set() },
+    csrf,
+    fetcher,
+  });
+  const bodies = fetcher.mock.calls.map((call) => JSON.parse(String(call[1]?.body)));
+  expect(fetcher.mock.calls[1]?.[0]).toBe("/merchant/orders/close");
+  expect(bodies[1]).toMatchObject({ reasonCode: "ORDER_CANCELLED" });
+});

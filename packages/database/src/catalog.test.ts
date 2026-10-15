@@ -698,6 +698,8 @@ describe("migration catalog", () => {
       "2000_053_create_reconciliation_difference_resolution",
       "2000_054_create_staff_dining_round_entry",
       "2000_056_alter_batch_cancellation_payment_not_started",
+      "2000_057_alter_staff_cancellation_guest_left",
+      "2000_058_alter_eventing_retry_policy_v2",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

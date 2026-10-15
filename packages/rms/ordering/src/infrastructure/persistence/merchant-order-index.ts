@@ -535,7 +535,10 @@ export async function listStorePaidOrderBatches(
     await transaction.query(
       "SELECT w.order_id::text order_id,w.order_batch_id::text order_batch_id," +
         "NOT EXISTS (SELECT 1 FROM rms_ordering.order_payment_disposition_record d WHERE d.brand_id=w.brand_id " +
-        "AND d.store_id=w.store_id AND d.order_batch_id=w.order_batch_id) awaiting " +
+        "AND d.store_id=w.store_id AND d.order_batch_id=w.order_batch_id) " +
+        // A never-accepted round staff cancelled (its payment refunded) no longer awaits acceptance.
+        "AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation c WHERE c.brand_id=w.brand_id " +
+        "AND c.store_id=w.store_id AND c.order_batch_id=w.order_batch_id) awaiting " +
         "FROM rms_ordering.order_payment_acceptance_wait w WHERE w.brand_id=$1 AND w.store_id=$2 AND w.order_id=ANY($3::uuid[]) " +
         "UNION ALL SELECT d.order_id::text,d.order_batch_id::text,false FROM rms_ordering.order_payment_disposition_record d " +
         "WHERE d.brand_id=$1 AND d.store_id=$2 AND d.order_id=ANY($3::uuid[])",
@@ -648,4 +651,58 @@ export async function listStoreConfirmedOrderBatches(
     batches.add(parseOrderingReference(row.order_batch_id));
   }
   return batches;
+}
+
+/**
+ * DEC-TABLE-CLOSE-GUESTS-LEFT: the payment Ordering recorded for each round of one Order — the
+ * Confirmed disposition of an accepted round, or the payment still waiting for acceptance — so a
+ * manager closing the table sees what each round's cancellation refunds. Rounds with no recorded
+ * payment are absent. Read only; the caller authorizes and owns the transaction.
+ */
+export async function listStoreOrderBatchPayments(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReference: string,
+): Promise<
+  readonly {
+    readonly orderBatchReference: string;
+    readonly status: "Confirmed" | "AwaitingAcceptance";
+    readonly paymentTransactionReference: string;
+    readonly paymentIntentReference: string;
+    readonly paymentAttemptReference: string;
+  }[]
+> {
+  const order = parseOrderingReference(orderReference);
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [scope.brandReference, scope.storeReference],
+  );
+  const rows = (
+    await transaction.query(
+      "SELECT d.order_batch_id::text AS batch,'Confirmed' AS status,d.payment_transaction_id::text AS tx,d.payment_intent_id::text AS intent,d.payment_attempt_id::text AS attempt " +
+        "FROM rms_ordering.order_payment_disposition_record d WHERE d.brand_id=$1 AND d.store_id=$2 AND d.order_id=$3 AND d.disposition='Confirmed' " +
+        "UNION ALL SELECT w.order_batch_id::text,'AwaitingAcceptance',w.record_json->>'paymentTransactionReference',w.record_json->>'paymentIntentReference',w.record_json->>'paymentAttemptReference' " +
+        "FROM rms_ordering.order_payment_acceptance_wait w WHERE w.brand_id=$1 AND w.store_id=$2 AND w.order_id=$3 " +
+        "AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_payment_disposition_record d WHERE d.brand_id=w.brand_id AND d.store_id=w.store_id AND d.order_batch_id=w.order_batch_id) " +
+        "ORDER BY 1 LIMIT 10001",
+      [scope.brandReference, scope.storeReference, order],
+    )
+  ).rows as readonly Record<string, unknown>[];
+  if (rows.length > 10000) throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+  const seen = new Set<string>();
+  return Object.freeze(
+    rows.map((row) => {
+      const batch = parseOrderingReference(row.batch);
+      if (seen.has(batch) || (row.status !== "Confirmed" && row.status !== "AwaitingAcceptance"))
+        throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+      seen.add(batch);
+      return Object.freeze({
+        orderBatchReference: String(batch),
+        status: row.status as "Confirmed" | "AwaitingAcceptance",
+        paymentTransactionReference: String(parseOrderingReference(row.tx)),
+        paymentIntentReference: String(parseOrderingReference(row.intent)),
+        paymentAttemptReference: String(parseOrderingReference(row.attempt)),
+      });
+    }),
+  );
 }

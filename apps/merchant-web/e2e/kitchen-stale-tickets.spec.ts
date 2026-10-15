@@ -40,6 +40,8 @@ const item = (n: number, overrides: Record<string, unknown>) => ({
 });
 
 async function board(page: Page, canClose: boolean) {
+  // Ticket ages follow the device clock; pin it to the board's time so "waiting 4 days" is stable.
+  await page.clock.setFixedTime(new Date(at));
   await page.route("**/merchant/session", (route) =>
     route.fulfill({
       headers,

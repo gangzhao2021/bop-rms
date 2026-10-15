@@ -17,6 +17,7 @@ import {
   StaffOrderCancellationError,
   type StaffOrderCancellationPlan,
   type StaffOrderCancellationRecord,
+  type StaffOrderCancellationRefundDisposition,
 } from "../../application/staff-order-cancellation.js";
 import { createPostgresOrderTerminationStore } from "./order-termination-store.js";
 
@@ -44,6 +45,8 @@ const columns = {
   sourceDigest: "source_digest",
   auditReference: "audit_id",
   cancelledAt: "cancelled_at",
+  previousPhase: "previous_phase",
+  refundDisposition: "refund_disposition",
 } as const;
 const keys = Object.keys(columns) as (keyof typeof columns)[];
 const selection = keys
@@ -130,6 +133,20 @@ export async function readStaffOrderCancellations(
 
 export type StaffOrderCancellationNotEligibleReason =
   "NotFound" | "VersionConflict" | "NotConfirmed" | "AlreadyCancelled" | "Completed" | "Closed";
+
+/** Payment facts of the waiting (never accepted) disposition, from its JSON record. */
+function waitingPayment(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return unavailable();
+  const record = value as Record<string, unknown>;
+  if (record.disposition !== "AwaitingAcceptance") return unavailable();
+  return {
+    dispositionReference: parseOrderingReference(record.dispositionReference),
+    paymentTransactionReference: parseOrderingReference(record.paymentTransactionReference),
+    paymentIntentReference: parseOrderingReference(record.paymentIntentReference),
+    paymentAttemptReference: parseOrderingReference(record.paymentAttemptReference),
+    paymentEventReference: parseOrderingReference(record.paymentEventReference),
+  };
+}
 export type StaffOrderCancellationPreparation = Readonly<
   | { status: "Ready"; plan: StaffOrderCancellationPlan }
   | { status: "NotEligible"; reason: StaffOrderCancellationNotEligibleReason }
@@ -236,8 +253,52 @@ export function createPostgresStaffOrderCancellationStore(options: {
         "WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 AND order_batch_id=$4 AND disposition='Confirmed' LIMIT 2",
       [brand, store, order, batch],
     );
-    if (!acceptance || !paid) return notEligible("NotConfirmed");
-    if (paid.submission !== target.submission) return unavailable();
+    // DEC-TABLE-CLOSE-GUESTS-LEFT: a dine-in round the guest paid for that was never accepted is
+    // cancelled from the payment Ordering recorded as waiting for acceptance (no disposition yet).
+    let payment: Readonly<Record<string, unknown>> | null = null;
+    let since: string | null = null;
+    let previousPhase: "Accepted" | "Submitted" = "Accepted";
+    if (acceptance && paid) {
+      if (paid.submission !== target.submission) return unavailable();
+      payment = {
+        dispositionReference: paid.disposition,
+        paymentTransactionReference: paid.transaction,
+        paymentIntentReference: paid.intent,
+        paymentAttemptReference: paid.attempt,
+        paymentEventReference: paid.event,
+      };
+      since =
+        instant(acceptance.accepted_at) > instant(paid.confirmed_at)
+          ? instant(acceptance.accepted_at)
+          : instant(paid.confirmed_at);
+    } else if (!acceptance && orderType === "DineIn") {
+      const disposed = await single(
+        tx,
+        "SELECT EXISTS (SELECT 1 FROM rms_ordering.order_payment_disposition_record WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 AND order_batch_id=$4) AS disposed",
+        [brand, store, order, batch],
+      );
+      const waits = (
+        await tx.query(
+          "SELECT wait_id::text AS wait,submission_id::text AS submission,payment_event_id::text AS event,evaluated_at,record_json FROM rms_ordering.order_payment_acceptance_wait " +
+            "WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 AND order_batch_id=$4 LIMIT 2",
+          [brand, store, order, batch],
+        )
+      ).rows;
+      if (typeof disposed?.disposed !== "boolean" || waits.length > 1) return unavailable();
+      const wait = waits[0];
+      if (disposed.disposed || !wait) return notEligible("NotConfirmed");
+      const waiting = waitingPayment(wait.record_json);
+      if (
+        wait.submission !== target.submission ||
+        waiting.dispositionReference !== wait.wait ||
+        waiting.paymentEventReference !== wait.event
+      )
+        return unavailable();
+      payment = waiting;
+      since = instant(wait.evaluated_at);
+      previousPhase = "Submitted";
+    }
+    if (payment === null || since === null) return notEligible("NotConfirmed");
     const latest = await single(
       tx,
       "SELECT revision_id::text AS revision,version,occurred_at FROM rms_ordering.order_revision WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 ORDER BY version DESC LIMIT 1",
@@ -259,19 +320,10 @@ export function createPostgresStaffOrderCancellationStore(options: {
       expectedOrderVersion: latest.version,
       expectedSourceCheckpoint: latest.revision,
       orderItemReferences: items,
-      payment: {
-        dispositionReference: paid.disposition,
-        paymentTransactionReference: paid.transaction,
-        paymentIntentReference: paid.intent,
-        paymentAttemptReference: paid.attempt,
-        paymentEventReference: paid.event,
-      },
+      payment,
+      previousPhase,
     });
-    const occurredAt = [
-      instant(latest.occurred_at),
-      instant(acceptance.accepted_at),
-      instant(paid.confirmed_at),
-    ].sort()[2] as string;
+    const occurredAt = [instant(latest.occurred_at), since].sort()[1] as string;
     return { status: "Ready", plan, occurredAt };
   }
 
@@ -352,6 +404,11 @@ export function createPostgresStaffOrderCancellationStore(options: {
         auditReference: string;
         terminationAuditReference: string;
         cancelledAt: string;
+        /**
+         * DEC-TABLE-CLOSE-GUESTS-LEFT: AlreadyRefunded only for a never-accepted round whose payment
+         * the caller proved (from Payment, under this fence) fully refunded already. Default Refund.
+         */
+        refundDisposition?: StaffOrderCancellationRefundDisposition;
       },
     ): Promise<{ readonly status: "Created"; readonly record: StaffOrderCancellationRecord }> {
       const plan = parseStaffOrderCancellationPlan(input.plan);
@@ -362,6 +419,12 @@ export function createPostgresStaffOrderCancellationStore(options: {
         auditReference = parseOrderingReference(input.auditReference),
         terminationAuditReference = parseOrderingReference(input.terminationAuditReference),
         cancelledAt = parseOrderingInstant(input.cancelledAt);
+      const refundDisposition = input.refundDisposition ?? "Refund";
+      if (
+        (refundDisposition !== "Refund" && refundDisposition !== "AlreadyRefunded") ||
+        (refundDisposition === "AlreadyRefunded" && plan.previousPhase !== "Submitted")
+      )
+        return unavailable();
       const identity = {
         orderReference: plan.orderReference,
         orderBatchReference: plan.orderBatchReference,
@@ -418,9 +481,12 @@ export function createPostgresStaffOrderCancellationStore(options: {
           plan,
           reasonCode,
           kitchenEvidenceDigest: input.kitchenEvidenceDigest,
+          ...(refundDisposition === "AlreadyRefunded" ? { refundDisposition } : {}),
         }),
         auditReference,
         cancelledAt,
+        previousPhase: plan.previousPhase ?? "Accepted",
+        refundDisposition,
       });
       const audit = validateAuditRecord({
         auditId: auditReference,
@@ -435,7 +501,11 @@ export function createPostgresStaffOrderCancellationStore(options: {
         reasonCode,
         occurredAt: cancelledAt,
         sourceChannel: "MERCHANT_WEB",
-        afterSummary: { phase: "Cancelled" },
+        afterSummary: {
+          phase: "Cancelled",
+          previousPhase: plan.previousPhase ?? "Accepted",
+          refund: refundDisposition,
+        },
         dataClassification: "Restricted",
         retentionPolicyCode: "FINANCIAL_COMPLIANCE",
         retentionPolicyVersion: 1,
@@ -515,9 +585,9 @@ export function createPostgresStaffOrderCancellationStore(options: {
         const inserted = await tx.query(
           "INSERT INTO rms_ordering.order_staff_cancellation (" +
             keys.map((key) => columns[key]).join(",") +
-            ",previous_phase,permission_code) VALUES (" +
+            ",permission_code) VALUES (" +
             keys.map((_, i) => "$" + (i + 1)).join(",") +
-            ",'Accepted','" +
+            ",'" +
             staffOrderCancellationPolicy.permissionCode +
             "')",
           keys.map((key) =>
@@ -571,6 +641,8 @@ export function createPostgresStaffOrderCancellationReader(scope: {
         record.paymentEventReference !== event
       )
         return unavailable();
+      // DEC-TABLE-CLOSE-GUESTS-LEFT: already refunded in full before the cancellation; nothing owed.
+      if (record.refundDisposition === "AlreadyRefunded") return null;
       return staffOrderCancellationDisposition(record);
     },
     async listByOrders(

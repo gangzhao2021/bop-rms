@@ -3,12 +3,17 @@ import type { PaidWithoutFulfillableOrderDisposition } from "../contracts/order-
 import { parseOrderingHash, parseOrderingInstant, parseOrderingReference } from "../domain/cart.js";
 import { parseOrderPaymentOutcomeDisposition } from "./order-payment-outcome.js";
 
-/** WP-2423 Q6: why store staff cancelled a paid, accepted Batch before the kitchen started it. */
+/**
+ * WP-2423 Q6: why store staff cancelled a paid Batch before the kitchen started it.
+ * GUEST_LEFT (table closure, DEC-TABLE-CLOSE-GUESTS-LEFT): the table's guests left before the round
+ * was made; a manager closing the table cancels it.
+ */
 export const staffOrderCancellationReasonCodes = [
   "CUSTOMER_REQUEST",
   "SOLD_OUT",
   "STORE_ERROR",
   "DUPLICATE_ORDER",
+  "GUEST_LEFT",
 ] as const;
 export type StaffOrderCancellationReasonCode = (typeof staffOrderCancellationReasonCodes)[number];
 
@@ -40,6 +45,19 @@ const invalid = (): never => {
   throw new StaffOrderCancellationError("STAFF_ORDER_CANCELLATION_INVALID");
 };
 
+/**
+ * The Batch's state when staff cancelled it: Accepted (paid and sent to the kitchen, not started),
+ * or Submitted (DEC-TABLE-CLOSE-GUESTS-LEFT: a dine-in round the guest paid for that was never
+ * accepted, so it never reached the kitchen; its payment is the one Ordering recorded as waiting).
+ */
+export type StaffOrderCancellationPreviousPhase = "Accepted" | "Submitted";
+/**
+ * Refund: Payment refunds the whole remaining capture (compensation). AlreadyRefunded
+ * (DEC-TABLE-CLOSE-GUESTS-LEFT): a never-accepted round whose payment an ordinary refund had already
+ * returned in full; nothing more is owed and no compensation is opened.
+ */
+export type StaffOrderCancellationRefundDisposition = "Refund" | "AlreadyRefunded";
+
 export interface StaffOrderCancellationPayment {
   readonly dispositionReference: string;
   readonly paymentTransactionReference: string;
@@ -58,6 +76,8 @@ export interface StaffOrderCancellationPlan {
   readonly expectedSourceCheckpoint: string;
   readonly orderItemReferences: readonly string[];
   readonly payment: StaffOrderCancellationPayment;
+  /** Always set by the parser; absent (older callers) means Accepted. */
+  readonly previousPhase?: StaffOrderCancellationPreviousPhase;
 }
 
 export interface StaffOrderCancellationRecord {
@@ -84,6 +104,8 @@ export interface StaffOrderCancellationRecord {
   readonly sourceDigest: string;
   readonly auditReference: string;
   readonly cancelledAt: string;
+  readonly previousPhase: StaffOrderCancellationPreviousPhase;
+  readonly refundDisposition: StaffOrderCancellationRefundDisposition;
 }
 
 const recordReferences = [
@@ -108,11 +130,35 @@ function orderType(value: unknown) {
   if (value !== "Pickup" && value !== "DineIn") return invalid();
   return value;
 }
-function expectedVersion(value: unknown) {
-  // Version 1 is the submitted Order; a cancellable Batch is at least accepted.
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 2 || value >= 2147483647)
+function expectedVersion(value: unknown, previousPhase: StaffOrderCancellationPreviousPhase) {
+  // Version 1 is the submitted Order; an accepted Batch is at least version 2. A never-accepted
+  // first round may be the Order's only revision.
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < (previousPhase === "Accepted" ? 2 : 1) ||
+    value >= 2147483647
+  )
     return invalid();
   return value;
+}
+function previousPhaseOf(value: unknown, type: "Pickup" | "DineIn") {
+  if (value === undefined || value === "Accepted") return "Accepted" as const;
+  if (value === "Submitted" && type === "DineIn") return "Submitted" as const;
+  return invalid();
+}
+function refundDispositionOf(value: unknown, phase: StaffOrderCancellationPreviousPhase) {
+  if (value === undefined || value === "Refund") return "Refund" as const;
+  if (value === "AlreadyRefunded" && phase === "Submitted") return "AlreadyRefunded" as const;
+  return invalid();
+}
+/** Closed record with optional keys (absent from older callers and rows). */
+function readWithOptional(value: unknown, keys: readonly string[], optional: readonly string[]) {
+  const present =
+    value !== null && typeof value === "object"
+      ? optional.filter((key) => Object.hasOwn(value, key))
+      : [];
+  return readClosedRecord(value, [...keys, ...present]);
 }
 /** Complete Batch membership in database uuid order (lowercase canonical text order). */
 function itemReferences(value: unknown) {
@@ -132,16 +178,22 @@ export function parseStaffOrderCancellationReasonCode(
 
 export function parseStaffOrderCancellationPlan(value: unknown): StaffOrderCancellationPlan {
   try {
-    const raw = readClosedRecord(value, [
-      "orderType",
-      "orderReference",
-      "orderBatchReference",
-      "submissionReference",
-      "expectedOrderVersion",
-      "expectedSourceCheckpoint",
-      "orderItemReferences",
-      "payment",
-    ]);
+    const raw = readWithOptional(
+      value,
+      [
+        "orderType",
+        "orderReference",
+        "orderBatchReference",
+        "submissionReference",
+        "expectedOrderVersion",
+        "expectedSourceCheckpoint",
+        "orderItemReferences",
+        "payment",
+      ],
+      ["previousPhase"],
+    );
+    const type = orderType(raw.orderType);
+    const previousPhase = previousPhaseOf(raw.previousPhase, type);
     const payment = readClosedRecord(raw.payment, [
       "dispositionReference",
       "paymentTransactionReference",
@@ -150,11 +202,11 @@ export function parseStaffOrderCancellationPlan(value: unknown): StaffOrderCance
       "paymentEventReference",
     ]);
     return Object.freeze({
-      orderType: orderType(raw.orderType),
+      orderType: type,
       orderReference: parseOrderingReference(raw.orderReference),
       orderBatchReference: parseOrderingReference(raw.orderBatchReference),
       submissionReference: parseOrderingReference(raw.submissionReference),
-      expectedOrderVersion: expectedVersion(raw.expectedOrderVersion),
+      expectedOrderVersion: expectedVersion(raw.expectedOrderVersion, previousPhase),
       expectedSourceCheckpoint: parseOrderingReference(raw.expectedSourceCheckpoint),
       orderItemReferences: itemReferences(raw.orderItemReferences),
       payment: Object.freeze({
@@ -164,6 +216,7 @@ export function parseStaffOrderCancellationPlan(value: unknown): StaffOrderCance
         paymentAttemptReference: parseOrderingReference(payment.paymentAttemptReference),
         paymentEventReference: parseOrderingReference(payment.paymentEventReference),
       }),
+      previousPhase,
     });
   } catch {
     return invalid();
@@ -173,21 +226,28 @@ export function parseStaffOrderCancellationPlan(value: unknown): StaffOrderCance
 /** Append-only owner fact. Parsing grants no permission, releases no stock and refunds nothing. */
 export function parseStaffOrderCancellationRecord(value: unknown): StaffOrderCancellationRecord {
   try {
-    const raw = readClosedRecord(value, [
-      ...recordReferences,
-      "orderType",
-      "expectedOrderVersion",
-      "cancelledOrderVersion",
-      "reasonCode",
-      "orderItemReferences",
-      "kitchenEvidenceDigest",
-      "sourceDigest",
-      "cancelledAt",
-    ]);
+    const raw = readWithOptional(
+      value,
+      [
+        ...recordReferences,
+        "orderType",
+        "expectedOrderVersion",
+        "cancelledOrderVersion",
+        "reasonCode",
+        "orderItemReferences",
+        "kitchenEvidenceDigest",
+        "sourceDigest",
+        "cancelledAt",
+      ],
+      ["previousPhase", "refundDisposition"],
+    );
     const ids = Object.fromEntries(
       recordReferences.map((key) => [key, parseOrderingReference(raw[key])]),
     ) as unknown as Record<(typeof recordReferences)[number], string>;
-    const expected = expectedVersion(raw.expectedOrderVersion);
+    const type = orderType(raw.orderType);
+    const previousPhase = previousPhaseOf(raw.previousPhase, type);
+    const refundDisposition = refundDispositionOf(raw.refundDisposition, previousPhase);
+    const expected = expectedVersion(raw.expectedOrderVersion, previousPhase);
     if (
       raw.cancelledOrderVersion !== expected + 1 ||
       ids.cancellationReference === ids.expectedSourceCheckpoint
@@ -195,7 +255,7 @@ export function parseStaffOrderCancellationRecord(value: unknown): StaffOrderCan
       return invalid();
     return Object.freeze({
       ...ids,
-      orderType: orderType(raw.orderType),
+      orderType: type,
       expectedOrderVersion: expected,
       cancelledOrderVersion: expected + 1,
       reasonCode: parseStaffOrderCancellationReasonCode(raw.reasonCode),
@@ -203,6 +263,8 @@ export function parseStaffOrderCancellationRecord(value: unknown): StaffOrderCan
       kitchenEvidenceDigest: parseOrderingHash(raw.kitchenEvidenceDigest),
       sourceDigest: parseOrderingHash(raw.sourceDigest),
       cancelledAt: parseOrderingInstant(raw.cancelledAt),
+      previousPhase,
+      refundDisposition,
     });
   } catch {
     return invalid();

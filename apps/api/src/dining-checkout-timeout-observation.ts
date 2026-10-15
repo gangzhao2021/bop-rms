@@ -69,12 +69,15 @@ export function createDiningCheckoutTimeoutObservation(options: {
           return at;
         };
         if (clock.paymentRequestedAt === null) {
+          // WP-2423 item 3: payment can only be requested before preparationValidUntil; the
+          // recorder decides from it (and Ordering's window start) whether the round is past due.
           return Object.freeze({
             commitmentReference: clock.commitmentReference,
             orderReference: clock.orderReference,
             orderBatchReference: clock.orderBatchReference,
             submissionReference: clock.submissionReference,
             paymentOperationReference: clock.paymentOperationReference,
+            preparationValidUntil: clock.preparationValidUntil,
             observedAt: await finish(),
             status: "NotStarted" as const,
           });

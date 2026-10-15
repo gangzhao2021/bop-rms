@@ -84,7 +84,7 @@ function requestBlockedMessage(context: Context): ReactNode {
   return null;
 }
 /** Payment state in staff language, including refunds already made. */
-function paymentStateLabel(context: Context): string {
+export function paymentStateLabel(context: Context): string {
   if (context.paymentState !== "Captured")
     return context.paymentState === "Failed" ? "Failed" : "Not confirmed yet";
   const captured = BigInt(context.capturedAmountMinor ?? "0"),
@@ -131,7 +131,7 @@ export function OrderPaymentLinks({
           ),
         ];
         setLinks(ids);
-        if (!ids.length) setMessage("No captured payment is available for this order.");
+        if (!ids.length) setMessage("This order has no paid payment yet.");
       }
     } catch (error) {
       if (!controller.signal.aborted) setMessage(errorMessage(error));
@@ -256,12 +256,34 @@ function RefundPreparationAction({
     </div>
   );
 }
+/** WP-2423 item 4: a request's refund as recorded from the store's card machine. */
+export function CardMachineRefundDone({
+  amountMinor,
+  refundedAt,
+  slipReference,
+}: {
+  readonly amountMinor: string;
+  readonly refundedAt: string;
+  /** The reference printed on the refund slip, as staff entered it (null: none entered). */
+  readonly slipReference: string | null;
+}) {
+  return (
+    <>
+      Refunded {amount(amountMinor)} on the store&apos;s card machine{" "}
+      <SourceTime instant={refundedAt} />.
+      {slipReference !== null
+        ? ` Slip reference: ${slipReference}.`
+        : " No slip reference was entered."}
+    </>
+  );
+}
 function RecordedRequestStatus({
   orderReference,
   entry,
   approval,
   csrf,
   onFinancialChange,
+  onRequestsChange,
   onPending,
 }: {
   orderReference: string;
@@ -270,20 +292,29 @@ function RecordedRequestStatus({
   approval: RefundApprovalEntry | null;
   csrf: string;
   onFinancialChange: () => void;
+  /** Reread the order's recorded requests after a write on this one. */
+  onRequestsChange: () => void;
   onPending: (paymentReference: string, active: boolean) => void;
 }) {
   const [result, setResult] = useState<Awaited<ReturnType<typeof client.status>> | null>(null);
   const [message, setMessage] = useState("");
+  // The confirmation of a write on this request; kept while its status is reread.
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [preparing, setPreparing] = useState<ReadonlySet<string>>(new Set());
   const pending = useRef<AbortController | null>(null);
   useEffect(() => () => pending.current?.abort(), []);
-  const load = async () => {
-    if (pending.current) return;
+  const load = async (afterWrite = false) => {
+    if (pending.current) {
+      if (!afterWrite) return;
+      // A write supersedes a read that started before it.
+      pending.current.abort();
+    }
     const controller = new AbortController();
     pending.current = controller;
     setBusy(true);
     setMessage("");
+    if (!afterWrite) setNotice(null);
     setResult(null);
     try {
       const value = await client.status(
@@ -302,17 +333,29 @@ function RecordedRequestStatus({
         onFinancialChange();
       }
     } catch (error) {
-      if (!controller.signal.aborted) setMessage(errorMessage(error));
+      if (!controller.signal.aborted) {
+        setMessage(errorMessage(error));
+        // The write happened: the payment amounts are reread even when this status is not.
+        if (afterWrite) onFinancialChange();
+      }
     } finally {
-      pending.current = null;
+      if (pending.current === controller) pending.current = null;
       if (!controller.signal.aborted) setBusy(false);
     }
+  };
+  // WP-2423 item 4: after the machine refund is recorded, show where the request now stands from
+  // the server (this status, the payment amounts and the order's request list), not a local guess.
+  const recorded = (confirmation: string) => {
+    setNotice(confirmation);
+    onRequestsChange();
+    void load(true);
   };
   return (
     <div>
       <button disabled={busy || preparing.size > 0} onClick={() => void load()}>
         Check execution status for request {entry.claimVersion}
       </button>
+      {notice ? <p role="status">{notice}</p> : null}
       {message ? <p role="status">{message}</p> : null}
       {result ? (
         <section aria-label={"Execution status for request " + entry.claimVersion}>
@@ -327,10 +370,11 @@ function RecordedRequestStatus({
                   // WP-2423 item 4: refunded on the store's card machine, then recorded here.
                   <>
                     {payment.state === "Confirmed" && payment.refundedOnCardMachineAt !== null ? (
-                      <>
-                        Refunded {amount(payment.amountMinor)} on the store&apos;s card machine{" "}
-                        <SourceTime instant={payment.refundedOnCardMachineAt} />.
-                      </>
+                      <CardMachineRefundDone
+                        amountMinor={payment.amountMinor}
+                        refundedAt={payment.refundedOnCardMachineAt}
+                        slipReference={payment.cardMachineSlipReference}
+                      />
                     ) : approval?.state === "AwaitingApproval" ? (
                       <>
                         {amount(payment.amountMinor)} to refund on the card machine once an owner
@@ -343,7 +387,7 @@ function RecordedRequestStatus({
                         amountMinor={payment.amountMinor}
                         amountLabel={amount(payment.amountMinor)}
                         csrf={csrf}
-                        onRecorded={onFinancialChange}
+                        onRecorded={recorded}
                       />
                     )}
                   </>
@@ -551,6 +595,40 @@ function RefundWizard({
       pending.current = null;
     }
   };
+  // WP-2423 item 4: after a write on a recorded request, reread the order's requests (and their
+  // approvals) without touching the selection, calculation or status message being worked on.
+  const requestsRefresh = useRef<AbortController | null>(null);
+  useEffect(() => () => requestsRefresh.current?.abort(), []);
+  const reloadRequests = async () => {
+    requestsRefresh.current?.abort();
+    const controller = new AbortController();
+    requestsRefresh.current = controller;
+    try {
+      const result = await client.items(orderReference, csrf, controller.signal);
+      const current = await approvalClient
+        .approvals(controller.signal)
+        .then(
+          (view) =>
+            new Map(
+              view.entries
+                .filter((value) => value.orderReference === orderReference)
+                .map((value) => [value.requestReference, value] as const),
+            ),
+        )
+        .catch(() => null);
+      if (!controller.signal.aborted) {
+        setItems(result);
+        if (current !== null) setApprovals(current);
+      }
+    } catch {
+      if (!controller.signal.aborted)
+        setMessage(
+          "The refund was recorded, but this list could not be updated. Select Refresh recorded requests.",
+        );
+    } finally {
+      if (requestsRefresh.current === controller) requestsRefresh.current = null;
+    }
+  };
   // WP-2423 Q5: show this order's refund requests and their progress straight away.
   const loadedOnce = useRef(false);
   useEffect(() => {
@@ -755,6 +833,7 @@ function RefundWizard({
                     <RecordedRequestStatus
                       approval={approvals.get(entry.requestReference) ?? null}
                       onFinancialChange={onFinancialChange}
+                      onRequestsChange={() => void reloadRequests()}
                       orderReference={orderReference}
                       entry={entry}
                       csrf={csrf}
@@ -957,14 +1036,17 @@ function RefundWizard({
     </section>
   );
 }
-function PaymentFinancialSummary({
+export function PaymentFinancialSummary({
   initial,
   csrf,
   revision,
+  onContext,
 }: {
   initial: Context;
   csrf: string;
   revision: number;
+  /** The reread payment, so what the page offers next follows the current amounts. */
+  onContext: (context: Context) => void;
 }) {
   const [context, setContext] = useState<Context | null>(initial);
   const [refresh, setRefresh] = useState(0);
@@ -982,6 +1064,7 @@ function PaymentFinancialSummary({
         if (!controller.signal.aborted) {
           setContext(value);
           setMessage("");
+          onContext(value);
         }
       })
       .catch((error) => {
@@ -991,6 +1074,7 @@ function PaymentFinancialSummary({
         if (!controller.signal.aborted) setBusy(false);
       });
     return () => controller.abort();
+    // onContext is the page's state setter (stable); a new initial value never rereads.
   }, [initial.paymentIntentReference, csrf, revision, refresh]);
   return (
     <>
@@ -1010,7 +1094,7 @@ function PaymentFinancialSummary({
           ) : null}
           <dl>
             <div>
-              <dt>Captured</dt>
+              <dt>Paid</dt>
               <dd>{amount(context.capturedAmountMinor)}</dd>
             </div>
             <div>
@@ -1072,9 +1156,14 @@ function PaymentContent({
         <button onClick={() => setRefresh((value) => value + 1)}>Refresh payment</button>
       ) : (
         <>
-          <PaymentFinancialSummary initial={context} csrf={csrf} revision={financialRevision} />
+          <PaymentFinancialSummary
+            initial={context}
+            csrf={csrf}
+            revision={financialRevision}
+            onContext={setContext}
+          />
           {context.paymentState !== "Captured" ? (
-            <p>A captured payment is required before starting a refund request.</p>
+            <p>A refund can be requested once this payment is paid.</p>
           ) : !wizard && context.canRequest && refundableMinor(context) > 0n ? (
             <Link to={"/app/operations/payments/" + paymentIntentReference + "/refund"}>
               Start refund request

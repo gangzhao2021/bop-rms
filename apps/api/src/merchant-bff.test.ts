@@ -3777,11 +3777,25 @@ it("protects refund status and strips private execution details", async () => {
     state: "NotDispatched" as const,
     method: "Online" as const,
     refundedOnCardMachineAt: null,
+    cardMachineSlipReference: null,
     executionOperationReference: null,
     executionApprovalReference: null,
     amountMinor: "1130",
     confirmedMinor: "0",
     pendingMinor: "1130",
+  };
+  // WP-2423 item 4: a refund recorded on the store's card machine carries its slip reference.
+  const machine = {
+    ...payment,
+    paymentAttemptReference: id(7),
+    paymentIntentReference: id(6),
+    state: "Confirmed" as const,
+    method: "CardMachine" as const,
+    refundedOnCardMachineAt: "2026-09-20T11:50:00.000Z",
+    cardMachineSlipReference: "RF4821",
+    amountMinor: "593",
+    confirmedMinor: "593",
+    pendingMinor: "0",
   };
   const data = {
     orderReference: id(3),
@@ -3789,13 +3803,13 @@ it("protects refund status and strips private execution details", async () => {
     operationReference: id(5),
     observedAt: "2026-09-20T12:00:00.000Z",
     currencyCode: "CAD" as const,
-    amountMinor: "1130",
-    payments: [payment],
+    amountMinor: "1723",
+    payments: [payment, machine],
   };
   const query = vi.fn<NonNullable<MerchantBffRouterOptions["ordinaryRefundStatus"]>>(async () => ({
     ...data,
     rawProvider: "private",
-    payments: [{ ...payment, providerRefundReference: "private" }],
+    payments: [{ ...payment, providerRefundReference: "private" }, machine],
   }));
   const root = await serveRefundStatus(query),
     headers = {

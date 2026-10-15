@@ -702,6 +702,17 @@ export function createPostgresDiningOrderPreparationSource(options: {
       void allCancelled;
       return Object.freeze(current);
     },
+    /**
+     * Staff reads (serving, table closure): the current phase/version like resolveCurrent, also for
+     * an Order whose every round was cancelled (WP-2423 item 2). Never grants checkout or a batch.
+     */
+    async resolveCurrentIncludingCancelled(input: Parameters<typeof source.resolve>[0]) {
+      const result = await source.resolve(input, true);
+      if (result === null) return null;
+      const { allCancelled, ...current } = result;
+      void allCancelled;
+      return Object.freeze(current);
+    },
     /** Terminal display only. Never grants checkout or another batch. */
     async resolveCancelled(input: Parameters<typeof source.resolve>[0]) {
       const result = await source.resolve(input, true);

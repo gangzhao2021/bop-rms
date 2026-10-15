@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   KitchenBoardPage,
   KitchenBoardScreen,
@@ -26,6 +26,7 @@ import {
   type LoadState,
 } from "./KitchenBoardPages.js";
 import { staleRetryDelayMs } from "./stale-read.js";
+import { kitchenClockAt, kitchenClockTickMs, subscribeKitchenClock } from "./kitchen-clock.js";
 import { kitchenBoardFixture, kitchenItemFixture } from "./kitchen-board.fixtures.js";
 import { parseKitchenBoardView, parseKitchenWorkItemDetailView } from "./kitchen-board.js";
 import { StoreBusinessDayContext } from "./StoreBusinessDay.js";
@@ -1057,6 +1058,51 @@ describe("DEC-KITCHEN-STALE-TICKETS earlier business days on the kitchen board",
     );
     expect(earlierDaySearchText(3, "6")).toBe(
       "3 tickets from earlier days have number or table “6”",
+    );
+  });
+});
+
+describe("WP-2423 follow-up: kitchen ticket ages follow the clock", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+  const render = () =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <KitchenBoardScreen view={parseKitchenBoardView(kitchenBoardFixture())} />
+      </MemoryRouter>,
+    );
+  const ageOf = (html: string) => /data-age="(?:ok|warning|late)">(\d+ min)</u.exec(html)?.[1];
+  it("advances a ticket's age as time passes without a new projection", () => {
+    // The fixture's ticket was created at 15:00 and the projection is from 15:12.
+    vi.useFakeTimers({ now: new Date("2026-08-12T15:12:00.000Z") });
+    const ticks: number[] = [];
+    const stop = subscribeKitchenClock(() => ticks.push(Date.now()));
+    expect(ageOf(render())).toBe("12 min");
+    vi.advanceTimersByTime(kitchenClockTickMs - 1);
+    expect(ticks).toHaveLength(0);
+    vi.advanceTimersByTime(1);
+    expect(ticks).toHaveLength(1);
+    vi.advanceTimersByTime(10 * kitchenClockTickMs);
+    const html = render();
+    expect(ageOf(html)).toBe("17 min");
+    expect(html).toContain('data-age="late"');
+    stop();
+    vi.advanceTimersByTime(4 * kitchenClockTickMs);
+    expect(ticks).toHaveLength(11);
+    // Unused, the clock stops and the board measures from the projection again.
+    expect(ageOf(render())).toBe("12 min");
+  });
+  it("never shows a negative or shrinking age when the device clock runs slow", () => {
+    vi.useFakeTimers({ now: new Date("2026-08-12T15:02:00.000Z") });
+    const stop = subscribeKitchenClock(() => undefined);
+    expect(ageOf(render())).toBe("12 min");
+    stop();
+    expect(kitchenClockAt("2026-08-12T15:12:00.000Z", Date.parse("2026-08-12T15:02:00.000Z"))).toBe(
+      "2026-08-12T15:12:00.000Z",
+    );
+    expect(kitchenClockAt("2026-08-12T15:12:00.000Z", null, "2026-08-12T15:20:00.000Z")).toBe(
+      "2026-08-12T15:20:00.000Z",
     );
   });
 });

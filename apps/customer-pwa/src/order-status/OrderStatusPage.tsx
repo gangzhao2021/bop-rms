@@ -83,6 +83,7 @@ export const staffCancellationReasonText: Readonly<Record<StaffCancellationReaso
   SoldOut: "An item you ordered sold out.",
   StoreError: "The store couldn't prepare it.",
   DuplicateOrder: "It was a duplicate of another order.",
+  GuestLeft: "The table was closed after your party left, before this was made.",
 };
 export function staffRefundText(cancellation: StaffCancellation): string {
   return cancellation.refundStatus === "Refunded"

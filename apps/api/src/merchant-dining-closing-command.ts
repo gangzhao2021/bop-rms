@@ -149,6 +149,8 @@ export function createMerchantDiningClosingCommand(options: {
         authorizeKitchen: allowed,
         authorizeDining: allowed,
         authorizeAndFence,
+        // WP-2423 item 2: an Order whose every round was cancelled is closed with the table too.
+        includeCancelled: true,
       });
       let resolvedEvidence: Awaited<ReturnType<typeof evidence.load>> | null = null;
       const service = createDiningClosingService({

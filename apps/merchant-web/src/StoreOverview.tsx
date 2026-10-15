@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import {
   createCurrentOrderQueueClient,
+  ordersAwaitingAcceptance,
   type CurrentOrderQueue,
 } from "./current-order-queue-client.js";
 import { createOrderExceptionClient } from "./order-exception-client.js";
@@ -43,7 +44,7 @@ export function summarizeOrders(queue: CurrentOrderQueue): OrdersSummary {
   const dineIn = open.filter((order) => order.orderType === "DineIn");
   return {
     open: open.length,
-    awaitingAcceptance: open.filter((order) => order.canRequestAcceptance).length,
+    awaitingAcceptance: ordersAwaitingAcceptance(queue),
     readyToServe: dineIn.filter((order) => order.currentPhase === "Ready").length,
     dineIn: dineIn.length > 0,
     more: queue.nextAfterOrderReference !== null,

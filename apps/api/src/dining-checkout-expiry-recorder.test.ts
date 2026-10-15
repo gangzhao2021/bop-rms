@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   load: vi.fn(),
   append: vi.fn(),
   store: vi.fn(),
+  windowStart: vi.fn(),
 }));
 vi.mock("@rms/payment", async (original) => ({
   ...(await original<typeof import("@rms/payment")>()),
@@ -14,6 +15,7 @@ vi.mock("@rms/payment", async (original) => ({
 vi.mock("@rms/ordering", async (original) => ({
   ...(await original<typeof import("@rms/ordering")>()),
   createPostgresOrderBatchCheckoutExpiryStore: (options: unknown) => mocks.store(options),
+  loadDiningBatchPaymentWindowStart: (...args: unknown[]) => mocks.windowStart(...args),
 }));
 vi.mock("./dining-checkout-timeout-observation.js", () => ({
   createDiningCheckoutTimeoutObservation: () => ({ resolve: mocks.observe }),
@@ -66,6 +68,7 @@ function fixture() {
     return observation;
   });
   mocks.load.mockReset().mockResolvedValue([]);
+  mocks.windowStart.mockReset().mockResolvedValue("2026-09-20T23:59:00.000Z");
   mocks.append.mockReset().mockImplementation(async (transaction, record) => {
     expect(transaction).toBe(tx);
     return { status: "Created", record };
@@ -156,10 +159,71 @@ it("fails before payment locks when current authorization is denied", async () =
   expect(mocks.observe).not.toHaveBeenCalled();
 });
 
-it("does not manufacture timeout evidence for a payment clock that never started", async () => {
+it("does not manufacture timeout evidence while payment could still be requested", async () => {
   const f = fixture();
-  mocks.observe.mockResolvedValue({ ...f.observation, status: "NotStarted" });
+  mocks.observe.mockResolvedValue({
+    ...f.observation,
+    status: "NotStarted",
+    preparationValidUntil: "2026-09-21T00:31:00.001Z",
+  });
   expect(await f.recorder.record(f.input)).toEqual({ status: "NotStarted" });
+  expect(mocks.windowStart).not.toHaveBeenCalled();
   expect(mocks.load).not.toHaveBeenCalled();
+  expect(mocks.append).not.toHaveBeenCalled();
+});
+
+function neverRequested(f: ReturnType<typeof fixture>) {
+  const rest: Partial<typeof f.observation> = { ...f.observation };
+  delete rest.paymentRequestedAt;
+  delete rest.capacityExpiresAt;
+  delete rest.reason;
+  return { ...rest, status: "NotStarted", preparationValidUntil: "2026-09-20T23:40:00.000Z" };
+}
+it("WP-2423 item 3: a round whose payment was never requested is not due before its window ends", async () => {
+  const f = fixture();
+  mocks.observe.mockResolvedValue(neverRequested(f));
+  // Submitted 00:02, so the window ends at 00:32, after the 00:31 observation.
+  mocks.windowStart.mockResolvedValue("2026-09-21T00:02:00.000Z");
+  expect(await f.recorder.record(f.input)).toEqual({ status: "NotDue" });
+  expect(mocks.append).not.toHaveBeenCalled();
+});
+it("WP-2423 item 3: records a never-requested round as awaiting payment from its submission", async () => {
+  const f = fixture();
+  mocks.observe.mockResolvedValue(neverRequested(f));
+  const result = await f.recorder.record(f.input);
+  expect(result).toMatchObject({
+    status: "Created",
+    record: {
+      status: "AwaitingPaymentResolution",
+      paymentEvidence: null,
+      version: 1,
+      paymentRequestedAt: "2026-09-20T23:59:00.000Z",
+      capacityExpiresAt: "2026-09-21T00:29:00.000Z",
+      observedAt: f.observation.observedAt,
+    },
+  });
+  expect(mocks.acquire.mock.calls[0]?.[0]).toBe(f.tx);
+  expect(mocks.windowStart.mock.calls[0]?.[0]).toBe(f.tx);
+  expect(mocks.windowStart.mock.calls[0]?.[2]).toEqual({
+    orderReference: id(5),
+    orderBatchReference: id(6),
+    submissionReference: id(12),
+    commitmentReference: id(14),
+    paymentOperationReference: id(13),
+  });
+  // A later sweep finds the same evidence and appends nothing.
+  if (!("record" in result)) throw new Error("record missing");
+  mocks.load.mockResolvedValue([result.record]);
+  mocks.append.mockClear();
+  expect(await f.recorder.record(f.input)).toEqual({ status: "Existing", record: result.record });
+  expect(mocks.append).not.toHaveBeenCalled();
+});
+it("WP-2423 item 3: fails closed when Ordering has no Dining window for the round", async () => {
+  const f = fixture();
+  mocks.observe.mockResolvedValue(neverRequested(f));
+  mocks.windowStart.mockResolvedValue(null);
+  await expect(f.recorder.record(f.input)).rejects.toThrow(
+    "DINING_CHECKOUT_EXPIRY_RECORDING_UNAVAILABLE",
+  );
   expect(mocks.append).not.toHaveBeenCalled();
 });

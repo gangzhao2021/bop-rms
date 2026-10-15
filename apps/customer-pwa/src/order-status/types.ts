@@ -85,7 +85,7 @@ export interface UnpaidBatchCancellation {
 }
 
 export type StaffCancellationReason =
-  "CustomerRequest" | "SoldOut" | "StoreError" | "DuplicateOrder";
+  "CustomerRequest" | "SoldOut" | "StoreError" | "DuplicateOrder" | "GuestLeft";
 
 export interface StaffCancellation {
   readonly orderBatchReference: string;

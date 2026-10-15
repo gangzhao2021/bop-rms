@@ -52,7 +52,7 @@ export interface CustomerMoney {
   readonly currencyCode: string;
 }
 export type DiningStoreCancellationReason =
-  "CustomerRequest" | "SoldOut" | "StoreError" | "DuplicateOrder";
+  "CustomerRequest" | "SoldOut" | "StoreError" | "DuplicateOrder" | "GuestLeft";
 export type DiningItemPhase = OrderItemProgressPhase;
 
 /** Owner facts for one dining session, as read in one transaction. References stay server-side. */
@@ -757,6 +757,8 @@ const customerCancellationReasons = Object.freeze({
   SOLD_OUT: "SoldOut",
   STORE_ERROR: "StoreError",
   DUPLICATE_ORDER: "DuplicateOrder",
+  // DEC-TABLE-CLOSE-GUESTS-LEFT: the table was closed after the party left.
+  GUEST_LEFT: "GuestLeft",
 } as const);
 
 /**

@@ -90,11 +90,12 @@ export function createRefundReceiptIssuance(options: {
           return true;
         };
         await authorize();
-        // WP-2423 Q5: rounds cancelled because their payment failed were never charged.
+        // WP-2423 Q5: only rounds charged by now are on the receipt.
         const order = await receiptChargedOrder(
           transaction,
-          scope,
+          options.scope,
           await orderSource(transaction, request),
+          request.observedAt,
         );
         const financial = await createPostgresPaymentReceiptCoverageSource({
           scope: options.scope,

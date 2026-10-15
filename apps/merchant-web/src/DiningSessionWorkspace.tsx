@@ -28,8 +28,6 @@ const tableBlockReasons = [
   ["OUT_OF_SERVICE", "Out of service"],
   ["AREA_CLOSED", "Section closed"],
 ] as const;
-const stateLabel = (state: string) =>
-  state === "TemporarilyBlocked" ? "Temporarily unavailable" : state;
 /** WP-2423 follow-up: how long a session has been open, in words staff read at a glance. */
 export function elapsedText(minutes: number): string {
   if (minutes < 60) return `${String(minutes)} min`;
@@ -43,6 +41,37 @@ export function elapsedText(minutes: number): string {
 }
 /** A session open longer than this is most likely a table nobody closed. */
 export const longOpenSessionMinutes = 12 * 60;
+/** What staff see on the floor: free, blocked, seated, or seated so long the guests have likely left. */
+export type TableFloorState = "Available" | "Unavailable" | "Seated" | "LongOpen";
+/**
+ * WP-2423 follow-up: the table's real floor state. Its operational state only says whether the
+ * table is blocked, so a table with an open session is "Seated", never "Available".
+ */
+export function tableFloorStatus(
+  table: Pick<
+    StaffDiningTable,
+    "operationalState" | "currentDiningSessionReference" | "elapsedMinutes"
+  >,
+): { state: TableFloorState; label: string } {
+  const blocked = table.operationalState === "TemporarilyBlocked";
+  if (table.currentDiningSessionReference === null)
+    return blocked
+      ? { state: "Unavailable", label: "Temporarily unavailable" }
+      : { state: "Available", label: "Available" };
+  const suffix = blocked ? " · Temporarily unavailable" : "";
+  if (table.elapsedMinutes === null) return { state: "Seated", label: `Seated${suffix}` };
+  const open = elapsedText(table.elapsedMinutes);
+  return table.elapsedMinutes > longOpenSessionMinutes
+    ? { state: "LongOpen", label: `Guests may have left · open ${open}${suffix}` }
+    : { state: "Seated", label: `Seated · open ${open}${suffix}` };
+}
+/** The "Table state" filter: free tables, tables with guests, or blocked tables. */
+export function tableMatchesStateFilter(table: StaffDiningTable, filter: string): boolean {
+  if (filter === "Available") return tableFloorStatus(table).state === "Available";
+  if (filter === "Seated") return table.currentDiningSessionReference !== null;
+  if (filter === "TemporarilyBlocked") return table.operationalState === "TemporarilyBlocked";
+  return true;
+}
 /** WP-2423 Q11: warn on the floor when guests can't scan in, or soon won't be able to. */
 export function tableCodeNotice(table: StaffDiningTable, now = Date.now()): string | null {
   if (table.lifecycle !== "Published") return null;
@@ -379,7 +408,7 @@ export function DiningSessionWorkspace({
       (table) =>
         (!query || table.stableLabel.toLocaleLowerCase().includes(query)) &&
         (areaFilter === "All" || table.areaCode === areaFilter) &&
-        (stateFilter === "All" || table.operationalState === stateFilter),
+        tableMatchesStateFilter(table, stateFilter),
     );
   }, [areaFilter, search, stateFilter, tables]);
   const visibleAreas = useMemo(
@@ -440,6 +469,7 @@ export function DiningSessionWorkspace({
               >
                 <option>All</option>
                 <option value="Available">Available</option>
+                <option value="Seated">Seated</option>
                 <option value="TemporarilyBlocked">Temporarily unavailable</option>
               </select>
             </label>
@@ -473,10 +503,11 @@ export function DiningSessionWorkspace({
                           data-selected={selected?.tableReference === table.tableReference}
                           data-state={table.operationalState}
                           data-session={table.currentDiningSessionReference ? "linked" : "none"}
+                          data-floor={tableFloorStatus(table).state}
                         >
                           <div className="dining-table-tile__identity">
                             <h4>{table.stableLabel}</h4>
-                            <span>{stateLabel(table.operationalState)}</span>
+                            <span>{tableFloorStatus(table).label}</span>
                           </div>
                           <hr className="dining-table-tile__divider" />
                           <p className="dining-table-tile__capacity">Seats {table.capacity}</p>
@@ -495,16 +526,7 @@ export function DiningSessionWorkspace({
                               </p>
                             );
                           })()}
-                          <p className="dining-table-tile__session">
-                            {table.currentDiningSessionReference
-                              ? table.elapsedMinutes === null
-                                ? "Session elapsed time unavailable"
-                                : `Open ${elapsedText(table.elapsedMinutes)}`
-                              : "No active session"}
-                          </p>
-                          {table.currentDiningSessionReference &&
-                          table.elapsedMinutes !== null &&
-                          table.elapsedMinutes > longOpenSessionMinutes ? (
+                          {tableFloorStatus(table).state === "LongOpen" ? (
                             <p className="dining-table-tile__notice">
                               {canCloseSessions
                                 ? "Open for a long time — if the guests have left, select the table and close it."
@@ -542,7 +564,7 @@ export function DiningSessionWorkspace({
             {selected ? (
               <>
                 <p className="bop-eyebrow">
-                  {selected.areaCode} · {stateLabel(selected.operationalState)}
+                  {selected.areaCode} · {tableFloorStatus(selected).label}
                 </p>
                 <h3>Table {selected.stableLabel}</h3>
                 <dl>
@@ -579,6 +601,7 @@ export function DiningSessionWorkspace({
                     table={selected}
                     session={selected.session}
                     csrf={csrf}
+                    timeZone={timeZone}
                     locked={locked || paused}
                     onBusy={() => undefined}
                     onClosed={() => {

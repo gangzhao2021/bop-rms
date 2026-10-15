@@ -403,7 +403,8 @@ export function createPostgresOrderCompensationCandidateReader(options: {
             "SELECT disposition_id::uuid AS disposition_id,payment_event_id::uuid AS payment_event_id,'Disposition' AS source FROM rms_ordering.order_payment_disposition_record " +
             "WHERE brand_id=$1 AND store_id=$2 AND disposition='PaidWithoutFulfillableOrder' AND ($3::uuid IS NULL OR disposition_id>$3::uuid) " +
             "UNION ALL SELECT cancellation_id::uuid,payment_event_id::uuid,'StaffCancellation' FROM rms_ordering.order_staff_cancellation " +
-            "WHERE brand_id=$1 AND store_id=$2 AND ($3::uuid IS NULL OR cancellation_id>$3::uuid)" +
+            // DEC-TABLE-CLOSE-GUESTS-LEFT: an already refunded round owes nothing; no compensation.
+            "WHERE brand_id=$1 AND store_id=$2 AND refund_disposition='Refund' AND ($3::uuid IS NULL OR cancellation_id>$3::uuid)" +
             ") candidates ORDER BY disposition_id LIMIT $4",
           [brandReference, storeReference, after, input.limit],
         )

@@ -21,6 +21,7 @@ export const staffCancellationReasonLabel: Readonly<Record<StaffCancellationReas
   SOLD_OUT: "Sold out",
   STORE_ERROR: "Store error",
   DUPLICATE_ORDER: "Duplicate order",
+  GUEST_LEFT: "Guests left",
 };
 
 /** "Cancelled by store · refund pending" (pickup) or "Batch 2 cancelled · refunded" (dine-in). */
