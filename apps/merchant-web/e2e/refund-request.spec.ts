@@ -153,6 +153,7 @@ for (const recovery of ["retry", "history"] as const)
               quantity: 2,
               unclaimedQuantity: persisted ? 1 : 2,
               paymentCaptured: true,
+              refundedByCancellation: false,
               paymentIntentReference: id(31),
               paymentMethod: "Online",
             },
@@ -164,8 +165,21 @@ for (const recovery of ["retry", "history"] as const)
               quantity: 1,
               unclaimedQuantity: 0,
               paymentCaptured: false,
+              refundedByCancellation: false,
               paymentIntentReference: null,
               paymentMethod: null,
+            },
+            // A round the store cancelled was refunded whole by that cancellation (v15 order 7).
+            {
+              orderBatchReference: id(92),
+              orderItemReference: id(5),
+              label: "Soup",
+              quantity: 1,
+              unclaimedQuantity: 0,
+              paymentCaptured: true,
+              refundedByCancellation: true,
+              paymentIntentReference: id(33),
+              paymentMethod: "Online",
             },
           ],
         },
@@ -306,6 +320,10 @@ for (const recovery of ["retry", "history"] as const)
     await page.getByRole("button", { name: "Load refundable items" }).click();
     await expect(page.getByRole("spinbutton", { name: /Tea/ })).toHaveCount(0);
     await expect(page.getByText("Not charged, so not refundable: Tea.")).toBeVisible();
+    await expect(page.getByRole("spinbutton", { name: /Soup/ })).toHaveCount(0);
+    await expect(
+      page.getByText("Already refunded in full when the round was cancelled: Soup."),
+    ).toBeVisible();
     await page.getByRole("spinbutton", { name: /Latte/ }).fill("1");
     await page.getByRole("combobox", { name: "Reason" }).selectOption("CUSTOMER_REQUEST");
     await page.getByRole("button", { name: "Calculate refund" }).click();
@@ -353,6 +371,10 @@ for (const recovery of ["retry", "history"] as const)
       })
       .click();
     await expect(page.getByText("Original request recovered.", { exact: false })).toBeVisible();
+    // The recorded request is listed straight away, without a manual refresh.
+    await expect(page.getByRole("region", { name: "Recorded refund requests" })).toContainText(
+      "Request 1: CAD 11.30",
+    );
     expect(previews).toHaveLength(2);
     expect(requests).toHaveLength(recovery === "retry" ? 2 : 1);
     expect(requests[0]).toBe(previews[0]);

@@ -741,6 +741,8 @@ function RefundWizard({
                   ? ". Now refund it on the store's card machine and record it under the request below."
                   : ". Approval and execution are separate. No completed refund is confirmed here."),
         );
+        // The new request appears in the list (and its units leave the selection) straight away.
+        void reloadRequests();
       }
     } catch (error) {
       if (!controller.signal.aborted) {
@@ -869,7 +871,8 @@ function RefundWizard({
           {items?.items.map((item, index) =>
             // WP-2423 Q5: a line that was never charged (e.g. a round cancelled before payment)
             // cannot be refunded; it is summarized below instead of offered as a quantity.
-            !item.paymentCaptured ? null : (
+            // A round the store cancelled was refunded whole by that cancellation; listed below.
+            !item.paymentCaptured || item.refundedByCancellation ? null : (
               <div className="form-field" key={item.orderItemReference}>
                 <label htmlFor={"refund-quantity-" + index}>
                   {item.label} · line {index + 1} ({item.unclaimedQuantity} unclaimed of{" "}
@@ -905,6 +908,16 @@ function RefundWizard({
               Not charged, so not refundable:{" "}
               {items.items
                 .filter((item) => !item.paymentCaptured)
+                .map((item) => item.label)
+                .join(", ")}
+              .
+            </p>
+          ) : null}
+          {items && items.items.some((item) => item.refundedByCancellation) ? (
+            <p>
+              Already refunded in full when the round was cancelled:{" "}
+              {items.items
+                .filter((item) => item.refundedByCancellation)
                 .map((item) => item.label)
                 .join(", ")}
               .

@@ -405,8 +405,8 @@ export function createPostgresStaffOrderCancellationStore(options: {
         terminationAuditReference: string;
         cancelledAt: string;
         /**
-         * DEC-TABLE-CLOSE-GUESTS-LEFT: AlreadyRefunded only for a never-accepted round whose payment
-         * the caller proved (from Payment, under this fence) fully refunded already. Default Refund.
+         * DEC-TABLE-CLOSE-GUESTS-LEFT: AlreadyRefunded only for a round whose payment the caller
+         * proved (from Payment, under this fence) fully refunded already. Default Refund.
          */
         refundDisposition?: StaffOrderCancellationRefundDisposition;
       },
@@ -420,10 +420,7 @@ export function createPostgresStaffOrderCancellationStore(options: {
         terminationAuditReference = parseOrderingReference(input.terminationAuditReference),
         cancelledAt = parseOrderingInstant(input.cancelledAt);
       const refundDisposition = input.refundDisposition ?? "Refund";
-      if (
-        (refundDisposition !== "Refund" && refundDisposition !== "AlreadyRefunded") ||
-        (refundDisposition === "AlreadyRefunded" && plan.previousPhase !== "Submitted")
-      )
+      if (refundDisposition !== "Refund" && refundDisposition !== "AlreadyRefunded")
         return unavailable();
       const identity = {
         orderReference: plan.orderReference,

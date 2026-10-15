@@ -12,6 +12,11 @@ const d = vi.hoisted(() => ({
   capture: vi.fn(),
   member: vi.fn(),
   status: vi.fn(),
+  cancelledRound: vi.fn(),
+}));
+// Rounds refunded whole by their cancellation (Ordering owner reads), none unless a test says so.
+vi.mock("./merchant-round-cancellation-refund.js", () => ({
+  createRoundCancellationRefundSource: () => d.cancelledRound,
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => d.resolve }));
 vi.mock("./merchant-workforce-authority-source.js", () => ({
@@ -78,6 +83,7 @@ function setup() {
 beforeEach(() => {
   vi.clearAllMocks();
   d.status.mockResolvedValue({ payments: [{ state: "Confirmed" }] });
+  d.cancelledRound.mockResolvedValue(false);
   d.workforce.mockResolvedValue({ decision: { effect: "Allow" }, activeRoleCodes: ["manager"] });
   d.context.mockResolvedValue({
     existing: null,
@@ -120,7 +126,7 @@ beforeEach(() => {
   });
   d.capture.mockImplementation(async (_tx, q) =>
     q.orderBatchReference === id(11)
-      ? { paymentEvent: "private", paymentIntentReference: id(31) }
+      ? { paymentEvent: { eventId: id(32), private: true }, paymentIntentReference: id(31) }
       : null,
   );
 });
@@ -153,6 +159,7 @@ it("returns paid unclaimed units and current claim version without private facts
         quantity: 3,
         unclaimedQuantity: 2,
         paymentCaptured: true,
+        refundedByCancellation: false,
         paymentIntentReference: id(31),
         paymentMethod: "Online",
       },
@@ -163,6 +170,7 @@ it("returns paid unclaimed units and current claim version without private facts
         quantity: 1,
         unclaimedQuantity: 0,
         paymentCaptured: false,
+        refundedByCancellation: false,
         paymentIntentReference: null,
         paymentMethod: null,
       },
@@ -282,4 +290,24 @@ it("WP-2423 Q5: an Owner reads refunds (progress included) but may not record a 
   const result = await f.operation(f.input);
   expect(result.canRequest).toBe(false);
   expect(result.recentRequests[0]?.progress).toBe("Sending");
+});
+
+it("WP-2423: a round refunded whole by its cancellation offers no unit again", async () => {
+  const f = setup();
+  d.cancelledRound.mockImplementation(
+    async (round: { orderBatchReference: string }) => round.orderBatchReference === id(11),
+  );
+  const result = await f.operation(f.input);
+  expect(d.cancelledRound).toHaveBeenCalledWith({
+    orderBatchReference: id(11),
+    paymentEventReference: id(32),
+  });
+  expect(result.items[0]).toMatchObject({
+    orderItemReference: id(12),
+    paymentCaptured: true,
+    unclaimedQuantity: 0,
+    refundedByCancellation: true,
+  });
+  // A round never charged is not "refunded by cancellation".
+  expect(result.items[1]).toMatchObject({ paymentCaptured: false, refundedByCancellation: false });
 });

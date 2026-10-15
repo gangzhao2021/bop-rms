@@ -1,11 +1,13 @@
 import type { ConsumerTransaction } from "@bop/eventing";
 import { readClosedRecord, parseOpaqueUuidV7 } from "@bop/identity";
 import {
+  createPostgresCapturedBatchPaymentSource,
   createPostgresCardMachinePaymentStore,
   createPostgresOrdinaryRefundRequestRuntime,
   createOrdinaryRefundRoleResolver,
 } from "@rms/payment";
 import { cardMachineWholeRefundSource } from "./merchant-card-machine-refund.js";
+import { createRoundCancellationRefundSource } from "./merchant-round-cancellation-refund.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { createMerchantWorkforcePermissionSource } from "./merchant-workforce-authority-source.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -55,6 +57,10 @@ export function createMerchantOrdinaryRefundRequest(options: {
   const resolve = createMerchantStoreScope(options.persistence);
   const deny = (): never => {
     throw new Error("ORDINARY_REFUND_REQUEST_DENIED");
+  };
+  /** Refused like any other denial; the message names the cause for logs and tests only. */
+  const roundRefunded = (): never => {
+    throw new Error("ORDINARY_REFUND_ROUND_REFUNDED_BY_CANCELLATION");
   };
   const resolveCommand = async (
     input: { sessionCookie: unknown; csrf: unknown; command: unknown },
@@ -187,14 +193,44 @@ export function createMerchantOrdinaryRefundRequest(options: {
           return typeof batch === "string" ? [batch] : [];
         }),
       );
+      // A round the store cancelled is refunded whole by that cancellation (online compensation or
+      // the card-machine cancellation refund); an item request on it would refund it twice.
+      const cancellationRefund = createRoundCancellationRefundSource(
+        businessTransaction,
+        scope,
+        orderReference,
+      );
+      const captured = createPostgresCapturedBatchPaymentSource({
+        scope: {
+          brandReference: scope.brandReference,
+          storeReference: scope.storeReference,
+          providerAccountReference: configuration.providerAccountReference,
+          environment: configuration.environment,
+        },
+        authorize: async (_tx, query) => query.orderReference === orderReference,
+      });
       for (const batch of batches) {
+        const orderBatchReference = String(parseOpaqueUuidV7(batch, "ACTOR_REFERENCE_INVALID"));
         const card = await cards.loadByBatch(
           businessTransaction,
           orderReference,
-          String(parseOpaqueUuidV7(batch, "ACTOR_REFERENCE_INVALID")),
+          orderBatchReference,
         );
         if (card !== null && (await cardMachineWholeRefundSource(businessTransaction, scope, card)))
-          return deny();
+          return roundRefunded();
+        const payment = await captured.load(businessTransaction, {
+          orderReference,
+          orderBatchReference,
+          observedAt: String(current.context.resolvedAt),
+        });
+        if (
+          payment !== null &&
+          (await cancellationRefund({
+            orderBatchReference,
+            paymentEventReference: String(payment.paymentEvent.eventId),
+          }))
+        )
+          return roundRefunded();
       }
       const runtime = createPostgresOrdinaryRefundRequestRuntime({
         scope: {

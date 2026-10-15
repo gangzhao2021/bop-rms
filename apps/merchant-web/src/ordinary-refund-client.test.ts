@@ -134,6 +134,7 @@ it("binds item queries to order and denies selectable units on uncaptured batche
       quantity: 2,
       unclaimedQuantity: 1,
       paymentCaptured: true,
+      refundedByCancellation: false,
       paymentIntentReference: id(31),
       paymentMethod: "Online",
     },

@@ -650,10 +650,19 @@ describe("DEC-TABLE-CLOSE-GUESTS-LEFT: a paid round never accepted", () => {
     );
     expect(f.query.mock.calls[staff]?.[1]?.slice(-2)).toEqual(["Submitted", "AlreadyRefunded"]);
   });
-  it("never records AlreadyRefunded for an accepted round", async () => {
+  it("records AlreadyRefunded for an accepted round refunded in full already (v15 round 16)", async () => {
     const f = storeFixture({ orderType: "DineIn" });
+    const created = await f.store.commit(f.tx, {
+      ...commitInput("DineIn"),
+      reasonCode: "GUEST_LEFT",
+      refundDisposition: "AlreadyRefunded",
+    });
+    expect(created.record).toMatchObject({
+      previousPhase: "Accepted",
+      refundDisposition: "AlreadyRefunded",
+    });
     await expect(
-      f.store.commit(f.tx, { ...commitInput("DineIn"), refundDisposition: "AlreadyRefunded" }),
+      f.store.commit(f.tx, { ...commitInput("DineIn"), refundDisposition: "Partly" as never }),
     ).rejects.toThrow();
   });
   it("parses older records as Accepted / Refund and refuses mismatched phases", () => {
@@ -675,8 +684,12 @@ describe("DEC-TABLE-CLOSE-GUESTS-LEFT: a paid round never accepted", () => {
         }),
       ).refundDisposition,
     ).toBe("AlreadyRefunded");
+    expect(
+      parseStaffOrderCancellationRecord(record({ refundDisposition: "AlreadyRefunded" }))
+        .refundDisposition,
+    ).toBe("AlreadyRefunded");
     expect(() =>
-      parseStaffOrderCancellationRecord(record({ refundDisposition: "AlreadyRefunded" })),
+      parseStaffOrderCancellationRecord(record({ refundDisposition: "Partly" })),
     ).toThrow();
   });
   it("opens no compensation for an already refunded round", async () => {

@@ -10,6 +10,13 @@ const mock = vi.hoisted(() => ({
   finalize: vi.fn(),
   ports: vi.fn(),
   release: vi.fn(),
+  sessionOrders: vi.fn(),
+  cancellations: vi.fn(),
+}));
+vi.mock("@rms/ordering", async (original) => ({
+  ...(await original<typeof import("@rms/ordering")>()),
+  listStoreDiningSessionOrders: mock.sessionOrders,
+  createPostgresStaffOrderCancellationReader: () => ({ listByOrders: mock.cancellations }),
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => mock.scope }));
 vi.mock("@rms/dining", async (original) => ({
@@ -166,3 +173,32 @@ it("repairs matching old Finalize via release without repeating session transiti
   expect(mock.finalize).not.toHaveBeenCalled();
   expect(mock.release).toHaveBeenCalledTimes(1);
 });
+
+it.each([
+  [[{ reasonCode: "SOLD_OUT" }, { reasonCode: "GUEST_LEFT" }], "GUEST_LEFT"],
+  [[{ reasonCode: "SOLD_OUT" }], "CUSTOMER_FINISHED"],
+  [null, "CUSTOMER_FINISHED"],
+])(
+  "DEC-TABLE-CLOSE-GUESTS-LEFT: records why the table was closed (%j)",
+  async (cancellations, reason) => {
+    const f = setup();
+    mock.sessionOrders.mockResolvedValue(new Map(cancellations === null ? [] : [[id(5), id(11)]]));
+    mock.cancellations.mockResolvedValue(cancellations ?? []);
+    await f.handler(f.input);
+    const ports = mock.ports.mock.calls[0]?.[0] as {
+      authorization: { authorize(request: unknown): Promise<{ audit: { reasonCode: string } }> };
+    };
+    const scope = (await mock.scope.mock.results[0]?.value) as {
+      authorizeAction: ReturnType<typeof vi.fn>;
+    };
+    scope.authorizeAction.mockResolvedValue({ effect: "Allow" });
+    const decision = await ports.authorization.authorize({
+      session: { diningSessionReference: id(5) },
+      operation: "Begin",
+      observedAt: at,
+    });
+    expect(decision.audit.reasonCode).toBe(reason);
+    if (cancellations !== null)
+      expect(mock.cancellations).toHaveBeenCalledWith(expect.anything(), [id(11)]);
+  },
+);

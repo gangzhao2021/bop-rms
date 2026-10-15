@@ -225,8 +225,17 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
       /** One submitted Order: stock reserved at submission, Ordering facts and (pickup) Fulfillment's window. */
       async function submit(
         n,
-        { quantity, requestedAgo = 35, type = "Pickup", paid = null, intent = false },
+        {
+          quantity,
+          requestedAgo = 35,
+          type = "Pickup",
+          paid = null,
+          intent = false,
+          // Per-line (schema 2) quantities on the one stock account, as a multi-unit order holds.
+          lines = null,
+        },
       ) {
+        assert.ok(lines === null || lines.length <= 2);
         const base100 = n * 100;
         const refs = {
           order: id(base100 + 1),
@@ -258,53 +267,60 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
           retentionPolicyCode: "AUDIT_DEFAULT",
           retentionPolicyVersion: 1,
         });
-        const reservation = createInventoryReservation({
-          reservationReference: refs.reservation,
-          binding: {
-            tenantReference: tenant,
-            brandReference: brand,
-            storeReference: store,
-            stockSiteReference: site,
-            locationReference: location,
-            itemReference: item,
-            lotReference: null,
-            submissionReference: refs.submission,
-            cartReference: refs.cart,
-            cartVersion: 1,
-            quoteReference: refs.quote,
-            demandReference: refs.demand,
-            demandDigest: hash(["demand", n]),
-          },
-          unit,
-          quantity,
-          occurredAt: createdAt,
-        });
+        const reservationOf = (k, partQuantity, cartItem) =>
+          createInventoryReservation({
+            reservationReference: k === 0 ? refs.reservation : id(base100 + 51),
+            binding: {
+              tenantReference: tenant,
+              brandReference: brand,
+              storeReference: store,
+              stockSiteReference: site,
+              locationReference: location,
+              itemReference: item,
+              lotReference: null,
+              submissionReference: refs.submission,
+              cartReference: refs.cart,
+              cartVersion: 1,
+              quoteReference: refs.quote,
+              demandReference: refs.demand,
+              demandDigest: hash(["demand", n]),
+              ...(cartItem === null ? {} : { cartItemReference: cartItem }),
+            },
+            unit,
+            quantity: partQuantity,
+            occurredAt: createdAt,
+          });
+        const parts = (lines ?? [quantity]).map((part, k) => ({
+          quantity: part,
+          reservation: reservationOf(k, part, lines === null ? null : id(base100 + 90 + k)),
+        }));
         const result = await scoped(async (tx) =>
           owner(tx).commitSet({
             setReference: id(base100 + 20),
             operationReference: id(base100 + 21),
             workflowReference: refs.workflow,
             workflowVersion: 1,
-            writes: [
-              {
-                operationReference: id(base100 + 30),
+            writes: await (async () => {
+              const ledger = await owner(tx).loadAccountLedgerVersion(account);
+              return parts.map(({ quantity: part, reservation }, k) => ({
+                operationReference: id(base100 + (k === 0 ? 30 : 52)),
                 accountReference: account,
                 action: "Reserve",
-                expectedLedgerVersion: await owner(tx).loadAccountLedgerVersion(account),
-                quantity,
+                expectedLedgerVersion: ledger + k,
+                quantity: part,
                 reservation,
-                movementReference: id(base100 + 31),
+                movementReference: id(base100 + (k === 0 ? 31 : 53)),
                 audit: {
                   ...audit(
-                    32,
+                    k === 0 ? 32 : 54,
                     "InventoryReservation",
-                    refs.reservation,
+                    reservation.reservationReference,
                     "INVENTORY_RESERVATION_RESERVE",
                   ),
-                  correlationId: id(base100 + 30),
+                  correlationId: id(base100 + (k === 0 ? 30 : 52)),
                 },
-              },
-            ],
+              }));
+            })(),
             audit: {
               ...audit(
                 22,
@@ -640,7 +656,8 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
         );
         return record;
       }
-      const expired = await submit(1, { quantity: "2" });
+      // Two lines of one order reserve on the same stock account (released in one transaction).
+      const expired = await submit(1, { quantity: "2", lines: ["1.25", "0.75"] });
       const open = await submit(2, { quantity: "1", requestedAgo: 10 });
       const waiting = await submit(3, { quantity: "1.5", paid: "Wait" });
       const settled = await submit(4, { quantity: "0.5", paid: "Disposition" });
@@ -701,15 +718,15 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
       const closed = await closure.close({ link: expired.link });
       assert.equal(closed.status, "Closed");
       assert.equal(closed.paymentEvidence, "NoPaymentStarted");
-      assert.deepEqual(closed.inventory, { status: "Released", entryCount: 1 });
+      assert.deepEqual(closed.inventory, { status: "Released", entryCount: 2 });
       assert.deepEqual(await stock(), { onHand: "10", reserved: "5" });
       const after = await counts();
       assert.deepEqual(after, {
-        reservations: before.reservations + 1,
-        movements: before.movements + 1,
+        reservations: before.reservations + 2,
+        movements: before.movements + 2,
         terminations: before.terminations + 1,
         revisions: before.revisions + 1,
-        audits: before.audits + 2,
+        audits: before.audits + 3,
       });
       const termination = (
         await admin.query(
@@ -742,14 +759,18 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
       ]);
       const movement = (
         await admin.query(
-          "SELECT record_json FROM rms_inventory.stock_movement WHERE movement_type='Release'",
+          "SELECT record_json FROM rms_inventory.stock_movement WHERE movement_type='Release' ORDER BY ledger_version",
           [],
         )
       ).rows.map((row) => row.record_json);
-      assert.equal(movement.length, 1);
-      assert.equal(movement[0].performedBy, system);
-      assert.equal(movement[0].reasonCode, "PAYMENT_WINDOW_EXPIRED");
-      assert.equal(movement[0].occurredAt, termination.terminated_at.toISOString());
+      // Both lines' releases on the one account follow each other in the ledger.
+      assert.equal(movement.length, 2);
+      assert.equal(movement[1].before.ledgerVersion, movement[0].after.ledgerVersion);
+      for (const released of movement) {
+        assert.equal(released.performedBy, system);
+        assert.equal(released.reasonCode, "PAYMENT_WINDOW_EXPIRED");
+        assert.equal(released.occurredAt, termination.terminated_at.toISOString());
+      }
       const releaseAudit = (
         await admin.query(
           "SELECT actor_type,reason_code,source_channel FROM platform_audit.audit_record WHERE action_code='INVENTORY_RESERVATION_RELEASE'",
@@ -757,6 +778,7 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
         )
       ).rows;
       assert.deepEqual(releaseAudit, [
+        { actor_type: "System", reason_code: "PAYMENT_WINDOW_EXPIRED", source_channel: "SYSTEM" },
         { actor_type: "System", reason_code: "PAYMENT_WINDOW_EXPIRED", source_channel: "SYSTEM" },
       ]);
 
@@ -783,7 +805,7 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
       // Replay (next scan, worker restart) verifies the original closure and release, writes nothing.
       const replay = await closure.close({ link: expired.link });
       assert.equal(replay.status, "AlreadyClosed");
-      assert.deepEqual(replay.inventory, { status: "AlreadyApplied", entryCount: 1 });
+      assert.deepEqual(replay.inventory, { status: "AlreadyApplied", entryCount: 2 });
       assert.deepEqual(await counts(), after);
       assert.deepEqual(await discover(), [open.refs.order, abandoned.refs.order]);
       assert.deepEqual(await stock(), { onHand: "10", reserved: "5" });

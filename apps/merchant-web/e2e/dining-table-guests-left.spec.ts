@@ -127,18 +127,21 @@ test("@production a manager closes out a table whose guests left: rounds cancell
       planRound(21, 1, "AlreadyRefunded", { method: "Online", amountMinor: "0" }),
       planRound(24, 4, "PaidNotSent", { method: "Online", amountMinor: "1130" }),
       planRound(29, 9, "NotStarted", { method: "CardMachine", amountMinor: "593" }),
+      // v15 DEMO-02 round 16: refunded in full on the card machine item by item already.
+      planRound(30, 10, "NotStarted", { method: "CardMachine", amountMinor: "0" }),
     ].slice(resolved);
   await page.route("**/merchant/dining/order-progress", (route) =>
     route.fulfill({
       headers,
       json:
-        resolved < 3
+        resolved < 4
           ? progress(
               "Accepted",
               [
                 progressItem(1, 21, 1, "Submitted"),
                 progressItem(4, 24, 4, "Submitted"),
                 progressItem(9, 29, 9, "Accepted"),
+                progressItem(10, 30, 10, "Accepted"),
               ],
               orderVersion,
             )
@@ -148,6 +151,7 @@ test("@production a manager closes out a table whose guests left: rounds cancell
                 { ...progressItem(1, 21, 1, "Cancelled") },
                 { ...progressItem(4, 24, 4, "Cancelled") },
                 { ...progressItem(9, 29, 9, "Cancelled") },
+                { ...progressItem(10, 30, 10, "Cancelled") },
               ],
               orderVersion,
             ),
@@ -169,7 +173,9 @@ test("@production a manager closes out a table whose guests left: rounds cancell
         rounds: left,
         totals: {
           onlineMinor: left.some((round) => round.state === "PaidNotSent") ? "1130" : "0",
-          cardMachineMinor: left.some((round) => round.state === "NotStarted") ? "593" : "0",
+          cardMachineMinor: left.some((round) => round.orderBatchReference === id(29))
+            ? "593"
+            : "0",
         },
       },
     });
@@ -178,8 +184,8 @@ test("@production a manager closes out a table whose guests left: rounds cancell
     const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
     expect(route.request().headers()["x-bop-csrf"]).toBe(csrf);
     cancels.push(body);
-    // The first answer is lost: the same operation is sent again.
-    if (cancels.length === 1) return route.abort("failed");
+    // The answer for the second round is lost: the same operation is sent again.
+    if (cancels.length === 2) return route.abort("failed");
     resolved += 1;
     orderVersion += 1;
     return route.fulfill({
@@ -228,10 +234,14 @@ test("@production a manager closes out a table whose guests left: rounds cancell
     "Round 9: 1 item not started in the kitchen. It will be cancelled; then refund CAD 5.93 on the card machine",
   );
   await expect(guests).toContainText(
+    "Round 10: 1 item not started in the kitchen, already refunded in full. It will be cancelled; nothing is left to refund.",
+  );
+  await expect(guests).not.toContainText("CAD 0.00");
+  await expect(guests).toContainText(
     "refunds CAD 11.30 to the guest online and CAD 5.93 to refund on the card machine",
   );
   await expect(dialog.getByRole("button", { name: /^Close table/u })).toHaveCount(0);
-  const confirm = guests.getByRole("button", { name: "Cancel 3 rounds and refund", exact: true });
+  const confirm = guests.getByRole("button", { name: "Cancel 4 rounds and refund", exact: true });
   await expect(confirm).toBeDisabled();
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
@@ -254,15 +264,19 @@ test("@production a manager closes out a table whose guests left: rounds cancell
   const retry = guests.getByRole("button", { name: "Try again", exact: true });
   await expect(retry).toBeEnabled();
   await expect(guests).toContainText("nothing is cancelled or refunded twice");
+  // The list is read again after the failed step: round 1, already closed out, is gone.
+  await expect(guests).toContainText("Round 4: paid CAD 11.30 online");
+  await expect(guests).not.toContainText("Round 1:");
   await retry.click();
   await expect(dialog.getByRole("button", { name: "Close table T2", exact: true })).toBeVisible();
-  expect(cancels).toHaveLength(4);
-  expect(cancels[1]).toEqual(cancels[0]);
+  expect(cancels).toHaveLength(5);
+  expect(cancels[2]).toEqual(cancels[1]);
   expect(cancels.map((body) => [body.orderBatchReference, body.expectedOrderVersion])).toEqual([
     [id(21), 19],
-    [id(21), 19],
+    [id(24), 20],
     [id(24), 20],
     [id(29), 21],
+    [id(30), 22],
   ]);
   for (const body of cancels) expect(body.reasonCode).toBe("GUEST_LEFT");
 

@@ -95,6 +95,20 @@ it("DEC-TABLE-CLOSE-GUESTS-LEFT: words each round for staff, with amounts and no
   expect(texts[4]).toContain("CAD 4.50 refunded");
   expect(texts[5]).toContain("mark them served");
   expect(texts[6]).toContain("Refund CAD 5.93 on the card machine");
+  // v15 DEMO-02 round 16: accepted, refunded in full on the card machine item by item already.
+  const refunded = guestsLeftRoundText(
+    round({
+      state: "NotStarted",
+      openItemCount: 1,
+      refund: { method: "CardMachine", amountMinor: "0" },
+    }),
+    "America/Toronto",
+    now,
+  );
+  expect(refunded).toBe(
+    "Round 4: 1 item not started in the kitchen, already refunded in full. It will be cancelled; nothing is left to refund.",
+  );
+  texts.push(refunded);
   for (const text of texts) expect(text).not.toMatch(/[0-9a-f]{8}-|GUEST_LEFT|PaidNotSent|Batch/u);
 });
 

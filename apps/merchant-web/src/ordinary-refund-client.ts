@@ -101,6 +101,8 @@ export interface RefundItem {
   readonly quantity: number;
   readonly unclaimedQuantity: number;
   readonly paymentCaptured: boolean;
+  /** The round was cancelled and refunded whole by that cancellation; no unit is refundable. */
+  readonly refundedByCancellation: boolean;
   readonly paymentIntentReference: string | null;
   readonly paymentMethod: "Online" | "CardMachine" | null;
 }
@@ -523,6 +525,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
               "quantity",
               "unclaimedQuantity",
               "paymentCaptured",
+              "refundedByCancellation",
               "paymentIntentReference",
               "paymentMethod",
             ]),
@@ -530,6 +533,8 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
             unclaimedQuantity = count(item.unclaimedQuantity, 0, quantity);
           if (
             typeof item.paymentCaptured !== "boolean" ||
+            typeof item.refundedByCancellation !== "boolean" ||
+            (item.refundedByCancellation && (!item.paymentCaptured || unclaimedQuantity !== 0)) ||
             (!item.paymentCaptured && unclaimedQuantity !== 0) ||
             (item.paymentCaptured
               ? item.paymentMethod !== "Online" && item.paymentMethod !== "CardMachine"
@@ -543,6 +548,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
             quantity,
             unclaimedQuantity,
             paymentCaptured: item.paymentCaptured,
+            refundedByCancellation: item.refundedByCancellation,
             paymentIntentReference: item.paymentCaptured
               ? ref(item.paymentIntentReference)
               : item.paymentIntentReference === null

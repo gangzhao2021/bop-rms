@@ -407,9 +407,18 @@ export function createSubmissionInventoryRelease(options: {
         return Object.freeze({ status: "NotReleasable", reason: "PartiallySettled" });
       const plan = planInventoryReservationSetRelease({ set, current, occurredAt: releasedAt });
       const writes: StockReservationWrite[] = [];
+      // The store writes these in plan order inside one transaction, and every Release advances
+      // its account's ledger by one, so a later write on the same account must expect the
+      // version the earlier write produced (a round of several units can hold several
+      // reservations on one account).
+      const nextLedgerVersion = new Map<string, number>();
       for (const entry of plan.entries) {
-        const version = await store.loadAccountLedgerVersion(entry.accountReference);
-        if (version === null) return fail();
+        let version = nextLedgerVersion.get(entry.accountReference) ?? null;
+        if (version === null) {
+          version = await store.loadAccountLedgerVersion(entry.accountReference);
+          if (version === null) return fail();
+        }
+        nextLedgerVersion.set(entry.accountReference, version + 1);
         const reservation = entry.reservation,
           operationReference = child(reservation.reservationReference, "operation");
         writes.push({

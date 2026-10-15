@@ -53,8 +53,9 @@ const invalid = (): never => {
 export type StaffOrderCancellationPreviousPhase = "Accepted" | "Submitted";
 /**
  * Refund: Payment refunds the whole remaining capture (compensation). AlreadyRefunded
- * (DEC-TABLE-CLOSE-GUESTS-LEFT): a never-accepted round whose payment an ordinary refund had already
- * returned in full; nothing more is owed and no compensation is opened.
+ * (DEC-TABLE-CLOSE-GUESTS-LEFT): a round whose payment ordinary refunds had already returned in full
+ * (never accepted, or accepted and refunded item by item, online or on the card machine); nothing
+ * more is owed, no compensation is opened and no card-machine refund is left to record.
  */
 export type StaffOrderCancellationRefundDisposition = "Refund" | "AlreadyRefunded";
 
@@ -149,7 +150,8 @@ function previousPhaseOf(value: unknown, type: "Pickup" | "DineIn") {
 }
 function refundDispositionOf(value: unknown, phase: StaffOrderCancellationPreviousPhase) {
   if (value === undefined || value === "Refund") return "Refund" as const;
-  if (value === "AlreadyRefunded" && phase === "Submitted") return "AlreadyRefunded" as const;
+  if (value === "AlreadyRefunded" && (phase === "Submitted" || phase === "Accepted"))
+    return "AlreadyRefunded" as const;
   return invalid();
 }
 /** Closed record with optional keys (absent from older callers and rows). */

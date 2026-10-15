@@ -43,6 +43,9 @@ export function guestsLeftRoundText(
     case "AlreadyRefunded":
       return `${name}: never sent to the kitchen and already refunded in full. It will be closed; nothing more is refunded.`;
     case "NotStarted":
+      // Refunded in full item by item already: nothing is left to refund or record.
+      if (round.refund !== null && BigInt(round.refund.amountMinor) === 0n)
+        return `${name}: ${items(round.openItemCount)} not started in the kitchen, already refunded in full. It will be cancelled; nothing is left to refund.`;
       return machine
         ? `${name}: ${items(round.openItemCount)} not started in the kitchen. It will be cancelled; then refund ${cad(round.refund?.amountMinor ?? "0")} on the card machine and record that on the Orders page.`
         : `${name}: ${items(round.openItemCount)} not started in the kitchen. It will be cancelled and ${cad(round.refund?.amountMinor ?? "0")} refunded to the guest.`;
@@ -178,6 +181,10 @@ export function TableGuestsLeft({
       const outcome = await client.resolve(current, round, operation, csrf);
       if (outcome === "Unknown" || outcome === "FullSignInRequired") {
         setRun(outcome);
+        // Show what is actually still open (rounds closed out before the failure are gone); the
+        // same operation is kept for this round, so trying again never repeats it. The table
+        // itself is re-checked once the close-out finishes (this dialog stays as it is meanwhile).
+        setReload((value) => value + 1);
         return;
       }
       operations.current.delete(key);
@@ -220,10 +227,18 @@ export function TableGuestsLeft({
           <p>
             Closing out{" "}
             {actionable.length === 1 ? "this round" : `these ${String(actionable.length)} rounds`}{" "}
-            refunds {cad(online)} to the guest online
-            {unknownPartly ? " plus the items not started" : ""}
-            {machine > 0n ? ` and ${cad(machine)} to refund on the card machine` : ""}. The reason
-            recorded is &ldquo;Guests left&rdquo;.
+            {online > 0n || unknownPartly ? (
+              <>
+                refunds {cad(online)} to the guest online
+                {unknownPartly ? " plus the items not started" : ""}
+                {machine > 0n ? ` and ${cad(machine)} to refund on the card machine` : ""}
+              </>
+            ) : machine > 0n ? (
+              `leaves ${cad(machine)} to refund on the card machine`
+            ) : (
+              "refunds nothing more: what was paid has already been refunded"
+            )}
+            . The reason recorded is &ldquo;Guests left&rdquo;.
           </p>
           {run === "Unknown" || run === "FullSignInRequired" ? null : (
             <label>

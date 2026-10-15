@@ -31,6 +31,8 @@ import { createMerchantOrderStaffCancellation } from "../../../apps/api/src/merc
 import { createMerchantDiningTableClosePlan } from "../../../apps/api/src/merchant-dining-table-close-plan.ts";
 import { createPaymentCompensationComposition } from "../../../apps/api/src/payment-compensation-composition.ts";
 import { createMerchantCardMachineCancellationRefund } from "../../../apps/api/src/merchant-card-machine-refund.ts";
+import { createMerchantOrdinaryRefundRequest } from "../../../apps/api/src/merchant-ordinary-refund-request.ts";
+import { createRoundCancellationRefundSource } from "../../../apps/api/src/merchant-round-cancellation-refund.ts";
 import { withoutCardMachinePayments } from "../../../tooling/environment/pilot-compensation-candidates.mjs";
 import { createInternalCompensationIdentity } from "../../../tooling/environment/pilot-compensation-identity.mjs";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
@@ -54,7 +56,7 @@ vi.mock("../../../apps/api/src/merchant-store-scope.ts", () => ({
     return {
       actorReference: merchant.actor,
       selected: { tenantReference: merchant.tenant },
-      context: { brand: { brandReference: merchant.brand } },
+      context: { brand: { brandReference: merchant.brand }, resolvedAt: new Date().toISOString() },
       store: { storeReference: merchant.store },
       allowed: async () => merchant.allowed(),
     };
@@ -289,28 +291,33 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
         ).rows.map((row) => row.status);
 
       /** Stock reserved at submission plus the inventory final validation for one Batch. */
-      async function reserve(n, refs, orderReference, quantity, at) {
-        const reservation = createInventoryReservation({
-          reservationReference: refs.reservation,
-          binding: {
-            tenantReference: tenant,
-            brandReference: brand,
-            storeReference: store,
-            stockSiteReference: site,
-            locationReference: location,
-            itemReference: item,
-            lotReference: null,
-            submissionReference: refs.submission,
-            cartReference: refs.cart,
-            cartVersion: 1,
-            quoteReference: refs.quote,
-            demandReference: refs.demand,
-            demandDigest: hash(["demand", n]),
-          },
-          unit,
-          quantity,
-          occurredAt: at,
-        });
+      async function reserve(n, refs, orderReference, quantity, at, parts = null) {
+        // Per-line (schema 2) reservations: each Order line of the Batch reserves on the same
+        // stock account, as a multi-unit round does (v15 DEMO-02 round 6).
+        const lines = parts ?? [{ quantity, cartItem: null }];
+        const reservationOf = (k, partQuantity, cartItem) =>
+          createInventoryReservation({
+            reservationReference: k === 0 ? refs.reservation : id(n + 60 + k),
+            binding: {
+              tenantReference: tenant,
+              brandReference: brand,
+              storeReference: store,
+              stockSiteReference: site,
+              locationReference: location,
+              itemReference: item,
+              lotReference: null,
+              submissionReference: refs.submission,
+              cartReference: refs.cart,
+              cartVersion: 1,
+              quoteReference: refs.quote,
+              demandReference: refs.demand,
+              demandDigest: hash(["demand", n]),
+              ...(cartItem === null ? {} : { cartItemReference: cartItem }),
+            },
+            unit,
+            quantity: partQuantity,
+            occurredAt: at,
+          });
         const audit = (k, targetType, targetId, actionCode, correlationId) => ({
           auditId: id(n + k),
           brandId: brand,
@@ -333,24 +340,28 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
             operationReference: id(n + 21),
             workflowReference: refs.workflow,
             workflowVersion: 1,
-            writes: [
-              {
-                operationReference: id(n + 30),
-                accountReference: account,
-                action: "Reserve",
-                expectedLedgerVersion: await owner(tx).loadAccountLedgerVersion(account),
-                quantity,
-                reservation,
-                movementReference: id(n + 31),
-                audit: audit(
-                  32,
-                  "InventoryReservation",
-                  refs.reservation,
-                  "INVENTORY_RESERVATION_RESERVE",
-                  id(n + 30),
-                ),
-              },
-            ],
+            writes: await (async () => {
+              const ledger = await owner(tx).loadAccountLedgerVersion(account);
+              return lines.map((line, k) => {
+                const reservation = reservationOf(k, line.quantity, line.cartItem);
+                return {
+                  operationReference: id(n + 30 + 3 * k),
+                  accountReference: account,
+                  action: "Reserve",
+                  expectedLedgerVersion: ledger + k,
+                  quantity: line.quantity,
+                  reservation,
+                  movementReference: id(n + 31 + 3 * k),
+                  audit: audit(
+                    32 + 3 * k,
+                    "InventoryReservation",
+                    reservation.reservationReference,
+                    "INVENTORY_RESERVATION_RESERVE",
+                    id(n + 30 + 3 * k),
+                  ),
+                };
+              });
+            })(),
             audit: audit(
               22,
               "InventoryReservationSet",
@@ -443,6 +454,8 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
           awaiting = false,
           // Later submission times (stock ledger movements must stay in time order).
           shift = 0,
+          // Per Batch index: per-line reservation quantities on the one stock account.
+          lineParts = {},
         },
       ) {
         const time = (offset) => baseTime(offset + shift);
@@ -599,7 +612,14 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
           }
           version += 1;
           previous = refs.submission;
-          await reserve(b, refs, order.order, quantity, submittedAt);
+          await reserve(
+            b,
+            refs,
+            order.order,
+            quantity,
+            submittedAt,
+            lineParts[k]?.map((part, j) => ({ quantity: part, cartItem: id(b + 40 + j) })) ?? null,
+          );
 
           // WP-2423 Q7: a counter order paid on the Store's card machine (recorded by staff).
           if (cardMachine)
@@ -1133,7 +1153,40 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
         ],
       );
       const waitingPickup = await seedOrder(11000, { batches: [1], quantity: "1", awaiting: true });
-      const dineIn = await seedOrder(5000, { type: "DineIn", batches: [1, 2], quantity: "1.5" });
+      // v15 DEMO-02 round 16: an accepted round paid on the card machine, refunded there in full.
+      const acceptedCard = await seedOrder(13000, {
+        type: "DineIn",
+        batches: [1],
+        quantity: "1",
+        cardMachine: true,
+      });
+      // TEST-ONLY fixture: the machine payment was refunded in full on the machine already.
+      await admin.query(
+        "INSERT INTO rms_payment.card_machine_refund (tenant_id,brand_id,store_id,card_machine_refund_id,card_machine_payment_id,order_id,operation_id,intent_digest,source_kind,source_id,amount_minor,currency_code,slip_reference,refunded_at,recorded_at,actor_id,audit_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'UnfulfillableOrder',$9,$10,'CAD',NULL,$11,$11,$12,$13)",
+        [
+          tenant,
+          brand,
+          store,
+          id(13901),
+          acceptedCard.batches[0].transaction,
+          acceptedCard.order,
+          id(13902),
+          hash(["fixture-refund", 13000]),
+          id(13903),
+          acceptedCard.batches[0].totalMinor,
+          time(-minutes(5)),
+          staff,
+          id(13904),
+        ],
+      );
+      // v15 DEMO-02 round 6: a multi-unit round holds several reservations on one stock account;
+      // whole-round cancellation must release all of them in one transaction.
+      const dineIn = await seedOrder(5000, {
+        type: "DineIn",
+        batches: [1, 2],
+        quantity: "1.5",
+        lineParts: { 1: ["0.5", "1"] },
+      });
       const left = await seedOrder(8000, {
         type: "DineIn",
         batches: [1, 1],
@@ -1141,7 +1194,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
         awaiting: true,
         shift: minutes(15),
       });
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "14" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "15" });
 
       // The kitchen accepted the first item of the pickup Order (still Queued, not started).
       assert.equal((await kitchen(pickup).accept(0)).outcome, "Accepted");
@@ -1300,7 +1353,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       assert.equal(releases.length, 1);
       assert.equal(releases[0].performedBy, staff);
       assert.equal(releases[0].reasonCode, "STAFF_CANCELLED_BEFORE_PREPARATION");
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "12" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "13" });
 
       // Payment's compensation source: the CancelledByStaff disposition, discovered only by the
       // refund workload (includeStaffCancellations).
@@ -1354,7 +1407,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
         code: "ORDER_CANCELLATION_NOT_CANCELLABLE",
       });
       assert.deepEqual(await counts(), before);
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "12" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "13" });
 
       // ── Scenario 2: one item already started (In Progress): refused, nothing written.
       const startedKitchen = kitchen(started);
@@ -1365,7 +1418,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       await assert.rejects(cancel(started, 0), { code: "ORDER_CANCELLATION_PREPARATION_STARTED" });
       assert.deepEqual(await counts(), before);
       assert.deepEqual(await itemStatuses(started.batches[0].ticket), ["In Progress", "Queued"]);
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "12" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "13" });
 
       // ── Scenario 3a: the kitchen starts first and holds its row locks; the cancellation waits,
       // then sees the started item and is refused.
@@ -1441,7 +1494,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
           0,
         );
       }
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "11" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "12" });
 
       // ── Scenario 6: dine-in Order with an initial and an additional Batch; staff cancel the
       // additional Batch only. The Order stays open; the first Batch is unaffected.
@@ -1469,7 +1522,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       ]);
       assert.deepEqual(await itemStatuses(dineIn.batches[0].ticket), ["Queued"]);
       assert.deepEqual(await itemStatuses(dineIn.batches[1].ticket), ["Cancelled", "Cancelled"]);
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "9.5" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "10.5" });
       const diningState = await scoped((tx) =>
         createPostgresDiningOrderItemStateReader({
           brandReference: brand,
@@ -1495,7 +1548,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       dineIn.version = 5;
       assert.equal((await cancel(dineIn, 0)).status, "Cancelled");
       assert.deepEqual(await itemStatuses(dineIn.batches[0].ticket), ["Cancelled"]);
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "8" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "9" });
 
       // ── Scenario 7: the refund workload opens one compensation case for the staff-cancelled
       // payment attempt and refunds the whole capture including tip, through Payment's runtime
@@ -1698,18 +1751,21 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
           to: new Date(Date.now() + 60_000).toISOString(),
         }),
       );
-      // Includes the never-accepted table round paid on the machine and refunded there (fixture).
-      assert.equal(machineDay.paymentCount, 3);
+      // Includes the table rounds paid on the machine and refunded there (fixtures).
+      assert.equal(machineDay.paymentCount, 4);
       assert.equal(
         machineDay.takenMinor,
         BigInt(cardTotal) +
           BigInt(expired.batches[0].totalMinor) +
-          BigInt(leftCard.batches[0].totalMinor),
+          BigInt(leftCard.batches[0].totalMinor) +
+          BigInt(acceptedCard.batches[0].totalMinor),
       );
-      assert.equal(machineDay.refundCount, 2);
+      assert.equal(machineDay.refundCount, 3);
       assert.equal(
         machineDay.refundedMinor,
-        BigInt(cardTotal) + BigInt(leftCard.batches[0].totalMinor),
+        BigInt(cardTotal) +
+          BigInt(leftCard.batches[0].totalMinor) +
+          BigInt(acceptedCard.batches[0].totalMinor),
       );
       assert.equal(
         (
@@ -1955,6 +2011,31 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
         ],
       );
       assert.deepEqual(planAfter.totals, { onlineMinor: "0", cardMachineMinor: "0" });
+      // v15 DEMO-02 round 16: an accepted round already refunded in full on the card machine shows
+      // nothing left to refund; closing it out cancels it with nothing owed (no 0.00 machine refund
+      // to record, which the database refuses) and it no longer keeps the table open.
+      assert.deepEqual(
+        (await closePlan(acceptedCard)).rounds.map((round) => [round.state, round.refund]),
+        [["NotStarted", { method: "CardMachine", amountMinor: "0" }]],
+      );
+      const stockBeforeAccepted = Number((await stock()).reserved);
+      const acceptedResult = await cancel(acceptedCard, 0, { reasonCode: "GUEST_LEFT" });
+      assert.equal(acceptedResult.status, "Cancelled");
+      assert.equal(acceptedResult.refundMethod, "CardMachine");
+      assert.equal(acceptedResult.refundStatus, "Refunded");
+      assert.equal(acceptedResult.refundAmountMinor, String(acceptedCard.batches[0].totalMinor));
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT previous_phase,refund_disposition FROM rms_ordering.order_staff_cancellation WHERE order_batch_id=$1",
+            [acceptedCard.batches[0].batch],
+          )
+        ).rows,
+        [{ previous_phase: "Accepted", refund_disposition: "AlreadyRefunded" }],
+      );
+      assert.equal(Number((await stock()).reserved), stockBeforeAccepted - 1);
+      assert.deepEqual((await closePlan(acceptedCard)).rounds, []);
+
       // A pickup can never be cancelled as a never-accepted round, and a round without a recorded
       // payment is not eligible either (it is cancelled by the System when its payment time ends).
       await assert.rejects(cancel(waitingPickup, 0, { reasonCode: "GUEST_LEFT" }), {
@@ -1973,6 +2054,92 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
         previousPhase: "Submitted",
         refund: "Refund",
       });
+
+      // ── Double-refund guard (v15 order 7): a round its cancellation refunds whole (online by
+      // compensation, or on the card machine) offers no unit to an ordinary item refund, and the
+      // server refuses such a request. Read as the API role.
+      const refundedByCancellation = (order, k) =>
+        scoped((tx) =>
+          createRoundCancellationRefundSource(
+            tx,
+            { brandReference: brand, storeReference: store },
+            order.order,
+          )({
+            orderBatchReference: order.batches[k].batch,
+            paymentEventReference: order.batches[k].event,
+          }),
+        );
+      for (const [order, k] of [
+        [pickup, 0], // staff cancelled, refunded online by compensation
+        [dineIn, 1], // one round of a table cancelled by staff
+        [counter, 0], // paid on the card machine, cancelled by staff
+        [left, 0], // guests left: never-accepted rounds cancelled with refund
+        [left, 1],
+        [leftCard, 0], // guests left, already refunded on the machine
+        [acceptedCard, 0], // accepted, refunded in full on the machine, then cancelled
+        [expired, 0], // paid, but Ordering found it could no longer be fulfilled
+      ])
+        assert.equal(await refundedByCancellation(order, k), true);
+      // Paid rounds the store did not cancel stay refundable item by item.
+      assert.equal(await refundedByCancellation(started, 0), false);
+      assert.equal(await refundedByCancellation(raceStart, 0), false);
+      merchant.allowed = () => true;
+      const refundRequest = createMerchantOrdinaryRefundRequest({
+        persistence: { transactions: transactions({ guc: false }) },
+        authentication: { authorize: async () => ({ sessionReference: id(12) }) },
+        resolveConfiguration: async () => ({
+          providerAccountReference: provider,
+          environment: "Test",
+          roleMapping: { Manager: ["STORE_MANAGER"], Owner: ["OWNER"], Finance: [] },
+        }),
+        newAuditReference: fresh,
+        retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+        retentionPolicyVersion: 1,
+      });
+      const itemRefund = (order, k) => ({
+        sessionCookie: "synthetic-session",
+        csrf: "synthetic-csrf",
+        command: {
+          orderReference: order.order,
+          requestReference: fresh(),
+          operationReference: fresh(),
+          expectedClaimVersion: 0,
+          reasonCode: "QUALITY_ISSUE",
+          items: [
+            {
+              orderBatchReference: order.batches[k].batch,
+              orderItemReference: order.batches[k].items[0],
+              quantity: 1,
+            },
+          ],
+        },
+      });
+      const requestsBefore = (
+        await admin.query("SELECT count(*)::int AS n FROM rms_payment.ordinary_refund_request")
+      ).rows[0].n;
+      for (const [order, k] of [
+        [pickup, 0],
+        [dineIn, 1],
+        [counter, 0],
+        [left, 1],
+      ]) {
+        await assert.rejects(refundRequest.preview(itemRefund(order, k)), {
+          message: "ORDINARY_REFUND_ROUND_REFUNDED_BY_CANCELLATION",
+        });
+        await assert.rejects(refundRequest(itemRefund(order, k)), {
+          message: "ORDINARY_REFUND_ROUND_REFUNDED_BY_CANCELLATION",
+        });
+      }
+      // A round not cancelled passes this guard (and is then decided by the ordinary checks).
+      await assert.rejects(refundRequest.preview(itemRefund(started, 0)), (error) => {
+        assert.notEqual(error.message, "ORDINARY_REFUND_ROUND_REFUNDED_BY_CANCELLATION");
+        return true;
+      });
+      assert.equal(
+        (await admin.query("SELECT count(*)::int AS n FROM rms_payment.ordinary_refund_request"))
+          .rows[0].n,
+        requestsBefore,
+      );
 
       // History stays append-only for the API role.
       await scoped(async (tx) => {

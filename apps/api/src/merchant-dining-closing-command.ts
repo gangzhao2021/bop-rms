@@ -11,6 +11,10 @@ import {
   parseDiningHash,
   parsePositiveDiningVersion,
 } from "@rms/dining";
+import {
+  createPostgresStaffOrderCancellationReader,
+  listStoreDiningSessionOrders,
+} from "@rms/ordering";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import {
   createDiningSettledSessionEvidence,
@@ -153,6 +157,26 @@ export function createMerchantDiningClosingCommand(options: {
         includeCancelled: true,
       });
       let resolvedEvidence: Awaited<ReturnType<typeof evidence.load>> | null = null;
+      // DEC-TABLE-CLOSE-GUESTS-LEFT: a table whose rounds were closed out because the guests left
+      // is recorded as closed for that reason, not as guests who finished. Ordering owner reads.
+      let closingReason: Promise<"GUEST_LEFT" | "CUSTOMER_FINISHED"> | null = null;
+      const reasonFor = () =>
+        (closingReason ??= (async () => {
+          const owner = {
+            brandReference: scope.brandReference,
+            storeReference: scope.storeReference,
+          };
+          const order = (
+            await listStoreDiningSessionOrders(tx, owner, [String(command.diningSessionReference)])
+          ).get(String(command.diningSessionReference));
+          if (order === undefined) return "CUSTOMER_FINISHED";
+          const cancellations = await createPostgresStaffOrderCancellationReader(
+            owner,
+          ).listByOrders(tx, [order]);
+          return cancellations.some((record) => record.reasonCode === "GUEST_LEFT")
+            ? "GUEST_LEFT"
+            : "CUSTOMER_FINISHED";
+        })());
       const service = createDiningClosingService({
         store,
         hashes,
@@ -176,7 +200,7 @@ export function createMerchantDiningClosingCommand(options: {
                 actionCode: `DINING_SESSION_CLOSING_${request.operation.toUpperCase()}`,
                 targetType: "DiningSession",
                 targetId: command.diningSessionReference,
-                reasonCode: "CUSTOMER_FINISHED",
+                reasonCode: await reasonFor(),
                 correlationId: command.operationReference,
                 occurredAt: request.observedAt,
                 sourceChannel: "MERCHANT_WEB",

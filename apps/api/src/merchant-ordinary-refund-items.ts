@@ -15,6 +15,7 @@ import { createMerchantWorkforcePermissionSource } from "./merchant-workforce-au
 import { refundReadAccess } from "./merchant-refund-read-authority.js";
 import type { MerchantRefundSoleOperatorResolver } from "./merchant-sole-operator.js";
 import { ordinaryRefundProgress } from "./merchant-ordinary-refund-progress.js";
+import { createRoundCancellationRefundSource } from "./merchant-round-cancellation-refund.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 interface Scope {
@@ -196,6 +197,14 @@ export function createMerchantOrdinaryRefundItems(options: {
               query.orderReference === orderReference && (await allowed()),
           });
           const onMachine = new Set<string>();
+          // Rounds refunded whole by their cancellation (online compensation or the recorded
+          // card-machine refund): no unit of them is offered again.
+          const refundedByCancellation = new Set<string>();
+          const cancellationRefund = createRoundCancellationRefundSource(
+            businessTransaction,
+            scope,
+            orderReference,
+          );
           for (const batch of order.batches) {
             const payment = await captured.load(businessTransaction, {
               orderReference,
@@ -204,6 +213,13 @@ export function createMerchantOrdinaryRefundItems(options: {
             });
             if (payment) {
               paid.set(batch.orderBatchReference, payment.paymentIntentReference);
+              if (
+                await cancellationRefund({
+                  orderBatchReference: String(batch.orderBatchReference),
+                  paymentEventReference: String(payment.paymentEvent.eventId),
+                })
+              )
+                refundedByCancellation.add(batch.orderBatchReference);
               if (
                 (await cards.loadByBatch(
                   businessTransaction,
@@ -234,13 +250,17 @@ export function createMerchantOrdinaryRefundItems(options: {
               Object.values(snapshot.catalog.localizedNames)[0];
             if (!label) return deny();
             const paymentCaptured = paid.has(snapshot.orderBatchReference);
+            const cancelledWithRefund =
+              paymentCaptured && refundedByCancellation.has(snapshot.orderBatchReference);
             return Object.freeze({
               orderBatchReference: String(snapshot.orderBatchReference),
               orderItemReference: String(snapshot.orderItemReference),
               label,
               quantity: snapshot.quantity,
-              unclaimedQuantity: paymentCaptured ? snapshot.quantity - occupied.length : 0,
+              unclaimedQuantity:
+                paymentCaptured && !cancelledWithRefund ? snapshot.quantity - occupied.length : 0,
               paymentCaptured,
+              refundedByCancellation: cancelledWithRefund,
               paymentIntentReference: paid.get(snapshot.orderBatchReference) ?? null,
               paymentMethod: !paymentCaptured
                 ? null

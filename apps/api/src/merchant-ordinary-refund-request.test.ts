@@ -9,6 +9,11 @@ const d = vi.hoisted(() => ({
   workforce: vi.fn(),
   compose: vi.fn(),
   record: vi.fn(),
+  capture: vi.fn(),
+  cancelledRound: vi.fn(),
+}));
+vi.mock("./merchant-round-cancellation-refund.js", () => ({
+  createRoundCancellationRefundSource: () => d.cancelledRound,
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => d.resolve }));
 vi.mock("./merchant-workforce-authority-source.js", () => ({
@@ -19,6 +24,7 @@ vi.mock("@rms/payment", async (original) => ({
   // WP-2423 item 4: no card-machine payment unless a test says so.
   createPostgresCardMachinePaymentStore: () => d.cards(),
   createPostgresOrdinaryRefundRequestRuntime: d.compose,
+  createPostgresCapturedBatchPaymentSource: () => ({ load: d.capture }),
 }));
 const id = (n: number) => "01909974-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 type Options = Parameters<typeof createMerchantOrdinaryRefundRequest>[0];
@@ -65,6 +71,11 @@ function setup() {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  d.cancelledRound.mockResolvedValue(false);
+  d.capture.mockResolvedValue({
+    paymentEvent: { eventId: id(14) },
+    paymentIntentReference: id(15),
+  });
   d.workforce.mockResolvedValue({ decision: { effect: "Allow" }, activeRoleCodes: ["manager"] });
   d.record.mockImplementation(async (_tx, value) => ({
     status: "Created",
@@ -245,4 +256,20 @@ it("WP-2423 Q5: Other requires a short note and no other reason carries one", as
     reasonCode: "OTHER",
     note: " Customer left early ",
   });
+});
+
+it("WP-2423: refuses an item refund on a round its cancellation refunds whole", async () => {
+  const f = setup();
+  d.cancelledRound.mockResolvedValue(true);
+  await expect(f.operation(f.input)).rejects.toThrow(
+    "ORDINARY_REFUND_ROUND_REFUNDED_BY_CANCELLATION",
+  );
+  await expect(f.operation.preview(f.input)).rejects.toThrow(
+    "ORDINARY_REFUND_ROUND_REFUNDED_BY_CANCELLATION",
+  );
+  expect(d.cancelledRound).toHaveBeenCalledWith({
+    orderBatchReference: id(11),
+    paymentEventReference: id(14),
+  });
+  expect(d.record).not.toHaveBeenCalled();
 });

@@ -5550,6 +5550,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             quantity: item.quantity,
             unclaimedQuantity: item.unclaimedQuantity,
             paymentCaptured: item.paymentCaptured,
+            refundedByCancellation: item.refundedByCancellation,
             paymentIntentReference: item.paymentIntentReference,
             paymentMethod: item.paymentMethod,
           })),

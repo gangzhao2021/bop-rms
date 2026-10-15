@@ -105,6 +105,14 @@ export async function readCardMachineCancellationRefund(
       amountMinor: refunded.toString(),
       cardMachinePaymentReference: payment.cardMachinePaymentReference,
     });
+  // Nothing left on the machine payment (refunded in full item by item before an older record
+  // without AlreadyRefunded): there is no 0.00 refund to make or record.
+  if (own === undefined && payment.preparation.total.amountMinor - refunded <= 0n)
+    return Object.freeze({
+      status: "Refunded" as const,
+      amountMinor: refunded.toString(),
+      cardMachinePaymentReference: payment.cardMachinePaymentReference,
+    });
   return Object.freeze({
     status: own === undefined ? ("Pending" as const) : ("Refunded" as const),
     amountMinor: (own?.amountMinor ?? payment.preparation.total.amountMinor - refunded).toString(),
@@ -185,7 +193,8 @@ export function createMerchantOrderStaffCancellation(options: {
   nextReference(): string;
   /**
    * DEC-TABLE-CLOSE-GUESTS-LEFT: the Store's Provider account, to read what is left to refund of a
-   * never-accepted round paid online. Without it such a round is not cancellable here.
+   * round paid online. Without it a never-accepted round is not cancellable here, and an accepted
+   * one is always refunded by compensation.
    */
   resolveRefundConfiguration?(
     transaction: ConsumerTransaction,
@@ -308,10 +317,11 @@ export function createMerchantOrderStaffCancellation(options: {
                 : "ORDER_CANCELLATION_NOT_CANCELLABLE",
           );
         const plan = prepared.plan;
-        // DEC-TABLE-CLOSE-GUESTS-LEFT: a never-accepted round whose payment was already refunded in
-        // full owes nothing more; otherwise Payment refunds what is left (all of it, tip included).
+        // DEC-TABLE-CLOSE-GUESTS-LEFT: a round whose payment ordinary refunds already returned in full
+        // (never accepted, or accepted and refunded item by item) owes nothing more; otherwise
+        // Payment refunds what is left (all of it, tip included).
         let refundDisposition: "Refund" | "AlreadyRefunded" = "Refund";
-        if (plan.previousPhase === "Submitted") {
+        {
           // The staff member was resolved at the start of this transaction and is again before
           // the reply; these Payment reads only confirm they run in it, for this Order.
           const cardStore = createPostgresCardMachinePaymentStore({
@@ -319,15 +329,13 @@ export function createMerchantOrderStaffCancellation(options: {
             authorize: async (t, value) => t === tx && value.orderReference === orderReference,
           });
           const card = await cardStore.loadByBatch(tx, orderReference, orderBatchReference);
-          let remainingMinor: bigint;
+          let remainingMinor: bigint | null = null;
           if (card !== null) {
             const refunds = await cardStore.refunds(tx, card.cardMachinePaymentReference);
             remainingMinor =
               card.preparation.total.amountMinor -
               refunds.reduce((sum, refund) => sum + refund.amountMinor, 0n);
-          } else {
-            if (options.resolveRefundConfiguration === undefined)
-              return fail("ORDER_CANCELLATION_NOT_CANCELLABLE");
+          } else if (options.resolveRefundConfiguration !== undefined) {
             const configuration = await options.resolveRefundConfiguration(tx, selected);
             const position = await readPaymentRemainingRefundable(tx, {
               scope: {
@@ -343,8 +351,10 @@ export function createMerchantOrderStaffCancellation(options: {
               authorize: async (t, query) => t === tx && query.orderReference === orderReference,
             });
             remainingMinor = position.remainingMinor;
-          }
-          if (remainingMinor < 0n) return fail("ORDER_CANCELLATION_UNAVAILABLE");
+          } else if (plan.previousPhase === "Submitted")
+            return fail("ORDER_CANCELLATION_NOT_CANCELLABLE");
+          if (remainingMinor !== null && remainingMinor < 0n)
+            return fail("ORDER_CANCELLATION_UNAVAILABLE");
           if (remainingMinor === 0n) refundDisposition = "AlreadyRefunded";
           if (!(await allowed())) return fail("ORDER_CANCELLATION_PERMISSION_DENIED");
         }

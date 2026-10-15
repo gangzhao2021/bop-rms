@@ -3501,6 +3501,7 @@ it("protects refund items transport and strips private nested data", async () =>
     quantity: 2,
     unclaimedQuantity: 1,
     paymentCaptured: true,
+    refundedByCancellation: false,
     paymentIntentReference: id(31),
     paymentMethod: "Online" as const,
   };
