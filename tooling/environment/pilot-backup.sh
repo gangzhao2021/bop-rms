@@ -6,6 +6,10 @@
 #   pilot-backup.sh drill  --container <postgres container> --port <port> --database <db> \
 #     --user <role> --password-file <file> --dir <backup dir> [--backup <file>] [--keep-drill]
 #
+# --client local (WP-2423 Q13) runs the PostgreSQL client programs on PATH instead of
+# `docker exec` into --container (which is then not needed): the pilot ops container ships the
+# exact client version of the server and shares its network namespace (127.0.0.1:<port>).
+#
 # backup: a consistent online pg_dump (custom format) taken while services keep running, written to
 # a private directory, with a manifest of its SHA-256 and the row count of every table it contains
 # (counted from the dump itself). Older backups beyond --keep (default 14) are removed.
@@ -27,10 +31,11 @@ fail() {
 command=${1:-}
 [[ $command == backup || $command == drill ]] || fail "usage"
 shift
-container="" port="" database="" user="" password_file="" dir="" keep=14 backup="" keep_drill=0
+container="" port="" database="" user="" password_file="" dir="" keep=14 backup="" keep_drill=0 client=docker
 while [[ $# -gt 0 ]]; do
   case $1 in
   --container) container=${2:-} ;;
+  --client) client=${2:-} ;;
   --port) port=${2:-} ;;
   --database) database=${2:-} ;;
   --user) user=${2:-} ;;
@@ -48,7 +53,8 @@ while [[ $# -gt 0 ]]; do
   shift 2 || fail "usage"
 done
 identifier='^[a-z][a-z0-9_]{0,40}$'
-[[ $container =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]] || fail "container"
+[[ $client == docker || $client == local ]] || fail "client"
+[[ $client == local || $container =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]] || fail "container"
 [[ $port =~ ^[1-9][0-9]{0,4}$ ]] || fail "port"
 [[ $database =~ $identifier ]] || fail "database"
 [[ $user =~ $identifier ]] || fail "user"
@@ -62,16 +68,20 @@ chmod 700 "$dir"
 sha256() {
   if command -v sha256sum >/dev/null; then sha256sum "$1" | awk '{print $1}'; else shasum -a 256 "$1" | awk '{print $1}'; fi
 }
-# Runs a client program in the database container; the password travels on stdin, never argv/env.
+# A client program in the database container (docker) or on PATH here (local).
+tool() {
+  if [[ $client == local ]]; then "$@"; else docker exec -i "$container" "$@"; fi
+}
+# Runs a client program; the password travels on stdin, never argv or the caller's environment.
 in_container() {
   local program=$1
   shift
-  { cat "$password_file"; printf '\n'; cat; } | docker exec -i "$container" sh -c \
+  { tr -d '\r\n' <"$password_file"; printf '\n'; cat; } | tool sh -c \
     'IFS= read -r p; export PGPASSWORD="$p"; exec "$@"' sh "$program" -h 127.0.0.1 -p "$port" -U "$user" "$@"
 }
 # Per-table row counts of a dump, from its COPY blocks (schema.table<TAB>rows), sorted.
 dump_counts() {
-  docker exec -i "$container" pg_restore --data-only --file=- <"$1" | awk '
+  tool pg_restore --data-only --file=- <"$1" | awk '
     /^COPY / { table = $2; rows[table] = 0; inside = 1; next }
     inside && $0 == "\\." { inside = 0; next }
     inside { rows[table]++ }
@@ -139,7 +149,7 @@ trap cleanup EXIT
 in_container psql --dbname=postgres -qAtX -c "CREATE DATABASE \"$drill\"" </dev/null >/dev/null ||
   fail "create drill database"
 started=$(date -u +%s)
-{ cat "$password_file"; printf '\n'; cat "$backup"; } | docker exec -i "$container" sh -c \
+{ tr -d '\r\n' <"$password_file"; printf '\n'; cat "$backup"; } | tool sh -c \
   'IFS= read -r p; export PGPASSWORD="$p"; exec pg_restore -h 127.0.0.1 -p "$1" -U "$2" --dbname="$3" --exit-on-error --single-transaction' \
   sh "$port" "$user" "$drill" || fail "restore"
 query=""

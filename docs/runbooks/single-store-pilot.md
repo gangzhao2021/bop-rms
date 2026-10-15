@@ -430,7 +430,7 @@ Fill in before UAT and keep a printed copy at the counter. Do not commit real nu
 | Need                           | Contact (Owner fills in) | Notes                                             |
 | ------------------------------ | ------------------------ | ------------------------------------------------- |
 | Incident lead / Owner          | _OWNER INPUT_            | Decides pause, closing early, customer goodwill   |
-| Pilot operator (host restart)  | _OWNER INPUT_            | No automatic alert exists (Q13): staff must call  |
+| Pilot operator (host restart)  | _OWNER INPUT_            | Alerts reach them once channels are set up (Q13)  |
 | Internet provider              | _OWNER INPUT_            | Account number kept off Git                       |
 | Card machine provider support  | _OWNER INPUT_            | Ask whether the machine has its own mobile data   |
 | Payment Provider (online card) | _OWNER INPUT_            | Stripe account is an external gate (P2); none yet |
@@ -739,7 +739,7 @@ Overall: [ ] pass  [ ] fail      Owner sign-off: ________
 | G4  | Back-entry charges the current server total; a paper charge that differs (price changed, mistake) cannot be recorded at its real amount, so the card machine section will not match the batch                                                                                                                    | Q7 (follow-up)              |
 | G5  | Back-entered orders go onto the Kitchen board and Pickup and must be marked ready and handed over one by one                                                                                                                                                                                                     | Q7 (kitchen quick close)    |
 | G6  | Card-machine payments have no partial refund; only whole-order cancellation with "refunded on card machine"                                                                                                                                                                                                      | Q5                          |
-| G7  | No external alert when the host is down; staff must notice and call                                                                                                                                                                                                                                              | Q13                         |
+| G7  | Handled 2026-10-15 (DEC-PILOT-ALERTS-BACKUP): the ops monitor alerts on the Home and, once the Owner sets up email/phone accounts, outbound; a whole-host outage needs the external heartbeat service (external gate)                                                                                            | Q13                         |
 | G8  | No way to notify pickup customers of a delay or an expired order; only contact details shown on the order                                                                                                                                                                                                        | Q10 (notification Provider) |
 | G9  | Staff on a backup device sign in through the internal-test staff page; real named accounts wait for the Cognito gate                                                                                                                                                                                             | Step 9 (external)           |
 | G10 | Real Provider behaviour for payments approved while the host was down (late webhook, capture discovery) is unproven; pilot uses simulated payments                                                                                                                                                               | P2/B5, Q22 (external)       |
@@ -1723,8 +1723,9 @@ tooling/environment/pilot-backup.sh backup --container <postgres container> --po
 tooling/environment/pilot-backup.sh drill --container <postgres container> --port <port> --database <db> --user <migration role> --password-file <private password file> --dir <private backup dir>
 ```
 
-Schedule on the pilot host (systemd timers or cron, owned by the service user): `backup` daily
-after the Store closes and `drill` weekly. Alert on a non-zero exit. The local copy has the same
+Since WP-2423 Q13 the `ops` service schedules `backup` and a restore check (`drill`) daily and
+alerts on failure; see "Alerts and scheduled backups (WP-2423 Q13)" below. The commands above remain
+for a manual run. The local copy has the same
 trust boundary as the database volume; copying backups off the host (required for P4) must use
 storage that encrypts at rest with a managed key, and the off-host target is an external P4 input.
 The command prints only the file name and table/row/byte counts, never credentials or row contents.
@@ -1732,3 +1733,156 @@ The command prints only the file name and table/row/byte counts, never credentia
 First local run (v15, 2026-10-09): backup 532 tables / 525,651 rows / 37.8 MB in 8 s with services
 serving; drill restored it in 49 s and every table matched; a byte-flipped copy was refused with
 `checksum mismatch` before any database was created.
+
+## Alerts and scheduled backups (WP-2423 Q13)
+
+Decision: [DEC-PILOT-ALERTS-BACKUP](../spec/design/pilot-alerts-backup.md). The compose service
+`ops` (same image as `pilot`, its own container) runs `tooling/environment/pilot-ops.mjs` every
+minute. It works while the supervisor, API or database is down, which is when it matters.
+
+What it checks: the API `/ready`, the customer page and the staff app through the same published
+ports staff and guests use; the supervisor's report (`supervisor.health.json`, written every 5 s);
+stuck order or payment updates (dead-lettered events); open payment reconciliation differences;
+day-end settlement days with differences or still missing 6 hours after close; the scheduled
+backup, its restore check and its off-site copy; no successful backup in 26 hours; the HTTPS
+certificate expiring within 7 days; free space of the pilot data folder, the backup folder, the
+database volume and the off-site folder; and whether its own outbound alerts are being delivered.
+
+Where alerts appear:
+
+- **Home, "Store system" card** (Owner and Store Manager; the same permission as Exceptions):
+  every open problem with "Urgent" or "Today", what to do and since when, recently resolved
+  problems, the last backup time and whether email or phone alerts are set up. If the monitor
+  stops, the card says "The alert monitor stopped reporting" instead of "Everything is working".
+- **Log**: `<runtime>/ops/alerts.log` (JSON lines: alert key, severity, delivery result).
+- **Email and phone/message alerts**: only after the Owner provides accounts (external gate).
+
+Noise control: a failed entry probe must last 2 minutes before it alerts; each problem is sent once,
+again only if it gets worse or after a reminder interval (urgent 3 hours, today 24 hours), and
+"Resolved" is sent after 2 quiet minutes. Each channel sends at most 6 messages an hour; anything
+waiting is merged into the next message. Alert state is kept in `<runtime>/ops/alert-state.json`,
+so a restart does not resend. Messages contain only fixed text, counts and times: never names,
+phone numbers, emails, order details, tokens or passwords.
+
+### Configuration (`<runtime>/ops.json`, 0600, pilot operator)
+
+Without the file the monitor runs with the Home card and log only, and reports "No recent backup"
+until backups are configured. Secrets go in separate 0600 files in the runtime directory; the
+values below are placeholders.
+
+```json
+{
+  "schemaVersion": 1,
+  "siteLabel": "<short store name for message subjects>",
+  "runbookUrl": "https://<where the Owner can open this runbook>",
+  "homeUrl": "https://<store host>/app",
+  "email": {
+    "host": "<smtp host>",
+    "port": 587,
+    "security": "starttls",
+    "username": "<smtp user>",
+    "passwordFile": "ops-smtp-password",
+    "from": "<sender address>",
+    "to": ["<owner address>"]
+  },
+  "webhooks": [
+    { "format": "pushover", "tokenFile": "ops-pushover-token", "userKeyFile": "ops-pushover-user" }
+  ],
+  "heartbeat": { "urlFile": "ops-heartbeat-url", "everyMinutes": 5 },
+  "backup": {
+    "role": "<migration admin role>",
+    "passwordFile": "migration-admin-password",
+    "timeZone": "<the Store's IANA time zone, e.g. America/Toronto>",
+    "localTime": "04:30",
+    "keep": 14,
+    "restoreCheck": true,
+    "offsite": {
+      "kind": "directory",
+      "path": "/offsite",
+      "keyFile": "offsite-backup-key",
+      "keep": 30
+    }
+  }
+}
+```
+
+- `email.security` is `starttls` (port 587) or `tls` (port 465); plaintext SMTP is refused.
+- `webhooks[].format`: `json` (`urlFile`; body `{severity, subject, text}`), `slack` (`urlFile`,
+  an incoming-webhook URL), `pushover` (`tokenFile`, `userKeyFile`) or `twilio-sms`
+  (`accountSid`, `authTokenFile`, `from`, `to`: E.164 numbers). URLs are secrets and live in files.
+- `heartbeat` is a dead man's switch: an HTTPS URL of an external uptime service (for example a
+  healthchecks-style "ping" URL) pinged every few minutes. If the whole host or its internet is
+  down, nothing on the host can send an alert; the external service notices the missing pings and
+  alerts the Owner. Set the service's grace period to 10 minutes.
+- **External gate (Owner)**: the SMTP account, Pushover/Twilio/Slack account, uptime service account
+  and the hosted runbook URL. None exist yet; nothing is sent outbound until they are configured.
+  Do not commit any of these values or files.
+
+Operator commands (inside the `ops` container, from `/app`):
+
+```bash
+docker compose -f compose.pilot.yaml exec ops node tooling/environment/pilot-ops.mjs test-alert "$PILOT_RUNTIME_DIRECTORY"
+docker compose -f compose.pilot.yaml exec ops node tooling/environment/pilot-ops.mjs status "$PILOT_RUNTIME_DIRECTORY"
+docker compose -f compose.pilot.yaml exec ops node tooling/environment/pilot-ops.mjs backup-now "$PILOT_RUNTIME_DIRECTORY"
+```
+
+`test-alert` sends one "test alert" message to every configured channel and prints `Delivered` or
+`Failed` with a fixed code per channel. Run it after any channel change and monthly.
+
+### Scheduled backups
+
+Daily at `backup.localTime` in the Store's time zone (after the business day closes; 04:30 by
+default), the monitor runs `pilot-backup.sh backup` with the image's PostgreSQL 18.4 client
+(`--client local`), then `drill` (restore into a scratch database `<db>_drill_<time>`, every table's
+row count compared, scratch database dropped), then the encrypted off-site copy, keeping `keep`
+local backups and `offsite.keep` off-site copies. A failed dump is retried after 30 minutes, up to 3
+tries a Store day. If the host was off at that time, the backup runs at the next start (online, while
+serving). Backups live in `<runtime>-backups` (a sibling of the runtime directory).
+
+Off-site copies are AES-256-GCM encrypted on this host before they are written, so the target may
+be any folder that leaves the host: an external drive, or a folder a cloud sync client uploads.
+Mount it with `PILOT_OFFSITE_DIR=<host folder>` (create it first, owned by the pilot user). Unset, it
+is `.local/pilot-offsite` on the same disk, which is **not** off-site. An S3-compatible bucket with a
+managed key is the P4 target (external gate: bucket, credentials, region).
+
+Key custody: create the key once with `pilot-ops.mjs generate-offsite-key <runtime>`. **Copy the
+key file's content into the Owner's password manager now.** Without it the off-site copies cannot be
+read when the host is lost. Restore from an off-site copy:
+
+```bash
+node tooling/environment/pilot-ops.mjs decrypt-backup <runtime> <copy>.dump.enc <dir>/<name>.dump
+node tooling/environment/pilot-ops.mjs decrypt-backup <runtime> <copy>.dump.manifest.json.enc <dir>/<name>.dump.manifest.json
+tooling/environment/pilot-backup.sh drill --container <postgres container> --port <port> --database <db> --user <migration role> --password-file <file> --dir <dir> --keep-drill
+```
+
+A tampered or wrong-key copy is refused and nothing is written. `--keep-drill` keeps the restored
+database for inspection or cut-over (a cut-over is a maintenance step with the Owner's approval).
+
+### What each alert means and what to do
+
+"Urgent" means act now (store service or data at risk); "Today" means fix before the next day.
+Staff on the floor follow the [Store outage procedure](#store-outage-procedure-wp-2423-q9) for
+anything that stops ordering; the pilot operator fixes the cause.
+
+| Alert (Home title)                                                                | Means                                                                                     | Staff / Owner                                                                                                  | Pilot operator                                                                                                       |
+| --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| <a id="alert-store-system-down"></a>Store system is not responding                | API `/ready` failing for 2+ minutes                                                       | Outage procedure: pause online ordering if possible, paper orders, card machine only                           | `docker compose ps`; `docker compose logs pilot`; restart `pilot`; check the database container                      |
+| <a id="alert-customer-entry-down"></a>Customer ordering page is not loading       | The customer HTTPS page fails for 2+ minutes                                              | If staff screens work: pause online ordering in `Hours & ordering`; tell seated guests to order at the counter | Customer service log; certificate; restart `pilot`                                                                   |
+| <a id="alert-merchant-entry-down"></a>Staff screens are not loading               | The staff app `/app` fails for 2+ minutes                                                 | Outage procedure                                                                                               | As above                                                                                                             |
+| <a id="alert-supervisor-silent"></a>Background services are not being watched     | No supervisor report for 2+ minutes (not during maintenance)                              | Watch Orders and Kitchen for orders that stop moving                                                           | `docker compose logs pilot`; restart `pilot`                                                                         |
+| <a id="alert-service-attention"></a>A background service needs a person           | The supervisor gave up restarting a service, or a workload keeps failing (named)          | Check Orders and Exceptions for waiting work                                                                   | Read that service's log in the runtime directory (`<service>.log`, `workload_cycle_failed` lines); fix, then restart |
+| <a id="alert-payment-updates"></a>Order or payment updates are stuck              | Events failed after automatic retries (dead letters)                                      | Never take a second payment from a guest who says they paid; check Exceptions                                  | `dead-letter-operations.mjs list`; fix the cause; retry per "Interrupted maintenance diagnosis"                      |
+| <a id="alert-reconciliation-differences"></a>Payments need checking               | Open payment reconciliation differences (urgent after 24 hours)                           | Store Manager: `Payment reconciliation` / `Exceptions`, resolve or escalate before day-end                     | Only if a difference is a system fault                                                                               |
+| <a id="alert-settlement-exceptions"></a>Day-end settlement has open problems      | A closed day has a difference, or no settlement 6 hours after close                       | Store Manager: `Settlement` for that day                                                                       | If days are missing: `daily-settlement-worker` health and log                                                        |
+| <a id="alert-backup-failed"></a>Last night's backup failed                        | The dump failed; retries follow (3 a day)                                                 | Nothing in store; service is unaffected                                                                        | `ops/alerts.log` reason; free space; database reachable; `backup-now`                                                |
+| <a id="alert-backup-stale"></a>No recent backup                                   | No successful backup for 26 hours, or none configured yet                                 | Owner: ask for a backup today                                                                                  | Configure `backup` in `ops.json`, or find why the schedule did not run; `backup-now`                                 |
+| <a id="alert-backup-restore-check"></a>The newest backup could not be restored    | The scratch restore or row comparison failed                                              | Nothing in store                                                                                               | Keep older backups; run `drill` by hand on the newest and on the previous one; take a new backup                     |
+| <a id="alert-backup-offsite"></a>Off-site backup copy failed                      | The encrypted copy could not be written (drive missing, full, key missing)                | Owner: reconnect the drive or check the sync folder                                                            | Check the `/offsite` mount, free space and the key file                                                              |
+| <a id="alert-certificate-expiring"></a>Secure connection certificate expires soon | Within 7 days ("Urgent" within 2 days or expired)                                         | Plan the renewal before it expires                                                                             | `pilot-provision-tls.mjs renew` (see its README), restart, re-trust on staff devices                                 |
+| <a id="alert-disk-low"></a>Disk space is running low                              | Under 15% or 5 GB free ("Urgent" under 5% or 1 GB) on a named folder or the database disk | Nothing in store until it is full                                                                              | Remove old logs and old local backups beyond `keep`; `docker system df` for the database volume; add storage         |
+| <a id="alert-monitor-source"></a>Some checks could not run                        | A source could not be read for 5+ minutes (for example the database for payment checks)   | Treat the named checks as unknown                                                                              | `ops/alerts.log`; database and runtime directory permissions                                                         |
+| <a id="alert-channel-delivery"></a>Alert messages are not being delivered         | An email or phone channel has failed for 30+ minutes                                      | Owner: watch the Home card; check the account                                                                  | `ops/alerts.log` code; fix the account file; `test-alert`                                                            |
+
+If the Home card says "The alert monitor is not running" or "stopped reporting": nothing above is
+being checked. The pilot operator runs `docker compose -f compose.pilot.yaml up -d ops` and reads
+`docker compose logs ops`.

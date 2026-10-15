@@ -11,6 +11,12 @@ import {
  * customer or internal data.
  */
 export interface CustomerStoreContact {
+  /**
+   * WP-2423 DEC-STORE-CUSTOMER-NAME: the name customers see, from the same published profile in
+   * the guest's language. Server-side only (the pickup panel uses it); not part of
+   * `storeContactJson`, the order page already has the name from the session.
+   */
+  readonly storeDisplayName: string;
   readonly phone: string | null;
   readonly addressLines: readonly string[];
   readonly locality: string;
@@ -45,6 +51,7 @@ export async function readCustomerStoreContact(
   if (result.status !== "Available") return null;
   const { address, businessPhone } = result.profile;
   return Object.freeze({
+    storeDisplayName: result.profile.storeDisplayName,
     phone: businessPhone,
     addressLines: Object.freeze([...address.addressLines]),
     locality: address.locality,

@@ -39,6 +39,8 @@ it("WP-2423 Q10: reads only the published phone and address for the Guest's Stor
     "2026-10-14T12:00:00.000Z",
   );
   expect(contact).toEqual({
+    // WP-2423 DEC-STORE-CUSTOMER-NAME: the published name, for the pickup panel (server only).
+    storeDisplayName: "DEMO Store",
     phone: "+14165550123",
     addressLines: ["DEMO 100 Test Street"],
     locality: "Toronto",

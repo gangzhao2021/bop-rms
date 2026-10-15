@@ -280,6 +280,8 @@ export interface MerchantRuntimeOptions {
   };
   readonly orderExceptions?: MerchantBffRouterOptions["orderExceptions"];
   readonly settlement?: MerchantBffRouterOptions["settlement"];
+  /** WP-2423 Q13: operations alerts for the Home. */
+  readonly operationsAlerts?: MerchantBffRouterOptions["operationsAlerts"];
   /** WP-2423 Q14: Store sales reports and CSV export. */
   readonly storeReports?: MerchantBffRouterOptions["storeReports"];
   readonly diningItemService?: Omit<
@@ -946,6 +948,9 @@ export function createMerchantRuntime(options: MerchantRuntimeOptions): Merchant
         }),
     ...(options.orderExceptions === undefined ? {} : { orderExceptions: options.orderExceptions }),
     ...(options.settlement === undefined ? {} : { settlement: options.settlement }),
+    ...(options.operationsAlerts === undefined
+      ? {}
+      : { operationsAlerts: options.operationsAlerts }),
     ...(options.storeReports === undefined ? {} : { storeReports: options.storeReports }),
   };
 }

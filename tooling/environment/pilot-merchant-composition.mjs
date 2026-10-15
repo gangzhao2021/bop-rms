@@ -17,6 +17,7 @@ import { createInternalStaffTotpVerifier } from "./pilot-staff-totp.mjs";
 import { createInternalCounterOrder } from "./pilot-counter-order.mjs";
 import { createInternalQrLoaders } from "./pilot-qr.mjs";
 import { createMerchantDiningTableQr } from "../../apps/api/dist/merchant-dining-table-qr.js";
+import { createPilotAlertBoardReader } from "./pilot-ops-files.mjs";
 const factories = {
   createInternalRefundReconciliation,
   createInternalRefundSend,
@@ -57,6 +58,8 @@ export function composeMerchantDependencies(
   return {
     exceptionPaymentMode: customer.paymentChannel,
     ...account,
+    // WP-2423 Q13: the operations monitor's alert board (ops container) for the Home.
+    readOperationsAlertBoard: createPilotAlertBoardReader(directory),
     expectedDatabaseName: installation.database,
     roleMapping: config.roleMapping,
     ...(config.product?.optionPriceSources?.currencyMetadata === undefined

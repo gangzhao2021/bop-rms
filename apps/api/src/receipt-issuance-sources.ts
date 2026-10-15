@@ -56,7 +56,12 @@ export function createReceiptIssuanceSources(options: {
   receiptDetails?(
     tx: ConsumerTransaction,
     request: { observedAt: string; locale: string },
-  ): Promise<NonNullable<OriginalReceiptSources["receiptDetails"]>>;
+  ): Promise<
+    NonNullable<OriginalReceiptSources["receiptDetails"]> & {
+      /** WP-2423 DEC-STORE-CUSTOMER-NAME: the published name customers see (null: none). */
+      readonly storeDisplayName?: string | null;
+    }
+  >;
 }) {
   const scope = {
     brandReference: String(parseOrderingReference(options.scope.brandReference)),
@@ -135,7 +140,13 @@ export function createReceiptIssuanceSources(options: {
           operatingEntityReference: issuer.operatingEntityReference,
           displayName: issuer.legalName,
         },
-        store: { ...scope, displayName: store.storeDisplayName, currencyCode: store.currencyCode },
+        // WP-2423 DEC-STORE-CUSTOMER-NAME: the name customers see on every page (the Store's
+        // published profile), frozen here; the Store record name only when none is published.
+        store: {
+          ...scope,
+          displayName: receiptDetails?.storeDisplayName ?? store.storeDisplayName,
+          currencyCode: store.currencyCode,
+        },
         template: template.template,
         financial: {
           ...scope,

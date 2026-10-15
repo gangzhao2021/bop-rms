@@ -12,6 +12,12 @@ import {
 } from "./persistent-public-store-profile.js";
 
 export interface StoreReceiptDetails {
+  /**
+   * WP-2423 DEC-STORE-CUSTOMER-NAME: the Store name customers see, from the current published
+   * public profile in the receipt's language (`null` when none is published; the issuer then
+   * falls back to the Store record). Frozen into the receipt at issue.
+   */
+  readonly storeDisplayName: string | null;
   readonly businessAddress: ReceiptBusinessAddress | null;
   readonly taxRegistrations: readonly ReceiptTaxRegistration[];
 }
@@ -33,6 +39,7 @@ export function createStoreReceiptDetailsSource(options: {
   ): Promise<StoreReceiptDetails> => {
     const profile = await readCurrentStoreReceiptProfile(transaction, options.scope);
     let businessAddress: ReceiptBusinessAddress | null = null;
+    let storeDisplayName: string | null = null;
     if (options.publicProfile !== undefined) {
       const publicRequest = parseGetPublicStoreRequest({
         publicStoreReference: options.publicProfile.binding.publicStoreReference,
@@ -48,6 +55,7 @@ export function createStoreReceiptDetailsSource(options: {
         ),
       ).getPublicStore(publicRequest);
       if (result.status === "Available") {
+        storeDisplayName = result.profile.storeDisplayName;
         const address = result.profile.address;
         businessAddress = Object.freeze({
           addressLines: Object.freeze([...address.addressLines]),
@@ -64,6 +72,7 @@ export function createStoreReceiptDetailsSource(options: {
       );
     }
     return Object.freeze({
+      storeDisplayName,
       businessAddress,
       taxRegistrations: storeReceiptTaxRegistrations(profile),
     });

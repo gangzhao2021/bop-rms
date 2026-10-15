@@ -115,6 +115,7 @@ it("preserves configured refund roles, provider and Pickup workstation without g
     [
       "cancellationRefundProvider",
       "createInternalCounterOrder",
+      "readOperationsAlertBoard",
       "exceptionPaymentMode",
       "providerAccountReference",
       "expectedDatabaseName",

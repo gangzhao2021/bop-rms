@@ -17,6 +17,11 @@ export interface CustomerPickupCodeReadOptions {
     ReturnType<typeof createPickupCredentialProvider>,
     "recoverOpaque" | "recoverCounterCode"
   >;
+  /**
+   * Fallback only. WP-2423 DEC-STORE-CUSTOMER-NAME: the panel shows the name from the Store's
+   * current published profile (the same read as the order page's store contact) whenever the
+   * status read has one; this configured name is used only when no profile is published.
+   */
   readonly storeDisplayName: string;
   readonly pickupInstruction: string;
 }
@@ -102,7 +107,8 @@ export function createCustomerPickupCodeRead(options: CustomerPickupCodeReadOpti
           status: "Ready" as const,
           orderReference: input.orderReference,
           orderNumber: after.order.orderNumber,
-          storeDisplayName: options.storeDisplayName,
+          storeDisplayName:
+            after.sources.storeContact?.storeDisplayName ?? options.storeDisplayName,
           pickupInstruction: options.pickupInstruction,
           generation: current.capability.generation,
           proofKind: "Opaque" as const,

@@ -1,4 +1,5 @@
 import { StoreReceiptPrivacyPanel } from "./StoreReceiptPrivacyPanel.js";
+import { StorePublicProfilePanel } from "./StorePublicProfilePanel.js";
 import { createOptionSetClient } from "./store-option-set-page.js";
 import { createOptionPriceClient } from "./store-option-prices-page.js";
 import { createTaxReviewClient } from "./StoreTaxReviewPage.js";
@@ -599,6 +600,8 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                     storeReference={state.workspace.selectedScope.storeReference}
                     csrf={state.csrf}
                   >
+                    {/* WP-2423 DEC-STORE-CUSTOMER-NAME: the name, address and phone customers see. */}
+                    <StorePublicProfilePanel csrf={state.csrf} />
                     {/* WP-2423 Q15/Q16: receipt registrations and the privacy notice link. */}
                     <StoreReceiptPrivacyPanel csrf={state.csrf} />
                   </StoreSetupDraftPage>

@@ -8,6 +8,7 @@ import { createInternalExceptionSnapshotTransactions } from "./pilot-exception-s
 import { readInternalExceptionCoverage } from "./pilot-exception-coverage.mjs";
 import { createPersistentMerchantOrderExceptions } from "../../apps/api/dist/persistent-merchant-order-exceptions.js";
 import { createPersistentMerchantSettlement } from "../../apps/api/dist/persistent-merchant-settlement.js";
+import { createPersistentMerchantOperationsAlerts } from "../../apps/api/dist/merchant-operations-alerts.js";
 import { createPersistentMerchantStoreReports } from "../../apps/api/dist/persistent-merchant-store-reports.js";
 import { dailySettlementRunReference } from "./pilot-daily-settlement-reference.mjs";
 import { createPostgresPublishedStoreOperatingStatusReader } from "../../packages/rms/store/src/index.ts";
@@ -75,6 +76,7 @@ import {
 import { createMerchantRefundSoleOperatorResolver } from "../../apps/api/dist/merchant-sole-operator.js";
 import { createMerchantSoleOperator } from "../../apps/api/dist/merchant-sole-operator-setting.js";
 import { createMerchantStoreReceiptProfile } from "../../apps/api/dist/merchant-store-receipt-profile.js";
+import { createMerchantStorePublicProfile } from "../../apps/api/dist/merchant-store-public-profile.js";
 import { createMerchantOrdinaryRefundApproval } from "../../apps/api/dist/merchant-ordinary-refund-approval.js";
 import { createMerchantOrdinaryRefundApprovals } from "../../apps/api/dist/merchant-ordinary-refund-approvals.js";
 import { createMerchantOrdinaryRefundDecline } from "../../apps/api/dist/merchant-ordinary-refund-decline.js";
@@ -107,6 +109,7 @@ export async function createInternalMerchant(
     createInternalCounterOrder,
     createInternalTableQr,
     createInternalStaffPinCredentials,
+    readOperationsAlertBoard,
   },
 ) {
   const session = await createInternalMerchantSession(resources);
@@ -522,6 +525,18 @@ export async function createInternalMerchant(
       },
     }),
   );
+  // WP-2423 Q13: the operations monitor's alert board for the installation's Store (Home).
+  const operationsAlerts =
+    readOperationsAlertBoard === undefined
+      ? undefined
+      : logUnexpected(
+          "INTERNAL_OPERATIONS_ALERTS_UNAVAILABLE",
+          createPersistentMerchantOperationsAlerts({
+            persistence,
+            storeReference: selected.storeReference,
+            readBoard: readOperationsAlertBoard,
+          }),
+        );
   // WP-2423 Q14: the Store's sales reports, over the same payment sources as the settlement.
   const reports = createPersistentMerchantStoreReports({
     persistence,
@@ -1087,6 +1102,7 @@ export async function createInternalMerchant(
       reconciliationFollowUpQuery,
       orderExceptions,
       settlement,
+      ...(operationsAlerts === undefined ? {} : { operationsAlerts }),
       storeReports,
       compensationReconciliation,
       compensationQuery,
@@ -1157,6 +1173,13 @@ export async function createInternalMerchant(
         const profile = createMerchantStoreReceiptProfile({ persistence, authentication: service });
         return Object.assign(logUnexpected("INTERNAL_RECEIPT_PROFILE_UNAVAILABLE", profile), {
           read: logUnexpected("INTERNAL_RECEIPT_PROFILE_READ_UNAVAILABLE", profile.read),
+        });
+      })(),
+      // WP-2423 DEC-STORE-CUSTOMER-NAME: Store setup → name, address and phone customers see.
+      storePublicProfile: (() => {
+        const profile = createMerchantStorePublicProfile({ persistence, authentication: service });
+        return Object.assign(logUnexpected("INTERNAL_PUBLIC_PROFILE_UNAVAILABLE", profile), {
+          read: logUnexpected("INTERNAL_PUBLIC_PROFILE_READ_UNAVAILABLE", profile.read),
         });
       })(),
       diningJoinState,

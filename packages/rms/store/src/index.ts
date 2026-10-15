@@ -75,3 +75,7 @@ export * from "./infrastructure/persistence/store-presence-store.js";
 // WP-2423 Q15/Q16 (DEC-RECEIPT-TAX-AND-PRIVACY): receipt registration numbers and privacy link.
 export * from "./contracts/store-receipt-profile.js";
 export * from "./infrastructure/persistence/store-receipt-profile-store.js";
+
+// WP-2423 store name (DEC-STORE-CUSTOMER-NAME): the Owner publishes the Store's public profile.
+export * from "./contracts/public-store-profile-edit.js";
+export * from "./infrastructure/public-store-profile-publisher.js";

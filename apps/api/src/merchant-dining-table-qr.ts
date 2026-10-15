@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { appendAuditRecordInTransaction } from "@bop/audit";
+import { appendAuditRecordInTransaction, canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import { readClosedRecord } from "@bop/identity";
 import {
   createDiningTable,
@@ -15,6 +15,7 @@ import {
   type DiningTableQrIssue,
   type QrSignedPayload,
 } from "@rms/dining";
+import { createPostgresPublicStoreProfilePublisher } from "@rms/store";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -409,12 +410,41 @@ export function createMerchantDiningTableQr(options: Options) {
           retentionPolicyCode: options.retentionPolicyCode,
           retentionPolicyVersion: options.retentionPolicyVersion,
         });
+        // WP-2423 DEC-STORE-CUSTOMER-NAME: the printed card names the Store as guests see it
+        // (current published profile, the Store's own language); the Store record name only when
+        // none is published.
+        // A failed name read must not end the print: it is isolated in a savepoint.
+        await tx.query("SAVEPOINT table_qr_store_name", []);
+        const published = await createPostgresPublicStoreProfilePublisher({
+          tenantReference: String(current.selected.tenantReference),
+          brandReference: String(scope.brandReference),
+          storeReference: String(scope.storeReference),
+          // Read-only, inside this transaction: the caller was resolved in full by open() and is
+          // re-checked in full below before the sheet is returned.
+          authorize: async () => true,
+          hash: (value) => "sha256:" + sha256Hex(canonicalizeRfc8785(value)),
+          verifyMedia: async () => false,
+          appendAudit: async () => fail(),
+          retentionPolicyCode: options.retentionPolicyCode,
+          retentionPolicyVersion: options.retentionPolicyVersion,
+        })
+          .readCurrent(tx, occurredAt)
+          .then(async (profile) => {
+            await tx.query("RELEASE SAVEPOINT table_qr_store_name", []);
+            return profile;
+          })
+          .catch(async () => {
+            await tx.query("ROLLBACK TO SAVEPOINT table_qr_store_name", []);
+            return null;
+          });
+        const publicName = published?.localizedFields[published.defaultLocale]?.storeDisplayName;
         if (!(await allowed())) fail("TABLE_QR_PERMISSION_DENIED");
         const store = current.store as { displayName?: unknown; timeZone?: unknown };
         return Object.freeze({
           fileName: "table-qr-codes-" + occurredAt.slice(0, 10) + ".html",
           html: renderTableQrSheet({
-            storeName: typeof store.displayName === "string" ? store.displayName : "",
+            storeName:
+              publicName ?? (typeof store.displayName === "string" ? store.displayName : ""),
             timeZone: typeof store.timeZone === "string" ? store.timeZone : "UTC",
             cards,
           }),

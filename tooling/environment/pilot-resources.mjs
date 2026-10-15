@@ -46,7 +46,9 @@ export async function createInternalTestResources({
     const store = await readStoreOperatingFacts(transactions, scope, now);
     const publicProfile = {
       binding: profile.binding,
-      selection: profile.selection,
+      // WP-2423 DEC-STORE-CUSTOMER-NAME: no operator pin — customers get the Store's current
+      // published profile, which its Owner changes in Store setup. A `selection` left in the
+      // operator file is ignored.
       authorize: async (_tx, binding, context) =>
         binding?.brandReference === scope.brandReference &&
         binding?.storeReference === scope.storeReference &&

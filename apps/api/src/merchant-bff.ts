@@ -234,6 +234,10 @@ import {
   MerchantStoreReceiptProfileError,
   type createMerchantStoreReceiptProfile,
 } from "./merchant-store-receipt-profile.js";
+import {
+  MerchantStorePublicProfileError,
+  type createMerchantStorePublicProfile,
+} from "./merchant-store-public-profile.js";
 import type { createMerchantOrdinaryRefundDecline } from "./merchant-ordinary-refund-decline.js";
 import type { createMerchantOrdinaryRefundProgress } from "./merchant-ordinary-refund-progress.js";
 import type { createMerchantKitchenCommand } from "./merchant-kitchen-command.js";
@@ -319,6 +323,7 @@ import type { createMerchantStoreConfiguration } from "./merchant-store-configur
 import type { createMerchantServiceControl } from "./merchant-service-control.js";
 import type { createMerchantOrderExceptionRead } from "./merchant-order-exception-read.js";
 import type { createMerchantSettlementRead } from "./merchant-settlement-read.js";
+import type { createPersistentMerchantOperationsAlerts } from "./merchant-operations-alerts.js";
 import type { createPersistentMerchantStoreReports } from "./persistent-merchant-store-reports.js";
 import {
   storeSalesReportExportKinds,
@@ -609,6 +614,8 @@ export interface MerchantBffRouterOptions {
   readonly soleOperator?: ReturnType<typeof createMerchantSoleOperator>;
   /** WP-2423 Q15/Q16: the Store's receipt registration numbers and privacy notice link. */
   readonly storeReceiptProfile?: ReturnType<typeof createMerchantStoreReceiptProfile>;
+  /** WP-2423 DEC-STORE-CUSTOMER-NAME: the name, address and phone customers see. */
+  readonly storePublicProfile?: ReturnType<typeof createMerchantStorePublicProfile>;
   readonly kitchenQuery?: ReturnType<typeof createMerchantKitchenQuery>;
   readonly kitchenCommand?: ReturnType<typeof createMerchantKitchenCommand>;
   readonly kitchenRelease?: ReturnType<typeof createMerchantKitchenRelease>;
@@ -693,6 +700,8 @@ export interface MerchantBffRouterOptions {
   readonly orderExceptions?: ReturnType<typeof createMerchantOrderExceptionRead>;
   /** WP-2423 P1: the day-end settlement view for one business day. */
   readonly settlement?: ReturnType<typeof createMerchantSettlementRead>;
+  /** WP-2423 Q13: the installation's operations alerts for the Home (Owner and Store Manager). */
+  readonly operationsAlerts?: ReturnType<typeof createPersistentMerchantOperationsAlerts>;
   /** WP-2423 Q14: the Store's sales, item, hourly and tip reports and their CSV export. */
   readonly storeReports?: ReturnType<typeof createPersistentMerchantStoreReports>;
   readonly service: MerchantBffService;
@@ -1953,6 +1962,33 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         }
         denied(response);
       });
+  });
+
+  // WP-2423 Q13: operations alerts (system down, backups, certificate, disk) for the Home.
+  router.get("/operations-alerts", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    if (
+      request.method !== "GET" ||
+      request.body !== undefined ||
+      sessionCookie === null ||
+      Object.keys(request.query).length !== 0 ||
+      rawHeaderValues(request, "origin").length > 1 ||
+      rawHeaderValues(request, "sec-fetch-site").length !== 1
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.operationsAlerts) {
+      response
+        .status(503)
+        .set("Cache-Control", NO_STORE)
+        .json({ error: "operations_alerts_unavailable" });
+      return;
+    }
+    void options
+      .operationsAlerts({ sessionCookie })
+      .then((view) => response.set("Cache-Control", NO_STORE).json(view))
+      .catch(() => denied(response));
   });
 
   // WP-2423 Q14: the Store's reports for a range of business days, and one report as CSV.
@@ -4990,6 +5026,78 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         else if (error.code === "NoChange") response.status(409).json({ error: "no_change" });
         else if (error.code === "Invalid") response.status(422).json({ error: "invalid_details" });
         else response.status(503).json({ error: "receipt_profile_unavailable" });
+      });
+  });
+
+  // WP-2423 DEC-STORE-CUSTOMER-NAME: the Store's published name, address and phone.
+  router.get("/store/public-profile", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    if (
+      request.method !== "GET" ||
+      request.body !== undefined ||
+      sessionCookie === null ||
+      Object.keys(request.query).length !== 0 ||
+      rawHeaderValues(request, "origin").length > 1 ||
+      rawHeaderValues(request, "sec-fetch-site").length !== 1
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.storePublicProfile) {
+      response.status(503).json({ error: "public_profile_unavailable" });
+      return;
+    }
+    const port = options.storePublicProfile;
+    void retryTransactionConflict(() => port.read({ sessionCookie }))
+      .then((view) => response.set("Cache-Control", NO_STORE).json(view))
+      .catch((error: unknown) => {
+        if (error instanceof MerchantStorePublicProfileError && error.code === "Denied") {
+          denied(response);
+          return;
+        }
+        response
+          .status(503)
+          .set("Cache-Control", NO_STORE)
+          .set("Retry-After", "5")
+          .json({ error: "public_profile_unavailable" });
+      });
+  });
+  router.post("/store/public-profile", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    const command = options.storePublicProfile;
+    if (!command) {
+      response.status(503).json({ error: "public_profile_unavailable" });
+      return;
+    }
+    void command({ sessionCookie, csrf, command: request.body })
+      .then((result) =>
+        response.set("Cache-Control", NO_STORE).json({
+          status: result.status,
+          current: result.current,
+        }),
+      )
+      .catch((error: unknown) => {
+        response.set("Cache-Control", NO_STORE);
+        if (!(error instanceof MerchantStorePublicProfileError)) {
+          response.status(503).json({ error: "public_profile_unavailable" });
+          return;
+        }
+        if (error.code === "Denied") response.status(403).json({ error: "owner_required" });
+        else if (error.code === "VersionConflict")
+          response.status(409).json({ error: "profile_changed" });
+        else if (error.code === "NoChange") response.status(409).json({ error: "no_change" });
+        else if (error.code === "Invalid") response.status(422).json({ error: "invalid_details" });
+        else response.status(503).json({ error: "public_profile_unavailable" });
       });
   });
 

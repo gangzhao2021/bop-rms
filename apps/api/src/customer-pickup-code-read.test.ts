@@ -71,6 +71,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   ports.status.mockResolvedValue({
     order: { orderType: "Pickup", orderNumber: "11", fulfillmentStatus: "Pending" },
+    sources: {},
   });
   ports.readiness.mockResolvedValue(readinessSource());
   ports.proof.mockResolvedValue({
@@ -139,6 +140,24 @@ describe("current Guest pickup proof read", () => {
         counterCode: { derivationIndex: 0, selectorHash: "a".repeat(64) },
       }),
     );
+  });
+  it("names the Store as the order page does, from its published profile", async () => {
+    // WP-2423 DEC-STORE-CUSTOMER-NAME: one name everywhere; the configured one is a fallback.
+    ports.status.mockResolvedValue({
+      order: { orderType: "Pickup", orderNumber: "11", fulfillmentStatus: "Pending" },
+      sources: { storeContact: { storeDisplayName: "Maple Noodle House" } },
+    });
+    await expect(createCustomerPickupCodeRead(options()).read(input)).resolves.toMatchObject({
+      status: "Ready",
+      storeDisplayName: "Maple Noodle House",
+    });
+    ports.status.mockResolvedValue({
+      order: { orderType: "Pickup", orderNumber: "11", fulfillmentStatus: "Pending" },
+      sources: {},
+    });
+    await expect(createCustomerPickupCodeRead(options()).read(input)).resolves.toMatchObject({
+      storeDisplayName: "DEMO Store",
+    });
   });
   it("shows no short code for a proof issued before short codes existed", async () => {
     ports.counterCode.mockResolvedValue(null);

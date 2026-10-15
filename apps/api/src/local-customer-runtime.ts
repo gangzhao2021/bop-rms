@@ -545,7 +545,14 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
           customerPickupCode: {
             ...options.pickupCode,
             allowedOrigin: options.allowedOrigin,
-            status: { ...options.orderStatus, scope, credentials: entry.session.credentials, now },
+            status: {
+              ...options.orderStatus,
+              // WP-2423 DEC-STORE-CUSTOMER-NAME: the panel names the Store as the order page does.
+              ...("persistent" in entry ? { publicProfile: entry.persistent.profile } : {}),
+              scope,
+              credentials: entry.session.credentials,
+              now,
+            },
           },
         }),
     ...(options.orderStatus === undefined

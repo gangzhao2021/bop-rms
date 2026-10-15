@@ -2,9 +2,24 @@
 # Installs and builds inside Linux so the existing /proc-based supervisor, process identity
 # and health checks run unchanged. The runtime directory (configuration, keys, simulator)
 # is mounted at /app/.local/<name> and never copied into the image.
+# WP-2423 Q13: the PostgreSQL client programs of the exact server image (pg_dump, pg_restore,
+# psql) for scheduled backups and restore checks by the ops service; nothing else from it.
+FROM postgres:18.4-bookworm@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296 AS pgclient
+RUN mkdir -p /pgclient/bin /pgclient/lib \
+ && cp /usr/lib/postgresql/18/bin/pg_dump /usr/lib/postgresql/18/bin/pg_restore \
+    /usr/lib/postgresql/18/bin/psql /pgclient/bin/ \
+ && cp -L /usr/lib/*-linux-gnu/libpq.so.5 /pgclient/lib/
+
 FROM node:24.18.0-bookworm@sha256:5711a0d445a1af54af9589066c646df387d1831a608226f4cd694fc59e745059
 
 RUN corepack enable
+COPY --from=pgclient /pgclient /opt/pgclient
+# Wrappers keep the newer libpq private to these three programs (the image's own libpq stays).
+RUN for tool in pg_dump pg_restore psql; do \
+      printf '#!/bin/sh\nLD_LIBRARY_PATH=/opt/pgclient/lib exec /opt/pgclient/bin/%s "$@"\n' "$tool" \
+        > "/usr/local/bin/$tool" && chmod 755 "/usr/local/bin/$tool"; \
+    done \
+ && pg_dump --version && pg_restore --version && psql --version
 WORKDIR /app
 COPY . .
 RUN pnpm install --frozen-lockfile && pnpm build

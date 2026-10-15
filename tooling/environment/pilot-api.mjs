@@ -68,7 +68,8 @@ export async function createRuntime(
         readiness: ready.storeOptions,
         proof: proof.storeOptions,
         credentials: resources.credentials.pickup,
-        // The Store record's own name, the same one the receipt and order pages show.
+        // Fallback only: the panel names the Store from its published profile (WP-2423
+        // DEC-STORE-CUSTOMER-NAME); the Store record name is used when none is published.
         storeDisplayName: resources.store.displayName,
         pickupInstruction: "Show this pickup confirmation to staff at the pickup counter.",
       },

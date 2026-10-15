@@ -19,7 +19,13 @@ type Transaction = ResolutionOptions["transaction"];
 export interface PersistentPublicStoreProfileOptions {
   binding: ResolutionOptions["binding"];
   authorize: ResolutionOptions["authorize"];
-  selection: Readonly<{ profileReference: string; profileVersion: number }>;
+  /**
+   * Explicit pin of one saved profile version (tests and diagnosis only). Without it the read
+   * serves the Store's current published profile (WP-2423 DEC-STORE-CUSTOMER-NAME), so an Owner
+   * publication reaches customers without an operator change. A pinned version stops resolving
+   * once a newer release supersedes it.
+   */
+  selection?: Readonly<{ profileReference: string; profileVersion: number }>;
   hashContent: AuthorityOptions["hashContent"];
   hashSnapshot: ProfileOptions["hashSnapshot"];
   hashPeriod: TimingOptions["hashPeriod"];
@@ -31,7 +37,7 @@ const readOnly = async (): Promise<never> => {
 };
 
 /** Construct once per request in the caller-retained transaction, using a trusted
- * evaluation clock. Internal scope and exact profile version are server configuration.
+ * evaluation clock. Internal scope is server configuration; the profile is the current one.
  * Never cache these ports across requests or commit before dependent entry reads.
  */
 export function createPersistentPublicStoreProfilePorts(
@@ -44,9 +50,14 @@ export function createPersistentPublicStoreProfilePorts(
   if (purpose !== "CustomerEntry" && purpose !== "CustomerCart")
     throw new Error("PUBLIC_STORE_REQUEST_INVALID");
   const binding = Object.freeze({ ...options.binding });
-  const reference = parseStoreAdministrationReference(options.selection.profileReference);
-  const version = options.selection.profileVersion;
-  if (!Number.isSafeInteger(version) || version < 1)
+  const pin =
+    options.selection === undefined
+      ? null
+      : {
+          reference: parseStoreAdministrationReference(options.selection.profileReference),
+          version: options.selection.profileVersion,
+        };
+  if (pin !== null && (!Number.isSafeInteger(pin.version) || pin.version < 1))
     throw new Error("PUBLIC_STORE_SELECTION_INVALID");
   const authorize = (transaction: Transaction, observedAt: string) =>
     options.authorize(transaction, binding, { evaluatedAt: observedAt, purpose });
@@ -93,7 +104,10 @@ export function createPersistentPublicStoreProfilePorts(
           input.storeReference !== scope.storeReference
         )
           throw new Error("PUBLIC_STORE_SCOPE_UNAVAILABLE");
-        const profile = await profiles.loadExact(tx, reference, version, at);
+        const profile =
+          pin === null
+            ? await profiles.loadLatestCurrent(tx, at)
+            : await profiles.loadExact(tx, pin.reference, pin.version, at);
         return profile === null ? [] : [profile];
       },
     },

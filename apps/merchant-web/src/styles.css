@@ -8786,3 +8786,83 @@ body:has(.product-complete-draft) .bop-shell__header,
   border-color: var(--bop-color-danger);
   color: var(--bop-color-danger);
 }
+
+/* WP-2423 Q13: store system alerts on the Home (Owner and Store Manager). */
+.overview-card--alerts {
+  grid-column: 1 / -1;
+  order: -1;
+}
+.overview-card--alerts header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.overview-card--alerts header button {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+}
+.workspace-page .overview-card--alerts-critical {
+  border-color: var(--bop-color-danger);
+  border-left-width: 4px;
+}
+.workspace-page .overview-card--alerts-warning {
+  border-color: var(--bop-color-warning);
+  border-left-width: 4px;
+}
+.overview-card--alerts .system-alert__headline {
+  color: var(--bop-color-text-default);
+  font-weight: 500;
+}
+.system-alerts {
+  display: grid;
+  gap: 12px;
+  margin: 8px 0 12px;
+  padding: 0;
+  list-style: none;
+}
+.system-alert {
+  padding: 12px 0 0;
+  border-top: 1px solid var(--bop-color-border-default);
+  overflow-wrap: anywhere;
+}
+.system-alert:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+.overview-card--alerts .system-alert__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--bop-color-text-default);
+}
+.system-alert__badge {
+  padding: 1px 8px;
+  border: 1px solid currentcolor;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.system-alert--critical .system-alert__badge {
+  color: var(--bop-color-danger);
+}
+.system-alert--warning .system-alert__badge {
+  color: var(--bop-color-text-default);
+  border-color: var(--bop-color-warning);
+}
+.system-alert__label {
+  color: var(--bop-color-text-default);
+  font-weight: 500;
+}
+.system-alert__since,
+.system-alert__resolved {
+  font-size: 13px;
+}

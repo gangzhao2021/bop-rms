@@ -168,6 +168,21 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
     }),
   );
 
+  // WP-2423 Q13: the store system card (Owner and Store Manager) with nothing wrong.
+  await page.route("**/merchant/operations-alerts", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        monitor: "Reporting",
+        observedAt: "2026-09-23T14:01:00.000Z",
+        active: [],
+        recentlyCleared: [],
+        outbound: { email: false, webhooks: 0, heartbeat: false },
+        lastSuccessfulBackupAt: "2026-09-23T08:30:00.000Z",
+      },
+    }),
+  );
+
   await page.goto("/app");
   await expect(page.getByRole("heading", { level: 1, name: "Training Store" })).toBeVisible();
   const workspace = page.getByRole("navigation", { name: "Workspace" });
@@ -187,6 +202,9 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
   await expect(now.getByText("Ready for collection")).toBeVisible();
   await expectNoInternalText(page);
   await expect(now.getByText("1 overdue")).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Store system" }).getByText("Everything is working."),
+  ).toBeVisible();
   await expect(now.getByText(/^Last checked \d\d:\d\d/u)).toBeVisible();
   await expect(now.getByRole("link", { name: "View exceptions" })).toHaveAttribute(
     "href",
@@ -279,6 +297,7 @@ test("@production Home reads only the summaries the staff member's screens permi
     "**/merchant/orders*",
     "**/merchant/pickup/query",
     "**/merchant/order-exceptions",
+    "**/merchant/operations-alerts",
   ])
     await page.route(path, (route) => {
       requested.push(new URL(route.request().url()).pathname);

@@ -131,6 +131,67 @@ export function createPostgresPublicStoreProfileStore(options: {
       await authority(tx, at);
       return "Created" as const;
     },
+    /**
+     * WP-2423 store name (DEC-STORE-CUSTOMER-NAME): the Store's current published profile — the
+     * newest saved version whose release is still the current Publishing release and whose timing
+     * is effective now. An Owner publication supersedes earlier versions, so customers, the pickup
+     * panel and new receipts all follow it without an operator pin. `null` when none is current.
+     */
+    async loadLatestCurrent(tx: Transaction, observedAt: string) {
+      const at = parseCanonicalInstant(observedAt);
+      await fence(tx, at, false);
+      const found = rows(
+        await tx.query(
+          "SELECT profile_id,profile_version,profile_json,payload_digest,recorded_at FROM rms_store.public_store_profile_version WHERE brand_id=$1 AND store_id=$2 AND recorded_at<=$3 ORDER BY recorded_at DESC,profile_version DESC LIMIT 8",
+          [brand, store, at],
+        ),
+      );
+      for (const row of found) {
+        const { profile, digest } = parse(row.profile_json);
+        if (
+          row.payload_digest !== digest ||
+          row.profile_id !== profile.profileReference ||
+          row.profile_version !== profile.profileVersion ||
+          !(row.recorded_at instanceof Date)
+        )
+          return fail();
+        if ((await options.verifyCurrent(tx, profile, at)) === true) {
+          await authority(tx, at);
+          return profile;
+        }
+      }
+      await authority(tx, at);
+      return null;
+    },
+    /** Highest saved version of one profile (0 when none), so a new version never collides. */
+    async highestVersion(tx: Transaction, reference: string, observedAt: string) {
+      const at = parseCanonicalInstant(observedAt);
+      await fence(tx, at, true);
+      const found = rows(
+        await tx.query(
+          "SELECT coalesce(max(profile_version),0)::int AS version FROM rms_store.public_store_profile_version WHERE brand_id=$1 AND store_id=$2 AND profile_id=$3",
+          [brand, store, parseStoreAdministrationReference(reference)],
+        ),
+      );
+      const version = found[0]?.version;
+      if (found.length !== 1 || typeof version !== "number" || !Number.isSafeInteger(version))
+        return fail();
+      await authority(tx, at);
+      return version;
+    },
+    /**
+     * One publication per Store at a time, held until the caller's transaction ends. The write
+     * lock is taken first, before any Publishing or timing lock, so readers (which lock this table
+     * before Publishing) wait instead of deadlocking with the publication.
+     */
+    async lockPublication(tx: Transaction, observedAt: string) {
+      const at = parseCanonicalInstant(observedAt);
+      await authority(tx, at);
+      await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+        "StorePublicProfilePublication:" + brand + ":" + store,
+      ]);
+      await fence(tx, at, true);
+    },
     async loadExact(tx: Transaction, reference: string, version: number, observedAt: string) {
       const at = parseCanonicalInstant(observedAt);
       await fence(tx, at, false);

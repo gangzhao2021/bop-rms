@@ -7,6 +7,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { createPilotRecoverySweep } from "./pilot-recovery-sweep.mjs";
 import { parsePilotRuntimeDirectory } from "./pilot-service.mjs";
 import { assertPilotReady, isPilotRuntime } from "./pilot-environment.mjs";
+import { SUPERVISOR_HEALTH_FILE, writePrivateJson } from "./pilot-ops-files.mjs";
 export async function acquirePilotSupervisorLease(runtimeDirectory) {
   const root = await fs.realpath(process.cwd());
   const directory = path.join(root, parsePilotRuntimeDirectory(runtimeDirectory));
@@ -109,6 +110,31 @@ export function createPilotAttentionReporter(write = (line) => process.stderr.wr
     );
   };
 }
+/** WP-2423 Q13: the latest sweep as a private file, so the separate operations monitor can alert
+ * on services needing a person and notice when the supervisor itself stops (names and states only). */
+export function createPilotSupervisorHealthWriter(
+  runtimeDirectory,
+  write = writePrivateJson,
+  report = (line) => process.stderr.write(line),
+) {
+  const file = path.join(parsePilotRuntimeDirectory(runtimeDirectory), SUPERVISOR_HEALTH_FILE);
+  return async (snapshot) => {
+    try {
+      await write(file, {
+        schemaVersion: 1,
+        observedAt: snapshot.observedAt,
+        services: snapshot.services.map((entry) => ({
+          service: entry.service,
+          state: entry.state,
+          ...(entry.attention ? { attention: [...entry.attention] } : {}),
+        })),
+      });
+    } catch {
+      // Reporting must never stop supervision; the monitor alerts on a stale file instead.
+      report("PILOT_SUPERVISOR_HEALTH_WRITE_UNAVAILABLE\n");
+    }
+  };
+}
 export async function runPilotSupervisor({
   runtimeDirectory,
   signal,
@@ -164,9 +190,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       signal: controller.signal,
       observe: (() => {
         const report = createPilotAttentionReporter();
-        return (snapshot) => {
+        const health = createPilotSupervisorHealthWriter(process.argv[2]);
+        return async (snapshot) => {
           console.log(JSON.stringify(snapshot));
           report(snapshot);
+          await health(snapshot);
         };
       })(),
     });

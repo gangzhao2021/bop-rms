@@ -6543,3 +6543,69 @@ it("WP-2423: the Orders list and pickup queue rerun a deadlocked read and never 
   });
   expect(refused.status).toBe(403);
 }, 15000);
+describe("WP-2423 Q13 operations alerts read route", () => {
+  type Read = NonNullable<MerchantBffRouterOptions["operationsAlerts"]>;
+  async function serve(read?: Read) {
+    const app = express();
+    app.use(
+      "/merchant",
+      createMerchantBffRouter({
+        service: fakeService(),
+        exactOrigin: "https://merchant.invalid",
+        acceptedHost: "merchant.invalid",
+        ...(read ? { operationsAlerts: read } : {}),
+      }),
+    );
+    const server = app.listen(0, "127.0.0.1");
+    servers.push(server);
+    await new Promise<void>((resolve) => server.once("listening", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("listener unavailable");
+    return `http://127.0.0.1:${address.port}`;
+  }
+  const headers = {
+    host: "merchant.invalid",
+    cookie: "__Host-bop-merchant=" + sessionCookie,
+    "sec-fetch-site": "same-origin",
+  };
+  const view = {
+    monitor: "Reporting" as const,
+    observedAt: "2026-10-15T08:00:00.000Z",
+    active: [],
+    recentlyCleared: [],
+    outbound: { email: false, webhooks: 0, heartbeat: false },
+    lastSuccessfulBackupAt: null,
+  };
+  it("passes only the session cookie and answers without caching", async () => {
+    const read = vi.fn<Read>(async () => view);
+    const root = await serve(read);
+    const result = await request(root, "/merchant/operations-alerts", { headers });
+    expect(result.status).toBe(200);
+    expect(result.headers.get("cache-control")).toBe("no-store");
+    expect(await result.json()).toEqual(view);
+    expect(read).toHaveBeenCalledWith({ sessionCookie });
+  });
+  it("refuses parameters, a missing session and a cross-site read; 503 when not composed", async () => {
+    const read = vi.fn<Read>(async () => view);
+    const root = await serve(read);
+    for (const [path, extra] of [
+      ["/merchant/operations-alerts?store=x", {}],
+      ["/merchant/operations-alerts", { cookie: "" }],
+      ["/merchant/operations-alerts", { "sec-fetch-site": "cross-site" }],
+    ] as const) {
+      const result = await request(root, path, { headers: { ...headers, ...extra } });
+      expect(result.status).toBe(403);
+    }
+    expect(read).not.toHaveBeenCalled();
+    const absent = await serve();
+    expect((await request(absent, "/merchant/operations-alerts", { headers })).status).toBe(503);
+  });
+  it("answers a refusal or unreadable board as denied without the reason", async () => {
+    const root = await serve(async () => {
+      throw new Error("MERCHANT_OPERATIONS_ALERTS_UNAVAILABLE");
+    });
+    const result = await request(root, "/merchant/operations-alerts", { headers });
+    expect(result.status).toBe(403);
+    expect(await result.text()).not.toContain("OPERATIONS");
+  });
+});

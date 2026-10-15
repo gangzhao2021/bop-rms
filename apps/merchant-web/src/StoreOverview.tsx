@@ -9,6 +9,7 @@ import { parseOrderExceptionView, type OrderExceptionView } from "./OrderExcepti
 import { createPickupClient } from "./pickup-client.js";
 import { parsePickupQueueView } from "./pickup.js";
 import { storeTime } from "./StoreTime.js";
+import { OperationsAlerts } from "./OperationsAlerts.js";
 
 /** WP-2423 P2: what the Store is dealing with right now, from the pilot projections. */
 export interface OrdersSummary {
@@ -304,6 +305,10 @@ export function StoreOverview({
     };
   }, [load, permitted]);
   return (
-    <OverviewToday state={state} timeZone={timeZone} busy={busy} onRefresh={() => void load()} />
+    <>
+      {/* WP-2423 Q13: store system alerts, for the roles that handle exceptions (Owner, Manager). */}
+      {permitted.exceptions ? <OperationsAlerts timeZone={timeZone} fetcher={fetcher} /> : null}
+      <OverviewToday state={state} timeZone={timeZone} busy={busy} onRefresh={() => void load()} />
+    </>
   );
 }
