@@ -1,6 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
 import {
+  readCurrentOrders,
+  refreshedOrderState,
   CurrentOrderDetails,
   CurrentOrderLines,
   formatContactPhone,
@@ -1000,8 +1002,11 @@ it("WP-2423: says an online order is paid, and what happened to the payment", ()
   });
   expect(text(order(), position("0"))).toBe("Paid online $11.30");
   expect(text(order(), position("500"))).toBe("Paid online $11.30 · partly refunded");
-  expect(text(order(), position("1130"))).toBe("Paid online $11.30 · refunded");
-  expect(text(order(), position("0", "1130"))).toBe("Paid online $11.30 · refund pending");
+  expect(text(order(), position("1130"))).toBe("Paid online $11.30 · refunded in full");
+  expect(text(order(), position("0", "1130"))).toBe("Paid online $11.30 · refund in progress");
+  expect(text(order(), position("500", "630"))).toBe(
+    "Paid online $11.30 · partly refunded, refund in progress",
+  );
   // On the list: refunds the queue itself shows.
   expect(
     text(
@@ -1012,7 +1017,7 @@ it("WP-2423: says an online order is paid, and what happened to the payment", ()
         batches: [batch(1, { acceptanceStatus: "NotAccepted" })],
       }),
     ),
-  ).toBe("Paid online $11.30 · refunded");
+  ).toBe("Paid online $11.30 · refunded in full");
   const cancellation = (refundStatus: string) => ({
     reasonCode: "SOLD_OUT",
     cancelledAt: "2026-10-15T02:10:00.000Z",
@@ -1024,8 +1029,8 @@ it("WP-2423: says an online order is paid, and what happened to the payment", ()
       currentVersion: 3,
       batches: [batch(1, { staffCancellation: cancellation(refundStatus) })],
     });
-  expect(text(cancelled("Pending"))).toBe("Paid online $11.30 · refund pending");
-  expect(text(cancelled("Refunded"))).toBe("Paid online $11.30 · refunded");
+  expect(text(cancelled("Pending"))).toBe("Paid online $11.30 · refund in progress");
+  expect(text(cancelled("Refunded"))).toBe("Paid online $11.30 · refunded in full");
   const dining = order({
     orderType: "DineIn",
     paidOnline: { amountMinor: "2260", currencyCode: "CAD" },
@@ -1078,4 +1083,142 @@ it("WP-2423 follow-up: counts a table whose later round awaits acceptance as one
     new Set([laterRound, awaiting.batches[0].orderBatchReference]),
   );
   expect(ordersAwaitingAcceptance(view)).toBe(2);
+});
+
+it("WP-2423 v15 DEMO-02: an order whose every round was cancelled and refunded reads refunded in full", () => {
+  const id = (n: number) => `01909968-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
+  const cancellation = (
+    refundMethod: "Online" | "CardMachine",
+    refundAmountMinor: string | null,
+  ) => ({
+    reasonCode: "SOLD_OUT",
+    cancelledAt: "2026-10-15T02:30:00.000Z",
+    refundStatus: "Refunded",
+    refundMethod,
+    refundAmountMinor,
+  });
+  const round = (n: number, extra: object) => ({
+    orderBatchReference: id(90 + n),
+    sequence: n,
+    acceptanceStatus: "Cancelled",
+    canRequestAcceptance: false,
+    canCancel: false,
+    canCancelItems: false,
+    paymentDue: null,
+    staffRound: null,
+    ...extra,
+  });
+  const machineRound = (n: number) =>
+    round(n, {
+      staffCancellation: cancellation("CardMachine", "1500"),
+      staffRound: {
+        recordedAfterOutage: false,
+        paidOnCardMachine: { amountMinor: "1500", takenAt: "2026-10-15T02:20:00.000Z" },
+      },
+    });
+  // Online rounds refunded online; card-machine rounds refunded on the machine and recorded.
+  const view = parseCurrentOrderQueue({
+    items: [
+      {
+        orderReference: id(1),
+        orderNumber: "DEMO-02",
+        orderType: "DineIn",
+        sourceChannel: "Qr",
+        submittedAt: "2026-10-15T02:08:00.000Z",
+        observedAt: "2026-10-15T02:40:00.000Z",
+        initialBatchReference: id(91),
+        batches: [
+          round(1, { staffCancellation: cancellation("Online", null) }),
+          machineRound(2),
+          round(3, { staffCancellation: cancellation("Online", null) }),
+          machineRound(4),
+        ],
+        canRequestAcceptance: false,
+        unfulfillable: null,
+        pickupNotCollected: false,
+        acceptBy: null,
+        awaitingPayment: false,
+        paidOnline: { amountMinor: "10707", currencyCode: "CAD" },
+        currentPhase: "Cancelled",
+        currentVersion: 6,
+      },
+    ],
+    nextAfterOrderReference: null,
+  });
+  const order = view.items[0];
+  if (order === undefined) throw new Error("no order");
+  // Without Payment's totals, card-machine rounds are not part of the online payment.
+  expect(onlinePaymentText(order)).toBe("Paid online $107.07 · refunded in full");
+  // Payment's totals decide when known: everything paid online was refunded.
+  const full = { refundedMinor: "10707", refundPendingMinor: "0" };
+  expect(onlinePaymentText(order, full)).toBe("Paid online $107.07 · refunded in full");
+  // The list header uses the totals read for an opened order instead of the per-round guess.
+  const listed = renderToStaticMarkup(
+    <CurrentOrderQueueRows
+      view={view}
+      paymentPositions={new Map([[id(1), { refundedMinor: "5000", refundPendingMinor: "0" }]])}
+    />,
+  );
+  expect(listed).toContain("Paid online $107.07 · partly refunded");
+  expect(listed).not.toContain("Paid online $107.07 · refunded in full");
+  const listedFull = renderToStaticMarkup(
+    <CurrentOrderQueueRows view={view} paymentPositions={new Map([[id(1), full]])} />,
+  );
+  expect(listedFull).toContain("Paid online $107.07 · refunded in full");
+  expect(listedFull).not.toContain("partly refunded");
+});
+
+it("WP-2423: an opened order stays open and in place when the page refreshes after an action", async () => {
+  const fixture = parseCurrentOrderQueue(currentOrderQueueFixture());
+  const [first, second] = fixture.items;
+  if (!first || !second) throw new Error("fixture");
+  // The page keeps the opened orders; rows rendered again after a refresh keep them open.
+  const html = renderToStaticMarkup(
+    <CurrentOrderQueueRows
+      view={fixture}
+      expanded={{ opened: new Set([second.orderReference]), setOpened: () => undefined }}
+      detail={(order, open) => (open ? <p>{"open:" + order.orderNumber}</p> : null)}
+    />,
+  );
+  const entries = html.split('<details class="order-workbench-entry"').slice(1);
+  expect(entries).toHaveLength(fixture.items.length);
+  expect(entries[0]?.startsWith(" open")).toBe(false);
+  expect(entries[1]?.startsWith(' open=""')).toBe(true);
+  expect(html).toContain("open:" + second.orderNumber);
+  expect(html).not.toContain("open:" + first.orderNumber);
+  // A reread in place never passes through Loading (which unmounts the rows) and keeps the detail.
+  const loading = { kind: "Loading" } as const;
+  expect(refreshedOrderState(loading, { view: fixture })).toBe(loading);
+  const detail = { view: fixture } as unknown as Parameters<
+    typeof refreshedOrderState
+  >[1]["detail"];
+  const ready = { kind: "Ready", view: fixture, detail } as Parameters<
+    typeof refreshedOrderState
+  >[0];
+  const next = parseCurrentOrderQueue({
+    items: [currentOrderQueueFixture().items[0]],
+    nextAfterOrderReference: null,
+  });
+  expect(refreshedOrderState(ready, { view: next })).toEqual({ kind: "Ready", view: next, detail });
+  // The same read as the page's own: the list page, or the one order with its detail.
+  const calls: string[] = [];
+  const client = {
+    load: (after: string | null) => {
+      calls.push("list:" + String(after));
+      return Promise.resolve(fixture);
+    },
+    loadDetail: (reference: string) => {
+      calls.push("detail:" + reference);
+      return Promise.resolve({ view: next } as never);
+    },
+  };
+  const signal = new AbortController().signal;
+  await expect(readCurrentOrders(client, "cursor", undefined, signal)).resolves.toEqual({
+    view: fixture,
+  });
+  await expect(readCurrentOrders(client, null, first.orderReference, signal)).resolves.toEqual({
+    view: next,
+    detail: { view: next },
+  });
+  expect(calls).toEqual(["list:cursor", "detail:" + first.orderReference]);
 });

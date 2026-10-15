@@ -379,7 +379,11 @@ for (const recovery of ["retry", "history"] as const)
     expect(requests).toHaveLength(recovery === "retry" ? 2 : 1);
     expect(requests[0]).toBe(previews[0]);
     if (recovery === "retry") expect(requests[1]).toBe(requests[0]);
-    await expect(page.getByRole("button", { name: "Record refund request" })).toBeDisabled();
+    // WP-2423: the recorded request's confirmation is gone; another request is started on purpose.
+    await expect(page.getByRole("button", { name: "Record refund request" })).toHaveCount(0);
+    await expect(page.getByRole("checkbox", { name: /I confirm/ })).toHaveCount(0);
+    await expect(page.getByRole("spinbutton", { name: /Latte/ })).toHaveValue("0");
+    await expect(page.getByRole("button", { name: "Start another refund request" })).toBeVisible();
     await page.route("**/merchant/payments/refunds/items", (route) => route.abort("failed"), {
       times: 1,
     });
@@ -387,11 +391,11 @@ for (const recovery of ["retry", "history"] as const)
     await expect(
       page.getByText("Unable to refresh this information.", { exact: false }),
     ).toBeVisible();
-    await expect(page.getByRole("button", { name: "Record refund request" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Record refund request" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Calculate refund" })).toBeDisabled();
     await page.getByRole("button", { name: "Refresh recorded requests" }).click();
     await expect(page.getByText("Request remains recorded.", { exact: false })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Record refund request" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Record refund request" })).toHaveCount(0);
     await expect(page.getByRole("region", { name: "Recorded refund requests" })).toContainText(
       "Request 1: CAD 11.30",
     );

@@ -42,9 +42,41 @@ import {
   type OrderPickupContact,
 } from "./current-order-queue-client.js";
 
-type State =
+/** WP-2423: the list orders staff opened, and how the rows change it. */
+export interface ExpandedOrders {
+  readonly opened: ReadonlySet<string>;
+  readonly setOpened: React.Dispatch<React.SetStateAction<ReadonlySet<string>>>;
+}
+export type OrderPageState =
   | { kind: "Loading" | "PermissionDenied" | "NotFound" | "Unavailable" }
   | { kind: "Ready"; view: CurrentOrderQueue; detail?: CurrentOrderDetail };
+type State = OrderPageState;
+/** WP-2423: what the Orders page reads: one page of the list, or the one order with its detail. */
+export function readCurrentOrders(
+  client: Pick<ReturnType<typeof createCurrentOrderQueueClient>, "load" | "loadDetail">,
+  after: string | null,
+  orderReference: string | undefined,
+  signal: AbortSignal,
+): Promise<{ view: CurrentOrderQueue; detail?: CurrentOrderDetail }> {
+  return orderReference === undefined
+    ? client.load(after, signal).then((view) => ({ view }))
+    : client.loadDetail(orderReference, signal).then((detail) => ({ view: detail.view, detail }));
+}
+/**
+ * WP-2423: a reread in place (the background poll, or after an action such as a recorded
+ * card-machine refund) replaces the orders shown without passing through Loading, so the rows
+ * stay mounted: opened orders stay open and the scroll position stays where staff left it.
+ */
+export function refreshedOrderState(
+  previous: OrderPageState,
+  next: { view: CurrentOrderQueue; detail?: CurrentOrderDetail },
+): OrderPageState {
+  if (previous.kind !== "Ready") return previous;
+  const detail = next.detail ?? previous.detail;
+  return detail === undefined
+    ? { kind: "Ready", view: next.view }
+    : { kind: "Ready", view: next.view, detail };
+}
 interface CurrentOrderFilters {
   readonly orderNumber: string;
   readonly type: string;
@@ -311,10 +343,13 @@ export function cardMachineRoundsText(order: CurrentOrderQueue["items"][number])
 
 /**
  * WP-2423: an online order's payment as staff read it ("Paid online $11.30 · partly refunded"),
- * like a counter order's "Paid on card machine". With Payment's refund position (the order
- * detail) the refund state is exact; on the list it follows the refunds the queue shows (the
- * store's cancellations and orders refunded because they could not be fulfilled). Null when
- * nothing was paid online.
+ * like a counter order's "Paid on card machine". Payment's refund totals (read with the order
+ * detail) decide the refund state whenever they are known: refunded equal to what was paid is
+ * "refunded in full", less is "partly refunded", and money still on its way is "refund in
+ * progress". Only without those totals (a list row never opened) does it follow the refunds the
+ * queue itself shows: the store's online-refunded cancellations against the rounds paid online
+ * (rounds paid or refunded on the card machine are not part of the online payment), and orders
+ * refunded because they could not be fulfilled. Null when nothing was paid online.
  */
 export function onlinePaymentText(
   order: CurrentOrderQueue["items"][number],
@@ -324,26 +359,36 @@ export function onlinePaymentText(
   if (paid === null) return null;
   const base = "Paid online " + orderMoney(paid);
   if (position !== undefined && position !== null) {
-    if (BigInt(position.refundPendingMinor) > 0n) return base + " · refund pending";
-    const refunded = BigInt(position.refundedMinor);
-    if (refunded >= BigInt(paid.amountMinor)) return base + " · refunded";
+    const refunded = BigInt(position.refundedMinor),
+      pending = BigInt(position.refundPendingMinor);
+    if (pending > 0n)
+      return (
+        base + (refunded > 0n ? " · partly refunded, refund in progress" : " · refund in progress")
+      );
+    if (refunded >= BigInt(paid.amountMinor)) return base + " · refunded in full";
     return refunded > 0n ? base + " · partly refunded" : base;
   }
-  if (order.unfulfillable !== null) return base + " · refunded";
+  if (order.unfulfillable !== null) return base + " · refunded in full";
   const cancelled = order.batches.filter(
     (batch) =>
       batch.staffCancellation !== null && batch.staffCancellation.refundMethod === "Online",
   );
   if (cancelled.length === 0) return base;
   if (cancelled.some((batch) => batch.staffCancellation?.refundStatus === "Pending"))
-    return base + " · refund pending";
-  // Rounds cancelled automatically because they were never paid were not part of the payment.
-  const paidBatches = order.batches.filter(
+    return base + " · refund in progress";
+  // Rounds cancelled automatically because they were never paid were not part of the payment,
+  // and neither were rounds paid on the store's card machine (refunded on that machine).
+  const paidOnlineBatches = order.batches.filter(
     (batch) =>
       batch.paymentDue === null &&
-      (batch.acceptanceStatus !== "Cancelled" || batch.staffCancellation !== null),
+      (batch.acceptanceStatus !== "Cancelled" || batch.staffCancellation !== null) &&
+      batch.staffRound?.paidOnCardMachine == null &&
+      batch.staffCancellation?.refundMethod !== "CardMachine",
   );
-  return base + (cancelled.length >= paidBatches.length ? " · refunded" : " · partly refunded");
+  return (
+    base +
+    (cancelled.length >= paidOnlineBatches.length ? " · refunded in full" : " · partly refunded")
+  );
 }
 /** WP-2423: the exact refunds of an online payment on the order detail, when Payment has any. */
 function OnlineRefundNote({
@@ -491,26 +536,38 @@ function QueuedOrderLines({
   orderReference,
   client,
   refundCheck,
+  revision = 0,
+  onDetail,
 }: {
   readonly orderReference: string;
   readonly client: ReturnType<typeof createCurrentOrderQueueClient>;
   readonly refundCheck?: ItemRefundCheckContext | undefined;
+  /** WP-2423: changes when the page refreshed after an action; the lines are reread in place. */
+  readonly revision?: number;
+  /** WP-2423: the detail just read, so the order's header can show Payment's refund totals. */
+  readonly onDetail?: ((detail: CurrentOrderDetail) => void) | undefined;
 }) {
   const [state, setState] = useState<
     { kind: "Loading" | "Unavailable" } | { kind: "Ready"; detail: CurrentOrderDetail }
   >({ kind: "Loading" });
+  const reported = useRef(onDetail);
+  reported.current = onDetail;
   useEffect(() => {
     const controller = new AbortController();
     void client
       .loadDetail(orderReference, controller.signal)
       .then((detail) => {
-        if (!controller.signal.aborted) setState({ kind: "Ready", detail });
+        if (controller.signal.aborted) return;
+        setState({ kind: "Ready", detail });
+        reported.current?.(detail);
       })
       .catch(() => {
-        if (!controller.signal.aborted) setState({ kind: "Unavailable" });
+        // A failed reread after an action keeps the lines already shown.
+        if (!controller.signal.aborted)
+          setState((previous) => (previous.kind === "Ready" ? previous : { kind: "Unavailable" }));
       });
     return () => controller.abort();
-  }, [orderReference, client]);
+  }, [orderReference, client, revision]);
   return state.kind === "Ready" ? (
     <>
       <PickupContactPanel contact={state.detail.pickupContact} />
@@ -597,10 +654,19 @@ export function CurrentOrderQueueRows({
   timeZone,
   now,
   paymentPosition,
+  paymentPositions,
+  expanded,
 }: {
   readonly view: CurrentOrderQueue;
   /** WP-2423: Payment's refund position of the one Order shown (the order detail page). */
   readonly paymentPosition?: CurrentOrderDetail["paymentPosition"] | undefined;
+  /** WP-2423: on the list, the refund positions of the orders whose detail was read (opened). */
+  readonly paymentPositions?: ReadonlyMap<string, CurrentOrderDetail["paymentPosition"]>;
+  /**
+   * WP-2423: the orders staff opened, kept by the page so a refresh after an action (a recorded
+   * card-machine refund) never collapses them. Omitted: the rows keep it themselves.
+   */
+  readonly expanded?: ExpandedOrders | undefined;
   /** WP-2423 Q1: the clock acceptance deadlines are shown against (omitted: not shown). */
   readonly now?: number | undefined;
   readonly timeZone?: string | undefined;
@@ -613,7 +679,15 @@ export function CurrentOrderQueueRows({
     batch: CurrentOrderQueue["items"][number]["batches"][number],
   ) => React.ReactNode;
 }) {
-  const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
+  const [ownOpened, setOwnOpened] = useState<ReadonlySet<string>>(new Set());
+  const opened = expanded?.opened ?? ownOpened;
+  const setOpened = expanded?.setOpened ?? setOwnOpened;
+  // Orders opened only because they are the one match (search, filter): they close again when the
+  // filter changes; only orders staff opened themselves stay open across a refresh.
+  const autoOpened = useRef(new Set<string>());
+  const autoOpen = view.items.length === 1 || visibleOrderReferences?.size === 1;
+  const positionOf = (order: CurrentOrderQueue["items"][number]) =>
+    single ? paymentPosition : paymentPositions?.get(order.orderReference);
   // WP-2423 Q21: orders are grouped by the Store business day they belong to (order numbers restart
   // each business day; an order after midnight before the day's start belongs to the day before).
   const today = useStoreBusinessDay()?.businessDate ?? null;
@@ -653,9 +727,15 @@ export function CurrentOrderQueueRows({
               visibleOrderReferences !== undefined &&
               !visibleOrderReferences.has(order.orderReference)
             }
-            open={view.items.length === 1 || visibleOrderReferences?.size === 1}
+            open={
+              autoOpen ||
+              (opened.has(order.orderReference) && !autoOpened.current.has(order.orderReference))
+            }
             onToggle={(event) => {
               const open = event.currentTarget.open;
+              if (!open) autoOpened.current.delete(order.orderReference);
+              else if (autoOpen && !opened.has(order.orderReference))
+                autoOpened.current.add(order.orderReference);
               setOpened((current) => {
                 if (open === current.has(order.orderReference)) return current;
                 const next = new Set(current);
@@ -741,7 +821,7 @@ export function CurrentOrderQueueRows({
                 {/* WP-2423: an online order — paid online, and any refund of that payment. */}
                 {order.paidOnline !== null ? (
                   <span className="order-counter-paid order-online-paid">
-                    {onlinePaymentText(order, single ? paymentPosition : undefined)}
+                    {onlinePaymentText(order, positionOf(order))}
                   </span>
                 ) : null}
                 {cardMachineRoundsText(order) !== null ? (
@@ -799,7 +879,7 @@ export function CurrentOrderQueueRows({
                       {[
                         order.paidOnline === null
                           ? null
-                          : onlinePaymentText(order, single ? paymentPosition : undefined),
+                          : onlinePaymentText(order, positionOf(order)),
                         cardMachineRoundsText(order),
                       ]
                         .filter((text) => text !== null)
@@ -1022,6 +1102,13 @@ export function CurrentOrderQueuePage({
   const [phaseFilter, setPhaseFilter] = useState("All");
   const [now, setNow] = useState(() => Date.now());
   const [stale, setStale] = useState(false);
+  // WP-2423: opened list orders and the refund totals read for them outlive a refresh.
+  const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
+  const expanded = useMemo(() => ({ opened, setOpened }), [opened]);
+  const [positions, setPositions] = useState<
+    ReadonlyMap<string, CurrentOrderDetail["paymentPosition"]>
+  >(new Map());
+  const [linesRevision, setLinesRevision] = useState(0);
   const background = useRef<AbortController | null>(null);
   const [soundOn, setSoundOn] = useState(false);
   const audio = useRef<AudioContext | null>(null);
@@ -1072,23 +1159,13 @@ export function CurrentOrderQueuePage({
       if (servingOrders.current.size > 0 || background.current !== null) return;
       const controller = new AbortController();
       background.current = controller;
-      const read: Promise<{ view: CurrentOrderQueue; detail?: CurrentOrderDetail }> =
-        orderReference === undefined
-          ? client.load(after, controller.signal).then((view) => ({ view }))
-          : client
-              .loadDetail(orderReference, controller.signal)
-              .then((detail) => ({ view: detail.view, detail }));
-      void read
+      void readCurrentOrders(client, after, orderReference, controller.signal)
         .then((next) => {
           if (controller.signal.aborted) return;
           setStale(false);
-          setState((previous): State => {
-            if (previous.kind !== "Ready") return previous;
-            const detail = next.detail ?? previous.detail;
-            return detail === undefined
-              ? { kind: "Ready", view: next.view }
-              : { kind: "Ready", view: next.view, detail };
-          });
+          setState((previous) => refreshedOrderState(previous, next));
+          // Opened orders reread their lines and refund totals with the list.
+          setLinesRevision((value) => value + 1);
         })
         .catch(() => {
           if (!controller.signal.aborted) setStale(true);
@@ -1152,6 +1229,31 @@ export function CurrentOrderQueuePage({
     setState({ kind: "Loading" });
     setAfter(cursor);
     setRefresh((value) => value + 1);
+  };
+  /**
+   * WP-2423: after an action on an order already shown (a recorded card-machine refund), reread
+   * the page in place: the order stays open where it is, its lines and refund totals are reread,
+   * and focus stays with staff instead of jumping to Refresh. A poll in flight read before the
+   * action, so it is replaced. A failed reread keeps the view and says it could not be refreshed.
+   */
+  const refreshInPlace = () => {
+    if (state.kind !== "Ready") return reload(after);
+    background.current?.abort();
+    const controller = new AbortController();
+    background.current = controller;
+    setLinesRevision((value) => value + 1);
+    void readCurrentOrders(client, after, orderReference, controller.signal)
+      .then((next) => {
+        if (controller.signal.aborted) return;
+        setStale(false);
+        setState((previous) => refreshedOrderState(previous, next));
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setStale(true);
+      })
+      .finally(() => {
+        if (background.current === controller) background.current = null;
+      });
   };
   const filteredOrders = useMemo(() => {
     if (state.kind !== "Ready") return [];
@@ -1303,6 +1405,8 @@ export function CurrentOrderQueuePage({
               timeZone={timeZone}
               now={now}
               paymentPosition={detail?.paymentPosition}
+              paymentPositions={positions}
+              expanded={expanded}
               visibleOrderReferences={visibleOrderReferences}
               detail={(order, open) => (
                 <CurrentOrderDetails
@@ -1330,6 +1434,14 @@ export function CurrentOrderQueuePage({
                         <QueuedOrderLines
                           orderReference={order.orderReference}
                           client={client}
+                          revision={linesRevision}
+                          onDetail={(read) =>
+                            setPositions((current) =>
+                              current.get(order.orderReference) === read.paymentPosition
+                                ? current
+                                : new Map(current).set(order.orderReference, read.paymentPosition),
+                            )
+                          }
                           refundCheck={{
                             orderReference: order.orderReference,
                             csrf,
@@ -1395,7 +1507,7 @@ export function CurrentOrderQueuePage({
                       owedMinor={cardMachineOwed(order)}
                       csrf={csrf}
                       fetcher={fetcher}
-                      onSettled={() => reload(after)}
+                      onSettled={refreshInPlace}
                     />
                   </fieldset>
                 ) : batch.canCancel || batch.canCancelItems ? (

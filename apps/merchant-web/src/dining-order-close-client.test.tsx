@@ -1,6 +1,10 @@
 import { expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { createDiningOrderCloseClient } from "./dining-order-close-client.js";
+import {
+  createDiningOrderCloseClient,
+  DiningOrderCloseClientError,
+} from "./dining-order-close-client.js";
+import { closeReasonTexts } from "./dining-close-reasons.js";
 import { DiningOrderCloseAction } from "./DiningOrderCloseAction.js";
 import type { DiningProgress } from "./dining-progress-client.js";
 const id = (n: number) => "01909988-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -113,3 +117,30 @@ it.each([{ closureStatus: "Closed" as const }, { phase: "Ready" }])(
     expect(render(change)).toBe("");
   },
 );
+
+it("WP-2423 B759: a refusal is told apart from a missing permission, with what is outstanding", async () => {
+  const csrfToken = "A".repeat(43);
+  const refused = async (status: number, body: unknown) => {
+    const client = createDiningOrderCloseClient(
+      vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(body), { status })),
+    );
+    return client
+      .prepare(command())
+      .execute(csrfToken)
+      .then(
+        () => null,
+        (error: unknown) => error as DiningOrderCloseClientError,
+      );
+  };
+  const notReady = await refused(409, { error: "order_not_ready", reasons: ["REFUND_PENDING"] });
+  expect(notReady?.code).toBe("NotReady");
+  expect(notReady?.reasons).toEqual(["REFUND_PENDING"]);
+  expect((await refused(409, { error: "order_version_conflict" }))?.code).toBe("Conflict");
+  expect((await refused(403, { error: "order_close_permission_denied" }))?.code).toBe(
+    "PermissionDenied",
+  );
+  const texts = closeReasonTexts(["REFUND_PENDING", "EXECUTION_NOT_FINAL", "SOMETHING_NEW"]);
+  expect(texts).toHaveLength(3);
+  expect(texts[0]).toMatch(/refund is still being made/u);
+  for (const text of texts) expect(text).not.toMatch(/[A-Z]{2,}_[A-Z]/u);
+});

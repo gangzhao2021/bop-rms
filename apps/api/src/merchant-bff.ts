@@ -176,7 +176,11 @@ import type { createMerchantDiningJoinRegenerate } from "./merchant-dining-join-
 import type { createMerchantDiningSessionStart } from "./merchant-dining-session-start.js";
 import type { createMerchantDiningTables } from "./merchant-dining-tables.js";
 import type { createMerchantDiningClosingCommand } from "./merchant-dining-closing-command.js";
-import type { createMerchantDiningOrderCloseCommand } from "./merchant-dining-order-close-command.js";
+import {
+  OrderCloseCommandError,
+  type createMerchantDiningOrderCloseCommand,
+} from "./merchant-dining-order-close-command.js";
+import { DiningClosingError } from "@rms/dining";
 import type { createMerchantTaskInboxRead } from "./merchant-task-inbox-read.js";
 import type { createMerchantDiningServeCommand } from "./merchant-dining-serve-command.js";
 import type { createMerchantDiningTableCommand } from "./merchant-dining-table-command.js";
@@ -8112,6 +8116,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             cancelsAt: round.cancelsAt,
           })),
           totals: plan.totals,
+          closeBlockers: plan.closeBlockers,
         });
       })
       .catch((error: unknown) => {
@@ -10477,7 +10482,22 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           sessionVersion: result.sessionVersion,
         });
       })
-      .catch(() => denied(response));
+      .catch((error: unknown) => {
+        // WP-2423 (B759): a table that cannot close yet is a 409, never a permission message.
+        const code = error instanceof DiningClosingError ? error.code : null;
+        const [status, body] =
+          code === "DINING_CLOSING_PERMISSION_DENIED"
+            ? ([403, "dining_closing_permission_denied"] as const)
+            : code === "DINING_CLOSING_VERSION_CONFLICT" ||
+                code === "DINING_CLOSING_PHASE_CONFLICT" ||
+                code === "DINING_CLOSING_IDEMPOTENCY_CONFLICT"
+              ? ([409, "dining_session_changed"] as const)
+              : code === "DINING_CLOSING_TASK_REQUIRED" ||
+                  code === "DINING_CLOSING_BATCH_NOT_TERMINAL"
+                ? ([409, "dining_session_not_ready"] as const)
+                : ([503, "dining_closing_unavailable"] as const);
+        response.status(status).set("Cache-Control", NO_STORE).json({ error: body });
+      });
   });
 
   // WP-2423 Q7: the counter item picker — the pickup menu customers see now, under staff ordering.
@@ -10981,7 +11001,35 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           closureVersion: result.closureVersion,
         });
       })
-      .catch(() => denied(response));
+      .catch((error: unknown) => {
+        // WP-2423 (B759): only a missing permission is a 403; an Order that is not ready, changed
+        // or already closed is a 409 naming why, and a failure to decide is a 503.
+        if (!(error instanceof OrderCloseCommandError)) {
+          response
+            .status(503)
+            .set("Cache-Control", NO_STORE)
+            .json({ error: "order_closure_unavailable" });
+          return;
+        }
+        const [status, code] = (
+          {
+            ORDER_CLOSE_INPUT_INVALID: [400, "order_close_input_invalid"],
+            ORDER_CLOSE_PERMISSION_DENIED: [403, "order_close_permission_denied"],
+            ORDER_CLOSE_VERSION_CONFLICT: [409, "order_version_conflict"],
+            ORDER_CLOSE_ALREADY_CLOSED: [409, "order_already_closed"],
+            ORDER_CLOSE_NOT_READY: [409, "order_not_ready"],
+            ORDER_CLOSE_UNAVAILABLE: [503, "order_closure_unavailable"],
+          } as const
+        )[error.code];
+        response
+          .status(status)
+          .set("Cache-Control", NO_STORE)
+          .json(
+            error.code === "ORDER_CLOSE_NOT_READY"
+              ? { error: code, reasons: error.reasons.slice(0, 16) }
+              : { error: code },
+          );
+      });
   });
 
   router.post("/orders/accept", sameOriginMutation(options), (request, response) => {

@@ -97,8 +97,11 @@ export function TableGuestsLeft({
   readonly locked: boolean;
   /** Re-read when the parent re-checks the table. */
   readonly attempt: number;
-  /** How many rounds still keep the table open (null: unknown, the plan could not be read). */
-  readonly onPlan: (open: number | null) => void;
+  /**
+   * How many rounds still keep the table open and what else stops its Order closing (server codes
+   * of the close evaluation); null: unknown, the plan could not be read.
+   */
+  readonly onPlan: (plan: { open: number; blockers: readonly string[] } | null) => void;
   /** After rounds were cancelled: re-check the table. */
   readonly onResolved: () => void;
   readonly fetcher?: typeof fetch | undefined;
@@ -126,7 +129,7 @@ export function TableGuestsLeft({
         if (controller.signal.aborted) return;
         setPreviews(next);
         setLoad({ kind: "Ready", plan });
-        onPlanRef.current(plan.rounds.length);
+        onPlanRef.current({ open: plan.rounds.length, blockers: plan.closeBlockers });
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;

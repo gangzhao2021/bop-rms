@@ -15,6 +15,7 @@ import {
 } from "./dining-session-close-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { TableGuestsLeft } from "./TableGuestsLeft.js";
+import { closeReasonTexts } from "./dining-close-reasons.js";
 import type { StaffDiningTable, StaffDiningTableSession } from "./dining-session-client.js";
 
 const plural = (count: number, one: string, many: string) =>
@@ -121,7 +122,12 @@ type Check =
   | { readonly kind: "Checking" }
   | { readonly kind: "Ready"; readonly progress: DiningProgress | null }
   | { readonly kind: "Failed"; readonly denied: boolean; readonly missing?: boolean };
-type Outcome = null | "Unknown" | "Refused" | "Denied";
+type Outcome =
+  | null
+  | "Unknown"
+  | "Refused"
+  | "Denied"
+  | { readonly kind: "NotReady"; readonly reasons: readonly string[] };
 
 /**
  * WP-2423 D4 (DIN-FLOOR-BOARD): close a table's dining session from the Tables page — stop new
@@ -190,11 +196,24 @@ export function TableSessionClose({
   useEffect(() => () => pending.current?.abort(), []);
 
   const progress = check.kind === "Ready" ? check.progress : null;
-  // DEC-TABLE-CLOSE-GUESTS-LEFT: rounds still open (undefined while read, null when unknown).
-  const [openRounds, setOpenRounds] = useState<number | null | undefined>(
-    orderReference === null ? 0 : undefined,
-  );
-  const blockers = check.kind === "Ready" ? tableCloseBlockers(table, progress) : [];
+  // DEC-TABLE-CLOSE-GUESTS-LEFT: rounds still open and what else stops the Order closing, from the
+  // server's close evaluation (undefined while read, null when unknown).
+  const [plan, setPlan] = useState<
+    { readonly open: number; readonly blockers: readonly string[] } | null | undefined
+  >(orderReference === null ? { open: 0, blockers: [] } : undefined);
+  // A re-check reads the plan again: never show the previous answer meanwhile.
+  useEffect(() => {
+    setPlan(orderReference === null ? { open: 0, blockers: [] } : undefined);
+  }, [orderReference, session.version, attempt]);
+  const openRounds = plan === undefined ? undefined : plan === null ? null : plan.open;
+  const blockers =
+    check.kind === "Ready"
+      ? [
+          ...tableCloseBlockers(table, progress),
+          // WP-2423 (B759): when no round is left to close out, the close evaluation's own reasons.
+          ...(plan && plan.open === 0 ? closeReasonTexts(plan.blockers) : []),
+        ]
+      : [];
   const guestsLeft =
     orderReference !== null && check.kind === "Ready" ? (
       <TableGuestsLeft
@@ -205,7 +224,7 @@ export function TableSessionClose({
         timeZone={timeZone}
         locked={locked || submitting}
         attempt={attempt}
-        onPlan={setOpenRounds}
+        onPlan={setPlan}
         onResolved={() => {
           setAttempt((value) => value + 1);
           onRefresh();
@@ -254,10 +273,17 @@ export function TableSessionClose({
         setOutcome("Unknown");
         return;
       }
-      // Refused: start over from what the table shows now.
+      // Refused: start over from what the table shows now. Steps already done (ordering stopped)
+      // are read back from the table, so pressing Close again continues from there.
       steps.current = { done: new Set() };
       setConfirmed(false);
-      setOutcome(code === "PermissionDenied" ? "Denied" : "Refused");
+      setOutcome(
+        code === "PermissionDenied"
+          ? "Denied"
+          : code === "NotReady" && error instanceof DiningOrderCloseClientError
+            ? { kind: "NotReady", reasons: error.reasons }
+            : "Refused",
+      );
       onBusy(false);
       setAttempt((value) => value + 1);
       onRefresh();
@@ -287,14 +313,18 @@ export function TableSessionClose({
         </p>
       ) : blockers.length > 0 || planBlocks ? (
         <div role="note">
-          <p>This table can&apos;t be closed yet:</p>
           {blockers.length > 0 ? (
-            <ul>
-              {blockers.map((text) => (
-                <li key={text}>{text}</li>
-              ))}
-            </ul>
-          ) : null}
+            <>
+              <p>This table can&apos;t be closed yet:</p>
+              <ul>
+                {blockers.map((text) => (
+                  <li key={text}>{text}</li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p>This table can&apos;t be closed yet. Close out its open rounds first.</p>
+          )}
           {guestsLeft}
           <p>
             {ordersLink}{" "}
@@ -346,10 +376,21 @@ export function TableSessionClose({
         </p>
       ) : outcome === "Refused" ? (
         <p role="alert">
-          The table wasn&apos;t closed: something on its order still needs attention — a payment not
-          settled, an item not served, or an open issue. Check the order on the Orders page, then
-          try again. {ordersLink}
+          The table wasn&apos;t closed: it changed while it was being closed (for example a payment
+          or refund came in). It has been checked again; review it and try again. {ordersLink}
         </p>
+      ) : typeof outcome === "object" && outcome !== null ? (
+        <div role="alert">
+          <p>The table wasn&apos;t closed yet:</p>
+          <ul>
+            {closeReasonTexts(outcome.reasons.length > 0 ? outcome.reasons : ["UNKNOWN"]).map(
+              (text) => (
+                <li key={text}>{text}</li>
+              ),
+            )}
+          </ul>
+          <p>{ordersLink}</p>
+        </div>
       ) : null}
     </section>
   );

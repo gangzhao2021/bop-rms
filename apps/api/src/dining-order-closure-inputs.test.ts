@@ -1,19 +1,43 @@
 import { beforeEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
+  cardOwed: vi.fn(),
   cancellation: vi.fn(),
   priced: vi.fn(),
   execution: vi.fn(),
   financial: vi.fn(),
   tasks: vi.fn(),
+  staffCancellations: vi.fn(),
 }));
 vi.mock("@rms/ordering", () => ({
   createPostgresOrderCancellationRequestStore: () => ({ loadPosition: mocks.cancellation }),
   createPostgresOrderPricedAmountSource: () => mocks.priced,
+  createPostgresStaffOrderCancellationReader: () => ({ listByOrders: mocks.staffCancellations }),
+}));
+vi.mock("./merchant-order-staff-cancellation.js", () => ({
+  readCardMachineCancellationRefund: mocks.cardOwed,
 }));
 vi.mock("@rms/payment", async (original) => ({
   ...(await original<typeof import("@rms/payment")>()),
-  createPostgresOrderFinancialPosition: () => mocks.financial,
+  createPostgresOrderFinancialPosition:
+    () =>
+    async (...args: unknown[]) =>
+      withSettlement((await mocks.financial(...args)) as Record<string, unknown> | undefined),
 }));
+// WP-2423 (B759): settlement reads the all-tender totals; these fixtures have online tender only.
+const withSettlement = (value: Record<string, unknown> | undefined) =>
+  value && !("settlement" in value)
+    ? {
+        ...value,
+        settlement: {
+          capturedMinor: value.capturedMinor,
+          capturedOrderAllocationMinor: value.capturedOrderAllocationMinor,
+          capturedTipMinor: value.capturedTipMinor,
+          confirmedRefundMinor: value.confirmedRefundMinor,
+          pendingRefundMinor: value.pendingRefundMinor,
+          refundAllocation: value.refundAllocation,
+        },
+      }
+    : value;
 vi.mock("./dining-order-execution-position.js", () => ({
   createDiningOrderExecutionPosition: () => ({ load: mocks.execution }),
 }));
@@ -22,7 +46,10 @@ vi.mock("./dining-order-task-position.js", () => ({
 }));
 import { createDiningOrderClosureInputs } from "./dining-order-closure-inputs.js";
 const id = (n: number) => "0190fad0-0000-7000-8000-" + String(n).padStart(12, "0");
-beforeEach(() => vi.resetAllMocks());
+beforeEach(() => {
+  vi.resetAllMocks();
+  mocks.staffCancellations.mockResolvedValue([]);
+});
 function setup() {
   const scope = { tenantReference: id(1), brandReference: id(2), storeReference: id(3) },
     base = {
@@ -131,4 +158,56 @@ it("passes proven refund allocation to settlement without changing original pric
     refundAllocation: { orderMinor: 50n, tipMinor: 5n, unallocatedMinor: 0n },
   });
   expect((await f.load())?.settlement.classification).toBe("Settled");
+});
+
+it("B759: a cancelled card-machine round not yet refunded on the machine keeps a refund pending", async () => {
+  const f = setup();
+  mocks.staffCancellations.mockResolvedValue([{ cancellationReference: id(40) }]);
+  mocks.cardOwed.mockResolvedValue({
+    status: "Pending",
+    amountMinor: "0",
+    cardMachinePaymentReference: id(41),
+  });
+  expect((await f.load())?.settlement.reasons).not.toContain("REFUND_PENDING");
+  mocks.cardOwed.mockResolvedValue({
+    status: "Refunded",
+    amountMinor: "50",
+    cardMachinePaymentReference: id(41),
+  });
+  expect((await f.load())?.settlement.classification).toBe("Settled");
+  mocks.cardOwed.mockResolvedValue({
+    status: "Pending",
+    amountMinor: "50",
+    cardMachinePaymentReference: id(41),
+  });
+  expect((await f.load())?.settlement.reasons).toContain("REFUND_PENDING");
+});
+it("B759: an online round cancelled with a refund keeps the rest of its capture pending until refunded", async () => {
+  const f = setup();
+  const record = {
+    cancellationReference: id(40),
+    refundDisposition: "Refund",
+    paymentAttemptReference: id(42),
+    paymentTransactionReference: id(43),
+  };
+  mocks.staffCancellations.mockResolvedValue([record]);
+  mocks.cardOwed.mockResolvedValue(null);
+  const capture = (confirmedRefundMinor: bigint, pendingRefundMinor: bigint) => ({
+    paymentAttemptReference: id(42),
+    paymentTransactionReference: id(43),
+    capturedMinor: 110n,
+    confirmedRefundMinor,
+    pendingRefundMinor,
+  });
+  mocks.financial.mockResolvedValue({ ...f.financial, captures: [capture(0n, 0n)] });
+  expect((await f.load())?.settlement.reasons).toContain("REFUND_PENDING");
+  // Once the compensation case records its pending refund it is not counted twice.
+  mocks.financial.mockResolvedValue({
+    ...f.financial,
+    pendingRefundMinor: 110n,
+    captures: [capture(0n, 110n)],
+  });
+  expect((await f.load())?.settlement.reasons).toContain("REFUND_PENDING");
+  mocks.financial.mockResolvedValue({ ...f.financial, captures: [] });
+  await expect(f.load()).rejects.toThrow();
 });

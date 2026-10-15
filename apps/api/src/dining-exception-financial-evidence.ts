@@ -74,12 +74,12 @@ export function createDiningExceptionFinancialEvidence(options: Options) {
       const assessment = assessOrderSettlement({
         currencyCode: financial.currencyCode,
         pricedOrderTotalMinor: priced.pricedTotalMinor,
-        capturedMinor: financial.capturedMinor,
-        capturedOrderAllocationMinor: financial.capturedOrderAllocationMinor,
-        capturedTipMinor: financial.capturedTipMinor,
-        confirmedRefundMinor: financial.confirmedRefundMinor,
-        refundAllocation: financial.refundAllocation,
-        pendingRefundMinor: financial.pendingRefundMinor,
+        capturedMinor: financial.settlement.capturedMinor,
+        capturedOrderAllocationMinor: financial.settlement.capturedOrderAllocationMinor,
+        capturedTipMinor: financial.settlement.capturedTipMinor,
+        confirmedRefundMinor: financial.settlement.confirmedRefundMinor,
+        refundAllocation: financial.settlement.refundAllocation,
+        pendingRefundMinor: financial.settlement.pendingRefundMinor,
         unresolvedAttemptCount: financial.unresolvedAttemptCount,
         pendingAmendmentCount: priced.pendingAmendmentCount,
       });
@@ -117,9 +117,10 @@ export function createDiningExceptionFinancialEvidence(options: Options) {
           String(fact.finalityReference) !== String(closure.financialFinalityReference) ||
           fact.decidedAt > query.observedAt ||
           fact.pricedOrderTotalMinor !== priced.pricedTotalMinor.toString() ||
-          fact.capturedMinor !== financial.capturedMinor.toString() ||
-          fact.capturedOrderAllocationMinor !== financial.capturedOrderAllocationMinor.toString() ||
-          fact.capturedTipMinor !== financial.capturedTipMinor.toString()
+          fact.capturedMinor !== financial.settlement.capturedMinor.toString() ||
+          fact.capturedOrderAllocationMinor !==
+            financial.settlement.capturedOrderAllocationMinor.toString() ||
+          fact.capturedTipMinor !== financial.settlement.capturedTipMinor.toString()
         )
           return fail();
         evidence = {

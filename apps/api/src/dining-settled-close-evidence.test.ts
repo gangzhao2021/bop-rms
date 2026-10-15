@@ -45,7 +45,7 @@ function setup() {
     financial: { snapshotDigest: digest },
     priced: { snapshotDigest: digest, pendingAmendmentCount: 0 },
     cancellation: { pendingCount: 0 },
-    settlement: { classification: "Settled" },
+    settlement: { classification: "Settled", reasons: [] as string[] },
     tasks: { taskSources: [{ tasks: [] as unknown[] }] },
   };
   const fact = {
@@ -102,7 +102,14 @@ function setup() {
     createdAt: at,
     updatedAt: at,
   };
-  return { current, fact, task, authorize, run: () => source.load(input, fact) };
+  return {
+    current,
+    fact,
+    task,
+    authorize,
+    run: () => source.load(input, fact),
+    readiness: () => source.readiness(input),
+  };
 }
 it("builds eligible evidence from complete current facts and matching finality", async () => {
   const f = setup(),
@@ -156,4 +163,24 @@ it("requires current authority after facts", async () => {
   const f = setup();
   f.authorize.mockResolvedValue(false);
   await expect(f.run()).rejects.toThrow();
+});
+
+it("B759: readiness names what stops the close from the same rules, without a recorded finality", async () => {
+  const f = setup();
+  expect((await f.readiness())?.reasons).toEqual([]);
+  f.current.settlement = {
+    classification: "Indeterminate",
+    reasons: ["REFUND_PENDING"],
+  } as typeof f.current.settlement;
+  f.current.execution.items = f.current.execution.items.map((item) => ({
+    ...item,
+    phase: "InProgress",
+  }));
+  f.current.execution.phase = "InProgress";
+  const reasons = (await f.readiness())?.reasons ?? [];
+  expect(reasons).toContain("REFUND_PENDING");
+  expect(reasons).toContain("EXECUTION_NOT_FINAL");
+  expect(reasons).not.toContain("FINANCIAL_FINALITY_REQUIRED");
+  mocks.inputs.mockResolvedValue(null);
+  expect(await f.readiness()).toBeNull();
 });

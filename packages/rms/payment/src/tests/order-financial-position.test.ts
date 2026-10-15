@@ -1,5 +1,8 @@
 import { beforeEach, expect, it, vi } from "vitest";
-const mock = vi.hoisted(() => ({ load: vi.fn(), refund: vi.fn() }));
+const mock = vi.hoisted(() => ({ load: vi.fn(), refund: vi.fn(), machine: vi.fn() }));
+vi.mock("../infrastructure/persistence/card-machine-payment-store.js", () => ({
+  createPostgresCardMachinePaymentStore: () => ({ listByOrder: mock.machine }),
+}));
 vi.mock("../infrastructure/persistence/order-payment-attempt-position.js", () => ({
   createPostgresOrderPaymentAttemptPosition: () => ({ load: mock.load }),
 }));
@@ -46,6 +49,7 @@ const position = () => ({
   snapshotDigest: hash,
 });
 beforeEach(() => {
+  mock.machine.mockReset().mockResolvedValue([]);
   mock.load.mockReset().mockResolvedValue(position());
   mock.refund.mockReset().mockResolvedValue({
     confirmedMinor: 100n,
@@ -192,4 +196,138 @@ it("keeps partial compensation and unproven ordinary allocation unresolved", asy
 it("rejects compensation provenance exceeding the unallocated total", async () => {
   fullCompensation(500n, 600n);
   await expect(setup().read()).rejects.toThrow();
+});
+
+// WP-2423 (B759): a card-machine payment is a capture of the Order too, and its refunds count.
+const machinePayment = (n: number, order: bigint, tip: bigint) => ({
+  tenantReference: scope.tenantReference,
+  brandReference: scope.brandReference,
+  storeReference: scope.storeReference,
+  cardMachinePaymentReference: id(n),
+  paymentIntentReference: id(n + 1),
+  paymentAttemptReference: id(n + 2),
+  orderReference: query.orderReference,
+  orderBatchReference: id(n + 3),
+  environment: "Test",
+  recordedAt: at,
+  preparation: {
+    orderAllocation: { amountMinor: order },
+    tip: { amountMinor: tip },
+    total: { amountMinor: order + tip },
+  },
+});
+const machineRefund = (
+  n: number,
+  payment: number,
+  sourceKind: string,
+  amountMinor: bigint,
+  recordedAt = at,
+) => ({
+  cardMachineRefundReference: id(n),
+  cardMachinePaymentReference: id(payment),
+  orderReference: query.orderReference,
+  sourceKind,
+  amountMinor,
+  recordedAt,
+});
+const noRefund = {
+  confirmedMinor: 0n,
+  pendingMinor: 0n,
+  confirmedOrderAllocationMinor: 0n,
+  confirmedTipMinor: 0n,
+  unallocatedConfirmedMinor: 0n,
+  unallocatedCompensationMinor: 0n,
+  snapshotDigest: hash,
+};
+function onlineOnlyRefunds() {
+  mock.load.mockResolvedValue({ ...position(), attempts: [], capturedMinor: 0n });
+}
+it("B759: counts a served card-machine round as paid (order and tip), online fields unchanged", async () => {
+  onlineOnlyRefunds();
+  mock.refund.mockResolvedValue(noRefund);
+  mock.machine.mockResolvedValue([{ payment: machinePayment(60, 1887n, 167n), refunds: [] }]);
+  const result = await setup().read();
+  expect(result.capturedMinor).toBe(0n);
+  expect(result.settlement).toEqual({
+    capturedMinor: 2054n,
+    capturedOrderAllocationMinor: 1887n,
+    capturedTipMinor: 167n,
+    confirmedRefundMinor: 0n,
+    pendingRefundMinor: 0n,
+    refundAllocation: { orderMinor: 0n, tipMinor: 0n, unallocatedMinor: 0n },
+  });
+  expect(mock.refund.mock.calls[0]?.[1]).toMatchObject({
+    paymentTransactionReference: id(60),
+    paymentIntentReference: id(61),
+    paymentAttemptReference: id(62),
+  });
+});
+it("B759: a cancelled card-machine round refunded in full is reversed in full, tip included", async () => {
+  onlineOnlyRefunds();
+  mock.refund.mockResolvedValue(noRefund);
+  mock.machine.mockResolvedValue([
+    {
+      payment: machinePayment(60, 1887n, 167n),
+      refunds: [machineRefund(70, 60, "StaffCancellation", 2054n)],
+    },
+  ]);
+  const result = await setup().read();
+  expect(result.settlement.confirmedRefundMinor).toBe(2054n);
+  expect(result.settlement.refundAllocation).toEqual({
+    orderMinor: 1887n,
+    tipMinor: 167n,
+    unallocatedMinor: 0n,
+  });
+});
+it("B759: ordinary refunds on the machine come from the ordinary owner, never twice", async () => {
+  onlineOnlyRefunds();
+  mock.refund.mockResolvedValue({
+    ...noRefund,
+    confirmedMinor: 537n,
+    confirmedOrderAllocationMinor: 537n,
+  });
+  mock.machine.mockResolvedValue([
+    {
+      payment: machinePayment(60, 537n, 0n),
+      refunds: [machineRefund(70, 60, "OrdinaryRefund", 537n)],
+    },
+  ]);
+  const result = await setup().read();
+  expect(result.settlement.confirmedRefundMinor).toBe(537n);
+  expect(result.settlement.refundAllocation.orderMinor).toBe(537n);
+});
+it("B759: item cancellation refunds are the order's; refunds recorded later are not yet counted", async () => {
+  onlineOnlyRefunds();
+  mock.refund.mockResolvedValue(noRefund);
+  mock.machine.mockResolvedValue([
+    {
+      payment: machinePayment(60, 1000n, 100n),
+      refunds: [
+        machineRefund(70, 60, "ItemCancellation", 400n),
+        machineRefund(71, 60, "StaffCancellation", 700n, "2026-09-20T00:00:01.000Z"),
+      ],
+    },
+  ]);
+  const result = await setup().read();
+  expect(result.settlement.confirmedRefundMinor).toBe(400n);
+  expect(result.settlement.refundAllocation).toEqual({
+    orderMinor: 400n,
+    tipMinor: 0n,
+    unallocatedMinor: 0n,
+  });
+});
+it("B759: rejects a card-machine payment of another environment or refunds above it", async () => {
+  onlineOnlyRefunds();
+  mock.refund.mockResolvedValue(noRefund);
+  mock.machine.mockResolvedValue([
+    { payment: { ...machinePayment(60, 1000n, 0n), environment: "Live" }, refunds: [] },
+  ]);
+  await expect(setup().read()).rejects.toThrow("ORDER_FINANCIAL_POSITION_UNAVAILABLE");
+  mock.machine.mockResolvedValue([
+    {
+      payment: machinePayment(60, 1000n, 0n),
+      refunds: [machineRefund(70, 60, "StaffCancellation", 1001n)],
+    },
+  ]);
+  await expect(setup().read()).rejects.toThrow("ORDER_FINANCIAL_POSITION_UNAVAILABLE");
 });

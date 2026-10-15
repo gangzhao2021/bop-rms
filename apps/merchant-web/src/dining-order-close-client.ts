@@ -6,10 +6,34 @@ export interface DiningOrderCloseCommand {
   readonly reasonCode: string;
 }
 export class DiningOrderCloseClientError extends Error {
-  constructor(readonly code: "PermissionDenied" | "Conflict" | "Unavailable" | "OutcomeUnknown") {
+  constructor(
+    readonly code: "PermissionDenied" | "NotReady" | "Conflict" | "Unavailable" | "OutcomeUnknown",
+    /** NotReady: the server's reason codes (what is still outstanding). */
+    readonly reasons: readonly string[] = [],
+  ) {
     super("Order closure could not be confirmed");
     this.name = "DiningOrderCloseClientError";
   }
+}
+/** WP-2423 (B759): a 409 names why the Order can't close yet; anything else is a plain conflict. */
+async function refusal(response: Response): Promise<DiningOrderCloseClientError> {
+  try {
+    const text = await response.text();
+    const value: unknown = text.length > 4096 ? null : JSON.parse(text);
+    const body = value as { error?: unknown; reasons?: unknown } | null;
+    if (
+      body?.error === "order_not_ready" &&
+      Array.isArray(body.reasons) &&
+      body.reasons.length <= 32 &&
+      body.reasons.every(
+        (code: unknown) => typeof code === "string" && /^[A-Z][A-Z0-9_]{0,63}$/u.test(code),
+      )
+    )
+      return new DiningOrderCloseClientError("NotReady", Object.freeze([...body.reasons]));
+  } catch {
+    // An unreadable body is still a refusal: re-check the table.
+  }
+  return new DiningOrderCloseClientError("Conflict");
 }
 const invalid = (): never => {
   throw new DiningOrderCloseClientError("Unavailable");
@@ -83,7 +107,7 @@ export function createDiningOrderCloseClient(fetcher: typeof fetch = fetch) {
             if (controller.signal.aborted) throw new DiningOrderCloseClientError("OutcomeUnknown");
             if (response.status === 401 || response.status === 403)
               throw new DiningOrderCloseClientError("PermissionDenied");
-            if (response.status === 409) throw new DiningOrderCloseClientError("Conflict");
+            if (response.status === 409) throw await refusal(response);
             if (
               !response.ok ||
               response.headers.get("cache-control") !== "no-store" ||

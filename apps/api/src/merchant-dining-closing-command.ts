@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { readClosedRecord } from "@bop/identity";
 import {
+  DiningClosingError,
   createDiningClosingService,
   createPostgresDiningClosingStore,
   createPostgresDiningClosingFence,
@@ -25,6 +26,13 @@ import type { MerchantBffService } from "./merchant-bff.js";
 const fail = (): never => {
   throw new Error("DINING_CLOSING_COMMAND_UNAVAILABLE");
 };
+// WP-2423 (B759): a missing permission and a changed session are told apart from failures.
+const denied = (): never => {
+  throw new DiningClosingError("DINING_CLOSING_PERMISSION_DENIED");
+};
+const changed = (): never => {
+  throw new DiningClosingError("DINING_CLOSING_VERSION_CONFLICT");
+};
 export function createMerchantDiningClosingCommand(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
@@ -37,7 +45,7 @@ export function createMerchantDiningClosingCommand(options: {
 }) {
   const resolve = createMerchantStoreScope(options.persistence);
   return async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
-    const authenticated = await options.authentication.authorize(input);
+    const authenticated = await options.authentication.authorize(input).catch(denied);
     const raw = readClosedRecord(input.command, [
       "action",
       "diningSessionReference",
@@ -57,9 +65,9 @@ export function createMerchantDiningClosingCommand(options: {
           input.sessionCookie,
           "dining.session.close",
           authenticated.sessionReference,
-        ),
+        ).catch(denied),
         allowed = async () => (await current.allowed()) === true;
-      if (!(await allowed())) return fail();
+      if (!(await allowed())) return denied();
       const scope = {
         tenantReference: current.selected.tenantReference,
         brandReference: String(current.context.brand.brandReference),
@@ -126,7 +134,7 @@ export function createMerchantDiningClosingCommand(options: {
           sessionVersion: prior.record.session.version,
         });
       }
-      if (session.version !== command.expectedSessionVersion) return fail();
+      if (session.version !== command.expectedSessionVersion) return changed();
       const authorizeAndFence = async () => {
         const again = await fence(tx, {
           diningSessionReference: command.diningSessionReference,

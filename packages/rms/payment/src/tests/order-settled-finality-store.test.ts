@@ -10,8 +10,26 @@ vi.mock("@rms/ordering", async (original) => ({
   createPostgresOrderRevisionPosition: () => mock.revision,
   createPostgresOrderPricedAmountSource: () => mock.price,
 }));
+// WP-2423 (B759): settlement reads the all-tender totals; these fixtures have online tender only.
 vi.mock("../infrastructure/order-financial-position.js", () => ({
-  createPostgresOrderFinancialPosition: () => mock.financial,
+  createPostgresOrderFinancialPosition:
+    () =>
+    async (...args: unknown[]) => {
+      const value = (await mock.financial(...args)) as Record<string, unknown> | undefined;
+      return value && !("settlement" in value)
+        ? {
+            ...value,
+            settlement: {
+              capturedMinor: value.capturedMinor,
+              capturedOrderAllocationMinor: value.capturedOrderAllocationMinor,
+              capturedTipMinor: value.capturedTipMinor,
+              confirmedRefundMinor: value.confirmedRefundMinor,
+              pendingRefundMinor: value.pendingRefundMinor,
+              refundAllocation: value.refundAllocation,
+            },
+          }
+        : value;
+    },
 }));
 vi.mock("@bop/audit", async (original) => ({
   ...(await original<typeof import("@bop/audit")>()),

@@ -475,6 +475,21 @@ function RecordedRequestStatus({
     </div>
   );
 }
+/**
+ * WP-2423: what the refund wizard shows. Once a request is recorded its confirmation (amount,
+ * checkbox and record button) is gone: the success message and the reread request list remain,
+ * the selection is cleared and locked, and staff start another request explicitly.
+ */
+export function refundWizardSections(
+  state: "Idle" | "Busy" | "Unknown" | "Recorded",
+  hasPreview: boolean,
+  requestable: boolean,
+): { readonly confirmation: boolean; readonly startAnother: boolean } {
+  return {
+    confirmation: hasPreview && state !== "Recorded",
+    startAnother: requestable && state === "Recorded",
+  };
+}
 function RefundWizard({
   orderReference,
   csrf,
@@ -530,6 +545,7 @@ function RefundWizard({
     ) === true;
   // WP-2423 Q5: someone who cannot record a new request here only follows recorded ones.
   const requestable = blockedMessage === null && items?.canRequest !== false;
+  const sections = refundWizardSections(state, preview !== null, requestable);
   const verificationCurrent = () =>
     verifiedUntil !== null && Date.parse(verifiedUntil) > Date.now();
   const clearPreview = () => {
@@ -538,6 +554,20 @@ function RefundWizard({
     setConfirmed(false);
     operation.current = null;
     operationReference.current = null;
+  };
+  // WP-2423: a recorded request leaves nothing selected or confirmed behind it.
+  const clearRequestForm = () => {
+    clearPreview();
+    setQuantities({});
+    setReason("");
+    setNote("");
+  };
+  const startAnother = () => {
+    if (state !== "Recorded" || pending.current) return;
+    clearRequestForm();
+    previewIdentity.current = null;
+    setMessage("");
+    setState("Idle");
   };
   const load = async () => {
     if (pending.current || preparing.size > 0 || state === "Busy") return;
@@ -569,6 +599,10 @@ function RefundWizard({
           const recovered = result.recentRequests.find(
             (entry) => entry.operationReference === operationReference.current,
           );
+          if (recovered) {
+            previewIdentity.current = null;
+            clearRequestForm();
+          }
           setState(recovered ? "Recorded" : "Unknown");
           setMessage(
             recovered
@@ -727,6 +761,7 @@ function RefundWizard({
       const result = await operation.current.submit(csrf, controller.signal);
       if (!controller.signal.aborted) {
         previewIdentity.current = null;
+        clearRequestForm();
         setState("Recorded");
         onFinancialChange();
         setMessage(
@@ -963,7 +998,12 @@ function RefundWizard({
           </button>
         </fieldset>
       )}
-      {preview ? (
+      {sections.startAnother ? (
+        <button type="button" disabled={preparing.size > 0} onClick={startAnother}>
+          Start another refund request
+        </button>
+      ) : null}
+      {preview && sections.confirmation ? (
         <section aria-label="Refund calculation">
           <h3>Confirm refund amount</h3>
           <dl>

@@ -11,7 +11,7 @@ const id = (n: number) => "01909968-0000-7000-8000-" + n.toString(16).padStart(1
 const headers = { "cache-control": "no-store" };
 const csrf = "a".repeat(43);
 
-async function floor(page: Page) {
+async function floor(page: Page, session = { phase: "Active", version: 19 }) {
   const scope = {
     brandLabel: "Synthetic Brand",
     storeLabel: "Synthetic Store",
@@ -61,7 +61,7 @@ async function floor(page: Page) {
             currentDiningSessionReference: id(2),
             elapsedMinutes: 4 * 24 * 60,
             qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
-            session: { phase: "Active", version: 19, orderReference: id(3) },
+            session: { ...session, orderReference: id(3) },
             staffRoundsAwaitingPayment: [],
           },
         ],
@@ -171,6 +171,7 @@ test("@production a manager closes out a table whose guests left: rounds cancell
         orderVersion,
         observedAt: "2026-10-15T19:00:00.000Z",
         rounds: left,
+        closeBlockers: [],
         totals: {
           onlineMinor: left.some((round) => round.state === "PaidNotSent") ? "1130" : "0",
           cardMachineMinor: left.some((round) => round.orderBatchReference === id(29))
@@ -309,4 +310,101 @@ test("@production a table whose order is no longer found says so instead of blam
     ),
   ).toBeVisible();
   await expect(page.getByText(/Check the connection/u)).toHaveCount(0);
+});
+
+test("@production B759: a table left in Closing names what still stops it, then closing continues from there", async ({
+  page,
+}) => {
+  // v15 DEMO-02: every round cancelled and refunded, the session already Closing (v20), the
+  // order still open. The close dialog says what the server's close evaluation still waits for,
+  // never an empty list or a permission message; once resolved, Close continues from Closing.
+  await floor(page, { phase: "Closing", version: 20 });
+  let blockers = ["REFUND_PENDING"];
+  let closeAnswers = 0;
+  const closing: Record<string, unknown>[] = [];
+  await page.route("**/merchant/dining/order-progress", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        ...progress("Cancelled", [{ ...progressItem(1, 21, 1, "Cancelled") }], 38),
+        sessionPhase: "Closing",
+        sessionVersion: 20,
+      },
+    }),
+  );
+  await page.route("**/merchant/dining/table-close-plan", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(3),
+        diningSessionReference: id(2),
+        orderVersion: 38,
+        observedAt: "2026-10-15T19:00:00.000Z",
+        rounds: [],
+        closeBlockers: blockers,
+        totals: { onlineMinor: "0", cardMachineMinor: "0" },
+      },
+    }),
+  );
+  await page.route("**/merchant/orders/close", (route) => {
+    closing.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
+    closeAnswers += 1;
+    return closeAnswers === 1
+      ? route.fulfill({
+          status: 409,
+          headers,
+          json: { error: "order_not_ready", reasons: ["REFUND_PENDING"] },
+        })
+      : route.fulfill({
+          headers,
+          json: { status: "Committed", closureVersion: 1, closedOrderVersion: 38 },
+        });
+  });
+  await page.route("**/merchant/dining/closing", (route) => {
+    closing.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
+    return route.fulfill({
+      headers,
+      json: { status: "Applied", phase: "Closed", sessionVersion: 21 },
+    });
+  });
+
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T2", exact: true }).click();
+  const dialog = page.getByRole("region", { name: "Close this table" });
+  await expect(dialog).toContainText("This table can't be closed yet:");
+  await expect(dialog.getByRole("listitem")).toContainText([
+    "A refund is still being made (online, or not yet recorded as refunded on the card machine).",
+  ]);
+  await expect(dialog.getByRole("button", { name: /^Close table/u })).toHaveCount(0);
+  await expectNoInternalText(page, ["Temporarily unavailable"]);
+
+  // The refund is made; checking again offers Close. A refusal still names why, not access.
+  blockers = [];
+  await dialog.getByRole("button", { name: "Check again", exact: true }).click();
+  const close = dialog.getByRole("button", { name: "Close table T2", exact: true });
+  await expect(close).toBeVisible();
+  await expect(dialog).not.toContainText("can't be closed yet");
+  await dialog.getByRole("checkbox", { name: "The guests at table T2 have left" }).check();
+  await close.click();
+  const alert = dialog.getByRole("alert");
+  await expect(alert).toContainText("The table wasn't closed yet:");
+  await expect(alert).toContainText("A refund is still being made");
+  await expect(page.getByText(/access doesn't allow/u)).toHaveCount(0);
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/dining-b759-closing-${width}.png`, fullPage: true });
+  }
+  await dialog.getByRole("checkbox", { name: "The guests at table T2 have left" }).check();
+  await dialog.getByRole("button", { name: "Close table T2", exact: true }).click();
+  await expect(page.getByText("Table T2 is closed and free for the next party.")).toBeVisible();
+  // No new Begin: the order close, then Finalize at the Closing session's version.
+  expect(closing.map((body) => body.action ?? body.reasonCode)).toEqual([
+    "ORDER_CANCELLED",
+    "ORDER_CANCELLED",
+    "Finalize",
+  ]);
+  expect(closing[2]).toMatchObject({ expectedSessionVersion: 20 });
 });

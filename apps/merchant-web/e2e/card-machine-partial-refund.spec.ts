@@ -247,6 +247,9 @@ test("@production a manager refunds an item of a card-machine payment and record
   await page.getByRole("checkbox", { name: /I confirm/ }).check();
   await page.getByRole("button", { name: "Record refund request" }).click();
   await expect(page.getByText(/Now refund it on the store's card machine/u)).toBeVisible();
+  // WP-2423: once recorded, the confirmation and its button are gone (no second request by mistake).
+  await expect(page.getByRole("button", { name: "Record refund request" })).toHaveCount(0);
+  await expect(page.getByRole("checkbox", { name: /I confirm/ })).toHaveCount(0);
   await page.getByRole("button", { name: "Refresh recorded requests" }).click();
   const requests = page.getByRole("region", { name: "Recorded refund requests" });
   await expect(requests).toContainText("To refund on the card machine");

@@ -11,6 +11,8 @@ import {
   createPostgresDiningGuestBindingStore,
 } from "../../rms/dining/src/index.ts";
 import { loadOutboxEnvelope } from "../../bop/eventing/src/index.ts";
+import { canonicalizeRfc8785, sha256Hex } from "../../bop/audit/src/index.ts";
+import { parseSubmissionInventoryFinalValidation } from "../../rms/inventory/src/index.ts";
 import {
   createPostgresReceiptOrderSource,
   createOrderNumberAllocation,
@@ -18,6 +20,7 @@ import {
   createPostgresOrderBatchIdentitySource,
   createPostgresOrderSubmittedConsumer,
   createPostgresStaffDiningRoundEntryStore,
+  createPostgresStaffOrderCancellationReader,
   parseAdditionalDiningBatchSnapshot,
 } from "../../rms/ordering/src/index.ts";
 import {
@@ -71,6 +74,13 @@ import { createPersistentMerchantOrderQueue } from "../../../apps/api/src/persis
 import { kitchenPreparation } from "../../../apps/api/src/merchant-kitchen-query.ts";
 import { createOrderCapturedPaymentSource } from "../../../apps/api/src/order-captured-payment-source.ts";
 import { createAdditionalOrderPaidContextSource } from "../../../apps/api/src/additional-order-paid-context-source.ts";
+import { createMerchantDiningTableClosePlan } from "../../../apps/api/src/merchant-dining-table-close-plan.ts";
+import { createMerchantOrderStaffCancellation } from "../../../apps/api/src/merchant-order-staff-cancellation.ts";
+import { createMerchantDiningOrderCloseCommand } from "../../../apps/api/src/merchant-dining-order-close-command.ts";
+import { createDiningOrderCloseConfiguration } from "../../../apps/api/src/dining-order-close-configuration.ts";
+import { createMerchantDiningClosingCommand } from "../../../apps/api/src/merchant-dining-closing-command.ts";
+import { createPaymentCompensationComposition } from "../../../apps/api/src/payment-compensation-composition.ts";
+import { createInternalCompensationIdentity } from "../../../tooling/environment/pilot-compensation-identity.mjs";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { seedAcceptanceOrderHistory } from "../test-support/acceptance-order-history.mjs";
@@ -998,7 +1008,7 @@ it("enters a dine-in round by staff, takes its card-machine payment and marks it
       // refund versions to that receipt.
       const R3 = await seedUnpaidRound(admin, {
         from: R2.batch.orderBatchReference,
-        at: time(-minutes(2)),
+        at: now(),
         id: (k) => id(0x3000 + k),
       });
       const refreshReceiptObservations = receiptObservationRefresh({
@@ -1050,6 +1060,21 @@ it("enters a dine-in round by staff, takes its card-machine payment and marks it
         elsewhere,
         refreshReceiptObservations,
         time,
+      });
+
+      await exerciseGuestsLeftOrderClose({
+        admin,
+        one,
+        transactions,
+        tenant,
+        scope,
+        ownerScope,
+        provider,
+        orderReference,
+        dining,
+        rounds: { R1, R2, roundTotal, round2Total, tipMinor },
+        pay1,
+        saved,
       });
     } finally {
       vi.unstubAllEnvs();
@@ -1809,6 +1834,478 @@ async function exerciseCardMachinePartialRefund({
 }
 
 /**
+ * WP-2423 B759 (v15 2026-10-15): the guests of this table left. Its Order has round 1 paid online
+ * and accepted, round 2 paid on the Store's card machine, accepted and refunded on the machine in
+ * full by item, and round 3 cancelled unpaid. Under the restricted API role and a real merchant
+ * session (membership, role grants, encrypted session) of a manager holding the close-dialog
+ * permissions, the table close plan names what still stops the Order from closing; the manager
+ * resolves the open rounds as the close dialog does (staff cancellation, reason GUEST_LEFT): round
+ * 2 owes nothing more (AlreadyRefunded), round 1's online payment is refunded by Payment's
+ * compensation workload (Provider simulated). Until that refund is made the Order is not closable
+ * (REFUND_PENDING, never a permission refusal); then it closes: the Payment finality counts the
+ * card-machine round with the online round, a replay writes nothing, another close is refused as
+ * already closed, and a manager whose permission was withdrawn is refused. The dining session is
+ * put into Closing before the Order close and finalized after it.
+ *
+ * Test-only owner seeds (the fixture writes the history of round 1 and the acceptance of round 2
+ * without the owners' side records the pilot worker leaves): round 1's submission inventory record
+ * (nothing was tracked, so its cancellation releases no stock), round 2's Confirmed payment
+ * disposition the Ordering payment-outcome consumer records once a paid later round is accepted,
+ * and the table version Dining's session start leaves (the journey seed keeps the version before).
+ * Round 1 is cancelled rather than served: the fixture has no kitchen progress or service path for
+ * its seeded ticket, while the cancellation and the Provider refund are the v15 shape (every round
+ * of the Order cancelled and refunded).
+ */
+async function exerciseGuestsLeftOrderClose({
+  admin,
+  one,
+  transactions,
+  tenant,
+  scope,
+  ownerScope,
+  provider,
+  orderReference,
+  dining,
+  rounds: { R1, R2, roundTotal, round2Total, tipMinor },
+  pay1,
+  saved,
+}) {
+  const id = (n) => "01a5ff00-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  let n = 0xe000;
+  const fresh = () =>
+    Date.now()
+      .toString(16)
+      .padStart(12, "0")
+      .replace(/^(.{8})(.{4})$/u, "$1-$2") +
+    "-7000-8000-" +
+    (n++).toString(16).padStart(12, "0");
+  const now = () => new Date().toISOString();
+  const digest = (value) => "sha256:" + sha256Hex(canonicalizeRfc8785(value));
+  const cardMachineTotal = round2Total + tipMinor;
+
+  // ── Test-only owner seeds (see above), triggers and foreign keys skipped for the seed only.
+  const [r1] = await one(
+    "SELECT submission_id::text AS submission,source_cart_id::text AS cart,source_cart_version::int AS version,quote_id::text AS quote,submitted_at FROM rms_ordering.order_batch WHERE order_batch_id=$1",
+    [R1.batch.orderBatchReference],
+  );
+  const inventoryRecord = parseSubmissionInventoryFinalValidation({
+    schemaVersion: 1,
+    validationReference: id(0x10),
+    operationReference: id(0x11),
+    actorReference: R1.f.request.record.guestSessionReference,
+    auditReference: id(0x12),
+    tenantReference: tenant,
+    brandReference: scope.brandReference,
+    storeReference: scope.storeReference,
+    orderReference,
+    submissionReference: r1.submission,
+    cartReference: r1.cart,
+    cartVersion: r1.version,
+    quoteReference: r1.quote,
+    demandReference: id(0x13),
+    demandDigest: digest(["demand", r1.submission]),
+    workflowReference: id(0x14),
+    workflowVersionReference: id(0x15),
+    workflowVersion: 1,
+    transitionReference: id(0x16),
+    observedAt: r1.submitted_at.toISOString(),
+    items: [
+      {
+        itemReference: id(0x17),
+        currentItemVersion: 1,
+        configurationOperationReferences: [id(0x18)],
+        unit: {
+          unitCode: "EA",
+          dimension: "Count",
+          displayPrecision: 0,
+          ledgerPrecision: 0,
+          roundingMode: "HalfEven",
+        },
+        quantity: "1",
+        stockTrackingEnabled: false,
+        disposition: "NotTracked",
+        deferredActionCode: null,
+      },
+    ],
+    reservationSet: null,
+  });
+  const machineEvent = createCardMachinePaymentEnvelope(saved);
+  const [accepted2] = await one(
+    "SELECT acceptance_id::text AS acceptance,accepted_order_version::int AS version,accepted_at FROM rms_ordering.order_acceptance_record WHERE order_batch_id=$1",
+    [R2.batch.orderBatchReference],
+  );
+  await admin.query("SET session_replication_role = replica");
+  try {
+    const v = inventoryRecord;
+    await admin.query(
+      "INSERT INTO rms_inventory.submission_final_validation (tenant_id,brand_id,store_id,validation_id,operation_id,actor_id,audit_id,order_id,submission_id,cart_id,cart_version,quote_id,demand_id,demand_digest,workflow_id,workflow_version_id,workflow_version,transition_id,reservation_set_id,observed_at,record_digest,record_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,NULL,$19,$20,$21)",
+      [
+        tenant,
+        scope.brandReference,
+        scope.storeReference,
+        v.validationReference,
+        v.operationReference,
+        v.actorReference,
+        v.auditReference,
+        v.orderReference,
+        v.submissionReference,
+        v.cartReference,
+        v.cartVersion,
+        v.quoteReference,
+        v.demandReference,
+        v.demandDigest,
+        v.workflowReference,
+        v.workflowVersionReference,
+        v.workflowVersion,
+        v.transitionReference,
+        v.observedAt,
+        digest(v),
+        v,
+      ],
+    );
+    await admin.query(
+      "INSERT INTO rms_ordering.order_payment_disposition_record (disposition_id,brand_id,store_id,order_id,order_batch_id,submission_id,payment_transaction_id,payment_intent_id,payment_attempt_id,payment_event_id,source_checkpoint,correlation_id,source_version,source_digest,evaluated_at,disposition,confirmation_id,source_snapshot_digest,confirmed_at,order_confirmed_event_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'Confirmed',$16,$17,$15,$18)",
+      [
+        id(0x20),
+        scope.brandReference,
+        scope.storeReference,
+        orderReference,
+        R2.batch.orderBatchReference,
+        R2.batch.submissionReference,
+        machineEvent.payload.paymentTransactionReference,
+        machineEvent.payload.paymentIntentReference,
+        machineEvent.payload.paymentAttemptReference,
+        machineEvent.eventId,
+        accepted2.acceptance,
+        id(0x21),
+        accepted2.version,
+        digest(["disposition", id(0x20)]),
+        accepted2.accepted_at,
+        id(0x22),
+        digest(["snapshot", id(0x20)]),
+        id(0x23),
+      ],
+    );
+    // The journey fixture's table still reads its pre-assignment version; Dining's session start
+    // advances the occupied table past the session's assignment version (releasing it checks so).
+    await admin.query(
+      "UPDATE rms_dining.dining_table SET version=version+1,table_snapshot=jsonb_set(table_snapshot,'{aggregateVersion}',to_jsonb(version+1)) WHERE table_id=$1 AND version=1",
+      [dining.table.tableReference],
+    );
+  } finally {
+    await admin.query("SET session_replication_role = origin");
+  }
+
+  // ── A Store Manager's real session: cancel orders, close tables and close Orders.
+  const permissions = [
+    "dining.operate",
+    "ordering.order.cancel",
+    "dining.session.close",
+    "order.close",
+  ];
+  const manager = await seedMerchantAcceptanceSession({
+    admin,
+    runner: transactions(),
+    scope: ownerScope,
+    actor: id(0x703),
+    at: now(),
+    extraPermissions: permissions,
+    referencePrefix: "01909962",
+    sessionReferencePrefix: "01909961",
+  });
+  const persistence = { ...manager.persistence, now };
+  const session = { sessionCookie: manager.sessionCookie, csrf: manager.csrf };
+  const refundConfiguration = async () => ({
+    providerAccountReference: provider,
+    environment: "Test",
+  });
+  const diningSessionReference = dining.session.diningSessionReference;
+  // The pilot's compositions (tooling/environment/pilot-merchant.mjs).
+  const plan = () =>
+    createMerchantDiningTableClosePlan({
+      persistence,
+      authentication: manager.authentication,
+      resolveRefundConfiguration: refundConfiguration,
+    })({ ...session, query: { orderReference, diningSessionReference } });
+  const cancelRound = createMerchantOrderStaffCancellation({
+    persistence,
+    authentication: manager.authentication,
+    installContext: async (tx, selected) => {
+      await tx.query(
+        "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+        [selected.tenantReference, selected.brandReference, selected.storeReference],
+      );
+    },
+    nextReference: fresh,
+    resolveRefundConfiguration: refundConfiguration,
+  });
+  const closeOrder = createMerchantDiningOrderCloseCommand({
+    persistence,
+    authentication: manager.authentication,
+    resolveConfiguration: createDiningOrderCloseConfiguration({
+      ...ownerScope,
+      providerAccountReference: provider,
+      environment: "Test",
+    }),
+    newReference: fresh,
+    audit: { retentionPolicyCode: "ORDER_AUDIT", retentionPolicyVersion: 1 },
+  });
+  const closeTable = createMerchantDiningClosingCommand({
+    persistence,
+    authentication: manager.authentication,
+    providerAccountReference: provider,
+    environment: "Test",
+    newReference: fresh,
+    retentionPolicyCode: "AUDIT_DEFAULT",
+    retentionPolicyVersion: 1,
+  });
+  const sessionVersion = async () =>
+    Number(
+      (
+        await one("SELECT version FROM rms_dining.dining_session WHERE session_id=$1", [
+          diningSessionReference,
+        ])
+      )[0].version,
+    );
+  const closeInput = (orderVersion, operationReference = fresh()) => ({
+    ...session,
+    command: {
+      orderReference,
+      operationReference,
+      expectedOrderVersion: orderVersion,
+      expectedClosureVersion: 0,
+      reasonCode: "ORDER_CANCELLED",
+    },
+  });
+  const notReady = (reasons) => (error) => {
+    assert.equal(error.code, "ORDER_CLOSE_NOT_READY");
+    assert.deepEqual([...error.reasons], reasons);
+    return true;
+  };
+  const written = async () =>
+    (
+      await one(
+        "SELECT (SELECT count(*)::int FROM rms_ordering.order_closure_version WHERE order_id=$1) AS closures,(SELECT count(*)::int FROM rms_payment.order_settled_finality WHERE order_id=$1) AS finalities,(SELECT count(*)::int FROM platform_audit.audit_record WHERE action_code IN ('ORDER_CLOSURE_RECORDED','ORDER_FINANCIAL_FINALITY_RECORDED') AND target_id=$1) AS audits",
+        [orderReference],
+      )
+    )[0];
+  const nothing = { closures: 0, finalities: 0, audits: 0 };
+  const states = (view) => view.rounds.map((round) => [round.sequence, round.state, round.refund]);
+
+  // ── The close dialog: two rounds still open. Payment counts the card-machine round as paid
+  // (B759: before, its capture was missing and the Order read ORDER_BALANCE_UNPAID forever).
+  const open = await plan();
+  assert.deepEqual(states(open), [
+    [1, "NotStarted", { method: "Online", amountMinor: String(roundTotal) }],
+    [2, "NotStarted", { method: "CardMachine", amountMinor: "0" }],
+  ]);
+  assert.deepEqual(open.totals, { onlineMinor: String(roundTotal), cardMachineMinor: "0" });
+  const openReasons = ["EVIDENCE_INCOMPLETE", "EXECUTION_NOT_FINAL", "FULFILLMENT_NOT_FINAL"];
+  assert.deepEqual([...open.closeBlockers], openReasons);
+  // The close is refused with what is outstanding, never as a permission refusal; nothing written.
+  await assert.rejects(closeOrder(closeInput(open.orderVersion)), notReady(openReasons));
+  assert.deepEqual(await written(), nothing);
+
+  // The table is put into Closing first (no new rounds); the Order close continues from there.
+  const begun = await closeTable({
+    ...session,
+    command: {
+      action: "Begin",
+      diningSessionReference,
+      operationReference: fresh(),
+      expectedSessionVersion: await sessionVersion(),
+    },
+  });
+  assert.deepEqual([begun.status, begun.phase], ["Applied", "Closing"]);
+
+  // ── The manager resolves the rounds (GUEST_LEFT). Round 2 was refunded on the machine in full:
+  // cancelled with nothing more owed. Round 1: Payment refunds the online payment.
+  const cancel = async (round, operationReference = fresh()) =>
+    cancelRound({
+      ...session,
+      command: {
+        orderReference,
+        orderBatchReference: round.orderBatchReference,
+        expectedOrderVersion: (await plan()).orderVersion,
+        operationReference,
+        reasonCode: "GUEST_LEFT",
+      },
+    });
+  const machineRound = await cancel(open.rounds[1]);
+  assert.deepEqual(
+    [machineRound.status, machineRound.refundMethod, machineRound.refundStatus],
+    ["Cancelled", "CardMachine", "Refunded"],
+  );
+  assert.equal(machineRound.refundAmountMinor, String(cardMachineTotal));
+  const onlineRound = await cancel(open.rounds[0]);
+  assert.deepEqual(
+    [onlineRound.status, onlineRound.refundMethod, onlineRound.refundStatus],
+    ["Cancelled", "Online", "Pending"],
+  );
+  assert.deepEqual(
+    await one(
+      "SELECT order_batch_id::text AS batch,reason_code,refund_disposition FROM rms_ordering.order_staff_cancellation WHERE order_id=$1 ORDER BY cancelled_order_version",
+      [orderReference],
+    ),
+    [
+      {
+        batch: R2.batch.orderBatchReference,
+        reason_code: "GUEST_LEFT",
+        refund_disposition: "AlreadyRefunded",
+      },
+      {
+        batch: R1.batch.orderBatchReference,
+        reason_code: "GUEST_LEFT",
+        refund_disposition: "Refund",
+      },
+    ],
+  );
+  // While the online refund is still owed, the plan and the close both name it.
+  const refunding = await plan();
+  assert.deepEqual(states(refunding), [[1, "Refunding", null]]);
+  assert.deepEqual([...refunding.closeBlockers], ["REFUND_PENDING"]);
+  await assert.rejects(
+    closeOrder(closeInput(refunding.orderVersion)),
+    notReady(["REFUND_PENDING"]),
+  );
+  assert.deepEqual(await written(), nothing);
+
+  // ── Payment's compensation workload refunds round 1 in full (Provider simulated, InternalTest).
+  const source = await transactions({ guc: true }).run((tx) =>
+    createPostgresStaffOrderCancellationReader({
+      brandReference: scope.brandReference,
+      storeReference: scope.storeReference,
+    }).loadCompensationByPaymentEvent({
+      transaction: tx,
+      paymentEventReference: pay1.paymentEvent,
+    }),
+  );
+  assert.deepEqual(
+    [source.orderBatchReference, source.reason],
+    [R1.batch.orderBatchReference, "CancelledByStaff"],
+  );
+  const [observed] = await one(
+    "SELECT provider_intent_reference AS intent,provider_transaction_reference AS transaction FROM rms_payment.payment_provider_observation WHERE payment_intent_id=$1 ORDER BY provider_observed_at DESC LIMIT 1",
+    [pay1.paymentIntent],
+  );
+  const money = (amountMinor) => ({ amountMinor, currencyCode: "CAD" });
+  let providerRefunded = 0n;
+  const providerSnapshot = (request) =>
+    createPaymentProviderSnapshot({
+      kind: "Snapshot",
+      context: request.context,
+      providerIntentReference: observed.intent,
+      providerTransactionReference: observed.transaction,
+      paymentMethod: "OnlineCard",
+      captureMode: "Automatic",
+      status: "Captured",
+      requestedAmount: money(roundTotal),
+      authorizedAmount: money(roundTotal),
+      capturedAmount: money(roundTotal),
+      refundedAmount: money(providerRefunded),
+      observedAt: now(),
+      evidenceDigest: digest(["synthetic guests-left refund", fresh()]),
+    });
+  const identity = createInternalCompensationIdentity(source, now);
+  const compensation = await createPaymentCompensationComposition({
+    disposition: source,
+    tenantReference: tenant,
+    transactions: transactions({ guc: true }),
+    scope: {
+      brandReference: scope.brandReference,
+      storeReference: scope.storeReference,
+      providerAccountReference: provider,
+      environment: "Test",
+    },
+    clock: { now },
+    references: identity.references,
+    audit: identity.audit,
+    provider: {
+      retrieveIntent: async (request) => providerSnapshot(request),
+      refundPayment: async (request) => {
+        assert.equal(request.amount.amountMinor, roundTotal);
+        providerRefunded = request.amount.amountMinor;
+        return providerSnapshot(request);
+      },
+    },
+    authorize: async () => true,
+    otherRefunds: async () => ({ confirmedMinor: 0n, pendingMinor: 0n, version: 1 }),
+    lease: { leaseDurationMs: 30000, newFenceReference: fresh },
+    newObservationReference: fresh,
+    operations: { authorize: async () => true, validateEvidence: async () => false },
+    authorizeOperations: async () => false,
+  });
+  await compensation.execute(source);
+  assert.equal(providerRefunded, roundTotal);
+
+  // ── Everything resolved: nothing left in the dialog and the Order closes.
+  const resolved = await plan();
+  assert.deepEqual(states(resolved), []);
+  assert.deepEqual([...resolved.closeBlockers], []);
+  const operationReference = fresh();
+  const closed = await closeOrder(closeInput(resolved.orderVersion, operationReference));
+  assert.deepEqual(closed, {
+    status: "Committed",
+    closedOrderVersion: resolved.orderVersion,
+    closureVersion: 1,
+  });
+  // Payment's finality counts the card-machine round with the online round.
+  assert.deepEqual(
+    await one(
+      "SELECT priced_order_total_minor::text AS priced,captured_minor::text AS captured,captured_order_allocation_minor::text AS allocation,captured_tip_minor::text AS tip FROM rms_payment.order_settled_finality WHERE order_id=$1",
+      [orderReference],
+    ),
+    [
+      {
+        priced: String(roundTotal + round2Total),
+        captured: String(roundTotal + cardMachineTotal),
+        allocation: String(roundTotal + round2Total),
+        tip: String(tipMinor),
+      },
+    ],
+  );
+  const once = { closures: 1, finalities: 1, audits: 2 };
+  assert.deepEqual(await written(), once);
+  // A retry of the same close reports it, writing nothing; another close is told it is closed.
+  assert.deepEqual(await closeOrder(closeInput(resolved.orderVersion, operationReference)), {
+    ...closed,
+    status: "AlreadyCommitted",
+  });
+  await assert.rejects(closeOrder(closeInput(resolved.orderVersion)), {
+    code: "ORDER_CLOSE_ALREADY_CLOSED",
+  });
+  assert.deepEqual(await written(), once);
+
+  // ── The table is released from Closing.
+  const finalized = await closeTable({
+    ...session,
+    command: {
+      action: "Finalize",
+      diningSessionReference,
+      operationReference: fresh(),
+      expectedSessionVersion: await sessionVersion(),
+    },
+  });
+  assert.deepEqual([finalized.status, finalized.phase], ["Applied", "Closed"]);
+
+  // ── The manager's Order close permission is withdrawn: refused as such, before anything else.
+  await admin.query(
+    "UPDATE bop_permission.permission_grant SET lifecycle='Revoked',version=version+1 WHERE grant_id=$1",
+    [
+      "01909962-0000-7000-8000-" +
+        (20 + 3 + permissions.indexOf("order.close")).toString(16).padStart(12, "0"),
+    ],
+  );
+  await assert.rejects(closeOrder(closeInput(resolved.orderVersion)), {
+    code: "ORDER_CLOSE_PERMISSION_DENIED",
+  });
+  await assert.rejects(closeOrder(closeInput(resolved.orderVersion, operationReference)), {
+    code: "ORDER_CLOSE_PERMISSION_DENIED",
+  });
+  assert.deepEqual(await written(), once);
+}
+
+/**
  * WP-2423 D1: the round paid on the card machine is accepted by the server with its payment
  * record, at the table Order's current version (past 1: round 1 was accepted and round 2 added,
  * while the Order header still reads 1), by the staff member who recorded it and under the restricted API role — the
@@ -2124,12 +2621,15 @@ async function exerciseCardMachineRoundReceipt({
 
 /**
  * v15 2026-10-15 (test-only owner seed): a later round of the table Order that staff entered and
- * nobody has paid yet. Its Ordering facts (the round and its items, every reference renamed) are
- * copied from round 2 by the database owner with triggers and foreign keys skipped for the seed
- * only; no payment exists for it.
+ * nobody has paid yet. Its Ordering facts are copied from round 2 by the database owner with
+ * triggers and foreign keys skipped for the seed only, every reference renamed, and written the way
+ * the additional-round writer leaves them: the submission, the round and its items, the round's
+ * snapshot and the Order revision it adds (so the Order's revision chain stays whole for every
+ * owner read). No payment exists for it.
  */
 async function seedUnpaidRound(admin, { from, at, id }) {
-  const batch = id(1);
+  const batch = id(1),
+    submission = id(2);
   const rows = (
     await admin.query(
       "SELECT order_item_id::text AS item,source_cart_line_id::text AS line FROM rms_ordering.order_item WHERE order_batch_id=$1 ORDER BY ordinal",
@@ -2137,35 +2637,91 @@ async function seedUnpaidRound(admin, { from, at, id }) {
     )
   ).rows;
   assert.ok(rows.length > 0);
+  const [source] = (
+    await admin.query(
+      "SELECT order_id::text AS order,submission_id::text AS submission,source_cart_id::text AS cart,checkout_validation_id::text AS validation,quote_id::text AS quote FROM rms_ordering.order_batch WHERE order_batch_id=$1",
+      [from],
+    )
+  ).rows;
+  const [last] = (
+    await admin.query(
+      "SELECT revision_id::text AS revision,version::int AS version,occurred_at FROM rms_ordering.order_revision WHERE order_id=$1 ORDER BY version DESC LIMIT 1",
+      [source.order],
+    )
+  ).rows;
+  // The round is submitted after the Order's last change (revisions are in time order).
+  assert.ok(Date.parse(at) > last.occurred_at.getTime());
+  const renames = [
+    [from, batch],
+    [source.submission, submission],
+    [source.cart, id(3)],
+    [source.validation, id(4)],
+    [source.quote, id(5)],
+  ];
   const items = [];
   await admin.query("SET session_replication_role = replica");
   try {
     await admin.query(
+      "INSERT INTO rms_ordering.order_submission_record (submission_id,brand_id,store_id,order_id,guest_session_id,intent_digest,source_cart_id,source_cart_version,quote_id,created_at,submission_kind) SELECT $2,brand_id,store_id,order_id,guest_session_id,intent_digest,$3,source_cart_version,$4,$5,submission_kind FROM rms_ordering.order_submission_record WHERE submission_id=$1",
+      [source.submission, submission, id(3), id(5), at],
+    );
+    await admin.query(
       "INSERT INTO rms_ordering.order_batch (order_batch_id,brand_id,store_id,order_id,submission_id,source_cart_id,source_cart_version,checkout_validation_id,quote_id,submitted_by_actor_id,submitted_at) SELECT $2,brand_id,store_id,order_id,$3,$4,source_cart_version,$5,$6,submitted_by_actor_id,$7 FROM rms_ordering.order_batch WHERE order_batch_id=$1",
-      [from, batch, id(2), id(3), id(4), id(5), at],
+      [from, batch, submission, id(3), id(4), id(5), at],
     );
     for (const [index, row] of rows.entries()) {
       const item = id(0x10 + index),
         line = id(0x20 + index);
+      renames.push([row.item, item], [row.line, line]);
       await admin.query(
         "INSERT INTO rms_ordering.order_item (order_item_id,brand_id,store_id,order_id,order_batch_id,source_cart_line_id,quantity,catalog_snapshot_digest,quote_input_digest,transaction_snapshot_json,snapshot_captured_at,ordinal) SELECT $2,brand_id,store_id,order_id,$3,$4,quantity,catalog_snapshot_digest,quote_input_digest,replace(replace(replace(transaction_snapshot_json::text,$5::text,$8::text),$6::text,$9::text),$7::text,$10::text)::jsonb,snapshot_captured_at,ordinal FROM rms_ordering.order_item WHERE order_item_id=$1",
         [row.item, item, batch, line, from, row.item, row.line, batch, item, line],
       );
       items.push(item);
     }
+    await admin.query(
+      "INSERT INTO rms_ordering.order_revision (revision_id,brand_id,store_id,order_id,kind,version,expected_version,previous_revision_id,initial_submission_id,occurred_at) SELECT $1,brand_id,store_id,order_id,'AdditionalBatch',$2,$3,$4,NULL,$5 FROM rms_ordering.order_batch WHERE order_batch_id=$6",
+      [submission, last.version + 1, last.version, last.revision, at, batch],
+    );
+    const [record] = (
+      await admin.query(
+        "SELECT batch_sequence,snapshot_json::text AS snapshot FROM rms_ordering.additional_dining_batch_record WHERE order_batch_id=$1",
+        [from],
+      )
+    ).rows;
+    const snapshot = JSON.parse(
+      renames.reduce((text, [a, b]) => text.split(a).join(b), record.snapshot),
+    );
+    snapshot.batchSequence = record.batch_sequence + 1;
+    snapshot.expectedOrderVersion = last.version;
+    snapshot.batch.submittedAt = at;
+    await admin.query(
+      "INSERT INTO rms_ordering.additional_dining_batch_record (submission_id,brand_id,store_id,order_id,order_batch_id,batch_sequence,snapshot_json) SELECT $1,brand_id,store_id,order_id,order_batch_id,$3,$4::jsonb FROM rms_ordering.order_batch WHERE order_batch_id=$2",
+      [submission, batch, record.batch_sequence + 1, JSON.stringify(snapshot)],
+    );
   } finally {
     await admin.query("SET session_replication_role = origin");
   }
-  return Object.freeze({ orderBatchReference: batch, items: Object.freeze(items) });
+  return Object.freeze({
+    orderBatchReference: batch,
+    submissionReference: submission,
+    orderVersion: last.version + 1,
+    items: Object.freeze(items),
+  });
 }
 
-/** The System's cancellation of that round when its payment window ended unpaid (owner seed). */
+/**
+ * The System's cancellation of that round when its payment window ended unpaid (owner seed), with
+ * the Order revision it adds, as the checkout cancellation writer records it.
+ */
 async function cancelUnpaidRound(admin, { tenant, scope, orderReference, round, id }) {
   const sha = "sha256:" + "c".repeat(64);
+  const [{ at }] = (await admin.query("SELECT date_trunc('milliseconds',clock_timestamp()) AS at"))
+    .rows;
   await admin.query("SET session_replication_role = replica");
   try {
     await admin.query(
-      "INSERT INTO rms_ordering.order_batch_checkout_cancellation (cancellation_id,operation_id,tenant_id,brand_id,store_id,order_id,order_batch_id,submission_id,payment_operation_id,expiry_record_id,expiry_evidence_digest,expected_order_version,cancelled_order_version,expected_source_checkpoint,workflow_version_id,transition_id,order_item_ids,cancelled_at,phase,reason_code) SELECT $1,$2,$3,b.brand_id,b.store_id,b.order_id,b.order_batch_id,b.submission_id,$4,$5,$6,10,11,$7,$8,$9,$10::uuid[],date_trunc('milliseconds',clock_timestamp()),'Cancelled','PAYMENT_NOT_STARTED' FROM rms_ordering.order_batch b WHERE b.order_batch_id=$11 AND b.order_id=$12 AND b.brand_id=$13",
+      "INSERT INTO rms_ordering.order_batch_checkout_cancellation (cancellation_id,operation_id,tenant_id,brand_id,store_id,order_id,order_batch_id,submission_id,payment_operation_id,expiry_record_id,expiry_evidence_digest,expected_order_version,cancelled_order_version,expected_source_checkpoint,workflow_version_id,transition_id,order_item_ids,cancelled_at,phase,reason_code) SELECT $1,$2,$3,b.brand_id,b.store_id,b.order_id,b.order_batch_id,b.submission_id,$4,$5,$6,$14,$14+1,b.submission_id,$8,$9,$10::uuid[],$7,'Cancelled','PAYMENT_NOT_STARTED' FROM rms_ordering.order_batch b WHERE b.order_batch_id=$11 AND b.order_id=$12 AND b.brand_id=$13",
       [
         id(1),
         id(2),
@@ -2173,13 +2729,25 @@ async function cancelUnpaidRound(admin, { tenant, scope, orderReference, round, 
         id(3),
         id(4),
         sha,
-        id(5),
+        at,
         id(6),
         id(7),
         round.items,
         round.orderBatchReference,
         orderReference,
         scope.brandReference,
+        round.orderVersion,
+      ],
+    );
+    await admin.query(
+      "INSERT INTO rms_ordering.order_revision (revision_id,brand_id,store_id,order_id,kind,version,expected_version,previous_revision_id,initial_submission_id,occurred_at) SELECT $1,brand_id,store_id,order_id,'BatchCancellation',$2,$3,$4,NULL,$5 FROM rms_ordering.order_batch WHERE order_batch_id=$6",
+      [
+        id(1),
+        round.orderVersion + 1,
+        round.orderVersion,
+        round.submissionReference,
+        at,
+        round.orderBatchReference,
       ],
     );
   } finally {

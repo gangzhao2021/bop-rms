@@ -5,6 +5,7 @@ import {
   CardMachineRefundDone,
   PaymentFinancialSummary,
   paymentStateLabel,
+  refundWizardSections,
 } from "./RefundPaymentPage.js";
 import { StoreTimeZoneContext } from "./StoreTime.js";
 
@@ -84,4 +85,24 @@ it("WP-2423 item 4: recording the machine refund confirms it plainly, with the c
       "UTC",
     ),
   ).toMatch(/^Card-machine refund recorded: \S*5\.00 .*not counted twice\)\.$/u);
+});
+
+it("WP-2423 v15: a recorded refund request leaves no confirmation or record button behind", () => {
+  // Before recording: the calculated amount is confirmed and recorded here.
+  expect(refundWizardSections("Idle", true, true)).toEqual({
+    confirmation: true,
+    startAnother: false,
+  });
+  // A result still unknown keeps the same request on screen to retry it.
+  expect(refundWizardSections("Unknown", true, true).confirmation).toBe(true);
+  // Recorded: the confirmation is gone; another request is started explicitly.
+  expect(refundWizardSections("Recorded", true, true)).toEqual({
+    confirmation: false,
+    startAnother: true,
+  });
+  // Someone who only follows requests is never offered a new one.
+  expect(refundWizardSections("Recorded", false, false)).toEqual({
+    confirmation: false,
+    startAnother: false,
+  });
 });

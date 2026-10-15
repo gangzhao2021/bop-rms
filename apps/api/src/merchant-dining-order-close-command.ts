@@ -29,6 +29,31 @@ interface Command {
 const fail = (): never => {
   throw new Error("ORDER_CLOSE_COMMAND_UNAVAILABLE");
 };
+export type OrderCloseCommandErrorCode =
+  | "ORDER_CLOSE_INPUT_INVALID"
+  | "ORDER_CLOSE_PERMISSION_DENIED"
+  | "ORDER_CLOSE_VERSION_CONFLICT"
+  | "ORDER_CLOSE_ALREADY_CLOSED"
+  | "ORDER_CLOSE_NOT_READY"
+  | "ORDER_CLOSE_UNAVAILABLE";
+/**
+ * WP-2423 (B759): why an Order close was refused, so staff see the real reason (never a
+ * permission message for an Order that is simply not ready). `reasons` are the settlement and
+ * closure-eligibility reason codes of ORDER_CLOSE_NOT_READY.
+ */
+export class OrderCloseCommandError extends Error {
+  constructor(
+    readonly code: OrderCloseCommandErrorCode,
+    readonly reasons: readonly string[] = [],
+  ) {
+    super(code);
+    this.name = "OrderCloseCommandError";
+  }
+}
+const reference = (v: unknown) => String(parseOpaqueUuidV7(v, "ACTOR_REFERENCE_INVALID"));
+const refuse = (code: OrderCloseCommandErrorCode, reasons: readonly string[] = []): never => {
+  throw new OrderCloseCommandError(code, reasons);
+};
 /** Server-owned employee command; no client proof, Actor, Store, timestamp or Audit. */
 export function createMerchantDiningOrderCloseCommand(options: {
   persistence: PersistentMerchantBffOptions;
@@ -49,15 +74,36 @@ export function createMerchantDiningOrderCloseCommand(options: {
 }) {
   const resolveScope = createMerchantStoreScope(options.persistence);
   return async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
-    const authenticated = await options.authentication.authorize(input);
-    const raw = readClosedRecord(input.command, [
+    try {
+      return await run(input);
+    } catch (error) {
+      if (error instanceof OrderCloseCommandError) throw error;
+      return refuse("ORDER_CLOSE_UNAVAILABLE");
+    }
+  };
+  async function run(input: { sessionCookie: unknown; csrf: unknown; command: unknown }) {
+    let authenticated: Awaited<ReturnType<MerchantBffService["authorize"]>>;
+    try {
+      authenticated = await options.authentication.authorize(input);
+    } catch {
+      return refuse("ORDER_CLOSE_PERMISSION_DENIED");
+    }
+    let command: Command;
+    try {
+      command = parseCommand(input.command);
+    } catch {
+      return refuse("ORDER_CLOSE_INPUT_INVALID");
+    }
+    return runCommand(input, authenticated, command);
+  }
+  function parseCommand(value: unknown): Command {
+    const raw = readClosedRecord(value, [
       "orderReference",
       "operationReference",
       "expectedOrderVersion",
       "expectedClosureVersion",
       "reasonCode",
     ]);
-    const reference = (v: unknown) => String(parseOpaqueUuidV7(v, "ACTOR_REFERENCE_INVALID"));
     const version = (v: unknown, min: number) => {
       if (typeof v !== "number" || !Number.isInteger(v) || v < min || v >= 2147483647)
         return fail();
@@ -72,14 +118,26 @@ export function createMerchantDiningOrderCloseCommand(options: {
       expectedClosureVersion: version(raw.expectedClosureVersion, 0),
       reasonCode: raw.reasonCode,
     });
+    return command;
+  }
+  function runCommand(
+    input: { sessionCookie: unknown },
+    authenticated: Awaited<ReturnType<MerchantBffService["authorize"]>>,
+    command: Command,
+  ) {
     return options.persistence.transactions.run(async (transaction) => {
-      const current = await resolveScope(
-        transaction,
-        input.sessionCookie,
-        "order.close",
-        authenticated.sessionReference,
-      );
-      if ((await current.allowed()) !== true) return fail();
+      let current: Awaited<ReturnType<typeof resolveScope>>;
+      try {
+        current = await resolveScope(
+          transaction,
+          input.sessionCookie,
+          "order.close",
+          authenticated.sessionReference,
+        );
+      } catch {
+        return refuse("ORDER_CLOSE_PERMISSION_DENIED");
+      }
+      if ((await current.allowed()) !== true) return refuse("ORDER_CLOSE_PERMISSION_DENIED");
       const scope = {
           tenantReference: current.selected.tenantReference,
           brandReference: String(current.context.brand.brandReference),
@@ -226,12 +284,19 @@ export function createMerchantDiningOrderCloseCommand(options: {
           orderReference: command.orderReference,
           observedAt,
         });
+        if (position.status !== "Open") return refuse("ORDER_CLOSE_ALREADY_CLOSED");
         if (
-          position.status !== "Open" ||
           position.orderVersion !== command.expectedOrderVersion ||
           position.closureVersion !== command.expectedClosureVersion
         )
-          return fail();
+          return refuse("ORDER_CLOSE_VERSION_CONFLICT");
+        // WP-2423 (B759): the same evaluation the closure evidence applies, read first so a
+        // refusal names what is outstanding (refund still processing, items not resolved, …).
+        const readiness = await evidence.readiness(evidenceInput);
+        if (readiness === null) return refuse("ORDER_CLOSE_ALREADY_CLOSED");
+        if (readiness.orderVersion !== command.expectedOrderVersion)
+          return refuse("ORDER_CLOSE_VERSION_CONFLICT");
+        if (readiness.reasons.length > 0) return refuse("ORDER_CLOSE_NOT_READY", readiness.reasons);
         const closureReference = reference(options.newReference());
         result = await runtime.commitPrepared(tx, {
           financial,
@@ -265,5 +330,5 @@ export function createMerchantDiningOrderCloseCommand(options: {
         closureVersion: result.closure.closureVersion,
       });
     });
-  };
+  }
 }

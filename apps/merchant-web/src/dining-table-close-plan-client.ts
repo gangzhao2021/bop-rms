@@ -61,6 +61,7 @@ export function parseTableClosePlan(value: unknown, expected: { order: string; s
     "observedAt",
     "rounds",
     "totals",
+    "closeBlockers",
   ]);
   if (
     reference(raw.orderReference) !== expected.order ||
@@ -118,6 +119,10 @@ export function parseTableClosePlan(value: unknown, expected: { order: string; s
     });
   });
   const totals = exact(raw.totals, ["onlineMinor", "cardMachineMinor"]);
+  if (!Array.isArray(raw.closeBlockers) || raw.closeBlockers.length > 32) return fail();
+  const closeBlockers = raw.closeBlockers.map((code: unknown) =>
+    typeof code === "string" && /^[A-Z][A-Z0-9_]{0,63}$/u.test(code) ? code : fail(),
+  );
   return Object.freeze({
     orderReference: expected.order,
     diningSessionReference: expected.session,
@@ -128,6 +133,8 @@ export function parseTableClosePlan(value: unknown, expected: { order: string; s
       onlineMinor: amount(totals.onlineMinor),
       cardMachineMinor: amount(totals.cardMachineMinor),
     }),
+    /** WP-2423 (B759): what still stops the Order closing (server codes; empty: it can close). */
+    closeBlockers: Object.freeze(closeBlockers),
   });
 }
 export type TableClosePlan = ReturnType<typeof parseTableClosePlan>;

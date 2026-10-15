@@ -122,10 +122,10 @@ function createSessionEvidence(options: Options, allowUnresolved: boolean) {
             fact.decidedAt > current.observedAt ||
             fact.currencyCode !== position.financial.currencyCode ||
             fact.pricedOrderTotalMinor !== position.priced.pricedTotalMinor.toString() ||
-            fact.capturedMinor !== position.financial.capturedMinor.toString() ||
+            fact.capturedMinor !== position.financial.settlement.capturedMinor.toString() ||
             fact.capturedOrderAllocationMinor !==
-              position.financial.capturedOrderAllocationMinor.toString() ||
-            fact.capturedTipMinor !== position.financial.capturedTipMinor.toString()
+              position.financial.settlement.capturedOrderAllocationMinor.toString() ||
+            fact.capturedTipMinor !== position.financial.settlement.capturedTipMinor.toString()
           )
             return fail();
           const resolver = createDiningExceptionResolution({

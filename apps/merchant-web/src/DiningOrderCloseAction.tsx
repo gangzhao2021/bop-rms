@@ -4,6 +4,7 @@ import {
   DiningOrderCloseClientError,
 } from "./dining-order-close-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
+import { closeReasonTexts } from "./dining-close-reasons.js";
 import type { DiningProgress } from "./dining-progress-client.js";
 type Operation = ReturnType<ReturnType<typeof createDiningOrderCloseClient>["prepare"]>;
 export function DiningOrderCloseAction({
@@ -20,7 +21,9 @@ export function DiningOrderCloseAction({
   readonly onClosed: () => void;
 }) {
   const [confirmed, setConfirmed] = useState(false),
-    [state, setState] = useState<"Idle" | "Submitting" | "Unknown" | "Denied">("Idle");
+    [state, setState] = useState<"Idle" | "Submitting" | "Unknown" | "Denied">("Idle"),
+    // WP-2423 (B759): why the server refused (not ready / changed / no access), in staff words.
+    [refusal, setRefusal] = useState<readonly string[]>([]);
   const operation = useRef<Operation | null>(null),
     pending = useRef<AbortController | null>(null);
   useEffect(() => () => pending.current?.abort(), []);
@@ -49,6 +52,15 @@ export function DiningOrderCloseAction({
         const unknown =
           error instanceof DiningOrderCloseClientError && error.code === "OutcomeUnknown";
         setState(unknown ? "Unknown" : "Denied");
+        setRefusal(
+          !(error instanceof DiningOrderCloseClientError) || unknown
+            ? []
+            : error.code === "NotReady"
+              ? closeReasonTexts(error.reasons.length > 0 ? error.reasons : ["UNKNOWN"])
+              : error.code === "PermissionDenied"
+                ? ["Your access doesn't allow closing orders. Ask an Owner or Store Manager."]
+                : ["The order changed meanwhile. Refresh it and try again."],
+        );
         if (!unknown) onBusy(false);
       }
     } finally {
@@ -85,10 +97,16 @@ export function DiningOrderCloseAction({
       {state === "Unknown" ? (
         <p role="status">The result is unknown. Retry the same request to recover its result.</p>
       ) : state === "Denied" ? (
-        <p role="status">
-          Order closure was not confirmed. Refresh and check payment, unresolved exceptions and
-          permissions.
-        </p>
+        <div role="status">
+          <p>The order wasn&apos;t closed.</p>
+          {refusal.length > 0 ? (
+            <ul>
+              {refusal.map((text) => (
+                <li key={text}>{text}</li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );

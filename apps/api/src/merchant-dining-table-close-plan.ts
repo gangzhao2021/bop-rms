@@ -16,6 +16,7 @@ import {
   readPaymentRemainingRefundable,
 } from "@rms/payment";
 import { createDiningOrderDeliveryProgress } from "./dining-order-delivery-progress.js";
+import { createDiningSettledCloseEvidence } from "./dining-settled-close-evidence.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import {
@@ -78,6 +79,12 @@ export interface TableClosePlan {
   readonly rounds: readonly TableCloseRound[];
   /** Sum of the round refunds the confirmation sends (CancelRound rounds only). */
   readonly totals: { readonly onlineMinor: string; readonly cardMachineMinor: string };
+  /**
+   * WP-2423 (B759): what still stops the Order from closing, as reason codes from the same
+   * evaluation the close command applies (settlement and closure eligibility). Empty: the Order
+   * can be closed now. CLOSE_CHECK_UNAVAILABLE: the evaluation could not be read.
+   */
+  readonly closeBlockers: readonly string[];
 }
 
 /**
@@ -344,6 +351,13 @@ export function createMerchantDiningTableClosePlan(options: {
               )
               .reduce((total, round) => total + BigInt(round.refund?.amountMinor ?? "0"), 0n)
               .toString();
+          configuration ??= await options.resolveRefundConfiguration(tx, scope);
+          const closeBlockers = await readCloseBlockers(tx, {
+            scope,
+            configuration,
+            authorize: allowed,
+            input: query,
+          });
           if (!(await stillAllowed())) return denied();
           return Object.freeze({
             orderReference,
@@ -355,9 +369,49 @@ export function createMerchantDiningTableClosePlan(options: {
               onlineMinor: sum("Online"),
               cardMachineMinor: sum("CardMachine"),
             }),
+            closeBlockers,
           });
         },
       ),
     );
   };
+}
+
+/** WP-2423 (B759): the close command's own readiness evaluation, read without recording anything. */
+async function readCloseBlockers(
+  tx: ConsumerTransaction,
+  input: {
+    scope: { tenantReference: string; brandReference: string; storeReference: string };
+    configuration: { providerAccountReference: string; environment: "Test" | "Live" };
+    authorize: () => Promise<boolean>;
+    input: {
+      transaction: ConsumerTransaction;
+      brandReference: string;
+      storeReference: string;
+      orderReference: string;
+      diningSessionReference: string;
+      guestSessionReference: string;
+      observedAt: string;
+    };
+  },
+): Promise<readonly string[]> {
+  const { scope, configuration, authorize } = input;
+  await tx.query("SAVEPOINT table_close_readiness", []);
+  try {
+    const readiness = await createDiningSettledCloseEvidence({
+      ...scope,
+      diningScope: scope,
+      paymentScope: { ...scope, ...configuration },
+      authorize,
+      authorizeKitchen: authorize,
+      authorizeDining: authorize,
+      includeCancelled: true,
+    }).readiness({ ...input.input, ...scope });
+    await tx.query("RELEASE SAVEPOINT table_close_readiness", []);
+    return Object.freeze([...(readiness?.reasons ?? [])]);
+  } catch {
+    await tx.query("ROLLBACK TO SAVEPOINT table_close_readiness", []);
+    await tx.query("RELEASE SAVEPOINT table_close_readiness", []);
+    return Object.freeze(["CLOSE_CHECK_UNAVAILABLE"]);
+  }
 }

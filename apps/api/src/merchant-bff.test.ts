@@ -17,10 +17,11 @@ import { StaffDiningRoundError } from "./merchant-staff-dining-round.js";
 import { CounterMenuError } from "./merchant-counter-menu.js";
 import { CardMachinePaymentCommandError } from "./merchant-card-machine-payment.js";
 import { CardMachineRefundCommandError } from "./merchant-card-machine-refund.js";
+import { OrderCloseCommandError } from "./merchant-dining-order-close-command.js";
 import { BrowserSessionError } from "@bop/identity";
 import { parsePaymentReference, ReconciliationFollowUpError } from "@rms/payment";
 import { parsePaymentInstant } from "@rms/payment";
-import { parseDiningReference } from "@rms/dining";
+import { DiningClosingError, parseDiningReference } from "@rms/dining";
 import { FulfillmentReadinessError } from "@rms/fulfillment";
 import { PickupHandoffError, PickupProofError } from "@rms/fulfillment";
 import {
@@ -2438,10 +2439,26 @@ it("protects order closure transport, exact retry and bounded response", async (
     closedOrderVersion: 3,
     closureVersion: 1,
   });
+  // WP-2423 (B759): only a missing permission is a 403; not ready / changed is a 409 with why.
   close.mockRejectedValueOnce(new Error("synthetic-private"));
+  const failed = await submit();
+  expect(failed.status).toBe(503);
+  expect(await failed.json()).toEqual({ error: "order_closure_unavailable" });
+  close.mockRejectedValueOnce(new OrderCloseCommandError("ORDER_CLOSE_PERMISSION_DENIED"));
   const denied = await submit();
   expect(denied.status).toBe(403);
-  expect(await denied.json()).toEqual({ error: "request_denied" });
+  expect(await denied.json()).toEqual({ error: "order_close_permission_denied" });
+  close.mockRejectedValueOnce(
+    new OrderCloseCommandError("ORDER_CLOSE_NOT_READY", ["REFUND_PENDING"]),
+  );
+  const notReady = await submit();
+  expect(notReady.status).toBe(409);
+  expect(notReady.headers.get("cache-control")).toBe("no-store");
+  expect(await notReady.json()).toEqual({ error: "order_not_ready", reasons: ["REFUND_PENDING"] });
+  close.mockRejectedValueOnce(new OrderCloseCommandError("ORDER_CLOSE_VERSION_CONFLICT"));
+  const conflict = await submit();
+  expect(conflict.status).toBe(409);
+  expect(await conflict.json()).toEqual({ error: "order_version_conflict" });
   close.mockResolvedValueOnce({ status: "Committed", closedOrderVersion: 0, closureVersion: 1 });
   expect((await submit()).status).toBe(403);
   const unconfigured = await serveOrderClose(),
@@ -3055,10 +3072,21 @@ it("protects dining closing transport, exact retry and bounded response", async 
     phase: "Closing",
     sessionVersion: 3,
   });
+  // WP-2423 (B759): a table that cannot close yet is never answered as a permission problem.
   close.mockRejectedValueOnce(new Error("synthetic-private"));
+  const failed = await submit();
+  expect(failed.status).toBe(503);
+  expect(await failed.json()).toEqual({ error: "dining_closing_unavailable" });
+  close.mockRejectedValueOnce(new DiningClosingError("DINING_CLOSING_PERMISSION_DENIED"));
   const denied = await submit();
   expect(denied.status).toBe(403);
-  expect(await denied.json()).toEqual({ error: "request_denied" });
+  expect(await denied.json()).toEqual({ error: "dining_closing_permission_denied" });
+  close.mockRejectedValueOnce(new DiningClosingError("DINING_CLOSING_VERSION_CONFLICT"));
+  const changed = await submit();
+  expect(changed.status).toBe(409);
+  expect(await changed.json()).toEqual({ error: "dining_session_changed" });
+  close.mockRejectedValueOnce(new DiningClosingError("DINING_CLOSING_TASK_REQUIRED"));
+  expect((await submit()).status).toBe(409);
   close.mockResolvedValueOnce({ status: "Applied", phase: "Closing", sessionVersion: 0 });
   expect((await submit()).status).toBe(403);
   const unconfigured = await serveDiningClosing(),

@@ -197,3 +197,31 @@ it("WP-2423 item 2: a table whose every round was cancelled closes its cancelled
   expect(fetcher.mock.calls[1]?.[0]).toBe("/merchant/orders/close");
   expect(bodies[1]).toMatchObject({ reasonCode: "ORDER_CANCELLED" });
 });
+
+it("WP-2423 B759: a table left in Closing continues from there — order closed, then released", async () => {
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(json({ status: "Committed", closureVersion: 1, closedOrderVersion: 38 }))
+    .mockResolvedValueOnce(json({ status: "Applied", phase: "Closed", sessionVersion: 21 }));
+  await closeTableSession({
+    diningSessionReference: id(2),
+    session: { phase: "Closing", version: 20, orderReference: id(3) },
+    progress: {
+      ...progress,
+      sessionPhase: "Closing",
+      currentOrderVersion: 38,
+      phase: "Cancelled",
+      items: [item("Cancelled", 1, 7)],
+    },
+    plan: { done: new Set() },
+    csrf,
+    fetcher,
+  });
+  const bodies = fetcher.mock.calls.map((call) => JSON.parse(String(call[1]?.body)));
+  expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
+    "/merchant/orders/close",
+    "/merchant/dining/closing",
+  ]);
+  expect(bodies[0]).toMatchObject({ expectedOrderVersion: 38, reasonCode: "ORDER_CANCELLED" });
+  expect(bodies[1]).toMatchObject({ action: "Finalize", expectedSessionVersion: 20 });
+});

@@ -49,6 +49,12 @@ function setup(unresolved = false) {
       capturedMinor: 120n,
       capturedOrderAllocationMinor: 100n,
       capturedTipMinor: 20n,
+      // WP-2423 (B759): the finality binds the all-tender totals (online and card machine).
+      settlement: {
+        capturedMinor: 120n,
+        capturedOrderAllocationMinor: 100n,
+        capturedTipMinor: 20n,
+      },
     },
     tasks: { taskSources: [{ tasks: [] as unknown[] }] },
     snapshotDigest: digest,
@@ -105,7 +111,7 @@ it.each(["balance", "refund", "open", "version", "pending", "kitchen", "batch"])
   "blocks changed or incomplete %s",
   async (kind) => {
     const f = setup();
-    if (kind === "balance") f.current.financial.capturedMinor = 121n;
+    if (kind === "balance") f.current.financial.settlement.capturedMinor = 121n;
     if (kind === "refund") f.current.settlement.classification = "Indeterminate";
     if (kind === "open") f.closure.status = "Open";
     if (kind === "version") f.fact.orderVersion = 3;

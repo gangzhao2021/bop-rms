@@ -8,13 +8,14 @@ const mocks = vi.hoisted(() => ({
   prepared: vi.fn(),
   replay: vi.fn(),
   runtime: vi.fn(),
+  readiness: vi.fn(),
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => mocks.scope }));
 vi.mock("./merchant-order-closure-authority.js", () => ({
   createMerchantOrderClosureAuthority: () => mocks.authority,
 }));
 vi.mock("./dining-settled-close-evidence.js", () => ({
-  createDiningSettledCloseEvidence: () => ({ load: mocks.proof }),
+  createDiningSettledCloseEvidence: () => ({ load: mocks.proof, readiness: mocks.readiness }),
 }));
 vi.mock("./settled-order-close.js", () => ({
   createSettledOrderClose: (options: unknown) => {
@@ -27,7 +28,10 @@ vi.mock("@rms/ordering", async (original) => ({
   createPostgresOrderClosureStore: () => ({ readOperation: mocks.receipt }),
   createPostgresOrderClosurePosition: () => mocks.position,
 }));
-import { createMerchantDiningOrderCloseCommand } from "./merchant-dining-order-close-command.js";
+import {
+  createMerchantDiningOrderCloseCommand,
+  OrderCloseCommandError,
+} from "./merchant-dining-order-close-command.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 const id = (n: number) => "0190fad0-0000-7000-8000-" + String(n).padStart(12, "0"),
   at = "2026-09-20T00:00:00.000Z";
@@ -46,6 +50,7 @@ function setup() {
     allowed,
   });
   mocks.authority.mockResolvedValue(true);
+  mocks.readiness.mockResolvedValue({ orderVersion: 3, reasons: [] });
   mocks.receipt.mockResolvedValue(null);
   mocks.position.mockResolvedValue({
     status: "Open",
@@ -170,14 +175,14 @@ it("CSRF/session failure precedes all business work", async () => {
 it("current permission denial precedes configuration/write", async () => {
   const f = setup();
   f.allowed.mockResolvedValue(false);
-  await expect(f.run()).rejects.toThrow();
+  await expect(f.run()).rejects.toMatchObject({ code: "ORDER_CLOSE_PERMISSION_DENIED" });
   expect(f.resolveConfiguration).not.toHaveBeenCalled();
   expect(mocks.prepared).not.toHaveBeenCalled();
 });
 it("stale closure version cannot write", async () => {
   const f = setup();
   mocks.position.mockResolvedValue({ status: "Open", orderVersion: 3, closureVersion: 2 });
-  await expect(f.run()).rejects.toThrow();
+  await expect(f.run()).rejects.toMatchObject({ code: "ORDER_CLOSE_VERSION_CONFLICT" });
   expect(mocks.prepared).not.toHaveBeenCalled();
 });
 it("ineligible proof fails preparation", async () => {
@@ -185,4 +190,32 @@ it("ineligible proof fails preparation", async () => {
   mocks.proof.mockResolvedValue({ decision: { eligible: false } });
   await expect(f.run()).rejects.toThrow();
   expect(f.records).toHaveLength(0);
+});
+
+it("B759: an Order not ready to close is refused with what is outstanding, never as a permission", async () => {
+  const f = setup();
+  mocks.readiness.mockResolvedValue({
+    orderVersion: 3,
+    reasons: ["REFUND_PENDING", "ORDER_BALANCE_UNPAID"],
+  });
+  const error = await f.run().then(
+    () => null,
+    (caught: unknown) => caught,
+  );
+  expect(error).toBeInstanceOf(OrderCloseCommandError);
+  expect(error).toMatchObject({
+    code: "ORDER_CLOSE_NOT_READY",
+    reasons: ["REFUND_PENDING", "ORDER_BALANCE_UNPAID"],
+  });
+  expect(mocks.prepared).not.toHaveBeenCalled();
+});
+it("B759: an already closed Order, a session failure and an internal failure are told apart", async () => {
+  const f = setup();
+  mocks.position.mockResolvedValue({ status: "Closed", orderVersion: 3, closureVersion: 1 });
+  await expect(f.run()).rejects.toMatchObject({ code: "ORDER_CLOSE_ALREADY_CLOSED" });
+  mocks.position.mockResolvedValue({ status: "Open", orderVersion: 3, closureVersion: 0 });
+  mocks.prepared.mockRejectedValue(new Error("SETTLED_ORDER_CLOSE_UNAVAILABLE"));
+  await expect(f.run()).rejects.toMatchObject({ code: "ORDER_CLOSE_UNAVAILABLE" });
+  f.authentication.authorize.mockRejectedValue(new Error("denied"));
+  await expect(f.run()).rejects.toMatchObject({ code: "ORDER_CLOSE_PERMISSION_DENIED" });
 });

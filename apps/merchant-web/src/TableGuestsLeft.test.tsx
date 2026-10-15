@@ -48,6 +48,7 @@ const wire = {
     },
   ],
   totals: { onlineMinor: "1130", cardMachineMinor: "0" },
+  closeBlockers: [],
 };
 
 it("DEC-TABLE-CLOSE-GUESTS-LEFT: words each round for staff, with amounts and no internal codes", () => {
@@ -159,4 +160,15 @@ it("DEC-TABLE-CLOSE-GUESTS-LEFT: parses the plan strictly and resolves rounds wi
     orderItemReferences: [id(30)],
     reasonCode: "GUEST_LEFT",
   });
+});
+
+it("WP-2423 B759: the plan carries the close evaluation's reasons, strictly", () => {
+  const expected = { order: id(3), session: id(2) };
+  expect(
+    parseTableClosePlan({ ...wire, closeBlockers: ["REFUND_PENDING"] }, expected).closeBlockers,
+  ).toEqual(["REFUND_PENDING"]);
+  const missing: Record<string, unknown> = { ...wire };
+  delete missing.closeBlockers;
+  expect(() => parseTableClosePlan(missing, expected)).toThrow();
+  expect(() => parseTableClosePlan({ ...wire, closeBlockers: ["not a code"] }, expected)).toThrow();
 });

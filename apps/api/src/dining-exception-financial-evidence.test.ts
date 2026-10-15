@@ -14,9 +14,27 @@ vi.mock("@rms/ordering", async (original) => ({
 }));
 vi.mock("@rms/payment", async (original) => ({
   ...(await original<typeof import("@rms/payment")>()),
-  createPostgresOrderFinancialPosition: () => d.financial,
+  createPostgresOrderFinancialPosition:
+    () =>
+    async (...args: unknown[]) =>
+      withSettlement((await d.financial(...args)) as Record<string, unknown> | undefined),
   createPostgresOrderSettledFinalityStore: d.store,
 }));
+// WP-2423 (B759): settlement reads the all-tender totals; these fixtures have online tender only.
+const withSettlement = (value: Record<string, unknown> | undefined) =>
+  value && !("settlement" in value)
+    ? {
+        ...value,
+        settlement: {
+          capturedMinor: value.capturedMinor,
+          capturedOrderAllocationMinor: value.capturedOrderAllocationMinor,
+          capturedTipMinor: value.capturedTipMinor,
+          confirmedRefundMinor: value.confirmedRefundMinor,
+          pendingRefundMinor: value.pendingRefundMinor,
+          refundAllocation: value.refundAllocation,
+        },
+      }
+    : value;
 import { createDiningExceptionFinancialEvidence } from "./dining-exception-financial-evidence.js";
 const id = (n: number) => "0190fa85-0000-7000-8000-" + String(n).padStart(12, "0"),
   at = "2026-09-21T01:00:00.000Z",

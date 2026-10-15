@@ -229,12 +229,12 @@ export function createPostgresOrderSettledFinalityStore(
         const assessment = assessOrderSettlement({
           currencyCode: position.currencyCode,
           pricedOrderTotalMinor: priced.pricedTotalMinor,
-          capturedMinor: position.capturedMinor,
-          capturedOrderAllocationMinor: position.capturedOrderAllocationMinor,
-          capturedTipMinor: position.capturedTipMinor,
-          confirmedRefundMinor: position.confirmedRefundMinor,
-          refundAllocation: position.refundAllocation,
-          pendingRefundMinor: position.pendingRefundMinor,
+          capturedMinor: position.settlement.capturedMinor,
+          capturedOrderAllocationMinor: position.settlement.capturedOrderAllocationMinor,
+          capturedTipMinor: position.settlement.capturedTipMinor,
+          confirmedRefundMinor: position.settlement.confirmedRefundMinor,
+          refundAllocation: position.settlement.refundAllocation,
+          pendingRefundMinor: position.settlement.pendingRefundMinor,
           unresolvedAttemptCount: position.unresolvedAttemptCount,
           pendingAmendmentCount: priced.pendingAmendmentCount,
         });
@@ -256,9 +256,9 @@ export function createPostgresOrderSettledFinalityStore(
           classification: "Settled",
           currencyCode: "CAD",
           pricedOrderTotalMinor: priced.pricedTotalMinor.toString(),
-          capturedMinor: position.capturedMinor.toString(),
-          capturedOrderAllocationMinor: position.capturedOrderAllocationMinor.toString(),
-          capturedTipMinor: position.capturedTipMinor.toString(),
+          capturedMinor: position.settlement.capturedMinor.toString(),
+          capturedOrderAllocationMinor: position.settlement.capturedOrderAllocationMinor.toString(),
+          capturedTipMinor: position.settlement.capturedTipMinor.toString(),
           orderEvidenceDigest:
             "sha256:" +
             createHash("sha256")

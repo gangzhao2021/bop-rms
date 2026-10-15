@@ -437,6 +437,8 @@ test("@production the order queue shows counter orders and records a card-machin
   await dialog.getByRole("textbox", { name: "Slip reference (optional)" }).fill("REFUND 7731");
   await dialog.getByRole("button", { name: "Refunded $6.72 on card machine" }).click();
   await expect(entry).toContainText("Cancelled by store · refunded on card machine");
+  // WP-2423: recording the refund refreshes the order in place; it stays open.
+  await expect(entry).toHaveAttribute("open", "");
   expect(refunds).toEqual([
     {
       operationReference: expect.stringMatching(/^[0-9a-f-]{36}$/u),
