@@ -445,7 +445,11 @@ export async function verifyPersistentMerchantBff({
     authorization;
   let denyWorkspace = false,
     wrongWorkspace = false,
-    associationActive = true;
+    associationActive = true,
+    /** WP-2423: the pilot's full staff navigation (~30 entries), for the session query budget. */
+    pilotNavigation = false,
+    /** Statements the restricted role ran (the session read's query budget). */
+    queryCount = 0;
   const scope = { tenantReference: f.uuid("90"), brandReference: f.BRAND, storeReference: f.STORE };
   const targetReference = f.uuid("610");
   const credentials = {
@@ -521,7 +525,10 @@ export async function verifyPersistentMerchantBff({
           try {
             await client.query("SET LOCAL ROLE " + role);
             const result = await work({
-              query: (sql, values) => client.query(sql, [...values]),
+              query: (sql, values) => {
+                queryCount += 1;
+                return client.query(sql, [...values]);
+              },
             });
             await client.query("COMMIT");
             return result;
@@ -554,6 +561,66 @@ export async function verifyPersistentMerchantBff({
         storeLabel: context.store.displayName,
         storeReference: wrongWorkspace ? f.STORE : context.store.storeReference,
       };
+      if (pilotNavigation)
+        return {
+          screenId: "HOME-OVERVIEW",
+          selectedScope,
+          authorizedStores: [{ ...selectedScope }],
+          businessDate: "2099-01-01",
+          storeStatus: "Unavailable",
+          freshness: "Stale",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "STORE-SETUP",
+              label: "Store setup",
+              href: "/app/organization/stores/" + context.store.storeReference + "/setup",
+              permission: "organization.manage",
+            },
+            ...[
+              ["OPS-ORDER-QUEUE", "/operations/orders", "ordering.operate"],
+              ["OPS-ORDER-ENTRY", "/operations/order-entry", "ordering.order.create_staff"],
+              ["KIT-KITCHEN-QUEUE", "/operations/kitchen", "kitchen.operate"],
+              ["FUL-PICKUP-QUEUE", "/operations/pickup", "fulfillment.operate"],
+              ["DIN-FLOOR-BOARD", "/operations/dining", "dining.operate"],
+              ["DIN-TABLE-LIST", "/app/operations/tables", "dining.table.qr.manage"],
+              [
+                "PAY-RECONCILIATION",
+                "/app/operations/payment-reconciliation",
+                "operations.order-exception.manage",
+              ],
+              ["RPT-OPS-DASHBOARD", "/app/reports/operations", "reporting.sales.read"],
+              ["INV-ITEM-LIST", "/app/supply/items", "inventory.item.read"],
+              ["INV-LOCATION-LIST", "/app/supply/locations", "inventory.location.read"],
+              ["INV-RECEIPT-LIST", "/operations/receiving", "inventory.receipt.read"],
+              ["RECIPE-LIST", "/app/commerce/recipes", "recipe.read"],
+              ["RECIPE-OPTION-LIST", "/app/commerce/option-recipes", "recipe.read"],
+              ["CAT-MENU-LIST", "/app/commerce/menus", "catalog.menu.read"],
+              ["CAT-OPTIONSET-LIST", "/app/commerce/option-sets", "catalog.option_set.read"],
+              ["APPROVAL-INBOX", "/app/approvals", "workflow.operate"],
+              ["CAT-AVAILABILITY", "/app/commerce/availability", "catalog.sku.read"],
+              ["PRICE-BOOK-LIST", "/app/commerce/pricing", "pricing.price_book.read"],
+              ["PRICE-OPTION-LIST", "/app/commerce/option-prices", "pricing.price_book.read"],
+              ["TAX-STORE-REVIEW", "/app/commerce/tax-review", "pricing.tax_config.read"],
+              ["CMP-ALLERGEN-REVIEW", "/app/compliance/allergens", "catalog.allergen.read"],
+              ["INV-COUNT-LIST", "/operations/inventory/counts", "inventory.count.read"],
+              ["INV-WASTE-RECORD", "/operations/inventory/waste", "inventory.waste.record"],
+              ["INV-OPENING-COUNT", "/app/supply/opening-count", "inventory.count.read"],
+              ["IAM-USER-LIST", "/app/organization/users", "organization.staff.read"],
+              ["IAM-ROLE-LIST", "/app/organization/roles", "identity.role.read"],
+              [
+                "OPS-ORDER-EXCEPTION",
+                "/operations/order-exceptions",
+                "operations.order-exception.manage",
+              ],
+            ].map(([screenId, href, permission]) => ({
+              screenId,
+              label: "Synthetic entry",
+              href,
+              permission,
+            })),
+          ],
+        };
       return {
         screenId: "HOME-OVERVIEW",
         selectedScope,
@@ -611,6 +678,17 @@ export async function verifyPersistentMerchantBff({
     ["Synthetic Store", "Synthetic Second Store"],
   );
   assert.equal(initial.workspace.selectedScope.storeLabel, "Synthetic Store");
+  {
+    // WP-2423 query budget: every full merchant page load reads the session first, so its cost
+    // must not grow with the number of navigation entries (the pilot offers ~30).
+    pilotNavigation = true;
+    const before = queryCount;
+    const wide = await service().bootstrap(cookie.value);
+    pilotNavigation = false;
+    assert.equal(wide.workspace.navigation.length, 7); // The synthetic role grants a few entries.
+    // One policy materialization per 16 actions, not one per entry: 177 statements before.
+    assert.ok(queryCount - before <= 60, "session read used " + (queryCount - before));
+  }
   const productPermission = f.uuid("9100"),
     storeProductGrant = f.uuid("9101"),
     brandProductRole = f.uuid("9102"),
@@ -708,6 +786,7 @@ export async function verifyPersistentMerchantBff({
     clock,
     targetReference,
     readGrant: readGrants[1],
+    queryCount: () => queryCount,
     login: async (current) => {
       const started = await current.start("/operations/order-exceptions");
       return current.callback({

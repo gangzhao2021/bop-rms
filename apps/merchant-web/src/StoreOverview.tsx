@@ -167,7 +167,7 @@ export function OverviewToday({
       <p className="overview-updated">
         {state.updatedAt === null
           ? "Reading current work…"
-          : `Updated · ${storeTime(state.updatedAt, timeZone)}`}
+          : `Last checked ${storeTime(state.updatedAt, timeZone)}`}
       </p>
     </section>
   );

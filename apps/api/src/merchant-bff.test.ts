@@ -5913,6 +5913,14 @@ it("WP-2423 Q19: the Brand Owner reads and changes the sole-operator setting", a
     403,
     { error: "brand_owner_required" },
   ]);
+  // WP-2423: a Store Manager on the Approvals page is told there is nothing to show (no 403).
+  readView.mockRejectedValueOnce(new MerchantSoleOperatorError("NotOwner"));
+  const manager = await get();
+  expect([manager.status, manager.headers.get("cache-control"), await manager.json()]).toEqual([
+    200,
+    "no-store",
+    { brandOwner: false },
+  ]);
   const post = (extra: Record<string, string> = {}) =>
     request(root, "/merchant/organization/sole-operator", {
       method: "POST",

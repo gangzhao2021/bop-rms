@@ -43,14 +43,19 @@ it("WP-2423 Q19: reads the setting strictly and hides it from anyone but the Bra
     .fn<typeof fetch>()
     .mockResolvedValueOnce(json(view))
     .mockResolvedValueOnce(json({ ...view, state: "Maybe" }))
-    .mockResolvedValueOnce(json({ error: "brand_owner_required" }, 403));
+    .mockResolvedValueOnce(json({ error: "brand_owner_required" }, 403))
+    // WP-2423: a Store Manager is told there is nothing to show (no refused request).
+    .mockResolvedValueOnce(json({ brandOwner: false }))
+    .mockResolvedValueOnce(json({ brandOwner: true }));
   const client = createSoleOperatorClient(fetcher);
   const read = await client.read();
-  expect(read.refundApproval.otherApprovers).toEqual([{ displayName: "Mia" }]);
+  expect(read?.refundApproval.otherApprovers).toEqual([{ displayName: "Mia" }]);
   expect(fetcher.mock.calls[0]?.[0]).toBe("/merchant/organization/sole-operator");
   expect(fetcher.mock.calls[0]?.[1]).toMatchObject({ method: "GET", credentials: "same-origin" });
   await expect(client.read()).rejects.toMatchObject({ code: "Unavailable" });
   await expect(client.read()).rejects.toMatchObject({ code: "Denied" });
+  await expect(client.read()).resolves.toBeNull();
+  await expect(client.read()).rejects.toMatchObject({ code: "Unavailable" });
 });
 
 it("WP-2423 Q19: changes the setting with a reason for the target state and names refusals", async () => {

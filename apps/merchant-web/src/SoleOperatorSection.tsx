@@ -72,6 +72,10 @@ export function SoleOperatorSection({
       .read(controller.signal)
       .then((value) => {
         if (controller.signal.aborted) return;
+        if (value === null) {
+          setStatus("Hidden");
+          return;
+        }
         setView(value);
         if (value.verifiedUntil !== null) onVerified(value.verifiedUntil);
         setStatus("Ready");

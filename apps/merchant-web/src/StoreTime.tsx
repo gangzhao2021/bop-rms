@@ -123,16 +123,34 @@ export function StaffTime({ instant }: { readonly instant: string }) {
   );
 }
 
-/** How current a read is: "Updated 14:02" or a visible warning that the data may be out of date. */
+/**
+ * How current a read is: "Updated 14:02" or a visible warning that the data may be out of date.
+ * A screen that re-reads on its own passes `checkedAt` (when this device last read it
+ * successfully): it then says "Last checked 14:02", so a quiet board whose work has not changed
+ * for an hour is not mistaken for a stuck one. The time the work last changed stays in the title.
+ */
 export function Freshness({
   status,
   at,
+  checkedAt,
 }: {
   readonly status: "Fresh" | "Stale" | "Current" | "Rebuilding" | "Failed";
   readonly at?: string | undefined;
+  readonly checkedAt?: string | undefined;
 }) {
   const timeZone = useContext(StoreTimeZoneContext);
   const stale = status !== "Fresh" && status !== "Current";
+  if (checkedAt !== undefined)
+    return (
+      <span
+        className="workspace-page__freshness"
+        data-freshness={stale ? "Stale" : "Fresh"}
+        title={at === undefined ? undefined : `Last change ${storeTime(at, timeZone)}`}
+      >
+        {stale ? "Data may be out of date · last checked " : "Last checked "}
+        <time dateTime={checkedAt}>{storeTime(checkedAt, timeZone)}</time>
+      </span>
+    );
   const when = at === undefined ? null : storeTime(at, timeZone);
   return (
     <span className="workspace-page__freshness" data-freshness={stale ? "Stale" : "Fresh"}>

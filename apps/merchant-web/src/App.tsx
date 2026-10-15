@@ -420,6 +420,25 @@ function LocalDemoRoute({
   );
 }
 
+/**
+ * WP-2423: while the session answer (or a Store switch) is in flight, a page that needs it shows a
+ * neutral loading state; its "unavailable" text is shown only once the session is really refused.
+ */
+function SessionPending({
+  pending,
+  children,
+}: {
+  readonly pending: boolean;
+  readonly children: ReactNode;
+}) {
+  if (!pending) return <>{children}</>;
+  return (
+    <StatePanel heading="Loading" tone="neutral" status>
+      <p>Loading this page…</p>
+    </StatePanel>
+  );
+}
+
 function clientProps<T>(
   client: T | undefined,
 ): { readonly client?: never } | { readonly client: T } {
@@ -436,6 +455,8 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
   const [state, setState] = useState<WorkspaceState>({ kind: "Loading" });
   const { pathname } = useLocation();
   const switching = useRef(false);
+  const sessionPending =
+    demo === null && (state.kind === "Loading" || (state.kind === "Ready" && state.switching));
 
   useEffect(() => {
     let active = true;
@@ -552,61 +573,67 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         <Route
           path="/app/organization/stores/:id/setup"
           element={
-            <LocalDemoRoute notice={demo?.Notice ?? null}>
-              {demo !== null ? (
-                <StoreSetupPage {...clientProps(demo.storeAdmin)} />
-              ) : state.kind === "Ready" && !state.switching ? (
-                <StoreSetupDraftPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  storeReference={state.workspace.selectedScope.storeReference}
-                  csrf={state.csrf}
-                >
-                  {/* WP-2423 Q15/Q16: receipt registrations and the privacy notice link. */}
-                  <StoreReceiptPrivacyPanel csrf={state.csrf} />
-                </StoreSetupDraftPage>
-              ) : (
-                <StatePanel heading="Store setup unavailable" status>
-                  <p>A current merchant session and selected Store are required.</p>
-                </StatePanel>
-              )}
-            </LocalDemoRoute>
+            <SessionPending pending={sessionPending}>
+              <LocalDemoRoute notice={demo?.Notice ?? null}>
+                {demo !== null ? (
+                  <StoreSetupPage {...clientProps(demo.storeAdmin)} />
+                ) : state.kind === "Ready" && !state.switching ? (
+                  <StoreSetupDraftPage
+                    key={state.workspace.selectedScope.storeReference + state.csrf}
+                    storeReference={state.workspace.selectedScope.storeReference}
+                    csrf={state.csrf}
+                  >
+                    {/* WP-2423 Q15/Q16: receipt registrations and the privacy notice link. */}
+                    <StoreReceiptPrivacyPanel csrf={state.csrf} />
+                  </StoreSetupDraftPage>
+                ) : (
+                  <StatePanel heading="Store setup unavailable" status>
+                    <p>A current merchant session and selected Store are required.</p>
+                  </StatePanel>
+                )}
+              </LocalDemoRoute>
+            </SessionPending>
           }
         />
         <Route
           path="/app/organization/stores/:id/service"
           element={
-            <LocalDemoRoute notice={demo?.Notice ?? null}>
-              {demo !== null ? (
-                <StoreHoursServicePage {...clientProps(demo.storeAdmin)} />
-              ) : state.kind === "Ready" && !state.switching ? (
-                <StoreServiceControlPanel
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  store={state.workspace.selectedScope.storeReference}
-                  csrf={state.csrf}
-                />
-              ) : (
-                <StatePanel heading="Hours and service unavailable" status>
-                  <p>A current merchant session and Store are required.</p>
-                </StatePanel>
-              )}
-            </LocalDemoRoute>
+            <SessionPending pending={sessionPending}>
+              <LocalDemoRoute notice={demo?.Notice ?? null}>
+                {demo !== null ? (
+                  <StoreHoursServicePage {...clientProps(demo.storeAdmin)} />
+                ) : state.kind === "Ready" && !state.switching ? (
+                  <StoreServiceControlPanel
+                    key={state.workspace.selectedScope.storeReference + state.csrf}
+                    store={state.workspace.selectedScope.storeReference}
+                    csrf={state.csrf}
+                  />
+                ) : (
+                  <StatePanel heading="Hours and service unavailable" status>
+                    <p>A current merchant session and Store are required.</p>
+                  </StatePanel>
+                )}
+              </LocalDemoRoute>
+            </SessionPending>
           }
         />
         <Route
           path="/app/organization/stores/:id/capabilities"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <CurrentStoreCapabilityPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                scope={{ storeReference: state.workspace.selectedScope.storeReference }}
-                csrf={state.csrf}
-                storeLabel={state.workspace.selectedScope.storeLabel}
-              />
-            ) : (
-              <StatePanel heading="Store capabilities unavailable" status>
-                <p>A current merchant session and selected Store are required.</p>
-              </StatePanel>
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <CurrentStoreCapabilityPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  scope={{ storeReference: state.workspace.selectedScope.storeReference }}
+                  csrf={state.csrf}
+                  storeLabel={state.workspace.selectedScope.storeLabel}
+                />
+              ) : (
+                <StatePanel heading="Store capabilities unavailable" status>
+                  <p>A current merchant session and selected Store are required.</p>
+                </StatePanel>
+              )}
+            </SessionPending>
           }
         />
         <Route path="/app/organization/stores/:id/live-gate" element={<StoreLiveGatePage />} />
@@ -622,53 +649,61 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         <Route
           path="/app/organization/users"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <StaffListPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createStaffPageClient(state.csrf)}
-              />
-            ) : (
-              <StaffListPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <StaffListPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createStaffPageClient(state.csrf)}
+                />
+              ) : (
+                <StaffListPage />
+              )}
+            </SessionPending>
           }
         />
         <Route
           path="/app/organization/users/:id"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <StaffDetailPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createStaffPageClient(state.csrf)}
-              />
-            ) : (
-              <StaffDetailPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <StaffDetailPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createStaffPageClient(state.csrf)}
+                />
+              ) : (
+                <StaffDetailPage />
+              )}
+            </SessionPending>
           }
         />
         <Route
           path="/app/organization/roles"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <RoleListPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createRoleAdministrationPageClient(state.csrf)}
-              />
-            ) : (
-              <RoleListPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <RoleListPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createRoleAdministrationPageClient(state.csrf)}
+                />
+              ) : (
+                <RoleListPage />
+              )}
+            </SessionPending>
           }
         />
         <Route
           path="/app/organization/roles/:id"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <RoleEditorPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createRoleAdministrationPageClient(state.csrf)}
-              />
-            ) : (
-              <RoleEditorPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <RoleEditorPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createRoleAdministrationPageClient(state.csrf)}
+                />
+              ) : (
+                <RoleEditorPage />
+              )}
+            </SessionPending>
           }
         />
         <Route path="/platform/live-gates" element={<PlatformLiveGatePage />} />
@@ -686,40 +721,46 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         <Route
           path="/app/commerce/option-sets"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <StoreOptionSetListPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createOptionSetClient(state.csrf)}
-              />
-            ) : (
-              <StoreOptionSetListPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <StoreOptionSetListPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createOptionSetClient(state.csrf)}
+                />
+              ) : (
+                <StoreOptionSetListPage />
+              )}
+            </SessionPending>
           }
         />
         <Route
           path="/app/commerce/option-sets/:optionSetId"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <StoreOptionSetEditPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createOptionSetClient(state.csrf)}
-              />
-            ) : (
-              <StoreOptionSetEditPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <StoreOptionSetEditPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createOptionSetClient(state.csrf)}
+                />
+              ) : (
+                <StoreOptionSetEditPage />
+              )}
+            </SessionPending>
           }
         />
         <Route
           path="/app/commerce/products"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <ProductListPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createProductClient(state.csrf)}
-              />
-            ) : (
-              <ProductListPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <ProductListPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createProductClient(state.csrf)}
+                />
+              ) : (
+                <ProductListPage />
+              )}
+            </SessionPending>
           }
         />
         {["/app/commerce/products/new", "/app/commerce/products/:id/edit"].map((path) => (
@@ -727,45 +768,51 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
             key={path}
             path={path}
             element={
-              state.kind === "Ready" && !state.switching ? (
-                <ProductEditorPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createProductClient(state.csrf)}
-                />
-              ) : (
-                <ProductEditorPage />
-              )
+              <SessionPending pending={sessionPending}>
+                {state.kind === "Ready" && !state.switching ? (
+                  <ProductEditorPage
+                    key={state.workspace.selectedScope.storeReference + state.csrf}
+                    client={createProductClient(state.csrf)}
+                  />
+                ) : (
+                  <ProductEditorPage />
+                )}
+              </SessionPending>
             }
           />
         ))}
         <Route
           path="/app/commerce/menus"
           element={
-            <LocalDemoRoute notice={demo?.Notice ?? null}>
-              {!demo && state.kind === "Ready" && !state.switching ? (
-                <StoreMenuListPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createMenuClient(state.csrf)}
-                />
-              ) : (
-                // The local demo has no menu source; it fails closed without application requests.
-                <StoreMenuListPage />
-              )}
-            </LocalDemoRoute>
+            <SessionPending pending={sessionPending}>
+              <LocalDemoRoute notice={demo?.Notice ?? null}>
+                {!demo && state.kind === "Ready" && !state.switching ? (
+                  <StoreMenuListPage
+                    key={state.workspace.selectedScope.storeReference + state.csrf}
+                    client={createMenuClient(state.csrf)}
+                  />
+                ) : (
+                  // The local demo has no menu source; it fails closed without application requests.
+                  <StoreMenuListPage />
+                )}
+              </LocalDemoRoute>
+            </SessionPending>
           }
         />
         <Route
           path="/app/commerce/menus/:id"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <StoreMenuBuilderPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createMenuClient(state.csrf)}
-                csrf={state.csrf}
-              />
-            ) : (
-              <StoreMenuBuilderPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <StoreMenuBuilderPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createMenuClient(state.csrf)}
+                  csrf={state.csrf}
+                />
+              ) : (
+                <StoreMenuBuilderPage />
+              )}
+            </SessionPending>
           }
         />
         <Route path="/app/commerce/bundles" element={<BundleListPage />} />
@@ -773,100 +820,114 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         <Route
           path="/app/commerce/availability"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <StoreAvailabilityPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createAvailabilityClient(state.csrf)}
-              />
-            ) : (
-              <StoreAvailabilityPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <StoreAvailabilityPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createAvailabilityClient(state.csrf)}
+                />
+              ) : (
+                <StoreAvailabilityPage />
+              )}
+            </SessionPending>
           }
         />
         <Route
           path="/app/commerce/tax-review"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <StoreTaxReviewPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createTaxReviewClient(state.csrf)}
-                storeSetupHref={`/app/organization/stores/${state.workspace.selectedScope.storeReference}/setup#receipts-and-privacy`}
-              />
-            ) : (
-              <StoreTaxReviewPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <StoreTaxReviewPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createTaxReviewClient(state.csrf)}
+                  storeSetupHref={`/app/organization/stores/${state.workspace.selectedScope.storeReference}/setup#receipts-and-privacy`}
+                />
+              ) : (
+                <StoreTaxReviewPage />
+              )}
+            </SessionPending>
           }
         />
         <Route
           path="/app/commerce/option-recipes"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <StoreOptionRecipesPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createOptionRecipeClient(state.csrf)}
-                csrf={state.csrf}
-              />
-            ) : (
-              <StoreOptionRecipesPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <StoreOptionRecipesPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createOptionRecipeClient(state.csrf)}
+                  csrf={state.csrf}
+                />
+              ) : (
+                <StoreOptionRecipesPage />
+              )}
+            </SessionPending>
           }
         />
         <Route
           path="/app/commerce/option-prices"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <StoreOptionPricesPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createOptionPriceClient(state.csrf)}
-              />
-            ) : (
-              <StoreOptionPricesPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <StoreOptionPricesPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createOptionPriceClient(state.csrf)}
+                />
+              ) : (
+                <StoreOptionPricesPage />
+              )}
+            </SessionPending>
           }
         />
         <Route
           path="/app/commerce/pricing"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <StorePriceListPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createPriceClient(state.csrf)}
-              />
-            ) : (
-              <StorePriceListPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <StorePriceListPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createPriceClient(state.csrf)}
+                />
+              ) : (
+                <StorePriceListPage />
+              )}
+            </SessionPending>
           }
         />
         <Route
           path="/app/commerce/pricing/:id"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <StorePriceEditorPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createPriceClient(state.csrf)}
-                csrf={state.csrf}
-              />
-            ) : (
-              <StorePriceEditorPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <StorePriceEditorPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createPriceClient(state.csrf)}
+                  csrf={state.csrf}
+                />
+              ) : (
+                <StorePriceEditorPage />
+              )}
+            </SessionPending>
           }
         />
         <Route
           path="/app/commerce/tax"
           element={
-            demo !== null ? (
-              <TaxConfigPage />
-            ) : state.kind === "Ready" && !state.switching ? (
-              <TaxConfigDraftPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                storeReference={state.workspace.selectedScope.storeReference}
-                csrf={state.csrf}
-              />
-            ) : (
-              <StatePanel heading="Tax Configuration unavailable" status>
-                <p>A current merchant session and selected Store are required.</p>
-              </StatePanel>
-            )
+            <SessionPending pending={sessionPending}>
+              {demo !== null ? (
+                <TaxConfigPage />
+              ) : state.kind === "Ready" && !state.switching ? (
+                <TaxConfigDraftPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  storeReference={state.workspace.selectedScope.storeReference}
+                  csrf={state.csrf}
+                />
+              ) : (
+                <StatePanel heading="Tax Configuration unavailable" status>
+                  <p>A current merchant session and selected Store are required.</p>
+                </StatePanel>
+              )}
+            </SessionPending>
           }
         />
         <Route path="/app/commerce/promotions" element={<PromotionListPage />} />
@@ -874,54 +935,60 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         <Route
           path="/app/commerce/recipes"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <RecipeListPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createRecipeClient(state.csrf)}
-              />
-            ) : (
-              <RecipeListPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <RecipeListPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createRecipeClient(state.csrf)}
+                />
+              ) : (
+                <RecipeListPage />
+              )}
+            </SessionPending>
           }
         />
         <Route
           path="/app/commerce/recipes/:id/edit"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <RecipeEditorPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createRecipeClient(state.csrf)}
-                csrf={state.csrf}
-              />
-            ) : (
-              <RecipeEditorPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <RecipeEditorPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createRecipeClient(state.csrf)}
+                  csrf={state.csrf}
+                />
+              ) : (
+                <RecipeEditorPage />
+              )}
+            </SessionPending>
           }
         />
         <Route
           path="/operations/orders"
           element={
-            <LocalDemoRoute notice={demo?.Notice ?? null}>
-              {demo !== null ? (
-                <CurrentOrderQueuePage
-                  storeLabel={demo.demoStore.storeLabel}
-                  csrf="local-demo"
-                  timeZone={demo.demoStore.timeZone}
-                  fetcher={demo.merchantFetch}
-                />
-              ) : state.kind === "Ready" && !state.switching ? (
-                <CurrentOrderQueuePage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  storeLabel={state.workspace.selectedScope.storeLabel}
-                  csrf={state.csrf}
-                  timeZone={state.workspace.selectedScope.timeZone}
-                />
-              ) : (
-                <StatePanel heading="Order Queue unavailable" status>
-                  <p>A current merchant session and Store are required.</p>
-                </StatePanel>
-              )}
-            </LocalDemoRoute>
+            <SessionPending pending={sessionPending}>
+              <LocalDemoRoute notice={demo?.Notice ?? null}>
+                {demo !== null ? (
+                  <CurrentOrderQueuePage
+                    storeLabel={demo.demoStore.storeLabel}
+                    csrf="local-demo"
+                    timeZone={demo.demoStore.timeZone}
+                    fetcher={demo.merchantFetch}
+                  />
+                ) : state.kind === "Ready" && !state.switching ? (
+                  <CurrentOrderQueuePage
+                    key={state.workspace.selectedScope.storeReference + state.csrf}
+                    storeLabel={state.workspace.selectedScope.storeLabel}
+                    csrf={state.csrf}
+                    timeZone={state.workspace.selectedScope.timeZone}
+                  />
+                ) : (
+                  <StatePanel heading="Order Queue unavailable" status>
+                    <p>A current merchant session and Store are required.</p>
+                  </StatePanel>
+                )}
+              </LocalDemoRoute>
+            </SessionPending>
           }
         />
         <Route path="/operations/delivery" element={<DeliveryDispatchPage />} />
@@ -931,84 +998,96 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         <Route
           path="/operations/order-entry"
           element={
-            demo === null && state.kind === "Ready" && !state.switching ? (
-              <StaffOrderEntryPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                storeLabel={state.workspace.selectedScope.storeLabel}
-                csrf={state.csrf}
-                timeZone={state.workspace.selectedScope.timeZone}
-              />
-            ) : (
-              <StatePanel heading="Counter order unavailable" status>
-                <p>A current merchant session and Store are required.</p>
-              </StatePanel>
-            )
+            <SessionPending pending={sessionPending}>
+              {demo === null && state.kind === "Ready" && !state.switching ? (
+                <StaffOrderEntryPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  storeLabel={state.workspace.selectedScope.storeLabel}
+                  csrf={state.csrf}
+                  timeZone={state.workspace.selectedScope.timeZone}
+                />
+              ) : (
+                <StatePanel heading="Counter order unavailable" status>
+                  <p>A current merchant session and Store are required.</p>
+                </StatePanel>
+              )}
+            </SessionPending>
           }
         />
         <Route path="/operations/inventory" element={<StockOverviewPage />} />
         <Route
           path="/operations/inventory/counts"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <StockCountListPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createStockCountClient(state.csrf)}
-              />
-            ) : (
-              <StockCountListPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <StockCountListPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createStockCountClient(state.csrf)}
+                />
+              ) : (
+                <StockCountListPage />
+              )}
+            </SessionPending>
           }
         />
         <Route
           path="/operations/inventory/counts/:id"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <StockCountWorkbenchPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createStockCountClient(state.csrf)}
-              />
-            ) : (
-              <StockCountWorkbenchPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <StockCountWorkbenchPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createStockCountClient(state.csrf)}
+                />
+              ) : (
+                <StockCountWorkbenchPage />
+              )}
+            </SessionPending>
           }
         />
         <Route
           path="/operations/inventory/waste"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <StoreWasteListPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createStoreWasteClient(state.csrf)}
-              />
-            ) : (
-              <StoreWasteListPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <StoreWasteListPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createStoreWasteClient(state.csrf)}
+                />
+              ) : (
+                <StoreWasteListPage />
+              )}
+            </SessionPending>
           }
         />
         <Route
           path="/operations/inventory/waste/new"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <StoreWasteFormPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createStoreWasteClient(state.csrf)}
-              />
-            ) : (
-              <StoreWasteFormPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <StoreWasteFormPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createStoreWasteClient(state.csrf)}
+                />
+              ) : (
+                <StoreWasteFormPage />
+              )}
+            </SessionPending>
           }
         />
         <Route
           path="/operations/inventory/waste/:id"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <StoreWasteDetailPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createStoreWasteClient(state.csrf)}
-              />
-            ) : (
-              <StoreWasteDetailPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <StoreWasteDetailPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createStoreWasteClient(state.csrf)}
+                />
+              ) : (
+                <StoreWasteDetailPage />
+              )}
+            </SessionPending>
           }
         />
         <Route path="/operations/inventory/transfers" element={<InventoryTransferListPage />} />
@@ -1020,134 +1099,154 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         <Route
           path="/operations/receiving"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <StoreReceiptListPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createStoreReceiptClient(state.csrf)}
-              />
-            ) : (
-              <StoreReceiptListPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <StoreReceiptListPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createStoreReceiptClient(state.csrf)}
+                />
+              ) : (
+                <StoreReceiptListPage />
+              )}
+            </SessionPending>
           }
         />
         <Route
           path="/operations/receiving/new"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <StoreReceiptFormPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createStoreReceiptClient(state.csrf)}
-              />
-            ) : (
-              <StoreReceiptFormPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <StoreReceiptFormPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createStoreReceiptClient(state.csrf)}
+                />
+              ) : (
+                <StoreReceiptFormPage />
+              )}
+            </SessionPending>
           }
         />
         <Route
           path="/operations/receiving/:id"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <StoreReceiptDetailPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createStoreReceiptClient(state.csrf)}
-              />
-            ) : (
-              <StoreReceiptDetailPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <StoreReceiptDetailPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createStoreReceiptClient(state.csrf)}
+                />
+              ) : (
+                <StoreReceiptDetailPage />
+              )}
+            </SessionPending>
           }
         />
         <Route
           path="/app/supply/opening-count"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <OpeningCountPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createOpeningCountClient(state.csrf)}
-              />
-            ) : (
-              <OpeningCountPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <OpeningCountPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createOpeningCountClient(state.csrf)}
+                />
+              ) : (
+                <OpeningCountPage />
+              )}
+            </SessionPending>
           }
         />
         <Route
           path="/app/supply/opening-count/:id"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <OpeningCountPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createOpeningCountClient(state.csrf)}
-              />
-            ) : (
-              <OpeningCountPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <OpeningCountPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createOpeningCountClient(state.csrf)}
+                />
+              ) : (
+                <OpeningCountPage />
+              )}
+            </SessionPending>
           }
         />
         <Route
           path="/app/supply/locations"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <StockLocationListPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createStockLocationClient(state.csrf)}
-              />
-            ) : (
-              <StockLocationListPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <StockLocationListPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createStockLocationClient(state.csrf)}
+                />
+              ) : (
+                <StockLocationListPage />
+              )}
+            </SessionPending>
           }
         />
         <Route
           path="/app/supply/items"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <SupplyItemListPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createSupplyItemClient(state.csrf)}
-              />
-            ) : (
-              <SupplyItemListPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <SupplyItemListPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createSupplyItemClient(state.csrf)}
+                />
+              ) : (
+                <SupplyItemListPage />
+              )}
+            </SessionPending>
           }
         />
         <Route
           path="/app/supply/items/new"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <SupplyItemFormPage
-                mode="Create"
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createSupplyItemClient(state.csrf)}
-              />
-            ) : (
-              <SupplyItemFormPage mode="Create" />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <SupplyItemFormPage
+                  mode="Create"
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createSupplyItemClient(state.csrf)}
+                />
+              ) : (
+                <SupplyItemFormPage mode="Create" />
+              )}
+            </SessionPending>
           }
         />
         <Route
           path="/app/supply/items/:id/edit"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <SupplyItemFormPage
-                mode="Edit"
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createSupplyItemClient(state.csrf)}
-              />
-            ) : (
-              <SupplyItemFormPage mode="Edit" />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <SupplyItemFormPage
+                  mode="Edit"
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createSupplyItemClient(state.csrf)}
+                />
+              ) : (
+                <SupplyItemFormPage mode="Edit" />
+              )}
+            </SessionPending>
           }
         />
         <Route path="/app/supply/items/:id/movements" element={<InventoryItemStockHistoryPage />} />
         <Route
           path="/app/supply/items/:id"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <SupplyItemDetailPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createSupplyItemClient(state.csrf)}
-              />
-            ) : (
-              <SupplyItemDetailPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <SupplyItemDetailPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createSupplyItemClient(state.csrf)}
+                />
+              ) : (
+                <SupplyItemDetailPage />
+              )}
+            </SessionPending>
           }
         />
         <Route path="/app/supply/movements" element={<InventoryMovementListPage />} />
@@ -1165,20 +1264,22 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         <Route
           path="/app/reports/operations"
           element={
-            demo === null && state.kind === "Ready" && !state.switching ? (
-              <StoreReportsPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                storeLabel={state.workspace.selectedScope.storeLabel}
-              />
-            ) : demo !== null ? (
-              <OperationalDashboardPage />
-            ) : (
-              <WorkspacePage title="Reports">
-                <StatePanel heading="Reports unavailable" tone="error" status>
-                  <p>A current merchant session and Store are required.</p>
-                </StatePanel>
-              </WorkspacePage>
-            )
+            <SessionPending pending={sessionPending}>
+              {demo === null && state.kind === "Ready" && !state.switching ? (
+                <StoreReportsPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  storeLabel={state.workspace.selectedScope.storeLabel}
+                />
+              ) : demo !== null ? (
+                <OperationalDashboardPage />
+              ) : (
+                <WorkspacePage title="Reports">
+                  <StatePanel heading="Reports unavailable" tone="error" status>
+                    <p>A current merchant session and Store are required.</p>
+                  </StatePanel>
+                </WorkspacePage>
+              )}
+            </SessionPending>
           }
         />
         <Route path="/app/reports/metrics" element={<MetricCatalogPage />} />
@@ -1207,28 +1308,32 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         <Route
           path="/app/compliance/allergens"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <AllergenListPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createAllergenClient(state.csrf)}
-                csrf={state.csrf}
-              />
-            ) : (
-              <AllergenListPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <AllergenListPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createAllergenClient(state.csrf)}
+                  csrf={state.csrf}
+                />
+              ) : (
+                <AllergenListPage />
+              )}
+            </SessionPending>
           }
         />
         <Route
           path="/app/compliance/allergens/:id"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <AllergenItemPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                client={createAllergenClient(state.csrf)}
-              />
-            ) : (
-              <AllergenItemPage />
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <AllergenItemPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createAllergenClient(state.csrf)}
+                />
+              ) : (
+                <AllergenItemPage />
+              )}
+            </SessionPending>
           }
         />
         <Route path="/app/compliance/incidents/:id" element={<ComplianceIncidentPage />} />
@@ -1280,27 +1385,29 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         <Route
           path="/operations/orders/:id"
           element={
-            <LocalDemoRoute notice={demo?.Notice ?? null}>
-              {demo !== null ? (
-                <CurrentOrderDetailRoute
-                  storeLabel={demo.demoStore.storeLabel}
-                  csrf="local-demo"
-                  timeZone={demo.demoStore.timeZone}
-                  fetcher={demo.merchantFetch}
-                />
-              ) : state.kind === "Ready" && !state.switching ? (
-                <CurrentOrderDetailRoute
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  storeLabel={state.workspace.selectedScope.storeLabel}
-                  csrf={state.csrf}
-                  timeZone={state.workspace.selectedScope.timeZone}
-                />
-              ) : (
-                <StatePanel heading="Order unavailable" status>
-                  <p>A current merchant session and Store are required.</p>
-                </StatePanel>
-              )}
-            </LocalDemoRoute>
+            <SessionPending pending={sessionPending}>
+              <LocalDemoRoute notice={demo?.Notice ?? null}>
+                {demo !== null ? (
+                  <CurrentOrderDetailRoute
+                    storeLabel={demo.demoStore.storeLabel}
+                    csrf="local-demo"
+                    timeZone={demo.demoStore.timeZone}
+                    fetcher={demo.merchantFetch}
+                  />
+                ) : state.kind === "Ready" && !state.switching ? (
+                  <CurrentOrderDetailRoute
+                    key={state.workspace.selectedScope.storeReference + state.csrf}
+                    storeLabel={state.workspace.selectedScope.storeLabel}
+                    csrf={state.csrf}
+                    timeZone={state.workspace.selectedScope.timeZone}
+                  />
+                ) : (
+                  <StatePanel heading="Order unavailable" status>
+                    <p>A current merchant session and Store are required.</p>
+                  </StatePanel>
+                )}
+              </LocalDemoRoute>
+            </SessionPending>
           }
         />
         {["/app/operations/payments/:id", "/app/operations/payments/:id/refund"].map((path) => (
@@ -1308,17 +1415,19 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
             key={path}
             path={path}
             element={
-              state.kind === "Ready" && !state.switching ? (
-                <RefundPaymentPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  csrf={state.csrf}
-                  storeLabel={state.workspace.selectedScope.storeLabel}
-                />
-              ) : (
-                <StatePanel heading="Payment unavailable" status>
-                  <p>Sign in and select a Store to continue.</p>
-                </StatePanel>
-              )
+              <SessionPending pending={sessionPending}>
+                {state.kind === "Ready" && !state.switching ? (
+                  <RefundPaymentPage
+                    key={state.workspace.selectedScope.storeReference + state.csrf}
+                    csrf={state.csrf}
+                    storeLabel={state.workspace.selectedScope.storeLabel}
+                  />
+                ) : (
+                  <StatePanel heading="Payment unavailable" status>
+                    <p>Sign in and select a Store to continue.</p>
+                  </StatePanel>
+                )}
+              </SessionPending>
             }
           />
         ))}
@@ -1326,61 +1435,66 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         <Route
           path="/operations/kitchen"
           element={
-            <LocalDemoRoute notice={demo?.Notice ?? null}>
-              {demo?.kitchenBoard ? (
-                <KitchenBoardPage client={demo.kitchenBoard} />
-              ) : state.kind === "Ready" && !state.switching ? (
-                <KitchenBoardPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  csrf={state.csrf}
-                  storeReference={state.workspace.selectedScope.storeReference}
-                  storeLabel={state.workspace.selectedScope.storeLabel}
-                  soldOutHref={
-                    state.workspace.navigation.find((item) => item.screenId === "CAT-AVAILABILITY")
-                      ?.href
-                  }
-                  navigation={state.workspace.navigation.map((item) => (
-                    <a
-                      key={item.screenId}
-                      href={item.href}
-                      aria-current={item.screenId === "KIT-KITCHEN-QUEUE" ? "page" : undefined}
-                    >
-                      {item.label}
-                    </a>
-                  ))}
-                />
-              ) : (
-                <StatePanel heading="Kitchen unavailable">
-                  <p>A current merchant session and Store are required.</p>
-                </StatePanel>
-              )}
-            </LocalDemoRoute>
+            <SessionPending pending={sessionPending}>
+              <LocalDemoRoute notice={demo?.Notice ?? null}>
+                {demo?.kitchenBoard ? (
+                  <KitchenBoardPage client={demo.kitchenBoard} />
+                ) : state.kind === "Ready" && !state.switching ? (
+                  <KitchenBoardPage
+                    key={state.workspace.selectedScope.storeReference + state.csrf}
+                    csrf={state.csrf}
+                    storeReference={state.workspace.selectedScope.storeReference}
+                    storeLabel={state.workspace.selectedScope.storeLabel}
+                    soldOutHref={
+                      state.workspace.navigation.find(
+                        (item) => item.screenId === "CAT-AVAILABILITY",
+                      )?.href
+                    }
+                    navigation={state.workspace.navigation.map((item) => (
+                      <a
+                        key={item.screenId}
+                        href={item.href}
+                        aria-current={item.screenId === "KIT-KITCHEN-QUEUE" ? "page" : undefined}
+                      >
+                        {item.label}
+                      </a>
+                    ))}
+                  />
+                ) : (
+                  <StatePanel heading="Kitchen unavailable">
+                    <p>A current merchant session and Store are required.</p>
+                  </StatePanel>
+                )}
+              </LocalDemoRoute>
+            </SessionPending>
           }
         />
         <Route path="/operations/production-batches" element={<ProductionBatchPage />} />
         <Route
           path="/operations/dining"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <DiningSessionWorkspace
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                csrf={state.csrf}
-                storeLabel={state.workspace.selectedScope.storeLabel}
-                navigation={state.workspace.navigation.map((item) => (
-                  <a
-                    key={item.screenId}
-                    href={item.href}
-                    aria-current={item.screenId === "DIN-FLOOR-BOARD" ? "page" : undefined}
-                  >
-                    {item.label}
-                  </a>
-                ))}
-              />
-            ) : (
-              <StatePanel heading="Dining unavailable">
-                <p>A current merchant session and Store are required.</p>
-              </StatePanel>
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <DiningSessionWorkspace
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  csrf={state.csrf}
+                  storeLabel={state.workspace.selectedScope.storeLabel}
+                  navigation={state.workspace.navigation.map((item) => (
+                    <a
+                      key={item.screenId}
+                      href={item.href}
+                      aria-current={item.screenId === "DIN-FLOOR-BOARD" ? "page" : undefined}
+                    >
+                      {item.label}
+                    </a>
+                  ))}
+                />
+              ) : (
+                <StatePanel heading="Dining unavailable">
+                  <p>A current merchant session and Store are required.</p>
+                </StatePanel>
+              )}
+            </SessionPending>
           }
         />
         <Route path="/operations/reservations/calendar" element={<ReservationCalendarPage />} />
@@ -1391,48 +1505,52 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         <Route
           path="/operations/kitchen/work-items/:id"
           element={
-            <LocalDemoRoute notice={demo?.Notice ?? null}>
-              {demo?.kitchenBoard ? (
-                <KitchenWorkItemPage client={demo.kitchenBoard} />
-              ) : state.kind === "Ready" && !state.switching ? (
-                <KitchenWorkItemPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  csrf={state.csrf}
-                  storeReference={state.workspace.selectedScope.storeReference}
-                  storeLabel={state.workspace.selectedScope.storeLabel}
-                  navigation={state.workspace.navigation.map((item) => (
-                    <a
-                      key={item.screenId}
-                      href={item.href}
-                      aria-current={item.href === "/operations/kitchen" ? "page" : undefined}
-                    >
-                      {item.label}
-                    </a>
-                  ))}
-                />
-              ) : (
-                <StatePanel heading="Kitchen work item unavailable">
-                  <p>A current merchant session and Store are required.</p>
-                </StatePanel>
-              )}
-            </LocalDemoRoute>
+            <SessionPending pending={sessionPending}>
+              <LocalDemoRoute notice={demo?.Notice ?? null}>
+                {demo?.kitchenBoard ? (
+                  <KitchenWorkItemPage client={demo.kitchenBoard} />
+                ) : state.kind === "Ready" && !state.switching ? (
+                  <KitchenWorkItemPage
+                    key={state.workspace.selectedScope.storeReference + state.csrf}
+                    csrf={state.csrf}
+                    storeReference={state.workspace.selectedScope.storeReference}
+                    storeLabel={state.workspace.selectedScope.storeLabel}
+                    navigation={state.workspace.navigation.map((item) => (
+                      <a
+                        key={item.screenId}
+                        href={item.href}
+                        aria-current={item.href === "/operations/kitchen" ? "page" : undefined}
+                      >
+                        {item.label}
+                      </a>
+                    ))}
+                  />
+                ) : (
+                  <StatePanel heading="Kitchen work item unavailable">
+                    <p>A current merchant session and Store are required.</p>
+                  </StatePanel>
+                )}
+              </LocalDemoRoute>
+            </SessionPending>
           }
         />
         <Route
           path="/operations/pickup"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <PickupQueuePage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                csrf={state.csrf}
-                storeReference={state.workspace.selectedScope.storeReference}
-                storeLabel={state.workspace.selectedScope.storeLabel}
-              />
-            ) : (
-              <StatePanel heading="Pickup Queue unavailable">
-                <p>A current merchant session and Store are required.</p>
-              </StatePanel>
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <PickupQueuePage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  csrf={state.csrf}
+                  storeReference={state.workspace.selectedScope.storeReference}
+                  storeLabel={state.workspace.selectedScope.storeLabel}
+                />
+              ) : (
+                <StatePanel heading="Pickup Queue unavailable">
+                  <p>A current merchant session and Store are required.</p>
+                </StatePanel>
+              )}
+            </SessionPending>
           }
         />
         <Route path="/app/integrations/kds-profiles" element={<KdsProfilePage />} />
@@ -1440,72 +1558,80 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         <Route
           path="/app/operations/tables"
           element={
-            demo === null && state.kind === "Ready" && !state.switching ? (
-              <TableQrCodesPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                csrf={state.csrf}
-                storeLabel={state.workspace.selectedScope.storeLabel}
-                timeZone={state.workspace.selectedScope.timeZone}
-              />
-            ) : (
-              <WorkspacePage title="Table QR codes">
-                <StatePanel heading="Table QR codes unavailable" tone="error" status>
-                  <p>A current merchant session and Store are required.</p>
-                </StatePanel>
-              </WorkspacePage>
-            )
+            <SessionPending pending={sessionPending}>
+              {demo === null && state.kind === "Ready" && !state.switching ? (
+                <TableQrCodesPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  csrf={state.csrf}
+                  storeLabel={state.workspace.selectedScope.storeLabel}
+                  timeZone={state.workspace.selectedScope.timeZone}
+                />
+              ) : (
+                <WorkspacePage title="Table QR codes">
+                  <StatePanel heading="Table QR codes unavailable" tone="error" status>
+                    <p>A current merchant session and Store are required.</p>
+                  </StatePanel>
+                </WorkspacePage>
+              )}
+            </SessionPending>
           }
         />
         {/* WP-2423 Q5: Section 88 APPROVAL-INBOX — refunds awaiting an Owner/Finance approval. */}
         <Route
           path="/app/approvals"
           element={
-            demo === null && state.kind === "Ready" && !state.switching ? (
-              <RefundApprovalsPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                csrf={state.csrf}
-                storeLabel={state.workspace.selectedScope.storeLabel}
-              />
-            ) : (
-              <WorkspacePage title="Approvals">
-                <StatePanel heading="Approvals unavailable" tone="error" status>
-                  <p>A current merchant session and Store are required.</p>
-                </StatePanel>
-              </WorkspacePage>
-            )
+            <SessionPending pending={sessionPending}>
+              {demo === null && state.kind === "Ready" && !state.switching ? (
+                <RefundApprovalsPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  csrf={state.csrf}
+                  storeLabel={state.workspace.selectedScope.storeLabel}
+                />
+              ) : (
+                <WorkspacePage title="Approvals">
+                  <StatePanel heading="Approvals unavailable" tone="error" status>
+                    <p>A current merchant session and Store are required.</p>
+                  </StatePanel>
+                </WorkspacePage>
+              )}
+            </SessionPending>
           }
         />
         <Route
           path="/app/operations/payment-reconciliation"
           element={
-            demo === null && state.kind === "Ready" && !state.switching ? (
-              <SettlementPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                storeLabel={state.workspace.selectedScope.storeLabel}
-                timeZone={state.workspace.selectedScope.timeZone}
-              />
-            ) : (
-              <WorkspacePage title="Settlement">
-                <StatePanel heading="Settlement unavailable" tone="error" status>
-                  <p>A current merchant session and Store are required.</p>
-                </StatePanel>
-              </WorkspacePage>
-            )
+            <SessionPending pending={sessionPending}>
+              {demo === null && state.kind === "Ready" && !state.switching ? (
+                <SettlementPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  storeLabel={state.workspace.selectedScope.storeLabel}
+                  timeZone={state.workspace.selectedScope.timeZone}
+                />
+              ) : (
+                <WorkspacePage title="Settlement">
+                  <StatePanel heading="Settlement unavailable" tone="error" status>
+                    <p>A current merchant session and Store are required.</p>
+                  </StatePanel>
+                </WorkspacePage>
+              )}
+            </SessionPending>
           }
         />
         <Route
           path="/operations/order-exceptions"
           element={
-            state.kind === "Ready" && !state.switching ? (
-              <OrderExceptionPage
-                key={state.workspace.selectedScope.storeReference + state.csrf}
-                csrf={state.csrf}
-              />
-            ) : (
-              <StatePanel heading="Exceptions unavailable" tone="error" status>
-                <p>A current merchant session and Store are required.</p>
-              </StatePanel>
-            )
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <OrderExceptionPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  csrf={state.csrf}
+                />
+              ) : (
+                <StatePanel heading="Exceptions unavailable" tone="error" status>
+                  <p>A current merchant session and Store are required.</p>
+                </StatePanel>
+              )}
+            </SessionPending>
           }
         />
         <Route path="*" element={<Navigate replace to="/app" />} />

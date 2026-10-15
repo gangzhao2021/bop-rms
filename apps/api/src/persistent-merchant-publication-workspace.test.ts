@@ -40,7 +40,16 @@ vi.mock("@bop/membership", async (original) => ({
 }));
 vi.mock("@bop/permission", async (original) => ({
   ...(await original<typeof import("@bop/permission")>()),
-  createPostgresCurrentPermissionPolicySource: () => ({ authorize: mocks.allowed }),
+  createPostgresCurrentPermissionPolicySource: () => ({
+    authorize: mocks.allowed,
+    authorizeActionsWithRoles: async (input: { actions: readonly string[] }) => ({
+      decisions: await Promise.all(
+        input.actions.map(async (action) => ({ ...(await mocks.allowed(input)), action })),
+      ),
+      activeRoleCodes: [],
+      validUntil: null,
+    }),
+  }),
 }));
 vi.mock("@rms/store", async (original) => ({
   ...(await original<typeof import("@rms/store")>()),

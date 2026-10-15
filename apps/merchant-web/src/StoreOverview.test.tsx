@@ -94,7 +94,7 @@ describe("WP-2423 P2 store overview", () => {
     expect(html).toContain("4 awaiting acceptance · 2 ready");
     expect(html).toContain("Could not be read");
     expect(html).toContain("None overdue");
-    expect(html).toContain("Updated · 12:30");
+    expect(html).toContain("Last checked 12:30");
     expect(html).toContain('href="/operations/order-exceptions"');
     const loading = renderToStaticMarkup(
       <MemoryRouter>

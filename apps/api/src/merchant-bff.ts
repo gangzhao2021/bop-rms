@@ -4951,6 +4951,11 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
     void retryTransactionConflict(() => port.read({ sessionCookie }))
       .then((view) => response.set("Cache-Control", NO_STORE).json(view))
       .catch((error: unknown) => {
+        // WP-2423: staff who are not the Brand Owner get "nothing to show", not a refusal.
+        if (error instanceof MerchantSoleOperatorError && error.code === "NotOwner") {
+          response.set("Cache-Control", NO_STORE).json({ brandOwner: false });
+          return;
+        }
         if (error instanceof MerchantSoleOperatorError && error.code === "Denied") {
           response
             .status(403)

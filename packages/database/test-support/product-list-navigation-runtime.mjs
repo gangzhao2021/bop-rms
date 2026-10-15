@@ -12,6 +12,7 @@ export async function verifyProductListNavigationRuntime({
   targetReference,
   readGrant,
   login,
+  queryCount,
 }) {
   const previous = options.catalogProductNavigation,
     actualNow = options.now,
@@ -49,7 +50,13 @@ export async function verifyProductListNavigationRuntime({
       "no actual definition hides navigation",
     );
     await featureVersion(1, "Enabled");
+    const queriesBefore = queryCount();
     assert.equal(hasProduct(await service().bootstrap(cookie)), true);
+    // WP-2423 query budget: the product entry's Brand checks share one policy read (177 before).
+    assert.ok(
+      queryCount() - queriesBefore <= 120,
+      "session read used " + (queryCount() - queriesBefore),
+    );
     await admin.query(
       "UPDATE bop_permission.permission_grant SET lifecycle='Revoked',version=version+1 WHERE grant_id=$1",
       [readGrant],

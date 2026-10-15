@@ -17,6 +17,18 @@ vi.mock("@bop/permission", async (importOriginal) => ({
   createPostgresCurrentPermissionPolicySource: (tx: unknown) => ({
     authorize: async (input: unknown) => (await ports.policy(tx, input)).decision,
     authorizeWithRoles: (input: unknown) => ports.policy(tx, input),
+    // One materialization for several actions: each action is evaluated by the same port.
+    authorizeActionsWithRoles: async (input: { actions: readonly string[] }) => {
+      const { actions, ...rest } = input;
+      const held: { decision: unknown; validUntil: string | null }[] = [];
+      for (const action of actions) held.push(await ports.policy(tx, { ...rest, action }));
+      const bounds = held.map((entry) => entry.validUntil).filter((at) => at !== null);
+      return {
+        decisions: held.map((entry) => entry.decision),
+        activeRoleCodes: [],
+        validUntil: bounds.length ? bounds.sort()[0] : null,
+      };
+    },
   }),
 }));
 vi.mock("./merchant-selected-context.js", () => ({
@@ -364,20 +376,24 @@ it("refuses selected Store grants as a substitute for complete Brand list access
   await expect(f.execute()).resolves.toBe(false);
 });
 
-it("uses the current clock for each Brand action after an earlier asynchronous decision", async () => {
+it("evaluates every Brand action from one policy materialization at one current observation", async () => {
   const f = fixture(),
     authorize = ports.policy.getMockImplementation();
   if (!authorize) throw Error("Missing controlled owner");
+  const brandObservations: string[] = [];
   ports.policy.mockImplementation(async (tx, input) => {
     const result = await authorize(tx, input);
+    if (input.tenantContext.scopeKind === "Brand")
+      brandObservations.push(input.tenantContext.resolvedAt);
+    // The clock moves on during the read; the later check still uses the current clock.
     if (input.action === "catalog.product.manage") f.state.now = after(1000);
-    if (input.action === "catalog.product.read") {
-      expect(input.tenantContext.resolvedAt).toBe(after(1000));
+    if (input.action === "catalog.product.read")
       return { ...result, decision: { ...result.decision, effect: "Deny" } };
-    }
     return result;
   });
   await expect(f.execute()).resolves.toBe(false);
+  expect(brandObservations).toHaveLength(4);
+  expect(new Set(brandObservations).size).toBe(1);
 });
 
 it.each(["missing", "disabled", "future"])(

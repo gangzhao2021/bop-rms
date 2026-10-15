@@ -206,9 +206,40 @@ export function createPersistentMerchantBffService(
       context.resolvedAt,
     );
     const policy = createPostgresCurrentPermissionPolicySource(tx);
-    const allowed = async (action: string) =>
-      (await policy.authorize({ tenantContext: context, membership, storeAssignment, action }))
-        .effect === "Allow";
+    // WP-2423: one policy materialization answers up to 16 actions of this one resolution (same
+    // context, Membership, Store assignment and observation; the policy tables stay SHARE-locked
+    // until COMMIT). Evaluating every navigation entry and every operating-status check on its
+    // own read the full policy packet ~50 times per session read (1.2–2.0 s per page load on v15).
+    const decisions = new Map<string, boolean>();
+    // Reuse ends with this resolution: a check made after it (a before-commit guard) reads anew.
+    let reuse = true;
+    const decide = async (actions: readonly string[]) => {
+      const missing = [...new Set(actions)].filter((action) => !decisions.has(action));
+      for (let start = 0; start < missing.length; start += 16) {
+        const chunk = Object.freeze(missing.slice(start, start + 16));
+        const result = await policy.authorizeActionsWithRoles({
+          tenantContext: context,
+          membership,
+          storeAssignment,
+          actions: chunk,
+        });
+        if (result.decisions.length !== chunk.length) throw new Error("MERCHANT_BFF_UNAVAILABLE");
+        chunk.forEach((action, index) => {
+          const decision = result.decisions[index];
+          if (decision?.action !== action) throw new Error("MERCHANT_BFF_UNAVAILABLE");
+          decisions.set(action, decision.effect === "Allow");
+        });
+      }
+    };
+    const allowed = async (action: string) => {
+      if (!reuse)
+        return (
+          (await policy.authorize({ tenantContext: context, membership, storeAssignment, action }))
+            .effect === "Allow"
+        );
+      await decide([action]);
+      return decisions.get(action) === true;
+    };
     if (!(await allowed("merchant.access"))) throw new Error("MERCHANT_BFF_UNAVAILABLE");
     let published:
       | Awaited<ReturnType<ReturnType<typeof createPostgresCurrentStorePublicationProof>>>
@@ -271,6 +302,17 @@ export function createPersistentMerchantBffService(
     if (result.selectedScope.storeReference !== store.storeReference)
       throw new Error("MERCHANT_BFF_UNAVAILABLE");
     const navigation = [];
+    await decide(
+      result.navigation
+        .filter(
+          (item) =>
+            item.screenId !== "ORG-BRAND-DETAIL" &&
+            item.screenId !== "CAT-OPTIONSET-LIST" &&
+            !(item.screenId === "CAT-PRODUCT-LIST" && (currentNavigation || legacyNavigation)) &&
+            item.permission !== "merchant.access",
+        )
+        .flatMap((item) => merchantNavigationActions(item)),
+    );
     for (const item of result.navigation) {
       if (item.screenId === "ORG-BRAND-DETAIL") {
         if (item.href !== "/app/organization/brands/" + context.brand.brandReference)
@@ -423,6 +465,7 @@ export function createPersistentMerchantBffService(
           }),
         );
     }
+    reuse = false;
     return Object.freeze({
       ...result,
       businessDate: operating.businessDate.businessDate,

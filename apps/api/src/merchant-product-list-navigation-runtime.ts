@@ -227,19 +227,29 @@ export function createMerchantProductListNavigationRuntime(options: {
       navigation.scopeKind !== "Store"
     )
       return null;
-    for (const action of optionSet
-      ? [request.permission, request.action]
-      : [request.permission, request.action, "catalog.product.read", "catalog.sku.read"]) {
-      const brandContext = createTenantContext(actor, context.brand, null, check());
-      const decision = await authorize({
-        tenantContext: brandContext,
-        membership,
-        storeAssignment: null,
-        action,
-      });
-      check();
+    // WP-2423: every Brand action of this check comes from one policy materialization (one packet
+    // read instead of one per action; the session read runs this on every page load).
+    const brandActions = Object.freeze(
+      optionSet
+        ? [request.permission, request.action]
+        : [request.permission, request.action, "catalog.product.read", "catalog.sku.read"],
+    );
+    const held = await permissions.authorizeActionsWithRoles({
+      tenantContext: createTenantContext(actor, context.brand, null, check()),
+      membership,
+      storeAssignment: null,
+      actions: brandActions,
+    });
+    if (held.validUntil !== null) {
+      const boundary = parseCanonicalInstant(held.validUntil);
+      if (boundary < deadline) deadline = boundary;
+    }
+    check();
+    if (held.decisions.length !== brandActions.length) return null;
+    for (const [index, action] of brandActions.entries()) {
+      const decision = held.decisions[index];
       if (
-        decision.effect !== "Allow" ||
+        decision?.effect !== "Allow" ||
         decision.scopeKind !== "Brand" ||
         decision.action !== action
       )

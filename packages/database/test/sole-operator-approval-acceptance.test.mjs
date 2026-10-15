@@ -649,10 +649,11 @@ it("sole operator: set by the Brand Owner, self-approval with MFA, lapse on a se
         return true;
       };
 
-      // ── 1. Only the Brand Owner sees and changes the setting; it starts Off.
+      // ── 1. Only the Brand Owner sees and changes the setting; it starts Off. Store staff who
+      // are not the Brand Owner are told so (the page shows them nothing), not refused.
       await assert.rejects(soleOperator.read({ sessionCookie: "mia" }), (error) => {
         assert.ok(error instanceof MerchantSoleOperatorError);
-        assert.equal(error.code, "Denied");
+        assert.equal(error.code, "NotOwner");
         return true;
       });
       const initial = await soleOperator.read({ sessionCookie: "owner" });

@@ -23,6 +23,30 @@ import { parseKitchenBoardView, parseKitchenWorkItemDetailView } from "./kitchen
 import { StoreBusinessDayContext } from "./StoreBusinessDay.js";
 import { earlierDayTickets, fromEarlierKitchenDay, kitchenWaitText } from "./KitchenEarlierDays.js";
 describe("WP-1804 Kitchen Board screens", () => {
+  it("WP-2423: says when the board was last checked, not only when its work last changed", () => {
+    const view = parseKitchenBoardView(kitchenBoardFixture());
+    const checked = new Date(Date.parse(view.projectedAt) + 65 * 60_000).toISOString();
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <KitchenBoardScreen view={view} checkedAt={checked} autoRefresh />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("Last checked <time");
+    expect(html).toContain("16:17 UTC</time>");
+    expect(html).toContain('title="Last change 15:12 UTC"');
+    expect(html).not.toContain("Updated · 15:12");
+    const stale = renderToStaticMarkup(
+      <MemoryRouter>
+        <KitchenBoardScreen
+          view={view}
+          checkedAt={checked}
+          stale={{ reason: "Unavailable", lastLoadedAt: checked, attempts: 1 }}
+        />
+      </MemoryRouter>,
+    );
+    expect(stale).toContain("Data may be out of date · last checked <time");
+    expect(stale).toContain("Read-only until reconnected");
+  });
   it("renders station, safety, age and bounded actions", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>

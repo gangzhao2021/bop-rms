@@ -177,7 +177,7 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
   await expect(now.getByText("1 awaiting acceptance · 1 ready")).toBeVisible();
   await expect(now.getByText("Ready for collection")).toBeVisible();
   await expect(now.getByText("1 overdue")).toBeVisible();
-  await expect(now.getByText(/^Updated · \d\d:\d\d/u)).toBeVisible();
+  await expect(now.getByText(/^Last checked \d\d:\d\d/u)).toBeVisible();
   await expect(now.getByRole("link", { name: "View exceptions" })).toHaveAttribute(
     "href",
     "/operations/order-exceptions",

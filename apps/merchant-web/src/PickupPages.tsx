@@ -249,9 +249,12 @@ export function PickupQueueScreen({
   refreshButtonRef,
   proofContext,
   stale,
+  checkedAt,
 }: {
   readonly view: PickupQueueView;
   readonly stale?: StaleRead | undefined;
+  /** When this device last read the queue successfully (shown as "Last checked"). */
+  readonly checkedAt?: string | undefined;
   readonly proofContext?: { csrf: string; storeReference: string } | undefined;
   readonly onRefresh?: () => void;
   readonly onNext?: () => void;
@@ -290,7 +293,13 @@ export function PickupQueueScreen({
       className="pickup-queue"
       title="Pickup"
       meta={view.storeLabel}
-      status={<Freshness status={stale ? "Stale" : view.freshnessStatus} at={view.projectedAt} />}
+      status={
+        <Freshness
+          status={stale ? "Stale" : view.freshnessStatus}
+          at={view.projectedAt}
+          checkedAt={checkedAt}
+        />
+      }
       actions={
         <button ref={refreshButtonRef} disabled={!onRefresh} onClick={onRefresh}>
           Refresh
@@ -581,6 +590,7 @@ export function PickupQueuePage(props: {
       onRefresh={refresh}
       refreshButtonRef={refreshButtonRef}
       stale={stale}
+      checkedAt={state.loadedAt}
       includeCompleted={includeCompleted}
       onCompletedChange={(value) => {
         focusAfterLoad.current = true;

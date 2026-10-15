@@ -121,3 +121,30 @@ describe("HOME-OVERVIEW Merchant shell", () => {
     expect(html).not.toContain("Unavailable until the WP-1905");
   });
 });
+
+describe("WP-2423 session-gated pages", () => {
+  it("show a neutral loading state, not a refusal, while the session answer is in flight", async () => {
+    const { App } = await import("./App.js");
+    const { MemoryRouter } = await import("react-router");
+    const pending = {
+      bootstrap: () => new Promise<never>(() => undefined),
+      switchStore: () => new Promise<never>(() => undefined),
+    };
+    for (const path of [
+      "/app/reports/operations",
+      "/app/operations/payment-reconciliation",
+      "/app/approvals",
+      "/operations/kitchen",
+      "/app/organization/stores/018f7f9a-ad3e-7a11-8d01-000000000003/setup",
+    ]) {
+      const html = renderToStaticMarkup(
+        <MemoryRouter initialEntries={[path]}>
+          <App client={pending} />
+        </MemoryRouter>,
+      );
+      expect(html, path).toContain("Loading this page…");
+      expect(html, path).not.toContain("A current merchant session");
+      expect(html, path).not.toContain("unavailable");
+    }
+  });
+});

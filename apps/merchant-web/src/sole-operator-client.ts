@@ -177,7 +177,8 @@ export function createSoleOperatorClient(fetcher: typeof fetch = fetch) {
     }
   };
   return Object.freeze({
-    async read(signal?: AbortSignal): Promise<SoleOperatorView> {
+    /** Null: the signed-in member is not the Brand Owner, so there is nothing to show them. */
+    async read(signal?: AbortSignal): Promise<SoleOperatorView | null> {
       let response: Response;
       try {
         response = await request(
@@ -191,7 +192,15 @@ export function createSoleOperatorClient(fetcher: typeof fetch = fetch) {
         throw new SoleOperatorClientError("Denied");
       if (response.status !== 200 || response.headers.get("cache-control") !== "no-store")
         throw new SoleOperatorClientError("Unavailable");
-      return parseSoleOperatorView(await body(response));
+      const value = await body(response);
+      if (
+        value !== null &&
+        typeof value === "object" &&
+        Reflect.ownKeys(value).length === 1 &&
+        (value as Record<string, unknown>).brandOwner === false
+      )
+        return null;
+      return parseSoleOperatorView(value);
     },
     /** Retry with the same operation reference after an unknown result: it is recorded once. */
     async change(

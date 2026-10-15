@@ -2781,6 +2781,42 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16): DEC-RECEIPT-TAX-AND-PRIVACY — the Store Owner enters the GST/HST, QST and PST registration numbers printed on customer receipts and the Store's privacy notice link as append-only versions with actor, time and audit; the pilot API (api role) records the Owner's change, reads the current version when issuing a receipt (frozen into the new receipt only), and shows the privacy link at checkout, on the order page and on receipts"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_setup_draft_revision",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_setup_draft_revision",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_setup_draft_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_setup_draft_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
     }
   ]
 }

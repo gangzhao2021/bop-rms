@@ -555,11 +555,14 @@ export function KitchenBoardScreen({
   onSoundToggle,
   autoRefresh = false,
   stale,
+  checkedAt,
   soldOutHref,
   remakes,
   earlierDays,
 }: {
   readonly view: KitchenBoardView;
+  /** When this device last read the board successfully (shown as "Last checked"). */
+  readonly checkedAt?: string | undefined;
   /** DEC-KITCHEN-STALE-TICKETS: closing an earlier business day's ticket, when offered. */
   readonly earlierDays?:
     | {
@@ -911,7 +914,11 @@ export function KitchenBoardScreen({
           <div>
             <h2>Kitchen</h2>
             <p className="kitchen-board-freshness">
-              <Freshness status={stale ? "Stale" : view.freshnessStatus} at={view.projectedAt} />
+              <Freshness
+                status={stale ? "Stale" : view.freshnessStatus}
+                at={view.projectedAt}
+                checkedAt={checkedAt}
+              />
               <span data-operator={view.operatorStatus}>
                 {view.operatorStatus === "Unverified"
                   ? "KDS session unverified"
@@ -1535,6 +1542,7 @@ function KitchenBoardContent(props: KitchenPageProps) {
           onSoundToggle={toggleSound}
           autoRefresh
           stale={stale}
+          checkedAt={state.loadedAt}
           soldOutHref={props.soldOutHref}
           earlierDays={
             props.csrf

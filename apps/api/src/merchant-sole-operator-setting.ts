@@ -30,7 +30,12 @@ import type { MerchantBffService } from "./merchant-bff.js";
 
 export class MerchantSoleOperatorError extends Error {
   constructor(
-    readonly code: "Denied" | "NeedsReverification" | "VersionConflict" | "NoChange" | "Invalid",
+    /**
+     * NotOwner: a current staff member of the selected Store who is not the Brand Owner (the read
+     * answers "nothing to show"; a change is refused like Denied).
+     */
+    readonly code:
+      "Denied" | "NotOwner" | "NeedsReverification" | "VersionConflict" | "NoChange" | "Invalid",
   ) {
     super("Sole operator setting was not changed");
     this.name = "MerchantSoleOperatorError";
@@ -77,7 +82,10 @@ export function createMerchantSoleOperator(options: {
     const isOwner = async () =>
       (await current.allowed()) &&
       (await brand.authorizeAction("organization.brand.manage"))?.effect === "Allow";
-    if (!(await isOwner())) throw new MerchantSoleOperatorError("Denied");
+    // WP-2423: current staff of the Store who are not the Brand Owner are told so (NotOwner)
+    // rather than refused, so the Approvals page shows them nothing without a refused request.
+    if (!(await isOwner()))
+      throw new MerchantSoleOperatorError((await current.allowed()) ? "NotOwner" : "Denied");
     const scope = {
       tenantReference: current.selected.tenantReference,
       brandReference: String(current.context.brand.brandReference),
@@ -257,6 +265,9 @@ export function createMerchantSoleOperator(options: {
         });
       });
     } catch (error) {
+      // A change by anyone but the Brand Owner is a refusal.
+      if (error instanceof MerchantSoleOperatorError && error.code === "NotOwner")
+        throw new MerchantSoleOperatorError("Denied");
       if (error instanceof SoleOperatorApprovalError) {
         if (error.code === "SOLE_OPERATOR_NEEDS_REVERIFICATION")
           throw new MerchantSoleOperatorError("NeedsReverification");

@@ -54,9 +54,10 @@ test("@production owner verifies and approves a refund above CAD 100 once", asyn
   );
   const stepUps: string[] = [],
     approvals: string[] = [];
-  // WP-2423 Q19: this owner is not the Brand Owner; the sole-operator section stays hidden.
+  // WP-2423 Q19: this owner is not the Brand Owner; the read says so (no refused request) and the
+  // sole-operator section stays hidden.
   await page.route("**/merchant/organization/sole-operator", (route) =>
-    route.fulfill({ status: 403, headers, json: { error: "brand_owner_required" } }),
+    route.fulfill({ headers, json: { brandOwner: false } }),
   );
   await page.route("**/merchant/session", (route) =>
     route.fulfill({
@@ -144,6 +145,7 @@ test("@production owner verifies and approves a refund above CAD 100 once", asyn
   await expect(card).toContainText("Mia");
   await expect(card).toContainText("Refunds on this order would total more than CAD 100");
   await expect(card).toContainText("Waiting for approval");
+  await expect(page.getByRole("heading", { name: "Sole operator" })).toHaveCount(0);
   const approve = card.getByRole("button", { name: "Approve and refund CAD 125.00" });
   await expect(approve).toBeDisabled();
 
@@ -238,9 +240,10 @@ test("@production owner declines a refund with a reason and it leaves the list",
     },
   ];
   const declines: string[] = [];
-  // WP-2423 Q19: this owner is not the Brand Owner; the sole-operator section stays hidden.
+  // WP-2423 Q19: this owner is not the Brand Owner; the read says so (no refused request) and the
+  // sole-operator section stays hidden.
   await page.route("**/merchant/organization/sole-operator", (route) =>
-    route.fulfill({ status: 403, headers, json: { error: "brand_owner_required" } }),
+    route.fulfill({ headers, json: { brandOwner: false } }),
   );
   await page.route("**/merchant/session", (route) =>
     route.fulfill({

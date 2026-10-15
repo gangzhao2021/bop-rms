@@ -201,7 +201,7 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
     "data-age",
     "late",
   );
-  await expect(page.getByText(/^Updated · \d\d:\d\d/u)).toBeVisible();
+  await expect(page.getByText(/^Last checked \d\d:\d\d/u)).toBeVisible();
   await expect(page.getByText("Auto-refresh every 10 s", { exact: true })).toBeVisible();
   await expect(page.getByText("KDS session unverified", { exact: true })).toBeVisible();
   await expect(
@@ -1300,7 +1300,9 @@ test("@production Kitchen keeps the last tickets read-only offline and recovers 
     );
     await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
     await expect(accept).toBeDisabled();
-    await expect(page.getByText(/^Data may be out of date · \d\d:\d\d/u)).toBeVisible();
+    await expect(
+      page.getByText(/^Data may be out of date · last checked \d\d:\d\d/u),
+    ).toBeVisible();
     await expect(page.getByText("Auto-refresh every 10 s", { exact: true })).toHaveCount(0);
     await expect(page.getByText("You’re offline", { exact: true })).toHaveCount(0);
     expect(
