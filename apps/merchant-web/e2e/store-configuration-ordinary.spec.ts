@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { expectNoInternalText } from "./internal-text-guard";
 import {
   createStoreSetupDraft,
   materializeStoreSetupConfigurationVersionV2,
@@ -209,6 +210,7 @@ async function install(page: Page) {
         storeReference: id(3),
         storeLabel: "Synthetic Store",
         brandLabel: "Synthetic Brand",
+        timeZone: "America/Toronto",
       };
       return respond(route, {
         authenticated: true,
@@ -510,18 +512,18 @@ test("ordinary Store Review materializes validates submits independently approve
   await enter(page);
   await panel(page).getByRole("button", { name: "Create configuration from saved setup" }).click();
   await expect(panel(page).getByRole("status")).toHaveText(
-    "Materialize: Committed. Current configuration refreshed.",
+    "Configuration created from the saved setup. Current configuration refreshed.",
   );
   await expect(
     panel(page).getByRole("region", { name: "Recorded fee configuration" }),
   ).toContainText("Service charge");
   await panel(page).getByRole("button", { name: "Validate configuration" }).click();
   await expect(panel(page).getByRole("status")).toHaveText(
-    "Validate: Committed. Current configuration refreshed.",
+    "Configuration checked. Current configuration refreshed.",
   );
   await panel(page).getByRole("button", { name: "Submit configuration for review" }).click();
   await expect(panel(page).getByRole("status")).toHaveText(
-    "Submit: Committed. Current configuration refreshed.",
+    "Configuration sent for approval. Current configuration refreshed.",
   );
   await expect(
     panel(page).getByRole("button", { name: "Approve configuration independently" }),
@@ -533,16 +535,17 @@ test("ordinary Store Review materializes validates submits independently approve
   ).toBeEnabled();
   await panel(page).getByRole("button", { name: "Approve configuration independently" }).click();
   await expect(panel(page).getByRole("status")).toHaveText(
-    "Approve: Committed. Current configuration refreshed.",
+    "Configuration approved. Current configuration refreshed.",
   );
   await panel(page).getByRole("button", { name: "Publish Store configuration" }).click();
   await expect(panel(page).getByRole("status")).toHaveText(
-    "Publish: Committed. Current configuration refreshed.",
+    "Configuration published. Current configuration refreshed.",
   );
   await expect(
     panel(page).getByRole("region", { name: "Published fee configuration" }),
   ).toContainText("Service charge");
   await expect(panel(page)).toContainText("Current published configuration");
+  await expectNoInternalText(page);
   expect(state.writes).toEqual(["Materialize", "Validate", "Submit", "Approve", "Publish"]);
   expect(await cursor(page)).toEqual([]);
   expect(state.errors).toEqual([]);
@@ -581,12 +584,14 @@ test("lost reply retains original through denied conflict and failed refresh the
   state.conflictResolve = false;
   state.failState = true;
   await panel(page).getByRole("button", { name: "Recover original configuration request" }).click();
-  await expect(panel(page).getByRole("alert")).toContainText("unavailable");
+  await expect(panel(page).getByRole("alert")).toContainText("could not be loaded");
   expect(await cursor(page)).toEqual(stored);
   state.failState = false;
   await panel(page).getByRole("button", { name: "Recover original configuration request" }).click();
-  await expect(panel(page).getByRole("status")).toContainText("Original Materialize: Committed");
-  await expect(panel(page)).toContainText("PendingApproval");
+  await expect(panel(page).getByRole("status")).toContainText(
+    "Configuration created from the saved setup.",
+  );
+  await expect(panel(page)).toContainText("Waiting for approval");
   expect(await cursor(page)).toEqual([]);
   expect(state.writes).toEqual(["Materialize"]);
   expect(state.errors).toEqual([]);
@@ -604,7 +609,9 @@ test("Review controls retain 320px 200 percent text keyboard and 44px targets @p
   await create.focus();
   await expect(create).toBeFocused();
   await page.keyboard.press("Enter");
-  await expect(panel(page).getByRole("status")).toContainText("Materialize: Committed");
+  await expect(panel(page).getByRole("status")).toContainText(
+    "Configuration created from the saved setup.",
+  );
   for (const button of await panel(page).getByRole("button").all()) {
     const box = await button.boundingBox();
     if (box) expect(box.height).toBeGreaterThanOrEqual(44);
@@ -625,12 +632,12 @@ test("actual immutable history paginates original authors and read refusal keeps
   await enter(page);
   await panel(page).getByRole("button", { name: "Create configuration from saved setup" }).click();
   await expect(panel(page).getByRole("status")).toHaveText(
-    "Materialize: Committed. Current configuration refreshed.",
+    "Configuration created from the saved setup. Current configuration refreshed.",
   );
   for (let i = 0; i < 2; i++) {
     await panel(page).getByRole("button", { name: "Validate configuration" }).click();
     await expect(panel(page).getByRole("status")).toHaveText(
-      "Validate: Committed. Current configuration refreshed.",
+      "Configuration checked. Current configuration refreshed.",
     );
   }
   state.actor = id(80);
@@ -641,14 +648,11 @@ test("actual immutable history paginates original authors and read refusal keeps
   });
   await history.getByRole("button", { name: "Refresh configuration history" }).click();
   await expect(history.getByRole("listitem")).toHaveCount(2);
-  await history.getByRole("button", { name: "Load older configuration operations" }).click();
+  await history.getByRole("button", { name: "Load older changes" }).click();
   await expect(history.getByRole("listitem")).toHaveCount(3);
-  await expect(
-    history.getByRole("button", { name: "Load older configuration operations" }),
-  ).toHaveCount(0);
-  await history.getByText("Recorded author and audit details", { exact: true }).first().click();
-  await expect(history).toContainText(scope.actorReference);
-  await expect(history).toContainText("SaveDraft");
+  await expect(history.getByRole("button", { name: "Load older changes" })).toHaveCount(0);
+  await expect(history).toContainText("Created from saved setup");
+  await expect(history).not.toContainText(scope.actorReference);
   state.wrongHistory = true;
   await history.getByRole("button", { name: "Refresh configuration history" }).click();
   await expect(history.getByRole("alert")).toContainText("Actor changed");
@@ -666,7 +670,28 @@ test("actual immutable history paginates original authors and read refusal keeps
   expect(await cursor(page)).toEqual(original);
   state.denyHistory = false;
   await panel(page).getByRole("button", { name: "Recover original configuration request" }).click();
-  await expect(panel(page).getByRole("status")).toContainText("Original Validate: Committed");
+  await expect(panel(page).getByRole("status")).toContainText("Configuration checked.");
   expect(await cursor(page)).toEqual([]);
+  expect(state.errors).toEqual([]);
+});
+test("a deployment without configuration publication hides the panel instead of an outage @production", async ({
+  page,
+}) => {
+  const state = await install(page);
+  // WP-2423 Q15/Q16 (v15): the pilot composes no Store configuration publication.
+  await page.route(
+    (url) => url.pathname === "/merchant/store-configuration/ordinary",
+    (route) => respond(route, { error: "store_configuration_publication_not_offered" }, 404),
+  );
+  await page.goto("/app");
+  const workspaceNav = page.getByRole("navigation", { name: "Workspace" });
+  await workspaceNav.waitFor();
+  const compactMenu = workspaceNav.locator(".workspace-sidebar__compact > summary");
+  if (await compactMenu.isVisible()) await compactMenu.click();
+  await page.getByRole("link", { name: "Store setup", exact: true }).click();
+  await page.getByRole("button", { name: /^8\. Review$/u }).click();
+  await expect(page.getByRole("heading", { name: "Review", exact: true })).toBeVisible();
+  await expect(panel(page)).toHaveCount(0);
+  await expect(page.getByRole("alert")).toHaveCount(0);
   expect(state.errors).toEqual([]);
 });

@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import { findInternalText, staticText } from "../e2e/internal-text-patterns.js";
 import { MemoryRouter } from "react-router";
 import {
   StoreConfigurationFeeBasisView,
@@ -92,18 +93,19 @@ it("shows real Setup provenance and fee states without Tenant identity or invent
     </MemoryRouter>,
   );
   expect(html).toContain('aria-label="Recorded fee configuration"');
-  expect(html).toContain("Configuration state: Draft");
+  expect(html).toContain("Draft, not yet sent for approval");
   expect(html).toContain("do not change the live Store");
-  expect(html).toContain(id(31));
-  expect(html).toContain(basis.sourceSnapshotDigest);
-  expect(html).toContain("Setup source revision");
+  expect(html).toContain(`saved Store setup draft ${basis.sourceRevision}`);
+  expect(html).not.toContain(id(31));
+  expect(html).not.toContain(basis.sourceSnapshotDigest);
   expect(html).toContain("Service charge");
-  expect(html).toContain("Enabled");
-  expect(html).toContain("Disabled");
+  expect(html).toContain(": On");
+  expect(html).toContain(": Off");
   expect(html).toContain("Pickup");
   expect(html).not.toContain(id(30));
   expect(html).not.toContain(id(32));
-  expect(html).toContain("do not supply fee amounts, quotes or professional tax qualification");
+  expect(html).toContain("not been checked by a tax");
+  expect(findInternalText([staticText(html)])).toEqual([]);
 });
 it("distinguishes actual Published content from a legacy record lacking fee facts", () => {
   const published = renderToStaticMarkup(
@@ -117,7 +119,7 @@ it("distinguishes actual Published content from a legacy record lacking fee fact
     </MemoryRouter>,
   );
   expect(published).toContain('aria-label="Published fee configuration"');
-  expect(published).toContain("Configuration state: Published");
+  expect(published).toContain("Published.");
   const legacy = renderToStaticMarkup(
     <MemoryRouter>
       <StoreConfigurationFeeBasisView
@@ -125,8 +127,7 @@ it("distinguishes actual Published content from a legacy record lacking fee fact
       />
     </MemoryRouter>,
   );
-  expect(legacy).toContain("no recorded Setup fee basis");
-  expect(legacy).toContain("Fee policy is not inferred");
+  expect(legacy).toContain("made before fees were part of Store setup");
   expect(legacy).not.toContain("Disabled");
 });
 
@@ -146,7 +147,7 @@ it("locks basis-bound content editing while keeping the authorized Setup route a
     </MemoryRouter>,
   );
   expect(html).toContain('<fieldset disabled="">');
-  expect(html).toContain("immutable Setup source");
+  expect(html).toContain("Change them in");
   expect(html).toContain(`href="/app/organization/stores/${id(3)}/setup"`);
   expect(html).toContain("Edit in Store Setup");
   expect(html).toContain('</fieldset><button type="button">Validate saved draft</button>');

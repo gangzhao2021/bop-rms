@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expectNoInternalText } from "./internal-text-guard";
 
 async function tabTo(page: Page, target: Locator): Promise<void> {
   // A closing dialog hands focus back without keyboard modality; step away and return by key.
@@ -45,7 +46,7 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
         csrf: "a".repeat(43),
         workspace: {
           screenId: "HOME-OVERVIEW",
-          selectedScope: scope,
+          selectedScope: { ...scope, timeZone: "America/Toronto" },
           authorizedStores: [scope],
           businessDate: "2026-09-19",
           storeStatus: "Open",
@@ -123,6 +124,7 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
       orderItemReference: id(8),
       stationReference: id(15),
       localizedDisplayNames: { "en-CA": "Synthetic stew" },
+      orderLabel: { orderNumber: "15", orderType: "DineIn", tableLabel: "T5" },
       status: "In Progress",
       completedQuantity: 1,
     },
@@ -134,6 +136,7 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
       orderItemReference: id(10),
       stationReference: id(16),
       localizedDisplayNames: { "en-CA": "Synthetic bread" },
+      orderLabel: { orderNumber: "16", orderType: "Pickup", tableLabel: null },
       status: "Completed",
       completedQuantity: 2,
     },
@@ -213,6 +216,8 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   await expect(page.getByRole("button", { name: "Hand over / sign out" })).toHaveCount(0);
   await expect(page.locator("body")).not.toContainText("KDS");
   await expect(page.locator("body")).not.toContainText("device lock");
+  // WP-2423: no internal codes, identifiers or technical words anywhere a staff member reads.
+  await expectNoInternalText(page);
   await expect(page.getByRole("button", { name: "Accept", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Start", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Complete quantity", exact: true })).toBeDisabled();
@@ -274,6 +279,10 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
     await refresh.evaluate((button) => getComputedStyle(button).backgroundColor),
   );
 
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await expect(page.getByRole("heading", { name: "Queue", exact: true })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  await page.screenshot({ path: "test-results/kitchen-board-1024.png", fullPage: true });
   for (const width of [720, 390, 320]) {
     await page.setViewportSize({ width, height: width === 390 ? 900 : 844 });
     await expect(page.getByRole("heading", { name: "Kitchen", exact: true })).toBeVisible();
@@ -313,7 +322,7 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
     await expect(filterToggle).toHaveCSS("outline-style", "solid");
     await page.keyboard.press("Enter");
     await expect(filterSheet).toBeVisible();
-    await expect(filterSheet.getByRole("combobox", { name: "Reference type" })).toBeFocused();
+    await expect(filterSheet.getByRole("combobox", { name: "Work state" })).toBeFocused();
     if (width <= 390) {
       // Bottom sheet: full width, anchored to the bottom edge.
       const sheetBox = await filterSheet.boundingBox();
@@ -355,7 +364,7 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
     await filterToggle.click();
     const mobileSearch = filterSheet.locator(".kitchen-reference-search--mobile");
     await expect(mobileSearch).toBeVisible();
-    const mobileSearchButton = mobileSearch.getByRole("button", { name: "Search", exact: true });
+    const mobileSearchButton = mobileSearch.getByRole("button", { name: "Find", exact: true });
     const mobileClearButton = mobileSearch.getByRole("button", { name: "Clear search" });
     await expect(mobileClearButton).toHaveText("Clear");
     await expect(mobileClearButton).toBeDisabled();
@@ -363,31 +372,21 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
     const clearSearchButtonBox = await mobileClearButton.boundingBox();
     expect(searchButtonBox?.y).toBe(clearSearchButtonBox?.y);
     expect(searchButtonBox?.height).toBeGreaterThanOrEqual(44);
-    const mobileReference = width === 390 ? id(3) : id(2);
-    const mobileReferenceKind = width === 390 ? "Order" : "Ticket";
-    await expect(mobileSearch.getByRole("textbox", { name: "Exact reference" })).toHaveAttribute(
-      "placeholder",
-      "UUIDv7 reference",
-    );
-    await mobileSearch
-      .getByRole("combobox", { name: "Reference type" })
-      .selectOption(mobileReferenceKind);
-    const mobileReferenceInput = mobileSearch.getByRole("textbox", { name: "Exact reference" });
-    await mobileReferenceInput.fill("unsent-reference");
+    // WP-2423: staff find an order by the number on its ticket, in their words.
+    const mobileOrderInput = mobileSearch.getByRole("searchbox", { name: "Order number or table" });
+    await expect(mobileOrderInput).toHaveAttribute("placeholder", "Order number or table");
+    await mobileOrderInput.fill("unsent");
     await expect(mobileClearButton).toBeEnabled();
     await mobileClearButton.click();
-    await expect(mobileReferenceInput).toHaveValue("");
-    await mobileReferenceInput.fill(mobileReference);
+    await expect(mobileOrderInput).toHaveValue("");
+    await mobileOrderInput.fill(width === 390 ? "15" : "#16");
     await mobileSearchButton.click();
-    await expect
-      .poll(() => searchedFilters ?? {})
-      .toMatchObject(
-        mobileReferenceKind === "Order"
-          ? { orderReference: mobileReference, ticketReference: null }
-          : { ticketReference: mobileReference, orderReference: null },
-      );
-    await expect(page).not.toHaveURL(new RegExp(mobileReference, "u"));
-    await expect(page.locator("body")).not.toContainText(mobileReference);
+    await expect(page.locator(".kitchen-work-item")).toHaveCount(1);
+    await expect(page.locator(".kitchen-work-item")).toContainText(
+      width === 390 ? "Synthetic stew" : "Synthetic bread",
+    );
+    expect(new URL(page.url()).search).toBe("");
+    expect(searchedFilters).toMatchObject({ orderReference: null, ticketReference: null });
     await expect(filterToggle).toHaveText("Filters · Applied");
     await expect(filterSheet).not.toBeVisible();
     await filterToggle.click();
@@ -411,71 +410,60 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   expect(laneTops).toHaveLength(3);
   expect(new Set(laneTops).size).toBe(1);
   const desktopSearch = page.locator(".kitchen-reference-search--desktop");
-  await expect(desktopSearch.locator("label")).toHaveText("Order or ticket reference");
-  const desktopSearchInput = desktopSearch.getByRole("textbox", { name: "Exact reference" });
-  await expect(desktopSearchInput).toHaveAttribute("placeholder", "Exact UUIDv7 reference");
-  await expect(desktopSearchInput).toHaveAttribute(
+  const orderInput = desktopSearch.getByRole("searchbox", { name: "Order number or table" });
+  await expect(orderInput).toHaveAttribute("placeholder", "Order number or table");
+  await expect(orderInput).toHaveAttribute(
     "aria-describedby",
     "kitchen-reference-search-hint-desktop",
   );
   await expect(page.locator("#kitchen-reference-search-hint-desktop")).toHaveText(
-    "Exact reference only. The value stays in this page session and is not added to the URL.",
+    "The number on the ticket or receipt, or the table. Shows only that order's work.",
   );
   // Only Work state is offered: the source carries no station names, cues or exceptions.
   await expect(page.locator(".kitchen-board-filters--desktop select")).toHaveCount(1);
   await page.screenshot({ path: "test-results/kitchen-board-1440.png", fullPage: true });
-  const exactReferenceInput = page.getByRole("textbox", { name: "Exact reference" });
-  await exactReferenceInput.fill("not-a-reference");
-  await page.getByRole("button", { name: "Search", exact: true }).click();
-  expect(
-    await exactReferenceInput.evaluate((element: HTMLInputElement) => element.validity.valid),
-  ).toBe(false);
-  expect(searchedFilters).toMatchObject({ orderReference: null, ticketReference: null });
-  await exactReferenceInput.fill("");
-  // The reference type the operator last chose (Ticket, on the phone) is kept; choose Order here.
-  await page.getByRole("combobox", { name: "Reference type" }).selectOption("Order");
-  const exactOrderReference = id(3);
-  await exactReferenceInput.fill(exactOrderReference);
-  await page.getByRole("button", { name: "Search", exact: true }).click();
-  await expect.poll(() => searchedFilters?.orderReference).toBe(exactOrderReference);
+  // WP-2423: by the order number printed on the ticket; nothing is sent or put in the address.
+  await orderInput.fill("Order 14");
+  await page.getByRole("button", { name: "Find", exact: true }).click();
   await expect(page.locator(".kitchen-work-item")).toHaveCount(1);
-  await expect(page.getByRole("textbox", { name: "Exact reference" })).toHaveValue("");
-  await expect(page).not.toHaveURL(new RegExp(exactOrderReference, "u"));
-  await expect(page.locator("body")).not.toContainText(exactOrderReference);
+  await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
+  await expect(orderInput).toHaveValue("Order 14");
+  expect(new URL(page.url()).search).toBe("");
+  expect(searchedFilters).toMatchObject({ orderReference: null, ticketReference: null });
   await expect(page.getByRole("button", { name: "Clear search" })).toBeVisible();
   await page.screenshot({ path: "test-results/kitchen-board-search-1440.png", fullPage: true });
   await page.getByRole("button", { name: "Clear search" }).click();
   await expect(page.locator(".kitchen-work-item")).toHaveCount(3);
-  const exactTicketReference = id(2);
-  await page.getByRole("combobox", { name: "Reference type" }).selectOption("Ticket");
-  const ticketReferenceInput = page.getByRole("textbox", { name: "Exact reference" });
-  await ticketReferenceInput.fill(exactTicketReference);
-  await ticketReferenceInput.press("Enter");
-  await expect
-    .poll(() => searchedFilters ?? {})
-    .toMatchObject({ ticketReference: exactTicketReference, orderReference: null });
-  await expect(page.getByRole("textbox", { name: "Exact reference" })).toHaveValue("");
-  await expect(page).not.toHaveURL(new RegExp(exactTicketReference, "u"));
-  await expect(page.locator("body")).not.toContainText(exactTicketReference);
-  await expect(page.getByRole("button", { name: "Clear search" })).toBeVisible();
+  await expect(orderInput).toHaveValue("");
+  // By table, with Enter.
+  await orderInput.fill("t5");
+  await orderInput.press("Enter");
+  await expect(page.locator(".kitchen-work-item")).toHaveCount(1);
+  await expect(page.getByRole("heading", { name: "Synthetic stew", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Clear search" }).click();
-  await expect(page.locator(".kitchen-work-item")).toHaveCount(3);
-  const exactReferenceWithoutMatch = id(16);
-  await page.getByRole("combobox", { name: "Reference type" }).selectOption("Ticket");
-  await exactReferenceInput.fill(exactReferenceWithoutMatch);
-  await page.getByRole("button", { name: "Search", exact: true }).click();
-  await expect.poll(() => searchedFilters?.ticketReference).toBe(exactReferenceWithoutMatch);
-  await expect(page.locator(".kitchen-work-item")).toHaveCount(0);
+  // A match the filters hide is named as such, not reported missing.
+  await page.getByRole("combobox", { name: "Work state", exact: true }).selectOption("Queued");
+  await orderInput.fill("16");
+  await orderInput.press("Enter");
   await expect(page.getByRole("heading", { name: "No matching work", exact: true })).toBeVisible();
   await expect(
     page.getByText(
-      "No work item matches this exact reference. Clear search to restore the queue.",
-      {
-        exact: true,
-      },
+      "Order or table “16” has work, but the filters hide it. Clear the filters to see it.",
+      { exact: true },
     ),
   ).toBeVisible();
-  await expect(page.locator("body")).not.toContainText(exactReferenceWithoutMatch);
+  await page.getByRole("button", { name: "Clear filters", exact: true }).click();
+  await expect(page.locator(".kitchen-work-item")).toHaveCount(1);
+  await page.getByRole("button", { name: "Clear search" }).click();
+  await orderInput.fill("99");
+  await page.getByRole("button", { name: "Find", exact: true }).click();
+  await expect(page.locator(".kitchen-work-item")).toHaveCount(0);
+  await expect(
+    page.getByText(
+      "Nothing on the board for order or table “99”. Clear the search to see the whole queue.",
+      { exact: true },
+    ),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Clear search" }).click();
   await expect(page.locator(".kitchen-work-item")).toHaveCount(3);
   await page.getByRole("combobox", { name: "Work state", exact: true }).selectOption("Queued");
@@ -1078,6 +1066,234 @@ test("@production Kitchen commands preserve intent and wait for projection versi
   expect(
     await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length })),
   ).toEqual({ local: 0, session: 0 });
+});
+
+// WP-2423: a kitchen display sign-in sees the kitchen only, hands over from its header, and stays
+// on the ticket it just worked instead of being thrown to the top of the page.
+test("@production a kitchen display shows the kitchen only and keeps focus on the worked ticket", async ({
+  page,
+}) => {
+  const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const scope = {
+    brandLabel: "Training Brand",
+    storeLabel: "Training Store",
+    storeReference: id(99),
+  };
+  const headers = { "cache-control": "no-store" };
+  const nav = (screenId: string, label: string, href: string, permission: string) => ({
+    screenId,
+    label,
+    href,
+    permission,
+  });
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: { ...scope, timeZone: "America/Toronto" },
+          authorizedStores: [scope],
+          businessDate: "2026-09-19",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          // The person's roles reach the back office; the kitchen display still shows the kitchen.
+          navigation: [
+            nav("OPS-ORDER-QUEUE", "Orders", "/operations/orders", "ordering.operate"),
+            nav("KIT-KITCHEN-QUEUE", "Kitchen", "/operations/kitchen", "kitchen.operate"),
+            nav(
+              "CAT-AVAILABILITY",
+              "Item availability",
+              "/app/commerce/availability",
+              "catalog.sku.read",
+            ),
+            nav("APPROVAL-INBOX", "Approvals", "/app/approvals", "workflow.operate"),
+            nav(
+              "PAY-RECONCILIATION",
+              "Settlement",
+              "/app/operations/payment-reconciliation",
+              "operations.order-exception.manage",
+            ),
+            nav("RPT-OPS-DASHBOARD", "Reports", "/app/reports/operations", "reporting.sales.read"),
+            nav("IAM-ROLE-LIST", "Roles", "/app/organization/roles", "identity.role.read"),
+          ],
+        },
+      },
+    }),
+  );
+  const at = Date.now() - 4 * 60_000;
+  const ticket = (
+    n: number,
+    name: string,
+    orderNumber: string,
+    extra: Record<string, unknown>,
+  ) => ({
+    workItemReference: id(n),
+    ticketReference: id(n + 100),
+    orderReference: id(n + 200),
+    orderItemReference: id(n + 300),
+    stationReference: id(5),
+    localizedDisplayNames: { "en-CA": name },
+    allergens: { status: "Unavailable" },
+    orderLabel: { orderNumber, orderType: "Pickup", tableLabel: null },
+    customerNote: null,
+    selectedOptions: [],
+    status: "Queued" as string,
+    requiredQuantity: 1,
+    completedQuantity: 0,
+    workItemCreatedAt: new Date(at).toISOString(),
+    acceptedAt: null as string | null,
+    orderItemReadyAt: null as string | null,
+    ticketAggregateVersion: "1",
+    workItemVersion: "1",
+    ...extra,
+  });
+  const items = [
+    ticket(1, "Synthetic rice", "21", {}),
+    ticket(2, "Synthetic soup", "22", {
+      status: "Completed",
+      completedQuantity: 1,
+      acceptedAt: new Date(at).toISOString(),
+      workItemCreatedAt: new Date(at + 60_000).toISOString(),
+    }),
+    ticket(3, "Synthetic bread", "23", {
+      acceptedAt: new Date(at).toISOString(),
+      workItemCreatedAt: new Date(at + 120_000).toISOString(),
+    }),
+  ];
+  await page.route("**/merchant/kitchen/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        storeReference: scope.storeReference,
+        operatorStatus: "Named",
+        projectionName: "kitchen_work_queue_v1",
+        projectionVersion: 1,
+        projectionGenerationReference: id(6),
+        projectedAt: new Date().toISOString(),
+        partial: false,
+        stale: false,
+        freshnessStatus: "Fresh",
+        items,
+        nextCursor: null,
+      },
+    }),
+  );
+  await page.route("**/merchant/kitchen/work", (route) => {
+    const command = route.request().postDataJSON();
+    const reference =
+      command.workItemReference ??
+      (command.workItems as { workItemReference: string }[])[0]?.workItemReference;
+    const index = items.findIndex((candidate) => candidate.workItemReference === reference);
+    const current = items[index] as (typeof items)[number];
+    const ticketVersion = (BigInt(current.ticketAggregateVersion) + 1n).toString();
+    const workItemVersion = (BigInt(current.workItemVersion) + 1n).toString();
+    items[index] = {
+      ...current,
+      ticketAggregateVersion: ticketVersion,
+      workItemVersion,
+      ...(command.action === "AcceptKitchenWorkItem"
+        ? { acceptedAt: new Date().toISOString() }
+        : command.action === "StartKitchenWorkItem"
+          ? { status: "In Progress" }
+          : { orderItemReadyAt: new Date().toISOString() }),
+    };
+    return route.fulfill({
+      headers,
+      json: {
+        action: command.action,
+        ticketReference: current.ticketReference,
+        workItemReference: current.workItemReference,
+        orderItemReference: current.orderItemReference,
+        ticketVersion,
+        workItemVersion,
+        outcome:
+          command.action === "AcceptKitchenWorkItem"
+            ? "Accepted"
+            : command.action === "StartKitchenWorkItem"
+              ? "Started"
+              : "OrderItemReady",
+        projectionName: "kitchen_work_queue_v1",
+        projectionPending: true,
+      },
+    });
+  });
+  await page.goto("/operations/kitchen");
+  const card = (name: string) => page.locator(".kitchen-work-item").filter({ hasText: name });
+  await expect(card("Synthetic rice").getByRole("button", { name: "Accept" })).toBeEnabled();
+
+  // The kitchen only: the board and marking an item sold out (Q17), no back-office navigation.
+  const kitchenNav = page.getByRole("navigation", { name: "Primary" });
+  await expect(kitchenNav.getByRole("link")).toHaveText(["Kitchen", "Mark an item sold out"]);
+  await expect(kitchenNav.getByRole("link", { name: "Kitchen" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+  await expect(page.getByRole("link", { name: "Mark an item sold out" })).toHaveAttribute(
+    "href",
+    "/app/commerce/availability?from=kitchen",
+  );
+  for (const label of [
+    "Orders",
+    "Item availability",
+    "Approvals",
+    "Settlement",
+    "Reports",
+    "Roles",
+  ])
+    await expect(page.getByRole("link", { name: label, exact: true })).toHaveCount(0);
+  const handover = page
+    .locator(".bop-shell__header")
+    .getByRole("button", { name: "Hand over / sign out" });
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await expect(handover).toBeVisible();
+    await expectTouchTarget(handover, "Handover");
+    await expectTouchTarget(
+      kitchenNav.getByRole("link", { name: "Mark an item sold out" }),
+      "Kitchen sold-out link",
+    );
+    await expect(handover).toHaveCSS("border-top-style", "solid");
+    await expectNoHorizontalOverflow(page);
+    await page.screenshot({
+      path: `test-results/kitchen-display-board-${width}.png`,
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expectNoInternalText(page);
+
+  const skip = page.getByRole("link", { name: "Skip to main content", exact: true });
+  const skipHidden = async () => {
+    await expect(skip).not.toBeFocused();
+    expect(await skip.evaluate((link) => link.getBoundingClientRect().bottom)).toBeLessThanOrEqual(
+      0,
+    );
+  };
+  // Accepting keeps the cook on the same ticket, now on its next step.
+  await card("Synthetic rice").getByRole("button", { name: "Accept" }).click();
+  await expect(card("Synthetic rice").getByRole("button", { name: "Start" })).toBeFocused();
+  await skipHidden();
+  // By keyboard too.
+  await page.keyboard.press("Enter");
+  await expect(
+    card("Synthetic rice").getByRole("button", { name: "Complete quantity" }),
+  ).toBeFocused();
+  await skipHidden();
+  // A ticket that leaves the board hands focus to the next ticket's step.
+  await card("Synthetic soup").getByRole("button", { name: "Mark ready" }).click();
+  await expect(card("Synthetic soup")).toHaveCount(0);
+  await expect(card("Synthetic bread").getByRole("button", { name: "Start" })).toBeFocused();
+  await skipHidden();
+  // The skip link still appears for a keyboard user who reaches it.
+  await page.reload();
+  await expect(card("Synthetic bread")).toBeVisible();
+  await page.keyboard.press("Tab");
+  await expect(skip).toBeFocused();
+  await expect(skip).toBeInViewport();
 });
 
 for (const supported of [true, false]) {

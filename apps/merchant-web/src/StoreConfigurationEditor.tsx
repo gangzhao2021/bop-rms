@@ -613,30 +613,23 @@ export function StoreConfigurationFeeBasisView({
           : "Recorded configuration fee contexts"}
       </h3>
       <p>
-        Configuration state: {configuration.lifecycle}.{" "}
+        {storeConfigurationStateLabel(configuration.lifecycle)}.{" "}
         {configuration.lifecycle !== "Published" && "These settings do not change the live Store."}
       </p>
       {!basis ? (
         <p>
-          This legacy configuration has no recorded Setup fee basis. Fee policy is not inferred.
+          This configuration was made before fees were part of Store setup, so it has no fee
+          settings.
         </p>
       ) : (
         <>
           <p>
-            This recorded configuration is bound to its immutable Setup source. Edit its fields in
-            Store Setup.
+            These settings come from saved Store setup draft {basis.sourceRevision}. Change them in
+            Store setup.
           </p>
           <Link to={`/app/organization/stores/${configuration.storeReference}/setup`}>
             Edit in Store Setup
           </Link>
-          <dl>
-            <dt>Setup draft source</dt>
-            <dd>{basis.setupDraftReference}</dd>
-            <dt>Setup source revision</dt>
-            <dd>{basis.sourceRevision}</dd>
-            <dt>Setup source fingerprint</dt>
-            <dd>{basis.sourceSnapshotDigest}</dd>
-          </dl>
           <ul>
             {basis.feeContexts.map((entry) => (
               <li key={entry.chargeType}>
@@ -645,19 +638,21 @@ export function StoreConfigurationFeeBasisView({
                   : entry.chargeType === "DeliveryFee"
                     ? "Delivery fee"
                     : "Tip"}
-                : {entry.state}
+                :{" "}
+                {entry.state === "Enabled" ? "On" : entry.state === "Disabled" ? "Off" : "Not set"}
                 {entry.state === "Enabled" && (
                   <>
                     {" "}
-                    · order types {entry.orderTypes.join(", ")} · recorded tax classification
-                    selected
+                    · {entry.orderTypes.map(serviceModeLabel).join(", ")} · tax classification
+                    chosen
                   </>
                 )}
               </li>
             ))}
           </ul>
           <p>
-            Recorded selections do not supply fee amounts, quotes or professional tax qualification.
+            Fee amounts are not set here, and the tax classification has not been checked by a tax
+            professional.
           </p>
         </>
       )}

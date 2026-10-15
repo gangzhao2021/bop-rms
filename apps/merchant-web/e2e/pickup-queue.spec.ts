@@ -1,10 +1,12 @@
 import { expect, test } from "@playwright/test";
+import { expectNoInternalText } from "./internal-text-guard";
 test("@production Pickup paging, current scope and permission recovery", async ({ page }) => {
   const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
   const scope = {
     brandLabel: "Training Brand",
     storeLabel: "Training Store",
     storeReference: id(99),
+    timeZone: "America/Toronto",
   };
   const headers = { "cache-control": "no-store" };
   await page.route("**/merchant/session", (route) =>
@@ -117,9 +119,7 @@ test("@production Pickup paging, current scope and permission recovery", async (
     await page.screenshot({ path: `test-results/pickup-board-${width}.png`, fullPage: true });
   }
   await page.setViewportSize({ width: 1440, height: 900 });
-  await expect(
-    page.getByRole("button", { name: "Open proof verification", exact: true }),
-  ).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Check pickup code", exact: true })).toBeEnabled();
   const proofs: string[] = [];
   let releaseFirstProof!: () => void;
   let notifyProofStarted!: () => void;
@@ -154,27 +154,27 @@ test("@production Pickup paging, current scope and permission recovery", async (
       },
     });
   });
-  const openProof = page.getByRole("button", { name: "Open proof verification", exact: true });
+  const openProof = page.getByRole("button", { name: "Check pickup code", exact: true });
   await openProof.focus();
   await page.keyboard.press("Enter");
-  await expect(page.getByLabel("Pickup credential", { exact: true })).toBeFocused();
-  await page.getByLabel("Pickup credential", { exact: true }).fill("123456");
+  await expect(page.getByLabel("Pickup code", { exact: true })).toBeFocused();
+  await page.getByLabel("Pickup code", { exact: true }).fill("123456");
   await page.keyboard.press("Enter");
   await firstProofStarted;
   await orderSearch.focus();
   releaseFirstProof();
-  await expect(page.getByText("Verification result unknown.", { exact: false })).toBeVisible();
-  await expect(page.getByLabel("Pickup credential", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("The check could not be confirmed.", { exact: false })).toBeVisible();
+  await expect(page.getByLabel("Pickup code", { exact: true })).toHaveCount(0);
   await expect(orderSearch).toBeFocused();
   const retryVerification = page.getByRole("button", {
-    name: "Retry same verification",
+    name: "Try the check again",
     exact: true,
   });
   await orderSearch.fill("missing");
   await expect(heading("No pickups waiting")).toBeVisible();
   const firstCard = page.locator("article.store-card").first();
   await expect(firstCard).toHaveAttribute("hidden", "");
-  const hiddenRetry = firstCard.locator("button").filter({ hasText: "Retry same verification" });
+  const hiddenRetry = firstCard.locator("button").filter({ hasText: "Try the check again" });
   await expect(hiddenRetry).toBeAttached();
   await orderSearch.fill(first);
   await expect(heading("Order " + first)).toBeVisible();
@@ -183,7 +183,7 @@ test("@production Pickup paging, current scope and permission recovery", async (
   await page.keyboard.press("Enter");
   await expect(retryVerification).toBeFocused();
   await page.keyboard.press("Enter");
-  await expect(page.getByText("Proof verified.", { exact: false })).toBeVisible();
+  await expect(page.getByText("The code matches.", { exact: false })).toBeVisible();
   expect(proofs).toHaveLength(3);
   expect(proofs[0]).toBe(proofs[1]);
   expect(proofs[1]).toBe(proofs[2]);
@@ -214,13 +214,14 @@ test("@production Pickup paging, current scope and permission recovery", async (
   await page.keyboard.press("Enter");
   const dialog = page.getByRole("dialog", { name: "Confirm pickup handoff" });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByText("Order line 1: 2 remaining ready units")).toBeVisible();
-  const recipientType = dialog.getByLabel("Recipient type");
+  await expect(dialog.getByText("Item 1: 2 to hand over")).toBeVisible();
+  await expectNoInternalText(page);
+  const recipientType = dialog.getByLabel("Collected by");
   await expect(recipientType).toBeFocused();
-  await recipientType.press("C");
+  await recipientType.press("T");
   await expect(recipientType).toHaveValue("Customer");
   await page.keyboard.press("Tab");
-  const recipientMask = dialog.getByLabel("Masked recipient label");
+  const recipientMask = dialog.getByLabel("Collector’s initial");
   await expect(recipientMask).toBeFocused();
   await recipientMask.pressSequentially("S***");
   await page.keyboard.press("Tab");
@@ -232,11 +233,13 @@ test("@production Pickup paging, current scope and permission recovery", async (
   await expect(confirm).toBeFocused();
   await expect(confirm).toBeEnabled();
   await page.keyboard.press("Enter");
-  await expect(dialog.getByText("Handoff result unknown.", { exact: false })).toBeVisible();
+  await expect(
+    dialog.getByText("The handover could not be confirmed.", { exact: false }),
+  ).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Close handoff confirmation" })).toBeDisabled();
   await page.keyboard.press("Escape");
   await expect(dialog).toBeVisible();
-  const retryHandoff = dialog.getByRole("button", { name: "Retry same handoff" });
+  const retryHandoff = dialog.getByRole("button", { name: "Try confirming again" });
   await retryHandoff.focus();
   await page.keyboard.press("Enter");
   await expect(dialog.getByText("Handoff recorded. Close and refresh the queue.")).toBeVisible();
@@ -267,21 +270,21 @@ test("@production Pickup paging, current scope and permission recovery", async (
   await expect(heading("Order " + first)).toHaveCount(0);
   await expect(refresh).toBeFocused();
   const openSecondProof = page.getByRole("button", {
-    name: "Open proof verification",
+    name: "Check pickup code",
     exact: true,
   });
   await openSecondProof.focus();
   await page.keyboard.press("Enter");
-  const secondCredential = page.getByLabel("Pickup credential", { exact: true });
+  const secondCredential = page.getByLabel("Pickup code", { exact: true });
   await secondCredential.fill("654321");
   await page.keyboard.press("Enter");
-  await expect(page.getByText("Proof verified.", { exact: false })).toBeVisible();
+  await expect(page.getByText("The code matches.", { exact: false })).toBeVisible();
   expect(proofs).toHaveLength(4);
   const secondReview = page.getByRole("button", { name: "Review pickup handoff" });
   await secondReview.click();
   const rejectedDialog = page.getByRole("dialog", { name: "Confirm pickup handoff" });
-  await rejectedDialog.getByLabel("Recipient type").selectOption("Customer");
-  await rejectedDialog.getByLabel("Masked recipient label").fill("D***");
+  await rejectedDialog.getByLabel("Collected by").selectOption("Customer");
+  await rejectedDialog.getByLabel("Collector’s initial").fill("D***");
   await rejectedDialog.getByRole("checkbox").check();
   await rejectedDialog.getByRole("button", { name: "Confirm and record handoff" }).click();
   await expect(

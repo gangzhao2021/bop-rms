@@ -228,7 +228,9 @@ export function CheckoutDetailsForm({
   if (failed || !authorized || draft === null || policy === null)
     return (
       <section className="checkout-details-form" aria-label="Checkout details">
-        <p role="alert">Checkout details are unavailable. Refresh your checkout to try again.</p>
+        <p role="alert">
+          We couldn’t load your checkout details. Refresh your checkout to try again.
+        </p>
         <button type="button" disabled={!online || busy} onClick={() => void load()}>
           Reload checkout details
         </button>

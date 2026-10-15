@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  endSentence,
   formatClockTime,
   formatDateTime,
   formatMinutesUntil,
@@ -33,6 +34,14 @@ describe("customer time presentation", () => {
     expect(clock).toMatch(/\d{1,2}:\d{2}/u);
     expect(formatDateTime("2026-09-02T17:10:00.000Z")).toMatch(/2026/u);
     expect(formatClockTime("not-a-time")).toBe("");
+  });
+  it("ends a sentence after a formatted time exactly once", () => {
+    // en-CA times end with an abbreviation period ("9:46 p.m."); appending "." doubled it on v15.
+    const evening = formatClockTime("2026-09-02T21:46:00.000-04:00", "en-CA");
+    expect(endSentence(`Valid until ${evening}`)).not.toMatch(/\.\.$/u);
+    expect(endSentence("Valid until 9:46 p.m.")).toBe("Valid until 9:46 p.m.");
+    expect(endSentence("Valid until 21:46")).toBe("Valid until 21:46.");
+    expect(endSentence("Ready!")).toBe("Ready!");
   });
   it("describes remaining validity in whole minutes and hides it once passed", () => {
     const now = Date.parse("2026-09-02T17:00:00.000Z");

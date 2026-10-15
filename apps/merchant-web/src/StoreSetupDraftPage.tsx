@@ -46,6 +46,7 @@ import {
   type StoreSetupPendingJournal,
 } from "./store-setup-pending-journal.js";
 import { serviceOperationReference, type ServiceMode } from "./service-control-client.js";
+import { languageName } from "./staff-text.js";
 const steps = [
   "Identity",
   "Address and timezone",
@@ -212,6 +213,12 @@ const root = (view: StoreSetupWorkspace) => ({
 });
 const sameRoot = (a: StoreSetupWorkspace, b: StoreSetupWorkspace) =>
   JSON.stringify(root(a)) === JSON.stringify(root(b));
+const feeLabel = (chargeType: string) =>
+  chargeType === "ServiceCharge"
+    ? "Service charge"
+    : chargeType === "DeliveryFee"
+      ? "Delivery fee"
+      : "Tip";
 function SavedReference({ value }: { value: StoreSetupContent["addressReference"] }) {
   return <p>{value.state === "Configured" ? "Already configured." : "Not configured."}</p>;
 }
@@ -509,11 +516,7 @@ export function StoreSetupDraftPage({
       <header className="screen-heading">
         <div>
           <h2>Store setup</h2>
-          {workspace && (
-            <p>
-              {workspace.store.displayName} · {workspace.store.code}
-            </p>
-          )}
+          {workspace && <p>{workspace.store.displayName}</p>}
           <p>Saving a draft does not change the live Store.</p>
         </div>
         <button
@@ -578,10 +581,8 @@ export function StoreSetupDraftPage({
               <dl>
                 <dt>Store</dt>
                 <dd>{workspace.store.displayName}</dd>
-                <dt>Store code</dt>
-                <dd>{workspace.store.code}</dd>
-                <dt>Current locale</dt>
-                <dd>{workspace.store.locale}</dd>
+                <dt>Language</dt>
+                <dd>{languageName(workspace.store.locale)}</dd>
                 <dt>Currency</dt>
                 <dd>{workspace.store.currencyCode}</dd>
                 <dt>Current timezone</dt>
@@ -610,7 +611,6 @@ export function StoreSetupDraftPage({
                     {[
                       ...new Set([
                         ...(inputs.timeZone ? [inputs.timeZone] : []),
-                        "UTC",
                         ...Intl.supportedValuesOf("timeZone"),
                       ]),
                     ].map((value) => (
@@ -634,7 +634,7 @@ export function StoreSetupDraftPage({
             {step === 2 && (
               <>
                 <label>
-                  Configuration source
+                  Use service settings from
                   <select
                     disabled={disabled}
                     value={content.source.state === "Configured" ? content.source.value : ""}
@@ -647,12 +647,12 @@ export function StoreSetupDraftPage({
                       })
                     }
                   >
-                    <option value="">Not configured</option>
-                    <option value="StoreOverride">Settings for this Store</option>
+                    <option value="">Not chosen yet</option>
+                    <option value="StoreOverride">This Store</option>
                     {content.source.state === "Configured" &&
                       content.source.value === "BrandInherited" && (
                         <option value="BrandInherited" disabled>
-                          Saved Brand settings retained
+                          The Brand (saved earlier)
                         </option>
                       )}
                   </select>
@@ -868,22 +868,22 @@ export function StoreSetupDraftPage({
                       <ul>
                         {content.exceptions.value.map((value) => (
                           <li key={value.localDate}>
-                            {value.localDate} · {value.kind} · {value.intervals.length} service
-                            intervals
+                            {value.localDate} ·{" "}
+                            {value.kind === "Holiday" ? "Holiday" : "Special hours"} ·{" "}
+                            {value.intervals.length === 0
+                              ? "closed"
+                              : `${value.intervals.length} opening period${value.intervals.length === 1 ? "" : "s"}`}
                           </li>
                         ))}
                       </ul>
                     )}
                     <p>
-                      Saved special dates are retained. Editing these dates is not available here
-                      yet.
+                      Saved special dates are kept. Holidays and special hours are changed in Hours
+                      &amp; ordering.
                     </p>
                   </>
                 ) : (
-                  <p>
-                    Holiday and special-date hours are not configured. Editing these dates is not
-                    available here yet.
-                  </p>
+                  <p>No holidays or special hours are set. Add them in Hours &amp; ordering.</p>
                 )}
               </>
             )}
@@ -903,13 +903,13 @@ export function StoreSetupDraftPage({
                 <SavedReference value={content.paymentConfigurationReference} />
                 <h4>Receipt configuration</h4>
                 <SavedReference value={content.receiptReference} />
-                <p>Tax selection is not available here yet.</p>
+                <p>Tax rates and tax names are set in Tax review.</p>
               </>
             )}
             {step === 5 && (
               <>
                 <label>
-                  Capacity configuration
+                  Order limits
                   <select
                     disabled={
                       disabled ||
@@ -932,17 +932,17 @@ export function StoreSetupDraftPage({
                       })
                     }
                   >
-                    <option value="unconfigured">Not configured</option>
-                    <option value="none">No capacity configuration</option>
+                    <option value="unconfigured">Not decided yet</option>
+                    <option value="none">No order limits</option>
                     {content.capacityConfigurationReference.state === "Configured" &&
                       content.capacityConfigurationReference.value !== null && (
-                        <option value="saved">Already configured</option>
+                        <option value="saved">Limits saved earlier</option>
                       )}
                   </select>
                 </label>
                 <p>
-                  Choose whether capacity still needs configuration. Capacity settings cannot be
-                  selected here yet.
+                  Choose &ldquo;No order limits&rdquo; when the Store accepts every order it
+                  receives; staff pause ordering from Hours &amp; ordering when the kitchen is busy.
                 </p>
               </>
             )}
@@ -1109,7 +1109,9 @@ function storeReview(content: StoreSetupContent): readonly (readonly [string, st
     [
       "Service modes",
       content.enabledServiceModes.state === "Configured"
-        ? content.enabledServiceModes.value.join(", ")
+        ? content.enabledServiceModes.value
+            .map((mode) => (mode === "DineIn" ? "Dine in" : mode))
+            .join(", ")
         : "Not configured",
     ],
     [
@@ -1123,7 +1125,12 @@ function storeReview(content: StoreSetupContent): readonly (readonly [string, st
     [
       "Fee contexts",
       content.feeContexts?.state === "Configured"
-        ? content.feeContexts.value.map((v) => `${v.chargeType}: ${v.state}`).join(", ")
+        ? content.feeContexts.value
+            .map(
+              (v) =>
+                `${feeLabel(v.chargeType)}: ${v.state === "Enabled" ? "On" : v.state === "Disabled" ? "Off" : "Not set"}`,
+            )
+            .join(", ")
         : "Not configured",
     ],
     [
@@ -1138,7 +1145,7 @@ function storeReview(content: StoreSetupContent): readonly (readonly [string, st
       content.capacityConfigurationReference.state === "Unconfigured"
         ? "Not configured"
         : content.capacityConfigurationReference.value === null
-          ? "No capacity configuration"
+          ? "No order limits"
           : "Already configured",
     ],
     [
@@ -1438,7 +1445,7 @@ export function StoreSetupReferenceEditor({
                 ? "You cannot access this configuration in the current Store."
                 : error === "OutcomeUnknown"
                   ? "The save could not be confirmed. Recover the original save before making another change."
-                  : "Configuration unavailable. Refresh when connected; an earlier save remains protected."}
+                  : "These details could not be loaded. Refresh when connected; an earlier save remains protected."}
         </p>
       )}
       {notice && <p role="status">{notice}</p>}
@@ -1760,8 +1767,8 @@ export function StorePaymentConfigurationEditor({
     <section hidden={hidden} aria-label="Payment configuration">
       <h4>Store payment rules</h4>
       <p>
-        These saved rules do not establish Provider readiness. Approval, publication and live
-        payment availability have not been evaluated.
+        Saving these rules does not turn on card payments by itself: the payment provider account
+        must be set up, and the rules approved and published.
       </p>
       {error && (
         <p role="alert">
@@ -1773,7 +1780,7 @@ export function StorePaymentConfigurationEditor({
                 ? "The payment save could not be confirmed. Recover the original save before making another change."
                 : error === "Invalid"
                   ? "Check the three payment channel settings."
-                  : "Payment configuration unavailable. Refresh when connected; an earlier save remains protected."}
+                  : "Payment settings could not be loaded. Refresh when connected; an earlier save remains protected."}
         </p>
       )}
       {notice && <p role="status">{notice}</p>}
@@ -1817,8 +1824,8 @@ export function StorePaymentConfigurationEditor({
       {view?.snapshot && (
         <>
           <p>
-            Saved payment revision {view.snapshot.revision}. Provider readiness has not been
-            evaluated.
+            Saved payment rules, version {view.snapshot.revision}. Card payments still need the
+            payment provider account to be set up.
           </p>
           <button
             type="button"
@@ -2001,20 +2008,19 @@ export function StoreSetupFeeContextEditor({
       {error === "NotRegistered" && (
         <p role="status">
           No tax classifications are set up for this Brand yet, so these fees cannot be turned on
-          here. Leave each fee as Unconfigured or Disabled; you can still save the rest of this
-          setup.
+          here. Leave each fee as Not set or Off; you can still save the rest of this setup.
         </p>
       )}
       {error === "Denied" && (
         <p role="status">
           Choosing a tax classification needs permission to read Products and tax settings. Leave
-          each fee as Unconfigured or Disabled; you can still save the rest of this setup.
+          each fee as Not set or Off; you can still save the rest of this setup.
         </p>
       )}
       {error === "Unavailable" && (
         <p role="status">
-          Classification choices could not be loaded. Refresh to try again; Unconfigured or disabled
-          settings can still be saved.
+          Tax classifications could not be loaded. Refresh to try again; fees that are Not set or
+          Off can still be saved.
         </p>
       )}
       <button type="button" disabled={disabled} onClick={() => setReload((v) => v + 1)}>
@@ -2022,17 +2028,11 @@ export function StoreSetupFeeContextEditor({
       </button>
       {entries.map((entry, index) => (
         <fieldset disabled={disabled} key={entry.chargeType}>
-          <legend>
-            {entry.chargeType === "ServiceCharge"
-              ? "Service charge"
-              : entry.chargeType === "DeliveryFee"
-                ? "Delivery fee"
-                : "Tip"}
-          </legend>
+          <legend>{feeLabel(entry.chargeType)}</legend>
           <label>
-            {entry.chargeType} configuration
+            {feeLabel(entry.chargeType)}
             <select
-              aria-label={`${entry.chargeType} configuration`}
+              aria-label={feeLabel(entry.chargeType)}
               value={entry.state}
               onChange={(e) => {
                 const state = e.currentTarget.value;
@@ -2052,15 +2052,15 @@ export function StoreSetupFeeContextEditor({
                   );
               }}
             >
-              <option value="Unconfigured">Unconfigured</option>
-              <option value="Disabled">Disabled</option>
-              <option value="Enabled">Enabled</option>
+              <option value="Unconfigured">Not set</option>
+              <option value="Disabled">Off</option>
+              <option value="Enabled">On</option>
             </select>
           </label>
           <label>
-            {entry.chargeType} tax classification
+            {feeLabel(entry.chargeType)} tax classification
             <select
-              aria-label={`${entry.chargeType} tax classification`}
+              aria-label={`${feeLabel(entry.chargeType)} tax classification`}
               disabled={disabled || !fresh || entry.state !== "Enabled"}
               value={entry.state === "Enabled" ? entry.taxClassificationReference : ""}
               onChange={(e) => {
@@ -2077,7 +2077,7 @@ export function StoreSetupFeeContextEditor({
                 });
               }}
             >
-              <option value="">Select a registered classification to enable</option>
+              <option value="">Choose a tax classification to turn this on</option>
               {entry.state === "Enabled" &&
                 entry.taxClassificationReference !== "" &&
                 !choices?.choices.some(
@@ -2093,15 +2093,17 @@ export function StoreSetupFeeContextEditor({
                   value={choice.classificationReference}
                   disabled={choice.lifecycle !== "Active"}
                 >
-                  {choice.code} — {choice.localizedNames[choices.defaultLocale] ?? choice.code} (
-                  {choice.lifecycle})
+                  {choice.localizedNames[choices.defaultLocale] ??
+                    Object.values(choice.localizedNames)[0] ??
+                    "Unnamed tax classification"}
+                  {choice.lifecycle === "Active" ? "" : " (no longer in use)"}
                 </option>
               ))}
             </select>
           </label>
           {entry.state === "Enabled" && (
             <fieldset>
-              <legend>{entry.chargeType} order types</legend>
+              <legend>{feeLabel(entry.chargeType)} order types</legend>
               {modes.map((mode) => (
                 <label key={mode}>
                   <input
@@ -2124,9 +2126,9 @@ export function StoreSetupFeeContextEditor({
         </fieldset>
       ))}
       <p>
-        Enabled contexts require a registered classification and at least one order type before
-        saving. Classification references are recorded inputs; professional and legal qualification
-        has not been evaluated.
+        A fee that is On needs a tax classification and at least one order type before saving. The
+        classification is the Brand&rsquo;s own choice; it has not been checked by a tax
+        professional.
       </p>
     </section>
   );

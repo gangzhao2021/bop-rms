@@ -1,7 +1,7 @@
 import { createHttpPickupCodeClient } from "./pickup-code-client.js";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPickupCodeController, type PickupCodeController } from "./pickup-code-controller.js";
-import { formatClockTime } from "../journey/format.js";
+import { endSentence, formatClockTime } from "../journey/format.js";
 
 export function PickupCodePanel({
   orderReference,
@@ -151,7 +151,9 @@ export function PickupCodePanel({
           </div>
           <p>
             Show this code to staff to collect your order. Valid until{" "}
-            <time dateTime={state.view.expiresAt}>{formatClockTime(state.view.expiresAt)}</time>.
+            <time dateTime={state.view.expiresAt}>
+              {endSentence(formatClockTime(state.view.expiresAt))}
+            </time>
           </p>
           <div className="pickup-code__actions">
             <button

@@ -282,7 +282,7 @@ function Preset({
               ? "The saved preset changed. Refresh before saving."
               : error === "OutcomeUnknown"
                 ? "The save could not be confirmed. Recover the original save before saving again."
-                : "Receipt preset unavailable. Refresh when connected; an earlier save remains protected."}
+                : "Receipt presets could not be loaded. Refresh when connected; an earlier save remains protected."}
         </p>
       )}
       {pending && <p role="status">An earlier save must be recovered before another save.</p>}

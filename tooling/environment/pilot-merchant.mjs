@@ -1,14 +1,5 @@
 import console from "node:console";
 import { createMerchantTaxConfigAuthoring } from "../../apps/api/dist/merchant-tax-config-authoring.js";
-import { createMerchantReceiptTemplatePublished } from "../../apps/api/dist/merchant-receipt-template-published.js";
-import { createMerchantReceiptTemplateLifecycle } from "../../apps/api/dist/merchant-receipt-template-lifecycle.js";
-import { createMerchantReceiptTemplateReview } from "../../apps/api/dist/merchant-receipt-template-review.js";
-import { createMerchantReceiptTemplateSubmit } from "../../apps/api/dist/merchant-receipt-template-submit.js";
-import { createMerchantReceiptTemplateDraft } from "../../apps/api/dist/merchant-receipt-template-draft.js";
-import { createMerchantReceiptTemplateArtifacts } from "../../apps/api/dist/merchant-receipt-template-artifacts.js";
-import { createMerchantStorePaymentConfiguration } from "../../apps/api/dist/merchant-store-payment-configuration.js";
-import { createMerchantStoreSetupReferences } from "../../apps/api/dist/merchant-store-setup-references.js";
-import { createMerchantStoreSetup } from "../../apps/api/dist/merchant-store-setup.js";
 import { createMerchantReconciliationEvidenceQuery } from "../../apps/api/dist/merchant-reconciliation-evidence-query.js";
 import { createMerchantReconciliationFollowUpCommand } from "../../apps/api/dist/merchant-reconciliation-follow-up-command.js";
 import { createMerchantReconciliationFollowUpQuery } from "../../apps/api/dist/merchant-reconciliation-follow-up-query.js";
@@ -74,6 +65,7 @@ import { createPersistentMerchantOrderQueue } from "../../apps/api/dist/persiste
 import { createMerchantStorePresence } from "../../apps/api/dist/merchant-store-presence.js";
 import { createMerchantOrderAcceptanceHoldRefund } from "../../apps/api/dist/merchant-order-acceptance-hold-refund.js";
 import { createInternalStoreConfiguration } from "./pilot-store-configuration.mjs";
+import { createInternalStoreSetupBff } from "./pilot-store-setup.mjs";
 import { createMerchantMfaStepUp } from "../../apps/api/dist/merchant-mfa-step-up.js";
 import { createMerchantRefundSoleOperatorResolver } from "../../apps/api/dist/merchant-sole-operator.js";
 import { createMerchantSoleOperator } from "../../apps/api/dist/merchant-sole-operator-setting.js";
@@ -1029,45 +1021,8 @@ export async function createInternalMerchant(
           ? {}
           : { currencyMetadata: taxConfigCurrencyMetadata }),
       }),
-      receiptTemplatePublished: createMerchantReceiptTemplatePublished({
-        persistence,
-        authentication: service,
-      }),
-      receiptTemplateReview: createMerchantReceiptTemplateReview({
-        persistence,
-        authentication: service,
-      }),
-      receiptTemplateLifecycle: createMerchantReceiptTemplateLifecycle({
-        persistence,
-        authentication: service,
-        nextReference: () => resources.credentials.reference(),
-      }),
-      receiptTemplateSubmit: createMerchantReceiptTemplateSubmit({
-        persistence,
-        authentication: service,
-        nextReference: () => resources.credentials.reference(),
-      }),
-      receiptTemplateDraft: createMerchantReceiptTemplateDraft({
-        persistence,
-        authentication: service,
-        nextReference: () => resources.credentials.reference(),
-      }),
-      receiptTemplateArtifacts: createMerchantReceiptTemplateArtifacts({
-        persistence,
-        authentication: service,
-        nextReference: () => resources.credentials.reference(),
-      }),
-      storePaymentConfiguration: createMerchantStorePaymentConfiguration({
-        persistence,
-        authentication: service,
-        nextReference: () => resources.credentials.reference(),
-      }),
-      storeSetupReferences: createMerchantStoreSetupReferences({
-        persistence,
-        authentication: service,
-        nextReference: () => resources.credentials.reference(),
-      }),
-      storeSetup: createMerchantStoreSetup({
+      // WP-2423 Q15/Q16: Store setup reads and saves, including the step 5 fee classification read.
+      ...createInternalStoreSetupBff({
         persistence,
         authentication: service,
         nextReference: () => resources.credentials.reference(),

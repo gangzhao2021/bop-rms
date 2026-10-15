@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import { findInternalText, staticText } from "../e2e/internal-text-patterns.js";
 import {
   ReceiptTemplateDraftEditor,
   saveReceiptTemplateDraft,
@@ -187,7 +188,9 @@ it("renders actual Store default locale, 13 mechanical labels, with no opaque ID
   );
   expect(html).toContain('value="fr-CA"');
   expect(html).toContain("Save template draft");
-  expect(html).toContain("RefundedTotal");
+  expect(html).toContain("Amount refunded");
+  expect(html).not.toContain("RefundedTotal");
+  expect(findInternalText([staticText(html)])).toEqual([]);
   expect(html).toContain("No actual order or payment details");
   expect(html).not.toContain(scope.storeReference);
   expect(html).not.toContain("Use saved template");

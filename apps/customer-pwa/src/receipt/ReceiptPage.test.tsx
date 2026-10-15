@@ -93,7 +93,7 @@ describe("CUST-RECEIPT-SUPPORT screen contract", () => {
     [{ status: "permission-denied" }, "Your visit on this phone has ended"],
     [{ status: "not-found" }, "Receipt not found"],
     [{ status: "feature-disabled" }, "Digital receipt is disabled"],
-    [{ status: "unavailable" }, "Receipt is unavailable"],
+    [{ status: "unavailable" }, "We couldn’t load your receipt"],
     [{ status: "offline", view: null }, "You’re offline"],
   ] as const)("renders bounded state %#", (state, message) =>
     expect(render(state)).toContain(message),
@@ -181,5 +181,39 @@ describe("WP-2423 Q10 store contact on the receipt", () => {
     expect(html).toContain("Call (416) 555-0123");
     expect(html).toContain("DEMO 100 Test Street");
     expect(html).toContain("Toronto, ON M5V 1A1");
+  });
+});
+
+describe("receipt version reasons", () => {
+  it("says why a version was issued in guest words and never shows the reason code", () => {
+    const state = ready();
+    if (state.status !== "ready") throw new Error("missing fixture");
+    const record = state.view.records[0];
+    if (!record) throw new Error("missing fixture");
+    const html = render({
+      ...state,
+      view: {
+        ...state.view,
+        records: [
+          record,
+          {
+            ...record,
+            recordReference: id(5),
+            version: 2,
+            kind: "Reissue",
+            reasonCode: "ORDER_ADDITIONAL_PAYMENT_CAPTURED",
+          },
+          {
+            ...record,
+            recordReference: id(6),
+            version: 3,
+            kind: "Correction",
+            reasonCode: "SOME_UNREVIEWED_CODE",
+          },
+        ],
+      },
+    });
+    expect(html).toContain("Reason: An additional payment was added to this order.");
+    expect(html).not.toMatch(/ORDER.ADDITIONAL|SOME.UNREVIEWED/u);
   });
 });

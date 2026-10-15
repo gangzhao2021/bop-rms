@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { expectNoInternalText } from "./internal-text-guard";
 
 // Synthetic HTTP evidence for the production App. No live Store or Payment result.
 const id = (n: number) => "018f8800-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -149,6 +150,7 @@ test.describe("@production order status HTTP continuity", () => {
     await expect(
       page.getByRole("heading", { name: "Preparing your order", exact: true }),
     ).toBeVisible();
+    await expectNoInternalText(page);
     await page.getByRole("button", { name: "Refresh now", exact: true }).click();
     await expect.poll(() => firstCalls).toBe(2);
     await navigate(id(2));
@@ -163,8 +165,9 @@ test.describe("@production order status HTTP continuity", () => {
     await expect(
       page
         .getByRole("region", { name: "Your items" })
-        .getByText("Not available yet", { exact: true }),
+        .getByText("Not started yet", { exact: true }),
     ).toBeVisible();
+    await expectNoInternalText(page);
     const response = page.waitForResponse(
       (response) => response.url().includes(id(1)) && response.url().endsWith("/status"),
     );
@@ -298,6 +301,7 @@ test.describe("@production order status HTTP continuity", () => {
     await expect(main.getByRole("link", { name: "View receipt and support" })).toBeVisible();
     await expect(main.getByRole("button", { name: "Refresh now" })).toBeVisible();
     await expect(main).not.toContainText(/paid in full|\bETA\s*\d/i);
+    await expectNoInternalText(page);
 
     for (const viewport of [
       { width: 1440, height: 900 },
@@ -374,6 +378,7 @@ test.describe("@production order status HTTP continuity", () => {
     await expect(main.getByRole("heading", { name: "Remaking part of your order" })).toBeVisible();
     await expect(main.getByText("Being remade", { exact: true })).toBeVisible();
     await expect(main).not.toContainText("Your order is ready. Show your pickup code");
+    await expectNoInternalText(page);
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
       expect(

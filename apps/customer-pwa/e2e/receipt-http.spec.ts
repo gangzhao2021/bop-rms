@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { expectNoInternalText } from "./internal-text-guard";
 // Synthetic HTTP responses exercise the production App; no live issuance evidence.
 const id = (n: number) => "018f8a00-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 function payload() {
@@ -92,6 +93,7 @@ test("@production receipt navigation removes inaccessible history and fits commo
   // WP-2423 Q10: no inactive email stub; printing or saving is the working way to keep a copy.
   await expect(page.getByRole("button", { name: "Request email receipt" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Print or save receipt" })).toBeVisible();
+  await expectNoInternalText(page);
   for (const viewport of [
     { width: 1440, height: 900 },
     { width: 390, height: 844 },

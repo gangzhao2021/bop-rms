@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { expectNoInternalText } from "./internal-text-guard";
 
 // WP-2423 Q10 synthetic HTTP evidence for the production App: keep the order reachable, say plainly
 // when a visit has ended, and show how to reach the Store. No live Store, contact or Provider.
@@ -120,6 +121,7 @@ for (const viewport of [
         "tel:+14165550123",
       );
       await expect(contact.getByText("Toronto, ON M5V 1A1")).toBeVisible();
+      await expectNoInternalText(page);
       await noHorizontalOverflow(page);
     });
 

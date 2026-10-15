@@ -4,7 +4,8 @@ import { describe, expect, it } from "vitest";
 import { OrderStatusPage, isOrderSettled } from "./OrderStatusPage.js";
 import type { OrderStatusController } from "./order-status-controller.js";
 import type { OrderStatusState, OrderStatusView } from "./types.js";
-import { formatClockTime } from "../journey/format.js";
+import { endSentence, formatClockTime } from "../journey/format.js";
+import { findInternalText, staticText } from "../../e2e/internal-text-patterns.js";
 
 const id = (n: number) => `018f7a00-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 
@@ -82,11 +83,49 @@ describe("CUST-ORDER-STATUS screen contract", () => {
     expect(html).toContain("2 × Synthetic bowl");
     expect(html).toContain("$25.98");
     expect(html).toContain("Kitchen status");
-    expect(html).toContain("Not available yet");
-    expect(html).toContain("Payment");
+    expect(html).toContain("Not started yet");
+    // No payment result was read: the row is left out rather than shown as unavailable.
+    expect(html).not.toContain("<dt>Payment</dt>");
     expect(html).toContain("Show pickup code");
     expect(html).toContain("View receipt and support");
     expect(html).not.toContain("Ready for pickup");
+  });
+
+  it("tells a paid guest the kitchen hasn't started yet, in their words", () => {
+    const state = readyState();
+    if (state.status !== "ready") throw new Error("fixture");
+    const html = render({
+      ...state,
+      view: {
+        ...state.view,
+        sources: {
+          checkedAt: "2026-08-11T14:00:00.000Z",
+          kitchen: null,
+          payments: [
+            {
+              status: "Succeeded",
+              occurredAt: "2026-08-11T13:56:00.000Z",
+              amount: { amountMinor: 2598n, currencyCode: "CAD" },
+              freshnessStatus: "Fresh",
+            },
+          ],
+        },
+      },
+    });
+    expect(html).toContain("<dt>Kitchen status</dt><dd>Not started yet</dd>");
+    expect(html).toContain("Payment received $25.98");
+    expect(findInternalText([staticText(html)])).toEqual([]);
+  });
+
+  it("leaves the kitchen row out once a not-started order was cancelled", () => {
+    const state = readyState();
+    if (state.status !== "ready") throw new Error("fixture");
+    const html = render({
+      ...state,
+      view: { ...state.view, order: { ...state.view.order, canonicalPhase: "Cancelled" } },
+    });
+    expect(html).not.toContain("Kitchen status");
+    expect(findInternalText([staticText(html)])).toEqual([]);
   });
 
   it("makes stale projection evidence explicit", () => {
@@ -218,7 +257,7 @@ it("preserves a ready batch without claiming all batches ready", () => {
     },
   });
   expect(html).toContain("Preparing");
-  expect(html).toContain("Not available yet");
+  expect(html).toContain("Not started yet");
   expect(html).toContain(">Ready<");
 });
 
@@ -753,9 +792,7 @@ describe("WP-2423: a dine-in round whose payment didn't go through", () => {
     const at = formatClockTime("2026-08-11T14:25:00.000Z");
     // One sentence end, even when the time itself ends with a period ("9:46 p.m.").
     expect(html).toContain(
-      `Payment for this round didn&#x27;t go through. It will be cancelled at ${at}${
-        at.endsWith(".") ? "" : "."
-      } Ask a staff member if you need help.`,
+      `Payment for this round didn&#x27;t go through. It will be cancelled at ${endSentence(at)} Ask a staff member if you need help.`,
     );
     expect(html).not.toContain("..");
     // The unpaid round is not waiting to be served and is not counted as owed.

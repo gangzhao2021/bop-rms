@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { Buffer } from "node:buffer";
 import { readFile } from "node:fs/promises";
+import { request as httpRequest } from "node:http";
+import { createRequire } from "node:module";
 import { URL } from "node:url";
 import pg from "pg";
 import { it, vi } from "vitest";
@@ -14,10 +17,15 @@ import {
   createUnconfiguredStoreSetupDraftContent,
 } from "../../rms/store/src/index.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
+import { createInternalStoreSetupBff } from "../../../tooling/environment/pilot-store-setup.mjs";
+import { createMerchantBffRouter } from "../../../apps/api/dist/merchant-bff.js";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { seedMerchantAcceptanceSession } from "../test-support/merchant-acceptance-session.mjs";
 
 const { Client } = pg;
+const express = createRequire(new URL("../../../apps/api/package.json", import.meta.url))(
+  "express",
+);
 const id = (n) => "01a7e000-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 
 /**
@@ -178,6 +186,75 @@ it("WP-2423: the Owner reads Store setup under the pilot API grants", async () =
           error instanceof StoreSetupOperationError &&
           error.code === "STORE_SETUP_OPERATION_CLASSIFICATIONS_NOT_REGISTERED",
       );
+
+      // The same reads through the pilot merchant BFF composition. On v15 both answered 503: the
+      // pilot composed no storeSetupClock (step 5) and no Store configuration publication (step 8).
+      {
+        const app = express();
+        app.use(
+          "/merchant",
+          createMerchantBffRouter({
+            service: owner.authentication,
+            exactOrigin: "https://merchant.invalid",
+            acceptedHost: "merchant.invalid",
+            ...createInternalStoreSetupBff({
+              persistence: owner.persistence,
+              authentication: owner.authentication,
+              nextReference: () => id(next++),
+            }),
+          }),
+        );
+        const server = app.listen(0, "127.0.0.1");
+        try {
+          await new Promise((resolve) => server.once("listening", resolve));
+          const get = (path) =>
+            new Promise((resolve, reject) => {
+              const outgoing = httpRequest(
+                new URL(path, "http://127.0.0.1:" + server.address().port),
+                {
+                  headers: {
+                    host: "merchant.invalid",
+                    origin: "https://merchant.invalid",
+                    "sec-fetch-site": "same-origin",
+                    cookie: "__Host-bop-merchant=" + owner.sessionCookie,
+                    "x-bop-store-setup-scope": Buffer.from(
+                      JSON.stringify({ ...scope, actorReference: id(10) }),
+                    ).toString("base64url"),
+                  },
+                },
+                (response) => {
+                  const chunks = [];
+                  response.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+                  response.once("error", reject);
+                  response.once("end", () =>
+                    resolve({
+                      status: response.statusCode,
+                      body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
+                    }),
+                  );
+                },
+              );
+              outgoing.once("error", reject);
+              outgoing.end();
+            });
+          assert.deepEqual(
+            await get(
+              "/merchant/store-setup/fee-context-classifications?storeReference=" +
+                scope.storeReference,
+            ),
+            { status: 404, body: { error: "store_setup_classifications_not_registered" } },
+          );
+          assert.deepEqual(
+            await get(
+              "/merchant/store-configuration/ordinary?expectedStoreReference=" +
+                scope.storeReference,
+            ),
+            { status: 404, body: { error: "store_configuration_publication_not_offered" } },
+          );
+        } finally {
+          await new Promise((resolve) => server.close(resolve));
+        }
+      }
 
       // Step 7: the Owner saves the Store contact and reads it back.
       const contact = {

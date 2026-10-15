@@ -446,16 +446,29 @@ describe("IDR-0039 named KDS Operator profile", () => {
       "kitchen.operate",
     ]);
   });
-  it.each(["fulfillment.operate", "payment.refund", "catalog.manage", "kitchen.production.manage"])(
-    "denies %s even when the Actor's roles allow it, before any policy read",
-    async (action) => {
-      ports.session.mockResolvedValue(session(2, "NamedKdsOperator"));
-      const scope = await resolve(action);
-      expect(await scope.allowed()).toBe(false);
-      expect(await scope.authorizeAction(action)).toBeNull();
-      expect(ports.authorize.mock.calls.map(([request]) => request.action)).not.toContain(action);
-    },
-  );
+  it("allows the today-only sold-out mark (WP-2423 Q17) when the Actor's roles allow it", async () => {
+    ports.session.mockResolvedValue(session(2, "NamedKdsOperator"));
+    const scope = await resolve("catalog.sku.sold_out.mark");
+    expect(await scope.allowed()).toBe(true);
+    expect(ports.authorize.mock.calls.map(([request]) => request.action)).toEqual([
+      "merchant.access",
+      "catalog.sku.sold_out.mark",
+    ]);
+  });
+  it.each([
+    "fulfillment.operate",
+    "payment.refund",
+    "catalog.manage",
+    "kitchen.production.manage",
+    "catalog.sku.availability.manage",
+    "catalog.sku.read",
+  ])("denies %s even when the Actor's roles allow it, before any policy read", async (action) => {
+    ports.session.mockResolvedValue(session(2, "NamedKdsOperator"));
+    const scope = await resolve(action);
+    expect(await scope.allowed()).toBe(false);
+    expect(await scope.authorizeAction(action)).toBeNull();
+    expect(ports.authorize.mock.calls.map(([request]) => request.action)).not.toContain(action);
+  });
   it("leaves ordinary Workforce Sessions to their role policy", async () => {
     const scope = await resolve("fulfillment.operate");
     expect(await scope.allowed()).toBe(true);

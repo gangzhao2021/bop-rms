@@ -104,12 +104,15 @@ export function PickupProofForm({
   if (!open)
     return (
       <button disabled={paused} onClick={() => setOpen(true)}>
-        Open proof verification
+        Check pickup code
       </button>
     );
   return (
-    <section aria-label="Pickup proof verification">
-      <p>Verify the code for this exact order. Verification does not complete handoff.</p>
+    <section aria-label="Pickup code check">
+      <p>
+        Ask the customer for the pickup code shown on their order page. A matching code does not
+        hand the order over by itself.
+      </p>
       {status === "Idle" ? (
         <form
           ref={formRef}
@@ -120,7 +123,7 @@ export function PickupProofForm({
           }}
         >
           <label>
-            Pickup credential
+            Pickup code
             <input
               ref={inputRef}
               type="password"
@@ -133,21 +136,23 @@ export function PickupProofForm({
             />
           </label>
           <button type="submit" disabled={!credential || paused}>
-            Verify pickup proof
+            Check code
           </button>
         </form>
       ) : null}
       {paused ? <p role="status">Paused until the connection returns.</p> : null}
       <div role="status">
-        {status === "Pending" ? "Verifying pickup proof…" : null}
+        {status === "Pending" ? "Checking the code…" : null}
         {status === "Verified"
-          ? "Proof verified. Handoff is not completed. A configured workstation and explicit confirmation are required."
+          ? workstation
+            ? "The code matches. Hand over the order below, then confirm."
+            : "The code matches, but this device is not set up as the pickup counter, so the handover cannot be recorded here. Record it on the pickup counter device."
           : null}
         {status === "Rejected"
-          ? "Verification could not be accepted. Refresh the queue before trying again."
+          ? "That code was not accepted. Refresh the list, then ask the customer to check the code."
           : null}
         {status === "OutcomeUnknown"
-          ? "Verification result unknown. Retry this same verification to recover its result."
+          ? "The check could not be confirmed. Try the same check again before asking for the code again."
           : null}
       </div>
       {status === "Verified" && verification && workstation ? (
@@ -162,7 +167,7 @@ export function PickupProofForm({
       ) : null}
       {status === "OutcomeUnknown" ? (
         <button ref={retryButtonRef} disabled={paused} onClick={() => void submit(true)}>
-          Retry same verification
+          Try the check again
         </button>
       ) : null}
     </section>

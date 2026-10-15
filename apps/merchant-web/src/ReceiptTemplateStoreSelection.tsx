@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
+import { StoreTimeZoneContext, friendlyStoreTime } from "./StoreTime.js";
+import { languageName } from "./staff-text.js";
 import { canonicalPublicationValue as canonical } from "./product-publication-command-client-v2.js";
 import {
   createReceiptTemplateDraftClient,
@@ -71,6 +73,7 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
     [error, setError] = useState(""),
     [expired, setExpired] = useState(false);
   const code = (e: unknown) => (e instanceof StoreSetupClientError ? e.code : "Unavailable");
+  const timeZone = useContext(StoreTimeZoneContext);
   const valid = (e: number, key: string, c: AbortController) =>
     epoch.current === e && identityRef.current === key && !c.signal.aborted;
   async function loadRoster(after: string | null) {
@@ -213,7 +216,7 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
           <option value="">Choose a saved template</option>
           {roster?.entries.map((entry) => (
             <option key={entry.content.templateReference} value={entry.content.templateReference}>
-              {entry.content.locale} · Revision {entry.revision} · {entry.content.versionCode}
+              {languageName(entry.content.locale)} · draft {entry.revision}
             </option>
           ))}
         </select>
@@ -241,24 +244,28 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
         {busy
           ? "Loading published receipt template…"
           : error
-            ? `Published receipt template unavailable: ${error}. The saved selection is retained.`
+            ? error === "Denied"
+              ? "You do not have permission to choose receipt templates. The saved selection is kept."
+              : error === "NotFound"
+                ? "This template has not been published for this Store's language yet. The saved selection is kept."
+                : "Published receipt templates could not be loaded. Refresh to try again; the saved selection is kept."
             : expired
-              ? "The observation expired. Check the published template again."
+              ? "This check is out of date. Check the published template again."
               : ""}
       </p>
       {candidate && (
         <div>
           <p>
-            {candidate.currentVersion.locale} · {candidate.currentVersion.versionCode} · Version{" "}
+            {languageName(candidate.currentVersion.locale)} · published version{" "}
             {candidate.currentVersion.versionNumber}
           </p>
           <p>
-            Effective from {candidate.currentVersion.effectiveFrom}
+            In use from {friendlyStoreTime(candidate.currentVersion.effectiveFrom, timeZone)}
             {candidate.currentVersion.effectiveUntil
-              ? ` until ${candidate.currentVersion.effectiveUntil}`
+              ? ` until ${friendlyStoreTime(candidate.currentVersion.effectiveUntil, timeZone)}`
               : ""}
           </p>
-          <p>Professional review and legal conclusion have not been evaluated.</p>
+          <p>This template has not been checked by a tax or legal professional.</p>
           <button
             type="button"
             disabled={blocked || !fresh}

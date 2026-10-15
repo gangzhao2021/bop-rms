@@ -1533,11 +1533,12 @@
   gap: 8px;
 }
 .kitchen-reference-search input {
-  width: 21rem;
+  width: 15rem;
   max-width: 100%;
   min-width: 0;
-  font-family: var(--bop-font-mono);
-  font-size: 13px;
+  appearance: none;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
 }
 .kitchen-reference-search__actions {
   display: flex;
@@ -1566,6 +1567,7 @@
 .kitchen-board-filters label {
   display: grid;
   gap: 4px;
+  margin: 0;
   font-size: 13px;
   font-weight: 500;
 }
@@ -1803,6 +1805,71 @@
 .kitchen-screen-awake {
   color: var(--bop-color-text-muted);
   font-size: 13px;
+}
+.kitchen-screen-awake:empty {
+  display: none;
+}
+/* WP-2423: the kitchen display's own controls sit at the end of its header. */
+.kitchen-shell .bop-shell__header {
+  align-items: center;
+}
+.kitchen-shell .bop-shell__header-status {
+  margin-inline-start: auto;
+}
+.kitchen-display-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 16px;
+}
+.kitchen-handover-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.kitchen-handover-button:hover:not(:disabled) {
+  border-color: var(--bop-color-border-strong);
+}
+.kitchen-handover-button:disabled {
+  color: var(--bop-color-text-muted);
+  cursor: progress;
+}
+/* WP-2423: the kitchen display's own navigation (board, sold-out marking), sized for touch. */
+.bop-shell__nav:has(.kitchen-display-nav-link) {
+  gap: 20px;
+}
+.bop-shell__nav .kitchen-display-nav-link {
+  min-height: 44px;
+  padding: 0 4px;
+  border-bottom: 2px solid transparent;
+  color: var(--bop-color-text-muted);
+  font-size: 15px;
+  font-weight: 500;
+  text-decoration: none;
+}
+.bop-shell__nav .kitchen-display-nav-link:hover {
+  color: var(--bop-color-text-default);
+}
+.bop-shell__nav .kitchen-display-nav-link[aria-current="page"] {
+  border-bottom-color: var(--bop-color-text-default);
+  color: var(--bop-color-text-default);
+}
+.kitchen-handover-failed {
+  flex-basis: 100%;
+  color: var(--bop-color-danger);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: end;
 }
 .kitchen-screen-awake[data-state="Unsupported"] {
   color: var(--bop-color-warning);
@@ -8328,4 +8395,21 @@ body:has(.product-complete-draft) .bop-shell__header,
 .receipt-privacy__error {
   margin: 0;
   color: var(--bop-color-danger);
+}
+
+/* WP-2423: the pickup handover confirmation uses the shared dialog frame. */
+.pickup-handoff-dialog ul {
+  margin: 0 0 12px;
+  padding-left: 18px;
+  font-size: 14px;
+}
+.pickup-handoff-dialog label:has(> input[type="checkbox"]) {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-weight: 400;
+}
+.pickup-handoff-dialog form > button,
+.pickup-handoff-dialog > button {
+  margin: 0 8px 8px 0;
 }

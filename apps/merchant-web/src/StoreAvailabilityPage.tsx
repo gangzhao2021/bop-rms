@@ -1,6 +1,6 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { newOperationReference } from "./RoleAdministrationPages.js";
 import {
   AvailabilityPageError,
@@ -38,8 +38,11 @@ const statusText = {
 
 export function StoreAvailabilityPage({
   client = unavailableAvailabilityClient,
+  navigation,
 }: {
   readonly client?: AvailabilityClient;
+  /** WP-2423 Q17: the kitchen display's own navigation when reached from the kitchen board. */
+  readonly navigation?: ReactNode;
 }) {
   const [state, setState] = useState<
     | { readonly kind: "Loading" | AvailabilityErrorCode }
@@ -65,8 +68,8 @@ export function StoreAvailabilityPage({
       active = false;
     };
   }, [client, generation]);
-  if (state.kind !== "Found")
-    return (
+  if (state.kind !== "Found") {
+    const panel = (
       <StatePanel
         heading="Item availability"
         tone={state.kind === "Loading" ? "neutral" : "error"}
@@ -75,6 +78,15 @@ export function StoreAvailabilityPage({
         <p>{copy[state.kind]}</p>
       </StatePanel>
     );
+    // From the kitchen display there is no workspace frame around the page; keep the way back.
+    return navigation ? (
+      <AppFrame title="Item availability" description="" navigation={navigation}>
+        {panel}
+      </AppFrame>
+    ) : (
+      panel
+    );
+  }
   const view = state.view;
   // WP-2423 Q17: floor staff (Kitchen, Front of House) see only items sold here.
   const floorOnly = floorStaffOnly(view.permissions);
@@ -177,7 +189,7 @@ export function StoreAvailabilityPage({
     return buttons;
   };
   return (
-    <AppFrame title="Item availability" description="">
+    <AppFrame title="Item availability" description="" navigation={navigation}>
       <header className="screen-heading">
         <div>
           <h2>Item availability</h2>

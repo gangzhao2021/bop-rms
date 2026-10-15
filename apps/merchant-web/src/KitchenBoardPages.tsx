@@ -100,6 +100,123 @@ export function kitchenHandoverOffered(
   return named && operator !== null && operator !== "Unverified";
 }
 
+/**
+ * WP-2423: what the order search box understands, in staff terms: the order number printed on the
+ * ticket and receipt ("14", "#14", "Order 14") or the table ("T4", "Table T4"). Null when empty.
+ */
+export function kitchenOrderSearchTerm(input: string): string | null {
+  const term = input
+    .trim()
+    .replace(/^(?:order|table)\b\s*/iu, "")
+    .replace(/^#\s*/u, "")
+    .trim()
+    .toUpperCase();
+  return term.length === 0 ? null : term;
+}
+
+/** WP-2423: whether a work item belongs to the order (or table) staff searched for. */
+export function matchesKitchenOrderSearch(item: KitchenBoardItem, input: string): boolean {
+  const term = kitchenOrderSearchTerm(input);
+  if (term === null) return true;
+  const label = item.orderLabel;
+  if (!label) return false;
+  const number = (value: string) => value.toUpperCase().replace(/^0+(?=\d)/u, "");
+  return number(label.orderNumber) === number(term) || label.tableLabel?.toUpperCase() === term;
+}
+
+/**
+ * WP-2423: a kitchen display sign-in ("Start kitchen display as …") only works the kitchen, so its
+ * screens show the kitchen navigation alone (the board and, Q17, marking an item sold out), not
+ * the back office. Presentation only: the server still checks every request. Before the board has
+ * said who is using it, nothing is shown rather than flashing the back-office navigation at a cook.
+ */
+export function kitchenNavigationFor(
+  named: boolean,
+  operator: KitchenBoardView["operatorStatus"] | null,
+  navigation: ReactNode,
+  kitchenOnly?: ReactNode,
+): ReactNode {
+  if (!named) return navigation;
+  if (operator === null) return undefined;
+  return kitchenHandoverOffered(named, operator) ? kitchenOnly : navigation;
+}
+
+/** WP-2423 Q17: where the kitchen display's sold-out link leads (the page offers the way back). */
+export const kitchenSoldOutHref = (soldOutHref: string) => `${soldOutHref}?from=kitchen`;
+
+/** WP-2423: the kitchen display's own navigation: the board, and marking an item sold out. */
+export function KitchenDisplayNavigation({
+  current,
+  soldOutHref,
+}: {
+  readonly current: "Kitchen" | "SoldOut";
+  readonly soldOutHref?: string | undefined;
+}) {
+  return (
+    <>
+      <a
+        className="kitchen-display-nav-link"
+        href="/operations/kitchen"
+        aria-current={current === "Kitchen" ? "page" : undefined}
+      >
+        Kitchen
+      </a>
+      {soldOutHref ? (
+        <a
+          className="kitchen-display-nav-link"
+          href={kitchenSoldOutHref(soldOutHref)}
+          aria-current={current === "SoldOut" ? "page" : undefined}
+        >
+          Mark an item sold out
+        </a>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * WP-2423: the kitchen display's own controls in its header: whether the screen stays awake and
+ * the handover. Styled like the board's other controls (thin outline, 44 px).
+ */
+export function KitchenDisplayHeaderControls({
+  handoverOffered,
+  handover,
+  awake,
+  onHandover,
+}: {
+  readonly handoverOffered: boolean;
+  readonly handover: "Idle" | "SigningOut" | "SignedOut" | "Failed";
+  readonly awake: "Held" | "Unsupported" | "Released";
+  readonly onHandover: () => void;
+}) {
+  return (
+    <div className="kitchen-display-controls">
+      <span className="kitchen-screen-awake" data-state={awake} role="status">
+        {awake === "Held"
+          ? "Screen kept on"
+          : awake === "Unsupported"
+            ? "This browser cannot keep the screen on — set the device to never sleep"
+            : ""}
+      </span>
+      {handoverOffered ? (
+        <button
+          type="button"
+          className="kitchen-handover-button"
+          disabled={handover === "SigningOut"}
+          onClick={onHandover}
+        >
+          Hand over / sign out
+        </button>
+      ) : null}
+      {handover === "Failed" ? (
+        <span className="kitchen-handover-failed" role="alert">
+          Handover was not recorded or sign-out was not confirmed. Retry before handing over.
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 /** WP-2423: how the board names who is using it, in staff words. */
 export function kitchenOperatorText(status: KitchenBoardView["operatorStatus"]): string {
   return {
@@ -240,7 +357,6 @@ import {
   type KitchenBoardClient,
   type KitchenBoardItem,
   type KitchenBoardView,
-  type KitchenQueueSearch,
   type KitchenWorkItemDetailView,
 } from "./kitchen-board.js";
 import { StaffSignInLink, StaffSwitchButton } from "./StaffSession.js";
@@ -377,6 +493,53 @@ export function KitchenBoardStatePanel({
   );
 }
 
+interface KitchenFocusIntent {
+  readonly reference: string;
+  /** The cards after the acted one, in board order, for when it leaves the list. */
+  readonly followers: readonly string[];
+}
+const kitchenCards = (root: ParentNode) =>
+  [...root.querySelectorAll<HTMLElement>("[data-work-item]")].filter(
+    (card) => !card.closest("details:not([open])"),
+  );
+const kitchenCard = (root: ParentNode, reference: string) =>
+  kitchenCards(root).find((card) => card.dataset.workItem === reference);
+function kitchenFocusIntent(root: ParentNode | null, reference: string): KitchenFocusIntent {
+  const order = root ? kitchenCards(root).map((card) => card.dataset.workItem ?? "") : [];
+  const index = order.indexOf(reference);
+  return { reference, followers: index < 0 ? [] : order.slice(index + 1) };
+}
+const nextStep = (card: HTMLElement) =>
+  card.querySelector<HTMLButtonElement>(".kitchen-work-item__actions button:not(:disabled)");
+/** Focus is lost when it fell to the page, onto a control the step disabled, or stayed on the card. */
+function focusLost(root: HTMLElement, pending: KitchenFocusIntent): boolean {
+  const active = document.activeElement;
+  if (active === null || active === document.body || !active.isConnected) return true;
+  if (active instanceof HTMLButtonElement && active.disabled) return true;
+  return kitchenCard(root, pending.reference)?.contains(active) === true;
+}
+/**
+ * Where focus belongs while a kitchen step settles: the acted card (its next step once enabled),
+ * else the next card still on the board, else the queue heading. `done` ends the tracking.
+ */
+export function kitchenFocusTarget(
+  root: HTMLElement,
+  pending: KitchenFocusIntent,
+  actionsBlocked: boolean,
+): { readonly element: HTMLElement | null; readonly done: boolean } {
+  const card = kitchenCard(root, pending.reference);
+  if (card) {
+    const step = actionsBlocked ? null : nextStep(card);
+    return step ? { element: step, done: true } : { element: card, done: false };
+  }
+  for (const reference of pending.followers) {
+    const follower = kitchenCard(root, reference);
+    if (follower)
+      return { element: (!actionsBlocked && nextStep(follower)) || follower, done: true };
+  }
+  return { element: root.querySelector<HTMLElement>("#kitchen-queue-heading"), done: true };
+}
+
 function WorkCard({
   item,
   readOnly,
@@ -412,6 +575,9 @@ function WorkCard({
   return (
     <article
       className={`kitchen-work-item${!showDetails && !showActions ? " kitchen-work-item--detail" : ""}`}
+      data-work-item={showActions ? item.workItemReference : undefined}
+      tabIndex={showActions ? -1 : undefined}
+      aria-label={showActions ? item.displayName : undefined}
       data-read-only={readOnly}
       data-age={kitchenAgeTier(age)}
       data-status={item.status}
@@ -550,7 +716,7 @@ function WorkCard({
               </>
             ) : (
               <span className="kitchen-work-item__no-actions">
-                Actions unavailable for this item
+                No kitchen steps for this item on this screen
               </span>
             )
           ) : null}
@@ -606,8 +772,6 @@ function restoredQueueScope(value: unknown): KitchenQueueScope | undefined {
 
 export function KitchenBoardScreen({
   view,
-  onSearch,
-  searchApplied = false,
   onRefresh,
   refreshButtonRef,
   onAction,
@@ -621,8 +785,14 @@ export function KitchenBoardScreen({
   soldOutHref,
   remakes,
   earlierDays,
+  headerStatus,
+  notices,
 }: {
   readonly view: KitchenBoardView;
+  /** What happened to the last kitchen step, remake or ticket close. */
+  readonly notices?: ReactNode;
+  /** WP-2423: the kitchen display's own controls (screen awake, handover) in the header. */
+  readonly headerStatus?: ReactNode;
   /** When this device last read the board successfully (shown as "Last checked"). */
   readonly checkedAt?: string | undefined;
   /** DEC-KITCHEN-STALE-TICKETS: closing an earlier business day's ticket, when offered. */
@@ -643,8 +813,6 @@ export function KitchenBoardScreen({
         readonly onAdvance: (rework: KitchenReworkView) => void;
       }
     | undefined;
-  readonly onSearch?: (search: KitchenQueueSearch | null) => void;
-  readonly searchApplied?: boolean;
   readonly onAction?: (item: KitchenBoardItem, action: KitchenAction) => void;
   readonly actionsBlocked?: boolean;
   readonly onRefresh?: () => void;
@@ -666,8 +834,11 @@ export function KitchenBoardScreen({
   const [status, setStatus] = useState(restored?.status ?? "Active");
   const [allergen, setAllergen] = useState(restored?.allergen ?? "All");
   const [exception, setException] = useState(restored?.exception ?? "All");
-  const [referenceKind, setReferenceKind] = useState<KitchenQueueSearch["kind"]>("Order");
-  const [referenceInput, setReferenceInput] = useState("");
+  // WP-2423: staff find an order by the number on its ticket or receipt (or its table), over the
+  // board already loaded; the text stays on this screen and is never sent or put in the address.
+  const [orderInput, setOrderInput] = useState("");
+  const [orderSearch, setOrderSearch] = useState<string | null>(null);
+  const searchApplied = orderSearch !== null;
   const filterSheetRef = useRef<HTMLDialogElement>(null);
   const [remakeTarget, setRemakeTarget] = useState<KitchenBoardItem | null>(null);
   const readOnly = view.freshnessStatus !== "Fresh" || view.operatorStatus !== "Named";
@@ -702,9 +873,36 @@ export function KitchenBoardScreen({
     CompleteKitchenWorkItem: "Complete quantity",
     MarkKitchenOrderItemReady: "Mark ready",
   };
+  // WP-2423: after a kitchen step the cook stays where they were: on the same card (its next
+  // step once the board shows it), or on the next card when this one has left the list.
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const pendingFocus = useRef<KitchenFocusIntent | null>(null);
+  useEffect(() => {
+    const root = workspaceRef.current;
+    if (!root) return;
+    const moved = (event: FocusEvent) => {
+      const pending = pendingFocus.current;
+      if (pending && !kitchenCard(root, pending.reference)?.contains(event.target as Node))
+        pendingFocus.current = null;
+    };
+    document.addEventListener("focusin", moved);
+    return () => document.removeEventListener("focusin", moved);
+  }, []);
+  useEffect(() => {
+    const root = workspaceRef.current;
+    const pending = pendingFocus.current;
+    if (!root || !pending) return;
+    const target = kitchenFocusTarget(root, pending, actionsBlocked);
+    if (target.done) pendingFocus.current = null;
+    if (target.element && document.activeElement !== target.element && focusLost(root, pending))
+      target.element.focus();
+  });
   const guardedAction = onAction
     ? (item: KitchenBoardItem, action: KitchenAction) =>
-        guarded(item, actionLabels[action], () => onAction(item, action))
+        guarded(item, actionLabels[action], () => {
+          pendingFocus.current = kitchenFocusIntent(workspaceRef.current, item.workItemReference);
+          onAction(item, action);
+        })
     : undefined;
   const onRemake = remakes?.canRework
     ? (item: KitchenBoardItem) => guarded(item, "Remake", () => setRemakeTarget(item))
@@ -732,9 +930,13 @@ export function KitchenBoardScreen({
   const activeStation = stationFilterAvailable && stations.includes(station) ? station : "All";
   const activeAllergen = allergenFilterAvailable ? allergen : "All";
   const activeException = exceptionFilterAvailable ? exception : "All";
-  const items = view.items.filter(
+  const searchMatches = view.items.filter(
     (item) =>
       !earlierOpen.has(item.workItemReference) &&
+      (orderSearch === null || matchesKitchenOrderSearch(item, orderSearch)),
+  );
+  const items = searchMatches.filter(
+    (item) =>
       (activeStation === "All" || item.stationLabel === activeStation) &&
       (status === "All" ||
         (status === "Active" ? isActiveKitchenWork(item) : item.status === status)) &&
@@ -769,66 +971,49 @@ export function KitchenBoardScreen({
     dialog.showModal();
     dialog.querySelector<HTMLSelectElement>("select:not(:disabled)")?.focus();
   };
-  const renderReferenceSearch = (layout: "desktop" | "mobile") => (
+  const renderOrderSearch = (layout: "desktop" | "mobile") => (
     <form
       className={`kitchen-reference-search kitchen-reference-search--${layout}`}
       role="search"
-      aria-label="Search Kitchen by exact reference"
+      aria-label="Find an order"
       onSubmit={(event) => {
         event.preventDefault();
-        if (!onSearch) return;
-        try {
-          parseKitchenRouteReference(referenceInput);
-          onSearch({ kind: referenceKind, reference: referenceInput });
-          setReferenceInput("");
-          // The result is behind the sheet on a phone; the board stays mounted while it re-reads.
-          if (layout === "mobile") filterSheetRef.current?.close();
-        } catch {
-          const input = event.currentTarget.elements.namedItem("reference");
-          if (input instanceof HTMLInputElement) input.reportValidity();
-        }
+        const term = kitchenOrderSearchTerm(orderInput);
+        setOrderSearch(term === null ? null : orderInput.trim());
+        // The result is behind the sheet on a phone.
+        if (layout === "mobile") filterSheetRef.current?.close();
       }}
     >
       <label
         className={`kitchen-reference-search__label${layout === "desktop" ? " kitchen-filter-visually-hidden" : ""}`}
         htmlFor={`kitchen-reference-search-${layout}`}
       >
-        Order or ticket reference
+        Order number or table
       </label>
-      <select
-        aria-label="Reference type"
-        value={referenceKind}
-        onChange={(event) => setReferenceKind(event.currentTarget.value as "Order" | "Ticket")}
-      >
-        <option>Order</option>
-        <option>Ticket</option>
-      </select>
       <input
         id={`kitchen-reference-search-${layout}`}
-        name="reference"
-        aria-label="Exact reference"
+        name="order"
+        type="search"
+        inputMode="text"
         aria-describedby={`kitchen-reference-search-hint-${layout}`}
-        placeholder={layout === "mobile" ? "UUIDv7 reference" : "Exact UUIDv7 reference"}
-        value={referenceInput}
-        onChange={(event) => setReferenceInput(event.currentTarget.value)}
-        required
-        pattern="[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+        placeholder="Order number or table"
+        value={orderInput}
+        onChange={(event) => setOrderInput(event.currentTarget.value)}
+        maxLength={40}
         autoComplete="off"
         spellCheck={false}
       />
       <div className="kitchen-reference-search__actions">
-        <button type="submit" disabled={!onSearch}>
-          Search
-        </button>
+        <button type="submit">Find</button>
         {layout === "mobile" || searchApplied ? (
           <button
             type="button"
             aria-label="Clear search"
-            disabled={!searchApplied && referenceInput.length === 0}
+            disabled={!searchApplied && orderInput.length === 0}
             onClick={() => {
-              setReferenceInput("");
+              setOrderInput("");
               if (searchApplied) {
-                onSearch?.(null);
+                setOrderSearch(null);
                 if (layout === "mobile") filterSheetRef.current?.close();
               }
             }}
@@ -841,7 +1026,7 @@ export function KitchenBoardScreen({
         className={`kitchen-reference-search__hint${layout === "desktop" ? " kitchen-filter-visually-hidden" : ""}`}
         id={`kitchen-reference-search-hint-${layout}`}
       >
-        Exact reference only. The value stays in this page session and is not added to the URL.
+        The number on the ticket or receipt, or the table. Shows only that order&apos;s work.
       </span>
     </form>
   );
@@ -956,9 +1141,10 @@ export function KitchenBoardScreen({
       title={view.storeLabel}
       description="Kitchen display"
       navigation={navigation}
+      headerStatus={headerStatus}
       className="kitchen-shell"
     >
-      <div className="kitchen-board-workspace">
+      <div className="kitchen-board-workspace" ref={workspaceRef}>
         <header className="screen-heading kitchen-board-heading">
           <div>
             <h2>Kitchen</h2>
@@ -995,6 +1181,7 @@ export function KitchenBoardScreen({
             </button>
           </div>
         </header>
+        {notices}
         <button
           className="kitchen-filter-toggle"
           type="button"
@@ -1012,10 +1199,12 @@ export function KitchenBoardScreen({
           />
         ) : null}
         <header className="kitchen-queue-heading">
-          <h2>Queue</h2>
+          <h2 id="kitchen-queue-heading" tabIndex={-1}>
+            Queue
+          </h2>
         </header>
         <div className="kitchen-filter-toolbar">
-          {renderReferenceSearch("desktop")}
+          {renderOrderSearch("desktop")}
           {renderFilters("desktop")}
           <span className="kitchen-queue-count" aria-live="polite">
             {items.length} work {items.length === 1 ? "item" : "items"}
@@ -1032,7 +1221,7 @@ export function KitchenBoardScreen({
               Close
             </button>
           </div>
-          {renderReferenceSearch("mobile")}
+          {renderOrderSearch("mobile")}
           {renderFilters("mobile")}
         </dialog>
         {remakes?.readFailed ? (
@@ -1127,8 +1316,10 @@ export function KitchenBoardScreen({
             status
           >
             <p>
-              {searchApplied
-                ? "No work item matches this exact reference. Clear search to restore the queue."
+              {orderSearch !== null
+                ? searchMatches.length > 0
+                  ? `Order or table “${orderSearch}” has work, but the filters hide it. Clear the filters to see it.`
+                  : `Nothing on the board for order or table “${orderSearch}”. Clear the search to see the whole queue.`
                 : view.items.length === 0
                   ? "No authorized work item is available in the loaded queue."
                   : view.items.length === earlierOpen.size
@@ -1253,7 +1444,8 @@ export function KitchenWorkItemScreen({
     <AppFrame
       title={view.storeLabel}
       description="Kitchen display"
-      navigation={navigation}
+      // WP-2423: a kitchen display shows the kitchen only; "Return to Kitchen queue" leads back.
+      navigation={view.operatorStatus === "Unverified" ? navigation : undefined}
       className="kitchen-shell"
     >
       <div className="kitchen-board-workspace kitchen-work-item-screen">
@@ -1394,11 +1586,15 @@ function KitchenBoardContent(
   props: KitchenPageProps & {
     /** Who the board says is using it, so the page offers handover only to the kitchen display. */
     readonly onOperatorStatus?: (status: KitchenBoardView["operatorStatus"]) => void;
+    /** Who the board last said was using it (kept while a later read fails). */
+    readonly operator?: KitchenBoardView["operatorStatus"] | null;
+    /** The kitchen display's header controls, given who is using the board. */
+    readonly headerStatus?:
+      ((operator: KitchenBoardView["operatorStatus"] | null) => ReactNode) | undefined;
   },
 ) {
   const client = useClient(props),
     [revision, setRevision] = useState(0);
-  const [search, setSearch] = useState<KitchenQueueSearch | null>(null);
   const manualRefresh = useRef(false);
   const refresh = () => {
     manualRefresh.current = true;
@@ -1422,15 +1618,8 @@ function KitchenBoardContent(
       return next;
     });
   };
-  const load = useCallback(
-    () => client.loadQueue(search ?? undefined).then(parseKitchenBoardView),
-    [client, search],
-  );
-  const state = useLoad(
-    load,
-    `queue:${revision}:${search?.kind ?? "all"}:${search ? "exact" : ""}`,
-    true,
-  );
+  const load = useCallback(() => client.loadQueue().then(parseKitchenBoardView), [client]);
+  const state = useLoad(load, `queue:${revision}`, true);
   const stale = state.kind === "Found" ? state.stale : undefined;
   const operatorStatus = state.kind === "Found" ? state.view.operatorStatus : null;
   const { onOperatorStatus } = props;
@@ -1510,7 +1699,10 @@ function KitchenBoardContent(
   useEffect(() => {
     if (actions.state.kind !== "Unknown" || !restoreRetryFocus.current) return;
     restoreRetryFocus.current = false;
-    if (document.activeElement === document.body) retryButtonRef.current?.focus();
+    // The acted card holds focus while the step is sent; an unknown result moves it to Retry.
+    const active = document.activeElement;
+    if (active === document.body || active?.matches("[data-work-item]"))
+      retryButtonRef.current?.focus();
   }, [actions.state.kind]);
   const settled = state.kind !== "Loading" && !(state.kind === "Found" && state.reloading);
   useEffect(() => {
@@ -1519,7 +1711,23 @@ function KitchenBoardContent(
       refreshButtonRef.current?.focus();
     }
   }, [revision, settled]);
-  return (
+  // WP-2423: a kitchen display shows the kitchen only; the back office stays for other sign-ins.
+  const named = Boolean(props.csrf && props.storeReference);
+  const operator = state.kind === "Found" ? state.view.operatorStatus : (props.operator ?? null);
+  const navigation =
+    state.kind === "Loading" && operator === null
+      ? undefined
+      : kitchenNavigationFor(
+          named,
+          operator ?? (named ? "Unverified" : null),
+          props.navigation,
+          <KitchenDisplayNavigation current="Kitchen" soldOutHref={props.soldOutHref} />,
+        );
+  const kitchenDisplay = kitchenHandoverOffered(named, operator);
+  const headerStatus = props.headerStatus?.(operator);
+  // WP-2423: what happened to the last step is said inside the board, under its heading, not
+  // above the page frame.
+  const notices = (
     <>
       {actions.state.kind !== "Idle" ? (
         <StatePanel
@@ -1566,22 +1774,27 @@ function KitchenBoardContent(
       ) : null}
       <KitchenReworkStatus rework={rework} />
       <KitchenStaleCloseStatus close={staleClose} />
+    </>
+  );
+  return (
+    <>
       {state.kind === "Found" ? (
         <KitchenBoardScreen
           view={state.view}
-          onSearch={setSearch}
-          searchApplied={search !== null}
+          notices={notices}
           onRefresh={refresh}
           refreshButtonRef={refreshButtonRef}
           onAction={runAction}
           actionsBlocked={actions.blocked || stale !== undefined}
-          navigation={props.navigation}
+          navigation={navigation}
+          headerStatus={headerStatus}
           soundOn={soundOn}
           onSoundToggle={toggleSound}
           autoRefresh
           stale={stale}
           checkedAt={state.loadedAt}
-          soldOutHref={props.soldOutHref}
+          // The kitchen display offers marking an item sold out in its own navigation (Q17).
+          soldOutHref={kitchenDisplay ? undefined : props.soldOutHref}
           earlierDays={
             props.csrf
               ? {
@@ -1607,9 +1820,11 @@ function KitchenBoardContent(
         <AppFrame
           title={props.storeLabel ?? "Kitchen"}
           description="Kitchen display"
-          navigation={props.navigation}
+          navigation={navigation}
+          headerStatus={headerStatus}
           className="kitchen-shell"
         >
+          {notices}
           <KitchenBoardStatePanel state={state.kind} />
           {state.kind !== "Loading" ? (
             <button ref={refreshButtonRef} onClick={refresh}>
@@ -1729,41 +1944,32 @@ export function KitchenBoardPage(
         </button>
       </StatePanel>
     );
+  const handOver = () => {
+    setHandover("SigningOut");
+    signOut().then(
+      () => setHandover("SignedOut"),
+      () => setHandover("Failed"),
+    );
+  };
   return (
-    <>
-      {named ? (
-        <p>
-          {kitchenHandoverOffered(named, operator) ? (
-            <button
-              disabled={handover === "SigningOut"}
-              onClick={() => {
-                setHandover("SigningOut");
-                signOut().then(
-                  () => setHandover("SignedOut"),
-                  () => setHandover("Failed"),
-                );
-              }}
-            >
-              Hand over / sign out
-            </button>
-          ) : null}
-          <span className="kitchen-screen-awake" data-state={awake} role="status">
-            {awake === "Held"
-              ? " Screen kept on"
-              : awake === "Unsupported"
-                ? " This browser cannot keep the screen on — set the device to never sleep"
-                : ""}
-          </span>
-          {handover === "Failed" ? (
-            <span role="alert">
-              {" "}
-              Handover was not recorded or sign-out was not confirmed. Retry before handing over.
-            </span>
-          ) : null}
-        </p>
-      ) : null}
-      <KitchenBoardContent key={resumed} {...props} onOperatorStatus={setOperator} />
-    </>
+    <KitchenBoardContent
+      key={resumed}
+      {...props}
+      operator={operator}
+      onOperatorStatus={setOperator}
+      headerStatus={
+        named
+          ? (current) => (
+              <KitchenDisplayHeaderControls
+                handoverOffered={kitchenHandoverOffered(named, current)}
+                handover={handover}
+                awake={awake}
+                onHandover={handOver}
+              />
+            )
+          : undefined
+      }
+    />
   );
 }
 export function KitchenWorkItemPage(props: KitchenPageProps) {

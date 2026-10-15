@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { expectNoInternalText } from "./internal-text-guard";
 import {
   createStoreSetupDraft,
   replaceStoreSetupDraftContent,
@@ -61,6 +62,7 @@ async function install(page: Page) {
         storeReference: id(3),
         storeLabel: "Synthetic Store",
         brandLabel: "Synthetic Brand",
+        timeZone: "America/Toronto",
       };
       return respond(route, {
         authenticated: true,
@@ -383,26 +385,22 @@ async function feeStep(page: Page) {
 async function enabledFee(page: Page) {
   const panel = await feeStep(page);
   await panel
-    .getByRole("combobox", { name: "ServiceCharge configuration", exact: true })
+    .getByRole("combobox", { name: "Service charge", exact: true })
     .selectOption("Enabled");
   const classification = panel.getByRole("combobox", {
-    name: "ServiceCharge tax classification",
+    name: "Service charge tax classification",
     exact: true,
   });
   await expect(classification).toBeEnabled();
   await classification.selectOption({
-    label: "SYNTH_FEE_CLASS — Synthetic fee classification (Active)",
+    label: "Synthetic fee classification",
   });
   await panel
-    .getByRole("group", { name: "ServiceCharge order types", exact: true })
+    .getByRole("group", { name: "Service charge order types", exact: true })
     .getByLabel("Pickup", { exact: true })
     .check();
-  await panel
-    .getByRole("combobox", { name: "DeliveryFee configuration", exact: true })
-    .selectOption("Disabled");
-  await panel
-    .getByRole("combobox", { name: "Tip configuration", exact: true })
-    .selectOption("Disabled");
+  await panel.getByRole("combobox", { name: "Delivery fee", exact: true }).selectOption("Disabled");
+  await panel.getByRole("combobox", { name: "Tip", exact: true }).selectOption("Disabled");
   return panel;
 }
 const save = (page: Page) => page.getByRole("button", { name: "Save setup draft", exact: true });
@@ -414,10 +412,11 @@ test("@production Store fee contexts ordinary entry explicit selections V2 curre
   const f = await install(page);
   await open(page);
   const panel = await feeStep(page);
-  for (const charge of ["ServiceCharge", "DeliveryFee", "Tip"])
-    await expect(
-      panel.getByRole("combobox", { name: `${charge} configuration`, exact: true }),
-    ).toHaveValue("Unconfigured");
+  await expectNoInternalText(page);
+  for (const charge of ["Service charge", "Delivery fee", "Tip"])
+    await expect(panel.getByRole("combobox", { name: charge, exact: true })).toHaveValue(
+      "Unconfigured",
+    );
   await enabledFee(page);
   await save(page).click();
   await expect(
@@ -444,15 +443,13 @@ test("@production Store fee contexts ordinary entry explicit selections V2 curre
   await page.reload();
   await expect(page.getByText("Revision 1", { exact: true })).toBeVisible();
   const restored = await feeStep(page);
+  await expect(restored.getByRole("combobox", { name: "Service charge", exact: true })).toHaveValue(
+    "Enabled",
+  );
   await expect(
-    restored.getByRole("combobox", { name: "ServiceCharge configuration", exact: true }),
-  ).toHaveValue("Enabled");
-  await expect(
-    restored.getByRole("combobox", { name: "ServiceCharge tax classification", exact: true }),
+    restored.getByRole("combobox", { name: "Service charge tax classification", exact: true }),
   ).toHaveValue(id(22));
-  await restored
-    .getByRole("combobox", { name: "Tip configuration", exact: true })
-    .selectOption("Unconfigured");
+  await restored.getByRole("combobox", { name: "Tip", exact: true }).selectOption("Unconfigured");
   await save(page).click();
   await expect(
     page.getByText("Setup draft saved. These settings have not been validated or published.", {
@@ -495,9 +492,9 @@ test("@production Store fee context lost reply old original recovery retains new
   ).toBeVisible();
   await expect(page.getByText("Revision 2", { exact: true })).toBeVisible();
   const panel = await feeStep(page);
-  await expect(
-    panel.getByRole("combobox", { name: "ServiceCharge configuration", exact: true }),
-  ).toHaveValue("Disabled");
+  await expect(panel.getByRole("combobox", { name: "Service charge", exact: true })).toHaveValue(
+    "Disabled",
+  );
   expect(f.control.writes).toHaveLength(1);
   expect(f.control.resolves).toHaveLength(2);
   expect(await journalRecords(page)).toEqual([]);
@@ -513,7 +510,7 @@ test("@production Store fee contexts reject unavailable retired or foreign class
   await open(page);
   const panel = await feeStep(page);
   await panel
-    .getByRole("combobox", { name: "ServiceCharge configuration", exact: true })
+    .getByRole("combobox", { name: "Service charge", exact: true })
     .selectOption("Enabled");
   await save(page).click();
   await expect(page.locator("#setup-validation-error")).toContainText("Check the edited settings");
@@ -526,14 +523,14 @@ test("@production Store fee contexts reject unavailable retired or foreign class
     .click();
   await expect(
     panel
-      .getByRole("combobox", { name: "ServiceCharge tax classification", exact: true })
+      .getByRole("combobox", { name: "Service charge tax classification", exact: true })
       .getByRole("option", {
-        name: "SYNTH_FEE_CLASS — Synthetic fee classification (Retired)",
+        name: "Synthetic fee classification (no longer in use)",
         exact: true,
       }),
   ).toHaveJSProperty("disabled", true);
   const retiredPicker = panel.getByRole("combobox", {
-    name: "ServiceCharge tax classification",
+    name: "Service charge tax classification",
     exact: true,
   });
   await retiredPicker.focus();
@@ -546,9 +543,7 @@ test("@production Store fee contexts reject unavailable retired or foreign class
   await panel
     .getByRole("button", { name: "Refresh fee classification choices", exact: true })
     .click();
-  await expect(panel.getByRole("status")).toContainText(
-    "Classification choices could not be loaded",
-  );
+  await expect(panel.getByRole("status")).toContainText("Tax classifications could not be loaded");
   // WP-2423 Q15/Q16: a Brand with no tax classifications gets a plain answer, not "unavailable".
   f.control.choiceMode = "NotRegistered";
   await panel
@@ -563,13 +558,13 @@ test("@production Store fee contexts reject unavailable retired or foreign class
     .getByRole("button", { name: "Refresh fee classification choices", exact: true })
     .click();
   await expect(
-    panel.getByRole("combobox", { name: "ServiceCharge tax classification", exact: true }),
+    panel.getByRole("combobox", { name: "Service charge tax classification", exact: true }),
   ).toBeEnabled();
   await panel
-    .getByRole("combobox", { name: "ServiceCharge tax classification", exact: true })
+    .getByRole("combobox", { name: "Service charge tax classification", exact: true })
     .selectOption(id(22));
   await panel
-    .getByRole("group", { name: "ServiceCharge order types", exact: true })
+    .getByRole("group", { name: "Service charge order types", exact: true })
     .getByLabel("Pickup", { exact: true })
     .check();
   f.control.choiceMode = "Retired";
@@ -593,10 +588,10 @@ test("@production Store fee contexts late Actor choices cannot replace new scope
   await expect(save(page)).toBeEnabled();
   const panel = await feeStep(page);
   f.control.releaseChoices();
-  const config = panel.getByRole("combobox", { name: "ServiceCharge configuration", exact: true });
+  const config = panel.getByRole("combobox", { name: "Service charge", exact: true });
   await config.focus();
   await expect(config).toBeFocused();
-  await page.keyboard.press("d");
+  await page.keyboard.press("o");
   await page.keyboard.press("Enter");
   await expect(config).toHaveValue("Disabled");
   await page.evaluate(() => {

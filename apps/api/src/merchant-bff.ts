@@ -2312,6 +2312,15 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       read = port?.read,
       clock = options.storeConfigurationOrdinaryClock,
       now = clock?.now;
+    // WP-2423 Q15/Q16: a deployment that does not compose Store configuration publication answers
+    // that plainly (404), so Store setup hides the publication panel instead of showing an outage.
+    if (port === undefined && clock === undefined) {
+      response
+        .status(404)
+        .set("Cache-Control", NO_STORE)
+        .json({ error: "store_configuration_publication_not_offered" });
+      return;
+    }
     if (!port || typeof read !== "function" || !clock || typeof now !== "function") {
       ordinaryFailure(response, undefined);
       return;

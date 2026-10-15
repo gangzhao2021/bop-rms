@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
+import { expectNoInternalText } from "./internal-text-guard";
 
 // WP-2423 Q15/Q16 synthetic HTTP evidence for the production App: the tax receipt (address,
 // registration, one line per tax and rate), the Store's privacy notice link where contact details
@@ -294,6 +295,7 @@ for (const viewport of [
       const link = page.getByRole("link", { name: /Privacy notice/u });
       await expect(link).toHaveAttribute("href", privacyNoticeUrl);
       await expect(link).toHaveAttribute("rel", "noopener noreferrer");
+      await expectNoInternalText(page);
       await noOverflowOrBlockingAxe(page);
     });
 
@@ -318,6 +320,7 @@ for (const viewport of [
         "href",
         privacyNoticeUrl,
       );
+      await expectNoInternalText(page);
       await noOverflowOrBlockingAxe(page);
     });
 
@@ -353,6 +356,7 @@ for (const viewport of [
         "href",
         privacyNoticeUrl,
       );
+      await expectNoInternalText(page);
       await noOverflowOrBlockingAxe(page);
       await section.getByRole("button", { name: "Remove my contact details" }).click();
       await expect(section.getByText(/won't be able to call or email you/u)).toBeVisible();

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createStoreConfigurationOrdinaryClient,
+  StoreConfigurationPublicationNotOfferedError,
   type StoreConfigurationOrdinaryCommand,
   type PreparedStoreConfigurationOrdinaryCommand,
   type StoreConfigurationOrdinaryHistory,
@@ -23,7 +24,38 @@ import {
   publicationValueDigest,
 } from "./product-publication-command-client-v2.js";
 import { serviceOperationReference } from "./service-control-client.js";
-import { StoreConfigurationFeeBasisView } from "./StoreConfigurationEditor.js";
+import {
+  StoreConfigurationFeeBasisView,
+  storeConfigurationStateLabel,
+} from "./StoreConfigurationEditor.js";
+import { StaffTime } from "./StoreTime.js";
+/** Configuration steps in staff words (WP-2423: no command or outcome codes on screen). */
+const actionLabel: Record<string, string> = {
+  Materialize: "Create configuration from saved setup",
+  SaveDraft: "Created from saved setup",
+  Validate: "Checked",
+  Submit: "Sent for approval",
+  Approve: "Approved",
+  Publish: "Published",
+};
+const requestLabel: Record<string, string> = {
+  Materialize: "create-from-setup",
+  Validate: "check",
+  Submit: "send-for-approval",
+  Approve: "approval",
+  Publish: "publish",
+};
+const doneText: Record<string, string> = {
+  Materialize: "Configuration created from the saved setup.",
+  Validate: "Configuration checked.",
+  Submit: "Configuration sent for approval.",
+  Approve: "Configuration approved.",
+  Publish: "Configuration published.",
+};
+const outcomeText = (action: string, outcome: "Committed" | "Abandoned") =>
+  outcome === "Committed"
+    ? (doneText[action] ?? "Change recorded.")
+    : "That request did not go through; nothing changed.";
 export interface StoreConfigurationOrdinaryPanelProps {
   readonly scope: StoreSetupScope;
   readonly csrf: string;
@@ -107,7 +139,8 @@ const messages: Record<StoreSetupClientError["code"], string> = {
     "The saved source or configuration changed. Refresh before a new request; recover any pending original first.",
   ScopeChanged:
     "The selected Store or Actor changed. Return to the original scope to recover its request.",
-  Unavailable: "Configuration is unavailable. Retry without discarding a pending original.",
+  Unavailable:
+    "Store configuration could not be loaded. Try again; any request still waiting is kept.",
   NotRegistered: "No tax classifications are set up for this Brand yet.",
   OutcomeUnknown:
     "The result is unknown. Recover the original request before sending another command.",
@@ -139,7 +172,8 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
     [pending, setPending] = useState<StoreConfigurationOriginalCursor | null>(null),
     [busy, setBusy] = useState(true),
     [error, setError] = useState<string | null>(null),
-    [notice, setNotice] = useState<string | null>(null);
+    [notice, setNotice] = useState<string | null>(null),
+    [notOffered, setNotOffered] = useState(false);
   useEffect(() => {
     ++historyGeneration.current;
     historyController.current?.abort();
@@ -196,6 +230,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
     setPending(null);
     setError(null);
     setNotice(null);
+    setNotOffered(false);
     const current = () => epoch === generation.current && !c.signal.aborted;
     const j = (props.journalFactory ?? createStoreConfigurationPendingJournal)(props.scope);
     journal.current = j;
@@ -208,7 +243,9 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
         const next = await client.load(props.scope, { signal: c.signal });
         if (current()) setWorkspace(next);
       } catch (e) {
-        if (current()) setError(message(e));
+        if (current() && e instanceof StoreConfigurationPublicationNotOfferedError)
+          setNotOffered(true);
+        else if (current()) setError(message(e));
       } finally {
         if (current()) {
           running.current = false;
@@ -313,7 +350,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
       });
       setWorkspace(after);
       setPending(null);
-      setNotice(`${action}: ${receipt.outcome}. Current configuration refreshed.`);
+      setNotice(`${outcomeText(action, receipt.outcome)} Current configuration refreshed.`);
     } catch (e) {
       if (current()) setError(message(e));
     } finally {
@@ -348,7 +385,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
         setWorkspace(result.workspace);
         setPending(null);
         setNotice(
-          `Original ${original.action}: ${result.receipt.outcome}. Current configuration refreshed.`,
+          `${outcomeText(original.action, result.receipt.outcome)} Current configuration refreshed.`,
         );
       }
     } catch (e) {
@@ -363,12 +400,14 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
   const latest = workspace?.latest,
     current = workspace?.current,
     locked = busy || historyBusy || !!pending || !!props.freshDisabled;
+  // WP-2423 Q15/Q16: no publication path in this deployment; no panel rather than an outage.
+  if (notOffered) return null;
   return (
     <section className="store-setup-review" aria-label="Store configuration publication">
       <h3>Store configuration publication</h3>
       <p>
-        Saved setup drafts are not effective Store configuration. Validation and publication use the
-        saved source and current permissions.
+        A saved setup draft does not change the live Store. Create a configuration from it, have it
+        approved, then publish it.
       </p>
       {busy && <p role="status">Loading Store configuration…</p>}
       {error && <p role="alert">{error}</p>}
@@ -376,8 +415,8 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
       {pending && (
         <>
           <p>
-            A configuration {pending.action} request needs original recovery. Its saved source is
-            retained.
+            An earlier {requestLabel[pending.action] ?? "configuration"} request was not confirmed.
+            Recover it before making another change; the saved setup is kept.
           </p>
           <button type="button" disabled={busy} onClick={() => void recover()}>
             Recover original configuration request
@@ -389,10 +428,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
       </button>
       <section aria-label="Store configuration operation history">
         <h3>Recorded configuration history</h3>
-        <p>
-          Immutable recorded operations, separate from the latest configuration and original
-          recovery.
-        </p>
+        <p>Every recorded change to this Store&rsquo;s configuration, newest first.</p>
         <button
           type="button"
           disabled={busy || historyBusy || !!props.freshDisabled}
@@ -403,7 +439,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
         {historyBusy && <p role="status">Loading configuration history…</p>}
         {historyError && <p role="alert">{historyError}</p>}
         {historyLoaded && history.length === 0 && (
-          <p>No recorded configuration operations returned.</p>
+          <p>No configuration changes have been recorded yet.</p>
         )}
         <StoreConfigurationHistoryView entries={history} />
         {nextHistory !== null && (
@@ -412,7 +448,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
             disabled={busy || historyBusy || !!props.freshDisabled}
             onClick={() => void loadHistory(true)}
           >
-            Load older configuration operations
+            Load older changes
           </button>
         )}
       </section>
@@ -422,24 +458,21 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
             <dt>Latest recorded configuration</dt>
             <dd>
               {latest
-                ? `Version ${latest.configurationVersion} · ${latest.lifecycle}`
+                ? `Version ${latest.configurationVersion} · ${storeConfigurationStateLabel(latest.lifecycle)}`
                 : "None recorded"}
             </dd>
             <dt>Current published configuration</dt>
             <dd>
               {current
-                ? `Version ${current.configurationVersion} · ${current.lifecycle}`
-                : "None returned"}
+                ? `Version ${current.configurationVersion} · ${storeConfigurationStateLabel(current.lifecycle)}`
+                : "Nothing published yet"}
             </dd>
-            <dt>Business references</dt>
-            <dd>Not evaluated by this workspace read</dd>
           </dl>
           {latest && <StoreConfigurationFeeBasisView configuration={latest} />}{" "}
           {workspace.original && (
             <p>
-              Original {workspace.original.action}: {workspace.original.outcome} ·{" "}
-              {workspace.original.occurredAt}. This is an immutable original result, separate from
-              the current head.
+              Last request: {outcomeText(workspace.original.action, workspace.original.outcome)}{" "}
+              <StaffTime instant={workspace.original.occurredAt} />
             </p>
           )}
           <div className="store-setup-actions">
@@ -516,21 +549,11 @@ export function StoreConfigurationHistoryView({
       {entries.map((entry) => (
         <li key={entry.operationReference}>
           <p>
-            {entry.command} · Version {entry.configuration.configurationVersion} ·{" "}
-            {entry.configuration.lifecycle} ·{" "}
-            <time dateTime={entry.occurredAt}>{entry.occurredAt}</time>
+            {actionLabel[entry.command] ?? "Changed"} · Version{" "}
+            {entry.configuration.configurationVersion} ·{" "}
+            {storeConfigurationStateLabel(entry.configuration.lifecycle)} ·{" "}
+            <StaffTime instant={entry.occurredAt} />
           </p>
-          <details>
-            <summary>Recorded author and audit details</summary>
-            <dl>
-              <dt>Original author</dt>
-              <dd>{entry.actorReference}</dd>
-              <dt>Audit reference</dt>
-              <dd>{entry.auditReference}</dd>
-              <dt>Purpose</dt>
-              <dd>{entry.purposeCode}</dd>
-            </dl>
-          </details>
         </li>
       ))}
     </ol>

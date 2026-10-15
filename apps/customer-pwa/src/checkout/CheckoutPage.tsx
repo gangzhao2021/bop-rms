@@ -508,7 +508,7 @@ export function CheckoutPage({
                 ? checkoutInProgressMessage(sessionState.retryAfterSeconds)
                 : sessionState.canRetry
                   ? "We could not confirm checkout. Retry to recover the same checkout."
-                  : "Checkout is unavailable. Review your cart and scan the QR code again if needed."}
+                  : "We couldn’t continue this checkout. Review your cart and scan the QR code again if needed."}
           </p>
         ) : null}
         {"canRetry" in sessionState && sessionState.canRetry ? (

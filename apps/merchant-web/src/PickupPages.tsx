@@ -173,7 +173,7 @@ function PickupCard({
                 ? "No code sent · check in person"
                 : item.proofReadiness === "Ready"
                   ? "Sent to customer"
-                  : item.proofReadiness}
+                  : "Not known yet · check in person"}
           </dd>
         </div>
         <div>

@@ -57,7 +57,7 @@ export function SessionPaymentResultPage({
     state.status === "loading"
       ? "Verifying payment"
       : state.status === "missing" || state.status === "denied"
-        ? "Payment result unavailable"
+        ? "Payment result not found"
         : state.status === "offline"
           ? "Connection required"
           : unknown
@@ -70,17 +70,20 @@ export function SessionPaymentResultPage({
                   ? "Payment confirmed"
                   : result?.status === "Failed"
                     ? "Payment declined"
-                    : "Payment result unavailable";
+                    : "Payment result not found";
   const badge = unknown
     ? "Status not confirmed"
     : result?.status === "Failed"
       ? "Declined"
-      : (result?.status ??
-        (state.status === "loading"
-          ? "Checking"
-          : state.status === "offline"
-            ? "Offline"
-            : "Unavailable"));
+      : result?.status === "Succeeded"
+        ? "Paid"
+        : result?.status === "Pending"
+          ? "Pending"
+          : state.status === "loading"
+            ? "Checking"
+            : state.status === "offline"
+              ? "Offline"
+              : "Not found";
   const badgeTone = unknown
     ? "warning"
     : result?.status === "Failed"
@@ -136,7 +139,7 @@ export function SessionPaymentResultPage({
           ) : null}
           {state.status === "denied" ? (
             <p>
-              This payment is unavailable in your current session. Contact the store to check its
+              This payment can’t be shown on this phone right now. Contact the store to check its
               status.
             </p>
           ) : null}

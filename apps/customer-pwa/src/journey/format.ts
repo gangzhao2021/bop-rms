@@ -24,7 +24,11 @@ export function formatLocalityLine(address: {
   return `${address.locality}, ${address.regionCode} ${address.postalCode}`;
 }
 
-/** "5:10 p.m." in the device's own zone: the customer is standing at the Store. */
+/**
+ * "5:10 p.m." in the device's own zone: the customer is standing at the Store. Canadian and other
+ * locales end the time with an abbreviation period, so a sentence that ends with a formatted time
+ * must use {@link endSentence} instead of appending "." itself ("9:46 p.m.." otherwise).
+ */
 export function formatClockTime(instant: string, locale = "en-CA"): string {
   const ms = Date.parse(instant);
   if (!Number.isFinite(ms)) return "";
@@ -33,13 +37,22 @@ export function formatClockTime(instant: string, locale = "en-CA"): string {
   );
 }
 
-/** "2026-09-02, 12:51 p.m." for records such as receipts. */
+/** "2026-09-02, 12:51 p.m." for records such as receipts. End a sentence with {@link endSentence}. */
 export function formatDateTime(instant: string, locale = "en-CA"): string {
   const ms = Date.parse(instant);
   if (!Number.isFinite(ms)) return "";
   return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(
     new Date(ms),
   );
+}
+
+/**
+ * Ends a sentence once: "Valid until 9:46 p.m." stays as is, "Valid until 21:46" gains its period.
+ * Use it whenever a sentence closes with a formatted time or date, whose locale text may already
+ * end with an abbreviation period.
+ */
+export function endSentence(text: string): string {
+  return /[.!?…]$/u.test(text) ? text : `${text}.`;
 }
 
 /** "about 4 minutes" / "less than a minute" until an instant; null once it has passed. */

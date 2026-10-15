@@ -340,6 +340,13 @@ it.each(["missingPort", "missingClock"])(
     expect((await send(h.root, { method: "GET", path: getPath })).status).toBe(503);
   },
 );
+it("answers 404 when this deployment composes no Store configuration publication", async () => {
+  const h = await serve(undefined, { missingClock: true });
+  const reply = await send(h.root, { method: "GET", path: getPath });
+  expect(reply.status).toBe(404);
+  expect(reply.body).toEqual({ error: "store_configuration_publication_not_offered" });
+  expect(reply.headers.get("cache-control")).toBe("no-store");
+});
 it.each(["Origin", "Host", "Cookie", "X-BOP-CSRF"])(
   "refuses insecure/missing %s before writing",
   async (key) => {

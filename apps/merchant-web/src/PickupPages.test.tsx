@@ -21,7 +21,7 @@ describe("WP-1805 Pickup screens", () => {
     for (const value of [
       "FUL-PICKUP-QUEUE",
       "Overdue",
-      "Open proof verification",
+      "Check pickup code",
       "source-bound",
       "idempotent",
       "Report exception",

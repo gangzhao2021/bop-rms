@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { expectNoInternalText } from "./internal-text-guard";
 import {
   createStoreSetupDraft,
   replaceStoreSetupDraftContent,
@@ -50,6 +51,7 @@ async function install(page: Page) {
         storeReference: id(3),
         storeLabel: "Synthetic Store",
         brandLabel: "Synthetic Brand",
+        timeZone: "America/Toronto",
       };
       return respond(route, {
         authenticated: true,
@@ -269,10 +271,19 @@ test("@production Store Setup ordinary entry eight steps partial save refresh an
   await expect(
     page.getByRole("navigation", { name: "Setup steps" }).getByRole("button"),
   ).toHaveCount(8);
+  // WP-2423: every step reads in staff language (no store codes, enum names, UTC or stubs).
+  for (const step of await page
+    .getByRole("navigation", { name: "Setup steps" })
+    .getByRole("button")
+    .all()) {
+    await step.click();
+    // Reviewed: IANA time zone names (America/Toronto) are the standard zone choices.
+    await expectNoInternalText(page, [/\b[A-Z][A-Za-z_]+(?:\/[A-Za-z0-9_+-]+)+/u]);
+  }
   await timezone(page);
   await page.getByRole("button", { name: "3. Service modes", exact: true }).click();
   await page
-    .getByRole("combobox", { name: "Configuration source", exact: true })
+    .getByRole("combobox", { name: "Use service settings from", exact: true })
     .selectOption("StoreOverride");
   await page.getByLabel("Pickup", { exact: true }).check();
   await page.getByRole("button", { name: "4. Hours", exact: true }).click();
@@ -386,6 +397,13 @@ test("@production Store Setup mismatched selected scope refuses editing and narr
       .evaluate((element) => element.getBoundingClientRect().height),
   ).toBeGreaterThanOrEqual(44);
   await page.screenshot({ path: "/tmp/wp2421-store-setup-mobile.png", fullPage: true });
+  // WP-2423: tapping a step moves to its heading; the skip link never covers the page.
+  await page.getByRole("button", { name: "3. Service modes", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Service modes", exact: true })).toBeFocused();
+  for (const skip of await page.locator(".bop-skip-link").all())
+    expect(await skip.evaluate((link) => link.getBoundingClientRect().bottom)).toBeLessThanOrEqual(
+      0,
+    );
   fixture.control.wrongScope = true;
   await page.reload();
   await expect(page.getByRole("alert")).toContainText(

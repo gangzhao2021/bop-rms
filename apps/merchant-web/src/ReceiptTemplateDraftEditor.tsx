@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import {
+  StoreTimeZoneContext,
+  friendlyStoreTime,
+  storeLocalInstant,
+  storeTime,
+} from "./StoreTime.js";
+import { languageName, receiptFieldLabels, receiptTemplateStateLabel } from "./staff-text.js";
 import { StoreSetupClientError, type StoreSetupScope } from "./store-setup-client.js";
 import { canonicalPublicationValue as canonical } from "./product-publication-command-client-v2.js";
 import { serviceOperationReference } from "./service-control-client.js";
@@ -447,6 +454,21 @@ export function ReceiptTemplateDraftEditor({
     [activation, setActivation] = useState<"Immediate" | "Scheduled">("Immediate"),
     [start, setStart] = useState(""),
     [end, setEnd] = useState("");
+  // Staff enter Store wall-clock times; the draft keeps the exact instant they name.
+  const timeZone = useContext(StoreTimeZoneContext);
+  const localInput = (instant: string) =>
+    instant === "" || Number.isNaN(Date.parse(instant))
+      ? ""
+      : storeTime(
+          instant,
+          timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+          true,
+        ).replace(" ", "T");
+  const instantInput = (local: string) =>
+    local === ""
+      ? ""
+      : (storeLocalInstant(local, timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone) ??
+        "");
   const auxiliary = useRef(new Set<AbortController>()),
     epoch = useRef(0),
     active = useRef<AbortController | null>(null),
@@ -1012,13 +1034,13 @@ export function ReceiptTemplateDraftEditor({
           {subject && !rows.some((r) => r.content.templateReference === subject) && (
             <option value={subject}>
               {selected
-                ? `${selected.content.locale} · Revision ${selected.revision} · ${selected.content.versionCode}`
+                ? `${languageName(selected.content.locale)} · draft ${selected.revision}`
                 : "Selected saved template"}
             </option>
           )}
           {rows.map((r) => (
             <option key={r.content.templateReference} value={r.content.templateReference}>
-              {r.content.locale} · Revision {r.revision} · {r.content.versionCode}
+              {languageName(r.content.locale)} · draft {r.revision}
             </option>
           ))}
         </select>
@@ -1056,8 +1078,7 @@ export function ReceiptTemplateDraftEditor({
       </div>
       {selected && (
         <p>
-          Saved {selected.content.locale}, revision {selected.revision},{" "}
-          {selected.content.versionCode}.{" "}
+          Saved {languageName(selected.content.locale)} template, draft {selected.revision}.{" "}
           {publicationRecorded ? "Publication recorded." : "Publication has not been evaluated."}
         </p>
       )}
@@ -1122,13 +1143,16 @@ export function ReceiptTemplateDraftEditor({
         <section aria-label="Original template publication">
           <h5>Original publication receipt</h5>
           <p>
-            {publishedHistory.versionCode} · {publishedHistory.locale} · Published at{" "}
-            {publishedHistory.publishedAt}
+            {languageName(publishedHistory.locale)} · Published{" "}
+            {friendlyStoreTime(publishedHistory.publishedAt, timeZone)}
           </p>
           <p>
-            Effective from {publishedHistory.effectiveFrom}; until{" "}
-            {publishedHistory.effectiveUntil ?? "no recorded end"}. This immutable receipt does not
-            establish current effectiveness, Store selection, professional or legal approval.
+            In use from {friendlyStoreTime(publishedHistory.effectiveFrom, timeZone)}
+            {publishedHistory.effectiveUntil === null
+              ? " with no end date"
+              : ` until ${friendlyStoreTime(publishedHistory.effectiveUntil, timeZone)}`}
+            . This is the record of that publication; whether this Store prints it is chosen in
+            Receipt configuration, and it has not been checked by a tax or legal professional.
           </p>
         </section>
       )}
@@ -1138,11 +1162,13 @@ export function ReceiptTemplateDraftEditor({
           {review.submission && review.lifecycle ? (
             <>
               <p>
-                {review.lifecycle.state} · submitted draft revision{" "}
+                {receiptTemplateStateLabel(review.lifecycle.state)} · submitted draft{" "}
                 {review.submission.draftRevision}.{" "}
                 {Date.parse(review.submission.validationValidUntil) <= reviewNow
-                  ? "The original validation period has expired; this is historical evidence."
-                  : "Validation valid until " + review.submission.validationValidUntil}
+                  ? "The check made at submission has expired; submit again to approve it."
+                  : "The check made at submission holds until " +
+                    friendlyStoreTime(review.submission.validationValidUntil, timeZone) +
+                    "."}
               </p>
               {review.submission.versionReference !== selected?.content.versionReference && (
                 <p>This review refers to an earlier saved draft, not the current edited version.</p>
@@ -1227,10 +1253,10 @@ export function ReceiptTemplateDraftEditor({
             : error === "Denied"
               ? "Permission denied. An earlier save remains protected."
               : error === "Invalid"
-                ? "Check the locale, saved preset selections and UTC effective period. An earlier save remains protected."
+                ? "Check the language, saved receipt presets and the start and end times. An earlier save remains protected."
                 : error === "Conflict"
                   ? "The template changed or the original save conflicts. Refresh or recover the original save; no version has been silently substituted."
-                  : "Template draft unavailable or invalid. Refresh when connected; an earlier save remains protected."}
+                  : "The template draft could not be loaded or saved. Refresh when connected; an earlier save remains protected."}
         </p>
       )}
       {pending && (
@@ -1242,9 +1268,9 @@ export function ReceiptTemplateDraftEditor({
       <fieldset disabled={locked || frozenReview}>
         <legend>Authored template fields</legend>
         <label>
-          Template locale
+          Receipt language
           <input
-            aria-label="Template locale"
+            aria-label="Receipt language"
             value={locale}
             onChange={(e) => setLocale(e.target.value)}
           />
@@ -1300,28 +1326,28 @@ export function ReceiptTemplateDraftEditor({
               setActivation(e.target.value === "Scheduled" ? "Scheduled" : "Immediate")
             }
           >
-            <option value="Immediate">Immediate</option>
-            <option value="Scheduled">Scheduled</option>
+            <option value="Immediate">As soon as it is published</option>
+            <option value="Scheduled">From a set date and time</option>
           </select>
         </label>
         {activation === "Scheduled" && (
           <label>
-            Template activation UTC
+            Starts at (Store time)
             <input
-              aria-label="Template activation UTC"
-              placeholder="YYYY-MM-DDTHH:mm:ss.sssZ"
-              value={start}
-              onChange={(e) => setStart(e.target.value)}
+              type="datetime-local"
+              aria-label="Starts at (Store time)"
+              value={localInput(start)}
+              onChange={(e) => setStart(instantInput(e.target.value))}
             />
           </label>
         )}
         <label>
-          Template effective until UTC (optional)
+          Ends at (Store time, optional)
           <input
-            aria-label="Template effective until UTC (optional)"
-            placeholder="YYYY-MM-DDTHH:mm:ss.sssZ"
-            value={end}
-            onChange={(e) => setEnd(e.target.value)}
+            type="datetime-local"
+            aria-label="Ends at (Store time, optional)"
+            value={localInput(end)}
+            onChange={(e) => setEnd(instantInput(e.target.value))}
           />
         </label>
       </fieldset>
@@ -1333,7 +1359,7 @@ export function ReceiptTemplateDraftEditor({
         </p>
         <ul>
           {receiptTemplateArtifactRequiredFields.map((field) => (
-            <li key={field}>{field}</li>
+            <li key={field}>{receiptFieldLabels[field] ?? field}</li>
           ))}
         </ul>
       </section>

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { expectNoInternalText } from "./internal-text-guard";
 // Synthetic HTTP interception on the production PWA, not live Store/Pricing evidence.
 const id = (n: number) => "018f8800-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 for (const screen of [
@@ -472,6 +473,7 @@ for (const screen of [
             await tip.fill("1.25");
             await expect(proceed).toBeEnabled();
             await expect(proceed).toContainText("$2.38");
+            await expectNoInternalText(page);
             await proceed.click();
             const retrySession = page.getByRole("button", { name: "Retry checkout", exact: true });
             await expect(retrySession).toBeEnabled();
@@ -577,6 +579,7 @@ for (const screen of [
               await expect(
                 page.getByRole("link", { name: "View order status", exact: true }),
               ).toHaveAttribute("href", "/orders/" + id(12));
+              await expectNoInternalText(page);
             }
             expect(resultCalls).toBe(2);
             expect(paymentCalls).toHaveLength(4);

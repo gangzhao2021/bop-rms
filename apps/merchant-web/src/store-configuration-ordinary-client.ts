@@ -308,6 +308,15 @@ export function parseStoreConfigurationOrdinaryHistory(
     });
   });
 }
+/** WP-2423 Q15/Q16: this deployment does not offer Store configuration publication (404 on the
+ * current read); Store setup hides the publication panel instead of reporting an outage. */
+export class StoreConfigurationPublicationNotOfferedError extends Error {
+  constructor() {
+    super("Store configuration publication is not offered");
+    this.name = "StoreConfigurationPublicationNotOfferedError";
+  }
+}
+const ordinaryReadPath = "/merchant/store-configuration/ordinary?expectedStoreReference=";
 /** Actual ordinary routes share the /merchant BFF mount. No configuration body,
  * allocation metadata or original intent appears in a recovery URL. */
 export function createStoreConfigurationOrdinaryClient(fetcher: typeof fetch = fetch) {
@@ -383,6 +392,8 @@ export function createStoreConfigurationOrdinaryClient(fetcher: typeof fetch = f
       if (response.status === 403) return fail("Denied");
       if (response.status === 409) return fail("Conflict");
       if (response.status === 400) return fail("Invalid");
+      if (response.status === 404 && !mutating && path.startsWith(ordinaryReadPath))
+        throw new StoreConfigurationPublicationNotOfferedError();
       if (
         !response.ok ||
         response.headers.get("cache-control") !== "no-store" ||
@@ -416,7 +427,11 @@ export function createStoreConfigurationOrdinaryClient(fetcher: typeof fetch = f
       if (controller.signal.aborted) return unknown();
       return JSON.parse(text) as unknown;
     } catch (error) {
-      if (error instanceof StoreSetupClientError) throw error;
+      if (
+        error instanceof StoreSetupClientError ||
+        error instanceof StoreConfigurationPublicationNotOfferedError
+      )
+        throw error;
       return unknown();
     } finally {
       clearTimeout(timer);
@@ -462,7 +477,7 @@ export function createStoreConfigurationOrdinaryClient(fetcher: typeof fetch = f
     ): Promise<StoreConfigurationOrdinaryWorkspace> {
       const state = begin(scope, options),
         raw = await request(
-          `/merchant/store-configuration/ordinary?expectedStoreReference=${state.scope.storeReference}`,
+          `${ordinaryReadPath}${state.scope.storeReference}`,
           state,
           undefined,
           false,

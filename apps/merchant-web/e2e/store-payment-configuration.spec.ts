@@ -394,7 +394,9 @@ test("@production Store payment rules save, explicit selection, setup resume ret
     .getByRole("button", { name: "Refresh saved payment configuration", exact: true })
     .click();
   await expect(
-    page.getByText("Saved payment revision 2. Provider readiness has not been evaluated."),
+    page.getByText(
+      "Saved payment rules, version 2. Card payments still need the payment provider account to be set up.",
+    ),
   ).toBeVisible();
   expect(f.draft()?.content.paymentConfigurationReference).toEqual({
     state: "Configured",

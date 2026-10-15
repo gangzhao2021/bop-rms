@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { expectNoInternalText } from "./internal-text-guard";
 
 test("@production Merchant Overview uses the authorized workspace snapshot at desktop and mobile widths", async ({
   page,
@@ -9,6 +10,8 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
     storeLabel: "Training Store",
     storeReference: id(99),
   };
+  // A configured Store carries its time zone, so "Last checked" is Store-local time.
+  const selectedScope = { ...primary, timeZone: "America/Toronto" };
   const secondary = {
     brandLabel: "Synthetic Brand",
     storeLabel: "Second Store",
@@ -22,7 +25,7 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
         csrf: "a".repeat(43),
         workspace: {
           screenId: "HOME-OVERVIEW",
-          selectedScope: primary,
+          selectedScope,
           authorizedStores: [primary, secondary],
           businessDate: "2026-09-23",
           storeStatus: "Open",
@@ -60,11 +63,16 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
   );
 
   const headers = { "cache-control": "no-store" };
-  const order = (n: number, phase: "Submitted" | "Accepted" | "Ready", version: number) => ({
+  const order = (
+    n: number,
+    phase: "Submitted" | "Accepted" | "Ready",
+    version: number,
+    orderType: "Pickup" | "DineIn" = "Pickup",
+  ) => ({
     orderReference: id(n),
     orderNumber: "ORD-" + n,
-    orderType: "Pickup",
-    sourceChannel: "Web",
+    orderType,
+    sourceChannel: orderType === "Pickup" ? "Web" : "Qr",
     submittedAt: "2026-09-23T14:00:00.000Z",
     observedAt: "2026-09-23T14:01:00.000Z",
     initialBatchReference: id(50 + n),
@@ -91,8 +99,9 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
     route.fulfill({
       headers,
       json: {
-        // Newest first, as the queue contract requires.
-        items: [order(3, "Ready", 3), order(2, "Submitted", 1), order(1, "Accepted", 2)],
+        // Newest first, as the queue contract requires. A pickup stays Accepted in Ordering while
+        // Fulfillment holds it ready for collection; only dine-in food is "ready to serve".
+        items: [order(3, "Ready", 3, "DineIn"), order(2, "Submitted", 1), order(1, "Accepted", 2)],
         nextAfterOrderReference: null,
       },
     }),
@@ -174,8 +183,9 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
   await expect(page.getByText("not available in this release", { exact: false })).toHaveCount(0);
   // WP-2423 P2: the "right now" card reads the pilot projections and links to each page.
   const now = page.getByRole("region", { name: "Right now" });
-  await expect(now.getByText("1 awaiting acceptance · 1 ready")).toBeVisible();
+  await expect(now.getByText("1 awaiting acceptance · 1 ready to serve")).toBeVisible();
   await expect(now.getByText("Ready for collection")).toBeVisible();
+  await expectNoInternalText(page);
   await expect(now.getByText("1 overdue")).toBeVisible();
   await expect(now.getByText(/^Last checked \d\d:\d\d/u)).toBeVisible();
   await expect(now.getByRole("link", { name: "View exceptions" })).toHaveAttribute(
@@ -183,7 +193,7 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
     "/operations/order-exceptions",
   );
 
-  for (const width of [1440, 390, 320]) {
+  for (const width of [1440, 1024, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
     await expect(page.locator(".workspace-page__freshness")).toHaveText("Updated");
     await expect(page.locator(".workspace-page__freshness")).toBeVisible();

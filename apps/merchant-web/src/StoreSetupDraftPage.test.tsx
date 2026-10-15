@@ -6,6 +6,7 @@ import {
 import type { StoreSetupReferencePendingJournal } from "./store-setup-reference-pending-journal.js";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import { findInternalText, staticText } from "../e2e/internal-text-patterns.js";
 import { MemoryRouter } from "react-router";
 import {
   StoreSetupDraftPage,
@@ -272,7 +273,7 @@ it("review never shows opaque references or asserts approval/publication", () =>
   };
   const html = renderToStaticMarkup(<StoreSetupDraftReview content={content} />);
   expect(html).toContain("Already configured");
-  expect(html).toContain("No capacity configuration");
+  expect(html).toContain("No order limits");
   expect(html).toContain("not approved, published, or live");
   expect(html).not.toContain(id(8));
 });
@@ -779,7 +780,7 @@ it("Payment editor presents three actual channel controls and explicit readiness
     "Staff terminal card present",
     "Staff terminal Interac",
     "Save payment configuration",
-    "Provider readiness",
+    "payment provider account",
   ])
     expect(html).toContain(label);
   expect(html).not.toContain("ProviderReady");
@@ -926,10 +927,12 @@ it("renders three explicit fee configurations, actual order types and honest pre
     />,
   );
   expect(html).toContain('aria-label="Fee contexts"');
-  for (const kind of ["ServiceCharge", "DeliveryFee", "Tip"])
-    expect(html).toContain(`${kind} configuration`);
-  expect(html).toContain("Unconfigured");
-  expect(html).toContain("Disabled");
+  for (const kind of ["Service charge", "Delivery fee", "Tip"])
+    expect(html).toContain(`aria-label="${kind}"`);
+  expect(html).toContain("Not set");
+  expect(html).toContain(">Off<");
+  // Staff read fee names, never the charge codes (WP-2423 internal-text guard).
+  expect(findInternalText([staticText(html)])).toEqual([]);
   expect(html).toContain("These selections do not set fees, rates or effective policy");
   expect(html).not.toContain('type="text"');
 });

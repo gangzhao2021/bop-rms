@@ -117,6 +117,7 @@ export function PickupHandoffForm({
         </p>
       ) : null}
       <dialog
+        className="order-cancel-dialog pickup-handoff-dialog"
         ref={dialog}
         aria-labelledby={"handoff-" + item.fulfillmentReference}
         onClose={() => {
@@ -137,12 +138,11 @@ export function PickupHandoffForm({
         <ul>
           {lines.map((line, index) => (
             <li key={line.fulfillmentItemReference}>
-              Order line {index + 1}: {line.readyQuantity - line.handedOverQuantity} remaining ready
-              units
+              Item {index + 1}: {line.readyQuantity - line.handedOverQuantity} to hand over
             </li>
           ))}
         </ul>
-        <p>Hand over all quantities shown only after matching them to this order.</p>
+        <p>Match every item to the order ticket before handing it over.</p>
         {inPerson ? (
           <p>
             {item.proofReadiness === "Expired"
@@ -178,18 +178,18 @@ export function PickupHandoffForm({
               </label>
             ) : null}
             <label>
-              Recipient type
+              Collected by
               <select
                 value={recipient}
                 onChange={(event) => setRecipient(event.currentTarget.value as typeof recipient)}
               >
-                <option value="">Select recipient</option>
-                <option value="Customer">Customer</option>
-                <option value="Delegate">Delegate</option>
+                <option value="">Choose who collected it</option>
+                <option value="Customer">The customer</option>
+                <option value="Delegate">Someone collecting for them</option>
               </select>
             </label>
             <label>
-              Masked recipient label
+              Collector&rsquo;s initial
               <input
                 value={mask}
                 maxLength={64}
@@ -198,17 +198,21 @@ export function PickupHandoffForm({
                 onChange={(event) => setMask(event.currentTarget.value)}
               />
             </label>
-            <p>Use a masked label only. Do not enter a full name, phone number or pickup code.</p>
+            <p>
+              Enter only an initial, such as S***, so the record shows who collected it. Do not
+              enter a full name, phone number or pickup code.
+            </p>
             <label>
               <input
                 type="checkbox"
                 checked={confirmed}
                 onChange={(event) => setConfirmed(event.currentTarget.checked)}
               />
-              I matched this order, recipient and all quantities shown
+              I matched this order, the person collecting it and every item shown
             </label>
             <button
               type="submit"
+              data-variant="primary"
               disabled={paused || !confirmed || !recipient || !mask || (inPerson && !identityCheck)}
             >
               Confirm and record handoff
@@ -219,7 +223,7 @@ export function PickupHandoffForm({
         <div role="status">
           {status === "Pending" ? "Recording handoff…" : null}
           {status === "Unknown"
-            ? "Handoff result unknown. Do not hand over again. Retry this same operation to recover its result."
+            ? "The handover could not be confirmed. Do not hand anything over again; try confirming the same handover again."
             : null}
           {status === "Rejected"
             ? "Handoff was not confirmed. Close and refresh the queue before another attempt."
@@ -230,7 +234,7 @@ export function PickupHandoffForm({
         </div>
         {status === "Unknown" ? (
           <button disabled={paused} onClick={() => void submit(true)}>
-            Retry same handoff
+            Try confirming again
           </button>
         ) : null}
         <button disabled={locked} onClick={() => dialog.current?.close()}>

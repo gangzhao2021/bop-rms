@@ -30,7 +30,11 @@ import { SettlementPage } from "./SettlementPage.js";
 import { StoreReportsPage } from "./StoreReportsPage.js";
 import { RefundApprovalsPage } from "./RefundApprovalsPage.js";
 import { WorkspacePage } from "./WorkspacePage.js";
-import { KitchenBoardPage, KitchenWorkItemPage } from "./KitchenBoardPages.js";
+import {
+  KitchenBoardPage,
+  KitchenDisplayNavigation,
+  KitchenWorkItemPage,
+} from "./KitchenBoardPages.js";
 import { PickupQueuePage } from "./PickupPages.js";
 import { OrderExceptionPage } from "./OrderExceptionPage.js";
 import { StoreMenuBuilderPage, StoreMenuListPage } from "./StoreMenuPages.js";
@@ -453,7 +457,11 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
     [demo?.workspace, injectedClient],
   );
   const [state, setState] = useState<WorkspaceState>({ kind: "Loading" });
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
+  // WP-2423 Q17: the kitchen display reaches sold-out marking in its own kitchen-only frame.
+  const soldOutFromKitchen =
+    pathname === "/app/commerce/availability" &&
+    new URLSearchParams(search).get("from") === "kitchen";
   const switching = useRef(false);
   const sessionPending =
     demo === null && (state.kind === "Loading" || (state.kind === "Ready" && state.switching));
@@ -825,6 +833,11 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                 <StoreAvailabilityPage
                   key={state.workspace.selectedScope.storeReference + state.csrf}
                   client={createAvailabilityClient(state.csrf)}
+                  navigation={
+                    soldOutFromKitchen ? (
+                      <KitchenDisplayNavigation current="SoldOut" soldOutHref={pathname} />
+                    ) : undefined
+                  }
                 />
               ) : (
                 <StoreAvailabilityPage />
@@ -1651,7 +1664,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         }
         enabled={state.kind === "Ready" && !state.switching && demo === null}
       >
-        {state.kind === "Ready" && usesWorkspaceLayout(pathname) ? (
+        {state.kind === "Ready" && usesWorkspaceLayout(pathname) && !soldOutFromKitchen ? (
           <WorkspaceLayout
             items={state.workspace.navigation}
             path={pathname}

@@ -588,7 +588,7 @@ export function CurrentOrderQueueRows({
                         : "Expired · refunded"
                       : order.currentPhase === "InProgress"
                         ? "In progress"
-                        : (order.currentPhase ?? "Status unavailable")}
+                        : (order.currentPhase ?? "Status not loaded · refresh")}
               </span>
               <span className="order-workbench-batches">
                 {
@@ -1122,7 +1122,6 @@ export function CurrentOrderQueuePage({
                   <option value="Expired">Expired · refunded</option>
                   <option value="AwaitingPayment">Awaiting payment</option>
                   <option value="NotCollected">Not collected</option>
-                  <option value="Unavailable">Unavailable</option>
                 </select>
               </label>
               <p className="order-queue-filter-count" aria-live="polite">

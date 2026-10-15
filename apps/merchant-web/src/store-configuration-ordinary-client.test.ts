@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   createStoreConfigurationOrdinaryClient,
   parseStoreConfigurationOrdinaryHistory,
+  StoreConfigurationPublicationNotOfferedError,
   type StoreConfigurationOrdinaryCommand,
 } from "./store-configuration-ordinary-client.js";
 import {
@@ -232,6 +233,30 @@ it("loads the actual merchant route with scoped safe GET and no CSRF", async () 
     ),
   ).toEqual(scope);
   expect(init?.body).toBeUndefined();
+});
+it("reports a deployment without Store configuration publication as not offered", async () => {
+  const notOffered = () =>
+    new Response(JSON.stringify({ error: "store_configuration_publication_not_offered" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+    });
+  const client = createStoreConfigurationOrdinaryClient(
+    vi.fn<typeof fetch>(async () => notOffered()),
+  );
+  await expect(client.load(scope)).rejects.toBeInstanceOf(
+    StoreConfigurationPublicationNotOfferedError,
+  );
+  // A 503 stays an outage the Owner can retry.
+  const outage = createStoreConfigurationOrdinaryClient(
+    vi.fn<typeof fetch>(
+      async () =>
+        new Response(JSON.stringify({ error: "store_configuration_ordinary_unavailable" }), {
+          status: 503,
+          headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+        }),
+    ),
+  );
+  await expect(outage.load(scope)).rejects.toMatchObject({ code: "Unavailable" });
 });
 it("prepares detached scoped intent and sends the exact command wrapper", async () => {
   const cursor = await original(),

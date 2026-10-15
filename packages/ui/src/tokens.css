@@ -73,7 +73,8 @@ button {
   color: var(--bop-color-on-primary);
   background: var(--bop-color-brand-primary);
 }
-.bop-skip-link:focus {
+/* Shown only when reached by keyboard: a script moving focus, or a tap, never reveals it. */
+.bop-skip-link:focus-visible {
   transform: translateY(0);
 }
 .bop-shell {

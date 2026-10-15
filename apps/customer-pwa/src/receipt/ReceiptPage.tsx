@@ -32,6 +32,15 @@ export function receiptTaxLabel(label: string): string {
   return /^SYNTHETIC(?: |$)/u.test(label) ? "Test tax (internal testing only)" : label;
 }
 
+/**
+ * Why a later receipt version was issued, in the guest's words. A reason without a reviewed wording
+ * is left out (the version heading already says what changed) instead of showing its code.
+ */
+export const receiptReasonText: Readonly<Record<string, string>> = {
+  ORDER_ADDITIONAL_PAYMENT_CAPTURED: "An additional payment was added to this order.",
+  PAYMENT_REFUND_STATUS_CHANGED: "A refund on this order was updated.",
+};
+
 const kindText: Record<ReceiptRecordView["kind"], string> = {
   Original: "Receipt",
   Correction: "Corrected receipt",
@@ -51,7 +60,9 @@ function ReceiptVersion({ record }: { readonly record: ReceiptRecordView }) {
         Version {record.version}: {kindText[record.kind]}
       </h2>
       <p>Recorded {formatDateTime(record.recordedAt, snapshot.locale)}</p>
-      {record.reasonCode ? <p>Reason: {record.reasonCode.replaceAll("_", " ")}</p> : null}
+      {record.reasonCode && receiptReasonText[record.reasonCode] ? (
+        <p>Reason: {receiptReasonText[record.reasonCode]}</p>
+      ) : null}
       <ul className="receipt-page__lines">
         {snapshot.lines.map((line) => (
           <li key={line.lineReference}>
@@ -273,7 +284,10 @@ export function ReceiptPage({
     ],
     "not-found": ["Receipt not found", "No authorized receipt was found."],
     "feature-disabled": ["Digital receipt is disabled", "Contact the Store for support."],
-    unavailable: ["Receipt is unavailable", "Try again later or ask the Store for help."],
+    unavailable: [
+      "We couldn’t load your receipt",
+      "Try again later or ask a staff member for help.",
+    ],
   };
   const message = messages[state.status];
   return (

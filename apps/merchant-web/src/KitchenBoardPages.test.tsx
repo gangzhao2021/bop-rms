@@ -6,6 +6,11 @@ import {
   KitchenBoardScreen,
   kitchenHandoverOffered,
   KitchenBoardStatePanel,
+  KitchenDisplayHeaderControls,
+  KitchenDisplayNavigation,
+  kitchenNavigationFor,
+  kitchenOrderSearchTerm,
+  matchesKitchenOrderSearch,
   KitchenWorkItemScreen,
   kitchenAgeTier,
   kitchenLateMinutes,
@@ -22,6 +27,8 @@ import { staleRetryDelayMs } from "./stale-read.js";
 import { kitchenBoardFixture, kitchenItemFixture } from "./kitchen-board.fixtures.js";
 import { parseKitchenBoardView, parseKitchenWorkItemDetailView } from "./kitchen-board.js";
 import { StoreBusinessDayContext } from "./StoreBusinessDay.js";
+import { StoreTimeZoneContext } from "./StoreTime.js";
+import { findInternalText, staticText } from "../e2e/internal-text-patterns.js";
 import { earlierDayTickets, fromEarlierKitchenDay, kitchenWaitText } from "./KitchenEarlierDays.js";
 describe("WP-1804 Kitchen Board screens", () => {
   it("WP-2423: says when the board was last checked, not only when its work last changed", () => {
@@ -59,8 +66,8 @@ describe("WP-1804 Kitchen Board screens", () => {
       "Kitchen",
       "Updated · 15:12 UTC",
       "Queue",
-      "Order or ticket reference",
-      "Exact reference only. The value stays in this page session and is not added to the URL.",
+      "Order number or table",
+      "The number on the ticket or receipt, or the table. Shows only that order&#x27;s work.",
       "Training Store",
       "Hot line",
       "station",
@@ -72,7 +79,7 @@ describe("WP-1804 Kitchen Board screens", () => {
       "12 min",
       'class="kitchen-work-item__quantity"><dt>Quantity</dt><dd>0 / 2</dd></dl>',
       "Allergen review required",
-      "Actions unavailable for this item",
+      "No kitchen steps for this item on this screen",
       'data-age="warning"',
     ])
       expect(html).toContain(value);
@@ -82,6 +89,8 @@ describe("WP-1804 Kitchen Board screens", () => {
     expect(html).not.toContain("018f0f58-767a-7f3b-a1d0-000000000402");
     expect(html).not.toContain("018f0f58-767a-7f3b-a1d0-000000000403");
     expect(html).not.toContain("Exception: None");
+    // WP-2423: the search speaks the staff's language, never identifier vocabulary.
+    expect(html).not.toMatch(/uuid|exact reference|reference type/iu);
     expect(html.indexOf("Mushroom rice bowl")).toBeLessThan(
       html.indexOf('class="kitchen-work-item__state"'),
     );
@@ -478,6 +487,123 @@ it("does not present permission as proof of an active named operator session", (
   expect(html).not.toContain("Unverified operator");
   expect(html).not.toContain("KDS");
   expect(html).not.toContain("device lock");
+});
+
+describe("WP-2423 kitchen display search and chrome", () => {
+  const order = (orderNumber: string, tableLabel: string | null) =>
+    parseKitchenBoardView({
+      ...kitchenBoardFixture(),
+      items: [
+        {
+          ...kitchenItemFixture(),
+          orderLabel: { orderNumber, orderType: tableLabel ? "DineIn" : "Pickup", tableLabel },
+        },
+      ],
+    }).items[0] as Parameters<typeof matchesKitchenOrderSearch>[0];
+  it("finds an order by the number on its ticket or receipt, or by its table", () => {
+    const dineIn = order("14", "T4");
+    for (const input of ["14", " 14 ", "#14", "Order 14", "order #14", "014", "T4", "table t4"])
+      expect(matchesKitchenOrderSearch(dineIn, input), input).toBe(true);
+    for (const input of ["1", "4", "140", "T", "Table 14x"])
+      expect(matchesKitchenOrderSearch(dineIn, input), input).toBe(false);
+    expect(matchesKitchenOrderSearch(order("A-07", null), "a-07")).toBe(true);
+    expect(kitchenOrderSearchTerm("   ")).toBeNull();
+    expect(matchesKitchenOrderSearch(dineIn, "")).toBe(true);
+  });
+  it("shows a kitchen display sign-in the kitchen only, and others their navigation", () => {
+    const navigation = <a href="/app/approvals">Approvals</a>;
+    const kitchenOnly = <KitchenDisplayNavigation current="Kitchen" />;
+    expect(kitchenNavigationFor(true, "Named", navigation, kitchenOnly)).toBe(kitchenOnly);
+    expect(kitchenNavigationFor(true, "HandoverRequired", navigation, kitchenOnly)).toBe(
+      kitchenOnly,
+    );
+    expect(kitchenNavigationFor(true, "Locked", navigation, kitchenOnly)).toBe(kitchenOnly);
+    // Not yet known: nothing rather than flashing the back office at a cook.
+    expect(kitchenNavigationFor(true, null, navigation, kitchenOnly)).toBeUndefined();
+    expect(kitchenNavigationFor(true, "Unverified", navigation, kitchenOnly)).toBe(navigation);
+    expect(kitchenNavigationFor(false, null, navigation, kitchenOnly)).toBe(navigation);
+  });
+  it("offers the kitchen display marking an item sold out in its own navigation (Q17)", () => {
+    const board = renderToStaticMarkup(
+      <KitchenDisplayNavigation current="Kitchen" soldOutHref="/app/commerce/availability" />,
+    );
+    expect(board).toContain('href="/operations/kitchen" aria-current="page">Kitchen</a>');
+    expect(board).toContain('href="/app/commerce/availability?from=kitchen">Mark an item sold out');
+    expect(board).not.toMatch(/Approvals|Orders|Settlement|Item availability/u);
+    const soldOut = renderToStaticMarkup(
+      <KitchenDisplayNavigation current="SoldOut" soldOutHref="/app/commerce/availability" />,
+    );
+    expect(soldOut).toContain('aria-current="page">Mark an item sold out');
+    expect(soldOut).not.toContain('aria-current="page">Kitchen');
+    // Without the sold-out permission the kitchen display shows the board alone.
+    expect(renderToStaticMarkup(<KitchenDisplayNavigation current="Kitchen" />)).not.toContain(
+      "sold out",
+    );
+  });
+  it("renders the handover as a styled header control next to the screen-awake status", () => {
+    const html = renderToStaticMarkup(
+      <KitchenDisplayHeaderControls
+        handoverOffered
+        handover="Failed"
+        awake="Held"
+        onHandover={() => undefined}
+      />,
+    );
+    expect(html).toContain('class="kitchen-display-controls"');
+    expect(html).toContain('<button type="button" class="kitchen-handover-button">');
+    expect(html).toContain("Hand over / sign out");
+    expect(html).toContain("Screen kept on");
+    expect(html).toContain('role="alert"');
+    const counter = renderToStaticMarkup(
+      <KitchenDisplayHeaderControls
+        handoverOffered={false}
+        handover="Idle"
+        awake="Unsupported"
+        onHandover={() => undefined}
+      />,
+    );
+    expect(counter).not.toContain("Hand over");
+    expect(counter).toContain("set the device to never sleep");
+  });
+  it("puts the display controls in the board header and marks each card as a focus target", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <KitchenBoardScreen
+          view={parseKitchenBoardView(kitchenBoardFixture())}
+          headerStatus={<span>Display controls</span>}
+          navigation={<a href="/operations/kitchen">Kitchen</a>}
+        />
+      </MemoryRouter>,
+    );
+    expect(html.indexOf("Display controls")).toBeGreaterThan(html.indexOf("bop-shell__header"));
+    expect(html.indexOf("Display controls")).toBeLessThan(html.indexOf("bop-shell__main"));
+    expect(html).toMatch(
+      /<article class="kitchen-work-item" data-work-item="[^"]+" tabindex="-1"/u,
+    );
+    expect(html).toContain('<h2 id="kitchen-queue-heading" tabindex="-1">Queue</h2>');
+  });
+  it("shows kitchen staff no internal codes, identifiers or technical words", () => {
+    for (const operatorStatus of ["Named", "Unverified", "HandoverRequired"] as const) {
+      const html = renderToStaticMarkup(
+        <StoreTimeZoneContext.Provider value="America/Toronto">
+          <MemoryRouter>
+            <KitchenBoardScreen
+              view={parseKitchenBoardView({ ...kitchenBoardFixture(), operatorStatus })}
+              headerStatus={
+                <KitchenDisplayHeaderControls
+                  handoverOffered={operatorStatus !== "Unverified"}
+                  handover="Idle"
+                  awake="Held"
+                  onHandover={() => undefined}
+                />
+              }
+            />
+          </MemoryRouter>
+        </StoreTimeZoneContext.Provider>,
+      );
+      expect(findInternalText([staticText(html)]), operatorStatus).toEqual([]);
+    }
+  });
 });
 
 describe("IDR-0039 named-operator KDS handover", () => {

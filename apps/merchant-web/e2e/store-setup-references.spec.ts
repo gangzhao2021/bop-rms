@@ -533,7 +533,7 @@ test("@production Reference controls reflow at 390px and scope or CSRF denial ca
   await page.getByRole("button", { name: "2. Address and timezone", exact: true }).click();
   await expect(
     page.getByRole("region", { name: "Address configuration", exact: true }).getByRole("alert"),
-  ).toContainText("Configuration unavailable");
+  ).toContainText("These details could not be loaded");
   await expect(save).toBeDisabled();
   expect(f.control.referenceWrites).toEqual([]);
   expect(f.control.draftWrites).toEqual([]);

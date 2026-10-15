@@ -1,6 +1,7 @@
 // Controlled workflow boundary behavior, not native IAM/Publishing qualification.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import { findInternalText, staticText } from "../e2e/internal-text-patterns.js";
 import {
   StoreConfigurationOrdinaryPanel,
   recoverStoreConfigurationOriginal,
@@ -202,7 +203,8 @@ it("initial render declares saved source is not effective configuration and show
     <StoreConfigurationOrdinaryPanel scope={scope} csrf={csrf} saved={null} freshDisabled />,
   );
   expect(html).toContain("Store configuration publication");
-  expect(html).toContain("not effective Store configuration");
+  expect(html).toContain("A saved setup draft does not change the live Store");
+  expect(findInternalText([staticText(html)])).toEqual([]);
   expect(html).toContain("Loading Store configuration");
   expect(html).not.toContain("Publish Store configuration");
 });
@@ -351,15 +353,14 @@ function recordedPage(
     beforeSequence,
   );
 }
-it("displays actual recorded operations separately with author and audit details collapsed", () => {
+it("displays recorded changes in staff words without actor, audit or purpose codes", () => {
   const page = recordedPage(null, [4, 3], true),
     html = renderToStaticMarkup(<StoreConfigurationHistoryView entries={page.entries} />);
-  expect(html).toContain("Validate");
+  expect(html).toContain("Checked");
   expect(html).toContain("Version 1");
-  expect(html).toContain(id(40));
-  expect(html).toContain("Original author");
-  expect(html).toContain("<details>");
-  expect(html).not.toContain("open=");
+  expect(html).not.toContain(id(40));
+  expect(html).not.toContain("Original author");
+  expect(findInternalText([staticText(html)], [/\bUTC\b/u])).toEqual([]);
   expect(html).not.toContain(page.entries[0]?.intentDigest ?? "missing digest");
 });
 it("appends only the correct strictly older immutable page and refuses wrong selectors or duplicate operations", () => {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
-import { formatClockTime, formatMoney } from "../journey/format.js";
+import { endSentence, formatClockTime, formatMoney } from "../journey/format.js";
 import { staffCancellationReasonText } from "../order-status/OrderStatusPage.js";
 import {
   createHttpDiningSessionClient,
@@ -44,14 +44,13 @@ const settled: ReadonlySet<DiningRoundStatus> = new Set([
 ]);
 
 const money = (value: DiningMoney) => formatMoney(value.amountMinor, value.currencyCode);
-const sentenceEnd = (text: string) => (text.endsWith(".") ? text : text + ".");
 
 function RoundNote({ round }: { readonly round: DiningRound }) {
   if (round.status === "PaymentFailed")
     return (
       <p className="order-status__warning" role="status">
         {round.cancelsAt
-          ? `This round will be cancelled at ${sentenceEnd(formatClockTime(round.cancelsAt))} `
+          ? `This round will be cancelled at ${endSentence(formatClockTime(round.cancelsAt))} `
           : ""}
         Ask a staff member if you need help.
       </p>

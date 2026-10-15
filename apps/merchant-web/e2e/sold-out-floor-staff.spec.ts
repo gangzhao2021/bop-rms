@@ -212,3 +212,72 @@ test("@production Front of House reaches sold-out marking from the workspace nav
   expect(commands).toHaveLength(1);
   expect(commands[0]).toMatchObject({ action: "SoldOut", until: "EndOfDay", skuReference: id(2) });
 });
+
+test("@production the kitchen display marks an item sold out for today in its own kitchen frame", async ({
+  page,
+}) => {
+  // The person's roles reach the back office; the kitchen display sign-in still shows the kitchen.
+  await session(page, [
+    nav("OPS-ORDER-QUEUE", "Orders", "/operations/orders", "ordering.operate"),
+    nav("KIT-KITCHEN-QUEUE", "Kitchen", "/operations/kitchen", "kitchen.operate"),
+    availability,
+  ]);
+  await page.route("**/merchant/kitchen/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        storeReference: scope.storeReference,
+        operatorStatus: "Named",
+        projectionName: "kitchen_work_queue_v1",
+        projectionVersion: 1,
+        projectionGenerationReference: id(6),
+        projectedAt: new Date().toISOString(),
+        partial: false,
+        stale: false,
+        freshnessStatus: "Fresh",
+        items: [],
+        nextCursor: null,
+      },
+    }),
+  );
+  const commands = await availabilitySource(page);
+
+  await page.goto("/operations/kitchen");
+  const kitchenNav = page.getByRole("navigation", { name: "Primary" });
+  await expect(kitchenNav.getByRole("link")).toHaveText(["Kitchen", "Mark an item sold out"]);
+  await expect(page.getByRole("link", { name: "Orders", exact: true })).toHaveCount(0);
+  await kitchenNav.getByRole("link", { name: "Mark an item sold out" }).click();
+  await expect(page).toHaveURL(/\/app\/commerce\/availability\?from=kitchen$/u);
+  await expect(page.getByText(/Ran out of something\? Mark it sold out/u)).toBeVisible();
+  // Kitchen frame only: no workspace sidebar, no back-office links; the way back to the board.
+  await expect(page.getByRole("navigation", { name: "Workspace" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Orders", exact: true })).toHaveCount(0);
+  await expect(
+    page.getByRole("navigation", { name: "Primary" }).getByRole("link", {
+      name: "Mark an item sold out",
+    }),
+  ).toHaveAttribute("aria-current", "page");
+  // Today only: no offering and no "until further notice".
+  await expect(page.getByRole("button", { name: "Sold out until further notice" })).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: /Offer at this Store|Stop offering/u }),
+  ).toHaveCount(0);
+  await expectLayout(page, "sold-out-kitchen-display");
+  await page
+    .getByRole("row", { name: /Banana bread/u })
+    .getByRole("button", { name: "Sold out today" })
+    .click();
+  await expect(page.getByText("Banana bread is sold out for today.")).toBeVisible();
+  await page
+    .getByRole("row", { name: /Banana bread/u })
+    .getByRole("button", { name: "Back in stock" })
+    .click();
+  await expect(page.getByText("Banana bread is back in stock.")).toBeVisible();
+  expect(commands.map((command) => [command.action, command.until])).toEqual([
+    ["SoldOut", "EndOfDay"],
+    ["BackInStock", undefined],
+  ]);
+  await page.getByRole("link", { name: "Kitchen", exact: true }).click();
+  await expect(page).toHaveURL(/\/operations\/kitchen$/u);
+  await expect(page.getByRole("heading", { name: "Kitchen", exact: true })).toBeVisible();
+});

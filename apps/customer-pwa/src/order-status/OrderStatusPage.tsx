@@ -14,7 +14,7 @@ import type {
 import { PickupCodePanel } from "../pickup-code/PickupCodePanel.js";
 import type { PickupCodeController } from "../pickup-code/pickup-code-controller.js";
 import { CustomerPage, type CustomerStoreContext } from "../journey/CustomerPage.js";
-import { formatClockTime, formatMoney } from "../journey/format.js";
+import { endSentence, formatClockTime, formatMoney } from "../journey/format.js";
 import { StoreContactCard } from "../journey/StoreContact.js";
 import { ContactDetailsSection } from "./ContactDetailsSection.js";
 import type { ContactRemovalClient } from "./contact-removal-client.js";
@@ -102,11 +102,6 @@ export function isOrderSettled(view: OrderStatusView): boolean {
       view.sources.storeAcceptance.refundStatus === "Refunded") ||
     (view.order.orderType === "Pickup" && staffCancelledOrder(view) !== null)
   );
-}
-
-/** A sentence ending after a time that may already end with a period ("9:46 p.m."). */
-function sentenceEnd(text: string) {
-  return text.endsWith(".") ? text : text + ".";
 }
 
 /**
@@ -265,7 +260,8 @@ function StatusContent({
   const paid = payments?.find((payment) => payment.status === "Succeeded" && payment.amount);
   const paymentLabel =
     payments == null
-      ? "Payment updates unavailable"
+      ? // No payment result could be read for this order: say nothing rather than guess.
+        null
       : paid?.amount && storeCancelled
         ? // WP-2423 Q6: a store-cancelled order says where the money is, not that it was received.
           (storeCancelled.refundStatus === "Refunded" ? "Refunded " : "Refund pending · ") +
@@ -280,6 +276,32 @@ function StatusContent({
               : payments.some((payment) => payment.status === "Failed")
                 ? "Payment attempt failed"
                 : "Payment pending";
+  // The kitchen has no ticket for this order yet: the order is in, preparation hasn't started.
+  // Once the order has ended (cancelled, not paid, collected, closed) the row says nothing useful.
+  const orderEnded =
+    view.order.canonicalPhase === "Cancelled" ||
+    view.order.canonicalPhase === "Rejected" ||
+    view.order.canonicalPhase === "Fulfilled" ||
+    complete ||
+    notCollected ||
+    unpaidPickupCancelled ||
+    view.order.batches.every((batch) => notPaid.has(batch.orderBatchReference));
+  const kitchenText =
+    storeCancelled || notAccepted
+      ? "Cancelled"
+      : remakes.length > 0 && !complete
+        ? "Remaking an item"
+        : kitchenLabel === "Unknown"
+          ? orderEnded
+            ? null
+            : view.order.canonicalPhase === "Ready"
+              ? "Ready"
+              : view.order.canonicalPhase === "In Progress"
+                ? "Preparing"
+                : "Not started yet"
+          : kitchenLabel === "Queued"
+            ? "In the queue"
+            : kitchenLabel;
   const multipleBatches = view.order.batches.length > 1;
   // WP-2423: a round whose payment didn't go through is never charged (cancelled, or about to be).
   const total = view.order.batches
@@ -304,24 +326,18 @@ function StatusContent({
             <dt>Order type</dt>
             <dd>{view.order.orderType === "DineIn" ? "Dine in" : "Pickup"}</dd>
           </div>
-          <div>
-            <dt>Kitchen status</dt>
-            <dd>
-              {storeCancelled || notAccepted
-                ? "Cancelled"
-                : remakes.length > 0 && !complete
-                  ? "Remaking an item"
-                  : kitchenLabel === "Unknown"
-                    ? "Not available yet"
-                    : kitchenLabel === "Queued"
-                      ? "In the queue"
-                      : kitchenLabel}
-            </dd>
-          </div>
-          <div>
-            <dt>Payment</dt>
-            <dd>{paymentLabel}</dd>
-          </div>
+          {kitchenText === null ? null : (
+            <div>
+              <dt>Kitchen status</dt>
+              <dd>{kitchenText}</dd>
+            </div>
+          )}
+          {paymentLabel === null ? null : (
+            <div>
+              <dt>Payment</dt>
+              <dd>{paymentLabel}</dd>
+            </div>
+          )}
         </dl>
       </section>
 
@@ -391,7 +407,7 @@ function StatusContent({
                     ? "Payment for this round didn't go through. "
                     : "Payment for your order didn't go through. "}
                   It will be cancelled at{" "}
-                  {sentenceEnd(formatClockTime(failedPayment(batch.orderBatchReference) ?? ""))} Ask
+                  {endSentence(formatClockTime(failedPayment(batch.orderBatchReference) ?? ""))} Ask
                   a staff member if you need help.
                 </p>
               ) : batchCancellation ? (
@@ -410,7 +426,7 @@ function StatusContent({
                       ? "Preparing"
                       : batchKitchen
                         ? "In the queue"
-                        : "Not available yet"}
+                        : "Not started yet"}
                 </p>
               ) : null}
               <ul>

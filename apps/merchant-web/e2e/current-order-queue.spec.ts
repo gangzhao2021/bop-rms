@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { expectNoInternalText } from "./internal-text-guard";
 
 test("@production current queue pages and clears old orders after denied refresh", async ({
   page,
@@ -8,6 +9,7 @@ test("@production current queue pages and clears old orders after denied refresh
     brandLabel: "Synthetic Brand",
     storeLabel: "Synthetic Store",
     storeReference: id(99),
+    timeZone: "America/Toronto",
   };
   const headers = { "cache-control": "no-store" };
   await page.route("**/merchant/session", (route) =>
@@ -89,6 +91,7 @@ test("@production current queue pages and clears old orders after denied refresh
   const visibleOrderRows = page.locator("details.order-workbench-entry:visible");
   await expect(visibleOrderRows).toHaveCount(50);
   await expect(page.getByText("Showing 50 of 50 orders on this page.")).toBeVisible();
+  await expectNoInternalText(page);
   await page.getByRole("searchbox", { name: "Exact order number" }).fill("ORD-100");
   await expect(visibleOrderRows).toHaveCount(1);
   await expect(orderRows.first()).toContainText("ORD-100");

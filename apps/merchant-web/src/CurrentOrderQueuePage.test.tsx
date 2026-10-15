@@ -62,7 +62,7 @@ it("renders actual Accepted version and visibly unresolved state without fabrica
   expect(render(item)).toContain("00:00 UTC");
   expect(render(item)).not.toContain("guestSession");
   expect(render({ ...item, currentPhase: null, currentVersion: null })).toContain(
-    "Status unavailable",
+    "Status not loaded · refresh",
   );
 });
 it("renders an empty page explicitly", () => {

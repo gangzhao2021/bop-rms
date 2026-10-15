@@ -14,12 +14,20 @@ import { storeTime } from "./StoreTime.js";
 export interface OrdersSummary {
   readonly open: number;
   readonly awaitingAcceptance: number;
-  readonly ready: number;
+  /**
+   * Open dine-in orders whose food is all cooked but not yet all served. Pickup readiness is a
+   * Fulfillment fact (the pickup queue), never an Ordering phase, so pickups are not counted here.
+   */
+  readonly readyToServe: number;
+  /** Whether any open order is dine-in; a pickup-only Store has nothing to serve at tables. */
+  readonly dineIn: boolean;
   /** The first page was full; there are more open orders than counted here. */
   readonly more: boolean;
 }
 export interface PickupsSummary {
   readonly waiting: number;
+  /** Waiting pickups with a dish the kitchen is remaking; staff wait before handing them over. */
+  readonly remaking: number;
   readonly more: boolean;
 }
 export interface ExceptionsSummary {
@@ -31,19 +39,23 @@ export const OVERVIEW_REFRESH_MS = 30_000;
 const openPhases = new Set(["Submitted", "Accepted", "InProgress", "Ready"]);
 export function summarizeOrders(queue: CurrentOrderQueue): OrdersSummary {
   const open = queue.items.filter((order) => openPhases.has(order.currentPhase ?? ""));
+  const dineIn = open.filter((order) => order.orderType === "DineIn");
   return {
     open: open.length,
     awaitingAcceptance: open.filter((order) => order.canRequestAcceptance).length,
-    ready: open.filter((order) => order.currentPhase === "Ready").length,
+    readyToServe: dineIn.filter((order) => order.currentPhase === "Ready").length,
+    dineIn: dineIn.length > 0,
     more: queue.nextAfterOrderReference !== null,
   };
 }
 export function summarizePickups(view: {
-  readonly items: readonly { readonly phase: string }[];
+  readonly items: readonly { readonly phase: string; readonly remakeQuantity?: number }[];
   readonly nextAfterFulfillmentReference?: string | null | undefined;
 }): PickupsSummary {
+  const waiting = view.items.filter((item) => item.phase !== "Completed");
   return {
-    waiting: view.items.filter((item) => item.phase !== "Completed").length,
+    waiting: waiting.length,
+    remaking: waiting.filter((item) => (item.remakeQuantity ?? 0) > 0).length,
     more: (view.nextAfterFulfillmentReference ?? null) !== null,
   };
 }
@@ -141,7 +153,10 @@ export function OverviewToday({
           label="Open orders"
           read={state.orders}
           value={(o) => count(o.open, o.more)}
-          detail={(o) => `${o.awaitingAcceptance} awaiting acceptance · ${o.ready} ready`}
+          detail={(o) =>
+            `${o.awaitingAcceptance} awaiting acceptance` +
+            (o.dineIn ? ` · ${o.readyToServe} ready to serve` : "")
+          }
           href="/operations/orders"
           linkLabel="View orders"
         />
@@ -150,7 +165,11 @@ export function OverviewToday({
           read={state.pickups}
           value={(p) => count(p.waiting, p.more)}
           detail={(p) =>
-            p.waiting === 0 ? "Nothing waiting for collection" : "Ready for collection"
+            p.waiting === 0
+              ? "Nothing waiting for collection"
+              : p.remaking === 0
+                ? "Ready for collection"
+                : `${plural(p.remaking, "order")} waiting on a remake`
           }
           href="/operations/pickup"
           linkLabel="View pickups"

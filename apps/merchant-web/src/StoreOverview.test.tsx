@@ -13,22 +13,40 @@ import {
 } from "./StoreOverview.js";
 
 describe("WP-2423 P2 store overview", () => {
-  it("counts open, awaiting and ready orders from the current queue", () => {
+  it("counts open and awaiting orders from the current queue", () => {
     const queue = parseCurrentOrderQueue(currentOrderQueueFixture(), null);
     expect(summarizeOrders(queue)).toEqual({
       open: 3,
       awaitingAcceptance: 1,
-      ready: 1,
+      // The fixture's only Ready order is a pickup; pickup readiness is counted from the pickup queue.
+      readyToServe: 0,
+      dineIn: true,
       more: false,
     });
+  });
+  it("counts only dine-in orders as ready to serve; pickups ready for collection come from Fulfillment", () => {
+    const fixture = currentOrderQueueFixture();
+    const [ready, awaiting, accepted] = fixture.items;
+    const queue = parseCurrentOrderQueue(
+      { ...fixture, items: [{ ...ready, orderType: "DineIn" }, awaiting, accepted] },
+      null,
+    );
+    expect(summarizeOrders(queue)).toMatchObject({ open: 3, readyToServe: 1, dineIn: true });
+    const pickupsOnly = parseCurrentOrderQueue({ ...fixture, items: [ready, accepted] }, null);
+    expect(summarizeOrders(pickupsOnly)).toMatchObject({ readyToServe: 0, dineIn: false });
   });
   it("counts waiting pickups and open or overdue exceptions", () => {
     expect(
       summarizePickups({
-        items: [{ phase: "Ready" }, { phase: "Completed" }, { phase: "Ready" }],
+        items: [
+          { phase: "Ready" },
+          { phase: "Completed" },
+          { phase: "InProgress", remakeQuantity: 1 },
+          { phase: "Completed", remakeQuantity: 1 },
+        ],
         nextAfterFulfillmentReference: "018f0f58-767a-7f3b-a1d0-000000000001",
       }),
-    ).toEqual({ waiting: 2, more: true });
+    ).toEqual({ waiting: 2, remaking: 1, more: true });
     const view = parseOrderExceptionView({
       screenId: "OPS-ORDER-EXCEPTION",
       projectionName: "merchant_order_exception_v1",
@@ -80,7 +98,7 @@ describe("WP-2423 P2 store overview", () => {
           state={{
             orders: {
               kind: "Ready",
-              value: { open: 50, awaitingAcceptance: 4, ready: 2, more: true },
+              value: { open: 50, awaitingAcceptance: 4, readyToServe: 2, dineIn: true, more: true },
             },
             pickups: { kind: "Unavailable" },
             exceptions: { kind: "Ready", value: { open: 0, overdue: 0 } },
@@ -91,7 +109,7 @@ describe("WP-2423 P2 store overview", () => {
     );
     expect(html).toContain("Right now");
     expect(html).toContain('<strong class="overview-count__value">50+</strong>');
-    expect(html).toContain("4 awaiting acceptance · 2 ready");
+    expect(html).toContain("4 awaiting acceptance · 2 ready to serve");
     expect(html).toContain("Could not be read");
     expect(html).toContain("None overdue");
     expect(html).toContain("Last checked 12:30");
@@ -103,6 +121,34 @@ describe("WP-2423 P2 store overview", () => {
     );
     expect(loading).toContain("Reading current work…");
     expect(loading).not.toContain("Refresh");
+  });
+  it("never shows a pickup-only Store an orders 'ready' count that contradicts its pickups", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <OverviewToday
+          state={{
+            orders: {
+              kind: "Ready",
+              value: {
+                open: 5,
+                awaitingAcceptance: 0,
+                readyToServe: 0,
+                dineIn: false,
+                more: false,
+              },
+            },
+            pickups: { kind: "Ready", value: { waiting: 4, remaking: 1, more: false } },
+            exceptions: { kind: "Hidden" },
+            updatedAt: null,
+          }}
+        />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("0 awaiting acceptance<");
+    expect(html).not.toContain("ready to serve");
+    expect(html).not.toMatch(/\b0 ready\b/u);
+    expect(html).toContain('<strong class="overview-count__value">4</strong>');
+    expect(html).toContain("1 order waiting on a remake");
   });
 });
 
