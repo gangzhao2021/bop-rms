@@ -119,3 +119,53 @@ it("owns one real private lease and blocks maintenance until it is released", as
     await fs.rmdir(directory);
   }
 });
+
+// WP-2423 pilot resilience (2026-10-15).
+it("writes one alert line when the services or workloads needing a person change", async () => {
+  const { createPilotAttentionReporter } = await import("./pilot-supervisor.mjs");
+  const lines = [];
+  const report = createPilotAttentionReporter((line) => lines.push(JSON.parse(line)));
+  const healthy = {
+    observedAt: "2026-10-15T03:00:00.000Z",
+    services: [{ service: "business-worker", state: "running", pid: 1 }],
+  };
+  const degraded = {
+    observedAt: "2026-10-15T03:00:05.000Z",
+    services: [
+      { service: "business-worker", state: "running", pid: 1, attention: ["compensation"] },
+      { service: "customer", state: "attention_required" },
+    ],
+  };
+  report(healthy);
+  report(degraded);
+  report({ ...degraded, observedAt: "2026-10-15T03:00:10.000Z" });
+  report({ ...healthy, observedAt: "2026-10-15T03:00:15.000Z" });
+  expect(lines).toEqual([
+    {
+      level: 50,
+      time: "2026-10-15T03:00:05.000Z",
+      event: "pilot_attention_required",
+      attention: ["business-worker:compensation", "customer"],
+    },
+    {
+      level: 30,
+      time: "2026-10-15T03:00:15.000Z",
+      event: "pilot_attention_cleared",
+      attention: [],
+    },
+  ]);
+});
+it("reads optional business workload health from the installed worker configuration", async () => {
+  const { createPilotWorkloadHealthOptions } = await import("./pilot-supervisor.mjs");
+  const read = vi.fn(async (file) => {
+    expect(file).toBe(".local/pilot-v14/business-worker.json");
+    return JSON.stringify({ workloads: { compensation: true } });
+  });
+  const options = createPilotWorkloadHealthOptions(runtimeDirectory, read);
+  expect(await options("business-worker")).toEqual({
+    requireBatchCancellation: false,
+    requireCompensation: true,
+  });
+  expect(await options("kitchen-queue-worker")).toEqual({});
+  expect(read).toHaveBeenCalledOnce();
+});

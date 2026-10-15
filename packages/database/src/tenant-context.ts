@@ -36,6 +36,24 @@ function own(error: unknown, key: string): unknown {
     ? Object.getOwnPropertyDescriptor(error, key)?.value
     : undefined;
 }
+/**
+ * node-postgres reports a lost socket (server FATAL such as 25P03/57P01 already delivered, reset,
+ * pool timeout) without a SQLSTATE. These are reported as SQLSTATE 08006 connection_failure, the
+ * class the server itself uses, so callers can tell a retryable lost connection from bad data.
+ */
+const connectionLossMessages: ReadonlySet<string> = new Set([
+  "Connection terminated unexpectedly",
+  "Connection terminated",
+  "Connection terminated due to connection timeout",
+  "Client has encountered a connection error and is not queryable",
+  "Query read timeout",
+]);
+const connectionLossCodes: ReadonlySet<string> = new Set([
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "EPIPE",
+  "ETIMEDOUT",
+]);
 /** Extract only safe identifiers from a driver error. */
 export function tenantContextDatabaseDiagnostic(
   error: unknown,
@@ -45,8 +63,13 @@ export function tenantContextDatabaseDiagnostic(
     const value = own(error, key);
     return typeof value === "string" && pattern.test(value) ? value : null;
   };
+  const code = own(error, "code"),
+    message = own(error, "message");
+  const connectionLost =
+    (typeof code === "string" && connectionLossCodes.has(code)) ||
+    (typeof message === "string" && connectionLossMessages.has(message));
   return Object.freeze({
-    sqlState: pick("code", state),
+    sqlState: pick("code", state) ?? (connectionLost ? "08006" : null),
     constraint: pick("constraint", identifier),
     table: pick("table", identifier),
     closed,
@@ -128,6 +151,15 @@ export async function withTenantContextTransaction<T>(
   } catch {
     throw new TenantContextDatabaseError("TENANT_DATABASE_ACQUIRE_FAILED");
   }
+  // WP-2423 pilot resilience: the pool listens for errors only on idle clients. A checked-out
+  // connection the server terminates between queries (25P03 idle-in-transaction timeout, 57P01
+  // admin shutdown, reset) would otherwise emit an unhandled 'error' and exit the process. The
+  // transaction fails through its next query instead, and the client is discarded on release.
+  let connectionLost = false;
+  const onClientError = () => {
+    connectionLost = true;
+  };
+  client.on?.("error", onClientError);
 
   let began = false;
   let callbackActive = false;
@@ -153,7 +185,8 @@ export async function withTenantContextTransaction<T>(
   }
 
   try {
-    client.release(failed);
+    client.removeListener?.("error", onClientError);
+    client.release(failed || connectionLost);
   } catch {
     failed = true;
     primaryError ??= new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_FAILED");

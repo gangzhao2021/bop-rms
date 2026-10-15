@@ -70,11 +70,53 @@ export async function acquirePilotSupervisorLease(runtimeDirectory) {
     released = true;
   };
 }
+/** Which optional business workloads report health, from the installed worker configuration. */
+export function createPilotWorkloadHealthOptions(
+  runtimeDirectory,
+  read = (file) => fs.readFile(file, "utf8"),
+) {
+  const directory = parsePilotRuntimeDirectory(runtimeDirectory);
+  return async (service) => {
+    if (service !== "business-worker") return {};
+    const config = JSON.parse(await read(path.join(directory, "business-worker.json")));
+    return {
+      requireBatchCancellation: config?.workloads?.batchCancellation === true,
+      requireCompensation: config?.workloads?.compensation === true,
+    };
+  };
+}
+/** WP-2423 pilot resilience: one alert line whenever the set of services or workloads needing a
+ * person changes (names only), besides the full snapshot on every sweep. */
+export function createPilotAttentionReporter(write = (line) => process.stderr.write(line)) {
+  let previous = "[]";
+  return (snapshot) => {
+    const needs = snapshot.services
+      .flatMap((entry) => [
+        ...(entry.state === "attention_required" ? [entry.service] : []),
+        ...(entry.attention ?? []).map((component) => entry.service + ":" + component),
+      ])
+      .sort();
+    const current = JSON.stringify(needs);
+    if (current === previous) return;
+    previous = current;
+    write(
+      JSON.stringify({
+        level: needs.length > 0 ? 50 : 30,
+        time: snapshot.observedAt,
+        event: needs.length > 0 ? "pilot_attention_required" : "pilot_attention_cleared",
+        attention: needs,
+      }) + "\n",
+    );
+  };
+}
 export async function runPilotSupervisor({
   runtimeDirectory,
   signal,
   acquire = acquirePilotSupervisorLease,
-  sweep = createPilotRecoverySweep({ runtimeDirectory }),
+  sweep = createPilotRecoverySweep({
+    runtimeDirectory,
+    workloadHealth: createPilotWorkloadHealthOptions(runtimeDirectory),
+  }),
   wait = delay,
   observe = () => undefined,
 }) {
@@ -120,7 +162,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     await runPilotSupervisor({
       runtimeDirectory: process.argv[2],
       signal: controller.signal,
-      observe: (snapshot) => console.log(JSON.stringify(snapshot)),
+      observe: (() => {
+        const report = createPilotAttentionReporter();
+        return (snapshot) => {
+          console.log(JSON.stringify(snapshot));
+          report(snapshot);
+        };
+      })(),
     });
   } catch {
     console.error("PILOT_SUPERVISOR_UNAVAILABLE");

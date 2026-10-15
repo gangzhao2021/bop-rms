@@ -8,6 +8,32 @@ import { pilotApiRoleConnectionLimit, pilotPoolSize } from "./pilot-connection-b
 const require = createRequire(new URL("../../packages/database/package.json", import.meta.url));
 const { Pool } = require("pg");
 
+/**
+ * WP-2423 pilot resilience (2026-10-15): a terminated connection must never exit the process.
+ * pg-pool listens for 'error' only while a client is idle; a checked-out client the server ends
+ * between queries (25P03 idle-in-transaction timeout, 57P01 shutdown, ECONNRESET) emitted an
+ * unhandled 'error' and took the guest site down three times in v15. Every client gets a permanent
+ * listener: the request in flight fails (its handler answers 503 with Retry-After), the broken
+ * client is discarded on release, and the pool opens a fresh connection for the next request.
+ */
+export function guardPilotPoolConnections(pool, write = (line) => process.stderr.write(line)) {
+  const report = (error) => {
+    try {
+      const code = error?.code;
+      write(
+        JSON.stringify({
+          event: "local_database_connection_failed",
+          sqlState: typeof code === "string" && /^[0-9A-Z]{5}$/u.test(code) ? code : null,
+        }) + "\n",
+      );
+    } catch {
+      /* Diagnostics never change request handling. */
+    }
+  };
+  pool.on("error", report);
+  pool.on("connect", (client) => client.on("error", report));
+  return pool;
+}
 export async function createApplicationDatabase(
   service,
   { passwordFile, host, port, database, user },
@@ -40,9 +66,7 @@ export async function createApplicationDatabase(
     idleTimeoutMillis: 5000,
     statement_timeout: 5000,
   });
-  pool.on("error", () => {
-    process.stderr.write('{"event":"local_database_connection_failed"}\n');
-  });
+  guardPilotPoolConnections(pool);
   let closing;
   return Object.freeze({
     transactions: (scope) => createTenantTransactionRunner(pool, scope),

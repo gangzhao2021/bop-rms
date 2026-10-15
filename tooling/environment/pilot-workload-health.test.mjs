@@ -242,3 +242,87 @@ it("writes one service log line per failed cycle with category, code and SQLSTAT
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+// WP-2423 pilot resilience: a supervised workload stays alive; health must still say when a person
+// is needed (attention_required, or transient failures persisting two minutes).
+it("surfaces attention for attention_required and persistent failure, not a single retry", () => {
+  const failing = (state, failingSince, consecutiveFailures) => ({
+    ...value,
+    snapshot: {
+      ...snapshot,
+      state,
+      cycleInFlight: false,
+      consecutiveFailures,
+      failingSince,
+      lastCycleFailure: {
+        occurredAt: at,
+        category: "Unclassified",
+        code: "PAYMENT_RECEIPT_COVERAGE_UNAVAILABLE",
+        sqlState: null,
+      },
+    },
+  });
+  const now = Date.parse(at);
+  const brief = parsePilotWorkloadHealth(failing("running", at, 3), identity, now + 60_000);
+  expect(brief).toMatchObject({ attention: false, consecutiveFailures: 3, failingForMs: 60_000 });
+  const persistent = parsePilotWorkloadHealth(failing("running", at, 9), identity, now + 120_000);
+  expect(persistent.attention).toBe(true);
+  expect(
+    parsePilotWorkloadHealth(failing("attention_required", at, 1), identity, now),
+  ).toMatchObject({ attention: true, state: "attention_required" });
+  expect(parsePilotWorkloadHealth(value, identity, now)).toMatchObject({
+    attention: false,
+    consecutiveFailures: 0,
+    failingForMs: null,
+  });
+  for (const bad of [
+    failing("running", null, 2),
+    failing("running", at, 0),
+    failing("running", "2026-09-21T00:00:00.000Z", 1),
+    failing("running", at, -1),
+  ])
+    expect(() => parsePilotWorkloadHealth(bad, identity, now)).toThrow();
+});
+it("logs retried failures of a workload without a health file, once per failed cycle", async () => {
+  const { createPilotWorkloadFailureLogger } = await import("./pilot-workload-health.mjs");
+  expect(() => createPilotWorkloadFailureLogger("../x")).toThrow();
+  const lines = [];
+  const write = process.stderr.write;
+  process.stderr.write = (line) => lines.push(String(line)) > 0;
+  try {
+    const log = createPilotWorkloadFailureLogger("business-cart-expiry");
+    const failure = {
+      occurredAt: at,
+      category: "Deadlock",
+      code: "CART_EXPIRY_UNAVAILABLE",
+      sqlState: "40P01",
+    };
+    log({
+      ...snapshot,
+      state: "running",
+      consecutiveFailures: 1,
+      failingSince: at,
+      lastCycleFailure: failure,
+    });
+    log({
+      ...snapshot,
+      state: "running",
+      consecutiveFailures: 1,
+      failingSince: at,
+      lastCycleFailure: failure,
+    });
+    log({ ...snapshot, lastCycleFailure: null });
+  } finally {
+    process.stderr.write = write;
+  }
+  expect(lines.map((line) => JSON.parse(line))).toEqual([
+    expect.objectContaining({
+      event: "workload_cycle_failed",
+      component: "business-cart-expiry",
+      state: "running",
+      consecutiveFailures: 1,
+      code: "CART_EXPIRY_UNAVAILABLE",
+      sqlState: "40P01",
+    }),
+  ]);
+});

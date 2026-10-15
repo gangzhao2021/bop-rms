@@ -1,4 +1,5 @@
 import { createOptionalCompensationWorkloads } from "./pilot-compensation-workload.mjs";
+import { supervisedCycleFailures } from "../../apps/worker/dist/outbox-workload.js";
 import process from "node:process";
 import { createOptionalBatchCancellationWorkloads } from "./pilot-batch-cancellation-workload.mjs";
 import console from "node:console";
@@ -37,6 +38,8 @@ export async function createInternalWorker(resources, observers = {}, options = 
     pageSize: 5,
     pollIntervalMs: 1000,
     drainDeadlineMs: 25000,
+    // WP-2423 pilot resilience: a failed cycle retries; it never stops the other workloads.
+    supervision: supervisedCycleFailures,
   });
   const derive = (key) => {
     const d = createHash("sha256").update(key).digest("hex");
@@ -133,6 +136,7 @@ export async function createInternalWorker(resources, observers = {}, options = 
     },
     pollIntervalMs: 1000,
     drainDeadlineMs: 25000,
+    supervision: supervisedCycleFailures,
   });
   const recoveryRegistry = createManualOutboxRecoveryRegistry(
     services.map((service) => service.registration),

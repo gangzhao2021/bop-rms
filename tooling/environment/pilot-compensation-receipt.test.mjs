@@ -5,6 +5,11 @@ const m = vi.hoisted(() => ({
   refresh: vi.fn(),
   issuer: vi.fn(),
   issue: vi.fn(),
+  receiptStore: vi.fn(),
+  load: vi.fn(),
+}));
+vi.mock("../../packages/rms/ordering/src/index.ts", () => ({
+  createPostgresDigitalReceiptStore: m.receiptStore,
 }));
 vi.mock("../../packages/rms/payment/src/index.ts", async (original) => ({
   ...(await original()),
@@ -73,6 +78,8 @@ beforeEach(() => {
   m.refresh.mockResolvedValue(1);
   m.issuer.mockReturnValue(m.issue);
   m.issue.mockResolvedValue({ status: "Existing" });
+  m.receiptStore.mockReturnValue({ load: m.load });
+  m.load.mockResolvedValue({ records: [{ snapshot: { paymentStatus: "Paid" } }] });
 });
 afterEach(() => vi.unstubAllEnvs());
 it("refreshes confirmed provider observations then invokes existing tenant-scoped receipt issuance", async () => {
@@ -119,4 +126,39 @@ it("rechecks current Case before receipt authorization", async () => {
   expect(
     await m.issuer.mock.calls[0][0].authorize(f.tx, { ...f.scope, orderReference: id(5) }),
   ).toBe(false);
+});
+
+it("does not ask the Provider again once the receipt shows the refund (no observation growth)", async () => {
+  const f = setup();
+  // The receipt already shows the whole payment refunded: nothing can change; no Provider call.
+  m.load.mockResolvedValueOnce({ records: [{ snapshot: { paymentStatus: "Refunded" } }] });
+  expect(await f.recover(f.disposition, id(4))).toEqual({ status: "ReceiptCurrent" });
+  expect(m.refresh).not.toHaveBeenCalled();
+  expect(m.issue).not.toHaveBeenCalled();
+  const access = m.receiptStore.mock.calls[0][0];
+  expect(await access.authorize(f.tx, { action: "Read", orderReference: id(5) })).toBe(true);
+  expect(await access.authorize(f.tx, { action: "Read", orderReference: id(90) })).toBe(false);
+  expect(await access.authorize(f.tx, { action: "AppendRefund", orderReference: id(5) })).toBe(
+    false,
+  );
+  expect(await access.validateSources()).toBe(false);
+  // Every later cycle for the same confirmed Case reads owner state only.
+  for (let cycle = 0; cycle < 50; cycle++)
+    expect(await f.recover(f.disposition, id(4))).toEqual({ status: "ReceiptCurrent" });
+  expect(m.refresh).not.toHaveBeenCalled();
+});
+it("repairs a partially refunded receipt once per process, then stops re-observing", async () => {
+  const f = setup();
+  expect(await f.recover(f.disposition, id(4))).toEqual({ status: "Existing" });
+  for (let cycle = 0; cycle < 50; cycle++)
+    expect(await f.recover(f.disposition, id(4))).toEqual({ status: "ReceiptCurrent" });
+  expect(m.refresh).toHaveBeenCalledTimes(1);
+  expect(m.issue).toHaveBeenCalledTimes(1);
+  // A failed repair is not remembered: the next cycle tries again.
+  const g = setup();
+  m.issue.mockRejectedValueOnce(Error("PAYMENT_RECEIPT_COVERAGE_UNAVAILABLE"));
+  await expect(g.recover(g.disposition, id(4))).rejects.toThrow();
+  expect(await g.recover(g.disposition, id(4))).toEqual({ status: "Existing" });
+  // Still checks the Case first: a mismatched Order is refused even after a repair.
+  await expect(g.recover({ ...g.disposition, orderReference: id(90) }, id(4))).rejects.toThrow();
 });

@@ -17,6 +17,7 @@ vi.mock("../../apps/api/dist/pickup-payment-window-closure.js", () => ({
 }));
 vi.mock("../../apps/worker/dist/outbox-workload.js", () => ({
   createOutboxWorkload: d.workload,
+  supervisedCycleFailures: { supervised: true },
 }));
 import {
   createInternalPickupPaymentExpiry,
@@ -91,6 +92,7 @@ it("polls through the dispatcher and reports stock left or failures without iden
   const dispatch = d.dispatcher.mock.calls[0][0];
   expect(dispatch).toMatchObject({ closure: service, now: f.resources.now, pageSize: 10 });
   expect(d.workload.mock.calls[0][0]).toMatchObject({
+    supervision: { supervised: true },
     pollIntervalMs: 15000,
     drainDeadlineMs: 25000,
     onSnapshot: observer,

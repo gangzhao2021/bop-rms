@@ -15,6 +15,8 @@ export function createCartExpiryWorkload(options: {
   pollIntervalMs: number;
   drainDeadlineMs: number;
   onSnapshot?: Parameters<typeof createOutboxWorkload>[0]["onSnapshot"];
+  /** Supervised cycle failures (pilot workers): one failure never stops sibling workloads. */
+  readonly supervision?: Parameters<typeof createOutboxWorkload>[0]["supervision"];
 }) {
   if (!Number.isInteger(options.pageSize) || options.pageSize < 1 || options.pageSize > 100)
     throw new TypeError("CART_EXPIRY_CONFIG_INVALID");
@@ -22,6 +24,7 @@ export function createCartExpiryWorkload(options: {
   let stopping = false;
   const workload = createOutboxWorkload({
     ...(options.onSnapshot ? { onSnapshot: options.onSnapshot } : {}),
+    ...(options.supervision ? { supervision: options.supervision } : {}),
     pollIntervalMs: options.pollIntervalMs,
     drainDeadlineMs: options.drainDeadlineMs,
     dispatcher: {

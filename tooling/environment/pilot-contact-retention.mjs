@@ -1,5 +1,8 @@
 import { redactExpiredCheckoutContacts } from "../../packages/rms/ordering/src/index.ts";
-import { createOutboxWorkload } from "../../apps/worker/dist/outbox-workload.js";
+import {
+  createOutboxWorkload,
+  supervisedCycleFailures,
+} from "../../apps/worker/dist/outbox-workload.js";
 import { isPilotRuntime } from "./pilot-environment.mjs";
 
 /** WP-2423 Q10/Q16 (Owner-approved 30 days): daily removal, at most this many records per batch. */
@@ -53,6 +56,7 @@ export function createInternalContactRetentionWorkload(resources, onSnapshot) {
     dispatcher: createContactRetentionDispatcher({ resources }),
     pollIntervalMs: 60_000,
     drainDeadlineMs: 25_000,
+    supervision: supervisedCycleFailures,
     ...(onSnapshot ? { onSnapshot } : {}),
   });
 }

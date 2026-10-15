@@ -3,7 +3,10 @@ import {
   createPickupPaymentWindowClosure,
   createPickupPaymentWindowDispatcher,
 } from "../../apps/api/dist/pickup-payment-window-closure.js";
-import { createOutboxWorkload } from "../../apps/worker/dist/outbox-workload.js";
+import {
+  createOutboxWorkload,
+  supervisedCycleFailures,
+} from "../../apps/worker/dist/outbox-workload.js";
 import { parseOrderingReference } from "../../packages/rms/ordering/src/index.ts";
 import { isPilotRuntime } from "./pilot-environment.mjs";
 const unavailable = () => {
@@ -72,6 +75,7 @@ export function createInternalPickupPaymentExpiryWorkload(
     dispatcher,
     pollIntervalMs: 15000,
     drainDeadlineMs: 25000,
+    supervision: supervisedCycleFailures,
     ...(onSnapshot ? { onSnapshot } : {}),
   });
 }

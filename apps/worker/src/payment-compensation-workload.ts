@@ -26,6 +26,8 @@ export function createPaymentCompensationWorkload<
   readonly pollIntervalMs: number;
   readonly drainDeadlineMs: number;
   readonly onSnapshot?: (snapshot: OutboxWorkloadSnapshot) => void;
+  /** Supervised cycle failures (pilot workers): one failure never stops sibling workloads. */
+  readonly supervision?: Parameters<typeof createOutboxWorkload>[0]["supervision"];
   /** Longest delay before an unchanged candidate is executed again; default five minutes. */
   readonly unchangedBackoffMaxMs?: number;
   /** Test seam: the clock (milliseconds). */
@@ -49,6 +51,7 @@ export function createPaymentCompensationWorkload<
     stopping = false;
   const workload = createOutboxWorkload({
     ...(options.onSnapshot ? { onSnapshot: options.onSnapshot } : {}),
+    ...(options.supervision ? { supervision: options.supervision } : {}),
     pollIntervalMs: options.pollIntervalMs,
     drainDeadlineMs: options.drainDeadlineMs,
     dispatcher: {

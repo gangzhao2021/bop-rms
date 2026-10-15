@@ -31,20 +31,39 @@ export function createInternalPaymentTerminal(
     now,
     generateObservationReference: reference,
   });
+  // WP-2423 pilot resilience (2026-10-15): the simulator read is a synchronous sqlite read that can
+  // busy-wait up to 5 s on another process's lock, freezing the event loop while this transaction
+  // (and its advisory lock) sits idle; v15 hit the 5 s idle-in-transaction timeout. A terminal
+  // occurrence never changes once written, so the read taken before the transaction is reused.
+  const occurrences = new Map();
+  const occurrenceKey = (paymentAttemptReference, providerIntentReference) =>
+    paymentAttemptReference + ":" + providerIntentReference;
   const occurrenceVerification = {
     verifyOccurrence: async (_tx, observation) => {
-      const original = await simulator.readTerminalOccurrence({
-        operation: "RetrieveIntent",
-        purpose: "RetrievePaymentIntent",
-        context: {
-          ...scope,
-          provider: "Stripe",
-          environment: "Test",
-          paymentAttemptReference: observation.paymentAttemptReference,
-          operationReference: observation.causationReference,
-        },
-        providerIntentReference: observation.providerIntentReference,
-      });
+      const known = occurrences.get(
+        occurrenceKey(observation.paymentAttemptReference, observation.providerIntentReference),
+      );
+      const original =
+        known ??
+        (await simulator.readTerminalOccurrence({
+          operation: "RetrieveIntent",
+          purpose: "RetrievePaymentIntent",
+          context: {
+            ...scope,
+            provider: "Stripe",
+            environment: "Test",
+            paymentAttemptReference: observation.paymentAttemptReference,
+            operationReference: observation.causationReference,
+          },
+          providerIntentReference: observation.providerIntentReference,
+        }));
+      if (!known && ["Captured", "Failed"].includes(original.status)) {
+        if (occurrences.size >= 1000) occurrences.delete(occurrences.keys().next().value);
+        occurrences.set(
+          occurrenceKey(observation.paymentAttemptReference, observation.providerIntentReference),
+          { status: original.status, occurredAt: original.occurredAt },
+        );
+      }
       return (
         original.status === observation.status && original.occurredAt === observation.occurredAt
       );
@@ -97,6 +116,13 @@ export function createInternalPaymentTerminal(
   ) {
     const occurrence = await simulator.readTerminalOccurrence(retrieval);
     const occurredAt = parsePaymentInstant(occurrence.occurredAt);
+    if (["Captured", "Failed"].includes(occurrence.status)) {
+      if (occurrences.size >= 1000) occurrences.delete(occurrences.keys().next().value);
+      occurrences.set(
+        occurrenceKey(retrieval.context.paymentAttemptReference, retrieval.providerIntentReference),
+        { status: occurrence.status, occurredAt: occurrence.occurredAt },
+      );
+    }
     if (
       occurrence.status !== expected ||
       occurredAt > parsePaymentInstant(captured.observedAt) ||

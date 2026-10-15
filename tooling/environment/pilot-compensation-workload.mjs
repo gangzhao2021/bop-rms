@@ -1,5 +1,8 @@
+import console from "node:console";
 import { createPaymentCompensationWorkload } from "../../apps/worker/dist/payment-compensation-workload.js";
+import { supervisedCycleFailures } from "../../apps/worker/dist/outbox-workload.js";
 import { isPilotRuntime } from "./pilot-environment.mjs";
+const SAFE_CODE = /^[A-Z][A-Z0-9_]{2,79}$/u;
 export async function createOptionalCompensationWorkloads({
   enabled,
   resources,
@@ -20,7 +23,19 @@ export async function createOptionalCompensationWorkloads({
   return [
     createPaymentCompensationWorkload({
       discover: async (input) => {
-        await service.recoverProjectionPage();
+        // WP-2423 pilot resilience: projection/receipt repair is housekeeping; its failure must
+        // not hold back discovering and refunding paid orders. It is retried next cycle.
+        try {
+          await service.recoverProjectionPage();
+        } catch (error) {
+          const code = error?.code ?? error?.message;
+          console.error(
+            JSON.stringify({
+              event: "INTERNAL_COMPENSATION_REPAIR_FAILED",
+              code: typeof code === "string" && SAFE_CODE.test(code) ? code : null,
+            }),
+          );
+        }
         return service.discover(input);
       },
       execute: (value) => service.execute(value),
@@ -32,6 +47,7 @@ export async function createOptionalCompensationWorkloads({
       // of the Store recording its operations reconciliation.
       unchangedBackoffMaxMs: 60_000,
       drainDeadlineMs: 25000,
+      supervision: supervisedCycleFailures,
       ...(onSnapshot ? { onSnapshot } : {}),
     }),
   ];

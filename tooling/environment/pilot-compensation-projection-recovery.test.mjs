@@ -1,3 +1,4 @@
+import console from "node:console";
 import { beforeEach, expect, it, vi } from "vitest";
 const d = vi.hoisted(() => ({
   discover: vi.fn(),
@@ -102,14 +103,32 @@ it("rejects non-progressing or malformed discovery before writes", async () => {
   expect(d.project).not.toHaveBeenCalled();
 });
 
-it("retries the same page if receipt recovery fails after projection", async () => {
+it("isolates a failing receipt repair to its Case and advances to later Cases", async () => {
+  const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
   const after = vi
       .fn()
-      .mockRejectedValueOnce(Error("RECEIPT_UNAVAILABLE"))
+      .mockRejectedValueOnce(Error("PAYMENT_RECEIPT_COVERAGE_UNAVAILABLE"))
       .mockResolvedValue(undefined),
     f = setup(after);
-  await expect(f.recover()).rejects.toThrow("RECEIPT_UNAVAILABLE");
-  expect(await f.recover()).toEqual({ recoveredCount: 1, scanComplete: true });
+  d.discover.mockResolvedValueOnce({
+    items: [10, 11, 12, 13, 14].map(id),
+    nextAfterCaseReference: id(14),
+  });
+  expect(await f.recover()).toEqual({
+    recoveredCount: 5,
+    scanComplete: false,
+    receiptFailures: 1,
+  });
+  expect(after).toHaveBeenCalledTimes(5);
   expect(after.mock.calls[0]).toEqual(d.project.mock.calls[0]);
-  expect(d.discover.mock.calls.map(([, q]) => q.afterCaseReference)).toEqual([null, null]);
+  d.discover.mockResolvedValueOnce({ items: [], nextAfterCaseReference: null });
+  await f.recover();
+  expect(d.discover.mock.calls.map(([, q]) => q.afterCaseReference)).toEqual([null, id(14)]);
+  expect(errors.mock.calls.map(([line]) => JSON.parse(line))).toEqual([
+    {
+      event: "INTERNAL_COMPENSATION_RECEIPT_REPAIR_FAILED",
+      code: "PAYMENT_RECEIPT_COVERAGE_UNAVAILABLE",
+    },
+  ]);
+  errors.mockRestore();
 });

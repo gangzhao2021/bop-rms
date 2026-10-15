@@ -20,6 +20,8 @@ export function createPersistentConsumerWorker(options: {
   readonly pollIntervalMs: number;
   readonly drainDeadlineMs: number;
   readonly onSnapshot?: Parameters<typeof createOutboxWorkload>[0]["onSnapshot"];
+  /** Supervised cycle failures (pilot workers): one failure never stops sibling workloads. */
+  readonly supervision?: Parameters<typeof createOutboxWorkload>[0]["supervision"];
 }) {
   const eventing = createPersistentEventingPorts({
     ...options.eventing,
@@ -49,6 +51,7 @@ export function createPersistentConsumerWorker(options: {
   });
   const eventWorkload = createOutboxWorkload({
     ...(options.onSnapshot ? { onSnapshot: options.onSnapshot } : {}),
+    ...(options.supervision ? { supervision: options.supervision } : {}),
     pollIntervalMs: options.pollIntervalMs,
     drainDeadlineMs: options.drainDeadlineMs,
     dispatcher: {

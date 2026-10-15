@@ -1,5 +1,8 @@
 import { createDiningCheckoutExpiryDispatcher } from "../../apps/api/dist/dining-checkout-expiry-dispatcher.js";
-import { createOutboxWorkload } from "../../apps/worker/dist/outbox-workload.js";
+import {
+  createOutboxWorkload,
+  supervisedCycleFailures,
+} from "../../apps/worker/dist/outbox-workload.js";
 import { isPilotRuntime } from "./pilot-environment.mjs";
 export function createInternalDiningCheckoutExpiryWorkload(
   resources,
@@ -26,6 +29,7 @@ export function createInternalDiningCheckoutExpiryWorkload(
     dispatcher,
     pollIntervalMs: 5000,
     drainDeadlineMs: 25000,
+    supervision: supervisedCycleFailures,
     ...(onSnapshot ? { onSnapshot } : {}),
   });
 }

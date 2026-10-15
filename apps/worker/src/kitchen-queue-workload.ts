@@ -9,10 +9,13 @@ export function createKitchenQueueWorkload(options: {
   readonly pollIntervalMs: number;
   readonly drainDeadlineMs: number;
   readonly onSnapshot?: Parameters<typeof createOutboxWorkload>[0]["onSnapshot"];
+  /** Supervised cycle failures (pilot workers): one failure never stops sibling workloads. */
+  readonly supervision?: Parameters<typeof createOutboxWorkload>[0]["supervision"];
 }) {
   let closing: Promise<void> | undefined;
   return createOutboxWorkload({
     ...(options.onSnapshot ? { onSnapshot: options.onSnapshot } : {}),
+    ...(options.supervision ? { supervision: options.supervision } : {}),
     pollIntervalMs: options.pollIntervalMs,
     drainDeadlineMs: options.drainDeadlineMs,
     dispatcher: {
@@ -21,8 +24,9 @@ export function createKitchenQueueWorkload(options: {
           const result = await options.refresh();
           if (result !== 0 && result !== 1) throw new Error("invalid refresh result");
           return result;
-        } catch {
-          throw new Error("KITCHEN_QUEUE_REFRESH_UNAVAILABLE");
+        } catch (error) {
+          // The cause keeps only what classification and safe logging read (code, SQLSTATE).
+          throw new Error("KITCHEN_QUEUE_REFRESH_UNAVAILABLE", { cause: error });
         }
       },
       async stop() {

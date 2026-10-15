@@ -1,4 +1,5 @@
 import process from "node:process";
+import { supervisedCycleFailures } from "../../apps/worker/dist/outbox-workload.js";
 import { startWorkerRuntime } from "../../apps/worker/dist/index.js";
 import { createKitchenQueueWorkload } from "../../apps/worker/dist/kitchen-queue-workload.js";
 import {
@@ -95,6 +96,8 @@ export async function startPilotKitchenWorker({
         close,
         pollIntervalMs: 5000,
         drainDeadlineMs: 10000,
+        // WP-2423 pilot resilience: a failed refresh retries with backoff instead of exiting.
+        supervision: supervisedCycleFailures,
       }),
     });
   } catch {

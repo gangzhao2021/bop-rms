@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { supervisedCycleFailures } from "../../apps/worker/dist/outbox-workload.js";
+import { createPilotWorkloadFailureLogger } from "./pilot-workload-health.mjs";
 import {
   CartError,
   createPostgresDueCartSource,
@@ -107,5 +109,7 @@ export function createInternalCartExpiryWorkload(resources) {
     pageSize: 10,
     pollIntervalMs: 5000,
     drainDeadlineMs: 25000,
+    supervision: supervisedCycleFailures,
+    onSnapshot: createPilotWorkloadFailureLogger("business-cart-expiry"),
   });
 }

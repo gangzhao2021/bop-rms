@@ -26,6 +26,8 @@ const instant = (value) => {
 };
 const SAFE_FAILURE_CODE = /^[A-Z][A-Z0-9_]{2,79}$/u;
 const SQLSTATE = /^[0-9A-Z]{5}$/u;
+/** WP-2423 pilot resilience: transient failures that persist this long are alert-worthy. */
+export const PILOT_WORKLOAD_PERSISTENT_FAILURE_MS = 120_000;
 export function parsePilotWorkloadHealth(value, identity, now = Date.now()) {
   const record = exact(value, ["pid", "started", "observedAt", "snapshot"]);
   if (
@@ -46,9 +48,14 @@ export function parsePilotWorkloadHealth(value, identity, now = Date.now()) {
     "lastCycleStartedAt",
     "lastCycleCompletedAt",
     ...(Object.hasOwn(record.snapshot ?? {}, "lastCycleFailure") ? ["lastCycleFailure"] : []),
+    ...(Object.hasOwn(record.snapshot ?? {}, "consecutiveFailures")
+      ? ["consecutiveFailures", "failingSince"]
+      : []),
   ]);
   if (
-    !["idle", "running", "stopping", "stopped", "failed"].includes(snapshot.state) ||
+    !["idle", "running", "attention_required", "stopping", "stopped", "failed"].includes(
+      snapshot.state,
+    ) ||
     typeof snapshot.cycleInFlight !== "boolean" ||
     !Number.isSafeInteger(snapshot.completedCycles) ||
     snapshot.completedCycles < 0
@@ -64,6 +71,18 @@ export function parsePilotWorkloadHealth(value, identity, now = Date.now()) {
     (snapshot.cycleInFlight && started === null) ||
     (snapshot.completedCycles === 0) !== (completed === null) ||
     (completed !== null && started === null)
+  )
+    return fail();
+  const consecutiveFailures = snapshot.consecutiveFailures ?? 0;
+  const failingSince =
+    snapshot.failingSince === undefined || snapshot.failingSince === null
+      ? null
+      : instant(snapshot.failingSince);
+  if (
+    !Number.isSafeInteger(consecutiveFailures) ||
+    consecutiveFailures < 0 ||
+    (failingSince === null) !== (consecutiveFailures === 0) ||
+    (failingSince !== null && failingSince > observed)
   )
     return fail();
   let lastCycleFailure = null;
@@ -97,8 +116,16 @@ export function parsePilotWorkloadHealth(value, identity, now = Date.now()) {
       ...(detailed ? { code: failure.code, sqlState: failure.sqlState } : {}),
     });
   }
+  const failingForMs = failingSince === null ? null : now - failingSince;
   return Object.freeze({
     lastCycleFailure,
+    consecutiveFailures,
+    failingForMs,
+    // Alert-worthy: a person must look (the supervisor reports it; it never restarts for it).
+    attention:
+      snapshot.state === "attention_required" ||
+      snapshot.state === "failed" ||
+      (failingForMs !== null && failingForMs >= PILOT_WORKLOAD_PERSISTENT_FAILURE_MS),
     state: snapshot.state,
     cycleInFlight: snapshot.cycleInFlight,
     completedCycles: snapshot.completedCycles,
@@ -108,6 +135,42 @@ export function parsePilotWorkloadHealth(value, identity, now = Date.now()) {
     cycleAgeMs: snapshot.cycleInFlight ? now - started : null,
     lastCompletionAgeMs: completed === null ? null : now - completed,
   });
+}
+/** One line per failed cycle in the service log: category, safe code and SQLSTATE only. Returns
+ * the failure instant now reported. */
+function logPilotCycleFailure(component, snapshot, reported, time = new Date().toISOString()) {
+  const failure = snapshot?.lastCycleFailure;
+  if (!failure || failure.occurredAt === reported) return reported;
+  try {
+    process.stderr.write(
+      JSON.stringify({
+        level: 50,
+        time,
+        module: "pilot-workload-health",
+        event: "workload_cycle_failed",
+        component,
+        state: snapshot.state,
+        consecutiveFailures: Number.isSafeInteger(snapshot.consecutiveFailures)
+          ? snapshot.consecutiveFailures
+          : null,
+        category: failure.category,
+        code: SAFE_FAILURE_CODE.test(failure.code ?? "") ? failure.code : null,
+        sqlState: SQLSTATE.test(failure.sqlState ?? "") ? failure.sqlState : null,
+      }) + "\n",
+    );
+  } catch {
+    /* Diagnostics must not change workload execution. */
+  }
+  return failure.occurredAt;
+}
+/** Failure log only, for a supervised workload without its own health file (cart expiry): its
+ * retried failures still reach the service log instead of disappearing. */
+export function createPilotWorkloadFailureLogger(component) {
+  if (!/^business-[a-z-]{3,40}$/u.test(component)) return fail();
+  let reported = null;
+  return (snapshot) => {
+    reported = logPilotCycleFailure(component, snapshot, reported);
+  };
 }
 export function createPilotWorkloadHealthObserver(directory, component) {
   if (
@@ -143,27 +206,7 @@ export function createPilotWorkloadHealthObserver(directory, component) {
     reportedFailure = null;
   return (snapshot) => {
     const value = { ...identity, observedAt: new Date().toISOString(), snapshot };
-    const failure = snapshot?.lastCycleFailure;
-    if (failure && failure.occurredAt !== reportedFailure) {
-      reportedFailure = failure.occurredAt;
-      // One line per failed cycle in the service log: category, safe code and SQLSTATE only.
-      try {
-        process.stderr.write(
-          JSON.stringify({
-            level: 50,
-            time: value.observedAt,
-            module: "pilot-workload-health",
-            event: "workload_cycle_failed",
-            component,
-            category: failure.category,
-            code: SAFE_FAILURE_CODE.test(failure.code ?? "") ? failure.code : null,
-            sqlState: SQLSTATE.test(failure.sqlState ?? "") ? failure.sqlState : null,
-          }) + "\n",
-        );
-      } catch {
-        /* Diagnostics must not change workload execution. */
-      }
-    }
+    reportedFailure = logPilotCycleFailure(component, snapshot, reportedFailure, value.observedAt);
     const temporary = target + "." + process.pid + "." + ++sequence + ".tmp";
     let created = false;
     try {

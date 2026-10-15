@@ -3,7 +3,21 @@ import {
   createPostgresPaymentCompensationExceptionSource,
   parsePaymentReference,
 } from "../../packages/rms/payment/src/index.ts";
+import console from "node:console";
 import { createInternalCompensationProjection } from "./pilot-compensation-projection.mjs";
+const SAFE_CODE = /^[A-Z][A-Z0-9_]{2,79}$/u;
+/** Safe code only (never a message, value or identifier). */
+function safeCode(error) {
+  try {
+    for (const key of ["code", "message"]) {
+      const value = Object.getOwnPropertyDescriptor(error ?? {}, key)?.value;
+      if (typeof value === "string" && SAFE_CODE.test(value)) return value;
+    }
+  } catch {
+    /* Untrusted errors never break recovery. */
+  }
+  return null;
+}
 /** Bounded repair of existing owner facts only; never dispatch a financial command. */
 export function createInternalCompensationProjectionRecovery({
   resources,
@@ -35,7 +49,8 @@ export function createInternalCompensationProjectionRecovery({
     );
     if (!Array.isArray(page.items) || page.items.length > 5)
       throw Error("INTERNAL_COMPENSATION_RECOVERY_UNAVAILABLE");
-    let previous = cursor;
+    let previous = cursor,
+      receiptFailures = 0;
     for (const value of page.items) {
       const reference = parsePaymentReference(value);
       if (previous !== null && reference <= previous)
@@ -63,10 +78,28 @@ export function createInternalCompensationProjectionRecovery({
         paymentAttemptReference: parsePaymentReference(current.source.paymentAttemptReference),
       };
       await project(disposition, reference);
-      if (afterProject) await afterProject(disposition, reference);
+      // WP-2423 pilot resilience: one Case's receipt repair failing must not hold back the
+      // repair of every later Case (the page used to be retried forever). It is retried on the
+      // next round; the failure is logged with its safe code only.
+      if (afterProject)
+        try {
+          await afterProject(disposition, reference);
+        } catch (error) {
+          receiptFailures++;
+          console.error(
+            JSON.stringify({
+              event: "INTERNAL_COMPENSATION_RECEIPT_REPAIR_FAILED",
+              code: safeCode(error),
+            }),
+          );
+        }
     }
     if (!active()) throw Error("INTERNAL_COMPENSATION_RECOVERY_UNAVAILABLE");
     cursor = page.nextAfterCaseReference;
-    return { recoveredCount: page.items.length, scanComplete: cursor === null };
+    return {
+      recoveredCount: page.items.length,
+      scanComplete: cursor === null,
+      ...(receiptFailures > 0 ? { receiptFailures } : {}),
+    };
   };
 }

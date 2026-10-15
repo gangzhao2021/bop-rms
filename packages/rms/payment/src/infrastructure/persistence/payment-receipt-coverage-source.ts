@@ -15,6 +15,22 @@ import { providerStatuses } from "../../contracts/payment-provider-adapter.js";
 import { createPostgresPaymentIntentCreationStore } from "./payment-intent-creation-store.js";
 import { createPostgresPaymentTerminalStore } from "./payment-terminal-store.js";
 
+/**
+ * WP-2423 pilot resilience (2026-10-15): bounded reads over one payment attempt's Snapshot
+ * observations. Observations are append-only Provider facts, so an attempt can collect many; these
+ * scalar subqueries are answered from the partial indexes created by migration 2000_052 (an index
+ * range probe and an index-only count) instead of a window over every row of the attempt.
+ * Parameters: $1 brand, $2 store, $3 payment intent, $4 payment attempt.
+ */
+export const paymentSnapshotMaximumRefundedSql =
+  "SELECT m.refunded_minor FROM rms_payment.payment_provider_observation m " +
+  "WHERE m.brand_id=$1 AND m.store_id=$2 AND m.payment_attempt_id=$4 AND m.payment_intent_id=$3 " +
+  "AND m.observation_kind='Snapshot' ORDER BY m.refunded_minor DESC LIMIT 1";
+export const paymentSnapshotCountSql =
+  "SELECT count(*) FROM rms_payment.payment_provider_observation c " +
+  "WHERE c.brand_id=$1 AND c.store_id=$2 AND c.payment_attempt_id=$4 AND c.payment_intent_id=$3 " +
+  "AND c.observation_kind='Snapshot'";
+
 export class PaymentReceiptCoverageError extends Error {
   constructor(
     readonly code:
@@ -198,7 +214,11 @@ export function createPostgresPaymentReceiptCoverageSource(options: {
           const observations = await transaction.query(
             "SELECT provider_observation_id,normalized_status,provider_intent_reference,provider_transaction_reference," +
               "requested_minor::text,authorized_minor::text,captured_minor::text,refunded_minor::text,currency_code," +
-              "(max(refunded_minor) OVER ())::text AS maximum_refunded_minor," +
+              // WP-2423 pilot resilience: bounded reads (latest two + indexed maximum) instead of a
+              // window over every observation of the attempt, which timed out at ~650k rows.
+              "(" +
+              paymentSnapshotMaximumRefundedSql +
+              ")::text AS maximum_refunded_minor," +
               "evidence_digest,provider_observed_at,recorded_at FROM rms_payment.payment_provider_observation " +
               "WHERE brand_id=$1 AND store_id=$2 AND payment_intent_id=$3 AND payment_attempt_id=$4 AND observation_kind='Snapshot' " +
               "ORDER BY provider_observed_at DESC,recorded_at DESC,provider_observation_id DESC LIMIT 2",

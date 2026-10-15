@@ -96,6 +96,8 @@ it("polls owner discovery and executes each candidate through the idempotent rel
   expect(createService).toHaveBeenCalledWith(f.resources, { systemActorReference: ref(9) });
   const opts = d.workload.mock.calls[0][0];
   expect(opts).toMatchObject({ pageSize: 10, pollIntervalMs: 5000, drainDeadlineMs: 25000 });
+  // WP-2423 pilot resilience: a failed cycle retries instead of stopping the business worker.
+  expect(opts.supervision).toBeDefined();
   expect(opts.onSnapshot).toBe(onSnapshot);
   await opts.discover({ afterDispositionReference: null, limit: 10 });
   expect(service.discover).toHaveBeenCalledWith({ afterDispositionReference: null, limit: 10 });

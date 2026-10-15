@@ -1,4 +1,7 @@
-import { createOutboxWorkload } from "../../apps/worker/dist/outbox-workload.js";
+import {
+  createOutboxWorkload,
+  supervisedCycleFailures,
+} from "../../apps/worker/dist/outbox-workload.js";
 import { isPilotRuntime } from "./pilot-environment.mjs";
 /** Opt-in assembly only. The injected owner dispatcher retains all publication and financial gates. */
 export async function createOptionalBatchCancellationWorkloads({
@@ -16,6 +19,7 @@ export async function createOptionalBatchCancellationWorkloads({
       dispatcher,
       pollIntervalMs: 5000,
       drainDeadlineMs: 25000,
+      supervision: supervisedCycleFailures,
       ...(onSnapshot ? { onSnapshot } : {}),
     }),
   ];

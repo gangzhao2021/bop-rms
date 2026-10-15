@@ -1,4 +1,5 @@
 import console from "node:console";
+import { supervisedCycleFailures } from "../../apps/worker/dist/outbox-workload.js";
 import { createPaidWithoutFulfillableInventoryRelease } from "../../apps/api/dist/paid-without-fulfillable-inventory-release.js";
 import { createPaymentCompensationWorkload } from "../../apps/worker/dist/payment-compensation-workload.js";
 import { parseOrderingReference } from "../../packages/rms/ordering/src/index.ts";
@@ -70,6 +71,7 @@ export function createInternalPaidWithoutFulfillableInventoryWorkload(
     // An unchanged result (released, no-op or left for staff) is rechecked at most every 5 minutes.
     unchangedBackoffMaxMs: 300_000,
     drainDeadlineMs: 25000,
+    supervision: supervisedCycleFailures,
     ...(onSnapshot ? { onSnapshot } : {}),
   });
 }

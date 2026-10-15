@@ -21,6 +21,10 @@ import { createPostgresPaymentCompensationIdentityReader } from "./payment-compe
 import { createPostgresPaymentCompensationRefundPositionSource } from "./payment-compensation-refund-position-source.js";
 import { createPostgresPaymentIntentCreationStore } from "./payment-intent-creation-store.js";
 import { createPostgresPaymentTerminalStore } from "./payment-terminal-store.js";
+import {
+  paymentSnapshotCountSql,
+  paymentSnapshotMaximumRefundedSql,
+} from "./payment-receipt-coverage-source.js";
 type Request = Parameters<PaidWithoutFulfillableOrderPorts["source"]["resolveIdentity"]>[0];
 const fail = (): never => {
   throw new PaymentCompensationError("PAYMENT_COMPENSATION_SOURCE_UNAVAILABLE");
@@ -161,7 +165,12 @@ export function createPostgresPaymentCompensationSource(options: {
           const result = await tx.query(
             "SELECT normalized_status,provider_intent_reference,provider_transaction_reference,requested_minor::text,authorized_minor::text," +
               "captured_minor::text,refunded_minor::text,currency_code,evidence_digest,provider_observed_at,recorded_at," +
-              "(count(*) OVER ())::text AS observation_count,(max(refunded_minor) OVER ())::text AS maximum_refunded_minor " +
+              // WP-2423 pilot resilience: indexed count/maximum, no window over every row.
+              "(" +
+              paymentSnapshotCountSql +
+              ")::text AS observation_count,(" +
+              paymentSnapshotMaximumRefundedSql +
+              ")::text AS maximum_refunded_minor " +
               "FROM rms_payment.payment_provider_observation WHERE brand_id=$1 AND store_id=$2 AND payment_intent_id=$3 AND payment_attempt_id=$4 " +
               "AND observation_kind='Snapshot' ORDER BY provider_observed_at DESC,recorded_at DESC,provider_observation_id DESC LIMIT 2",
             [

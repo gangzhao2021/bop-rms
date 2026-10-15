@@ -1,5 +1,10 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { createOutboxWorkload } from "./outbox-workload.js";
+import {
+  createOutboxWorkload,
+  supervisedCycleFailures,
+  type OutboxWorkloadSnapshot,
+} from "./outbox-workload.js";
+import { createCompositeWorkerWorkload } from "./composite-workload.js";
 afterEach(() => {
   vi.useRealTimers();
 });
@@ -97,6 +102,8 @@ it("observes actual pending and completed cycles without manufacturing progress"
     completedCycles: 0,
     lastCycleStartedAt: null,
     lastCycleCompletedAt: null,
+    consecutiveFailures: 0,
+    failingSince: null,
   });
   expect(Object.isFrozen(initial)).toBe(true);
   const starting = workload.start();
@@ -108,6 +115,8 @@ it("observes actual pending and completed cycles without manufacturing progress"
     completedCycles: 0,
     lastCycleStartedAt: "2026-09-20T12:00:00.000Z",
     lastCycleCompletedAt: null,
+    consecutiveFailures: 0,
+    failingSince: null,
   });
   expect(runOnce).toHaveBeenCalledTimes(1);
   finish(0);
@@ -288,4 +297,149 @@ it("does not retry rejected classifications or throwing classifiers", async () =
     expect(runOnce).toHaveBeenCalledOnce();
     await work.stop();
   }
+});
+
+// WP-2423 pilot resilience (2026-10-15): v15 business worker restarted 9 times because one
+// cycle failure in one workload (TENANT_DATABASE_TRANSACTION_CONFLICT, *_UNAVAILABLE) failed the
+// workload, the group and the process.
+const conflict = () =>
+  Object.assign(Error("tenant database transaction conflicted; it may be retried"), {
+    code: "TENANT_DATABASE_TRANSACTION_CONFLICT",
+    diagnostic: { sqlState: "55P03", constraint: null, table: null, closed: false },
+  });
+it("supervised: retries transient failures with capped backoff and never completes failed", async () => {
+  vi.useFakeTimers();
+  const snapshots: OutboxWorkloadSnapshot[] = [];
+  const runOnce = vi.fn(async (): Promise<number> => {
+    throw conflict();
+  });
+  const work = createOutboxWorkload({
+    dispatcher: { runOnce, stop: async () => "drained" },
+    pollIntervalMs: 1000,
+    drainDeadlineMs: 1000,
+    supervision: { maxBackoffMs: 4000 },
+    onSnapshot: (value) => snapshots.push(value),
+  });
+  let settled = false;
+  void work.completion.then(() => {
+    settled = true;
+  });
+  await work.start(); // a failing first cycle no longer fails startup
+  // Backoff 1 s, 2 s, 4 s, then capped at 4 s.
+  for (const [elapsed, calls] of [
+    [999, 1],
+    [1, 2],
+    [2000, 3],
+    [4000, 4],
+    [4000, 5],
+    [4000, 6],
+  ] as const) {
+    await vi.advanceTimersByTimeAsync(elapsed);
+    expect(runOnce).toHaveBeenCalledTimes(calls);
+  }
+  const last = work.snapshot();
+  expect(last.state).toBe("running");
+  expect(last.consecutiveFailures).toBe(6);
+  expect(last.failingSince).toBe(snapshots.find((s) => s.consecutiveFailures === 1)?.failingSince);
+  expect(last.lastCycleFailure).toMatchObject({
+    category: "LockUnavailable",
+    code: "TENANT_DATABASE_TRANSACTION_CONFLICT",
+    sqlState: "55P03",
+  });
+  expect(settled).toBe(false);
+  runOnce.mockResolvedValue(0);
+  await vi.advanceTimersByTimeAsync(4000);
+  expect(work.snapshot()).toMatchObject({
+    state: "running",
+    consecutiveFailures: 0,
+    failingSince: null,
+    completedCycles: 1,
+  });
+  await work.stop();
+  await expect(work.completion).resolves.toBe("stopped");
+});
+it("supervised: an invariant failure marks attention_required, keeps retrying slowly and clears on success", async () => {
+  vi.useFakeTimers();
+  const runOnce = vi
+    .fn<() => Promise<number>>()
+    .mockResolvedValueOnce(0)
+    .mockRejectedValueOnce(Error("PAYMENT_WAIT_DISCOVERY_INVALID"))
+    .mockRejectedValueOnce(Error("PAYMENT_WAIT_DISCOVERY_INVALID"))
+    .mockResolvedValue(0);
+  const work = createOutboxWorkload({
+    dispatcher: { runOnce, stop: async () => "drained" },
+    pollIntervalMs: 100,
+    drainDeadlineMs: 1000,
+    supervision: { attentionRetryMs: 10_000 },
+  });
+  let settled = false;
+  void work.completion.then(() => {
+    settled = true;
+  });
+  await work.start();
+  await vi.advanceTimersByTimeAsync(100);
+  expect(work.snapshot().state).toBe("attention_required");
+  expect(work.snapshot().lastCycleFailure?.code).toBe("PAYMENT_WAIT_DISCOVERY_INVALID");
+  await vi.advanceTimersByTimeAsync(9_999);
+  expect(runOnce).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(runOnce).toHaveBeenCalledTimes(3);
+  expect(work.snapshot()).toMatchObject({ state: "attention_required", consecutiveFailures: 2 });
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(work.snapshot()).toMatchObject({ state: "running", consecutiveFailures: 0 });
+  expect(settled).toBe(false);
+  await work.stop();
+  await expect(work.completion).resolves.toBe("stopped");
+});
+it("supervised: a failing sibling never stops the group (one workload's failure is isolated)", async () => {
+  vi.useFakeTimers();
+  const healthy = vi.fn(async () => 0);
+  const broken = vi.fn(async (): Promise<number> => {
+    throw Error("PAYMENT_RECEIPT_COVERAGE_UNAVAILABLE");
+  });
+  const make = (runOnce: () => Promise<number>) =>
+    createOutboxWorkload({
+      dispatcher: { runOnce, stop: async () => "drained" },
+      pollIntervalMs: 1000,
+      drainDeadlineMs: 1000,
+      supervision: supervisedCycleFailures,
+    });
+  const group = createCompositeWorkerWorkload([make(healthy), make(broken)]);
+  let settled = false;
+  void group.completion?.then(() => {
+    settled = true;
+  });
+  await group.start();
+  await vi.advanceTimersByTimeAsync(120_000);
+  expect(settled).toBe(false);
+  expect(healthy.mock.calls.length).toBeGreaterThan(100);
+  expect(broken.mock.calls.length).toBeGreaterThan(3);
+  await group.stop();
+  await expect(group.completion).resolves.toBe("stopped");
+});
+it("supervised: mutually exclusive with bounded retry and validates intervals", () => {
+  const dispatcher = { runOnce: async () => 0, stop: async () => "drained" as const };
+  for (const extra of [
+    { retry: { maxRetries: 1, shouldRetry: () => true }, supervision: {} },
+    { supervision: { maxBackoffMs: 0 } },
+    { supervision: { attentionRetryMs: 3_600_001 } },
+    { supervision: { classify: "Transient" as never } },
+  ])
+    expect(() =>
+      createOutboxWorkload({ dispatcher, pollIntervalMs: 10, drainDeadlineMs: 10, ...extra }),
+    ).toThrow("OUTBOX_WORKLOAD_CONFIG_INVALID");
+});
+it("unsupervised workloads keep fail-fast semantics", async () => {
+  const work = createOutboxWorkload({
+    dispatcher: {
+      runOnce: async () => {
+        throw conflict();
+      },
+      stop: async () => "drained",
+    },
+    pollIntervalMs: 10,
+    drainDeadlineMs: 10,
+  });
+  await expect(work.start()).rejects.toThrow("OUTBOX_WORKLOAD_FAILED");
+  await expect(work.completion).resolves.toBe("failed");
 });

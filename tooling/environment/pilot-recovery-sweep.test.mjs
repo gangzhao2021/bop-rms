@@ -98,3 +98,83 @@ it("does not start after cancellation arrives during status inspection", async (
   expect(service).toHaveBeenCalledTimes(1);
   expect(service.mock.calls[0][0]).toBe("status");
 });
+
+// WP-2423 pilot resilience (2026-10-15).
+it("reports alert-worthy workloads of a running worker without restarting it", async () => {
+  const service = vi.fn(async (action, name, _directory, options) => {
+    if (action === "status") return { service: name, state: "running", pid: 10 };
+    if (action !== "health") throw Error("unexpected " + action);
+    if (name === "business-worker") {
+      expect(options).toEqual({ requireCompensation: true });
+      return {
+        service: name,
+        pid: 10,
+        workloads: {
+          paymentWait: { attention: false },
+          compensation: { attention: true },
+          events: { attention: true },
+        },
+      };
+    }
+    if (name === "kitchen-queue-worker") throw Error("PILOT_PROCESS_UNAVAILABLE");
+    return { service: name, pid: 10, attention: name === "reconciliation-worker" };
+  });
+  const workloadHealth = vi.fn(async (name) =>
+    name === "business-worker" ? { requireCompensation: true } : {},
+  );
+  const sweep = createPilotRecoverySweep({
+    runtimeDirectory,
+    service,
+    now: () => 1,
+    workloadHealth,
+  });
+  const result = await sweep.sweep();
+  expect(result.find((r) => r.service === "business-worker")).toEqual({
+    service: "business-worker",
+    state: "running",
+    pid: 10,
+    attention: ["compensation", "events"],
+  });
+  expect(result.find((r) => r.service === "kitchen-queue-worker")).toMatchObject({
+    state: "running",
+    health: "unavailable",
+  });
+  expect(result.find((r) => r.service === "reconciliation-worker").attention).toEqual(["workload"]);
+  expect(result.find((r) => r.service === "api")).toEqual({
+    service: "api",
+    state: "running",
+    pid: 10,
+  });
+  expect(service.mock.calls.some((c) => ["start", "restart", "stop"].includes(c[0]))).toBe(false);
+  expect(service.mock.calls.filter((c) => c[0] === "health").map((c) => c[1])).toEqual([
+    "business-worker",
+    "kitchen-queue-worker",
+    "reconciliation-worker",
+    "daily-settlement-worker",
+    "dining-exception-worker",
+  ]);
+});
+it("keeps trying to start an exhausted service every minute while reporting attention", async () => {
+  let at = 0,
+    up = false;
+  const service = vi.fn(async (action, name) => {
+    if (name !== "customer") return { service: name, state: "running", pid: 10 };
+    if (action === "start" && up) return { service: name, state: "started", pid: 11 };
+    throw Error("down");
+  });
+  const sweep = createPilotRecoverySweep({ runtimeDirectory, service, now: () => at });
+  const customer = async () => (await sweep.sweep()).find((r) => r.service === "customer");
+  for (at of [0, 5000, 15000]) await customer();
+  at = 40000;
+  expect((await customer()).state).toBe("attention_required");
+  at = 99_999;
+  expect((await customer()).state).toBe("attention_required");
+  const starts = () => service.mock.calls.filter((c) => c[0] === "start").length;
+  expect(starts()).toBe(3);
+  at = 100_000;
+  expect((await customer()).state).toBe("attention_required");
+  expect(starts()).toBe(4);
+  up = true;
+  at = 160_000;
+  expect(await customer()).toEqual({ service: "customer", state: "started", pid: 11 });
+});

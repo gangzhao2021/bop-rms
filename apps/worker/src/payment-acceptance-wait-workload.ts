@@ -1,7 +1,9 @@
 import { createOutboxWorkload } from "./outbox-workload.js";
 
 /** Durable owner records are the queue; cursor is only fair scan progress.
- * Errors fail the workload instead of silently retrying or discarding paid work.
+ * Unsupervised, errors fail the workload instead of silently retrying or discarding paid work.
+ * Supervised (pilot), a failed cycle is retried and reported in health; paid work is never dropped
+ * because discovery rescans the durable owner records.
  */
 export function createPaymentAcceptanceWaitWorkload(options: {
   discover(limit: number, after: string | null): Promise<readonly string[]>;
@@ -10,6 +12,8 @@ export function createPaymentAcceptanceWaitWorkload(options: {
   pollIntervalMs: number;
   drainDeadlineMs: number;
   readonly onSnapshot?: Parameters<typeof createOutboxWorkload>[0]["onSnapshot"];
+  /** Supervised cycle failures (pilot workers): one failure never stops sibling workloads. */
+  readonly supervision?: Parameters<typeof createOutboxWorkload>[0]["supervision"];
 }) {
   if (!Number.isInteger(options.pageSize) || options.pageSize < 1 || options.pageSize > 100)
     throw new TypeError("PAYMENT_WAIT_CONFIG_INVALID");
@@ -17,6 +21,7 @@ export function createPaymentAcceptanceWaitWorkload(options: {
   let stopping = false;
   const workload = createOutboxWorkload({
     ...(options.onSnapshot ? { onSnapshot: options.onSnapshot } : {}),
+    ...(options.supervision ? { supervision: options.supervision } : {}),
     pollIntervalMs: options.pollIntervalMs,
     drainDeadlineMs: options.drainDeadlineMs,
     dispatcher: {

@@ -71,6 +71,7 @@ export function createTenantTransactionRunner(
         let active = true;
         let failed = false;
         let conflicted = false;
+        let conflictDiagnostic: ReturnType<typeof tenantContextDatabaseDiagnostic> | null = null;
         let concurrent = false;
         let pending = 0;
         try {
@@ -96,12 +97,16 @@ export function createTenantTransactionRunner(
                   failed = true;
                   // Lock timeout, serialization failure and deadlock leave nothing committed; the
                   // caller may rerun the whole idempotent transaction. No SQL detail is exposed.
-                  if (retryableSqlStates.has(sqlState(error))) conflicted = true;
+                  const diagnostic = tenantContextDatabaseDiagnostic(error);
+                  if (retryableSqlStates.has(sqlState(error))) {
+                    conflicted = true;
+                    conflictDiagnostic ??= diagnostic;
+                  }
                   throw new TenantContextDatabaseError(
                     conflicted
                       ? "TENANT_DATABASE_TRANSACTION_CONFLICT"
                       : "TENANT_DATABASE_TRANSACTION_FAILED",
-                    tenantContextDatabaseDiagnostic(error),
+                    diagnostic,
                   );
                 } finally {
                   pending -= 1;
@@ -116,6 +121,7 @@ export function createTenantTransactionRunner(
                 : conflicted
                   ? "TENANT_DATABASE_TRANSACTION_CONFLICT"
                   : "TENANT_DATABASE_TRANSACTION_FAILED",
+              conflicted ? conflictDiagnostic : null,
             );
           return result;
         } catch (error) {
@@ -123,8 +129,12 @@ export function createTenantTransactionRunner(
           // and concurrent use of the transaction as the programming error it is.
           if (concurrent)
             throw new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_CONCURRENT_QUERY");
+          // The first conflict's SQLSTATE stays visible to logging (lock timeout vs serialization).
           if (conflicted)
-            throw new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_CONFLICT");
+            throw new TenantContextDatabaseError(
+              "TENANT_DATABASE_TRANSACTION_CONFLICT",
+              conflictDiagnostic,
+            );
           throw error;
         } finally {
           active = false;
