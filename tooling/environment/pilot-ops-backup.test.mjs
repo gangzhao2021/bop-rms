@@ -1,9 +1,12 @@
 import { Buffer } from "node:buffer";
+import { execFile } from "node:child_process";
+import process from "node:process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
+  classifyRestoreFailure,
   createDirectoryOffsiteTarget,
   decideBackupRun,
   decryptFile,
@@ -191,5 +194,153 @@ describe("WP-2423 Q13 scheduled backup cycle", () => {
     expect(next.lastSuccessFile).toBe(file);
     expect(next.restoreCheck.result).toBe("Failed");
     expect(next.offsite.result).toBe("Failed");
+  });
+  it("records the backup's own completion time, not the time the cycle started", async () => {
+    const file = "bop_rms_pilot_v15-20261015T083100Z.dump";
+    const finished = after + 17_000;
+    const next = await runBackupCycle({
+      now: after,
+      clock: () => finished,
+      runtimeDirectory: ".local/pilot-test",
+      installation,
+      backup: { ...backup, restoreCheck: false },
+      status: emptyBackupStatus(),
+      script: async () => ({
+        ok: true,
+        line: `PILOT_BACKUP_CREATED ${file} tables=1 rows=1 bytes=1`,
+        reason: null,
+      }),
+    });
+    expect(next.lastSuccessAt).toBe(new Date(finished).toISOString());
+    expect(next.lastAttempt.at).toBe(new Date(after).toISOString());
+  });
+  it("records why the restore failed (exit status, error class, table) without data values", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ops-restore-"));
+    const file = "bop_rms_pilot_v15-20261015T083100Z.dump";
+    const errorsFile = "drill-20261015T083400Z.restore-errors.txt";
+    await fs.writeFile(
+      path.join(dir, errorsFile),
+      [
+        'pg_restore: error: could not execute query: ERROR:  insert or update on table "payment_attempt" violates foreign key constraint "payment_attempt_order_fk"',
+        'DETAIL:  Key (order_id)=(4f1c-secret-value) is not present in table "order_header".',
+        "Command was: ALTER TABLE ONLY rms_payment.payment_attempt",
+        "    ADD CONSTRAINT payment_attempt_order_fk FOREIGN KEY (order_id) REFERENCES rms_ordering.order_header(order_id);",
+        "pg_restore: from TOC entry 6070; 2606 420397 FK CONSTRAINT payment_attempt payment_attempt_order_fk bop_rms_admin",
+      ].join("\n"),
+    );
+    const log = vi.fn();
+    const next = await runBackupCycle({
+      now: after,
+      runtimeDirectory: ".local/pilot-test",
+      installation,
+      backup: { ...backup, directory: dir },
+      status: emptyBackupStatus(),
+      log,
+      script: async (args) =>
+        args[0] === "backup"
+          ? { ok: true, line: `PILOT_BACKUP_CREATED ${file} tables=1 rows=1 bytes=1`, reason: null }
+          : { ok: false, line: "", reason: "restore", restoreExit: "1", restoreErrors: errorsFile },
+    });
+    const reason =
+      "restore exit=1 class=foreign_key_violation sqlstate=23503 item=FK_CONSTRAINT table=rms_payment.payment_attempt";
+    expect(next.restoreCheck).toMatchObject({ result: "Failed", file, reason });
+    expect(log).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "restore_check_failed", reason }),
+    );
+    expect(JSON.stringify(next)).not.toMatch(/secret-value|order_fk/u);
+    await fs.rm(dir, { recursive: true });
+  });
+});
+
+describe("WP-2423 Q13 restore check failure reasons", () => {
+  it("names the error class but never values from the message", () => {
+    expect(
+      classifyRestoreFailure({
+        exit: "1",
+        errors:
+          'pg_restore: error: COPY failed for table "menu_item": ERROR:  invalid input syntax for type integer: "Mrs Smith 555-0100"\nCONTEXT:  COPY menu_item, line 3',
+      }),
+    ).toBe("restore exit=1 class=invalid_text_representation sqlstate=22P02");
+    expect(
+      classifyRestoreFailure({
+        exit: "1",
+        errors:
+          'pg_restore: error: could not execute query: ERROR:  role "bop_rms_other" does not exist\nCommand was: ALTER TABLE rms_catalog.menu_item OWNER TO bop_rms_other;',
+      }),
+    ).toBe("restore exit=1 class=undefined_role sqlstate=42704 table=rms_catalog.menu_item");
+    expect(classifyRestoreFailure({ exit: "137", errors: "" })).toBe(
+      "restore exit=137 class=no_message",
+    );
+    expect(classifyRestoreFailure({ exit: "1", errors: "ERROR:  something new: 'x'" })).toBe(
+      "restore exit=1 class=other",
+    );
+    expect(
+      classifyRestoreFailure({ exit: null, differingTable: "rms_ordering.order_header" }),
+    ).toBe("rows differ table=rms_ordering.order_header");
+    expect(classifyRestoreFailure({ exit: null })).toBeNull();
+  });
+});
+
+describe("WP-2423 Q13 pilot-backup.sh drill with the local client (fake PostgreSQL programs)", () => {
+  // Fake pg_dump/pg_restore/psql: the "dump" is plain COPY text, so the script's own row counting
+  // works on it. The restore never reads its input (like pg_restore after the last item it needs).
+  const fakes = {
+    pg_dump: `#!/bin/sh\nhead -c 2000000 /dev/zero | tr '\\0' 'x' >/dev/null\nprintf 'COPY rms_catalog.menu_item (id) FROM stdin;\\n1\\n2\\n\\\\.\\n'\nhead -c 3000000 /dev/zero | tr '\\0' '#'\n`,
+    pg_restore: `#!/bin/sh\ncase " $* " in *" --data-only "*) cat; exit 0;; esac\nif [ -n "$FAKE_RESTORE_ERROR" ]; then echo "pg_restore: error: could not execute query: ERROR:  permission denied for schema rms_catalog" >&2; echo "Command was: ALTER TABLE ONLY rms_catalog.menu_item OWNER TO x;" >&2; exit 1; fi\nexit 0\n`,
+    psql: `#!/bin/sh\ncase "$*" in *"FROM ONLY"*) printf 'SET\\nrms_catalog.menu_item\\t%s\\n' "\${FAKE_ROWS:-2}";; *pg_database*) echo 0;; *server_version*) echo 18.4;; esac\nexit 0\n`,
+  };
+  async function setup() {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "ops-drill-"));
+    await fs.mkdir(path.join(root, "bin"));
+    for (const [name, body] of Object.entries(fakes))
+      await fs.writeFile(path.join(root, "bin", name), body, { mode: 0o755 });
+    await fs.writeFile(path.join(root, "password"), "not-a-real-password\n", { mode: 0o600 });
+    return root;
+  }
+  const run = (root, args, env = {}) =>
+    new Promise((resolve) => {
+      execFile(
+        "bash",
+        [
+          path.resolve("tooling/environment/pilot-backup.sh"),
+          ...args,
+          "--client",
+          "local",
+          "--port",
+          "55435",
+          "--database",
+          "bop_rms_pilot_test",
+          "--user",
+          "bop_rms_admin",
+          "--password-file",
+          path.join(root, "password"),
+          "--dir",
+          path.join(root, "backups"),
+        ],
+        { env: { PATH: `${path.join(root, "bin")}:${process.env.PATH}`, ...env } },
+        (error, stdout, stderr) => resolve({ code: error?.code ?? 0, stdout, stderr }),
+      );
+    });
+  it("matches when pg_restore succeeds without reading the whole backup, and reports failures", async () => {
+    const root = await setup();
+    const created = await run(root, ["backup"]);
+    expect(created.stdout).toMatch(/^PILOT_BACKUP_CREATED \S+ tables=1 rows=2 /u);
+    const matched = await run(root, ["drill"]);
+    expect(matched.stdout).toMatch(/^PILOT_RESTORE_DRILL_MATCHED \S+ tables=1 rows=2 /u);
+    const failed = await run(root, ["drill"], { FAKE_RESTORE_ERROR: "1" });
+    expect(failed.code).toBe(1);
+    const errorsFile = /PILOT_RESTORE_FAILED exit=1 errors=(\S+)/u.exec(failed.stderr)?.[1];
+    expect(failed.stderr).not.toMatch(/permission denied/u);
+    expect(
+      classifyRestoreFailure({
+        exit: "1",
+        errors: await fs.readFile(path.join(root, "backups", errorsFile), "utf8"),
+      }),
+    ).toBe(
+      "restore exit=1 class=insufficient_privilege sqlstate=42501 table=rms_catalog.menu_item",
+    );
+    const differs = await run(root, ["drill"], { FAKE_ROWS: "1" });
+    expect(differs.stderr).toMatch(/PILOT_RESTORE_DIFFERS table=rms_catalog\.menu_item/u);
+    await fs.rm(root, { recursive: true });
   });
 });

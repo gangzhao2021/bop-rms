@@ -82,10 +82,127 @@ export function runBackupScript(args, { cwd = process.cwd(), timeoutMs = 60 * 60
       clearTimeout(timer);
       // The script prints only file names, counts and fixed reasons (never credentials).
       const reason = /PILOT_BACKUP_UNAVAILABLE: ([a-z ]{1,40})/u.exec(err)?.[1] ?? null;
-      resolve({ ok: code === 0, line: out.trim().split("\n").at(-1) ?? "", reason });
+      const restore = RESTORE_FAILED.exec(err);
+      const differs = RESTORE_DIFFERS.exec(err);
+      resolve({
+        ok: code === 0,
+        line: out.trim().split("\n").at(-1) ?? "",
+        reason,
+        restoreExit: restore?.[1] ?? null,
+        restoreErrors: restore?.[2] ?? null,
+        differingTable: differs?.[1] ?? null,
+      });
     });
     child.on("error", () => resolve({ ok: false, line: "", reason: "spawn" }));
   });
+}
+
+const RESTORE_FAILED =
+  /PILOT_RESTORE_FAILED exit=((?:input-)?[0-9]{1,3}) errors=(drill-[0-9]{8}T[0-9]{6}Z\.restore-errors\.txt)/u;
+const IDENTIFIER = "[a-z_][a-z0-9_]{0,62}";
+const TABLE = new RegExp(`^${IDENTIFIER}\\.${IDENTIFIER}$`, "u");
+const RESTORE_DIFFERS = new RegExp(
+  `PILOT_RESTORE_DIFFERS table=(${IDENTIFIER}\\.${IDENTIFIER})`,
+  "u",
+);
+
+// PostgreSQL server and pg_restore messages mapped to an error class and SQLSTATE. pg_restore does
+// not print SQLSTATEs, so the class is recognised from the fixed message text; nothing else of
+// the message (which can contain key values or input data) is recorded.
+const RESTORE_ERROR_CLASSES = [
+  [/violates foreign key constraint/u, "foreign_key_violation", "23503"],
+  [/violates unique constraint|could not create unique index/u, "unique_violation", "23505"],
+  [/violates not-null constraint/u, "not_null_violation", "23502"],
+  [/violates check constraint/u, "check_violation", "23514"],
+  [/violates exclusion constraint/u, "exclusion_violation", "23P01"],
+  [/violates row-level security policy/u, "insufficient_privilege", "42501"],
+  [
+    /permission denied|must be owner of|must be superuser|must be member of|must be able to SET ROLE/u,
+    "insufficient_privilege",
+    "42501",
+  ],
+  [/role "[^"]*" does not exist/u, "undefined_role", "42704"],
+  [/relation "[^"]*" does not exist/u, "undefined_table", "42P01"],
+  [/schema "[^"]*" does not exist/u, "invalid_schema_name", "3F000"],
+  [/function .* does not exist/u, "undefined_function", "42883"],
+  [
+    /extension "[^"]*" is not available|could not open extension control file/u,
+    "undefined_file",
+    "58P01",
+  ],
+  [/(?:type|operator|collation|text search \w+) .* does not exist/u, "undefined_object", "42704"],
+  [/already exists/u, "duplicate_object", "42710"],
+  [/statement timeout/u, "query_canceled", "57014"],
+  [/lock timeout/u, "lock_not_available", "55P03"],
+  [/transaction timeout|idle-in-transaction timeout/u, "transaction_timeout", "25P04"],
+  [/deadlock detected/u, "deadlock_detected", "40P01"],
+  [/out of shared memory/u, "out_of_shared_memory", "53200"],
+  [/out of memory/u, "out_of_memory", "53200"],
+  [/No space left on device|could not extend file/u, "disk_full", "53100"],
+  [/invalid input syntax|invalid input value/u, "invalid_text_representation", "22P02"],
+  [/value too long/u, "string_data_right_truncation", "22001"],
+  [/syntax error/u, "syntax_error", "42601"],
+  [
+    /terminating connection|server closed the connection|connection to server|could not connect/u,
+    "connection_failure",
+    "08006",
+  ],
+  [/could not find block ID|out-of-order restore|non-seekable/u, "archive_out_of_order", null],
+  [
+    /unsupported version|did not find magic string|not a valid archive/u,
+    "archive_unsupported",
+    null,
+  ],
+  [/could not read from input file|unexpected end of file|corrupt/u, "archive_read_failed", null],
+];
+const TOC_ITEM =
+  /from TOC entry [0-9]+; [0-9]+ [0-9]+ (TABLE DATA|TABLE|FK CONSTRAINT|CONSTRAINT|INDEX|TRIGGER|RULE|POLICY|ROW SECURITY|ACL|DEFAULT ACL|DEFAULT|SEQUENCE SET|SEQUENCE OWNED BY|SEQUENCE|FUNCTION|PROCEDURE|AGGREGATE|TYPE|DOMAIN|VIEW|MATERIALIZED VIEW DATA|MATERIALIZED VIEW|SCHEMA|EXTENSION|COMMENT|EVENT TRIGGER|PUBLICATION|SUBSCRIPTION|DATABASE PROPERTIES|DATABASE) /u;
+
+/**
+ * A safe one-line reason for a failed restore check: pg_restore's exit status, the class and
+ * SQLSTATE of the first error, the kind of archive item and the schema.table it concerned. Data
+ * values, constraint names and the rest of the message are never included.
+ */
+export function classifyRestoreFailure({ exit, errors = "", differingTable = null }) {
+  if (differingTable !== null)
+    return TABLE.test(differingTable) ? `rows differ table=${differingTable}` : "rows differ";
+  if (exit === null) return null;
+  const lines = errors.split("\n");
+  const first =
+    lines.find((line) => /\bERROR:/u.test(line)) ??
+    lines.find((line) => /pg_restore: error:/u.test(line)) ??
+    "";
+  const parts = [`restore exit=${exit}`];
+  const known = RESTORE_ERROR_CLASSES.find(([pattern]) => pattern.test(first));
+  if (known) {
+    parts.push(`class=${known[1]}`);
+    if (known[2] !== null) parts.push(`sqlstate=${known[2]}`);
+  } else parts.push(first === "" ? "class=no_message" : "class=other");
+  const item = TOC_ITEM.exec(errors)?.[1];
+  if (item) parts.push(`item=${item.replaceAll(" ", "_")}`);
+  // "Command was: ALTER TABLE ONLY s.t ..." / "COPY s.t (...)" / 'table "s.t"' / 'relation "s.t"'.
+  const table = new RegExp(
+    `(?:Command was: (?:ALTER TABLE ONLY|ALTER TABLE|CREATE TABLE|COPY|CREATE POLICY \\S+ ON|CREATE TRIGGER \\S+ .*? ON|CREATE RULE \\S+ AS .*? TO|CREATE (?:UNIQUE )?INDEX \\S+ ON(?: ONLY)?|GRANT .*? ON TABLE) |(?:table|relation) ")(${IDENTIFIER}\\.${IDENTIFIER})\\b`,
+    "u",
+  ).exec(errors)?.[1];
+  if (table && TABLE.test(table)) parts.push(`table=${table}`);
+  return parts.join(" ");
+}
+
+async function readRestoreErrors(directory, name) {
+  if (name === null) return "";
+  try {
+    const handle = await fs.open(path.join(directory, name), "r");
+    try {
+      const buffer = Buffer.alloc(16_384);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      return buffer.subarray(0, bytesRead).toString("utf8");
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return "";
+  }
 }
 
 // --- Encrypted off-site copies: AES-256-GCM, file name bound as associated data. ---
@@ -188,6 +305,7 @@ export async function createDirectoryOffsiteTarget(directory, { forbidden = [] }
  */
 export async function runBackupCycle({
   now,
+  clock = Date.now,
   runtimeDirectory,
   installation,
   backup,
@@ -236,22 +354,31 @@ export async function runBackupCycle({
     stage: "dump",
     attemptsLeft: 0,
   };
-  next.lastSuccessAt = stamp;
+  // The backup's own completion time (the cycle's start can be minutes earlier).
+  next.lastSuccessAt = new Date(clock()).toISOString();
   next.lastSuccessFile = file;
   next.lastSuccessLocalDate = local.date;
   log({ event: "backup_created", file });
   if (backup.restoreCheck) {
     const drill = await script(["drill", ...common, "--backup", path.join(backup.directory, file)]);
     const matched = drill.ok && drill.line.startsWith("PILOT_RESTORE_DRILL_MATCHED ");
+    const reason = matched
+      ? null
+      : (classifyRestoreFailure({
+          exit: drill.restoreExit ?? null,
+          errors: await readRestoreErrors(backup.directory, drill.restoreErrors ?? null),
+          differingTable: drill.differingTable ?? null,
+        }) ?? drill.reason);
     next.restoreCheck = {
-      at: new Date().toISOString(),
+      at: new Date(clock()).toISOString(),
       result: matched ? "Matched" : "Failed",
       file,
+      ...(matched ? {} : { reason }),
     };
     log({
       event: matched ? "restore_check_matched" : "restore_check_failed",
       file,
-      reason: drill.reason,
+      reason,
     });
     await pruneDrillRecords(backup.directory, backup.keep);
   }
@@ -289,7 +416,7 @@ export async function runBackupCycle({
 }
 async function pruneDrillRecords(directory, keep) {
   const records = (await fs.readdir(directory).catch(() => []))
-    .filter((name) => /^drill-[0-9]{8}T[0-9]{6}Z\.json$/u.test(name))
+    .filter((name) => /^drill-[0-9]{8}T[0-9]{6}Z\.(?:json|restore-errors\.txt)$/u.test(name))
     .sort()
     .reverse();
   for (const old of records.slice(keep)) await fs.rm(path.join(directory, old), { force: true });

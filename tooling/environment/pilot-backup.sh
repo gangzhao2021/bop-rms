@@ -149,9 +149,37 @@ trap cleanup EXIT
 in_container psql --dbname=postgres -qAtX -c "CREATE DATABASE \"$drill\"" </dev/null >/dev/null ||
   fail "create drill database"
 started=$(date -u +%s)
-{ tr -d '\r\n' <"$password_file"; printf '\n'; cat "$backup"; } | tool sh -c \
-  'IFS= read -r p; export PGPASSWORD="$p"; exec pg_restore -h 127.0.0.1 -p "$1" -U "$2" --dbname="$3" --exit-on-error --single-transaction' \
-  sh "$port" "$user" "$drill" || fail "restore"
+# pg_restore's own messages go to a private file beside the backups (same trust boundary as the
+# dump); on failure only its exit status and that file's name are printed, and the ops monitor
+# records a classified reason without data values.
+errors="$dir/drill-$(date -u +%Y%m%dT%H%M%SZ).restore-errors.txt"
+restore_failed() {
+  echo "PILOT_RESTORE_FAILED exit=$1 errors=$(basename "$errors")" >&2
+  fail "restore"
+}
+set +e
+if [[ $client == local ]]; then
+  # A seekable file argument: pg_restore reads only what it needs, nothing is piped.
+  { tr -d '\r\n' <"$password_file"; printf '\n'; } | sh -c \
+    'IFS= read -r p; export PGPASSWORD="$p"; exec pg_restore -h 127.0.0.1 -p "$1" -U "$2" --dbname="$3" --exit-on-error --single-transaction "$4"' \
+    sh "$port" "$user" "$drill" "$backup" 2>"$errors"
+  statuses=("${PIPESTATUS[@]}")
+  restore_status=${statuses[1]} writer_status=${statuses[0]}
+else
+  # Streamed into the database container. pg_restore stops reading after the last item it needs,
+  # so the writer may end with SIGPIPE (141); success is pg_restore's own exit status (with
+  # --exit-on-error every item was restored), and the row counts are compared below.
+  { tr -d '\r\n' <"$password_file"; printf '\n'; cat "$backup"; } | tool sh -c \
+    'IFS= read -r p; export PGPASSWORD="$p"; exec pg_restore -h 127.0.0.1 -p "$1" -U "$2" --dbname="$3" --exit-on-error --single-transaction' \
+    sh "$port" "$user" "$drill" 2>"$errors"
+  statuses=("${PIPESTATUS[@]}")
+  restore_status=${statuses[1]} writer_status=${statuses[0]}
+  [[ $writer_status == 141 ]] && writer_status=0
+fi
+set -e
+[[ $restore_status == 0 ]] || restore_failed "$restore_status"
+[[ $writer_status == 0 ]] || restore_failed "input-$writer_status"
+rm -f "$errors"
 query=""
 while IFS=$'\t' read -r table _; do
   [[ $table =~ ^[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*$ ]] || fail "table name"
@@ -159,7 +187,13 @@ while IFS=$'\t' read -r table _; do
 done <<<"$manifest_counts"
 restored=$(in_container psql --dbname="$drill" -AtX -c "SET row_security = off" -c "$query" </dev/null |
   grep -v '^SET$' | LC_ALL=C sort)
-[[ $restored == "$manifest_counts" ]] || fail "restored rows differ from backup"
+if [[ $restored != "$manifest_counts" ]]; then
+  # The first table whose restored count differs (a schema.table identifier, never row data).
+  differing=$(diff <(printf '%s\n' "$manifest_counts") <(printf '%s\n' "$restored") |
+    sed -nE 's/^[<>] ([a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*)\t.*/\1/p' | head -n 1) || true
+  echo "PILOT_RESTORE_DIFFERS table=${differing:-unknown}" >&2
+  fail "restored rows differ from backup"
+fi
 seconds=$(($(date -u +%s) - started))
 tables=$(printf '%s\n' "$manifest_counts" | wc -l | tr -d ' ')
 rows=$(printf '%s\n' "$manifest_counts" | awk -F '\t' '{s += $2} END {print s}')
