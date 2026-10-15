@@ -7,6 +7,10 @@ const doubles = vi.hoisted(() => ({
   lock: vi.fn(),
   list: vi.fn(),
   get: vi.fn(),
+  roundDates: vi.fn(),
+}));
+vi.mock("./merchant-round-business-date.js", () => ({
+  createMerchantRoundBusinessDates: () => doubles.roundDates,
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => doubles.scope }));
 vi.mock("@rms/kitchen", async (original) => ({
@@ -169,6 +173,51 @@ it("DEC-KITCHEN-STALE-TICKETS: labels each ticket with its Order's business day,
   ]);
   expect(result.canCloseEarlierDayTickets).toBe(true);
   expect(f.authorizeAction).toHaveBeenCalledWith("kitchen.ticket.close_stale");
+});
+it("WP-2423 D4: a round added today to a table opened on an earlier day is today's kitchen work", async () => {
+  const f = setup();
+  doubles.scope.mockResolvedValue({
+    actorReference: id(2),
+    selected: { tenantReference: id(1) },
+    context: { brand: { brandReference: id(3) } },
+    store: { storeReference: id(4), timeZone: "America/Toronto" },
+    allowed: f.allowed,
+    authorizeAction: f.authorizeAction,
+  });
+  doubles.list.mockResolvedValue({
+    items: [
+      // The table's first round (Oct 11) and a round added today (Oct 15), one Order.
+      { workItemReference: id(5), ticketReference: id(7), orderBatchReference: id(20) },
+      { workItemReference: id(8), ticketReference: id(10), orderBatchReference: id(21) },
+    ].map((item) => ({
+      ...item,
+      orderReference: id(6),
+      ticketAggregateVersion: 3n,
+      workItemVersion: 2n,
+    })),
+  });
+  f.tx.query.mockImplementation((async (sql: string) =>
+    sql.includes("business_date::text")
+      ? { rows: [{ order_id: id(6), business_date: "2026-10-11" }], rowCount: 1 }
+      : { rows: [], rowCount: 0 }) as never);
+  doubles.roundDates.mockResolvedValue(
+    new Map([
+      [id(20), "2026-10-11"],
+      [id(21), "2026-10-15"],
+    ]),
+  );
+  const result = (await f.operation(f.input)) as {
+    items: { workItemReference: string; businessDate: string | null }[];
+  };
+  expect(doubles.roundDates.mock.calls[0]?.[1]).toEqual([id(20), id(21)]);
+  expect(result.items.map((item) => [item.workItemReference, item.businessDate])).toEqual([
+    [id(5), "2026-10-11"],
+    [id(8), "2026-10-15"],
+  ]);
+  // A round whose date can't be resolved keeps the Order's date (the earlier behaviour).
+  doubles.roundDates.mockResolvedValue(new Map());
+  const fallback = (await f.operation(f.input)) as typeof result;
+  expect(fallback.items.map((item) => item.businessDate)).toEqual(["2026-10-11", "2026-10-11"]);
 });
 it("WP-2423 Q3: serves the published menu disclosure per work item and restores Store scope", async () => {
   const f = setup();

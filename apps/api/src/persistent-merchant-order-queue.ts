@@ -22,12 +22,16 @@ import {
 import {
   createPostgresCardMachinePaymentStore,
   listStoreOrderBatchPaymentOutcomes,
+  listStoreOrderBatchesWithOnlinePayment,
   listStoreOrderOnlinePaidTotals,
 } from "@rms/payment";
 import { createPostgresCurrentBrowserSessionSource } from "@bop/identity";
+import { randomBytes } from "node:crypto";
+import { readStaffDiningRoundPaymentPreparation } from "./staff-dining-round-payment-preparation.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import { createMerchantOrderQueueRead } from "./merchant-order-queue-read.js";
+import { createMerchantBusinessDayWindows } from "./merchant-business-day-window.js";
 import {
   readCardMachineCancellationRefund,
   readStaffCancellationRefundStatus,
@@ -97,17 +101,21 @@ export function createPersistentMerchantOrderQueue(options: {
               "ordering.operate",
               session.sessionReference,
             );
-            if ((await resolved.allowed()) !== true) return unavailable();
+            // The read's permission and the actions it offers, from one current-fact read.
+            const decisions = await resolved.authorizeActions([
+              "ordering.operate",
+              "order.accept",
+              staffOrderCancellationPermission,
+            ]);
+            if (decisions.get("ordering.operate")?.effect !== "Allow") return unavailable();
             return Object.freeze({
               session,
               resolved,
               acceptanceAllowed:
                 options.acceptanceConfigured === true &&
-                (await resolved.authorizeAction("order.accept"))?.effect === "Allow",
+                decisions.get("order.accept")?.effect === "Allow",
               // WP-2423 Q6: staff cancellation is offered only to holders of ordering.order.cancel.
-              cancelAllowed:
-                (await resolved.authorizeAction(staffOrderCancellationPermission))?.effect ===
-                "Allow",
+              cancelAllowed: decisions.get(staffOrderCancellationPermission)?.effect === "Allow",
             });
           },
           recheck: async ({ resolved }) => (await resolved.allowed()) === true,
@@ -149,6 +157,19 @@ export function createPersistentMerchantOrderQueue(options: {
             transactions: { run: (work) => work(businessTransaction) },
             quoteVersion: options.quoteVersion,
             now: source.now,
+            // WP-2423 D4: the Store's current business day, so an older table's Order with a
+            // round today is listed with today's orders.
+            today: (tx) =>
+              createMerchantBusinessDayWindows({
+                persistence: source,
+                scope: {
+                  tenantReference: String(resolved.selected.tenantReference),
+                  brandReference: String(resolved.context.brand.brandReference),
+                  storeReference: String(resolved.store.storeReference),
+                },
+                timeZone: resolved.store.timeZone,
+                authorize: async (t) => authority.guard(t),
+              }).today(tx, source.now()),
             authorize: async (tx) => {
               if (!(await authority.guard(tx))) return null;
               return {
@@ -238,7 +259,15 @@ export function createPersistentMerchantOrderQueue(options: {
             .map((item) => item.orderReference);
           const paymentDeadlines = new Map<string, string>();
           const paymentOutcomes = new Map<string, BatchPaymentOutcome>();
+          // WP-2423 item 5: rounds whose payment was started (online here; card machine below).
+          const paymentStarted = new Set<string>();
           if (ownerScope !== null && diningOrders.length > 0) {
+            for (const batch of await listStoreOrderBatchesWithOnlinePayment(
+              businessTransaction,
+              ownerScope,
+              diningOrders,
+            ))
+              paymentStarted.add(batch);
             for (const entry of await listStoreDiningBatchPaymentDeadlines(
               businessTransaction,
               ownerScope,
@@ -319,6 +348,8 @@ export function createPersistentMerchantOrderQueue(options: {
             {
               recordedAfterOutage: boolean;
               paidOnCardMachine: { amountMinor: string; takenAt: string } | null;
+              /** WP-2423 D5: what to charge on the card machine while it is unpaid (else null). */
+              amountDueMinor: string | null;
             }
           >();
           let confirmed: ReadonlySet<string> = new Set<string>();
@@ -367,8 +398,12 @@ export function createPersistentMerchantOrderQueue(options: {
               scope: scoped,
               authorize: async () => stillAllowed(),
             });
+            // One read for every counter order's card-machine payment (and its refunds).
+            const counterPayments = await cardPayments.listByOrders(businessTransaction, [
+              ...entries.keys(),
+            ]);
             for (const [order, entry] of entries) {
-              const paid = (await cardPayments.listByOrder(businessTransaction, order))[0];
+              const paid = counterPayments.get(order)?.[0];
               counter.set(order, {
                 recordedAfterOutage: entry.recordedAfterOutage,
                 paidOnCardMachine:
@@ -384,18 +419,54 @@ export function createPersistentMerchantOrderQueue(options: {
                       },
               });
             }
-            const rounds = await createPostgresStaffDiningRoundEntryStore({
+            const roundEntries = createPostgresStaffDiningRoundEntryStore({
               ...scoped,
               authorize: stillAllowed,
-            }).listByOrders(businessTransaction, orderReferences);
+            });
+            const rounds = await roundEntries.listByOrders(businessTransaction, orderReferences);
+            // One Payment read for every staff round on the page.
+            const roundPayments = await cardPayments.listByBatches(
+              businessTransaction,
+              [...rounds].map(([batch, round]) => ({
+                orderReference: round.orderReference,
+                orderBatchReference: batch,
+              })),
+            );
             for (const [batch, round] of rounds) {
-              const paid = await cardPayments.loadByBatch(
-                businessTransaction,
-                round.orderReference,
-                batch,
-              );
+              const paid = roundPayments.get(batch) ?? null;
+              // WP-2423 D5: an unpaid round can be paid from Orders too, for the amount the
+              // card-machine record checks (quote with tax plus the tip staff keyed), while its
+              // Dining payment clock is open. The amount is rebuilt from five owners' records, so
+              // only the one-order read (the order's page, or the list's payment form when staff
+              // open it) builds it; the list polled by every tablet does not.
+              let amountDueMinor: string | null = null;
+              if (paid === null && tenantReference !== null && input.orderReference !== undefined) {
+                const submitted = await roundEntries.loadBatch(
+                  businessTransaction,
+                  String(round.entry.guestSessionReference),
+                );
+                if (submitted !== null && String(submitted.orderBatchReference) === batch) {
+                  const due = await readStaffDiningRoundPaymentPreparation(
+                    businessTransaction,
+                    {
+                      scope: { tenantReference, ...scoped },
+                      now: source.now,
+                      nextPreparationReference: transientReference,
+                      authorize: async () => (await stillAllowed()) === true,
+                    },
+                    {
+                      submissionReference: String(submitted.submissionReference),
+                      guestSessionReference: String(round.entry.guestSessionReference),
+                      tipSelectionReference: String(round.entry.tipSelectionReference),
+                    },
+                  );
+                  amountDueMinor = due?.preparation.total.amountMinor.toString() ?? null;
+                }
+              }
+              if (paid !== null) paymentStarted.add(batch);
               staffRounds.set(batch, {
                 recordedAfterOutage: round.entry.recordedAfterOutage,
+                amountDueMinor,
                 paidOnCardMachine:
                   paid === null
                     ? null
@@ -657,6 +728,7 @@ export function createPersistentMerchantOrderQueue(options: {
                           paidBatches: payments.paidBatches,
                           deadlines: paymentDeadlines,
                           outcomes: paymentOutcomes,
+                          paymentStarted,
                         }),
                         canCancelItems:
                           openBatches.has(batch.orderBatchReference) &&
@@ -681,4 +753,11 @@ export function createPersistentMerchantOrderQueue(options: {
       await options.storePresence.observe(observed.scope);
     return view;
   };
+}
+
+/** A throwaway reference for a payment preparation built only to read its amount (never stored). */
+function transientReference(): string {
+  const time = Date.now().toString(16).padStart(12, "0");
+  const random = randomBytes(10).toString("hex");
+  return `${time.slice(0, 8)}-${time.slice(8, 12)}-7${random.slice(0, 3)}-${(8 + (Number.parseInt(random.slice(3, 4), 16) % 4)).toString(16)}${random.slice(4, 7)}-${random.slice(7, 19)}`;
 }

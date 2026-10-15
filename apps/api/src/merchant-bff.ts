@@ -208,12 +208,14 @@ import {
 } from "./merchant-order-acceptance-hold-refund.js";
 import {
   CardMachinePaymentCommandError,
+  type CardMachinePaymentAcceptance,
   type createMerchantCardMachinePayment,
 } from "./merchant-card-machine-payment.js";
 import {
   CardMachineRefundCommandError,
   type createMerchantCardMachineCancellationRefund,
 } from "./merchant-card-machine-refund.js";
+import type { createMerchantCardMachineOrdinaryRefund } from "./merchant-card-machine-ordinary-refund.js";
 import { PickupHandoffError, PickupProofError } from "@rms/fulfillment";
 import { UnmatchedCaptureRefundError } from "@rms/payment";
 import type { createMerchantUnmatchedCaptureRefund } from "./merchant-unmatched-capture-refund.js";
@@ -321,7 +323,10 @@ import type { createMerchantProductLifecycleCommand } from "./merchant-product-l
 import { PriceBookWorkflowError } from "@rms/pricing";
 import type { createMerchantPriceBookHttpCommand } from "./merchant-price-book-http-command.js";
 import type { createPersistentMerchantOrderQueue } from "./persistent-merchant-order-queue.js";
-import type { createMerchantOrderAcceptanceCommand } from "./merchant-order-acceptance-command.js";
+import {
+  MerchantOrderAcceptanceError,
+  type createMerchantOrderAcceptanceCommand,
+} from "./merchant-order-acceptance-command.js";
 import type { createMerchantDiningItemService } from "./merchant-dining-item-service.js";
 import type { createMerchantStoreConfiguration } from "./merchant-store-configuration.js";
 import type { createMerchantServiceControl } from "./merchant-service-control.js";
@@ -603,10 +608,19 @@ export interface MerchantBffRouterOptions {
   readonly counterOrder?: ReturnType<typeof createMerchantCounterOrder>;
   /** WP-2423 Q7 slice 2: staff enter a dine-in round for a table (or a paper round afterwards). */
   readonly staffDiningRound?: ReturnType<typeof createMerchantStaffDiningRound>;
-  /** WP-2423 Q7: staff record a payment the Store's card machine approved. */
-  readonly cardMachinePayment?: ReturnType<typeof createMerchantCardMachinePayment>;
+  /** WP-2423 Q7: staff record a payment the Store's card machine approved (and, D1, the server
+   * accepts the paid order or round with it: `withPaidBatchAcceptance`). */
+  readonly cardMachinePayment?: (
+    ...args: Parameters<ReturnType<typeof createMerchantCardMachinePayment>>
+  ) => Promise<
+    Awaited<ReturnType<ReturnType<typeof createMerchantCardMachinePayment>>> & {
+      readonly acceptance?: CardMachinePaymentAcceptance;
+    }
+  >;
   /** WP-2423 Q7: staff record the card-machine refund of a cancelled card-machine order. */
   readonly cardMachineRefund?: ReturnType<typeof createMerchantCardMachineCancellationRefund>;
+  /** WP-2423 item 4: staff record an item refund of a card-machine payment made on the machine. */
+  readonly cardMachineOrdinaryRefund?: ReturnType<typeof createMerchantCardMachineOrdinaryRefund>;
   /** WP-2423 P6: refund a Provider capture that matches no payment or Order. */
   readonly unmatchedCaptureRefund?: ReturnType<typeof createMerchantUnmatchedCaptureRefund>;
   /** WP-2423 Q5: the signed-in staff member re-verifies a second factor (MFA step-up). */
@@ -1751,6 +1765,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             sourceChannel: item.sourceChannel,
             // WP-2423 Q21: the Store business day the Order belongs to (order numbers restart daily).
             businessDate: item.businessDate,
+            // WP-2423 D4: the day it is listed under (today when an older table ordered today).
+            listedBusinessDate: item.listedBusinessDate,
             submittedAt: item.submittedAt,
             initialBatchReference: item.initialBatchReference,
             canRequestAcceptance: item.canRequestAcceptance,
@@ -1851,6 +1867,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             sourceChannel: item.sourceChannel,
             // WP-2423 Q21: the Store business day the Order belongs to (order numbers restart daily).
             businessDate: item.businessDate,
+            // WP-2423 D4: the day it is listed under (today when an older table ordered today).
+            listedBusinessDate: item.listedBusinessDate,
             submittedAt: item.submittedAt,
             initialBatchReference: item.initialBatchReference,
             canRequestAcceptance: item.canRequestAcceptance,
@@ -2156,6 +2174,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             dueAt: item.dueAt,
             ownerStatus: item.ownerStatus,
             sourceFinal: item.sourceFinal,
+            // WP-2423 D3: what a payment reconciliation difference is about (the read's own DTO).
+            ...(item.reconciliation === undefined ? {} : { reconciliation: item.reconciliation }),
           })),
         });
       })
@@ -5264,6 +5284,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             orderNumber: entry.orderNumber,
             requestReference: entry.requestReference,
             paymentIntentReferences: entry.paymentIntentReferences,
+            paymentMethod: entry.paymentMethod,
             currencyCode: entry.currencyCode,
             amountMinor: entry.amountMinor,
             reasonCode: entry.reasonCode,
@@ -5420,6 +5441,9 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             paymentAttemptReference: payment.paymentAttemptReference,
             paymentIntentReference: payment.paymentIntentReference,
             state: payment.state,
+            // WP-2423 item 4: refunded on the Store's card machine (recorded) or online.
+            method: payment.method,
+            refundedOnCardMachineAt: payment.refundedOnCardMachineAt,
             executionOperationReference: payment.executionOperationReference,
             executionApprovalReference: payment.executionApprovalReference,
             amountMinor: payment.amountMinor,
@@ -5458,6 +5482,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           orderBatchReference: result.orderBatchReference,
           observedAt: result.observedAt,
           paymentState: result.paymentState,
+          paymentMethod: result.paymentMethod,
           currencyCode: result.currencyCode,
           capturedAmountMinor: result.capturedAmountMinor,
           confirmedRefundMinor: result.confirmedRefundMinor,
@@ -5511,6 +5536,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
                     declinedByYou: entry.decline.declinedByYou,
                   },
             progress: entry.progress,
+            paymentMethod: entry.paymentMethod,
           })),
           items: result.items.map((item) => ({
             orderBatchReference: item.orderBatchReference,
@@ -5520,6 +5546,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             unclaimedQuantity: item.unclaimedQuantity,
             paymentCaptured: item.paymentCaptured,
             paymentIntentReference: item.paymentIntentReference,
+            paymentMethod: item.paymentMethod,
           })),
         }),
       )
@@ -10589,6 +10616,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           recordingReason: result.recordingReason,
           takenAt: result.takenAt,
           recordedAt: result.recordedAt,
+          // D1: whether the server accepted it with the payment (it is then in the kitchen).
+          acceptance: result.acceptance ?? "NotAccepted",
         });
       })
       .catch((error: unknown) => {
@@ -10651,12 +10680,58 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             CARD_MACHINE_REFUND_NOT_FOUND: [404, "card_machine_refund_not_found"],
             CARD_MACHINE_REFUND_NOTHING_OWED: [409, "nothing_to_refund"],
             CARD_MACHINE_REFUND_IDEMPOTENCY_CONFLICT: [409, "card_machine_refund_conflict"],
+            CARD_MACHINE_REFUND_APPROVAL_REQUIRED: [409, "approval_required"],
             CARD_MACHINE_REFUND_UNAVAILABLE: [503, "card_machine_refund_unavailable"],
           } as const
         )[error.code];
         response.status(status).set("Cache-Control", NO_STORE).json({ error: code });
       });
   });
+  // WP-2423 item 4: an ordinary (item) refund of a card-machine payment was made on the Store's
+  // machine; staff record it (after the approval, when one is needed).
+  router.post(
+    "/payments/refunds/card-machine-record",
+    sameOriginMutation(options),
+    (request, response) => {
+      const auth = mutation(request, response);
+      if (auth === null) return;
+      if (!options.cardMachineOrdinaryRefund) {
+        response.status(503).json({ error: "card_machine_refund_unavailable" });
+        return;
+      }
+      void options
+        .cardMachineOrdinaryRefund({ ...auth, command: request.body })
+        .then((result) => {
+          response.set("Cache-Control", NO_STORE);
+          response.json({
+            status: result.status,
+            orderReference: result.orderReference,
+            requestReference: result.requestReference,
+            amountMinor: result.amountMinor,
+            refundedAt: result.refundedAt,
+            receipt: result.receipt,
+          });
+        })
+        .catch((error: unknown) => {
+          if (!(error instanceof CardMachineRefundCommandError)) {
+            denied(response);
+            return;
+          }
+          const [status, code] = (
+            {
+              CARD_MACHINE_REFUND_INPUT_INVALID: [400, "card_machine_refund_input_invalid"],
+              CARD_MACHINE_REFUND_PERMISSION_DENIED: [403, "card_machine_refund_permission_denied"],
+              CARD_MACHINE_REFUND_NOT_FOUND: [404, "card_machine_refund_not_found"],
+              CARD_MACHINE_REFUND_NOTHING_OWED: [409, "nothing_to_refund"],
+              CARD_MACHINE_REFUND_IDEMPOTENCY_CONFLICT: [409, "card_machine_refund_conflict"],
+              CARD_MACHINE_REFUND_APPROVAL_REQUIRED: [409, "approval_required"],
+              CARD_MACHINE_REFUND_UNAVAILABLE: [503, "card_machine_refund_unavailable"],
+            } as const
+          )[error.code];
+          response.status(status).set("Cache-Control", NO_STORE).json({ error: code });
+        });
+    },
+  );
   // WP-2423 Q9-G1: a manager decides to refund an order paid online while the Store was offline.
   router.post(
     "/orders/acceptance-hold/refund",
@@ -10878,7 +10953,27 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           acceptedOrderVersion: result.acceptedOrderVersion,
         }),
       )
-      .catch(() => denied(response));
+      .catch((error: unknown) => {
+        // WP-2423 D1: an authorized acceptance that did not happen is a conflict the page explains
+        // (the order changed, someone accepted it already, or it can no longer be accepted), not a
+        // permission refusal.
+        if (!(error instanceof MerchantOrderAcceptanceError)) {
+          denied(response);
+          return;
+        }
+        response
+          .status(409)
+          .set("Cache-Control", NO_STORE)
+          .json({
+            error: (
+              {
+                ORDER_ACCEPTANCE_VERSION_CONFLICT: "order_changed",
+                ORDER_ACCEPTANCE_ALREADY_ACCEPTED: "already_accepted",
+                ORDER_ACCEPTANCE_NOT_ACCEPTABLE: "order_not_acceptable",
+              } as const
+            )[error.code],
+          });
+      });
   });
 
   router.post("/service-control", sameOriginMutation(options), (request, response) => {

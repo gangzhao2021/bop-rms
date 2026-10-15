@@ -72,3 +72,24 @@ Current delivery status: eligibility policy and forward schema are implemented; 
 constraints have rollback-only PostgreSQL evidence. The live runtime still has no recovery
 tables. Atomic scheduling has rollback-only PostgreSQL evidence. Worker single-invocation orchestration has bounded timeout/late-result tests. Durable claim has rollback-only PostgreSQL evidence; the complete-consumer Inbox verifier is implemented. Fenced completion has rollback-only PostgreSQL evidence for complete receipt gating, publication, resolution and failure rollback. Operator composition, application-role/concurrent execution acceptance
 and actual recovery remain incomplete and must precede enabling it.
+
+## DEC-PILOT-EVENT-ROUTING — 品牌级事件发布与"本部署无订阅者"（WP-2423 5e，2026-10-15）
+
+问题：v15 上 `AvailabilityRule*`（attempt_count 0）以及更早的商品/菜单/价目/配方编辑事件一直未发布。
+根因：这些事件属于品牌（`store_id` 为空）；发件箱领取只在"当前无门店"的范围里领取品牌事件
+（`dispatch-outbox.ts` 领取条件），而试点业务 worker 只按"本品牌 + 本门店"一个范围领取（`pilot-worker.mjs`），
+所以品牌事件从未被领取。若只补上品牌范围，这些事件在试点中没有已部署的消费者，传输会拒绝
+（`TRANSPORT_REJECTED`）并进入死信，同样不对。
+
+决定：
+
+1. 试点 worker 按"本门店"和"本品牌（无门店）"两个范围领取（`pilot-event-routing.mjs`），每个范围每轮最多 5 条，
+   品牌编辑积压不会拖慢门店订单事件。授权仍只限绑定的品牌与门店。
+2. 目录中登记、但试点有意不部署的消费者逐个列出并写明原因（`pilotUndeployedConsumers`）：试点直接读取
+   所属领域的当前表（可售规则、商品、类目、选项、价目、税务配置、配方），菜单发布时在同一请求内投影顾客菜单
+   （失败可用 Rebuild 重投影）。只有"该类型的全部目录消费者都在此列表中"的事件，传输才按"已发布、本部署无订阅者"
+   确认（正常的 claim → published 状态转换，attempt_count 记 1）；其余没有已部署消费者的事件仍被拒绝，
+   缺接线的消费者（如此前的 `PaymentRefunded`）照样可见。若将来部署了列表中的消费者，组合会直接失败，须先移出列表。
+3. 不删除、不改写发件箱历史，不清零计数；已有的积压事件在 worker 重启后按正常领取与发布转换处理。
+   测试：`outbox-dispatcher` 隔离 PostgreSQL 新增用例（受限角色，修复前品牌事件停在 attempt 0），
+   `pilot-event-routing.test.mjs` 核对列表与事件目录一致。

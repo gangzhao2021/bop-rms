@@ -1,4 +1,5 @@
 import { consumeEventInTransaction } from "../../packages/bop/eventing/src/index.ts";
+import { createPostgresOrderBatchIdentitySource } from "../../packages/rms/ordering/src/index.ts";
 import {
   createPostgresCardMachinePaymentStore,
   parsePaymentSucceededEnvelope,
@@ -25,11 +26,26 @@ export function createInternalReceiptConsumer(resources, { createReceipt }) {
       if (!authorize(event)) throw new Error("INTERNAL_RECEIPT_SCOPE_DENIED");
       // WP-2423 Q7: a counter order paid on the Store's card machine has no customer device to
       // receive a digital receipt; the machine prints its own slip. Nothing to issue here.
+      // WP-2423 D2: a table's first round staff entered and took on the card machine does start the
+      // table's digital receipt (guests who join later see it, and later rounds — online or on the
+      // machine — are added to it), as for a first round a guest paid online.
       const card = await createPostgresCardMachinePaymentStore({
         scope: resources.scope,
         authorize: async () => authorize(event),
       }).loadByIntent(transaction, event.payload.paymentIntentReference);
-      if (card !== null) return { status: "completed" };
+      if (card !== null) {
+        const identity = await createPostgresOrderBatchIdentitySource({
+          ...resources.scope,
+          authorize: async () => authorize(event),
+        }).load(transaction, {
+          orderReference: String(card.orderReference),
+          orderBatchReference: String(card.orderBatchReference),
+          observedAt: resources.now(),
+        });
+        if (!identity) throw new Error("INTERNAL_RECEIPT_BATCH_UNAVAILABLE");
+        if (identity.orderType !== "DineIn" || identity.kind !== "Initial")
+          return { status: "completed" };
+      }
       const issuer = await createReceipt(resources, { run: (work) => work(transaction) });
       await issuer.issueOriginal({
         orderReference: event.payload.orderReference,

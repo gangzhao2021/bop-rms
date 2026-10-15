@@ -4,6 +4,10 @@ import {
   createPostgresOrderStatusProjectionStore,
   createPostgresOrderExecutionReader,
   createFulfillmentCompletedEventConsumerService,
+  createOrderCancelledEventConsumerService,
+  loadOrderBatchCheckoutCancellation,
+  orderBatchCheckoutCancellationDigest,
+  orderCancelledEventMatchesRecord,
   parseOrderStatusProjection,
 } from "../../packages/rms/ordering/src/index.ts";
 import { isPilotRuntime } from "./pilot-environment.mjs";
@@ -80,5 +84,49 @@ export async function createInternalOrderStatus(resources, { createCompletion })
     references,
     digests: { sha256: hash },
   });
-  return { created, completed, reader };
+  // WP-2423: an unpaid dine-in round the System cancelled advances the projection to the
+  // cancellation's Order version; phase and rounds stay as they were (shown from the record).
+  const cancelledProjections = createPostgresOrderStatusProjectionStore({
+    ...scope,
+    authorize: async () => active(),
+    validateCurrentSource: async (transaction, candidate) => {
+      const baseline = await reader.load({
+        transaction,
+        orderReference: candidate.snapshot.orderReference,
+      });
+      if (!baseline || baseline.snapshot.sourceVersion >= candidate.snapshot.sourceVersion)
+        return false;
+      const record = await loadOrderBatchCheckoutCancellation(
+        transaction,
+        scope,
+        candidate.snapshot.sourceCheckpoint,
+      );
+      if (
+        record === null ||
+        record.orderReference !== candidate.snapshot.orderReference ||
+        record.cancelledOrderVersion !== candidate.snapshot.sourceVersion ||
+        orderBatchCheckoutCancellationDigest(record) !== candidate.snapshot.sourceDigest
+      )
+        return false;
+      return (
+        candidate.freshnessStatus === "Fresh" &&
+        equal(candidate.snapshot) ===
+          equal({
+            ...baseline.snapshot,
+            sourceVersion: candidate.snapshot.sourceVersion,
+            sourceCheckpoint: candidate.snapshot.sourceCheckpoint,
+            sourceDigest: candidate.snapshot.sourceDigest,
+          })
+      );
+    },
+  });
+  const cancelled = createOrderCancelledEventConsumerService({
+    authorization: { authorize: authorized },
+    cancellations: {
+      matches: (transaction, event) => orderCancelledEventMatchesRecord(transaction, scope, event),
+    },
+    projections: cancelledProjections,
+    references,
+  });
+  return { created, completed, cancelled, reader };
 }

@@ -55,6 +55,38 @@
 
 ## 已知限制（后续）
 
-- 超过付款窗口仍未付款的店员轮次不会被关闭，只是不进厨房（与顾客从未发起付款的轮次相同，属剩余工作第 5 项"订单收尾一致性"）。
+- ~~超过付款窗口仍未付款的店员轮次不会被关闭~~：已由下方"实现决定（2026-10-15，剩余工作第 5 项）"解决——到期由系统取消（`PAYMENT_NOT_STARTED`），并提前在店员所在页面预警。
+- 店员只能在发送该轮的那个点单页面上记录刷卡机收款；离开该页面后（刷新、换设备），订单页与桌台页只显示截止时间与预警，不能补记。
+  到期未记录的轮次被取消；若刷卡机其实已扣款，按页面提示在刷卡机上退款，或在断网/误操作后用"Recorded after an outage"重新录入该轮（72 小时内）。
 - 刷卡机付款的部分/按菜品退款仍是剩余工作第 4 项；店员录入的一轮被门店取消时按 Q6 记录"刷卡机退款"。
 - 没有"整桌最后结账"：若门店将来改为先吃后付，需要另行决定挂账、厨房放行与付款的关系。
+
+## 实现决定（2026-10-15，剩余工作第 5 项"订单收尾一致性"，协调人按商用原则决定，Owner 可推翻）
+
+1. **到期关闭**：店员录入的一轮（以及顾客提交后从未开始付款的一轮）在付款窗口结束（封存后 30 分钟）时仍无任何付款——没有线上付款意向，
+   也没有刷卡机收款记录——由系统取消。这与"付款失败的一轮到期取消"是同一个机制：同一 Pilot 工作流转换（`UnpaidDineInBatchCancellation`，
+   权限 `order.batch.cancel.expired`，内容不变、无需重新发布）、同一只追加的 Ordering 取消记录 `order_batch_checkout_cancellation`、
+   同一事务内释放库存预留（与其他未付关闭相同的释放）、同一审计 `ORDERING_BATCH_CHECKOUT_CANCELLED`，原因区分为
+   `PAYMENT_NOT_STARTED`（付款失败仍为 `CHECKOUT_DEADLINE_REACHED`）。不新建并行机制，由现有业务 worker 的未付批次取消任务执行。
+2. **只在确实没收钱时取消**：取消前在付款操作围栏下重读 Payment：只要该轮有线上付款意向（不论结果）或刷卡机收款记录，就不取消
+   （`NotEligible`，等待付款结果，钱可能已经动了）；数据库触发器另行拒绝 Ordering 已记录付款（等待接单或付款处置）的一轮，并要求所依据的
+   到期证据是该轮最新的一条（迁移 `2000_056`）。付款准入在截止后拒绝新付款，因此取消后不会再被收费；若仍有付款到达，沿用已有的
+   "已付款无法履约（SubmissionCancelled）"自动退款。没有扣款，所以取消本身不退任何钱。
+3. **事件**：每次系统取消一轮都在同一事务发布 Ordering 的 `OrderCancelled` v1（Handoff 第 48.4.4 / 52.16 节 `rms.ordering.OrderCancelled.v1`；
+   Order 聚合、版本为取消后的订单版本、System 操作者、只含引用、原因、菜品数与记录摘要）。试点部署其消费者
+   `ordering.order-status-projection:v1`：顾客订单状态投影推进到该版本与检查点；阶段与轮次不变（DEC-PILOT-BATCH-PHASE-01，取消的一轮从
+   Ordering 取消记录显示）。
+4. **到期前预警（AGENTS"warn before timeouts"）**：
+   - 点单页（OPS-ORDER-ENTRY，发送后的收款面板）：显示"Record the payment by HH:MM…"，最后 10 分钟变为醒目的
+     "N min left: record the payment by HH:MM or this round is cancelled…"，到期后说明已取消、未进厨房、系统内未收费，若刷卡机已扣款请在机上退款。
+   - 桌台页（DIN-FLOOR-BOARD）：该桌当前这桌客人有店员录入、仍待刷卡机收款的轮次时，桌卡与选中桌详情显示截止时间，最后 10 分钟为醒目提示，
+     到期后说明正在取消；有待收款轮次时每 15 秒更新倒计时、每 30 秒后台重读。
+   - 订单页（OPS-ORDER-QUEUE）：未开始付款的一轮显示"Entered by staff · record the card-machine payment by HH:MM or it is cancelled"
+     （顾客轮次为"Not paid · cancelled automatically at HH:MM unless paid"），最后 10 分钟加"(N min left)"并标为紧急；取消后显示
+     "Batch cancelled · not paid…never went to the kitchen. Nothing was charged for it in the system."，店员轮次另提示"若刷卡机已扣款请在机上退款"。
+   - 顾客"本桌"页：待付款且未开始付款的一轮说明"若在 HH:MM 前未付款，该轮会被取消，不会收费"；取消后显示"Cancelled — not paid in time"
+     与"This round never went to the kitchen. No one was charged for it."。不显示内部代码或编号。
+5. **断网与设备故障**：店员在发送后断网而无法记录收款时，该轮会在到期时取消；恢复后按"断网后补录"（Recorded after an outage，实际收款时间，
+   72 小时内）重新录入该轮并记录收款，不会重复收费（刷卡机已扣的那笔即补录的收款）。运维手册的断网流程适用。
+6. **授权与迁移**：迁移 `2000_056`（放宽取消原因与触发器，无新表）；不新增数据库授权（api 已有取消记录、修订、发件箱、审计与 Payment
+   读取的授权），不改权限目录。

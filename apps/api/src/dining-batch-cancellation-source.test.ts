@@ -121,7 +121,7 @@ it.each(["history", "clock", "progress", "authority"])(
     );
   },
 );
-it("does not treat an unknown outcome as failure", async () => {
+it("WP-2423 item 5: loads an unresolved round only under the fence and as the latest evidence", async () => {
   const f = await fixture();
   await expect(
     f.source.load(f.tx, {
@@ -129,6 +129,7 @@ it("does not treat an unknown outcome as failure", async () => {
       status: "AwaitingPaymentResolution",
       paymentEvidence: null,
     }),
-  ).rejects.toThrow();
-  expect(mocks.fence).not.toHaveBeenCalled();
+  ).rejects.toThrow("DINING_BATCH_CANCELLATION_SOURCE_UNAVAILABLE");
+  // The fence is taken, then the evidence differs from the latest recorded (failed) one.
+  expect(mocks.fence).toHaveBeenCalledTimes(1);
 });

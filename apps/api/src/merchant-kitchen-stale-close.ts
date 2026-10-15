@@ -8,6 +8,7 @@ import {
 } from "@rms/kitchen";
 import { listStoreOrderBusinessDates } from "@rms/ordering";
 import { createMerchantStoreBusinessDay } from "./merchant-store-business-day.js";
+import { createMerchantRoundBusinessDates } from "./merchant-round-business-date.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -85,8 +86,20 @@ export function createMerchantKitchenStaleClose(options: {
         command,
         actorReference: scope.actorReference,
         occurredAt,
-        businessDays: async (orderReference) => {
+        businessDays: async (orderReference, orderBatchReference) => {
           const orders = await listStoreOrderBusinessDates(tx, selected, [orderReference]);
+          // WP-2423 D4: the ticket's round's own business day; a round added today to a table
+          // opened on an earlier day is today's work and is not closed as an earlier day's.
+          const rounds = await createMerchantRoundBusinessDates({
+            persistence: options.persistence,
+            scope: {
+              tenantReference: String(scope.selected.tenantReference),
+              brandReference: String(selected.brandReference),
+              storeReference: String(selected.storeReference),
+            },
+            timeZone: scope.store.timeZone,
+            authorize: scope.allowed,
+          })(tx, [orderBatchReference]);
           const today = await createMerchantStoreBusinessDay({
             publication: options.persistence.publication,
             tenantReference: scope.selected.tenantReference,
@@ -96,7 +109,8 @@ export function createMerchantKitchenStaleClose(options: {
             authorize: scope.allowed,
           })(transaction, occurredAt);
           return {
-            orderBusinessDate: orders.get(orderReference) ?? null,
+            orderBusinessDate:
+              rounds.get(orderBatchReference) ?? orders.get(orderReference) ?? null,
             currentBusinessDate: String(today.businessDate),
           };
         },

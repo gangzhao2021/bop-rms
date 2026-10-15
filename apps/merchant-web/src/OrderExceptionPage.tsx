@@ -63,7 +63,9 @@ export type OrderExceptionReconciliation =
       readonly resolvedAt: string | null;
     }
   | { readonly type: "Payment" }
-  | { readonly type: "UnmatchedCharge" };
+  | { readonly type: "UnmatchedCharge" }
+  /** WP-2423 D3: the server could not read what this difference is about. */
+  | { readonly type: "Unavailable" };
 
 export interface OrderExceptionView {
   readonly screenId: "OPS-ORDER-EXCEPTION";
@@ -119,7 +121,7 @@ function businessDate(value: unknown) {
 const MINOR = /^(0|[1-9][0-9]{0,15})$/u;
 function reconciliation(value: unknown): OrderExceptionReconciliation {
   const type = (value as { type?: unknown } | null)?.type;
-  if (type === "Payment" || type === "UnmatchedCharge") {
+  if (type === "Payment" || type === "UnmatchedCharge" || type === "Unavailable") {
     exact(value, ["type"]);
     return Object.freeze({ type });
   }
@@ -457,6 +459,30 @@ function OrderExceptionCard({
       </strong>
     </header>
   );
+  if (payment && detail?.type === "Unavailable") {
+    // WP-2423 D3: never guess the kind of difference (and its actions) without its details.
+    return (
+      <>
+        {header(exceptionKindLabel[item.kind])}
+        <dl>
+          <div>
+            <dt>Created</dt>
+            <dd>
+              <SourceTime instant={item.createdAt} />
+            </dd>
+          </div>
+          <div>
+            <dt>Owner</dt>
+            <dd>{item.ownerStatus}</dd>
+          </div>
+        </dl>
+        <p role="note">
+          The details of this payment difference could not be loaded, so what to do next is not
+          shown. Refresh the page to try again.
+        </p>
+      </>
+    );
+  }
   if (payment && detail?.type === "BusinessDayTotals") {
     const day = detail.businessDate === null ? null : businessDateText(detail.businessDate);
     const differences = [

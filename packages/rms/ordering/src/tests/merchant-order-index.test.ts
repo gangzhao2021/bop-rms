@@ -3,8 +3,11 @@ import type { ConsumerTransaction } from "@bop/eventing";
 import {
   createPostgresMerchantOrderIndex,
   listStoreKitchenOrderLabels,
+  listStoreOrderRoundSubmissions,
+  listStoreOrdersWithRoundsSince,
   listStorePaidOrderBatches,
 } from "../infrastructure/persistence/merchant-order-index.js";
+import { listStoreDiningSessionOrders } from "../infrastructure/persistence/dining-session-order-lookup.js";
 const id = (n: number) => "01909968-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const scope = { brandReference: id(1), storeReference: id(2) };
 const row = (n: number) => ({
@@ -313,4 +316,112 @@ it("WP-2423 Q2: names many Orders for the kitchen without Customer identity", as
     rowCount: 1,
   });
   await expect(listStoreKitchenOrderLabels(tx, scope, [id(3)])).rejects.toThrow();
+});
+
+it("WP-2423 D4: reads each round's submission time, whether it is the first and the Order's date", async () => {
+  const query = vi.fn(async (sql: string) =>
+    sql.startsWith("SELECT b.order_batch_id")
+      ? {
+          rows: [
+            {
+              batch_id: id(11),
+              order_id: id(3),
+              submitted_at: new Date("2026-10-11T23:00:00.000Z"),
+              business_date: "2026-10-11",
+              initial: true,
+            },
+            {
+              batch_id: id(21),
+              order_id: id(3),
+              submitted_at: new Date("2026-10-15T18:00:00.000Z"),
+              business_date: "2026-10-11",
+              initial: false,
+            },
+          ],
+          rowCount: 2,
+        }
+      : { rows: [], rowCount: 0 },
+  );
+  const tx = { query } as unknown as ConsumerTransaction;
+  const rounds = await listStoreOrderRoundSubmissions(tx, scope, [id(11), id(21)]);
+  expect(Object.fromEntries(rounds)).toEqual({
+    [id(11)]: {
+      orderReference: id(3),
+      submittedAt: "2026-10-11T23:00:00.000Z",
+      initial: true,
+      orderBusinessDate: "2026-10-11",
+    },
+    [id(21)]: {
+      orderReference: id(3),
+      submittedAt: "2026-10-15T18:00:00.000Z",
+      initial: false,
+      orderBusinessDate: "2026-10-11",
+    },
+  });
+  expect((query.mock.calls[1] as unknown[] | undefined)?.[1]).toEqual([
+    scope.brandReference,
+    scope.storeReference,
+    [id(11), id(21)],
+  ]);
+  await expect(listStoreOrderRoundSubmissions(tx, scope, [])).resolves.toEqual(new Map());
+  await expect(
+    listStoreOrderRoundSubmissions(
+      tx,
+      scope,
+      Array.from({ length: 101 }, (_, n) => id(n + 1)),
+    ),
+  ).rejects.toThrow();
+});
+
+it("WP-2423 D4: finds Orders opened on an earlier day with a round since today's start", async () => {
+  const query = vi.fn(async (sql: string) =>
+    sql.startsWith("SELECT h.order_id")
+      ? {
+          rows: [{ order_id: id(3), latest_round_at: new Date("2026-10-15T18:00:00.000Z") }],
+          rowCount: 1,
+        }
+      : { rows: [], rowCount: 0 },
+  );
+  const tx = { query } as unknown as ConsumerTransaction;
+  await expect(
+    listStoreOrdersWithRoundsSince(tx, scope, {
+      since: "2026-10-15T08:00:00.000Z",
+      businessDate: "2026-10-15",
+      limit: 100,
+    }),
+  ).resolves.toEqual([{ orderReference: id(3), latestRoundAt: "2026-10-15T18:00:00.000Z" }]);
+  expect(String(query.mock.calls[1]?.[0])).toContain("h.business_date<$4::date");
+  expect((query.mock.calls[1] as unknown[] | undefined)?.[1]).toEqual([
+    scope.brandReference,
+    scope.storeReference,
+    "2026-10-15T08:00:00.000Z",
+    "2026-10-15",
+    100,
+  ]);
+  await expect(
+    listStoreOrdersWithRoundsSince(tx, scope, {
+      since: "2026-10-15T08:00:00.000Z",
+      businessDate: "Oct 15",
+      limit: 100,
+    }),
+  ).rejects.toThrow();
+});
+
+it("WP-2423 D4: finds each dining session's one Order", async () => {
+  const query = vi.fn(async (sql: string) =>
+    sql.startsWith("SELECT dining_session_id")
+      ? {
+          rows: [
+            { session_id: id(5), order_id: id(3) },
+            // Against the one-Order rule: left out rather than guessed.
+            { session_id: id(6), order_id: id(7) },
+            { session_id: id(6), order_id: id(8) },
+          ],
+          rowCount: 3,
+        }
+      : { rows: [], rowCount: 0 },
+  );
+  const tx = { query } as unknown as ConsumerTransaction;
+  const orders = await listStoreDiningSessionOrders(tx, scope, [id(5), id(6), id(9)]);
+  expect(Object.fromEntries(orders)).toEqual({ [id(5)]: id(3) });
 });

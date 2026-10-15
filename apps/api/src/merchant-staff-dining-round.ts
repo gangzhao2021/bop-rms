@@ -3,6 +3,7 @@ import type { ConsumerTransaction } from "@bop/eventing";
 import { readClosedRecord } from "@bop/identity";
 import { listDiningSessionTableLabels } from "@rms/dining";
 import {
+  createPostgresAdditionalDiningExecutionReader,
   createPostgresStaffDiningRoundEntryStore,
   parseCustomerNote,
   parseOrderingHash,
@@ -343,13 +344,27 @@ export function createMerchantStaffDiningRound(options: {
         const labels = await listDiningSessionTableLabels(tx as never, scope.selected, [
           String(entry.diningSessionReference),
         ]);
+        // WP-2423 D1: a later round's table Order is at the version its other rounds moved it to
+        // (the Order header keeps the first round's version).
+        const execution = current.additional
+          ? await createPostgresAdditionalDiningExecutionReader({
+              brandReference: scope.selected.brandReference,
+              storeReference: scope.selected.storeReference,
+              authorize: async () => allowed(),
+            }).loadBySubmission({
+              transaction: tx,
+              submissionReference: String(batch.submissionReference),
+              observedAt: now(),
+            })
+          : null;
+        if (current.additional && execution === null) return fail("STAFF_ROUND_NOT_FINISHED");
         const p = current.preparation;
         return Object.freeze({
           status,
           orderReference: String(batch.orderReference),
           orderBatchReference: String(batch.orderBatchReference),
           orderNumber: batch.orderNumber,
-          orderVersion: batch.orderVersion,
+          orderVersion: execution?.orderVersion ?? batch.orderVersion,
           tableLabel: labels.get(String(entry.diningSessionReference)) ?? null,
           orderMinor: p.orderAllocation.amountMinor.toString(),
           tipMinor: p.tip.amountMinor.toString(),

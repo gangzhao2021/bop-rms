@@ -17,6 +17,8 @@ export function createPersistentConsumerWorker(options: {
   readonly leaseOwner: string;
   readonly newLeaseToken: () => string;
   readonly config?: Parameters<typeof createConsumerOutboxRuntime>[0]["config"];
+  /** Event types this deployment publishes with no subscriber (see the transport). */
+  readonly acknowledgedWithoutSubscribers?: readonly string[];
   readonly pollIntervalMs: number;
   readonly drainDeadlineMs: number;
   readonly onSnapshot?: Parameters<typeof createOutboxWorkload>[0]["onSnapshot"];
@@ -36,6 +38,9 @@ export function createPersistentConsumerWorker(options: {
     leaseOwner: options.leaseOwner,
     newLeaseToken: options.newLeaseToken,
     ...(options.config ? { config: options.config } : {}),
+    ...(options.acknowledgedWithoutSubscribers
+      ? { acknowledgedWithoutSubscribers: options.acknowledgedWithoutSubscribers }
+      : {}),
   });
   const consumerRetries = new ConsumerRetryScheduler({
     delivery: runtime.delivery,

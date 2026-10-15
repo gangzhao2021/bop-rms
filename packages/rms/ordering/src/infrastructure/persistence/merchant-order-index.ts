@@ -205,6 +205,121 @@ export async function listStoreOrderBusinessDates(
   );
 }
 
+/** WP-2423 D4: one round (Order batch) of a Store Order, as Ordering recorded its submission. */
+export interface StoreOrderRoundSubmission {
+  readonly orderReference: string;
+  /** When the round was submitted (UTC). */
+  readonly submittedAt: string;
+  /** The Order's first round, submitted with the Order itself. */
+  readonly initial: boolean;
+  /** The business date the Store resolved when the Order (its first round) was submitted. */
+  readonly orderBusinessDate: string;
+}
+
+/**
+ * WP-2423 D4: each given round (Order batch) of the Store — its Order, when it was submitted,
+ * whether it is the Order's first round and the Order's business date. A table's later round can
+ * be submitted on a later business day than the Order was opened; callers derive that round's
+ * business date from `submittedAt` with the Store's business-date configuration. Rounds of other
+ * Stores are not returned. Caller authorizes and owns the transaction.
+ */
+export async function listStoreOrderRoundSubmissions(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderBatchReferences: readonly string[],
+): Promise<ReadonlyMap<string, StoreOrderRoundSubmission>> {
+  if (orderBatchReferences.length === 0) return new Map();
+  if (orderBatchReferences.length > 100) throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+  const batches = orderBatchReferences.map((reference) => parseOrderingReference(reference));
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [scope.brandReference, scope.storeReference],
+  );
+  const rows = (
+    await transaction.query(
+      "SELECT b.order_batch_id::text batch_id,b.order_id::text order_id,b.submitted_at," +
+        "h.business_date::text business_date,(s.submission_kind='Initial') initial " +
+        "FROM rms_ordering.order_batch b JOIN rms_ordering.order_header h ON h.order_id=b.order_id " +
+        "AND h.brand_id=b.brand_id AND h.store_id=b.store_id " +
+        "JOIN rms_ordering.order_submission_record s ON s.submission_id=b.submission_id " +
+        "AND s.order_id=b.order_id AND s.brand_id=b.brand_id AND s.store_id=b.store_id " +
+        "WHERE b.brand_id=$1 AND b.store_id=$2 AND b.order_batch_id=ANY($3::uuid[])",
+      [scope.brandReference, scope.storeReference, batches],
+    )
+  ).rows as readonly Record<string, unknown>[];
+  const rounds = new Map<string, StoreOrderRoundSubmission>();
+  for (const row of rows) {
+    const submittedAt =
+      row.submitted_at instanceof Date ? row.submitted_at.toISOString() : row.submitted_at;
+    if (
+      typeof row.batch_id !== "string" ||
+      typeof row.order_id !== "string" ||
+      typeof row.initial !== "boolean" ||
+      typeof row.business_date !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}$/u.test(row.business_date)
+    )
+      throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+    rounds.set(
+      row.batch_id,
+      Object.freeze({
+        orderReference: row.order_id,
+        submittedAt: parseOrderingInstant(submittedAt),
+        initial: row.initial,
+        orderBusinessDate: row.business_date,
+      }),
+    );
+  }
+  return rounds;
+}
+
+/**
+ * WP-2423 D4: Orders opened on an earlier business day (a table session left open, or open past
+ * the day's end) that had a round submitted at or after `since` — the start of the Store's current
+ * business day — latest round first. Such an Order is today's work, so the Orders page lists it
+ * with today's orders. Caller authorizes and owns the transaction.
+ */
+export async function listStoreOrdersWithRoundsSince(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  input: { readonly since: string; readonly businessDate: string; readonly limit: number },
+): Promise<readonly { readonly orderReference: string; readonly latestRoundAt: string }[]> {
+  const since = parseOrderingInstant(input.since);
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/u.test(input.businessDate) ||
+    !Number.isSafeInteger(input.limit) ||
+    input.limit < 1 ||
+    input.limit > 100
+  )
+    throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [scope.brandReference, scope.storeReference],
+  );
+  const rows = (
+    await transaction.query(
+      "SELECT h.order_id::text order_id,max(b.submitted_at) latest_round_at " +
+        "FROM rms_ordering.order_batch b JOIN rms_ordering.order_header h ON h.order_id=b.order_id " +
+        "AND h.brand_id=b.brand_id AND h.store_id=b.store_id " +
+        "WHERE b.brand_id=$1 AND b.store_id=$2 AND b.submitted_at>=$3::timestamptz " +
+        "AND h.business_date<$4::date GROUP BY h.order_id " +
+        "ORDER BY max(b.submitted_at) DESC,h.order_id DESC LIMIT $5",
+      [scope.brandReference, scope.storeReference, since, input.businessDate, input.limit],
+    )
+  ).rows as readonly Record<string, unknown>[];
+  return Object.freeze(
+    rows.map((row) => {
+      const at =
+        row.latest_round_at instanceof Date
+          ? row.latest_round_at.toISOString()
+          : row.latest_round_at;
+      return Object.freeze({
+        orderReference: parseOrderingReference(row.order_id),
+        latestRoundAt: parseOrderingInstant(at),
+      });
+    }),
+  );
+}
+
 export interface MerchantOrderLineMoney {
   readonly amountMinor: string;
   readonly currencyCode: string;

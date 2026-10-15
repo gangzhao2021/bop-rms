@@ -51,6 +51,7 @@ for (const recovery of ["retry", "history"] as const)
       amountMinor: string;
       decline: null;
       progress: "Recorded";
+      paymentMethod: "Online";
     } | null = null;
     await page.route("**/merchant/session", (route) =>
       route.fulfill({
@@ -126,6 +127,7 @@ for (const recovery of ["retry", "history"] as const)
           orderBatchReference: id(90),
           observedAt: "2026-09-14T00:01:00.000Z",
           paymentState: "Captured",
+          paymentMethod: "Online",
           currencyCode: "CAD",
           capturedAmountMinor: "2260",
           confirmedRefundMinor: recoveredPhase === "Confirmed" ? "1130" : "0",
@@ -152,6 +154,7 @@ for (const recovery of ["retry", "history"] as const)
               unclaimedQuantity: persisted ? 1 : 2,
               paymentCaptured: true,
               paymentIntentReference: id(31),
+              paymentMethod: "Online",
             },
             // WP-2423 Q5: a line from a round cancelled before payment was never charged.
             {
@@ -162,6 +165,7 @@ for (const recovery of ["retry", "history"] as const)
               unclaimedQuantity: 0,
               paymentCaptured: false,
               paymentIntentReference: null,
+              paymentMethod: null,
             },
           ],
         },
@@ -184,6 +188,8 @@ for (const recovery of ["retry", "history"] as const)
               paymentAttemptReference: id(32),
               paymentIntentReference: id(31),
               state: recoveredPhase ?? (preparedOperation ? "Prepared" : "NotDispatched"),
+              method: "Online",
+              refundedOnCardMachineAt: null,
               executionOperationReference: preparedOperation,
               executionApprovalReference: null,
               amountMinor: "1130",
@@ -268,6 +274,7 @@ for (const recovery of ["retry", "history"] as const)
         amountMinor: "1130",
         decline: null,
         progress: "Recorded",
+        paymentMethod: "Online",
       };
       if (requests.length === 1) return route.abort("failed");
       return route.fulfill({

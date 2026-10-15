@@ -235,6 +235,8 @@ test("@production staff take an order for a table from the Tables page, charge i
         recordingReason: "AtCounter",
         takenAt: new Date().toISOString(),
         recordedAt: new Date().toISOString(),
+        // WP-2423 D1: the server accepted the paid round with its payment record.
+        acceptance: "Accepted",
       },
     });
   });
@@ -301,7 +303,7 @@ test("@production staff take an order for a table from the Tables page, charge i
   });
   await expect(
     page.getByText(
-      /Record the payment by .+ The kitchen starts this order once it is recorded here\./u,
+      /Record the payment by .+ The kitchen starts this order once it is recorded here; if it isn't recorded by then, the round is cancelled\./u,
     ),
   ).toBeVisible();
   await page.getByRole("textbox", { name: "Slip reference (optional)" }).fill("AUTH 771204");
@@ -342,13 +344,8 @@ test("@production staff take an order for a table from the Tables page, charge i
       takenAt: null,
     },
   ]);
-  expect(accepted).toEqual([
-    expect.objectContaining({
-      orderReference: id(20),
-      orderBatchReference: id(21),
-      expectedOrderVersion: 4,
-    }),
-  ]);
+  // WP-2423 D1: the page never accepts on its own (the server did, at the Order's version).
+  expect(accepted).toEqual([]);
   await expectNoInternalText(page);
   await expect(page.getByRole("link", { name: "Back to Tables" })).toBeVisible();
 });
@@ -369,7 +366,10 @@ test("@production the order queue marks a round entered by staff and its card-ma
     staffRound: null,
     ...extra,
   });
-  const listed = () => ({
+  const payments: Record<string, unknown>[] = [];
+  const detailReads: string[] = [];
+  // The list leaves an unpaid round's amount out; the one-order read gives it (WP-2423 D5).
+  const listed = (amountDueMinor: string | null = null) => ({
     items: [
       {
         orderReference: id(30),
@@ -389,11 +389,25 @@ test("@production the order queue marks a round entered by staff and its card-ma
               paidOnCardMachine: { amountMinor: "2304", takenAt: "2026-10-15T16:20:00.000Z" },
             },
           }),
-          batch(3, {
-            acceptanceStatus: "NotAccepted",
-            paymentDue: { status: "Awaiting", cancelsAt: null },
-            staffRound: { recordedAfterOutage: false, paidOnCardMachine: null },
-          }),
+          // WP-2423 D5: unpaid until staff record it from Orders; then paid and accepted.
+          payments.length === 0
+            ? batch(3, {
+                acceptanceStatus: "NotAccepted",
+                // WP-2423 item 5: no payment started, so it is cancelled at its deadline if unpaid.
+                paymentDue: { status: "Awaiting", cancelsAt: "2099-10-15T16:50:00.000Z" },
+                staffRound: {
+                  recordedAfterOutage: false,
+                  paidOnCardMachine: null,
+                  amountDueMinor,
+                },
+              })
+            : batch(3, {
+                staffRound: {
+                  recordedAfterOutage: false,
+                  paidOnCardMachine: { amountMinor: "1695", takenAt: "2026-10-15T16:40:00.000Z" },
+                  amountDueMinor: null,
+                },
+              }),
         ],
         canRequestAcceptance: false,
         currentPhase: "InProgress",
@@ -408,15 +422,79 @@ test("@production the order queue marks a round entered by staff and its card-ma
   });
   await page.route("**/merchant/orders?*", (route) => route.fulfill({ headers, json: listed() }));
   await page.route("**/merchant/orders", (route) => route.fulfill({ headers, json: listed() }));
+  await page.route("**/merchant/orders/detail?*", (route) => {
+    detailReads.push(new URL(route.request().url()).searchParams.get("order") ?? "");
+    const order = listed(payments.length === 0 ? "1695" : null).items[0];
+    return route.fulfill({
+      headers,
+      json: {
+        screenId: "OPS-ORDER-DETAIL",
+        pickupContact: null,
+        order,
+        lines: {
+          items: [
+            {
+              orderItemReference: id(39),
+              orderBatchReference: id(33),
+              name: "Synthetic noodles",
+              options: [],
+              quantity: 1,
+              customerNote: null,
+              unitPrice: { amountMinor: "1500", currencyCode: "CAD" },
+              subtotal: { amountMinor: "1500", currencyCode: "CAD" },
+              discount: { amountMinor: "0", currencyCode: "CAD" },
+              tax: { amountMinor: "195", currencyCode: "CAD" },
+              fee: { amountMinor: "0", currencyCode: "CAD" },
+              total: { amountMinor: "1695", currencyCode: "CAD" },
+              canCancel: false,
+              cancellation: null,
+            },
+          ],
+          totals: {
+            subtotal: { amountMinor: "1500", currencyCode: "CAD" },
+            discount: { amountMinor: "0", currencyCode: "CAD" },
+            tax: { amountMinor: "195", currencyCode: "CAD" },
+            fee: { amountMinor: "0", currencyCode: "CAD" },
+            total: { amountMinor: "1695", currencyCode: "CAD" },
+          },
+        },
+      },
+    });
+  });
+  await page.route("**/merchant/orders/card-machine-payment", (route) => {
+    payments.push(route.request().postDataJSON() as Record<string, unknown>);
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Recorded",
+        orderReference: id(30),
+        orderBatchReference: id(33),
+        amountMinor: "1695",
+        recordingReason: "AtCounter",
+        takenAt: new Date().toISOString(),
+        recordedAt: new Date().toISOString(),
+        acceptance: "Accepted",
+      },
+    });
+  });
   await page.goto("/operations/orders");
   const entry = page.locator("details.order-workbench-entry").first();
-  await expect(entry).toContainText("Batch 3: Entered by staff · awaiting card-machine payment");
+  await expect(entry).toContainText(
+    /Batch 3: Entered by staff · record the card-machine payment by \d\d:\d\d or it is cancelled/u,
+  );
   if (!(await entry.evaluate((element) => (element as HTMLDetailsElement).open)))
     await entry.locator("summary").click();
   await expect(
     entry.getByRole("heading", { name: "Batch 2 · Additional · Entered by staff" }),
   ).toBeVisible();
-  await expect(entry.getByText(/Paid on card machine \$23\.04/u)).toBeVisible();
+  // WP-2423 D5: the summary shows the card-machine total apart from what was paid online.
+  await expect(
+    entry.locator(".order-counter-paid", { hasText: "Paid online $11.30" }),
+  ).toBeVisible();
+  await expect(
+    entry.locator(".order-counter-paid", { hasText: "Paid on card machine $23.04" }),
+  ).toBeVisible();
+  await expect(entry.getByText(/the guest has not paid/u)).toHaveCount(0);
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     expect(
@@ -424,5 +502,60 @@ test("@production the order queue marks a round entered by staff and its card-ma
     ).toBe(true);
   }
   await expect(page.getByText(/cancelled automatically/u)).toHaveCount(0);
+  await expectNoInternalText(page);
+  // WP-2423 D5: the unpaid staff round is recorded as paid from Orders.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  // The list carries no amount; opening the form reads it for this one order.
+  await entry.getByRole("button", { name: "Record card-machine payment", exact: true }).click();
+  await expect(
+    entry.getByText("Charge $16.95 on the card machine first", { exact: false }),
+  ).toBeVisible();
+  expect(detailReads.filter((order) => order === id(30)).length).toBeGreaterThan(0);
+  await entry.getByRole("textbox", { name: "Slip reference (optional)" }).fill("AUTH 771205");
+  await entry.getByRole("button", { name: "Paid on card machine · $16.95" }).click();
+  // The list reloads: the round is paid on the card machine and no longer asks for payment.
+  await expect(
+    entry.locator(".order-counter-paid", { hasText: "Paid on card machine $39.99" }),
+  ).toBeVisible();
+  await expect(entry.getByRole("button", { name: /Record card-machine payment/u })).toHaveCount(0);
+  expect(payments).toEqual([
+    {
+      operationReference: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+      orderReference: id(30),
+      orderBatchReference: id(33),
+      expectedTotalMinor: "1695",
+      slipReference: "AUTH 771205",
+      takenAt: null,
+    },
+  ]);
+});
+
+test("@production the Tables page warns before a staff round's payment time ends (WP-2423 item 5)", async ({
+  page,
+}) => {
+  await page.clock.setFixedTime(new Date("2026-10-15T16:25:00.000Z"));
+  await signIn(page);
+  await page.route("**/merchant/dining/tables", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        canOperateTables: false,
+        items: [{ ...table, staffRoundsAwaitingPayment: [{ payBy: "2026-10-15T16:30:00.000Z" }] }],
+        nextAfterTableReference: null,
+      },
+    }),
+  );
+  await page.goto("/operations/dining");
+  const tile = page.locator("article.dining-table-tile").first();
+  await expect(tile.getByRole("alert")).toHaveText(
+    "5 min left: record the card-machine payment for the round entered by staff by 12:30, or it is cancelled.",
+  );
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/staff-round-payment-warning-${width}.png` });
+  }
   await expectNoInternalText(page);
 });

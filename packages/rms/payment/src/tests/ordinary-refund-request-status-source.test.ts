@@ -10,6 +10,14 @@ const d = vi.hoisted(() => ({
   prepared: vi.fn(),
   outcome: vi.fn(),
   recovery: vi.fn(),
+  card: vi.fn(),
+  machineRefund: vi.fn(),
+}));
+vi.mock("../infrastructure/persistence/card-machine-payment-store.js", () => ({
+  createPostgresCardMachinePaymentStore: () => ({
+    loadByIntent: d.card,
+    loadRefundBySource: d.machineRefund,
+  }),
 }));
 vi.mock("../infrastructure/persistence/ordinary-refund-request-store.js", () => ({
   createPostgresOrdinaryRefundRequestContextSource: () => d.context,
@@ -61,6 +69,8 @@ beforeEach(() => {
   d.context.mockResolvedValue({ existing: request, history: [request] });
   d.outcome.mockResolvedValue(null);
   d.prepared.mockResolvedValue(null);
+  d.card.mockResolvedValue(null);
+  d.machineRefund.mockResolvedValue(null);
 });
 it("reads a recorded request as not dispatched with its amount still reserved", async () => {
   const result = await make()(tx, query);
@@ -68,12 +78,14 @@ it("reads a recorded request as not dispatched with its amount still reserved", 
     {
       paymentAttemptReference: id(11),
       paymentIntentReference: id(10),
+      method: "Online",
       state: "NotDispatched",
       executionOperationReference: null,
       executionApprovalReference: null,
       amountMinor: "6000",
       confirmedMinor: "0",
       pendingMinor: "6000",
+      refundedOnCardMachineAt: null,
     },
   ]);
   expect(d.context).toHaveBeenCalledWith(tx, query);
@@ -151,4 +163,58 @@ it("recovers prepared operation identity without promoting it to dispatch", asyn
   // WP-2423 Q5: the approval the prepared operation is bound to (null: none needed).
   expect(result.payments[0]?.executionApprovalReference).toBeNull();
   expect(result.payments[0]?.pendingMinor).toBe("6000");
+});
+
+it("WP-2423 item 4: a card-machine refund is pending until recorded on the machine, never prepared", async () => {
+  const leg = request.payments[0];
+  if (!leg) throw new Error("fixture missing");
+  d.card.mockResolvedValue({
+    cardMachinePaymentReference: leg.paymentTransactionReference,
+    orderReference: request.orderReference,
+  });
+  const waiting = await make()(tx, query);
+  expect(waiting.payments).toEqual([
+    {
+      paymentAttemptReference: id(11),
+      paymentIntentReference: id(10),
+      method: "CardMachine",
+      executionOperationReference: null,
+      executionApprovalReference: null,
+      state: "NotDispatched",
+      amountMinor: "6000",
+      confirmedMinor: "0",
+      pendingMinor: "6000",
+      refundedOnCardMachineAt: null,
+    },
+  ]);
+  expect(d.prepared).not.toHaveBeenCalled();
+  expect(d.outcome).not.toHaveBeenCalled();
+  d.machineRefund.mockResolvedValue({
+    cardMachinePaymentReference: leg.paymentTransactionReference,
+    amountMinor: 6000n,
+    refundedAt: "2026-09-20T11:50:00.000Z",
+    recordedAt: "2026-09-20T11:55:00.000Z",
+  });
+  expect((await make()(tx, query)).payments[0]).toMatchObject({
+    state: "Confirmed",
+    confirmedMinor: "6000",
+    pendingMinor: "0",
+    refundedOnCardMachineAt: "2026-09-20T11:50:00.000Z",
+  });
+  // Recorded after the instant being read: still pending at that instant.
+  d.machineRefund.mockResolvedValue({
+    cardMachinePaymentReference: leg.paymentTransactionReference,
+    amountMinor: 6000n,
+    refundedAt: "2026-09-20T12:05:00.000Z",
+    recordedAt: "2026-09-20T12:06:00.000Z",
+  });
+  expect((await make()(tx, query)).payments[0]?.state).toBe("NotDispatched");
+  // A recorded amount that differs from the request is never shown as its refund.
+  d.machineRefund.mockResolvedValue({
+    cardMachinePaymentReference: leg.paymentTransactionReference,
+    amountMinor: 5999n,
+    refundedAt: "2026-09-20T11:50:00.000Z",
+    recordedAt: "2026-09-20T11:55:00.000Z",
+  });
+  await expect(make()(tx, query)).rejects.toThrow("ORDINARY_REFUND_STATUS_UNAVAILABLE");
 });

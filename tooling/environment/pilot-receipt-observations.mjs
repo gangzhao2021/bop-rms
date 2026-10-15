@@ -73,6 +73,9 @@ export async function refreshInternalOrderReceiptObservations(
       if (!paid) throw new Error("INTERNAL_RECEIPT_UNPAID_BATCH");
       const current = await captured.resolve(transaction, paid.paymentEvent),
         prior = current.payment.providerOutcome;
+      // WP-2423 item 4: a round paid on the Store's card machine has no Provider to ask; its
+      // record is the evidence the receipt reads.
+      if (current.payment.intent.paymentMethod === "StoreCardMachine") continue;
       if (prior?.kind !== "Snapshot") throw new Error("INTERNAL_RECEIPT_PROVIDER_UNAVAILABLE");
       plans.push({
         paymentIntentReference: paid.paymentIntentReference,

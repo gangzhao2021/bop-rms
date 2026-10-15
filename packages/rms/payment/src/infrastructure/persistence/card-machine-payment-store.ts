@@ -139,6 +139,77 @@ export function createPostgresCardMachinePaymentStore(options: {
         String(parsePaymentReference(orderReference)),
         String(parsePaymentReference(orderBatchReference)),
       ]),
+    /**
+     * WP-2423: the card-machine payments of these Order batches, keyed by batch, in one read (a
+     * screen listing many rounds asks once, not once per round).
+     */
+    async listByBatches(
+      tx: AuditTransaction,
+      batches: readonly { orderReference: string; orderBatchReference: string }[],
+    ): Promise<ReadonlyMap<string, CardMachinePaymentRecord>> {
+      const result = new Map<string, CardMachinePaymentRecord>();
+      if (batches.length === 0) return result;
+      if (batches.length > 1000) return fail();
+      const orders = batches.map((b) => String(parsePaymentReference(b.orderReference)));
+      const ids = batches.map((b) => String(parsePaymentReference(b.orderBatchReference)));
+      for (const order of new Set(orders)) await allowed(tx, order);
+      await context(tx);
+      const found = rows(
+        await tx.query(
+          `${selectPayment} AND (p.order_id,p.order_batch_id) IN
+ (SELECT q.order_id,q.order_batch_id FROM unnest($3::uuid[],$4::uuid[]) AS q(order_id,order_batch_id))`,
+          [brand, store, orders, ids],
+        ),
+      );
+      for (const row of found) {
+        const record = paymentFrom(row);
+        if (record.brandReference !== brand || record.storeReference !== store) return fail();
+        if (tenantScope !== null && record.tenantReference !== tenantScope) return fail();
+        if (result.has(record.orderBatchReference)) return fail();
+        result.set(String(record.orderBatchReference), record);
+      }
+      return result;
+    },
+    /**
+     * WP-2423: every card-machine payment of these Orders with its refunds (oldest first), keyed
+     * by Order, in two reads whatever the number of Orders.
+     */
+    async listByOrders(tx: AuditTransaction, orderReferences: readonly string[]) {
+      const result = new Map<
+        string,
+        { payment: CardMachinePaymentRecord; refunds: CardMachineRefundRecord[] }[]
+      >();
+      if (orderReferences.length === 0) return result;
+      if (orderReferences.length > 1000) return fail();
+      const orders = [...new Set(orderReferences.map((o) => String(parsePaymentReference(o))))];
+      for (const order of orders) await allowed(tx, order);
+      await context(tx);
+      const payments = rows(
+        await tx.query(
+          `${selectPayment} AND p.order_id=ANY($3::uuid[]) ORDER BY p.recorded_at,p.order_batch_id`,
+          [brand, store, orders],
+        ),
+      ).map((row) => paymentFrom(row));
+      const byPayment = new Map<string, CardMachineRefundRecord[]>();
+      for (const payment of payments) {
+        if (payment.brandReference !== brand || payment.storeReference !== store) return fail();
+        if (tenantScope !== null && payment.tenantReference !== tenantScope) return fail();
+        const refunds: CardMachineRefundRecord[] = [];
+        byPayment.set(String(payment.cardMachinePaymentReference), refunds);
+        const order = String(payment.orderReference);
+        result.set(order, [...(result.get(order) ?? []), { payment, refunds }]);
+      }
+      if (payments.length > 0)
+        for (const refund of rows(
+          await tx.query(
+            `${selectRefund} AND r.card_machine_payment_id=ANY($3::uuid[])
+ ORDER BY r.recorded_at,r.card_machine_refund_id`,
+            [brand, store, [...byPayment.keys()]],
+          ),
+        ).map((row) => refundFrom(row)))
+          (byPayment.get(String(refund.cardMachinePaymentReference)) ?? fail()).push(refund);
+      return result;
+    },
     /** Every card-machine payment of an Order with its refunds, oldest first. */
     async listByOrder(tx: AuditTransaction, orderReference: string) {
       const order = String(parsePaymentReference(orderReference));

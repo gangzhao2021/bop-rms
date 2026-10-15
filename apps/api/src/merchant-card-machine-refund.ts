@@ -26,6 +26,8 @@ export const cardMachineRefundCommandErrorCodes = [
   "CARD_MACHINE_REFUND_NOT_FOUND",
   "CARD_MACHINE_REFUND_NOTHING_OWED",
   "CARD_MACHINE_REFUND_IDEMPOTENCY_CONFLICT",
+  /** WP-2423 item 4: an escalated ordinary refund needs its approval recorded first. */
+  "CARD_MACHINE_REFUND_APPROVAL_REQUIRED",
   "CARD_MACHINE_REFUND_UNAVAILABLE",
 ] as const;
 export type CardMachineRefundCommandErrorCode = (typeof cardMachineRefundCommandErrorCodes)[number];
@@ -71,6 +73,58 @@ export function parseCardMachineRefundCommand(value: unknown) {
     if (error instanceof CardMachineRefundCommandError) throw error;
     return fail("CARD_MACHINE_REFUND_INPUT_INVALID");
   }
+}
+
+/**
+ * Why a whole card-machine payment is owed back, if it is: the store cancelled its Batch (Q6), or
+ * Ordering found the paid Order could no longer be fulfilled. Null when neither applies (an
+ * ordinary refund request is then the only way to refund it). Ordering owner reads only.
+ */
+export async function cardMachineWholeRefundSource(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  payment: {
+    readonly orderReference: string;
+    readonly orderBatchReference: string;
+    readonly cardMachinePaymentReference: string;
+    readonly eventReference: string;
+  },
+): Promise<{
+  kind: "StaffCancellation" | "UnfulfillableOrder";
+  reference: string;
+  at: string;
+} | null> {
+  const cancellation = (
+    await createPostgresStaffOrderCancellationReader({
+      brandReference: scope.brandReference,
+      storeReference: scope.storeReference,
+    }).listByOrders(tx, [payment.orderReference])
+  ).find(
+    (record) =>
+      String(record.orderBatchReference) === payment.orderBatchReference &&
+      String(record.paymentTransactionReference) === payment.cardMachinePaymentReference,
+  );
+  if (cancellation !== undefined)
+    return {
+      kind: "StaffCancellation",
+      reference: String(cancellation.cancellationReference),
+      at: String(cancellation.cancelledAt),
+    };
+  const outcome = await createPostgresOrderPaymentDispositionReader({
+    brandReference: scope.brandReference,
+    storeReference: scope.storeReference,
+  }).loadByPaymentEvent({
+    transaction: tx,
+    paymentEventReference: parseOrderingReference(payment.eventReference),
+  });
+  const record = outcome?.record as
+    { disposition?: unknown; dispositionReference?: unknown; evaluatedAt?: unknown } | undefined;
+  if (record?.disposition !== "PaidWithoutFulfillableOrder") return null;
+  return {
+    kind: "UnfulfillableOrder",
+    reference: String(parseOrderingReference(record.dispositionReference)),
+    at: String(record.evaluatedAt),
+  };
 }
 
 /**
@@ -155,46 +209,8 @@ export function createMerchantCardMachineCancellationRefund(options: {
         if (payment === null) return fail("CARD_MACHINE_REFUND_NOT_FOUND");
         // Why the money is owed: the store cancelled the Batch (Q6), or Ordering found the paid
         // Order could no longer be fulfilled (for example it was not accepted in time).
-        const cancellation = (
-          await createPostgresStaffOrderCancellationReader({
-            brandReference: scope.brandReference,
-            storeReference: scope.storeReference,
-          }).listByOrders(tx, [command.orderReference])
-        ).find(
-          (record) =>
-            String(record.orderBatchReference) === command.orderBatchReference &&
-            String(record.paymentTransactionReference) === payment.cardMachinePaymentReference,
-        );
-        let source: {
-          kind: "StaffCancellation" | "UnfulfillableOrder";
-          reference: string;
-          at: string;
-        };
-        if (cancellation !== undefined)
-          source = {
-            kind: "StaffCancellation",
-            reference: String(cancellation.cancellationReference),
-            at: String(cancellation.cancelledAt),
-          };
-        else {
-          const outcome = await createPostgresOrderPaymentDispositionReader({
-            brandReference: scope.brandReference,
-            storeReference: scope.storeReference,
-          }).loadByPaymentEvent({
-            transaction: tx,
-            paymentEventReference: parseOrderingReference(payment.eventReference),
-          });
-          const record = outcome?.record as
-            | { disposition?: unknown; dispositionReference?: unknown; evaluatedAt?: unknown }
-            | undefined;
-          if (record?.disposition !== "PaidWithoutFulfillableOrder")
-            return fail("CARD_MACHINE_REFUND_NOT_FOUND");
-          source = {
-            kind: "UnfulfillableOrder",
-            reference: String(parseOrderingReference(record.dispositionReference)),
-            at: String(record.evaluatedAt),
-          };
-        }
+        const source = await cardMachineWholeRefundSource(tx, scope, payment);
+        if (source === null) return fail("CARD_MACHINE_REFUND_NOT_FOUND");
         const already = await payments.loadRefundBySource(tx, source.kind, source.reference);
         if (already !== null) return fail("CARD_MACHINE_REFUND_NOTHING_OWED");
         const refunded = (await payments.refunds(tx, payment.cardMachinePaymentReference)).reduce(

@@ -102,6 +102,13 @@ export function composeMerchantDependencies(
             createSimulatedProvider: provider,
           }),
       }),
+    // WP-2423 item 4: refresh the online rounds' Provider snapshots before a card-machine refund
+    // adds a refund version to a mixed (online and card-machine) dine-in receipt.
+    refreshOrderReceiptObservations: (r, order, authorize) =>
+      f.refreshInternalOrderReceiptObservations(r, order, authorize, {
+        ...account,
+        createSimulatedProvider: provider,
+      }),
     // WP-2423 Q6 step 2a: TEST-ONLY internal simulator for item cancellation refunds (dispatch
     // through the ordinary refund journal; an unknown result is only looked up).
     cancellationRefundProvider: {

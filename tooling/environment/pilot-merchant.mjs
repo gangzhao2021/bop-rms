@@ -55,7 +55,7 @@ import { createMerchantAvailability } from "../../apps/api/dist/merchant-availab
 import { createMerchantKitchenRework } from "../../apps/api/dist/merchant-kitchen-rework.js";
 import { createMerchantKitchenStaleClose } from "../../apps/api/dist/merchant-kitchen-stale-close.js";
 import { createMerchantOptionSets } from "../../apps/api/dist/merchant-option-sets.js";
-import { logUnexpected } from "./pilot-merchant-pickup.mjs";
+import { logUnexpected, reportUnexpected } from "./pilot-merchant-pickup.mjs";
 import { createMerchantOptionPrices } from "../../apps/api/dist/merchant-option-prices.js";
 import { createMerchantOptionRecipes } from "../../apps/api/dist/merchant-option-recipes.js";
 import { createMerchantStoreTax } from "../../apps/api/dist/merchant-store-tax.js";
@@ -86,6 +86,12 @@ import { createMerchantOrdinaryRefundApproval } from "../../apps/api/dist/mercha
 import { createMerchantOrdinaryRefundApprovals } from "../../apps/api/dist/merchant-ordinary-refund-approvals.js";
 import { createMerchantOrdinaryRefundDecline } from "../../apps/api/dist/merchant-ordinary-refund-decline.js";
 import { createMerchantOrdinaryRefundProgress } from "../../apps/api/dist/merchant-ordinary-refund-progress.js";
+import { createMerchantCardMachineOrdinaryRefund } from "../../apps/api/dist/merchant-card-machine-ordinary-refund.js";
+import { withPaidBatchAcceptance } from "../../apps/api/dist/merchant-card-machine-payment.js";
+import {
+  createRefundReceiptIssuance,
+  hasDigitalReceipt,
+} from "../../apps/api/dist/refund-receipt-issuance.js";
 import { createInternalRefundWorkforceContext } from "./pilot-refund-workforce.mjs";
 import { parseCanonicalInstant } from "../../packages/bop/identity/src/index.ts";
 export async function createInternalMerchant(
@@ -116,6 +122,7 @@ export async function createInternalMerchant(
     createInternalStaffPinCredentials,
     readOperationsAlertBoard,
     loadDailySettlementCoverage,
+    refreshOrderReceiptObservations,
   },
 ) {
   const session = await createInternalMerchantSession(resources);
@@ -408,6 +415,9 @@ export async function createInternalMerchant(
       ...persistence,
       transactions: createInternalExceptionSnapshotTransactions(resources),
     },
+    // WP-2423 D3: an unreadable reconciliation detail is logged (code and frames only).
+    onUnexpected: (error) =>
+      reportUnexpected("INTERNAL_ORDER_EXCEPTION_RECONCILIATION_DETAIL_UNAVAILABLE", error),
     // WP-2423: a business day's totals difference names its day by the scheduler's own runs.
     settlementDays: {
       dayEndOf: dailySettlementDayEnd,
@@ -711,6 +721,67 @@ export async function createInternalMerchant(
     retentionPolicyVersion: 1,
     businessDate: refundBusinessDate,
     soleOperator: (...args) => refundSoleOperator(...args),
+  });
+  // WP-2423 item 4: staff record an item refund of a card-machine payment made on the machine.
+  // When the Order has a digital receipt (a dine-in table that also paid rounds online), the
+  // receipt gains a refund version afterwards, as after an online refund (System, TEST-ONLY audit
+  // reason as the online receipt path).
+  const issueCardMachineRefundReceipt = async ({ orderReference }) => {
+    const active = async () => resources.now() < resources.publicProfile.binding.validUntil;
+    const receiptScope = { ...selected, providerAccountReference, environment: "Test" };
+    const has = await persistence.transactions.run((tx) =>
+      hasDigitalReceipt(tx, { ...resources.scope, orderReference, authorize: active }),
+    );
+    if (!has) return "NoDigitalReceipt";
+    const freshAfter = resources.now();
+    if (refreshOrderReceiptObservations !== undefined)
+      await refreshOrderReceiptObservations(
+        { ...resources, transactions: persistence.transactions },
+        orderReference,
+        active,
+      );
+    const authorize = async (_t, q) =>
+      q.brandReference === receiptScope.brandReference &&
+      q.storeReference === receiptScope.storeReference &&
+      q.orderReference === orderReference &&
+      (await active());
+    const ref = () => resources.credentials.reference();
+    await persistence.transactions.run((tx) =>
+      createRefundReceiptIssuance({
+        scope: receiptScope,
+        authorize,
+        authorizeSources: authorize,
+        authorizeOrder: authorize,
+        identities: () => ({ recordReference: ref(), operationReference: ref() }),
+        audit: async (record, operationReference) => ({
+          auditId: ref(),
+          brandId: receiptScope.brandReference,
+          storeId: receiptScope.storeReference,
+          actor: { type: "System" },
+          actionCode: "DIGITAL_RECEIPT_APPEND",
+          targetType: "DigitalReceipt",
+          targetId: record.recordReference,
+          reasonCode: "INTERNAL_TEST_REFUND_RECEIPT",
+          correlationId: operationReference,
+          occurredAt: record.recordedAt,
+          sourceChannel: "SYSTEM",
+          dataClassification: "Restricted",
+          retentionPolicyCode: "AUDIT_DEFAULT",
+          retentionPolicyVersion: 1,
+        }),
+      })(tx, { orderReference, observedAt: resources.now(), freshAfter }),
+    );
+    return "Issued";
+  };
+  const cardMachineOrdinaryRefund = createMerchantCardMachineOrdinaryRefund({
+    persistence,
+    authentication: service,
+    resolveConfiguration: refundConfiguration,
+    businessDate: refundBusinessDate,
+    nextReference: () => resources.credentials.reference(),
+    issueRefundReceipt: issueCardMachineRefundReceipt,
+    onUnexpected: (error) =>
+      reportUnexpected("INTERNAL_CARD_MACHINE_ORDINARY_REFUND_UNAVAILABLE", error),
   });
   // WP-2423 Q5: escalated refund approval. The requester's role, permission and MFA are read from
   // their owners for that person (Identity roster, Membership, Permission, MFA step-ups).
@@ -1187,6 +1258,18 @@ export async function createInternalMerchant(
               ...(counter.counterOrder === undefined
                 ? {}
                 : { counterOrder: storePresence.wrap(presenceScope, counter.counterOrder) }),
+              // WP-2423 D1: the server accepts a card-machine-paid order or table round with its
+              // payment record (staff member's acceptance authority, the Order's current version).
+              ...(counter.cardMachinePayment === undefined
+                ? {}
+                : {
+                    cardMachinePayment: withPaidBatchAcceptance(counter.cardMachinePayment, {
+                      accept: orderAcceptance,
+                      nextReference: () => resources.credentials.reference(),
+                      onNotAccepted: (error) =>
+                        reportUnexpected("INTERNAL_CARD_MACHINE_ACCEPTANCE_NOT_MADE", error),
+                    }),
+                  }),
               // WP-2423 Q7 slice 2: staff-entered dine-in rounds for a table.
               ...(counter.staffDiningRound === undefined
                 ? {}
@@ -1222,6 +1305,7 @@ export async function createInternalMerchant(
         }),
       ),
       ordinaryRefundRequest,
+      cardMachineOrdinaryRefund,
       ordinaryRefundApproval,
       ordinaryRefundApprovals,
       ordinaryRefundDecline,

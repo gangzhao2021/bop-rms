@@ -676,6 +676,18 @@ const orderSubmittedPayload = z.strictObject({
   batchSequence: z.int().min(1).max(2147483647),
 });
 
+// WP-2423: Ordering cancelled an unpaid dine-in round when its payment window ended.
+const orderCancelledPayload = z.strictObject({
+  orderReference: z.string().regex(canonicalUuidV7),
+  orderBatchReference: z.string().regex(canonicalUuidV7),
+  cancellationReference: z.string().regex(canonicalUuidV7),
+  cancellationScope: z.literal("Batch"),
+  reasonCode: z.enum(["CHECKOUT_DEADLINE_REACHED", "PAYMENT_NOT_STARTED"]),
+  itemCount: z.int().min(1).max(100),
+  cancelledAt: z.iso.datetime({ offset: false }),
+  sourceDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+});
+
 const orderConfirmedPayload = z.strictObject({
   confirmationReference: z.uuid(),
   orderReference: z.uuid(),
@@ -1742,6 +1754,22 @@ export const eventCatalog = defineEventCatalog([
     deprecated: false,
     replacement: null,
     payloadSchema: orderAmendedPayload,
+  },
+  {
+    eventType: "OrderCancelled",
+    schemaVersion: 1,
+    ownerModule: "@rms/ordering",
+    producerModule: "@rms/ordering",
+    stability: "experimental",
+    consumers: ["ordering.order-status-projection:v1"],
+    tenantScope: "store",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: orderCancelledPayload,
   },
   {
     eventType: "OrderConfirmed",

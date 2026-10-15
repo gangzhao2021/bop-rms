@@ -661,6 +661,11 @@ it("WP-2423: reads an unpaid dine-in round's payment due and refuses malformed o
     status: "Awaiting",
     cancelsAt: null,
   });
+  // WP-2423 item 5: a round with no payment started has its cancellation time.
+  expect(parse(dining({ status: "Awaiting", cancelsAt: failed.cancelsAt }))).toEqual({
+    status: "Awaiting",
+    cancelsAt: failed.cancelsAt,
+  });
   expect(parse(dining(null))).toBeNull();
   // Older servers without the key read as nothing due.
   expect(
@@ -670,7 +675,7 @@ it("WP-2423: reads an unpaid dine-in round's payment due and refuses malformed o
   for (const invalid of [
     dining(undefined),
     dining({ status: "Failed", cancelsAt: null }),
-    dining({ status: "Awaiting", cancelsAt: failed.cancelsAt }),
+    dining({ status: "Awaiting", cancelsAt: "2026-09-13T23:59:00.000Z" }),
     dining({ status: "Pending", cancelsAt: null }),
     dining({ ...failed, extra: true }),
     dining({ status: "Failed", cancelsAt: "2026-09-14T00:30:00Z" }),
@@ -711,12 +716,17 @@ it("WP-2423 Q7 slice 2: reads a round staff entered for the table and its card-m
   expect(parse(dining({ recordedAfterOutage: false, paidOnCardMachine: null }))).toEqual({
     recordedAfterOutage: false,
     paidOnCardMachine: null,
+    amountDueMinor: null,
   });
+  // WP-2423 D5: what to charge while unpaid, so Orders can record the card-machine payment.
+  expect(
+    parse(dining({ recordedAfterOutage: false, paidOnCardMachine: null, amountDueMinor: "2486" })),
+  ).toEqual({ recordedAfterOutage: false, paidOnCardMachine: null, amountDueMinor: "2486" });
   const paid = {
     recordedAfterOutage: true,
     paidOnCardMachine: { amountMinor: "2560", takenAt: "2026-09-14T00:10:00.000Z" },
   };
-  expect(parse(dining(paid))).toEqual(paid);
+  expect(parse(dining(paid))).toEqual({ ...paid, amountDueMinor: null });
   expect(parse(dining(null))).toBeNull();
   // Older servers without the key read as no staff round.
   expect(
@@ -730,6 +740,9 @@ it("WP-2423 Q7 slice 2: reads a round staff entered for the table and its card-m
       paidOnCardMachine: { amountMinor: "25.60", takenAt: paid.paidOnCardMachine.takenAt },
     }),
     dining({ ...paid, extra: true }),
+    dining({ ...paid, amountDueMinor: "100" }),
+    dining({ recordedAfterOutage: false, paidOnCardMachine: null, amountDueMinor: "0" }),
+    dining({ recordedAfterOutage: false, paidOnCardMachine: null, amountDueMinor: "1.5" }),
     dining(paid, "Pickup"),
   ])
     expect(() =>
@@ -820,5 +833,40 @@ it("WP-2423: reads what an online order was paid and its refund position on the 
       { ...detail(), paymentPosition: { refundedMinor: "0", refundPendingMinor: "0" } },
       id(1),
     ),
+  ).toThrow();
+});
+
+it("WP-2423 D4: an older table's Order with a round today is listed first under today", () => {
+  const view = parseCurrentOrderQueue({
+    items: [
+      // Opened Sun Oct 11 (an older reference), a round today: outside the newest-first sequence.
+      { ...row(3), businessDate: "2026-10-11", listedBusinessDate: "2026-10-15" },
+      { ...row(9), businessDate: "2026-10-15", listedBusinessDate: "2026-10-15" },
+      { ...row(4), businessDate: "2026-10-14", listedBusinessDate: "2026-10-14" },
+    ],
+    nextAfterOrderReference: null,
+  });
+  expect(
+    view.items.map((item) => [item.orderReference, item.businessDate, item.listedBusinessDate]),
+  ).toEqual([
+    [id(3), "2026-10-11", "2026-10-15"],
+    [id(9), "2026-10-15", "2026-10-15"],
+    [id(4), "2026-10-14", "2026-10-14"],
+  ]);
+  // An older server: listed under its own day.
+  const older = parseCurrentOrderQueue({
+    items: [{ ...row(9), businessDate: "2026-10-15" }],
+    nextAfterOrderReference: null,
+  });
+  expect(older.items[0]?.listedBusinessDate).toBe("2026-10-15");
+  // Out of sequence without being listed on a later day is still refused.
+  expect(() =>
+    parseCurrentOrderQueue({
+      items: [
+        { ...row(3), businessDate: "2026-10-15", listedBusinessDate: "2026-10-15" },
+        { ...row(9), businessDate: "2026-10-15", listedBusinessDate: "2026-10-15" },
+      ],
+      nextAfterOrderReference: null,
+    }),
   ).toThrow();
 });

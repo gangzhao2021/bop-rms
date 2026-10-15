@@ -107,7 +107,7 @@ it("advances a full page only after bound receipts and wraps after a short page"
   await f.dispatcher.runOnce();
   expect(f.discover.mock.calls.map(([, query]) => query.after)).toEqual([null, id(40), null]);
 });
-it.each(["scope", "paid", "unknown", "future", "order", "duplicate", "overflow"])(
+it.each(["scope", "paid", "future", "order", "duplicate", "overflow"])(
   "rejects an invalid whole page (%s) before any cancellation",
   async (kind) => {
     const f = fixture();
@@ -119,8 +119,6 @@ it.each(["scope", "paid", "unknown", "future", "order", "duplicate", "overflow"]
       b.status = "PaidBeforeDeadline";
       b.paymentEvidence.outcome = "Succeeded";
     }
-    if (kind === "unknown")
-      page = [a, { ...b, status: "AwaitingPaymentResolution", paymentEvidence: null }];
     if (kind === "future") b.observedAt = "2026-09-21T02:00:00.000Z";
     if (kind === "order") page = [b, a];
     if (kind === "duplicate") b.orderBatchReference = a.orderBatchReference;
@@ -130,6 +128,20 @@ it.each(["scope", "paid", "unknown", "future", "order", "duplicate", "overflow"]
     expect(f.cancel).not.toHaveBeenCalled();
   },
 );
+it("WP-2423 item 5: cancels a round with no payment result, or skips it when payment started", async () => {
+  const f = fixture();
+  const unresolved = { ...expiry(40), status: "AwaitingPaymentResolution", paymentEvidence: null };
+  f.discover.mockResolvedValue([expiry(), unresolved]);
+  f.cancel
+    .mockResolvedValueOnce(receipt())
+    .mockResolvedValueOnce({ status: "NotEligible", reason: "PaymentStarted" });
+  expect(await f.dispatcher.runOnce()).toBe(1);
+  expect(f.cancel).toHaveBeenCalledTimes(2);
+  // A failed payment is never "not eligible".
+  f.discover.mockResolvedValue([expiry()]);
+  f.cancel.mockResolvedValueOnce({ status: "NotEligible", reason: "PaymentStarted" });
+  await expect(f.dispatcher.runOnce()).rejects.toThrow();
+});
 it("retains the cursor when a receipt belongs to another operation", async () => {
   const f = fixture();
   f.cancel.mockResolvedValueOnce({

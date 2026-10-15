@@ -135,6 +135,7 @@ it("binds item queries to order and denies selectable units on uncaptured batche
       unclaimedQuantity: 1,
       paymentCaptured: true,
       paymentIntentReference: id(31),
+      paymentMethod: "Online",
     },
     data = {
       orderReference: id(1),
@@ -152,6 +153,7 @@ it("binds item queries to order and denies selectable units on uncaptured batche
           amountMinor: "1130",
           decline: null,
           progress: "Recorded",
+          paymentMethod: "Online",
         },
       ],
       items: [item],
@@ -174,6 +176,7 @@ const context = {
   orderBatchReference: id(4),
   observedAt: "2026-09-20T12:00:00.000Z",
   paymentState: "Captured",
+  paymentMethod: "Online",
   currencyCode: "CAD",
   capturedAmountMinor: "2260",
   confirmedRefundMinor: "0",
@@ -223,6 +226,7 @@ it("rejects missing, duplicate or inconsistent persisted request history", async
     amountMinor: "1130",
     decline: null,
     progress: "Recorded",
+    paymentMethod: "Online",
   };
   const data = {
     orderReference: id(1),
@@ -257,6 +261,8 @@ it("binds status to request operation and rejects contradictory completion or mo
     paymentAttemptReference: id(7),
     paymentIntentReference: id(6),
     state: "NotDispatched",
+    method: "Online",
+    refundedOnCardMachineAt: null,
     executionOperationReference: null,
     executionApprovalReference: null,
     amountMinor: "1130",
@@ -369,6 +375,7 @@ it("WP-2423 Q5: shows a declined request and sends an Other note only with that 
       declinedByYou: false,
     },
     progress: "Declined",
+    paymentMethod: "Online",
   };
   const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(
     response({
@@ -406,6 +413,7 @@ it("WP-2423 Q5: reads each request's progress and who may record requests", asyn
     currencyCode: "CAD",
     amountMinor: "1130",
     decline: null,
+    paymentMethod: "Online",
   };
   const items = (entry: unknown, canRequest: unknown = false) =>
     response({
@@ -443,4 +451,85 @@ it("WP-2423: a PIN sign-in refusal asks to confirm it is them; a plain 403 stays
   // After confirming, the same request is retried and recorded once.
   await expect(operation.submit(csrf)).resolves.toMatchObject({ status: "RequestRecorded" });
   expect(new Set(fetcher.mock.calls.slice(1).map((call) => call[1]?.body)).size).toBe(1);
+});
+
+it("WP-2423 item 4: reads card-machine payments, items, request status and records the machine refund", async () => {
+  const machineContext = { ...context, paymentMethod: "CardMachine" };
+  const payment = {
+    paymentAttemptReference: id(7),
+    paymentIntentReference: id(6),
+    state: "Confirmed",
+    method: "CardMachine",
+    refundedOnCardMachineAt: "2026-09-20T12:10:00.000Z",
+    executionOperationReference: null,
+    executionApprovalReference: null,
+    amountMinor: "565",
+    confirmedMinor: "565",
+    pendingMinor: "0",
+  };
+  const status = {
+    orderReference: id(1),
+    requestReference: id(2),
+    operationReference: id(3),
+    observedAt: "2026-09-20T12:11:00.000Z",
+    currencyCode: "CAD",
+    amountMinor: "565",
+    payments: [payment],
+  };
+  const recorded = {
+    status: "Recorded",
+    orderReference: id(1),
+    requestReference: id(2),
+    amountMinor: "565",
+    refundedAt: "2026-09-20T12:10:00.000Z",
+    receipt: "NoDigitalReceipt",
+  };
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response(machineContext))
+    // A card-machine payment that is not taken is never shown.
+    .mockResolvedValueOnce(response({ ...machineContext, paymentState: "Unresolved" }))
+    .mockResolvedValueOnce(response(status))
+    // A card-machine refund is never prepared or sent.
+    .mockResolvedValueOnce(
+      response({
+        ...status,
+        payments: [{ ...payment, state: "Prepared", executionOperationReference: id(9) }],
+      }),
+    )
+    .mockResolvedValueOnce(response(recorded))
+    .mockResolvedValueOnce(response({ error: "approval_required" }, 409));
+  const client = createOrdinaryRefundClient(fetcher);
+  expect((await client.context(id(6), csrf)).paymentMethod).toBe("CardMachine");
+  await expect(client.context(id(6), csrf)).rejects.toMatchObject({ code: "Unavailable" });
+  const read = await client.status(id(1), id(3), csrf);
+  expect(read.payments[0]).toMatchObject({
+    method: "CardMachine",
+    state: "Confirmed",
+    refundedOnCardMachineAt: "2026-09-20T12:10:00.000Z",
+  });
+  await expect(client.status(id(1), id(3), csrf)).rejects.toMatchObject({ code: "Unavailable" });
+  const command = {
+    operationReference: id(10),
+    orderReference: id(1),
+    requestReference: id(2),
+    slipReference: "AUTH 1234",
+    refundedAt: null,
+  };
+  await expect(client.recordCardMachineRefund(command, csrf)).resolves.toEqual({
+    status: "Recorded",
+    amountMinor: "565",
+    refundedAt: "2026-09-20T12:10:00.000Z",
+    receipt: "NoDigitalReceipt",
+  });
+  expect(fetcher.mock.calls[4]?.[0]).toBe("/merchant/payments/refunds/card-machine-record");
+  expect(JSON.parse(String(fetcher.mock.calls[4]?.[1]?.body))).toEqual(command);
+  await expect(client.recordCardMachineRefund(command, csrf)).rejects.toMatchObject({
+    code: "Conflict",
+  });
+  // A card number is never sent as the slip reference.
+  await expect(
+    client.recordCardMachineRefund({ ...command, slipReference: "4111 1111 1111 1111" }, csrf),
+  ).rejects.toThrow();
+  expect(fetcher).toHaveBeenCalledTimes(6);
 });

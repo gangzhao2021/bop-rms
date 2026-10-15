@@ -2,6 +2,8 @@ import { createPostgresOrdinaryRefundRequestPositionSource } from "./persistence
 import { createPostgresOrdinaryRefundClaimOutcomeReader } from "./persistence/ordinary-refund-operation-store.js";
 import { createPostgresOrdinaryRefundRecoverySource } from "./ordinary-refund-recovery-source.js";
 import { ordinaryRefundPaymentAmount } from "../application/ordinary-refund-request.js";
+import { createHash } from "node:crypto";
+import { createPostgresCardMachinePaymentStore } from "./persistence/card-machine-payment-store.js";
 
 type Options = Omit<
   Parameters<typeof createPostgresOrdinaryRefundRequestPositionSource>[0],
@@ -32,6 +34,37 @@ export function createPostgresOrdinaryRefundPositionSource(
         if (allowed !== true) throw new Error("ORDINARY_REFUND_PERMISSION_DENIED");
         return true;
       };
+      // WP-2423 item 4: a refund of a card-machine payment is made on the Store's machine and
+      // recorded once; until then the request's amount stays pending (set aside).
+      const machine = await createPostgresCardMachinePaymentStore({
+        scope: {
+          brandReference: options.scope.brandReference,
+          storeReference: options.scope.storeReference,
+        },
+        authorize: async (transaction, query) =>
+          query.orderReference === request.orderReference &&
+          (await authorize(transaction as typeof tx)),
+      }).loadRefundBySource(tx, "OrdinaryRefund", request.requestReference);
+      // Recorded after the instant being read: still pending at that instant.
+      if (machine !== null && machine.recordedAt <= observedAt) {
+        if (
+          machine.cardMachinePaymentReference !== payment.paymentTransactionReference ||
+          machine.orderReference !== request.orderReference ||
+          machine.amountMinor !== ordinaryRefundPaymentAmount(payment) ||
+          request.payments.length !== 1
+        )
+          throw new Error("ORDINARY_REFUND_HISTORY_UNAVAILABLE");
+        return {
+          confirmedMinor: machine.amountMinor,
+          pendingMinor: 0n,
+          observationCount: 1,
+          historyDigest:
+            "sha256:" +
+            createHash("sha256")
+              .update("CardMachineRefund:" + machine.cardMachineRefundReference)
+              .digest("hex"),
+        };
+      }
       const recover = createPostgresOrdinaryRefundRecoverySource({ ...options, authorize });
       const result = await createPostgresOrdinaryRefundClaimOutcomeReader({
         scope: options.scope,

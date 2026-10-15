@@ -8,6 +8,11 @@ import { createManualOutboxRecoveryRegistry } from "../../packages/bop/eventing/
 import { createConsumerOutboxTransport } from "../../apps/worker/dist/consumer-outbox-transport.js";
 import { createHash } from "node:crypto";
 import { createPersistentConsumerWorker } from "../../apps/worker/dist/persistent-consumer-worker.js";
+import {
+  isPilotDispatchScope,
+  pilotDispatchScopes,
+  pilotUnsubscribedEventTypes,
+} from "./pilot-event-routing.mjs";
 export async function createInternalWorker(resources, observers = {}, options = {}, dependencies) {
   const {
     createInternalDiningCheckoutExpiryWorkload,
@@ -61,10 +66,11 @@ export async function createInternalWorker(resources, observers = {}, options = 
         derive(kind + ":" + key),
       ]),
     );
-  const scope = {
-    brandId: resources.scope.brandReference,
-    storeId: resources.scope.storeReference,
-  };
+  // WP-2423 5e: the bound Store and the bound Brand; Brand-scoped events have no Store.
+  const scopes = pilotDispatchScopes(resources.scope);
+  const acknowledgedWithoutSubscribers = pilotUnsubscribedEventTypes(
+    services.map((service) => service.registration),
+  );
   const runtime = createPersistentConsumerWorker({
     onSnapshot: observers.events,
     connections: resources.database,
@@ -103,8 +109,7 @@ export async function createInternalWorker(resources, observers = {}, options = 
       authorizeScope: async (value) =>
         process.env.NODE_ENV === "development" &&
         resources.now() < resources.publicProfile.binding.validUntil &&
-        value.brandId === scope.brandId &&
-        value.storeId === scope.storeId,
+        isPilotDispatchScope(value, resources.scope),
       now: resources.now,
       random: Math.random,
       outboxIdentities: (event, attempt) => identities("outbox:" + event + ":" + attempt),
@@ -123,13 +128,15 @@ export async function createInternalWorker(resources, observers = {}, options = 
         ),
     },
     services,
-    scopes: [scope],
+    scopes,
+    acknowledgedWithoutSubscribers,
     leaseOwner: "internal-test-v4-business",
     newLeaseToken: resources.credentials.reference,
     config: {
       adapterConcurrency: 1,
       adapterTimeoutMs: 20000,
-      batchMaximum: 5,
+      // Five per scope each cycle, so a Brand authoring backlog never delays Store order events.
+      batchMaximum: 10,
       perScopeMaximum: 5,
       leaseDurationSeconds: 30,
       drainDeadlineMs: 25000,
@@ -151,6 +158,7 @@ export async function createInternalWorker(resources, observers = {}, options = 
   const recoveryAdapter = createConsumerOutboxTransport({
     delivery: runtime.delivery,
     subscriptions: [...routes].map(([eventType, consumerNames]) => ({ eventType, consumerNames })),
+    acknowledgedWithoutSubscribers,
   });
   return Object.freeze({ ...runtime, recoveryRegistry, recoveryAdapter });
 }

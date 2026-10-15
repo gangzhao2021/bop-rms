@@ -193,6 +193,8 @@ test("@production staff take a counter pickup order, charge it on the card machi
         recordingReason: body.takenAt === null ? "AtCounter" : "RecordedAfterOutage",
         takenAt: (body.takenAt as string | null) ?? new Date().toISOString(),
         recordedAt: new Date().toISOString(),
+        // WP-2423 D1: the server accepts the paid order with its payment record.
+        acceptance: "Accepted",
       },
     });
   });
@@ -280,7 +282,8 @@ test("@production staff take a counter pickup order, charge it on the card machi
       takenAt: null,
     },
   ]);
-  expect(accepted).toHaveLength(1);
+  // WP-2423 D1: accepted by the server with the payment, not by the page.
+  expect(accepted).toHaveLength(0);
   await expect(page.locator("body")).not.toContainText(id(20));
 
   // A paper order taken during an outage: entered with the time it was paid, not sent again.
@@ -305,7 +308,7 @@ test("@production staff take a counter pickup order, charge it on the card machi
     }),
   ).toBeVisible();
   expect(payments.at(-1)?.takenAt).toEqual(expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/u));
-  expect(accepted).toHaveLength(2);
+  expect(accepted).toHaveLength(0);
 });
 
 test("@production the order queue shows counter orders and records a card-machine refund", async ({

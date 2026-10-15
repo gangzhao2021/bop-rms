@@ -187,3 +187,38 @@ describe("WP-2423 Q21: Store times typed by staff are read in the Store's zone",
     expect(paidAtInstant("2026-10-13T18:30", now, "America/Toronto")).toBeNull();
   });
 });
+
+it("WP-2423 D4: names the day an older table was opened and that it ordered again today", async () => {
+  const { openedEarlierText } = await import("./StoreBusinessDay.js");
+  expect(openedEarlierText("2026-10-11", "2026-10-15", "2026-10-15")).toBe(
+    "Opened Sun, Oct 11 · ordered again Today · Thu, Oct 15",
+  );
+});
+
+it("WP-2423 D4: an older table's Order with a round today is under Today, not its opening day", () => {
+  const fixture = currentOrderQueueFixture();
+  const [first, second, third] = fixture.items;
+  const view = parseCurrentOrderQueue({
+    ...fixture,
+    items: [
+      { ...third, businessDate: "2026-10-12", listedBusinessDate: "2026-10-14" },
+      { ...first, businessDate: "2026-10-14", listedBusinessDate: "2026-10-14" },
+      { ...second, businessDate: "2026-10-14", listedBusinessDate: "2026-10-14" },
+    ],
+  });
+  const markup = renderToStaticMarkup(
+    <MemoryRouter>
+      <StoreBusinessDayContext.Provider
+        value={{ businessDate: "2026-10-14", startsAt: null, endsAt: null }}
+      >
+        <CurrentOrderQueueRows view={view} timeZone="America/Toronto" />
+      </StoreBusinessDayContext.Provider>
+    </MemoryRouter>,
+  );
+  expect(markup.match(/class="order-workbench-day"/g)).toHaveLength(1);
+  expect(markup).toContain(">Today · Wed, Oct 14</h2>");
+  expect(markup).not.toContain("Mon, Oct 12</h2>");
+  expect(markup).toContain(
+    "<dt>Business day</dt><dd>Opened Mon, Oct 12 · ordered again Today · Wed, Oct 14</dd>",
+  );
+});

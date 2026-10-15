@@ -26,6 +26,7 @@ export const fullSignInMutationPaths: ReadonlySet<string> = new Set([
   "/payments/refunds/decline",
   "/payments/refunds/prepare",
   "/payments/refunds/send",
+  "/payments/refunds/card-machine-record",
   "/payments/unmatched-capture-refund/request",
   "/payments/unmatched-capture-refund/approve",
   "/orders/card-machine-refund",

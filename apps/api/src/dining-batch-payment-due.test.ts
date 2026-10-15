@@ -75,3 +75,34 @@ it("WP-2423: gives the customer each Dining-owned round's payment and drops the 
     }),
   ).toEqual([{ orderBatchReference: id(2), status: "Failed", cancelsAt: null }]);
 });
+
+it("WP-2423 item 5: a round with no payment started is cancelled at its deadline; one started is not promised", () => {
+  const input = {
+    orderType: "DineIn" as const,
+    open: true,
+    batch: { orderBatchReference: id(2), acceptanceStatus: "NotAccepted" },
+    paidBatches: new Set<string>(),
+    deadlines: new Map([[id(2), deadline]]),
+    outcomes: new Map<string, "Succeeded" | "Failed">(),
+  };
+  expect(resolveMerchantBatchPaymentDue({ ...input, paymentStarted: new Set() })).toEqual({
+    status: "Awaiting",
+    cancelsAt: deadline,
+  });
+  expect(resolveMerchantBatchPaymentDue({ ...input, paymentStarted: new Set([id(2)]) })).toEqual({
+    status: "Awaiting",
+    cancelsAt: null,
+  });
+  const customer = (paymentStarted?: ReadonlySet<string>, cancelled = new Set<string>()) =>
+    resolveCustomerBatchPayments({
+      batchReferences: [id(2)],
+      deadlines: input.deadlines,
+      outcomes: input.outcomes,
+      cancelled,
+      ...(paymentStarted === undefined ? {} : { paymentStarted }),
+    })[0]?.cancelsAt;
+  expect(customer(new Set())).toBe(deadline);
+  expect(customer(new Set([id(2)]))).toBeNull();
+  expect(customer()).toBeNull();
+  expect(customer(new Set(), new Set([id(2)]))).toBeNull();
+});

@@ -5,6 +5,15 @@ const d = vi.hoisted(() => ({
   port: vi.fn(),
   workload: vi.fn(),
   discover: vi.fn(),
+  close: vi.fn(),
+  closure: vi.fn(),
+}));
+vi.mock("../../packages/rms/ordering/src/index.ts", async (original) => ({
+  ...(await original()),
+  createPostgresPaidAcceptanceLapseClosure: (options) => {
+    d.closure(options);
+    return { close: d.close };
+  },
 }));
 vi.mock("../../apps/api/dist/paid-without-fulfillable-inventory-release.js", () => ({
   createPaidWithoutFulfillableInventoryRelease: (options) => {
@@ -38,6 +47,7 @@ function fixture() {
     },
     now: vi.fn(() => "2026-09-21T00:00:00.000Z"),
     transactions: { run: vi.fn((work) => work(tx)) },
+    credentials: { reference: vi.fn(() => ref(50)) },
   };
   return { resources, tx, scope };
 }
@@ -66,6 +76,27 @@ it("composes the owner release with the binding scope, System actor and one tran
     "INTERNAL_PAID_WITHOUT_FULFILLABLE_INVENTORY_UNAVAILABLE",
   );
   expect(f.resources.transactions.run).toHaveBeenCalledTimes(1);
+});
+it("also closes a pickup the Store did not accept in time, in the release transaction (WP-2423)", async () => {
+  const f = fixture();
+  const service = createInternalPaidWithoutFulfillableInventory(f.resources, {
+    systemActorReference: ref(9),
+  });
+  expect(d.closure.mock.calls[0][0]).toMatchObject(f.scope);
+  d.port.mockResolvedValue({ status: "Released", entryCount: 1 });
+  d.close.mockResolvedValue({ status: "Closed" });
+  const lapsed = { ...f.scope, reason: "CapacityExpired", paymentEventReference: ref(21) };
+  expect(await service.release(lapsed)).toEqual({ status: "Released", entryCount: 1 });
+  expect(d.close).toHaveBeenCalledWith(f.tx, {
+    paymentEventReference: ref(21),
+    closedAt: "2026-09-21T00:00:00.000Z",
+    terminationReference: ref(50),
+    auditReference: ref(50),
+  });
+  await service.release({ ...lapsed, reason: "SubmissionCancelled" });
+  expect(d.close).toHaveBeenCalledTimes(1);
+  d.close.mockRejectedValue(new Error("ORDER_TERMINATION_UNAVAILABLE"));
+  await expect(service.release(lapsed)).rejects.toThrow("ORDER_TERMINATION_UNAVAILABLE");
 });
 it("rejects production and a mismatched binding before composing the release", () => {
   const f = fixture();

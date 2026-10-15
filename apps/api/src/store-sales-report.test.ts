@@ -317,6 +317,40 @@ describe("store sales report (WP-2423 Q14)", () => {
     expect(view.reconciliation.matchesSettlement).toBe(true);
   });
 
+  it("WP-2423 D4: counts a table's later round on the day it was paid, not the day the table opened", () => {
+    // Table opened on Oct 13 (first round paid then); a second round was added and paid on Oct 14.
+    const opened = {
+      ...order(600, "DineIn", "Qr", [p0Items, c1Items]),
+      businessDate: "2026-10-13",
+    };
+    const first = payment("Online", 600, 0, p0Items, 0, "2026-10-13T21:00:00.000Z");
+    const later = payment("Online", 600, 1, c1Items, 0, "2026-10-14T16:00:00.000Z");
+    const view = computeStoreSalesReport({
+      ...today,
+      days,
+      orders: [opened],
+      payments: [first, later],
+      refundedPayments: [],
+      refunds: [],
+      settlement: {
+        onlineCaptured: { count: 2, amountMinor: first.totalMinor + later.totalMinor },
+        onlineRefunded: { count: 0, amountMinor: 0n },
+        cardMachineTaken: { count: 0, amountMinor: 0n, tipMinor: 0n },
+        cardMachineRefunded: { count: 0, amountMinor: 0n },
+      },
+    });
+    expect(
+      view.days.map((day) => [
+        day.businessDate,
+        day.summary.collectedMinor,
+        day.summary.grossSalesMinor,
+      ]),
+    ).toEqual([
+      ["2026-10-13", first.totalMinor.toString(), "1000"],
+      ["2026-10-14", later.totalMinor.toString(), "400"],
+    ]);
+  });
+
   it("refuses inconsistent sources instead of printing a plausible total", () => {
     expect(() => computeStoreSalesReport({ ...today, days: [] })).toThrow();
     expect(() => computeStoreSalesReport({ ...today, refundedPayments: [] })).toThrow();

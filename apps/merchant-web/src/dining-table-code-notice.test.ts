@@ -1,5 +1,10 @@
 import { expect, it } from "vitest";
-import { elapsedText, longOpenSessionMinutes, tableCodeNotice } from "./DiningSessionWorkspace.js";
+import {
+  elapsedText,
+  longOpenSessionMinutes,
+  staffRoundPaymentNotice,
+  tableCodeNotice,
+} from "./DiningSessionWorkspace.js";
 import type { StaffDiningTable } from "./dining-session-client.js";
 
 const table: StaffDiningTable = {
@@ -13,6 +18,7 @@ const table: StaffDiningTable = {
   currentDiningSessionReference: null,
   elapsedMinutes: null,
   qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
+  staffRoundsAwaitingPayment: [],
 };
 const now = Date.parse("2027-03-01T13:00:00.000Z");
 
@@ -38,4 +44,33 @@ it("WP-2423 follow-up: says how long a table has been open in minutes, hours or 
   expect(elapsedText(1440)).toBe("1 day");
   expect(elapsedText(34992)).toBe("24 days");
   expect(longOpenSessionMinutes).toBe(720);
+});
+
+it("WP-2423 item 5: warns before a staff round's payment time ends, urgently in the last 10 minutes", () => {
+  const payBy = "2027-03-01T13:30:00.000Z";
+  const waiting = {
+    ...table,
+    currentDiningSessionReference: "01909988-0000-7000-8000-000000000009",
+    elapsedMinutes: 20,
+    staffRoundsAwaitingPayment: [{ payBy }],
+  };
+  expect(staffRoundPaymentNotice(table, now, "America/Toronto")).toBeNull();
+  expect(staffRoundPaymentNotice(waiting, now, "America/Toronto")).toEqual({
+    tier: "warning",
+    text: "A round entered by staff awaits card-machine payment. Record it by 08:30; the kitchen starts once it is recorded.",
+  });
+  expect(
+    staffRoundPaymentNotice(waiting, Date.parse(payBy) - 4 * 60_000 - 1, "America/Toronto"),
+  ).toEqual({
+    tier: "urgent",
+    text: "5 min left: record the card-machine payment for the round entered by staff by 08:30, or it is cancelled.",
+  });
+  const ended = staffRoundPaymentNotice(waiting, Date.parse(payBy), "America/Toronto");
+  expect(ended?.tier).toBe("urgent");
+  expect(ended?.text).toContain("wasn't paid by 08:30 and is being cancelled");
+  expect(ended?.text).toContain("refund it on the machine");
+  const two = { ...waiting, staffRoundsAwaitingPayment: [{ payBy }, { payBy }] };
+  expect(staffRoundPaymentNotice(two, now, "America/Toronto")?.text).toMatch(
+    /^2 rounds entered by staff await/u,
+  );
 });

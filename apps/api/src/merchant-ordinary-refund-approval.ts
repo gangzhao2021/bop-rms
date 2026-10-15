@@ -8,6 +8,7 @@ import {
   createPostgresOrdinaryRefundApprovalStore,
   createPostgresOrdinaryRefundApprovalSubjectSource,
   createPostgresOrdinaryRefundCurrentEscalationSource,
+  createPostgresCardMachinePaymentStore,
   ordinaryRefundClaimKind,
 } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
@@ -265,6 +266,19 @@ export function createMerchantOrdinaryRefundApproval(options: {
         authorize,
       })(tx, { orderReference, approvalReference, observedAt });
       const payments = subject.request.payments.map((payment) => payment.paymentAttemptReference);
+      // WP-2423 item 4: a refund of a card-machine payment is made on the Store's machine and
+      // recorded there; the approval never prepares or sends anything to a Provider.
+      const cards = createPostgresCardMachinePaymentStore({
+        scope,
+        // Checked in full above and again before the approval is recorded.
+        authorize: async (_t, query) => query.orderReference === orderReference,
+      });
+      let cardMachine = false;
+      for (const payment of subject.request.payments)
+        if ((await cards.loadByIntent(tx, payment.paymentIntentReference)) !== null)
+          cardMachine = true;
+      if (cardMachine && subject.request.payments.length !== 1)
+        throw new MerchantRefundApprovalError("Changed");
       if (existing !== null) {
         if (
           existing.approval.subject.requestReference !== requestReference ||
@@ -272,7 +286,7 @@ export function createMerchantOrdinaryRefundApproval(options: {
           (existing.approval.approvalMode === "SoleOperator") !== sole
         )
           throw new MerchantRefundApprovalError("Changed");
-        return { replayed: true, payments };
+        return { replayed: true, payments, cardMachine };
       }
       const approvalOptions = { scope, authorize, authority };
       const prepared = await createPostgresOrdinaryRefundApprovalSource(approvalOptions)(tx, {
@@ -312,7 +326,7 @@ export function createMerchantOrdinaryRefundApproval(options: {
         },
       );
       if (!(await current.allowed())) throw new MerchantRefundApprovalError("Denied");
-      return { replayed: false, payments };
+      return { replayed: false, payments, cardMachine };
     }
     // One payment at a time, with identities fixed by the approval reference.
     const legs = approved.payments.map((paymentAttemptReference) => ({
@@ -378,9 +392,13 @@ export function createMerchantOrdinaryRefundApproval(options: {
     const results: {
       paymentAttemptReference: string;
       operationReference: string;
-      state: "SendRecorded" | "Sending" | "ResultUnknown";
+      state: "SendRecorded" | "Sending" | "ResultUnknown" | "RecordOnCardMachine";
     }[] = [];
-    if (options.sendInBackground === true) {
+    if (approved.cardMachine)
+      // Approved: staff now refund it on the Store's card machine and record that refund.
+      for (const leg of legs)
+        results.push(Object.freeze({ ...leg, state: "RecordOnCardMachine" as const }));
+    else if (options.sendInBackground === true) {
       const prepared: (typeof legs)[number][] = [];
       for (const leg of legs) {
         try {

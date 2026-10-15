@@ -362,3 +362,70 @@ export function createMerchantCardMachinePayment(options: {
     }
   };
 }
+
+/** Whether the paid order or round went on to the kitchen (accepted) with its payment record. */
+export type CardMachinePaymentAcceptance = "Accepted" | "NotAccepted";
+
+/**
+ * WP-2423 (D1, DEC-STAFF-DINE-IN-ROUND decision 4): a counter order or a staff-entered table round
+ * paid on the Store's card machine is accepted by the server as part of recording that payment —
+ * by the staff member who recorded it, at the Order version the Order is at now (a table Order's
+ * version moves with every other round) — so it reaches the kitchen whether or not the page that
+ * sent it stays open. A retry of the same payment record (same operation) retries the acceptance;
+ * an acceptance already made by anyone is reported as accepted. When the order cannot be accepted
+ * now (no acceptance permission, acceptance time passed, stock changed) the payment stays recorded
+ * and staff are told to accept it in Orders.
+ */
+export function withPaidBatchAcceptance(
+  record: ReturnType<typeof createMerchantCardMachinePayment>,
+  options: {
+    accept(
+      input: { sessionCookie: unknown; csrf: unknown; command: unknown },
+      mode: "CurrentVersion",
+    ): Promise<{ status: "Created" | "AlreadyCommitted"; acceptedOrderVersion: number }>;
+    nextReference(): string;
+    /** Told the original error of an acceptance that did not happen (code and frames only). */
+    onNotAccepted?(error: unknown): void;
+  },
+) {
+  return async (input: {
+    sessionCookie: unknown;
+    csrf: unknown;
+    command: unknown;
+  }): Promise<CardMachinePaymentResult & { readonly acceptance: CardMachinePaymentAcceptance }> => {
+    const paid = await record(input);
+    const attempt = () =>
+      options.accept(
+        {
+          sessionCookie: input.sessionCookie,
+          csrf: input.csrf,
+          command: {
+            acceptanceReference: options.nextReference(),
+            operationReference: options.nextReference(),
+            orderReference: paid.orderReference,
+            orderBatchReference: paid.orderBatchReference,
+          },
+        },
+        "CurrentVersion",
+      );
+    let acceptance: CardMachinePaymentAcceptance;
+    try {
+      await attempt().catch(async (error: unknown) => {
+        // Another acceptance of the same round may have won a race (a retry, or Orders): read
+        // again; it then reports the acceptance already made.
+        const code = (error as { code?: unknown } | null)?.code;
+        if (code === "ORDER_ACCEPTANCE_NOT_ACCEPTABLE") throw error;
+        return attempt();
+      });
+      acceptance = "Accepted";
+    } catch (error) {
+      try {
+        options.onNotAccepted?.(error);
+      } catch {
+        // Reporting never changes the answer.
+      }
+      acceptance = "NotAccepted";
+    }
+    return Object.freeze({ ...paid, acceptance });
+  };
+}

@@ -47,6 +47,8 @@ export async function createInternalWorkerServices(
     await createInternalOrderCompletionConsumer(resources),
     ...(createInternalRefundConsumers ? createInternalRefundConsumers(resources) : []),
     status.completed,
+    // WP-2423: OrderCancelled (an unpaid dine-in round the System cancelled).
+    ...(status.cancelled ? [status.cancelled] : []),
   ];
   new ConsumerRegistry(services.map((value) => value.registration));
   return services.map((service) => ({

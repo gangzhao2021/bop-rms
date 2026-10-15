@@ -21,6 +21,7 @@ import { createPostgresOrdinaryRefundPricingSource } from "./ordinary-refund-pri
 import { createPostgresCapturedBatchPaymentSource } from "./persistence/captured-batch-payment-source.js";
 import { createPostgresPaymentIntentCreationStore } from "./persistence/payment-intent-creation-store.js";
 import { createPostgresPaymentTerminalStore } from "./persistence/payment-terminal-store.js";
+import { createPostgresCardMachinePaymentStore } from "./persistence/card-machine-payment-store.js";
 import { evaluateOrdinaryRefundEscalation } from "../application/ordinary-refund-escalation.js";
 import { ordinaryRefundClaimKind } from "../application/ordinary-refund-request.js";
 const fail = (): never => {
@@ -206,24 +207,64 @@ export function createPostgresOrdinaryRefundRequestRuntime(options: {
     });
     const terminalStore = createPostgresPaymentTerminalStore(runner, paymentScope);
     const basisReader = createPostgresOrderRefundBasisReader({ ...scope, authorize });
+    // WP-2423 item 4: a Batch paid on the Store's card machine is refunded on that machine. Its
+    // request names that payment alone; the allocation below is the same as for an online payment.
+    const cards = createPostgresCardMachinePaymentStore({
+      scope: ownerScope,
+      authorize: async (_tx, query) =>
+        query.orderReference === intent.orderReference && (await authorize()),
+    });
+    const batches = [...new Set(intent.items.map((item) => item.orderBatchReference))].sort();
     const payments = [];
-    for (const batch of [...new Set(intent.items.map((item) => item.orderBatchReference))].sort()) {
+    for (const batch of batches) {
       const captured = await captures.load(tx, {
         orderReference: intent.orderReference,
         orderBatchReference: batch,
         observedAt: requestedAt,
       });
       if (!captured) return fail();
-      const stored = await creation.resolveOperation(captured.paymentOperationReference);
-      const terminal = await terminalStore.read(captured.paymentIntentReference);
-      if (
-        !stored ||
-        !terminal ||
-        terminal.outcome !== "Succeeded" ||
-        terminal.paymentAttemptReference !== stored.attempt.paymentAttemptReference
-      )
-        return fail();
-      const preparation = stored.intent.preparation;
+      const card = await cards.loadByBatch(tx, intent.orderReference, batch);
+      let leg: {
+        paymentTransactionReference: string;
+        paymentIntentReference: string;
+        paymentAttemptReference: string;
+        firstCaptureReference: string;
+      };
+      let preparation;
+      if (card !== null) {
+        if (
+          batches.length !== 1 ||
+          intent.claim !== null ||
+          card.paymentIntentReference !== captured.paymentIntentReference ||
+          card.environment !== scope.environment ||
+          card.recordedAt > requestedAt
+        )
+          return fail();
+        preparation = card.preparation;
+        leg = {
+          paymentTransactionReference: card.cardMachinePaymentReference,
+          paymentIntentReference: card.paymentIntentReference,
+          paymentAttemptReference: card.paymentAttemptReference,
+          firstCaptureReference: card.cardMachinePaymentReference,
+        };
+      } else {
+        const stored = await creation.resolveOperation(captured.paymentOperationReference);
+        const terminal = await terminalStore.read(captured.paymentIntentReference);
+        if (
+          !stored ||
+          !terminal ||
+          terminal.outcome !== "Succeeded" ||
+          terminal.paymentAttemptReference !== stored.attempt.paymentAttemptReference
+        )
+          return fail();
+        preparation = stored.intent.preparation;
+        leg = {
+          paymentTransactionReference: terminal.paymentTransactionReference,
+          paymentIntentReference: terminal.paymentIntentReference,
+          paymentAttemptReference: terminal.paymentAttemptReference,
+          firstCaptureReference: terminal.observationReference,
+        };
+      }
       const basis = await basisReader.load(tx, {
         orderReference: intent.orderReference,
         orderBatchReference: batch,
@@ -265,10 +306,7 @@ export function createPostgresOrdinaryRefundRequestRuntime(options: {
         })),
       });
       payments.push({
-        paymentTransactionReference: terminal.paymentTransactionReference,
-        paymentIntentReference: terminal.paymentIntentReference,
-        paymentAttemptReference: terminal.paymentAttemptReference,
-        firstCaptureReference: terminal.observationReference,
+        ...leg,
         sourceReference: allocation.sourceReference,
         sourceDigest: allocation.sourceDigest,
         items: allocation.items
@@ -307,6 +345,7 @@ export function createPostgresOrdinaryRefundRequestRuntime(options: {
       now: options.now,
       authorize,
       validatePricing: createPostgresOrdinaryRefundPricingSource({ scope, authorize }),
+      allowCardMachine: true,
     });
     const store = createPostgresOrdinaryRefundRequestStore({
       scope,

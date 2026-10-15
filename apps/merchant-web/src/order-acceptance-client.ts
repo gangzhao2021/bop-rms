@@ -5,10 +5,33 @@ export interface OrderAcceptanceCommand {
   readonly orderBatchReference: string;
   readonly expectedOrderVersion: number;
 }
+/** WP-2423 D1: why the server did not accept (409): the order changed since it was read, someone
+ * accepted it already, or it can no longer be accepted as it is. */
+export type OrderAcceptanceConflict = "Changed" | "AlreadyAccepted" | "NotAcceptable";
 export class OrderAcceptanceClientError extends Error {
-  constructor(readonly code: "PermissionDenied" | "Conflict" | "Unavailable" | "OutcomeUnknown") {
+  constructor(
+    readonly code: "PermissionDenied" | "Conflict" | "Unavailable" | "OutcomeUnknown",
+    readonly conflict: OrderAcceptanceConflict | null = null,
+  ) {
     super("Order acceptance could not be confirmed");
     this.name = "OrderAcceptanceClientError";
+  }
+}
+async function conflictReason(response: Response): Promise<OrderAcceptanceConflict> {
+  try {
+    const text = await response.text();
+    const value: unknown = text.length <= 256 ? JSON.parse(text) : null;
+    const error =
+      value !== null && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>).error
+        : null;
+    return error === "already_accepted"
+      ? "AlreadyAccepted"
+      : error === "order_not_acceptable"
+        ? "NotAcceptable"
+        : "Changed";
+  } catch {
+    return "Changed";
   }
 }
 const invalid = (): never => {
@@ -80,7 +103,8 @@ export function createOrderAcceptanceClient(fetcher: typeof fetch = fetch) {
             if (controller.signal.aborted) throw new OrderAcceptanceClientError("OutcomeUnknown");
             if (response.status === 401 || response.status === 403)
               throw new OrderAcceptanceClientError("PermissionDenied");
-            if (response.status === 409) throw new OrderAcceptanceClientError("Conflict");
+            if (response.status === 409)
+              throw new OrderAcceptanceClientError("Conflict", await conflictReason(response));
             if (
               !response.ok ||
               response.headers.get("cache-control") !== "no-store" ||

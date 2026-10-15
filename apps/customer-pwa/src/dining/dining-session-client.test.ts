@@ -94,6 +94,20 @@ describe("WP-2423 Q8 dining session client", () => {
     await expect(client.load()).rejects.toMatchObject({ code: "unavailable" });
   });
 
+  it("WP-2423 Q26: decodes a dish the kitchen is making again, and rejects any other value", () => {
+    const remade = payload();
+    Object.assign(firstRound(remade).items[0] as object, { beingRemade: true });
+    expect(parseDiningSessionView(remade).rounds[0]?.items[0]).toMatchObject({
+      beingRemade: true,
+    });
+    expect(parseDiningSessionView(payload()).rounds[0]?.items[0]).not.toHaveProperty("beingRemade");
+    for (const value of [false, "true", 1, null]) {
+      const wrong = payload();
+      Object.assign(firstRound(wrong).items[0] as object, { beingRemade: value });
+      expect(() => parseDiningSessionView(wrong)).toThrow(DiningSessionClientError);
+    }
+  });
+
   it("does not call the server without this browser's session", async () => {
     const request = vi.fn();
     await expect(

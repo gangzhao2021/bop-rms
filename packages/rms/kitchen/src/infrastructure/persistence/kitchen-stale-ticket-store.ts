@@ -149,8 +149,14 @@ export function createPostgresKitchenStaleTicketStore(options: {
       readonly command: unknown;
       readonly actorReference: string;
       readonly occurredAt: string;
-      /** Ordering's business date of the Order and the Store's current business day. */
-      businessDays(orderReference: string): Promise<{
+      /**
+       * The business date of the ticket's round (WP-2423 D4: a table's later round belongs to the
+       * day it was submitted on; the first round's is the Order's) and the Store's current one.
+       */
+      businessDays(
+        orderReference: string,
+        orderBatchReference: string,
+      ): Promise<{
         readonly orderBusinessDate: string | null;
         readonly currentBusinessDate: string;
       }>;
@@ -247,7 +253,7 @@ export function createPostgresKitchenStaleTicketStore(options: {
       if (!Number.isSafeInteger(openReworks) || openReworks < 0) return unavailable();
       if (open.length === 0 && openReworks === 0) return fail("KITCHEN_STALE_TICKET_NOTHING_OPEN");
 
-      const days = await input.businessDays(orderReference);
+      const days = await input.businessDays(orderReference, batchReference);
       let orderBusinessDate: string, closingBusinessDate: string;
       try {
         if (days.orderBusinessDate === null) return unavailable();

@@ -1,6 +1,8 @@
 import type { ConsumerTransaction } from "@bop/eventing";
 import { readClosedRecord, parseOpaqueUuidV7 } from "@bop/identity";
 import {
+  createPostgresCardMachinePaymentStore,
+  createPostgresOrdinaryRefundPositionSource,
   createPostgresPaymentIntentBindingSource,
   createPostgresPaymentTerminalStore,
   createPostgresOrderPaymentRefundPosition,
@@ -9,6 +11,7 @@ import {
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { createMerchantWorkforcePermissionSource } from "./merchant-workforce-authority-source.js";
 import { refundReadAccess } from "./merchant-refund-read-authority.js";
+import { cardMachineWholeRefundSource } from "./merchant-card-machine-refund.js";
 import type { MerchantRefundSoleOperatorResolver } from "./merchant-sole-operator.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -126,6 +129,59 @@ export function createMerchantRefundPaymentContext(options: {
       };
       if (!(await allowed())) return deny();
       const observedAt = String(current.context.resolvedAt);
+      // WP-2423 item 4: a payment taken on the Store's own card machine. Its refunds are made on
+      // that machine: confirmed is what was recorded as refunded there (ordinary requests and
+      // whole refunds of a cancelled or unfulfillable round); pending is an ordinary request not
+      // yet recorded, or the rest of a whole refund still owed.
+      // Owner reads run inside this transaction after the full check above; it is repeated
+      // before the reply.
+      const card = await createPostgresCardMachinePaymentStore({
+        scope,
+        authorize: async () => true,
+      }).loadByIntent(businessTransaction, paymentIntentReference);
+      if (card !== null) {
+        if (card.recordedAt > observedAt) return deny();
+        const cards = createPostgresCardMachinePaymentStore({
+          scope,
+          authorize: async (_tx, query) => query.orderReference === card.orderReference,
+        });
+        const ordinary = await createPostgresOrdinaryRefundPositionSource({
+          scope,
+          providerAccountReference: configuration.providerAccountReference,
+          environment: configuration.environment,
+          authorize: async (_tx, query) => query.orderReference === card.orderReference,
+        })(businessTransaction, {
+          orderReference: card.orderReference,
+          paymentTransactionReference: card.cardMachinePaymentReference,
+          paymentIntentReference: card.paymentIntentReference,
+          paymentAttemptReference: card.paymentAttemptReference,
+          observedAt,
+        });
+        const refunds = await cards.refunds(businessTransaction, card.cardMachinePaymentReference);
+        const captured = card.preparation.total.amountMinor;
+        const confirmed = refunds
+          .filter((refund) => refund.recordedAt <= observedAt)
+          .reduce((sum, refund) => sum + refund.amountMinor, 0n);
+        let pending = ordinary.pendingMinor;
+        const whole = await cardMachineWholeRefundSource(businessTransaction, scope, card);
+        if (whole !== null && !refunds.some((refund) => refund.sourceReference === whole.reference))
+          pending = captured - confirmed;
+        if (confirmed + pending > captured || !(await allowed())) return deny();
+        return Object.freeze({
+          paymentIntentReference: card.paymentIntentReference,
+          paymentAttemptReference: card.paymentAttemptReference,
+          orderReference: card.orderReference,
+          orderBatchReference: card.orderBatchReference,
+          observedAt,
+          paymentState: "Captured" as const,
+          paymentMethod: "CardMachine" as const,
+          currencyCode: "CAD" as const,
+          capturedAmountMinor: captured.toString(),
+          confirmedRefundMinor: confirmed.toString(),
+          pendingRefundMinor: pending.toString(),
+          canRequest: viewer.canRequest,
+        });
+      }
       const binding = await createPostgresPaymentIntentBindingSource({
         scope: { ...scope, environment: configuration.environment },
         authorize: allowed,
@@ -152,6 +208,7 @@ export function createMerchantRefundPaymentContext(options: {
           ...binding,
           observedAt,
           paymentState: terminal === null ? ("Unresolved" as const) : ("Failed" as const),
+          paymentMethod: "Online" as const,
           currencyCode: null,
           capturedAmountMinor: null,
           confirmedRefundMinor: null,
@@ -186,6 +243,7 @@ export function createMerchantRefundPaymentContext(options: {
         ...binding,
         observedAt,
         paymentState: "Captured" as const,
+        paymentMethod: "Online" as const,
         currencyCode: "CAD" as const,
         capturedAmountMinor: terminal.amount.amountMinor.toString(),
         confirmedRefundMinor: position.confirmedMinor.toString(),

@@ -4,7 +4,8 @@ import {
 } from "../../domain/order-batch-checkout-cancellation.js";
 import type { OrderItemProgressFact } from "../../domain/order-item-progress.js";
 import { createHash } from "node:crypto";
-import type { ConsumerTransaction } from "@bop/eventing";
+import { appendEventInTransaction, type ConsumerTransaction } from "@bop/eventing";
+import { createOrderCancelledEnvelope } from "../../application/order-cancelled-event.js";
 import { readClosedRecord } from "@bop/identity";
 import {
   appendAuditRecordInTransaction,
@@ -311,6 +312,8 @@ export function createPostgresDiningCheckoutExpiryCandidates(options: {
             AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_batch_checkout_expiry e
               WHERE e.brand_id=b.brand_id AND e.store_id=b.store_id AND e.order_batch_id=b.order_batch_id
                 AND e.status<>'AwaitingPaymentResolution')
+            AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_batch_checkout_cancellation c
+              WHERE c.brand_id=b.brand_id AND c.store_id=b.store_id AND c.order_batch_id=b.order_batch_id)
           ORDER BY b.order_batch_id LIMIT $5`,
           [brand, store, at, after, limit],
         );
@@ -367,6 +370,11 @@ const cancellationColumns = {
   reasonCode: "reason_code",
 } as const;
 type Cancellation = ReturnType<typeof parseOrderBatchCheckoutCancellation>;
+/** sha256 of the canonical cancellation record (the `OrderCancelled` source digest). */
+export function orderBatchCheckoutCancellationDigest(record: Cancellation): string {
+  const canonical = parseOrderBatchCheckoutCancellation(record);
+  return "sha256:" + createHash("sha256").update(canonicalizeRfc8785(canonical)).digest("hex");
+}
 /** Caller must retain the Payment fence and roll back the entire transaction on error. */
 export function createPostgresOrderBatchCheckoutCancellationStore(options: {
   tenantReference: string;
@@ -386,6 +394,8 @@ export function createPostgresOrderBatchCheckoutCancellationStore(options: {
   }>;
   workflow(tx: ConsumerTransaction, record: Cancellation): Promise<boolean>;
   audit(record: Cancellation): Promise<unknown>;
+  /** WP-2423: the new `OrderCancelled` event's reference, published in this transaction. */
+  eventReference(record: Cancellation): string;
 }) {
   const scope = {
     tenantReference: parseOrderingReference(options.tenantReference),
@@ -514,6 +524,28 @@ export function createPostgresOrderBatchCheckoutCancellationStore(options: {
         )
           return fail();
         await appendAuditRecordInTransaction(tx, audit);
+        // WP-2423: consumers learn of the cancellation from the Order's own event, in order with
+        // the Order's other events (aggregate version = the cancelled Order version).
+        await appendEventInTransaction(
+          tx,
+          createOrderCancelledEnvelope({
+            eventReference: parseOrderingReference(options.eventReference(record)),
+            brandReference: scope.brandReference,
+            storeReference: scope.storeReference,
+            operationReference: record.operationReference,
+            cancelledOrderVersion: record.cancelledOrderVersion,
+            payload: {
+              orderReference: record.orderReference,
+              orderBatchReference: record.orderBatchReference,
+              cancellationReference: record.cancellationReference,
+              cancellationScope: "Batch",
+              reasonCode: record.reasonCode,
+              itemCount: record.orderItemReferences.length,
+              cancelledAt: record.cancelledAt,
+              sourceDigest: orderBatchCheckoutCancellationDigest(record),
+            },
+          }),
+        );
         if (!(await options.authorize(tx, record))) return fail();
         return Object.freeze({ status: "Created" as const, record });
       } catch {
@@ -630,10 +662,23 @@ export function createPostgresDiningBatchCancellationCandidates(options: {
           "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
           [brand, store],
         );
+        // WP-2423: a round whose payment failed, or whose payment was still unresolved when its window
+        // ended (the cancellation proves from Payment that none was ever started, or skips it), of an
+        // Order that is still open and a round nobody accepted or cancelled.
         const found = await tx.query(
           `SELECT ${selection} FROM rms_ordering.order_batch_checkout_expiry e
-    WHERE e.tenant_id=$1 AND e.brand_id=$2 AND e.store_id=$3 AND e.status='PaymentFailed'
+    WHERE e.tenant_id=$1 AND e.brand_id=$2 AND e.store_id=$3
+      AND e.status IN ('PaymentFailed','AwaitingPaymentResolution')
       AND e.observed_at<=$4::timestamptz AND ($5::uuid IS NULL OR e.record_id>$5::uuid)
+      AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_termination_record t
+        WHERE t.brand_id=e.brand_id AND t.store_id=e.store_id AND t.order_id=e.order_id)
+      AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_acceptance_record a
+        WHERE a.brand_id=e.brand_id AND a.store_id=e.store_id AND a.order_id=e.order_id AND a.order_batch_id=e.order_batch_id)
+      AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation s
+        WHERE s.brand_id=e.brand_id AND s.store_id=e.store_id AND s.order_id=e.order_id AND s.order_batch_id=e.order_batch_id)
+      AND COALESCE((SELECT v.status FROM rms_ordering.order_closure_version v
+        WHERE v.brand_id=e.brand_id AND v.store_id=e.store_id AND v.order_id=e.order_id
+        ORDER BY v.closure_version DESC LIMIT 1),'Open')<>'Closed'
       AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_batch_checkout_expiry later
         WHERE later.tenant_id=e.tenant_id AND later.brand_id=e.brand_id AND later.store_id=e.store_id
           AND later.order_batch_id=e.order_batch_id AND later.evidence_version>e.evidence_version)
@@ -651,7 +696,7 @@ export function createPostgresDiningBatchCancellationCandidates(options: {
             record.tenantReference !== tenant ||
             record.brandReference !== brand ||
             record.storeReference !== store ||
-            record.status !== "PaymentFailed" ||
+            (record.status !== "PaymentFailed" && record.status !== "AwaitingPaymentResolution") ||
             record.observedAt > at ||
             (previous !== null && record.recordReference <= previous) ||
             batches.has(record.orderBatchReference)
@@ -782,5 +827,71 @@ export async function listStoreUnpaidBatchCancellations(
         cancelledAt: instant(row.cancelledAt),
       });
     }),
+  );
+}
+
+/**
+ * WP-2423: one System round cancellation by its reference (the `OrderCancelled` source), or null.
+ * Read only; the caller authorizes and owns the transaction.
+ */
+export async function loadOrderBatchCheckoutCancellation(
+  transaction: ConsumerTransaction,
+  scope: StoreScope,
+  cancellationReference: string,
+): Promise<Cancellation | null> {
+  await storeContext(transaction, scope);
+  const names = Object.keys(cancellationColumns) as (keyof typeof cancellationColumns)[];
+  const found = await transaction.query(
+    "SELECT " +
+      names.map((key) => cancellationColumns[key] + ' AS "' + key + '"').join(",") +
+      " FROM rms_ordering.order_batch_checkout_cancellation WHERE brand_id=$1 AND store_id=$2 AND cancellation_id=$3 LIMIT 2",
+    [
+      parseOrderingReference(scope.brandReference),
+      parseOrderingReference(scope.storeReference),
+      parseOrderingReference(cancellationReference),
+    ],
+  );
+  if (!Array.isArray(found.rows) || found.rows.length > 1) return fail();
+  const row = found.rows[0];
+  if (row === undefined) return null;
+  return parseOrderBatchCheckoutCancellation({
+    ...row,
+    cancelledAt: instant(row.cancelledAt),
+  });
+}
+
+/** WP-2423: whether an `OrderCancelled` event states exactly this stored cancellation. */
+export async function orderCancelledEventMatchesRecord(
+  transaction: ConsumerTransaction,
+  scope: StoreScope,
+  event: {
+    readonly aggregateId: string;
+    readonly aggregateVersion: bigint;
+    readonly payload: {
+      readonly orderReference: string;
+      readonly orderBatchReference: string;
+      readonly cancellationReference: string;
+      readonly reasonCode: string;
+      readonly itemCount: number;
+      readonly cancelledAt: string;
+      readonly sourceDigest: string;
+    };
+  },
+): Promise<boolean> {
+  const record = await loadOrderBatchCheckoutCancellation(
+    transaction,
+    scope,
+    event.payload.cancellationReference,
+  );
+  return (
+    record !== null &&
+    record.orderReference === event.aggregateId &&
+    record.orderReference === event.payload.orderReference &&
+    record.orderBatchReference === event.payload.orderBatchReference &&
+    BigInt(record.cancelledOrderVersion) === event.aggregateVersion &&
+    record.reasonCode === event.payload.reasonCode &&
+    record.orderItemReferences.length === event.payload.itemCount &&
+    record.cancelledAt === event.payload.cancelledAt &&
+    orderBatchCheckoutCancellationDigest(record) === event.payload.sourceDigest
   );
 }

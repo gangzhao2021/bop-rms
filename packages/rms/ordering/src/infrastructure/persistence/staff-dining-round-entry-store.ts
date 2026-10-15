@@ -8,6 +8,7 @@ import {
   type OrderingInstant,
   type OrderingReference,
 } from "../../domain/cart.js";
+import { diningCheckoutPaymentWindowMinutes } from "./order-batch-checkout-expiry-store.js";
 
 /**
  * WP-2423 Q7 slice 2 (DEC-STAFF-DINE-IN-ROUND): a dine-in round staff entered for a table (or a
@@ -231,6 +232,58 @@ export function createPostgresStaffDiningRoundEntryStore(options: {
       if (found.length > 1) return fail();
       const row = found[0];
       return row === undefined ? null : batchOf(row);
+    },
+    /**
+     * WP-2423 item 5: rounds staff entered at these tables that still wait for their card-machine
+     * payment as far as Ordering knows (no payment recorded, not accepted, not cancelled), with the
+     * time their payment window ends (the round's Dining capacity link + the dining payment window).
+     * The caller also checks Payment for a card-machine payment not yet seen by Ordering.
+     */
+    async listAwaitingPaymentByTables(tx: AuditTransaction, tableReferences: readonly string[]) {
+      await context(tx);
+      if (tableReferences.length === 0) return Object.freeze([]);
+      if (tableReferences.length > 500) return fail();
+      const found = rows(
+        await tx.query(
+          `SELECT e.table_id::text AS table_reference,e.dining_session_id::text AS session_reference,
+ b.order_id::text AS order_reference,
+ b.order_batch_id::text AS order_batch_reference,
+ to_char((l.created_at+interval '${diningCheckoutPaymentWindowMinutes} minutes') AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS pay_by
+ FROM rms_ordering.staff_dining_round_entry e
+ JOIN rms_ordering.order_batch b ON b.brand_id=e.brand_id AND b.store_id=e.store_id
+  AND b.submitted_by_actor_id=e.guest_session_id
+ JOIN rms_ordering.order_capacity_link l ON l.brand_id=b.brand_id AND l.store_id=b.store_id
+  AND l.order_id=b.order_id AND l.order_batch_id=b.order_batch_id AND l.submission_id=b.submission_id
+  AND l.link_json->>'owner'='Dining'
+ WHERE e.brand_id=$1 AND e.store_id=$2 AND e.table_id = ANY($3::uuid[])
+  AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_batch_checkout_cancellation c WHERE c.brand_id=b.brand_id
+   AND c.store_id=b.store_id AND c.order_batch_id=b.order_batch_id)
+  AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation s WHERE s.brand_id=b.brand_id
+   AND s.store_id=b.store_id AND s.order_batch_id=b.order_batch_id)
+  AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_acceptance_record a WHERE a.brand_id=b.brand_id
+   AND a.store_id=b.store_id AND a.order_id=b.order_id AND a.order_batch_id=b.order_batch_id)
+  AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_payment_acceptance_wait w WHERE w.brand_id=b.brand_id
+   AND w.store_id=b.store_id AND w.order_id=b.order_id AND w.order_batch_id=b.order_batch_id)
+  AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_payment_disposition_record d WHERE d.brand_id=b.brand_id
+   AND d.store_id=b.store_id AND d.order_id=b.order_id AND d.order_batch_id=b.order_batch_id)
+  AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_termination_record t WHERE t.brand_id=b.brand_id
+   AND t.store_id=b.store_id AND t.order_id=b.order_id)
+ ORDER BY e.table_id,l.created_at,b.order_batch_id LIMIT 1001`,
+          [brand, store, tableReferences.map((value) => parseOrderingReference(value))],
+        ),
+      );
+      if (found.length > 1000) return fail();
+      return Object.freeze(
+        found.map((row) =>
+          Object.freeze({
+            tableReference: String(parseOrderingReference(row.table_reference)),
+            diningSessionReference: String(parseOrderingReference(row.session_reference)),
+            orderReference: String(parseOrderingReference(row.order_reference)),
+            orderBatchReference: String(parseOrderingReference(row.order_batch_reference)),
+            payBy: String(parseOrderingInstant(row.pay_by)),
+          }),
+        ),
+      );
     },
     /** Staff entries behind rounds of these Orders, keyed by Order batch. */
     async listByOrders(tx: AuditTransaction, orderReferences: readonly string[]) {

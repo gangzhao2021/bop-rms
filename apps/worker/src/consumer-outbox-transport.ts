@@ -8,6 +8,13 @@ export function createConsumerOutboxTransport(options: {
     readonly eventType: string;
     readonly consumerNames: readonly string[];
   }[];
+  /**
+   * Event types this deployment publishes with no subscriber: the deployment declares that every
+   * registered consumer of the type is intentionally not deployed (WP-2423 5e). Such an event is
+   * acknowledged without delivery; any other unsubscribed type is still rejected, so a missing
+   * consumer that the deployment needs stays visible as a rejected event.
+   */
+  readonly acknowledgedWithoutSubscribers?: readonly string[];
 }): OutboxTransportAdapter {
   const routes = new Map<string, readonly string[]>();
   for (const subscription of options.subscriptions) {
@@ -23,10 +30,24 @@ export function createConsumerOutboxTransport(options: {
       throw new TypeError("OUTBOX_CONSUMER_SUBSCRIPTIONS_INVALID");
     routes.set(subscription.eventType, Object.freeze([...subscription.consumerNames]));
   }
+  const unsubscribed = new Set<string>();
+  for (const eventType of options.acknowledgedWithoutSubscribers ?? []) {
+    if (
+      typeof eventType !== "string" ||
+      !/^[A-Z][A-Za-z0-9]{0,127}$/u.test(eventType) ||
+      routes.has(eventType) ||
+      unsubscribed.has(eventType)
+    )
+      throw new TypeError("OUTBOX_UNSUBSCRIBED_EVENT_TYPES_INVALID");
+    unsubscribed.add(eventType);
+  }
   return Object.freeze<OutboxTransportAdapter>({
     async publish(envelope, context) {
       const names = routes.get(envelope.eventType);
-      if (!names) return { status: "failed", errorCode: "TRANSPORT_REJECTED" };
+      if (!names)
+        return unsubscribed.has(envelope.eventType)
+          ? { status: "acknowledged" }
+          : { status: "failed", errorCode: "TRANSPORT_REJECTED" };
       let failure: "TRANSPORT_UNAVAILABLE" | "TRANSPORT_REJECTED" | undefined;
       for (const name of names) {
         let outcome: ConsumerOutcome;

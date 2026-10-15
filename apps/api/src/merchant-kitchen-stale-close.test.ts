@@ -8,6 +8,10 @@ const doubles = vi.hoisted(() => ({
   close: vi.fn(),
   dates: vi.fn(),
   today: vi.fn(),
+  rounds: vi.fn(),
+}));
+vi.mock("./merchant-round-business-date.js", () => ({
+  createMerchantRoundBusinessDates: () => doubles.rounds,
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => doubles.scope }));
 vi.mock("./merchant-store-business-day.js", () => ({
@@ -82,8 +86,16 @@ it("DEC-KITCHEN-STALE-TICKETS: a manager closes with the narrow permission; acto
   expect(call).toMatchObject({ command, actorReference: id(7), occurredAt: now });
   doubles.dates.mockResolvedValue(new Map([[id(3), "2026-10-09"]]));
   doubles.today.mockResolvedValue({ businessDate: "2026-10-14" });
-  await expect(call.businessDays(id(3))).resolves.toEqual({
+  doubles.rounds.mockResolvedValue(new Map([[id(4), "2026-10-09"]]));
+  await expect(call.businessDays(id(3), id(4))).resolves.toEqual({
     orderBusinessDate: "2026-10-09",
+    currentBusinessDate: "2026-10-14",
+  });
+  expect(doubles.rounds.mock.calls[0]?.[1]).toEqual([id(4)]);
+  // WP-2423 D4: a round added today to a table opened on an earlier day is today's work.
+  doubles.rounds.mockResolvedValue(new Map([[id(4), "2026-10-14"]]));
+  await expect(call.businessDays(id(3), id(4))).resolves.toEqual({
+    orderBusinessDate: "2026-10-14",
     currentBusinessDate: "2026-10-14",
   });
   expect(doubles.dates.mock.calls[0]?.[1]).toEqual({

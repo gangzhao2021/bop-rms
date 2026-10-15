@@ -388,11 +388,15 @@ export function createPostgresOrdinaryRefundApprovalQueueReader(options: {
         "WHERE r.brand_id=$1 AND r.store_id=$2 AND r.requested_at>=$3 AND r.requested_at<=$4 " +
         "AND NOT (r.record_json ? 'claim') AND NOT EXISTS (SELECT 1 FROM rms_payment.ordinary_refund_decline y " +
         "WHERE y.brand_id=r.brand_id AND y.store_id=r.store_id AND y.request_id=r.request_id) AND (" +
+        // WP-2423 item 4: a card-machine refund is finished once it is recorded as made on the
+        // Store's machine (never prepared or dispatched).
+        "NOT EXISTS (SELECT 1 FROM rms_payment.card_machine_refund m WHERE m.brand_id=r.brand_id " +
+        "AND m.store_id=r.store_id AND m.source_kind='OrdinaryRefund' AND m.source_id=r.request_id) AND (" +
         "(a.approval_id IS NULL AND NOT EXISTS (SELECT 1 FROM rms_payment.ordinary_refund_operation o " +
         "WHERE o.brand_id=r.brand_id AND o.store_id=r.store_id AND o.request_id=r.request_id)) OR " +
         "(a.approval_id IS NOT NULL AND (SELECT count(*) FROM rms_payment.ordinary_refund_dispatch d " +
         "WHERE d.brand_id=r.brand_id AND d.store_id=r.store_id AND d.request_id=r.request_id)" +
-        "<jsonb_array_length(r.record_json->'payments'))) " +
+        "<jsonb_array_length(r.record_json->'payments')))) " +
         "ORDER BY r.requested_at DESC,r.request_id DESC LIMIT $5",
       [scope.brandReference, scope.storeReference, since, observedAt, raw.limit],
     );
@@ -544,8 +548,10 @@ export function createPostgresOrdinaryRefundDeclineStore(options: Options) {
         declinedAt: parsePaymentInstant(at instanceof Date ? at.toISOString() : at),
       });
     }
+    // WP-2423 item 4: a refund already made on the Store's card machine counts as prepared.
     const prepared = await tx.query(
-      "SELECT count(*)::int AS n FROM rms_payment.ordinary_refund_operation WHERE brand_id=$1 AND store_id=$2 AND request_id=$3",
+      "SELECT (SELECT count(*)::int FROM rms_payment.ordinary_refund_operation WHERE brand_id=$1 AND store_id=$2 AND request_id=$3)+" +
+        "(SELECT count(*)::int FROM rms_payment.card_machine_refund WHERE brand_id=$1 AND store_id=$2 AND source_kind='OrdinaryRefund' AND source_id=$3) AS n",
       [scope.brandReference, scope.storeReference, ids.requestReference],
     );
     if (prepared.rows[0]?.n !== 0) return denied("ORDINARY_REFUND_DECLINE_ALREADY_PREPARED");
@@ -691,4 +697,30 @@ export function createPostgresSoleOperatorRefundSummaryReader(options: {
       endsAt,
     });
   };
+}
+
+/** WP-2423 item 4: the approvals recorded for one request, newest first (the caller parses each
+ * through {@link createPostgresOrdinaryRefundApprovalReader}). Same Store scope as every read. */
+export async function listOrdinaryRefundApprovalReferences(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  query: { readonly orderReference: string; readonly requestReference: string },
+): Promise<readonly string[]> {
+  const brand = String(parsePaymentReference(scope.brandReference));
+  const store = String(parsePaymentReference(scope.storeReference));
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  const result = await tx.query(
+    "SELECT approval_id::text AS approval FROM rms_payment.ordinary_refund_approval WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 AND request_id=$4 ORDER BY approved_at DESC,approval_id DESC LIMIT 21",
+    [
+      brand,
+      store,
+      String(parsePaymentReference(query.orderReference)),
+      String(parsePaymentReference(query.requestReference)),
+    ],
+  );
+  if (result.rows.length > 20) return fail();
+  return Object.freeze(result.rows.map((row) => String(parsePaymentReference(row.approval))));
 }

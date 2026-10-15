@@ -20,6 +20,14 @@ const references = [
   "workflowVersionReference",
   "transitionReference",
 ] as const;
+/**
+ * Why the System cancelled an unpaid round when its payment window ended:
+ * CHECKOUT_DEADLINE_REACHED — its payment failed; PAYMENT_NOT_STARTED — no payment was ever
+ * started for it (WP-2423: a staff-entered round not paid on the card machine, or a guest round whose
+ * online payment never began). Nothing was charged in either case.
+ */
+export type OrderBatchCheckoutCancellationReasonCode =
+  "CHECKOUT_DEADLINE_REACHED" | "PAYMENT_NOT_STARTED";
 /** Append-only owner fact. Parsing grants no permission and releases no stock.
  * The writer must re-resolve source evidence and complete membership under fences.
  */
@@ -47,7 +55,8 @@ export function parseOrderBatchCheckoutCancellation(value: unknown) {
       expected >= 2147483647 ||
       next !== expected + 1 ||
       raw.phase !== "Cancelled" ||
-      raw.reasonCode !== "CHECKOUT_DEADLINE_REACHED" ||
+      (raw.reasonCode !== "CHECKOUT_DEADLINE_REACHED" &&
+        raw.reasonCode !== "PAYMENT_NOT_STARTED") ||
       !Array.isArray(raw.orderItemReferences) ||
       raw.orderItemReferences.length === 0
     )
@@ -66,7 +75,7 @@ export function parseOrderBatchCheckoutCancellation(value: unknown) {
       orderItemReferences: Object.freeze(items),
       cancelledAt: parseOrderingInstant(raw.cancelledAt),
       phase: "Cancelled" as const,
-      reasonCode: "CHECKOUT_DEADLINE_REACHED" as const,
+      reasonCode: raw.reasonCode as OrderBatchCheckoutCancellationReasonCode,
     });
   } catch {
     return fail();
@@ -95,8 +104,12 @@ export function createOrderBatchCheckoutCancellation(input: {
       "paymentOperationReference",
     ] as const)
       if (record[key] !== expiry[key]) return fail();
+    // The reason follows the expiry evidence: a failed payment, or none recorded at the deadline
+    // (the caller proves from Payment that none was ever started before it uses the latter).
     if (
-      expiry.status !== "PaymentFailed" ||
+      (record.reasonCode === "CHECKOUT_DEADLINE_REACHED"
+        ? expiry.status !== "PaymentFailed"
+        : expiry.status !== "AwaitingPaymentResolution") ||
       record.expiryRecordReference !== expiry.recordReference ||
       record.expiryEvidenceDigest !== expiry.evidenceDigest ||
       record.cancelledAt < expiry.observedAt

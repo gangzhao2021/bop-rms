@@ -1,4 +1,5 @@
 import { RefundExecutionAction } from "./RefundExecutionAction.js";
+import { CardMachineRequestRefund } from "./CardMachineRequestRefund.js";
 import {
   createOrdinaryRefundPreparationClient,
   OrdinaryRefundPreparationClientError,
@@ -322,16 +323,47 @@ function RecordedRequestStatus({
             {result.payments.map((payment, index) => (
               <li key={payment.paymentAttemptReference}>
                 Payment {index + 1}:{" "}
-                {payment.state === "Confirmed"
-                  ? "Refund confirmed"
-                  : payment.state === "Prepared"
-                    ? "Preparation recorded; awaiting dispatch"
-                    : payment.state === "NotDispatched"
-                      ? "Not dispatched"
-                      : "Needs reconciliation"}
-                . Requested {amount(payment.amountMinor)}; confirmed{" "}
-                {amount(payment.confirmedMinor)}; pending {amount(payment.pendingMinor)}.
-                {payment.state !== "NotDispatched" && payment.executionOperationReference ? (
+                {payment.method === "CardMachine" ? (
+                  // WP-2423 item 4: refunded on the store's card machine, then recorded here.
+                  <>
+                    {payment.state === "Confirmed" && payment.refundedOnCardMachineAt !== null ? (
+                      <>
+                        Refunded {amount(payment.amountMinor)} on the store&apos;s card machine{" "}
+                        <SourceTime instant={payment.refundedOnCardMachineAt} />.
+                      </>
+                    ) : approval?.state === "AwaitingApproval" ? (
+                      <>
+                        {amount(payment.amountMinor)} to refund on the card machine once an owner
+                        approves it. <Link to="/app/approvals">Open approvals</Link>
+                      </>
+                    ) : (
+                      <CardMachineRequestRefund
+                        orderReference={orderReference}
+                        requestReference={entry.requestReference}
+                        amountMinor={payment.amountMinor}
+                        amountLabel={amount(payment.amountMinor)}
+                        csrf={csrf}
+                        onRecorded={onFinancialChange}
+                      />
+                    )}
+                  </>
+                ) : null}
+                {payment.method === "CardMachine" ? null : (
+                  <>
+                    {payment.state === "Confirmed"
+                      ? "Refund confirmed"
+                      : payment.state === "Prepared"
+                        ? "Preparation recorded; awaiting dispatch"
+                        : payment.state === "NotDispatched"
+                          ? "Not dispatched"
+                          : "Needs reconciliation"}
+                    . Requested {amount(payment.amountMinor)}; confirmed{" "}
+                    {amount(payment.confirmedMinor)}; pending {amount(payment.pendingMinor)}.
+                  </>
+                )}
+                {payment.method === "Online" &&
+                payment.state !== "NotDispatched" &&
+                payment.executionOperationReference ? (
                   <RefundExecutionAction
                     onFinancialChange={onFinancialChange}
                     key={payment.executionOperationReference + ":" + payment.state}
@@ -353,7 +385,9 @@ function RecordedRequestStatus({
                     }}
                   />
                 ) : null}
-                {payment.state === "NotDispatched" && approval !== null ? (
+                {payment.method === "Online" &&
+                payment.state === "NotDispatched" &&
+                approval !== null ? (
                   <p>
                     {approval.state === "AwaitingApproval"
                       ? "Waiting for an owner or finance member to approve this refund in person."
@@ -361,7 +395,9 @@ function RecordedRequestStatus({
                     <Link to="/app/approvals">Open approvals</Link>
                   </p>
                 ) : null}
-                {payment.state === "NotDispatched" && approval === null ? (
+                {payment.method === "Online" &&
+                payment.state === "NotDispatched" &&
+                approval === null ? (
                   <RefundPreparationAction
                     // A Manager prepares only a refund that needs no approval; an approved
                     // refund is prepared and sent by its approval (one operation, never two).
@@ -442,6 +478,12 @@ function RefundWizard({
     return () => window.removeEventListener("beforeunload", warn);
   }, [state]);
   const locked = state !== "Idle" || preparing.size > 0;
+  // WP-2423 item 4: the calculated refund is of a card-machine payment (refunded on the machine).
+  const previewOnMachine =
+    items?.items.some(
+      (item) =>
+        (quantities[item.orderItemReference] ?? 0) > 0 && item.paymentMethod === "CardMachine",
+    ) === true;
   // WP-2423 Q5: someone who cannot record a new request here only follows recorded ones.
   const requestable = blockedMessage === null && items?.canRequest !== false;
   const verificationCurrent = () =>
@@ -529,6 +571,18 @@ function RefundWizard({
       setMessage("Select at least one item quantity.");
       return;
     }
+    // WP-2423 item 4: items paid on the store's card machine are refunded on that machine, one
+    // payment at a time; they are never mixed with items paid online.
+    const chosen = items.items.filter((item) => (quantities[item.orderItemReference] ?? 0) > 0);
+    if (
+      chosen.some((item) => item.paymentMethod === "CardMachine") &&
+      new Set(chosen.map((item) => item.paymentIntentReference)).size > 1
+    ) {
+      setMessage(
+        "Refund items paid on the card machine separately: select only items from that one payment.",
+      );
+      return;
+    }
     if (!refundReasonCodes.includes(reason as (typeof refundReasonCodes)[number])) {
       setMessage("Select the reason for this refund.");
       return;
@@ -605,7 +659,9 @@ function RefundWizard({
               ? ". You run this business alone (sole operator): open Approvals and approve it yourself after confirming it is you."
               : result.approvalRequired === true
                 ? ". Ask the owner to open Approvals on this device or theirs. If more than 15 minutes pass after your verification, you'll be asked to verify again here."
-                : ". Approval and execution are separate. No completed refund is confirmed here."),
+                : previewOnMachine
+                  ? ". Now refund it on the store's card machine and record it under the request below."
+                  : ". Approval and execution are separate. No completed refund is confirmed here."),
         );
       }
     } catch (error) {
@@ -677,7 +733,17 @@ function RefundWizard({
                   ) : approvals.get(entry.requestReference)?.state === "AwaitingApproval" ? (
                     " · Waiting for owner approval"
                   ) : approvals.get(entry.requestReference)?.state === "Approved" ? (
-                    " · Approved, sending not finished"
+                    entry.paymentMethod === "CardMachine" ? (
+                      " · Approved — refund it on the card machine and record it"
+                    ) : (
+                      " · Approved, sending not finished"
+                    )
+                  ) : entry.paymentMethod === "CardMachine" ? (
+                    entry.progress === "Refunded" ? (
+                      " · Refunded on the card machine"
+                    ) : (
+                      " · To refund on the card machine"
+                    )
                   ) : entry.progress === "Refunded" ? (
                     " · Refunded"
                   ) : entry.progress === "Sending" ? (
@@ -729,6 +795,7 @@ function RefundWizard({
                 <label htmlFor={"refund-quantity-" + index}>
                   {item.label} · line {index + 1} ({item.unclaimedQuantity} unclaimed of{" "}
                   {item.quantity})
+                  {item.paymentMethod === "CardMachine" ? " · paid on card machine" : ""}
                 </label>
                 <input
                   id={"refund-quantity-" + index}
@@ -825,10 +892,18 @@ function RefundWizard({
               <dd>{amount(preview.amountMinor)}</dd>
             </div>
           </dl>
-          <p>
-            {preview.paymentAttemptReferences.length} original payment(s). Recording a request does
-            not issue a refund.
-          </p>
+          {previewOnMachine ? (
+            <p>
+              Paid on the store&apos;s card machine. After the request is recorded
+              {preview.approvalRequired === true ? " and approved" : ""}, refund this amount on that
+              machine and record it under the request.
+            </p>
+          ) : (
+            <p>
+              {preview.paymentAttemptReferences.length} original payment(s). Recording a request
+              does not issue a refund.
+            </p>
+          )}
           {preview.approvalRequired === true ? (
             <section aria-label="Owner approval needed" className="refund-escalation">
               <h4>Needs owner approval</h4>
@@ -927,6 +1002,12 @@ function PaymentFinancialSummary({
         <section aria-label="Payment financial summary" data-screen-id="PAY-PAYMENT-DETAIL">
           <h2>Payment financial summary</h2>
           <p>Payment state: {paymentStateLabel(context)}</p>
+          {context.paymentMethod === "CardMachine" ? (
+            <p>
+              Paid on the store&apos;s card machine. Its refunds are made on that machine and
+              recorded here; they count on the day they are made.
+            </p>
+          ) : null}
           <dl>
             <div>
               <dt>Captured</dt>

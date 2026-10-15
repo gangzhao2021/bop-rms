@@ -299,6 +299,51 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     });
   });
 
+  // WP-2423 Q26: the kitchen is making a dish again; the table is told which one, in plain words.
+  test("tells the table which dish is being remade", async ({ page }) => {
+    const [round1] = session.session.rounds;
+    const [ramen, tea] = round1?.items ?? [];
+    if (round1 === undefined || ramen === undefined || tea === undefined)
+      throw new Error("fixture");
+    await enterTable(page, () => ({
+      status: 200,
+      json: {
+        schemaVersion: 1,
+        session: {
+          ...session.session,
+          rounds: [
+            {
+              ...round1,
+              items: [
+                { ...ramen, beingRemade: true },
+                { ...tea, displayName: "Synthetic gyoza", cancelled: false, servedQuantity: 1 },
+              ],
+            },
+          ],
+          summary: { ...session.session.summary, due: cad("0") },
+        },
+      },
+    }));
+    const round = page.getByRole("main").getByRole("article", { name: "Round 1 · Ordered by you" });
+    const remade = round.getByRole("listitem").filter({ hasText: "Synthetic tonkotsu ramen" });
+    await expect(remade).toContainText("Being remade · we'll bring it to your table shortly");
+    // The dish being remade does not also claim it was served; the other dish still does.
+    await expect(remade).not.toContainText("Served");
+    await expect(round.getByRole("listitem").filter({ hasText: "Synthetic gyoza" })).toContainText(
+      "Served 1 of 1",
+    );
+    await expect(round.getByText(/Being remade/u)).toHaveCount(1);
+    await expectNoInternalText(page);
+    for (const width of [1440, 390, 320]) {
+      await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
+      await expectNoHorizontalOverflow(page);
+    }
+    await page.screenshot({
+      path: "test-results/customer-dining-session-remake-320.png",
+      fullPage: true,
+    });
+  });
+
   test("asks a guest who has not joined to join first", async ({ page }) => {
     await enterTable(page, () => ({ status: 404, json: { schemaVersion: 1 } }));
     const main = page.getByRole("main");

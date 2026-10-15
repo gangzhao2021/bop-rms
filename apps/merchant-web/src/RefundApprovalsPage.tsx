@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router";
 import { StatePanel } from "@bop-rms/ui";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { SourceTime } from "./StoreTime.js";
@@ -36,6 +37,8 @@ type Outcome =
       /** Follows the refund after approval: sent to the Provider, then refunded. */
       readonly progress: "Sending" | "Refunded" | "StillPending";
     }
+  /** WP-2423 item 4: approved; staff now refund it on the store's card machine and record it. */
+  | { readonly kind: "OnMachine" }
   | { readonly kind: "Declined"; readonly declinedAt: string }
   | { readonly kind: "Failed"; readonly message: string; readonly retry: boolean }
   /** WP-2423: refused on an unconfirmed PIN sign-in; verify, then approve or decline again. */
@@ -196,6 +199,10 @@ function ApprovalCard({
         controller.signal,
       );
       if (controller.signal.aborted) return;
+      if (result.payments.every((payment) => payment.state === "RecordOnCardMachine")) {
+        setOutcome({ kind: "OnMachine" });
+        return;
+      }
       const unknown = result.payments.some((payment) => payment.state === "ResultUnknown");
       setOutcome({ kind: "Sent", unknown, progress: "Sending" });
       if (!unknown) void follow();
@@ -242,6 +249,11 @@ function ApprovalCard({
   const requesterCurrent =
     requesterVerifiedUntil !== null && Date.parse(requesterVerifiedUntil) > Date.now();
   const busy = outcome.kind === "Busy";
+  // WP-2423 item 4: a card-machine refund is made on the store's machine once approved.
+  const onMachine = entry.paymentMethod === "CardMachine";
+  const machineApproved = onMachine && (entry.state === "Approved" || outcome.kind === "OnMachine");
+  const paymentPage =
+    "/app/operations/payments/" + (entry.paymentIntentReferences[0] ?? "") + "/refund";
   return (
     <li className="refund-approval-card">
       <h3>
@@ -283,13 +295,15 @@ function ApprovalCard({
           <dd>
             {outcome.kind === "Declined"
               ? "Declined — nothing was refunded"
-              : outcome.kind === "Sent"
-                ? outcome.unknown
-                  ? "Approved — sending result unknown"
-                  : "Approved — refund sent"
-                : entry.state === "Approved"
-                  ? "Approved — sending not finished"
-                  : "Waiting for approval"}
+              : machineApproved
+                ? "Approved — refund it on the store's card machine, then record it"
+                : outcome.kind === "Sent"
+                  ? outcome.unknown
+                    ? "Approved — sending result unknown"
+                    : "Approved — refund sent"
+                  : entry.state === "Approved"
+                    ? "Approved — sending not finished"
+                    : "Waiting for approval"}
           </dd>
         </div>
         <div>
@@ -343,6 +357,7 @@ function ApprovalCard({
         />
       ) : null}
       {entry.canApprove &&
+      !machineApproved &&
       outcome.kind !== "Declined" &&
       !(outcome.kind === "Sent" && !outcome.unknown) ? (
         <div className="card-actions">
@@ -371,7 +386,9 @@ function ApprovalCard({
                     ? "Retry same approval"
                     : entry.state === "Approved"
                       ? "Send approved refund"
-                      : `Approve and refund ${formatCad(entry.amountMinor)}`}
+                      : onMachine
+                        ? `Approve card machine refund of ${formatCad(entry.amountMinor)}`
+                        : `Approve and refund ${formatCad(entry.amountMinor)}`}
           </button>
         </div>
       ) : null}
@@ -427,6 +444,16 @@ function ApprovalCard({
         <p>Only an owner or finance member who did not ask for this refund can approve it.</p>
       ) : null}
       <ApprovalFailureNotice outcome={outcome} csrf={csrf} fetcher={fetcher} />
+      {machineApproved ? (
+        <div role="status">
+          <p>
+            Approved. Refund {formatCad(entry.amountMinor)} on the store&apos;s card machine to the
+            card the customer paid with, then record it on the payment page with the slip reference.
+            The refund counts on the day it is made on the machine.
+          </p>
+          <Link to={paymentPage}>Record the card machine refund</Link>
+        </div>
+      ) : null}
       {outcome.kind === "Sent" ? (
         <div role="status">
           <p>

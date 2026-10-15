@@ -53,6 +53,22 @@ export interface StaffDiningTable {
   elapsedMinutes: number | null;
   /** WP-2423 Q11: until when the table's printed code works; null when it has none. */
   qrCodeValidUntil: string | null;
+  /**
+   * WP-2423 item 5: rounds staff entered for the party at this table that still wait for their
+   * card-machine payment, each with the time it is cancelled if not recorded (oldest first).
+   */
+  staffRoundsAwaitingPayment: readonly { readonly payBy: string }[];
+  /**
+   * WP-2423 D4: the open session's phase and version and its Order, for closing the table's
+   * session from the Tables page (absent when the staff member may not close sessions).
+   */
+  session?: StaffDiningTableSession | null;
+}
+export interface StaffDiningTableSession {
+  readonly phase: "Active" | "Closing";
+  readonly version: number;
+  /** The session's Order; null while nobody has ordered at the table. */
+  readonly orderReference: string | null;
 }
 export interface StaffDiningJoinState {
   diningSessionReference: string;
@@ -159,6 +175,44 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
                 /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(r.qrCodeValidUntil)
               ? r.qrCodeValidUntil
               : fail();
+        const awaiting =
+          r.staffRoundsAwaitingPayment === undefined
+            ? []
+            : Array.isArray(r.staffRoundsAwaitingPayment) &&
+                r.staffRoundsAwaitingPayment.length <= 20 &&
+                (currentDiningSessionReference !== null ||
+                  r.staffRoundsAwaitingPayment.length === 0)
+              ? r.staffRoundsAwaitingPayment.map((entry) => {
+                  const round = obj(entry);
+                  if (
+                    Object.keys(round).length !== 1 ||
+                    typeof round.payBy !== "string" ||
+                    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(round.payBy)
+                  )
+                    return fail();
+                  return Object.freeze({ payBy: round.payBy });
+                })
+              : fail();
+        // WP-2423 D4: present only for staff who may close sessions (older servers send none).
+        const sessionValue: unknown = r.session;
+        let session: StaffDiningTableSession | null = null;
+        if (sessionValue !== undefined && sessionValue !== null) {
+          const facts = obj(sessionValue);
+          if (
+            currentDiningSessionReference === null ||
+            Object.keys(facts).length !== 3 ||
+            (facts.phase !== "Active" && facts.phase !== "Closing") ||
+            typeof facts.version !== "number" ||
+            !Number.isSafeInteger(facts.version) ||
+            facts.version < 1
+          )
+            return fail();
+          session = Object.freeze({
+            phase: facts.phase,
+            version: facts.version,
+            orderReference: facts.orderReference === null ? null : ref(facts.orderReference),
+          });
+        }
         return {
           tableReference: reference,
           stableLabel: label(r.stableLabel),
@@ -170,11 +224,19 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
           currentDiningSessionReference,
           elapsedMinutes,
           qrCodeValidUntil,
+          staffRoundsAwaitingPayment: Object.freeze(awaiting),
+          session,
         } as StaffDiningTable;
       });
       const next = data.nextAfterTableReference === null ? null : ref(data.nextAfterTableReference);
       if (next !== null && (items.length !== 50 || next !== previous)) return fail();
-      return { items, next, canOperateTables: data.canOperateTables };
+      return {
+        items,
+        next,
+        canOperateTables: data.canOperateTables,
+        /** WP-2423 D4: the staff member may close a table's session (and its Order) here. */
+        canCloseSessions: data.canCloseSessions === true,
+      };
     },
     prepareAvailability(
       table: StaffDiningTable,

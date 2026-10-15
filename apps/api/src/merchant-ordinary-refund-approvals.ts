@@ -153,6 +153,7 @@ export function createMerchantOrdinaryRefundApprovals(options: {
                 orderNumber: placed.orderNumber,
                 requestReference: entry.requestReference,
                 paymentIntentReferences: entry.paymentIntentReferences,
+                paymentMethod: entry.paymentMethod,
                 currencyCode: entry.currencyCode,
                 amountMinor: entry.amountMinor.toString(),
                 reasonCode: entry.reasonCode,

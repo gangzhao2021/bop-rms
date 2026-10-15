@@ -12,6 +12,7 @@ import {
   createPostgresOrdinaryRefundApprovalReader,
 } from "./persistence/ordinary-refund-approval-store.js";
 import { createPostgresOrdinaryRefundPricingSource } from "./ordinary-refund-pricing-source.js";
+import { createPostgresCardMachinePaymentStore } from "./persistence/card-machine-payment-store.js";
 
 interface Scope {
   readonly tenantReference: string;
@@ -54,6 +55,8 @@ export function createPostgresOrdinaryRefundCurrentEscalationSource(options: {
           scope,
           authorize: (t, query) => byOrder(t, query),
         }),
+        // WP-2423 item 4: a card-machine refund needs the same approval as an online one.
+        allowCardMachine: true,
       })(transaction, input),
     businessDate: options.businessDate,
   });
@@ -122,9 +125,19 @@ export function createPostgresOrdinaryRefundApprovalQueueRuntime(options: {
             });
       if (candidate.approvalReference !== null && approval === null)
         throw new Error("ORDINARY_REFUND_APPROVAL_QUEUE_UNAVAILABLE");
+      // WP-2423 item 4: refunded on the Store's card machine (recorded there) or sent online.
+      let paymentMethod: "Online" | "CardMachine" = "Online";
+      const cards = createPostgresCardMachinePaymentStore({
+        scope: { brandReference: scope.brandReference, storeReference: scope.storeReference },
+        authorize: (t, query) => byOrder(t as ConsumerTransaction, query),
+      });
+      for (const payment of current.request.payments)
+        if ((await cards.loadByIntent(tx, payment.paymentIntentReference)) !== null)
+          paymentMethod = "CardMachine";
       entries.push(
         Object.freeze({
           orderReference: current.request.orderReference,
+          paymentMethod,
           requestReference: current.request.requestReference,
           operationReference: current.request.operationReference,
           requesterReference: current.requesterReference,

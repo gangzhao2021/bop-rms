@@ -14,6 +14,7 @@ import {
 import { providerStatuses } from "../../contracts/payment-provider-adapter.js";
 import { createPostgresPaymentIntentCreationStore } from "./payment-intent-creation-store.js";
 import { createPostgresPaymentTerminalStore } from "./payment-terminal-store.js";
+import { createPostgresCardMachinePaymentStore } from "./card-machine-payment-store.js";
 
 /**
  * WP-2423 pilot resilience (2026-10-15): bounded reads over one payment attempt's Snapshot
@@ -166,7 +167,7 @@ export function createPostgresPaymentReceiptCoverageSource(options: {
           "SELECT payment_operation_id FROM rms_payment.payment_intent WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 ORDER BY payment_operation_id LIMIT 101",
           [brandReference, storeReference, request.orderReference],
         );
-        if (intents.rows.length < 1 || intents.rows.length > 100) return unavailable();
+        if (intents.rows.length > 100) return unavailable();
         const runner = {
           run: async <T>(work: (tx: ConsumerTransaction) => Promise<T>) => work(transaction),
         };
@@ -373,7 +374,97 @@ export function createPostgresPaymentReceiptCoverageSource(options: {
             }),
           );
         }
-        if (batches.length !== expected.size) return unavailable();
+        // WP-2423 item 4: rounds paid on the Store's card machine (a dine-in table may mix them
+        // with rounds guests paid online). Captured is what the machine took; refunded is what was
+        // recorded as refunded on it by this instant; pending is an ordinary refund request still
+        // to be made on the machine.
+        const cards = createPostgresCardMachinePaymentStore({
+          scope: { brandReference, storeReference },
+          authorize: async (_tx, query) => {
+            await authorize();
+            return query.orderReference === request.orderReference;
+          },
+        });
+        for (const { payment, refunds } of await cards.listByOrder(
+          transaction,
+          request.orderReference,
+        )) {
+          const preparation = payment.preparation;
+          if (
+            payment.recordedAt > request.observedAt ||
+            payment.environment !== options.scope.environment ||
+            String(payment.tenantReference) !== String(tenantReference) ||
+            expected.get(preparation.orderBatchReference) !==
+              preparation.orderAllocation.amountMinor ||
+            batches.some((batch) => batch.orderBatchReference === preparation.orderBatchReference)
+          )
+            return unavailable();
+          const ordinary = await createPostgresOrdinaryRefundPositionSource({
+            scope: { tenantReference, brandReference, storeReference },
+            providerAccountReference,
+            environment: options.scope.environment,
+            authorize: async () => {
+              await authorize();
+              return true;
+            },
+          })(transaction, {
+            orderReference: request.orderReference,
+            paymentTransactionReference: payment.cardMachinePaymentReference,
+            paymentIntentReference: payment.paymentIntentReference,
+            paymentAttemptReference: payment.paymentAttemptReference,
+            observedAt: request.observedAt,
+          });
+          const recorded = refunds.filter((refund) => refund.recordedAt <= request.observedAt);
+          const other = recorded
+            .filter((refund) => refund.sourceKind !== "OrdinaryRefund")
+            .reduce((sum, refund) => sum + refund.amountMinor, 0n);
+          const confirmed = money(ordinary.confirmedMinor + other);
+          const pending = money(ordinary.pendingMinor);
+          const captured = preparation.total;
+          if (
+            captured.currencyCode !== "CAD" ||
+            confirmed.amountMinor + pending.amountMinor > captured.amountMinor ||
+            recorded.reduce((sum, refund) => sum + refund.amountMinor, 0n) !== confirmed.amountMinor
+          )
+            return unavailable();
+          const evidence =
+            "sha256:" +
+            createHash("sha256")
+              .update(
+                JSON.stringify({
+                  cardMachinePayment: payment.cardMachinePaymentReference,
+                  refunds: recorded.map((refund) => [
+                    refund.cardMachineRefundReference,
+                    refund.amountMinor.toString(),
+                  ]),
+                }),
+              )
+              .digest("hex");
+          batches.push(
+            Object.freeze({
+              orderBatchReference: preparation.orderBatchReference,
+              paymentIntentReference: payment.paymentIntentReference,
+              paymentOperationReference: payment.paymentOperationReference,
+              paymentTransactionReference: payment.cardMachinePaymentReference,
+              // No Provider observation: the machine payment record is the evidence.
+              observationReference: payment.cardMachinePaymentReference,
+              observationDigest: evidence,
+              providerObservedAt: payment.recordedAt,
+              orderAllocation: preparation.orderAllocation,
+              tip: preparation.tip,
+              captured: money(captured.amountMinor),
+              refunded: confirmed,
+              pendingRefund: pending,
+              refundPositionDigest:
+                "sha256:" +
+                createHash("sha256")
+                  .update(JSON.stringify({ ordinary: ordinary.snapshotDigest, machine: evidence }))
+                  .digest("hex"),
+              refundPositionVersion: ordinary.version + recorded.length,
+            }),
+          );
+        }
+        if (batches.length < 1 || batches.length !== expected.size) return unavailable();
         await authorize();
         const total = (
           field: "orderAllocation" | "tip" | "captured" | "refunded" | "pendingRefund",

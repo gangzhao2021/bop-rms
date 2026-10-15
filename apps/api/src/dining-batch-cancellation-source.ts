@@ -40,7 +40,7 @@ export function createDiningBatchCancellationSource(options: {
         const allowed = async (tx: unknown) =>
           tx === transaction && (await options.authorize(transaction, expiry));
         if (
-          expiry.status !== "PaymentFailed" ||
+          (expiry.status !== "PaymentFailed" && expiry.status !== "AwaitingPaymentResolution") ||
           expiry.tenantReference !== scope.tenantReference ||
           expiry.brandReference !== scope.brandReference ||
           expiry.storeReference !== scope.storeReference ||

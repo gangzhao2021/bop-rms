@@ -1,6 +1,7 @@
 import { createDiningOrderDeliveryProgress } from "./dining-order-delivery-progress.js";
 import { createHash } from "node:crypto";
 import type { ConsumerTransaction } from "@bop/eventing";
+import { withOptionalRead } from "./merchant-round-business-date.js";
 import {
   createPostgresMerchantOrderIndex,
   createPostgresOrderAcceptanceReader,
@@ -10,6 +11,7 @@ import {
   createPostgresDiningOrderItemStateReader,
   createPostgresDiningOrderPreparationSource,
   parseOrderingInstant,
+  listStoreOrdersWithRoundsSince,
 } from "@rms/ordering";
 
 type Scope = Readonly<{
@@ -28,6 +30,15 @@ export function createMerchantOrderQueueRead(options: {
   authorize(transaction: ConsumerTransaction, sessionCookie: unknown): Promise<Scope | null>;
   quoteVersion: 1 | 2;
   now(): string;
+  /**
+   * WP-2423 D4: the Store's current business day (its date and start), so an Order opened on an
+   * earlier day that had a round today is listed with today's orders. Without it, Orders are
+   * listed by the day they were opened only.
+   */
+  today?(transaction: ConsumerTransaction): Promise<{
+    readonly businessDate: string;
+    readonly startsAt: string;
+  }>;
 }) {
   return async (input: {
     sessionCookie: unknown;
@@ -58,10 +69,11 @@ export function createMerchantOrderQueueRead(options: {
         brandReference: scope.brandReference,
         storeReference: scope.storeReference,
       };
-      const index = await createPostgresMerchantOrderIndex({
+      const orderIndex = createPostgresMerchantOrderIndex({
         ...ownerScope,
         authorize: allowed,
-      }).list({
+      });
+      const index = await orderIndex.list({
         transaction,
         afterOrderReference: input.afterOrderReference,
         limit: input.limit,
@@ -70,6 +82,47 @@ export function createMerchantOrderQueueRead(options: {
           ? {}
           : { onlyOrderReference: input.onlyOrderReference }),
       });
+      // WP-2423 D4: a table's Order opened on an earlier business day that had a round today is
+      // today's work. A real floor reads the Orders page as "what is happening today", so such an
+      // Order is listed first with today's orders (under today, latest round first) instead of
+      // pages back under the day it was opened; it keeps its own business date, since its order
+      // number belongs to that day. Other pages leave it out so it is listed once.
+      // An unreadable business day never blanks the Orders page: Orders keep their own day.
+      const readToday = options.today;
+      const today =
+        readToday === undefined
+          ? null
+          : await withOptionalRead(transaction, () => readToday(transaction), null);
+      const carried =
+        today === null
+          ? []
+          : await listStoreOrdersWithRoundsSince(transaction, ownerScope, {
+              since: today.startsAt,
+              businessDate: today.businessDate,
+              limit: 100,
+            });
+      const carriedOrders = new Set(carried.map((order) => order.orderReference));
+      const carriedItems = [];
+      if (input.afterOrderReference === null && input.onlyOrderReference === undefined)
+        for (const order of carried.slice(0, input.limit))
+          carriedItems.push(
+            ...(
+              await orderIndex.list({
+                transaction,
+                afterOrderReference: null,
+                limit: 1,
+                newestFirst: true,
+                onlyOrderReference: order.orderReference,
+              })
+            ).items,
+          );
+      const listed = [
+        ...carriedItems,
+        ...index.items.filter(
+          (item) =>
+            input.onlyOrderReference !== undefined || !carriedOrders.has(item.orderReference),
+        ),
+      ];
       // WP-2423: history may hold Orders priced with either Quote version; each is decoded with its own.
       const readers = {
         1: createPostgresOrderCreationQueryStore(
@@ -84,7 +137,7 @@ export function createMerchantOrderQueueRead(options: {
         ),
       } as const;
       const items = [];
-      for (const item of index.items) {
+      for (const item of listed) {
         // Match acceptance/payment writers: disposition fence before the header row lock.
         const initialAcceptance = await createPostgresOrderAcceptanceReader({
           ...ownerScope,
@@ -220,6 +273,14 @@ export function createMerchantOrderQueueRead(options: {
             orderType: item.orderType,
             sourceChannel: item.sourceChannel,
             businessDate: item.businessDate,
+            /**
+             * WP-2423 D4: the business day the Order is listed under — today when a round was
+             * submitted today on an Order opened on an earlier day, otherwise its own day.
+             */
+            listedBusinessDate:
+              today !== null && carriedOrders.has(item.orderReference)
+                ? today.businessDate
+                : item.businessDate,
             submittedAt: item.submittedAt,
             initialBatchReference: item.initialBatchReference,
             batches: Object.freeze(current.batches.map((batch) => Object.freeze(batch))),

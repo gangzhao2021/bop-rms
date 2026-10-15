@@ -25,11 +25,12 @@ import { serviceOperationReference } from "./service-control-client.js";
 import { StatePanel } from "@bop-rms/ui";
 import { playKitchenChime } from "./alert-chime.js";
 import { storeTime } from "./StoreTime.js";
-import { businessDateLabel, useStoreBusinessDay } from "./StoreBusinessDay.js";
+import { businessDateLabel, openedEarlierText, useStoreBusinessDay } from "./StoreBusinessDay.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 export { storeTime } from "./StoreTime.js";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
+import { StaffRoundPaymentAction } from "./StaffRoundPaymentAction.js";
 import {
   cancelledItemsRefund,
   createCurrentOrderQueueClient,
@@ -292,6 +293,21 @@ export function cardMachineOwed(order: CurrentOrderQueue["items"][number]): stri
   return owed > 0n ? owed.toString() : null;
 }
 /**
+ * WP-2423 D5: what a table's staff-entered rounds took on the Store's card machine ("Paid on card
+ * machine $24.86"), shown beside what guests paid online so the two add up to what was taken.
+ * Null when no round was paid on the machine.
+ */
+export function cardMachineRoundsText(order: CurrentOrderQueue["items"][number]): string | null {
+  const total = order.batches.reduce(
+    (sum, batch) => sum + BigInt(batch.staffRound?.paidOnCardMachine?.amountMinor ?? "0"),
+    0n,
+  );
+  return total === 0n
+    ? null
+    : "Paid on card machine " + orderMoney({ amountMinor: total.toString(), currencyCode: "CAD" });
+}
+
+/**
  * WP-2423: an online order's payment as staff read it ("Paid online $11.30 · partly refunded"),
  * like a counter order's "Paid on card machine". With Payment's refund position (the order
  * detail) the refund state is exact; on the list it follows the refunds the queue shows (the
@@ -366,19 +382,49 @@ export function orderChannelLabel(channel: string): string {
           : "Other";
 }
 
+/** WP-2423 item 5: minutes before an unpaid round's cancellation when staff are warned urgently. */
+export const unpaidRoundUrgentMinutes = 10;
+
 /**
- * WP-2423: an unpaid dine-in round. A failed payment is cancelled automatically at its payment
- * deadline; staff are told when, in Store time, before it happens.
+ * WP-2423: an unpaid dine-in round. A failed payment — or, since item 5, a round with no payment
+ * started (a round staff entered and nobody recorded as paid on the card machine) — is cancelled
+ * automatically at its payment deadline; staff are told when, in Store time, before it happens, and
+ * urgently in the last minutes.
  */
 export function paymentDueText(
   due: NonNullable<CurrentOrderQueue["items"][number]["batches"][number]["paymentDue"]>,
   timeZone: string | undefined,
   now?: number,
+  staffRound = false,
 ): string {
-  if (due.status === "Awaiting" || due.cancelsAt === null) return "Awaiting payment";
-  return now !== undefined && Date.parse(due.cancelsAt) <= now
-    ? "Payment failed · being cancelled automatically"
-    : `Payment failed · will be cancelled automatically at ${storeTime(due.cancelsAt, timeZone)}`;
+  if (due.cancelsAt === null)
+    return staffRound ? "Entered by staff · awaiting card-machine payment" : "Awaiting payment";
+  const passed = now !== undefined && Date.parse(due.cancelsAt) <= now;
+  const at = storeTime(due.cancelsAt, timeZone);
+  if (due.status === "Failed")
+    return passed
+      ? "Payment failed · being cancelled automatically"
+      : `Payment failed · will be cancelled automatically at ${at}`;
+  if (passed) return "Not paid in time · being cancelled automatically";
+  const left =
+    now === undefined ? null : Math.max(1, Math.ceil((Date.parse(due.cancelsAt) - now) / 60_000));
+  const soon = left !== null && left <= unpaidRoundUrgentMinutes ? ` (${left} min left)` : "";
+  return staffRound
+    ? `Entered by staff · record the card-machine payment by ${at}${soon} or it is cancelled`
+    : `Not paid · cancelled automatically at ${at}${soon} unless paid`;
+}
+
+/** WP-2423 item 5: how loud an unpaid round's notice is (urgent near and after its deadline). */
+export function paymentDueTier(
+  due: NonNullable<CurrentOrderQueue["items"][number]["batches"][number]["paymentDue"]>,
+  now?: number,
+): "urgent" | "warning" {
+  if (due.status === "Failed") return "urgent";
+  return due.cancelsAt !== null &&
+    now !== undefined &&
+    Date.parse(due.cancelsAt) - now <= unpaidRoundUrgentMinutes * 60_000
+    ? "urgent"
+    : "warning";
 }
 
 /** WP-2423 Q6: batches the store cancelled as a whole (staff cancellation of the batch). */
@@ -575,14 +621,16 @@ export function CurrentOrderQueueRows({
   if (!single) {
     let previous: string | null = null;
     for (const order of view.items) {
+      // WP-2423 D4: an older table's Order with a round today is listed under today.
+      const listed = order.listedBusinessDate;
       if (
-        order.businessDate === null ||
+        listed === null ||
         (visibleOrderReferences !== undefined && !visibleOrderReferences.has(order.orderReference))
       )
         continue;
-      if (order.businessDate !== previous)
-        dayHeadings.set(order.orderReference, businessDateLabel(order.businessDate, today));
-      previous = order.businessDate;
+      if (listed !== previous)
+        dayHeadings.set(order.orderReference, businessDateLabel(listed, today));
+      previous = listed;
     }
   }
   return view.items.length === 0 ? (
@@ -696,6 +744,9 @@ export function CurrentOrderQueueRows({
                     {onlinePaymentText(order, single ? paymentPosition : undefined)}
                   </span>
                 ) : null}
+                {cardMachineRoundsText(order) !== null ? (
+                  <span className="order-counter-paid">{cardMachineRoundsText(order)}</span>
+                ) : null}
                 {order.counter?.recordedAfterOutage ? (
                   <span className="order-counter-outage" data-tier="warning">
                     Recorded after outage
@@ -707,12 +758,10 @@ export function CurrentOrderQueueRows({
                     <span
                       key={batch.orderBatchReference}
                       className="order-accept-by"
-                      data-tier={batch.paymentDue.status === "Failed" ? "urgent" : "warning"}
+                      data-tier={paymentDueTier(batch.paymentDue, now)}
                     >
                       {order.batches.length > 1 ? `Batch ${batch.sequence}: ` : ""}
-                      {batch.staffRound !== null && batch.paymentDue.status === "Awaiting"
-                        ? "Entered by staff · awaiting card-machine payment"
-                        : paymentDueText(batch.paymentDue, timeZone, now)}
+                      {paymentDueText(batch.paymentDue, timeZone, now, batch.staffRound !== null)}
                     </span>
                   ),
                 )}
@@ -743,16 +792,30 @@ export function CurrentOrderQueueRows({
                     </time>
                   </dd>
                 </div>
-                {order.paidOnline === null ? null : (
+                {order.paidOnline === null && cardMachineRoundsText(order) === null ? null : (
                   <div>
                     <dt>Payment</dt>
-                    <dd>{onlinePaymentText(order, single ? paymentPosition : undefined)}</dd>
+                    <dd>
+                      {[
+                        order.paidOnline === null
+                          ? null
+                          : onlinePaymentText(order, single ? paymentPosition : undefined),
+                        cardMachineRoundsText(order),
+                      ]
+                        .filter((text) => text !== null)
+                        .join(" · ")}
+                    </dd>
                   </div>
                 )}
                 {order.businessDate === null ? null : (
                   <div>
                     <dt>Business day</dt>
-                    <dd>{businessDateLabel(order.businessDate, today)}</dd>
+                    <dd>
+                      {order.listedBusinessDate !== null &&
+                      order.listedBusinessDate !== order.businessDate
+                        ? openedEarlierText(order.businessDate, order.listedBusinessDate, today)
+                        : businessDateLabel(order.businessDate, today)}
+                    </dd>
                   </div>
                 )}
                 <div>
@@ -847,21 +910,26 @@ export function CurrentOrderQueueRows({
                   ) : batch.acceptanceStatus === "Cancelled" ? (
                     // WP-2423: cancelled automatically because its payment failed (no store refund).
                     <p className="order-workbench-closed" role="note">
-                      Batch cancelled · not paid. Its payment didn&apos;t go through, so it was
-                      cancelled automatically when the payment time ended. Nothing was charged for
-                      it.
+                      Batch cancelled · not paid. It wasn&apos;t paid by the end of its payment
+                      time, so it was cancelled automatically and never went to the kitchen. Nothing
+                      was charged for it in the system.
+                      {batch.staffRound !== null
+                        ? " If the card machine was charged for it, refund that payment on the machine."
+                        : ""}
                     </p>
                   ) : batch.paymentDue !== null ? (
                     <p className="order-workbench-closed" role="note">
                       <span
                         className="order-accept-by"
-                        data-tier={batch.paymentDue.status === "Failed" ? "urgent" : "warning"}
+                        data-tier={paymentDueTier(batch.paymentDue, now)}
                       >
-                        {paymentDueText(batch.paymentDue, timeZone, now)}
+                        {paymentDueText(batch.paymentDue, timeZone, now, batch.staffRound !== null)}
                       </span>
                       {batch.paymentDue.status === "Failed"
                         ? " Don't prepare it; it will not be charged. If the guest still wants these items, they can order them again."
-                        : " Not accepted yet: the guest has not paid for this round."}
+                        : batch.staffRound !== null
+                          ? " Charge it on the card machine and record it below; the kitchen starts it once recorded. If it isn't recorded in time, it is cancelled and its items go back to stock."
+                          : " Not accepted yet: the guest has not paid for this round."}
                     </p>
                   ) : (
                     <p>
@@ -899,16 +967,15 @@ export function CurrentOrderDetails({
     <>
       {lines}
       {order.counter?.paidOnCardMachine ? (
-        // WP-2423 Q7: refunds of a card-machine payment are made on that machine. Cancelling before
-        // the kitchen starts records the full refund; partial refunds come in a later step.
+        // WP-2423 Q7 / item 4: refunds of a card-machine payment are made on that machine and
+        // recorded here: in full by cancelling before the kitchen starts, or by item afterwards.
         <p className="order-counter-note" role="note">
           Paid on the store&apos;s card machine. To refund it in full before the kitchen starts,
-          cancel the order and refund on the card machine. A partial refund after that is made on
-          the card machine by a manager, who keeps the slip for the day-end count.
+          cancel the order. To refund some items, a manager opens Payments and refunds, records the
+          refund, makes it on the card machine and records it there.
         </p>
-      ) : (
-        <OrderPaymentLinks orderReference={order.orderReference} csrf={csrf} fetcher={fetcher} />
-      )}
+      ) : null}
+      <OrderPaymentLinks orderReference={order.orderReference} csrf={csrf} fetcher={fetcher} />
       {order.orderType === "DineIn" && order.currentPhase !== "Cancelled" ? (
         <DiningOrderProgress
           orderReference={order.orderReference}
@@ -1290,9 +1357,41 @@ export function CurrentOrderQueuePage({
                 />
               )}
               action={(order, batch) =>
-                (batch.staffCancellation?.refundMethod === "CardMachine" &&
-                  batch.staffCancellation.refundStatus === "Pending") ||
-                (batch.sequence === 1 && cardMachineOwed(order) !== null) ? (
+                // WP-2423 D5: an unpaid round staff entered is recorded as paid here too. The list
+                // leaves its amount out (the one-order read builds it when the form is opened).
+                batch.staffRound != null &&
+                batch.staffRound.paidOnCardMachine === null &&
+                batch.acceptanceStatus === "NotAccepted" &&
+                batch.paymentDue !== null &&
+                batch.paymentDue.status === "Awaiting" &&
+                (batch.paymentDue.cancelsAt === null ||
+                  Date.parse(batch.paymentDue.cancelsAt) > Date.now()) ? (
+                  <fieldset disabled={servingBusy}>
+                    <StaffRoundPaymentAction
+                      key={"round-pay-" + batch.orderBatchReference}
+                      csrf={csrf}
+                      fetcher={fetcher}
+                      orderReference={order.orderReference}
+                      orderBatchReference={batch.orderBatchReference}
+                      amountDueMinor={batch.staffRound.amountDueMinor}
+                      loadAmountDue={(signal) =>
+                        client
+                          .loadDetail(order.orderReference, signal)
+                          .then(
+                            (detail) =>
+                              detail.order.batches.find(
+                                (entry) => entry.orderBatchReference === batch.orderBatchReference,
+                              )?.staffRound?.amountDueMinor ?? null,
+                          )
+                      }
+                      recordedAfterOutage={batch.staffRound.recordedAfterOutage}
+                      timeZone={timeZone}
+                      onRecorded={() => reload(after)}
+                    />
+                  </fieldset>
+                ) : (batch.staffCancellation?.refundMethod === "CardMachine" &&
+                    batch.staffCancellation.refundStatus === "Pending") ||
+                  (batch.sequence === 1 && cardMachineOwed(order) !== null) ? (
                   <fieldset disabled={servingBusy}>
                     <CardMachineRefundAction
                       key={"card-refund-" + batch.orderBatchReference}
@@ -1372,6 +1471,7 @@ export function CurrentOrderQueuePage({
                               return operation;
                             }}
                             onRejected={() => operations.current.delete(batch.orderBatchReference)}
+                            onChanged={() => reload(after)}
                             onAccepted={() => {
                               operations.current.delete(batch.orderBatchReference);
                               reload(after);
@@ -1403,6 +1503,7 @@ export function CurrentOrderQueuePage({
                           return operation;
                         }}
                         onRejected={() => operations.current.delete(batch.orderBatchReference)}
+                        onChanged={() => reload(after)}
                         onAccepted={() => {
                           operations.current.delete(batch.orderBatchReference);
                           reload(after);

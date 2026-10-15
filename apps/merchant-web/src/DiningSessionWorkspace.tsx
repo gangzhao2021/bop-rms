@@ -8,6 +8,8 @@ import {
   type StaffDiningTable,
 } from "./dining-session-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
+import { storeTime } from "./StoreTime.js";
+import { TableSessionClose } from "./TableSessionClose.js";
 import {
   browserOffline,
   StaleReadNotice,
@@ -51,14 +53,52 @@ export function tableCodeNotice(table: StaffDiningTable, now = Date.now()): stri
     : null;
 }
 
+/** WP-2423 item 5: minutes before an unpaid staff round's cancellation when the warning turns urgent. */
+export const staffRoundUrgentMinutes = 10;
+/**
+ * WP-2423 item 5 ("warn before timeouts"): a round staff entered at this table still waits for its
+ * card-machine payment; it is cancelled automatically (never sent to the kitchen) if nobody records
+ * the payment by then. Null when nothing is waiting.
+ */
+export function staffRoundPaymentNotice(
+  table: StaffDiningTable,
+  now: number,
+  timeZone: string | undefined,
+): { readonly tier: "warning" | "urgent"; readonly text: string } | null {
+  const first = table.staffRoundsAwaitingPayment[0];
+  if (first === undefined) return null;
+  const count = table.staffRoundsAwaitingPayment.length;
+  const rounds = count === 1 ? "A round" : `${String(count)} rounds`;
+  const remainingMs = Date.parse(first.payBy) - now;
+  const at = storeTime(first.payBy, timeZone);
+  if (remainingMs <= 0)
+    return {
+      tier: "urgent",
+      text: `${rounds} entered by staff wasn't paid by ${at} and is being cancelled; it won't go to the kitchen. If the card machine was charged, refund it on the machine.`,
+    };
+  const minutes = Math.max(1, Math.ceil(remainingMs / 60_000));
+  return minutes <= staffRoundUrgentMinutes
+    ? {
+        tier: "urgent",
+        text: `${String(minutes)} min left: record the card-machine payment for ${count === 1 ? "the round" : "the rounds"} entered by staff by ${at}, or ${count === 1 ? "it is" : "they are"} cancelled.`,
+      }
+    : {
+        tier: "warning",
+        text: `${rounds} entered by staff ${count === 1 ? "awaits" : "await"} card-machine payment. Record it by ${at}; the kitchen starts once it is recorded.`,
+      };
+}
+
 export function DiningSessionWorkspace({
   csrf,
   storeLabel,
+  timeZone,
   navigation,
   canTakeOrders = false,
 }: {
   readonly csrf: string;
   readonly storeLabel: string;
+  /** The Store's IANA time zone, for the times staff are told (WP-2423 item 5). */
+  readonly timeZone?: string | undefined;
   readonly navigation?: ReactNode;
   /** WP-2423 Q7 slice 2: the staff member may enter a round for a table (staff ordering). */
   readonly canTakeOrders?: boolean;
@@ -73,6 +113,8 @@ export function DiningSessionWorkspace({
   const pending = useRef<AbortController | null>(null),
     operation = useRef<Operation | null>(null),
     availabilityOperation = useRef<AvailabilityOperation | null>(null);
+  // WP-2423 D4: the staff member may close a table's session here (Owner, Store Manager).
+  const [canCloseSessions, setCanCloseSessions] = useState(false);
   const [canOperateTables, setCanOperateTables] = useState(false),
     [blockReasonCode, setBlockReasonCode] = useState(""),
     [unknownAction, setUnknownAction] = useState<"Session" | "Availability" | null>(null);
@@ -85,6 +127,10 @@ export function DiningSessionWorkspace({
   const loadedAt = useRef<string | null>(null);
   const paused = stale !== null;
   const locked = state !== "Idle" || hostLocked;
+  // WP-2423 item 5: while any staff round waits for payment, the clock ticks and the tables are
+  // re-read in the background, so the warning counts down and clears once the payment is recorded.
+  const [now, setNow] = useState(() => Date.now());
+  const awaitingPayment = tables.some((table) => table.staffRoundsAwaitingPayment.length > 0);
   /** `background`: an automatic retry; the selected table and any shown entry code stay. */
   const load = async (more = false, background = false) => {
     if ((pending.current && !pending.current.signal.aborted) || state === "Unknown" || hostLocked)
@@ -118,6 +164,7 @@ export function DiningSessionWorkspace({
           );
         setNext(result.next);
         setCanOperateTables(result.canOperateTables);
+        setCanCloseSessions(result.canCloseSessions);
         if (result.items.length === 0 && !more)
           setMessage("No tables are available in this Store.");
       }
@@ -154,6 +201,18 @@ export function DiningSessionWorkspace({
   const loadRef = useRef(load);
   loadRef.current = load;
   useStaleRetry(stale?.attempts ?? null, () => void loadRef.current(false, true));
+  useEffect(() => {
+    if (!awaitingPayment) return;
+    setNow(Date.now());
+    let ticks = 0;
+    const timer = setInterval(() => {
+      setNow(Date.now());
+      ticks += 1;
+      // Every 30 seconds; a failing read goes read-only through the stale retry above.
+      if (ticks % 2 === 0 && !paused) void loadRef.current(false, true);
+    }, 15_000);
+    return () => clearInterval(timer);
+  }, [awaitingPayment, paused]);
   // IDR-0039: the browser saying the network is gone is enough to go read-only at once.
   useBrowserOffline(() => {
     const lastLoadedAt = loadedAt.current;
@@ -424,6 +483,18 @@ export function DiningSessionWorkspace({
                           {tableCodeNotice(table) ? (
                             <p className="dining-table-tile__notice">{tableCodeNotice(table)}</p>
                           ) : null}
+                          {(() => {
+                            const notice = staffRoundPaymentNotice(table, now, timeZone);
+                            return notice === null ? null : (
+                              <p
+                                className="dining-table-tile__notice order-accept-by"
+                                data-tier={notice.tier}
+                                role={notice.tier === "urgent" ? "alert" : "status"}
+                              >
+                                {notice.text}
+                              </p>
+                            );
+                          })()}
                           <p className="dining-table-tile__session">
                             {table.currentDiningSessionReference
                               ? table.elapsedMinutes === null
@@ -435,8 +506,9 @@ export function DiningSessionWorkspace({
                           table.elapsedMinutes !== null &&
                           table.elapsedMinutes > longOpenSessionMinutes ? (
                             <p className="dining-table-tile__notice">
-                              Open for a long time — check the table and close the session if the
-                              guests have left.
+                              {canCloseSessions
+                                ? "Open for a long time — if the guests have left, select the table and close it."
+                                : "Open for a long time — if the guests have left, ask an Owner or Store Manager to close the table."}
                             </p>
                           ) : null}
                           <button
@@ -489,6 +561,38 @@ export function DiningSessionWorkspace({
                     </dd>
                   </div>
                 </dl>
+                {(() => {
+                  // WP-2423 item 5: the same payment warning as the tile, beside the table's actions.
+                  const notice = staffRoundPaymentNotice(selected, now, timeZone);
+                  return notice === null ? null : (
+                    <p className="order-accept-by" data-tier={notice.tier} role="note">
+                      {notice.text} The table&apos;s rounds and payments are on the Orders page.
+                    </p>
+                  );
+                })()}
+                {selected.currentDiningSessionReference !== null &&
+                canCloseSessions &&
+                selected.session ? (
+                  // WP-2423 D4: close the table's session here, after checking its rounds.
+                  <TableSessionClose
+                    key={selected.currentDiningSessionReference}
+                    table={selected}
+                    session={selected.session}
+                    csrf={csrf}
+                    locked={locked || paused}
+                    onBusy={() => undefined}
+                    onClosed={() => {
+                      void loadRef
+                        .current()
+                        .then(() =>
+                          setMessage(
+                            `Table ${selected.stableLabel} is closed and free for the next party.`,
+                          ),
+                        );
+                    }}
+                    onRefresh={() => void loadRef.current(false, true)}
+                  />
+                ) : null}
                 {canTakeOrders && eligible ? (
                   // WP-2423 Q7 slice 2: a round for guests who can't or won't order on a phone.
                   <section aria-label="Take an order for this table">

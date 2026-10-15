@@ -8,6 +8,7 @@ import {
   createPostgresOrdinaryRefundPreparedReader,
 } from "./persistence/ordinary-refund-operation-store.js";
 import { createPostgresOrdinaryRefundRecoverySource } from "./ordinary-refund-recovery-source.js";
+import { createPostgresCardMachinePaymentStore } from "./persistence/card-machine-payment-store.js";
 
 type ContextOptions = Parameters<typeof createPostgresOrdinaryRefundRequestContextSource>[0];
 const fail = (): never => {
@@ -60,9 +61,51 @@ export function createPostgresOrdinaryRefundRequestStatusSource(options: {
       environment: options.environment,
       authorize: allowed,
     });
+    const cards = createPostgresCardMachinePaymentStore({
+      scope: { brandReference: scope.brandReference, storeReference: scope.storeReference },
+      authorize: async (_tx, input) =>
+        input.orderReference === request.orderReference && (await allowed()) === true,
+    });
     const payments = [];
     for (const payment of request.payments) {
       const amountMinor = ordinaryRefundPaymentAmount(payment);
+      // WP-2423 item 4: a card-machine payment is refunded on the Store's machine and recorded;
+      // it is never prepared or sent to a Provider.
+      const card = await cards.loadByIntent(tx, payment.paymentIntentReference);
+      if (card !== null) {
+        if (
+          card.cardMachinePaymentReference !== payment.paymentTransactionReference ||
+          card.orderReference !== request.orderReference
+        )
+          return fail();
+        const recorded = await cards.loadRefundBySource(
+          tx,
+          "OrdinaryRefund",
+          request.requestReference,
+        );
+        const done = recorded !== null && recorded.recordedAt <= query.observedAt;
+        if (
+          done &&
+          (recorded.cardMachinePaymentReference !== card.cardMachinePaymentReference ||
+            recorded.amountMinor !== amountMinor)
+        )
+          return fail();
+        payments.push(
+          Object.freeze({
+            paymentAttemptReference: payment.paymentAttemptReference,
+            paymentIntentReference: payment.paymentIntentReference,
+            method: "CardMachine" as const,
+            executionOperationReference: null,
+            executionApprovalReference: null,
+            state: done ? ("Confirmed" as const) : ("NotDispatched" as const),
+            amountMinor: amountMinor.toString(),
+            confirmedMinor: (done ? amountMinor : 0n).toString(),
+            pendingMinor: (done ? 0n : amountMinor).toString(),
+            refundedOnCardMachineAt: done ? String(recorded.refundedAt) : null,
+          }),
+        );
+        continue;
+      }
       const prepared = await readPrepared(tx, {
         orderReference: request.orderReference,
         requestReference: request.requestReference,
@@ -104,6 +147,7 @@ export function createPostgresOrdinaryRefundRequestStatusSource(options: {
         Object.freeze({
           paymentAttemptReference: payment.paymentAttemptReference,
           paymentIntentReference: payment.paymentIntentReference,
+          method: "Online" as const,
           executionOperationReference: prepared?.operationReference ?? null,
           // WP-2423 Q5: the independent approval the prepared operation is bound to, if any.
           executionApprovalReference: prepared?.approvalReference ?? null,
@@ -113,6 +157,7 @@ export function createPostgresOrdinaryRefundRequestStatusSource(options: {
           amountMinor: amountMinor.toString(),
           confirmedMinor: (result?.position.confirmedMinor ?? 0n).toString(),
           pendingMinor: (result?.position.pendingMinor ?? amountMinor).toString(),
+          refundedOnCardMachineAt: null,
         }),
       );
     }

@@ -81,6 +81,8 @@ function storeFixture() {
       return { rows: previous, rowCount: previous.length };
     if (sql.startsWith("INSERT INTO rms_ordering.order_batch_checkout_cancellation"))
       return { rows: [{ cancellation_id: f.record.cancellationReference }], rowCount: 1 };
+    if (sql.startsWith("INSERT INTO platform_eventing.outbox_event"))
+      return { rows: [], rowCount: 1 };
     if (sql.startsWith("INSERT INTO rms_ordering.order_revision"))
       return { rows: [{ revision_id: f.record.cancellationReference }], rowCount: 1 };
     return { rows: [], rowCount: 0 };
@@ -95,7 +97,7 @@ function storeFixture() {
     orderVersion: 7,
     checkpoint: f.record.expectedSourceCheckpoint,
   }));
-  const audit = vi.fn(async () => ({
+  const audit = vi.fn(async (r: { reasonCode: string } = f.record) => ({
     auditId: id(99),
     brandId: f.record.brandReference,
     storeId: f.record.storeReference,
@@ -104,7 +106,7 @@ function storeFixture() {
     targetType: "OrderBatch",
     targetId: f.record.orderBatchReference,
     correlationId: f.record.operationReference,
-    reasonCode: f.record.reasonCode,
+    reasonCode: r.reasonCode,
     occurredAt: f.record.cancelledAt,
     sourceChannel: "SYSTEM",
     dataClassification: "Restricted",
@@ -120,6 +122,7 @@ function storeFixture() {
     source,
     workflow,
     audit,
+    eventReference: () => id(98),
   });
   return {
     f,
@@ -142,8 +145,49 @@ it("retains Payment fence before owner locks and writes cancellation/revision/Au
     return true;
   });
   expect((await f.store.append(f.tx, f.f.record)).status).toBe("Created");
-  expect(f.query.mock.calls.filter(([sql]) => sql.startsWith("INSERT"))).toHaveLength(2);
+  expect(
+    f.query.mock.calls.filter(
+      ([sql]) => sql.startsWith("INSERT") && !sql.includes("platform_eventing.outbox_event"),
+    ),
+  ).toHaveLength(2);
   expect(mocks.audit.mock.calls[0]?.[0]).toBe(f.tx);
+});
+it("publishes OrderCancelled for the cancelled round in the same transaction (WP-2423)", async () => {
+  const f = storeFixture();
+  expect((await f.store.append(f.tx, f.f.record)).status).toBe("Created");
+  const outbox = f.query.mock.calls.filter(([sql]) =>
+    String(sql).includes("platform_eventing.outbox_event"),
+  );
+  expect(outbox).toHaveLength(1);
+  const values = (outbox[0] as unknown as [string, unknown[]])[1];
+  expect(values).toContain("OrderCancelled");
+  expect(values).toContain(id(98));
+  expect(JSON.parse(String(values[13]))).toMatchObject({
+    orderReference: f.f.record.orderReference,
+    orderBatchReference: f.f.record.orderBatchReference,
+    cancellationReference: f.f.record.cancellationReference,
+    reasonCode: "CHECKOUT_DEADLINE_REACHED",
+    itemCount: 1,
+  });
+  expect(values[8]).toBe("8");
+});
+it("accepts a never-paid round (PAYMENT_NOT_STARTED) only with unresolved expiry evidence", async () => {
+  const f = storeFixture();
+  const unresolved = { ...f.f.expiry, status: "AwaitingPaymentResolution", paymentEvidence: null };
+  f.source.mockResolvedValue({ ...(await f.source()), expiry: unresolved as never });
+  const record = { ...f.f.record, reasonCode: "PAYMENT_NOT_STARTED" };
+  expect((await f.store.append(f.tx, record)).status).toBe("Created");
+  const g = storeFixture();
+  await expect(g.store.append(g.tx, record)).rejects.toThrow();
+  expect(g.query.mock.calls.some(([sql]) => sql.startsWith("INSERT"))).toBe(false);
+});
+it("refuses a replay of a recorded cancellation without publishing again", async () => {
+  const f = storeFixture();
+  f.setPrevious([f.f.record]);
+  await f.store.append(f.tx, f.f.record);
+  expect(
+    f.query.mock.calls.some(([sql]) => String(sql).includes("platform_eventing.outbox_event")),
+  ).toBe(false);
 });
 it("replays exact record without new source, workflow or Audit", async () => {
   const f = storeFixture();

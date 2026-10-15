@@ -36,6 +36,12 @@ vi.mock("@bop/membership", () => ({
 vi.mock("@bop/permission", () => ({
   createPostgresCurrentPermissionPolicySource: () => ({
     authorize: ports.authorize,
+    async authorizeActionsWithRoles(request: { actions: readonly string[] }) {
+      const decisions = [];
+      for (const action of request.actions)
+        decisions.push(await ports.authorize({ ...request, actions: undefined, action }));
+      return { decisions, validUntil: await ports.validity(request), activeRoleCodes: [] };
+    },
     async authorizeWithRoles(request: unknown) {
       return {
         decision: await ports.authorize(request),
@@ -483,4 +489,39 @@ describe("IDR-0039 named KDS Operator profile", () => {
       true,
     );
   });
+});
+
+it("WP-2423: answers several actions from one current Session, selection and permission read", async () => {
+  const scope = await resolve("dining.operate");
+  ports.session.mockClear();
+  ports.selected.mockClear();
+  ports.memberships.mockClear();
+  ports.authorize.mockImplementation(async (request: { action: string }) => ({
+    effect: request.action === "order.close" ? "Deny" : "Allow",
+    scopeKind: "Store",
+    action: request.action,
+  }));
+  const decisions = await scope.authorizeActions(["dining.operate", "order.close"]);
+  expect(decisions.get("dining.operate")?.effect).toBe("Allow");
+  expect(decisions.get("order.close")?.effect).toBe("Deny");
+  expect(ports.session).toHaveBeenCalledOnce();
+  expect(ports.selected).toHaveBeenCalledOnce();
+  expect(ports.memberships).toHaveBeenCalledOnce();
+  // Navigation first, then each action, in one policy read.
+  expect(ports.authorize.mock.calls.map(([r]) => (r as { action: string }).action)).toEqual([
+    "merchant.access",
+    "dining.operate",
+    "order.close",
+  ]);
+  // Without navigation, no action is allowed.
+  ports.authorize.mockImplementation(async (request: { action: string }) => ({
+    effect: request.action === "merchant.access" ? "Deny" : "Allow",
+    scopeKind: "Store",
+    action: request.action,
+  }));
+  const none = await scope.authorizeActions(["dining.operate"]);
+  expect(none.get("dining.operate")).toBeNull();
+  // A Session that changed answers nothing.
+  ports.session.mockResolvedValueOnce({ ...session(), sessionReference: id(66) });
+  expect((await scope.authorizeActions(["dining.operate"])).get("dining.operate")).toBeNull();
 });

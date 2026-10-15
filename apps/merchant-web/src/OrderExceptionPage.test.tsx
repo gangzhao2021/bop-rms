@@ -285,6 +285,37 @@ describe("WP-2423 reconciliation cards say what the difference is about", () => 
     expect(html).toContain("Review unmatched charge");
     expect(html).toContain("matches no order or payment in this store");
   });
+  it("D3: says the details could not be loaded instead of showing an unmatched-charge card", () => {
+    const html = render([
+      {
+        ...dayItem(null),
+        exceptionReference: "018f0f58-767a-7f3b-a1d0-000000000912",
+        reconciliation: { type: "Unavailable" },
+      },
+      dayItem("2026-10-15T13:32:56.580Z"),
+    ]);
+    expect(html).toContain(
+      "The details of this payment difference could not be loaded, so what to do next is not shown. Refresh the page to try again.",
+    );
+    // The other card keeps its own detail.
+    expect(html).toContain("Business day totals differ from the payment provider");
+    for (const text of [
+      "Charge that matches no order",
+      "View charge details",
+      "Review unmatched charge",
+      "Review current follow-up",
+      "Acknowledge payment difference",
+      "No order is linked",
+    ])
+      expect(html).not.toContain(text);
+    expect(findInternalText([html.replace(/<[^>]+>/gu, " ")])).toEqual([]);
+    expect(() =>
+      parseOrderExceptionView({
+        ...fixture(),
+        items: [{ ...dayItem(null), reconciliation: { type: "Unavailable", reason: "x" } }],
+      }),
+    ).toThrow("ORDER_EXCEPTION_INVALID");
+  });
   it("refuses a detail on another kind or a malformed day total", () => {
     expect(() =>
       parseOrderExceptionView({

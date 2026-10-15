@@ -6,6 +6,7 @@ import {
   DiningSessionScreen,
   isDiningSessionActive,
   type DiningSessionState,
+  roundTime,
 } from "./DiningSessionPage.js";
 import type { DiningRound, DiningSessionView } from "./dining-session-client.js";
 import { formatClockTime } from "../journey/format.js";
@@ -163,6 +164,32 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
     expect(html).not.toMatch(/\bStaff\b(?! entered)|card_machine|StoreCardMachine/u);
   });
 
+  it("WP-2423 Q26: says which dish the kitchen is making again and that it will come to the table", () => {
+    const ramen = round().items[0];
+    if (ramen === undefined) throw new Error("fixture");
+    const html = render({
+      status: "ready",
+      refreshing: false,
+      view: view({
+        rounds: [
+          round({
+            status: "Serving",
+            items: [
+              { ...ramen, quantity: 1, servedQuantity: 0, beingRemade: true },
+              { ...ramen, displayName: "Gyoza", quantity: 1, servedQuantity: 1 },
+            ],
+          }),
+        ],
+      }),
+    });
+    expect(html).toContain("Being remade · we&#x27;ll bring it to your table shortly");
+    // The dish being remade does not also claim it was served; the other dish still does.
+    expect(html.match(/Being remade/gu)).toHaveLength(1);
+    expect(html).toContain("Served 1 of 1");
+    expect(html).not.toContain("Served 0 of 1");
+    expect(html.replace(/<[^>]*>/gu, " ")).not.toMatch(/beingRemade|rework|remake/u);
+  });
+
   it("never shows names, contact details, internal codes or references", () => {
     const html = render({ status: "ready", view: view(), refreshing: false });
     expect(html).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}/u);
@@ -284,4 +311,38 @@ describe("CUST-DINE-IN-SESSION item prices before tax (WP-2423 D5)", () => {
     expect(html).not.toContain("Subtotal");
     expect(html).not.toContain("Item prices are before tax.");
   });
+  it("WP-2423 item 5: tells guests when an unpaid round with no payment started is cancelled", () => {
+    const html = render({
+      status: "ready",
+      refreshing: false,
+      view: view({
+        rounds: [
+          round({
+            orderedBy: "Staff",
+            status: "AwaitingPayment",
+            payment: "Awaiting",
+            cancelsAt: "2026-10-13T18:40:00.000Z",
+          }),
+          round({ roundNumber: 2, status: "NotPaidCancelled", payment: "NotCharged" }),
+        ],
+      }),
+    });
+    expect(html).toContain("Pay them on the card machine and the kitchen starts it.");
+    expect(html).toContain(
+      `If it isn&#x27;t paid by ${formatClockTime("2026-10-13T18:40:00.000Z")}, it is cancelled and nobody is charged.`,
+    );
+    expect(html).toContain("Cancelled — not paid in time");
+    expect(html).toContain("No one was charged for it.");
+  });
+});
+
+it("WP-2423 D5: a round from another day shows its date, today's only its time", () => {
+  const now = Date.parse("2026-10-15T18:00:00");
+  const today = new Date("2026-10-15T12:05:00").toISOString();
+  const earlier = new Date("2026-10-11T19:40:00").toISOString();
+  expect(roundTime(today, now)).toBe(formatClockTime(today));
+  const dated = roundTime(earlier, now);
+  expect(dated).toContain("Oct");
+  expect(dated).toContain("11");
+  expect(dated).not.toBe(formatClockTime(earlier));
 });

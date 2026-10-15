@@ -92,7 +92,14 @@ function parseStaffCancellation(value: unknown, submittedAt: string) {
 /** WP-2423 Q7 slice 2: a dine-in round staff entered for the table, and its card-machine payment. */
 function parseStaffRound(value: unknown, orderType: unknown) {
   if (value === null) return null;
-  const raw = exact(value, ["recordedAfterOutage", "paidOnCardMachine"]);
+  // WP-2423 D5: what to charge while unpaid (older servers don't send it).
+  const withDue =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "amountDueMinor");
+  const raw = exact(value, [
+    "recordedAfterOutage",
+    "paidOnCardMachine",
+    ...(withDue ? ["amountDueMinor"] : []),
+  ]);
   if (typeof raw.recordedAfterOutage !== "boolean" || orderType !== "DineIn") return fail();
   let paid = null;
   if (raw.paidOnCardMachine !== null) {
@@ -100,7 +107,17 @@ function parseStaffRound(value: unknown, orderType: unknown) {
     if (typeof p.amountMinor !== "string" || !minorPattern.test(p.amountMinor)) return fail();
     paid = Object.freeze({ amountMinor: p.amountMinor, takenAt: instant(p.takenAt) });
   }
-  return Object.freeze({ recordedAfterOutage: raw.recordedAfterOutage, paidOnCardMachine: paid });
+  const due = raw.amountDueMinor ?? null;
+  if (
+    due !== null &&
+    (typeof due !== "string" || !minorPattern.test(due) || due === "0" || paid !== null)
+  )
+    return fail();
+  return Object.freeze({
+    recordedAfterOutage: raw.recordedAfterOutage,
+    paidOnCardMachine: paid,
+    amountDueMinor: due as string | null,
+  });
 }
 /** WP-2423 Q7: a pickup order staff took at the counter, and its card-machine payment. */
 function parseCounter(value: unknown, sourceChannel: unknown) {
@@ -170,12 +187,13 @@ function parsePaymentPosition(value: unknown) {
 function parsePaymentDue(value: unknown, submittedAt: string) {
   if (value === null || value === undefined) return null;
   const raw = exact(value, ["status", "cancelsAt"]);
+  if (raw.status !== "Failed" && raw.status !== "Awaiting") return fail();
+  // An awaiting round has a cancellation time only when no payment was started (WP-2423 item 5).
   if (raw.status === "Awaiting" && raw.cancelsAt === null)
-    return Object.freeze({ status: "Awaiting" as const, cancelsAt: null });
-  if (raw.status !== "Failed") return fail();
+    return Object.freeze({ status: "Awaiting" as const, cancelsAt: null as string | null });
   const cancelsAt = instant(raw.cancelsAt);
   if (cancelsAt <= submittedAt) return fail();
-  return Object.freeze({ status: "Failed" as const, cancelsAt });
+  return Object.freeze({ status: raw.status as "Failed" | "Awaiting", cancelsAt });
 }
 /** WP-2423 Q9-G1: a held order (paid while the Store was offline). */
 function parseAcceptanceHold(
@@ -224,7 +242,8 @@ function parseAcceptanceHold(
 }
 export function parseCurrentOrderQueue(value: unknown, after: string | null = null) {
   const raw = exact(value, ["items", "nextAfterOrderReference"]);
-  if (!Array.isArray(raw.items) || raw.items.length > 50) return fail();
+  // WP-2423 D4: up to 50 Orders of the page, plus (first page) older tables' Orders with a round today.
+  if (!Array.isArray(raw.items) || raw.items.length > 100) return fail();
   let previous = after;
   const items = raw.items.map((value) => {
     const withCounter =
@@ -234,6 +253,12 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
     // WP-2423 Q21: the Store business day the Order belongs to (order numbers restart daily).
     const withBusinessDate =
       value !== null && typeof value === "object" && Object.hasOwn(value, "businessDate");
+    // WP-2423 D4: the day the Order is listed under (absent from an older server).
+    const withListedDate =
+      withBusinessDate &&
+      value !== null &&
+      typeof value === "object" &&
+      Object.hasOwn(value, "listedBusinessDate");
     // WP-2423: what the Order was paid online (absent from an older server).
     const withPaidOnline =
       value !== null && typeof value === "object" && Object.hasOwn(value, "paidOnline");
@@ -242,6 +267,7 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       ...(withPaidOnline ? ["paidOnline"] : []),
       ...(withHold ? ["acceptanceHold"] : []),
       ...(withBusinessDate ? ["businessDate"] : []),
+      ...(withListedDate ? ["listedBusinessDate"] : []),
       "orderReference",
       "orderNumber",
       "orderType",
@@ -259,9 +285,17 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       "batches",
     ]);
     const orderReference = reference(item.orderReference);
+    const businessDate = withBusinessDate ? date(item.businessDate) : null;
+    const listedBusinessDate = withListedDate ? date(item.listedBusinessDate) : businessDate;
+    // WP-2423 D4: an Order opened on an earlier day with a round today is listed later than it
+    // was opened (first, with today's orders); it is outside the newest-first sequence.
+    const carriedOver =
+      businessDate !== null && listedBusinessDate !== null && listedBusinessDate > businessDate;
     // WP-2423: newest first; a following page continues with older Orders.
-    if (previous !== null && orderReference >= previous) return fail();
-    previous = orderReference;
+    if (!carriedOver) {
+      if (previous !== null && orderReference >= previous) return fail();
+      previous = orderReference;
+    }
     if (
       typeof item.pickupNotCollected !== "boolean" ||
       (item.unfulfillable !== null &&
@@ -296,7 +330,6 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       return fail();
     const submittedAt = instant(item.submittedAt),
       observedAt = instant(item.observedAt);
-    const businessDate = withBusinessDate ? date(item.businessDate) : null;
     if (observedAt < submittedAt) return fail();
     // WP-2423 Q1: only a paid pickup still awaiting acceptance has a deadline.
     const acceptBy = item.acceptBy === null ? null : instant(item.acceptBy);
@@ -441,6 +474,11 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       sourceChannel: item.sourceChannel as string,
       /** WP-2423 Q21: the Store business date of the Order (null from an older server). */
       businessDate,
+      /**
+       * WP-2423 D4: the business date the Order is listed under — today for an Order opened on an
+       * earlier day that had a round today; otherwise its own business date.
+       */
+      listedBusinessDate,
       submittedAt,
       observedAt,
       initialBatchReference: reference(item.initialBatchReference),

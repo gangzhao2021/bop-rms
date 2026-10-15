@@ -6,6 +6,7 @@ import {
   createPostgresOrdinaryRefundRequestStatusSource,
   createPostgresOrdinaryRefundRequestContextSource,
   createPostgresCapturedBatchPaymentSource,
+  createPostgresCardMachinePaymentStore,
   createOrdinaryRefundRoleResolver,
 } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
@@ -188,13 +189,30 @@ export function createMerchantOrdinaryRefundItems(options: {
             authorize: allowed,
           });
           const paid = new Map<string, string>();
+          // WP-2423 item 4: rounds paid on the Store's card machine are refunded on that machine.
+          const cards = createPostgresCardMachinePaymentStore({
+            scope,
+            authorize: async (_tx, query) =>
+              query.orderReference === orderReference && (await allowed()),
+          });
+          const onMachine = new Set<string>();
           for (const batch of order.batches) {
             const payment = await captured.load(businessTransaction, {
               orderReference,
               orderBatchReference: batch.orderBatchReference,
               observedAt,
             });
-            if (payment) paid.set(batch.orderBatchReference, payment.paymentIntentReference);
+            if (payment) {
+              paid.set(batch.orderBatchReference, payment.paymentIntentReference);
+              if (
+                (await cards.loadByBatch(
+                  businessTransaction,
+                  orderReference,
+                  batch.orderBatchReference,
+                )) !== null
+              )
+                onMachine.add(batch.orderBatchReference);
+            }
           }
           const items = order.items.map(({ snapshot }) => {
             // WP-2423 Q5: units of a declined request are refundable again.
@@ -224,6 +242,11 @@ export function createMerchantOrdinaryRefundItems(options: {
               unclaimedQuantity: paymentCaptured ? snapshot.quantity - occupied.length : 0,
               paymentCaptured,
               paymentIntentReference: paid.get(snapshot.orderBatchReference) ?? null,
+              paymentMethod: !paymentCaptured
+                ? null
+                : onMachine.has(snapshot.orderBatchReference)
+                  ? ("CardMachine" as const)
+                  : ("Online" as const),
             });
           });
           // WP-2423 Q5: who declined a request, when and why (names are shown to staff only).
@@ -273,6 +296,7 @@ export function createMerchantOrdinaryRefundItems(options: {
             authorize: () => allowed(),
           });
           const progress = new Map<string, "Recorded" | "Sending" | "Refunded" | "Declined">();
+          const methods = new Map<string, "Online" | "CardMachine">();
           for (const request of recent) {
             if (declines.has(request.requestReference)) {
               progress.set(request.requestReference, "Declined");
@@ -283,6 +307,9 @@ export function createMerchantOrdinaryRefundItems(options: {
               operationReference: String(request.operationReference),
               observedAt,
             });
+            // WP-2423 item 4: a card-machine refund request names that one payment.
+            if (current.payments.some((payment) => payment.method === "CardMachine"))
+              methods.set(request.requestReference, "CardMachine");
             progress.set(
               request.requestReference,
               ordinaryRefundProgress(
@@ -309,6 +336,7 @@ export function createMerchantOrdinaryRefundItems(options: {
                   amountMinor: request.amountMinor.toString(),
                   decline: declines.get(request.requestReference) ?? null,
                   progress: progress.get(request.requestReference) ?? "Recorded",
+                  paymentMethod: methods.get(request.requestReference) ?? ("Online" as const),
                 }),
               ),
             ),

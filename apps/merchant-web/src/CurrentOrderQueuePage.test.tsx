@@ -15,6 +15,7 @@ import {
   orderChannelLabel,
   orderTypeLabel,
   paymentDueText,
+  paymentDueTier,
   storeCancelledBatches,
   unpaidCancelledBatches,
   unpaidCancelledTotal,
@@ -727,7 +728,9 @@ it("WP-2423: warns staff before an unpaid dine-in round is cancelled and says so
   // After the System cancelled it: not paid, nothing charged; not mistaken for a store cancellation.
   const cancelled = render({ acceptanceStatus: "Cancelled" });
   expect(cancelled).toContain("Batch cancelled · not paid.");
-  expect(cancelled).toContain("Nothing was charged for it.");
+  expect(cancelled).toContain(
+    "never went to the kitchen. Nothing was charged for it in the system.",
+  );
   expect(cancelled).not.toContain("Payment failed");
   expect(cancelled).toContain("1 cancelled");
 });
@@ -828,6 +831,27 @@ it("WP-2423: words an unpaid round's payment state for staff", () => {
   expect(paymentDueText({ status: "Failed", cancelsAt: "2026-09-14T00:30:00.000Z" }, "UTC")).toBe(
     "Payment failed · will be cancelled automatically at 00:30",
   );
+  // WP-2423 item 5: a round with no payment started is cancelled at its deadline; staff are warned.
+  const due = { status: "Awaiting" as const, cancelsAt: "2026-09-14T00:30:00.000Z" };
+  const at = (iso: string) => Date.parse(iso);
+  expect(paymentDueText(due, "UTC", at("2026-09-14T00:05:00.000Z"), true)).toBe(
+    "Entered by staff · record the card-machine payment by 00:30 or it is cancelled",
+  );
+  expect(paymentDueText(due, "UTC", at("2026-09-14T00:24:30.000Z"), true)).toBe(
+    "Entered by staff · record the card-machine payment by 00:30 (6 min left) or it is cancelled",
+  );
+  expect(paymentDueText(due, "UTC", at("2026-09-14T00:05:00.000Z"))).toBe(
+    "Not paid · cancelled automatically at 00:30 unless paid",
+  );
+  expect(paymentDueText(due, "UTC", at("2026-09-14T00:30:00.000Z"), true)).toBe(
+    "Not paid in time · being cancelled automatically",
+  );
+  expect(paymentDueText({ status: "Awaiting", cancelsAt: null }, "UTC", undefined, true)).toBe(
+    "Entered by staff · awaiting card-machine payment",
+  );
+  expect(paymentDueTier(due, at("2026-09-14T00:05:00.000Z"))).toBe("warning");
+  expect(paymentDueTier(due, at("2026-09-14T00:21:00.000Z"))).toBe("urgent");
+  expect(paymentDueTier({ status: "Failed", cancelsAt: due.cancelsAt })).toBe("urgent");
   expect(orderTypeLabel.DineIn).toBe("Dine-in");
   expect(["Qr", "Web", "Pos", "Api", "Kiosk"].map(orderChannelLabel)).toEqual([
     "QR code",

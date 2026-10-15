@@ -1,5 +1,9 @@
 import { readClosedRecord } from "@bop/identity";
-import { createPostgresPaymentOperationFence } from "@rms/payment";
+import {
+  createPostgresCardMachinePaymentStore,
+  createPostgresPaymentIntentCreationStore,
+  createPostgresPaymentOperationFence,
+} from "@rms/payment";
 import {
   createPostgresOrderBatchCheckoutCancellationReader,
   createPostgresOrderBatchCheckoutCancellationStore,
@@ -20,6 +24,13 @@ const unavailable = (): never => {
 /** Internal System command with mandatory same-transaction Inventory completion.
  * No financial compensation or table/session mutation.
  * The caller must reuse the same durable operation reference after uncertain responses.
+ *
+ * WP-2423: two kinds of unpaid round are cancelled when their payment window ends — one whose
+ * payment failed (`CHECKOUT_DEADLINE_REACHED`), and one for which no payment was ever started
+ * (`PAYMENT_NOT_STARTED`: a staff-entered round nobody recorded as paid on the card machine, or a
+ * guest round whose online payment never began). For the latter Payment is re-read under the
+ * payment operation fence: a round with any online payment or card-machine payment is left alone
+ * (`NotEligible`), since money may have moved. The cancellation publishes `OrderCancelled`.
  */
 export function createDiningBatchCancellation(
   options: SourceOptions & {
@@ -58,7 +69,7 @@ export function createDiningBatchCancellation(
           expiry = parseOrderBatchCheckoutExpiry(raw.expiry),
           started = parseOrderingInstant(options.now());
         if (
-          expiry.status !== "PaymentFailed" ||
+          (expiry.status !== "PaymentFailed" && expiry.status !== "AwaitingPaymentResolution") ||
           expiry.tenantReference !== scope.tenantReference ||
           expiry.brandReference !== scope.brandReference ||
           expiry.storeReference !== scope.storeReference ||
@@ -109,6 +120,28 @@ export function createDiningBatchCancellation(
               return unavailable();
             return Object.freeze({ status: "Existing" as const, record: original });
           }
+          if (expiry.status === "AwaitingPaymentResolution") {
+            // Under the fence above no payment for this round can start or be recorded meanwhile.
+            const runner = {
+              run: <T>(work: (tx: ConsumerTransaction) => Promise<T>) => work(transaction),
+            };
+            const intent = await createPostgresPaymentIntentCreationStore(
+              runner,
+              { brandReference: scope.brandReference, storeReference: scope.storeReference },
+              { now: options.now, generateObservationReference: unavailable },
+            ).resolveOperation(expiry.paymentOperationReference);
+            const card = await createPostgresCardMachinePaymentStore({
+              scope: { brandReference: scope.brandReference, storeReference: scope.storeReference },
+              authorize: async (tx) => tx === transaction && (await allowed(tx)),
+            }).loadByPaymentOperation(transaction, expiry.paymentOperationReference);
+            if (intent !== null || card !== null) {
+              if (!(await allowed(transaction))) return unavailable();
+              return Object.freeze({
+                status: "NotEligible" as const,
+                reason: "PaymentStarted" as const,
+              });
+            }
+          }
           const evidence = await createDiningBatchCancellationSource({
             ...options,
             scope,
@@ -137,7 +170,10 @@ export function createDiningBatchCancellation(
               .sort(),
             cancelledAt: evidence.observedAt,
             phase: "Cancelled",
-            reasonCode: "CHECKOUT_DEADLINE_REACHED",
+            reasonCode:
+              expiry.status === "PaymentFailed"
+                ? "CHECKOUT_DEADLINE_REACHED"
+                : "PAYMENT_NOT_STARTED",
           });
           const matches = (candidate: typeof record) =>
             candidate.orderReference === expiry.orderReference &&
@@ -175,6 +211,7 @@ export function createDiningBatchCancellation(
               });
               return true;
             },
+            eventReference: () => options.newReference(),
             audit: (candidate) =>
               Promise.resolve({
                 auditId: options.newReference(),

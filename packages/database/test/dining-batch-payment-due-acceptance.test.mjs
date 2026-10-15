@@ -10,6 +10,7 @@ import {
 } from "../../rms/ordering/src/index.ts";
 import {
   listStoreOrderBatchPaymentOutcomes,
+  listStoreOrderBatchesWithOnlinePayment,
   listStoreOrderOnlinePaidTotals,
 } from "../../rms/payment/src/index.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
@@ -234,6 +235,15 @@ it("reads dine-in round payment deadlines, unpaid cancellations and batch paymen
         { orderReference: orderA, amountMinor: "2260", currencyCode: "CAD" },
       ]);
 
+      // WP-2423 item 5: rounds for which an online payment was ever started (whatever its outcome
+      // or projection state) are never cancelled as "no payment started"; the others may be.
+      assert.deepEqual(
+        [
+          ...(await scoped((tx) => listStoreOrderBatchesWithOnlinePayment(tx, scope, orders))),
+        ].sort(),
+        [a1, a2, a3, a4],
+      );
+
       // The other Store sees only its own Order.
       const other = { brandReference: brand, storeReference: otherStore };
       assert.deepEqual(
@@ -247,6 +257,10 @@ it("reads dine-in round payment deadlines, unpaid cancellations and batch paymen
           (entry) => [entry.orderBatchReference, entry.status],
         ),
         [[b1, "Failed"]],
+      );
+      assert.deepEqual(
+        [...(await scoped((tx) => listStoreOrderBatchesWithOnlinePayment(tx, other, orders)))],
+        [b1],
       );
     } finally {
       await admin.end();

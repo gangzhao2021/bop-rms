@@ -1,6 +1,10 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { createMerchantOrdinaryRefundItems } from "./merchant-ordinary-refund-items.js";
 const d = vi.hoisted(() => ({
+  cards: (): unknown => ({
+    loadByIntent: async () => null,
+    loadByBatch: async () => null,
+  }),
   resolve: vi.fn(),
   workforce: vi.fn(),
   context: vi.fn(),
@@ -15,6 +19,8 @@ vi.mock("./merchant-workforce-authority-source.js", () => ({
 }));
 vi.mock("@rms/payment", async (original) => ({
   ...(await original<object>()),
+  // WP-2423 item 4: no card-machine payment unless a test says so.
+  createPostgresCardMachinePaymentStore: () => d.cards(),
   // Without declines every recorded request occupies the Order (WP-2423 Q5).
   createPostgresOrdinaryRefundRequestContextSource:
     () =>
@@ -136,6 +142,7 @@ it("returns paid unclaimed units and current claim version without private facts
         amountMinor: "1130",
         decline: null,
         progress: "Refunded",
+        paymentMethod: "Online",
       },
     ],
     items: [
@@ -147,6 +154,7 @@ it("returns paid unclaimed units and current claim version without private facts
         unclaimedQuantity: 2,
         paymentCaptured: true,
         paymentIntentReference: id(31),
+        paymentMethod: "Online",
       },
       {
         orderBatchReference: id(21),
@@ -156,6 +164,7 @@ it("returns paid unclaimed units and current claim version without private facts
         unclaimedQuantity: 0,
         paymentCaptured: false,
         paymentIntentReference: null,
+        paymentMethod: null,
       },
     ],
   });

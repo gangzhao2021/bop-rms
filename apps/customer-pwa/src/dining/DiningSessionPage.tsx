@@ -14,13 +14,31 @@ import {
   type DiningSessionView,
 } from "./dining-session-client.js";
 
+/**
+ * WP-2423 D5: when a round was sent. Today's rounds show the time; a round from another day (a
+ * table kept open past midnight, or reopened on a later day) shows its date too.
+ */
+export function roundTime(instant: string, now = Date.now(), locale = "en-CA"): string {
+  const ms = Date.parse(instant);
+  if (!Number.isFinite(ms)) return "";
+  const day = (value: number) => new Date(value).toDateString();
+  if (day(ms) === day(now)) return formatClockTime(instant, locale);
+  return new Intl.DateTimeFormat(locale, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(ms));
+}
+
 /** How often the table view re-reads while something at the table is still in progress. */
 export const diningSessionPollIntervalMs = 15_000;
 
 const statusText: Readonly<Record<DiningRoundStatus, string>> = {
   AwaitingPayment: "Waiting for payment",
   PaymentFailed: "On hold until paid",
-  NotPaidCancelled: "Cancelled — payment didn't go through",
+  NotPaidCancelled: "Cancelled — not paid in time",
   StoreCancelled: "Cancelled by the store",
   Received: "Received by the store",
   Queued: "Sent to the kitchen",
@@ -81,12 +99,16 @@ function RoundNote({ round }: { readonly round: DiningRound }) {
     );
   if (round.status === "AwaitingPayment")
     return (
-      <p>
+      <p className={round.cancelsAt ? "order-status__warning" : undefined}>
         {round.orderedBy === "You"
           ? "Finish paying for this round so the kitchen can start it."
           : round.orderedBy === "Staff"
             ? "Staff entered this round for your table. Pay them on the card machine and the kitchen starts it."
             : "The kitchen starts this round once it is paid."}
+        {/* WP-2423 item 5: a round nobody started paying for is cancelled when its time ends. */}
+        {round.cancelsAt
+          ? ` If it isn't paid by ${formatClockTime(round.cancelsAt)}, it is cancelled and nobody is charged.`
+          : ""}
       </p>
     );
   return null;
@@ -102,7 +124,7 @@ function RoundCard({ round }: { readonly round: DiningRound }) {
       <dl className="dining-session__round-facts">
         <div>
           <dt>Ordered at</dt>
-          <dd>{formatClockTime(round.submittedAt)}</dd>
+          <dd>{roundTime(round.submittedAt)}</dd>
         </div>
         <div>
           <dt>Status</dt>

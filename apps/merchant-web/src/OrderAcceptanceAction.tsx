@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   OrderAcceptanceClientError,
+  type OrderAcceptanceConflict,
   type createOrderAcceptanceClient,
 } from "./order-acceptance-client.js";
 type Operation = ReturnType<ReturnType<typeof createOrderAcceptanceClient>["prepare"]>;
@@ -10,14 +11,19 @@ export function OrderAcceptanceAction({
   operation,
   onAccepted,
   onRejected,
+  onChanged,
 }: {
   readonly orderNumber: string;
   readonly csrf: string;
   readonly operation: () => Operation;
   readonly onAccepted: () => void;
   readonly onRejected: () => void;
+  /** WP-2423 D1: the order changed or was accepted meanwhile; the list reloads its current state. */
+  readonly onChanged?: () => void;
 }) {
-  const [state, setState] = useState<"Idle" | "Submitting" | "Unknown" | "Denied">("Idle");
+  const [state, setState] = useState<
+    "Idle" | "Submitting" | "Unknown" | "Denied" | OrderAcceptanceConflict
+  >("Idle");
   const pending = useRef<AbortController | null>(null);
   useEffect(() => () => pending.current?.abort(), []);
   const accept = async () => {
@@ -35,19 +41,24 @@ export function OrderAcceptanceAction({
         error.code !== "OutcomeUnknown"
       )
         onRejected();
-      if (!controller.signal.aborted)
-        setState(
-          error instanceof OrderAcceptanceClientError && error.code === "OutcomeUnknown"
-            ? "Unknown"
-            : "Denied",
-        );
+      if (!controller.signal.aborted) {
+        if (error instanceof OrderAcceptanceClientError && error.conflict !== null) {
+          setState(error.conflict);
+          onChanged?.();
+        } else
+          setState(
+            error instanceof OrderAcceptanceClientError && error.code === "OutcomeUnknown"
+              ? "Unknown"
+              : "Denied",
+          );
+      }
     } finally {
       if (pending.current === controller) pending.current = null;
     }
   };
   return (
     <div className="card-actions">
-      {state !== "Denied" ? (
+      {state === "Idle" || state === "Submitting" || state === "Unknown" || state === "Changed" ? (
         <button disabled={state === "Submitting"} onClick={() => void accept()}>
           {state === "Unknown"
             ? "Retry acceptance for "
@@ -60,6 +71,18 @@ export function OrderAcceptanceAction({
       {state === "Unknown" ? (
         <p role="status">
           Acceptance could not be confirmed. Retry the same request to recover its result.
+        </p>
+      ) : state === "Changed" ? (
+        <p role="status">
+          This order changed since the list was loaded. The list is refreshing; accept again if it
+          still waits.
+        </p>
+      ) : state === "AlreadyAccepted" ? (
+        <p role="status">Already accepted by someone else. It is in the kitchen.</p>
+      ) : state === "NotAcceptable" ? (
+        <p role="status">
+          This can no longer be accepted as it is (its time ran out or an item ran out). Refresh
+          orders to see what to do.
         </p>
       ) : state === "Denied" ? (
         <p role="status">

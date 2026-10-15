@@ -21,6 +21,7 @@ import {
 import { listDiningSessionTableLabels } from "@rms/dining";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { createMerchantRoundBusinessDates } from "./merchant-round-business-date.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 
@@ -108,8 +109,10 @@ export interface KitchenPreparation {
   readonly allergens: KitchenItemAllergens;
   readonly orderLabel: KitchenOrderLabel | null;
   /**
-   * DEC-KITCHEN-STALE-TICKETS: the Order's business day (Ordering), so a ticket left from an
-   * earlier day is never mistaken for today's ticket with the same number. Null when unknown.
+   * DEC-KITCHEN-STALE-TICKETS: the business day of the item's round (WP-2423 D4: a table's later
+   * round is work of the day it was submitted on; the first round's day is the Order's), so a
+   * ticket left from an earlier day is never mistaken for today's ticket with the same number,
+   * and today's round of an older table is never shown as an earlier day's. Null when unknown.
    */
   readonly businessDate: string | null;
   /** Restricted (DEC-KDS-CUSTOMER-NOTE): displayed only; never logged or evented. */
@@ -143,6 +146,14 @@ export async function kitchenPreparation(
     readonly orderReference: string;
     readonly orderBatchReference?: string;
   }[],
+  /**
+   * WP-2423 D4: each round's own business date (a table's later round is work of the day it was
+   * submitted on, not of the day the table's Order was opened). Without it, the Order's date.
+   */
+  roundBusinessDates?: (
+    transaction: ConsumerTransaction,
+    orderBatchReferences: readonly string[],
+  ) => Promise<ReadonlyMap<string, string>>,
 ): Promise<ReadonlyMap<string, KitchenPreparation>> {
   const allergens = await kitchenAllergens(
     transaction,
@@ -162,6 +173,17 @@ export async function kitchenPreparation(
       orderReferences.slice(start, start + 100),
     ))
       businessDates.set(order, date);
+  const rounds = [
+    ...new Set(
+      items.flatMap((item) =>
+        item.orderBatchReference === undefined ? [] : [item.orderBatchReference],
+      ),
+    ),
+  ];
+  const roundDates =
+    roundBusinessDates === undefined || rounds.length === 0
+      ? new Map<string, string>()
+      : await roundBusinessDates(transaction, rounds);
   const tables = await listDiningSessionTableLabels(transaction, scope, [
     ...new Set(
       [...orders.values()].flatMap((order) =>
@@ -191,7 +213,12 @@ export async function kitchenPreparation(
         Object.freeze({
           allergens: facts?.allergens ?? unavailableAllergens,
           customerNote: facts?.customerNote ?? null,
-          businessDate: businessDates.get(item.orderReference) ?? null,
+          businessDate:
+            (item.orderBatchReference === undefined
+              ? undefined
+              : roundDates.get(item.orderBatchReference)) ??
+            businessDates.get(item.orderReference) ??
+            null,
           orderLabel:
             order === undefined
               ? null
@@ -381,6 +408,21 @@ export function createMerchantKitchenQuery(options: {
             clock: { now: () => authority.observedAt },
             digests: { sha256: options.sha256 },
           });
+          // WP-2423 D4: a round's own business date, by the Store's published business day.
+          const roundDates = (
+            transaction: ConsumerTransaction,
+            orderBatchReferences: readonly string[],
+          ) =>
+            createMerchantRoundBusinessDates({
+              persistence: options.persistence,
+              scope: {
+                tenantReference: String(scope.selected.tenantReference),
+                brandReference: String(authority.brandReference),
+                storeReference: String(authority.storeReference),
+              },
+              timeZone: scope.store.timeZone,
+              authorize: async () => authorized.guard(),
+            })(transaction, orderBatchReferences);
           const operatorStatus = (projection: ProjectionMetadata) =>
             kdsOperatorStatus({ session, ...authority, projection });
           if (query.kind === "List") {
@@ -396,7 +438,7 @@ export function createMerchantKitchenQuery(options: {
               ...new Set(result.items.map((item) => item.ticketReference)),
             ]);
             const items = result.items.filter((item) => !closed.has(item.ticketReference));
-            const preparation = await kitchenPreparation(tx, authority, items);
+            const preparation = await kitchenPreparation(tx, authority, items, roundDates);
             const canCloseEarlierDayTickets =
               (await scope.authorizeAction(kitchenStaleTicketClosePermission))?.effect === "Allow";
             return {
@@ -413,7 +455,7 @@ export function createMerchantKitchenQuery(options: {
             ...authority,
             workItemReference: query.workItemReference,
           });
-          const preparation = await kitchenPreparation(tx, authority, [result.item]);
+          const preparation = await kitchenPreparation(tx, authority, [result.item], roundDates);
           return {
             ...result,
             operatorStatus: operatorStatus(result),

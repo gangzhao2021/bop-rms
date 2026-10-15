@@ -418,7 +418,8 @@ gate (it needs the Owner's staff, the store's devices and network, and the card 
   (`Hours & ordering`, permission `operations.ordering.pause`), record card-machine refunds and see
   `Settlement` and `Exceptions`.
 - **Counter**: Front of House. Takes paper orders and card-machine payments; after recovery enters
-  them in `Counter order` (Front of House, Store Manager and Owner have it).
+  pickup slips in `Counter order` and dine-in slips on their table in `Tables` →
+  `Take order for table …` (Front of House, Store Manager and Owner have both).
 - **Kitchen**: works from paper tickets while the Kitchen board is down.
 - **Pilot operator**: the person who runs the pilot host (today the Owner's machine; P4 cloud host
   later). Restarts services; not on the shop floor.
@@ -512,7 +513,8 @@ customer menu or `Orders` loads on mobile data, the host is up and only the stor
   card by hand; no cash; no "pay later".
 - If the card machine cannot approve, do not take the order.
 - Pickup: give the customer the slip number (P-01, P-02, …) and call it when ready.
-- Dine-in: write the table number; one slip per round. Seated guests who already paid a round
+- Dine-in: write the table number; one slip per round. After recovery each slip is entered on that
+  table, so it joins the table's order (section 5 step 5). Seated guests who already paid a round
   online keep their phone's order number: write it on the incident sheet as "paid online, order N".
 - A customer who says they paid online but you cannot see it: ask for the phone's screen. If it
   shows "Payment confirmed" (or the order status shows "Payment received") with an order number,
@@ -596,9 +598,11 @@ Do these in order, before resuming online ordering.
 3. **Check customers who paid online during the outage** (incident sheet "paid online, order N" and
    "pending" lines): open each order in `Orders`. Paid and still open → make or confirm it, then
    hand over / serve. "Awaiting payment" or not found → the online payment did not complete; take
-   payment on the card machine through `Counter order` as a normal counter order. Never charge both.
-4. **Enter paper orders** in `Counter order`, one per paid slip, by the counter staff who took them
-   or the lead:
+   payment on the card machine through `Counter order` as a normal counter order (for a dine-in
+   round, through `Tables` → `Take order for table …` as in step 5, without "Recorded after an
+   outage"). Never charge both.
+4. **Enter paper pickup orders** in `Counter order`, one per paid slip, by the counter staff who
+   took them or the lead (dine-in slips: step 5):
    - tick "Recorded after an outage (taken on paper)", enter "Paid at (store time, from the paper
      order)" from the slip (within the last 3 days), add the same items, options and tip;
    - check "To charge" equals the card machine total on the slip; if it differs, stop and give the
@@ -609,11 +613,27 @@ Do these in order, before resuming online ordering.
    - write the order number on the paper slip ("entered as order no.").
    - Pressing `Send order` again with the same screen never creates a second order; if the screen
      reports that it did not go through, nothing was charged and it can be sent again.
-5. **Dine-in paper rounds** (interim, gap G3): the product has no staff dine-in entry yet (Q7 slice
-   2). Enter each paid dine-in slip in `Counter order` as a pickup order "Recorded after outage" so
-   that the card-machine payment, tax, tip, sales and stock are recorded and match the card machine
-   batch. Mark it ready in Kitchen and handed over in Pickup. Write the table number on the incident
-   sheet. Known effect: these sales show as Counter/pickup, not dine-in, in the pilot reports.
+5. **Enter paper dine-in rounds** on their table, one per paid slip, in slip time order
+   ([DEC-STAFF-DINE-IN-ROUND](../spec/design/staff-dine-in-round.md)). Do this before closing the
+   table (step 8): the round joins that table's order, so the card-machine payment, tax, tip, sales
+   and stock are recorded as dine-in for that table, and the guests' own phones show it as
+   "Entered by staff". Do not enter dine-in slips in `Counter order`.
+   - `Tables` → select the slip's table → `Take order for table …`;
+   - tick "Recorded after an outage (taken on paper)", enter "Paid at (store time, from the paper
+     order)" from the slip (within the last 3 days), add the same items, options, kitchen notes and
+     tip. This works even after the store has closed for the day;
+   - check "To charge" equals the card machine total on the slip; if it differs, stop and give the
+     slip to the incident lead (gap G4);
+   - `Send order`, then enter the slip reference and press `Paid on card machine`. The page says
+     "Recorded after the outage and added to the table's order. If it was already made and served,
+     mark it ready in Kitchen and served on the order." Do that for each one (gap G5);
+   - write the order number on the paper slip ("entered as order no.").
+   - If the page says guests at this table have items in their shared cart that haven't been sent,
+     ask them to send or remove those items on their phone first; if a guest is paying on their
+     phone right now, wait a minute and send again. If the table is marked unavailable, mark it
+     available in `Tables` first. Sending gives the table a new table code: a code handed out and
+     not yet used stops working; guests already at the table stay joined. If the table's session
+     was already closed, the entry opens a new one for it; close it again in step 8.
 6. **Expired online pickup orders** (rare since G1 is handled: only orders whose 30 minutes ended
    while a staff screen was still online, or held orders not decided within the 15 minutes): in
    `Orders` filter "Expired · refunded" for the outage period. For each one the kitchen actually made
@@ -674,9 +694,10 @@ STORE OUTAGE CHECKLIST                       keep at the counter
        Refund instead, each within 15 min of screens returning.
        Then accept everything else paid and waiting.
 [ ] 10 Check every "paid online / pending" line on the incident sheet.
-[ ] 11 Counter order: enter each paper slip, tick "Recorded after an outage",
+[ ] 11 Pickup slips: Counter order. Dine-in slips: Tables > Take order for
+       table (same table), before closing it. Tick "Recorded after an outage",
        paid-at time from slip, same items + tip; To charge = slip total.
-       Then Mark ready (Kitchen) and hand over (Pickup).
+       Then Mark ready (Kitchen) and hand over (Pickup) / served (on the order).
 [ ] 12 Orders: "Expired · refunded" in the outage period -> lead follows up.
 [ ] 13 Refund any duplicate on the card machine, then record it.
 [ ] 14 Tables: close sessions of guests who left.
@@ -735,7 +756,7 @@ Overall: [ ] pass  [ ] fail      Owner sign-off: ________
 | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
 | G1  | Handled (DEC-OUTAGE-ACCEPTANCE-HOLD): orders whose deadline passes while the store is offline are held and decided within 15 minutes of staff returning (section 5 step 1). Remaining: no link from a paper slip to an online order; an accepted order already served from paper still reaches the kitchen board | Q1 remainder                |
 | G2  | Handled 2026-10-14: a failed read keeps the last tickets as an explicit stale read-only board, actions off, retrying with backoff (IDR-0039); Pickup and Tables likewise                                                                                                                                         | Q9 follow-up (Q2 board)     |
-| G3  | No staff dine-in entry: paper dine-in rounds are back-entered as counter pickup orders, so they report as pickup; no table number or note on the record                                                                                                                                                          | Q7 slice 2                  |
+| G3  | Handled 2026-10-15 (DEC-STAFF-DINE-IN-ROUND): paper dine-in rounds are entered on their table in `Tables` → `Take order for table …` (section 5 step 5) and report as dine-in                                                                                                                                    | Q7 slice 2                  |
 | G4  | Back-entry charges the current server total; a paper charge that differs (price changed, mistake) cannot be recorded at its real amount, so the card machine section will not match the batch                                                                                                                    | Q7 (follow-up)              |
 | G5  | Back-entered orders go onto the Kitchen board and Pickup and must be marked ready and handed over one by one                                                                                                                                                                                                     | Q7 (kitchen quick close)    |
 | G6  | Card-machine payments have no partial refund; only whole-order cancellation with "refunded on card machine"                                                                                                                                                                                                      | Q5                          |

@@ -1,5 +1,11 @@
 import { beforeEach, expect, it, vi } from "vitest";
-const d = vi.hoisted(() => ({ scope: vi.fn(), store: vi.fn(), list: vi.fn(), followUp: vi.fn() }));
+const d = vi.hoisted(() => ({
+  scope: vi.fn(),
+  store: vi.fn(),
+  list: vi.fn(),
+  followUp: vi.fn(),
+  detail: vi.fn(),
+}));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => d.scope }));
 vi.mock("@bop/projection", async (original) => ({
   ...(await original<typeof import("@bop/projection")>()),
@@ -17,11 +23,17 @@ vi.mock("@rms/payment", () => ({
         throw Error("denied");
       return value;
     },
+  createPostgresPaymentReconciliationExceptionDetailReader:
+    (options: { authorize: (tx: unknown) => Promise<boolean> }) =>
+    async (tx: unknown, references: readonly string[]) => {
+      if (!(await options.authorize(tx))) throw Error("PAYMENT_COMPENSATION_PERMISSION_DENIED");
+      return d.detail(references);
+    },
 }));
 import { createPersistentMerchantOrderExceptions } from "./persistent-merchant-order-exceptions.js";
 type Options = Parameters<typeof createPersistentMerchantOrderExceptions>[0];
 const id = (n: number) => "0190fa86-0000-7000-8000-" + String(n).padStart(12, "0");
-function fixture() {
+function fixture(onUnexpected?: Options["onUnexpected"]) {
   const state = { allowed: true, store: id(3), session: id(4) };
   d.scope.mockImplementation(async () => ({
     selected: { tenantReference: id(1) },
@@ -43,12 +55,14 @@ function fixture() {
       transactions: { run: async (work: (tx: object) => Promise<unknown>) => work(original) },
     } as unknown as Options["persistence"],
     metadata,
+    ...(onUnexpected ? { onUnexpected } : {}),
   });
   return { state, original, metadata, read };
 }
 beforeEach(() => {
   vi.resetAllMocks();
   d.list.mockResolvedValue({ items: [], nextAfterSourceReference: null });
+  d.detail.mockResolvedValue(new Map());
   d.store.mockImplementation((options) => ({
     list: async (tx: unknown, input: unknown) => {
       if (!(await options.authorize(tx, "Read"))) throw new Error("denied");
@@ -155,4 +169,58 @@ it("uses scoped Payment assignment without changing financial status and fails c
     return { assigned: true };
   });
   await expect(f.read("synthetic-cookie")).rejects.toThrow();
+});
+
+it("D3: reads each difference's detail on its own after a failure and never guesses the kind", async () => {
+  const onUnexpected = vi.fn();
+  const f = fixture(onUnexpected);
+  const source = (n: number) => ({
+    sourceReference: id(n),
+    tenantReference: id(1),
+    brandReference: id(2),
+    storeReference: id(3),
+    orderReference: null,
+    paymentReference: null,
+    diningReference: null,
+    kind: "PaymentReconciliationDifference",
+    severity: "High",
+    sourceOwner: "Payment",
+    sourceStatus: "Open",
+    providerState: "Unknown",
+    compensationStatus: "NotRequested",
+    sourceVersion: 1n,
+    sourceDigest: `sha256:${"a".repeat(64)}`,
+    createdAt: "2026-09-21T00:00:00.000Z",
+    updatedAt: "2026-09-21T00:00:00.000Z",
+    resolutionEvidenceReference: null,
+  });
+  d.list.mockResolvedValue({ items: [source(7), source(8)], nextAfterSourceReference: null });
+  d.followUp.mockResolvedValue({ assigned: false });
+  const failure = Object.assign(Error("PAYMENT_COMPENSATION_SOURCE_UNAVAILABLE"), {
+    code: "PAYMENT_COMPENSATION_SOURCE_UNAVAILABLE",
+  });
+  d.detail.mockImplementation(async (references: readonly string[]) => {
+    if (references.includes(id(8))) throw failure;
+    return new Map([[id(7), { exceptionReference: id(7), kind: "UnmatchedCharge" }]]);
+  });
+  const view = await f.read("synthetic-cookie");
+  const byRef = (n: number) => view.items.find((item) => item.exceptionReference === id(n));
+  expect(byRef(7)).toMatchObject({ reconciliation: { type: "UnmatchedCharge" } });
+  expect(byRef(8)).toMatchObject({ reconciliation: { type: "Unavailable" } });
+  expect(d.detail.mock.calls).toEqual([[[id(7), id(8)]], [[id(7)]], [[id(8)]]]);
+  expect(onUnexpected).toHaveBeenCalledTimes(2);
+  expect(onUnexpected).toHaveBeenCalledWith(failure);
+
+  // A difference the Payment owner returns nothing for is not shown as an unmatched charge.
+  onUnexpected.mockClear();
+  d.detail.mockResolvedValue(new Map());
+  const missing = await f.read("synthetic-cookie");
+  expect(missing.items.map((item) => item.reconciliation)).toEqual([
+    { type: "Unavailable" },
+    { type: "Unavailable" },
+  ]);
+  expect(onUnexpected).toHaveBeenCalledTimes(2);
+  expect((onUnexpected.mock.calls[0]?.[0] as Error).message).toBe(
+    "PAYMENT_RECONCILIATION_DETAIL_MISSING",
+  );
 });

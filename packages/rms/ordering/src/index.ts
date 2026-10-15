@@ -50,6 +50,8 @@ export * from "./application/order-fulfillment-source.js";
 export * from "./contracts/fulfillment-completed-event.js";
 export * from "./application/fulfillment-completed-event.js";
 export * from "./application/fulfillment-completed-event-consumer-service.js";
+export * from "./application/order-cancelled-event.js";
+export * from "./application/order-cancelled-event-consumer-service.js";
 export * from "./application/ports/fulfillment-completed-event-ports.js";
 export * from "./domain/order-amendment.js";
 export * from "./application/order-amendment-service.js";
@@ -303,6 +305,9 @@ export {
   createPostgresMerchantOrderIndex,
   listStoreOrderNumbers,
   listStoreOrderBusinessDates,
+  listStoreOrderRoundSubmissions,
+  listStoreOrdersWithRoundsSince,
+  type StoreOrderRoundSubmission,
   listStoreUnfulfillablePaidOrders,
   loadOrderNotAcceptedClosure,
   listStorePaidOrderBatches,
@@ -315,7 +320,10 @@ export {
 
 export { createPostgresOrderBatchIdentitySource } from "./infrastructure/persistence/order-batch-identity-source.js";
 
-export { createPostgresDiningSessionOrderLookup } from "./infrastructure/persistence/dining-session-order-lookup.js";
+export {
+  createPostgresDiningSessionOrderLookup,
+  listStoreDiningSessionOrders,
+} from "./infrastructure/persistence/dining-session-order-lookup.js";
 
 export { createAdditionalReceiptSnapshot } from "./application/additional-receipt-snapshot.js";
 

@@ -347,6 +347,46 @@ export async function listStoreOrderBatchPaymentOutcomes(
 }
 
 /**
+ * WP-2423 item 5: the order batches of the given Orders for which an online payment was ever
+ * started (a payment intent exists, whatever its outcome). A dine-in round with none, and no
+ * card-machine payment, has nothing that could still be charged: it is cancelled automatically when
+ * its payment window ends, and staff and guests are told when beforehand. Read only; the caller
+ * authorizes the Orders and owns the transaction.
+ */
+export async function listStoreOrderBatchesWithOnlinePayment(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReferences: readonly string[],
+): Promise<ReadonlySet<string>> {
+  if (orderReferences.length > 100) return unavailable();
+  const brand = parsePaymentReference(scope.brandReference),
+    store = parsePaymentReference(scope.storeReference),
+    orders = orderReferences.map((reference) => parsePaymentReference(reference));
+  if (orders.length === 0) return new Set<string>();
+  try {
+    await transaction.query(
+      "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+      [brand, store],
+    );
+    const found = await transaction.query(
+      "SELECT DISTINCT i.order_batch_id::text AS order_batch_id FROM rms_payment.payment_intent i " +
+        "WHERE i.brand_id=$1 AND i.store_id=$2 AND i.order_id=ANY($3::uuid[]) LIMIT 10001",
+      [brand, store, orders],
+    );
+    if (!Array.isArray(found.rows) || found.rows.length > 10000) return unavailable();
+    return new Set(
+      found.rows.map((row: Record<string, unknown>) => {
+        if (Object.keys(row).length !== 1) return unavailable();
+        return String(parsePaymentReference(row.order_batch_id));
+      }),
+    );
+  } catch (error) {
+    if (error instanceof PaymentStatusProjectionError) throw error;
+    return unavailable();
+  }
+}
+
+/**
  * WP-2423: what each of the given Orders has been paid online — the sum of its active succeeded
  * payment outcomes (one per payment intent), from the same status projection as the batch
  * outcomes above. Orders with no succeeded online payment are absent. Card-machine payments are

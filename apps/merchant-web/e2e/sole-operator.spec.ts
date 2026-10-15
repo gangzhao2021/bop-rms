@@ -19,6 +19,7 @@ test("@production a sole operator turns it on and approves their own refund afte
     orderNumber: "A-0051",
     requestReference: id(2),
     paymentIntentReferences: [id(3)],
+    paymentMethod: "Online",
     currencyCode: "CAD",
     amountMinor: "11600",
     reasonCode: "WRONG_ITEM",

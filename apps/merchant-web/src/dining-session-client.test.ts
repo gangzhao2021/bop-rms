@@ -12,6 +12,7 @@ const table: StaffDiningTable = {
   currentDiningSessionReference: null,
   elapsedMinutes: null,
   qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
+  staffRoundsAwaitingPayment: [],
 };
 const response = (r: unknown) =>
   new Response(JSON.stringify(r), {
@@ -159,4 +160,33 @@ it("WP-2423 Q11: reads until when each table's printed code works, or that it ha
     }),
   );
   await expect(createDiningSessionClient(malformed).tables("A".repeat(43))).rejects.toThrow();
+});
+it("WP-2423 D4: reads each open session's closing facts and whether this staff member may close", async () => {
+  const occupied = { ...table, currentDiningSessionReference: id(3), elapsedMinutes: 5000 };
+  const read = (body: Record<string, unknown>) =>
+    createDiningSessionClient(vi.fn(async () => response(body))).tables("A".repeat(43));
+  const view = await read({
+    canOperateTables: true,
+    canCloseSessions: true,
+    items: [{ ...occupied, session: { phase: "Active", version: 4, orderReference: id(7) } }],
+    nextAfterTableReference: null,
+  });
+  expect(view.canCloseSessions).toBe(true);
+  expect(view.items[0]?.session).toEqual({ phase: "Active", version: 4, orderReference: id(7) });
+  // An older server: nothing to close with.
+  const older = await read({
+    canOperateTables: true,
+    items: [occupied],
+    nextAfterTableReference: null,
+  });
+  expect(older.canCloseSessions).toBe(false);
+  expect(older.items[0]?.session).toBeNull();
+  // Facts for a free table, or a closed session, are refused.
+  for (const item of [
+    { ...table, session: { phase: "Active", version: 4, orderReference: null } },
+    { ...occupied, session: { phase: "Closed", version: 4, orderReference: null } },
+  ])
+    await expect(
+      read({ canOperateTables: true, items: [item], nextAfterTableReference: null }),
+    ).rejects.toThrow();
 });

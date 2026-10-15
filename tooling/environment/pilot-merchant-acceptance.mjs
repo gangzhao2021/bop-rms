@@ -26,7 +26,8 @@ export async function createInternalMerchantAcceptance(
   )
     throw new Error("INTERNAL_ACCEPTANCE_SCOPE_MISMATCH");
   const resolveScope = createMerchantStoreScope(persistence);
-  return async (input) => {
+  // WP-2423 D1: `mode` "CurrentVersion" is the server-side acceptance after a card-machine payment.
+  return async (input, mode) => {
     const authenticated = await authentication.authorize(input);
     const allowed = async (tx) => {
       const resolved = await resolveScope(
@@ -125,6 +126,6 @@ export async function createInternalMerchantAcceptance(
           resolvePolicy: async () => ({ paymentScope, initial, additional }),
         })(tx, scope, command);
       },
-    })(input);
+    })(input, mode);
   };
 }

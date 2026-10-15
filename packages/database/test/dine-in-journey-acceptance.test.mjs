@@ -6,6 +6,8 @@ import pg from "pg";
 import { it, vi } from "vitest";
 import { loadOutboxEnvelope } from "../../bop/eventing/src/index.ts";
 import {
+  createDiningTable,
+  parseDiningSession,
   createDiningCartParticipationQuery,
   createDiningGuestBindingQuery,
   createPostgresDiningCheckoutCommitmentStore,
@@ -28,12 +30,16 @@ import {
   createPostgresOrderBatchIdentitySource,
   createPostgresOrderSubmittedConsumer,
   parseAdditionalDiningBatchSnapshot,
+  orderCancelledEventMatchesRecord,
 } from "../../rms/ordering/src/index.ts";
 import { createCustomerAdditionalDiningHistoryAuthorization } from "../../../apps/api/src/customer-additional-dining-history-authorization.ts";
 import { createCustomerAdditionalDiningSubmissionStore } from "../../../apps/api/src/customer-additional-dining-submission-store.ts";
 import { createDiningCheckoutExpiryDispatcher } from "../../../apps/api/src/dining-checkout-expiry-dispatcher.ts";
 import { createCustomerOrderStatusRead } from "../../../apps/api/src/customer-order-status-read.ts";
 import { createCustomerDiningSessionRead } from "../../../apps/api/src/customer-dining-session-read.ts";
+import { CustomerDiningSessionHandler } from "../../../apps/api/src/customer-dining-session.ts";
+import { parseDiningSessionView } from "../../../apps/customer-pwa/src/dining/dining-session-client.ts";
+import { createPostgresKitchenReworkStore } from "../../rms/kitchen/src/index.ts";
 import { createInternalBatchCancellationDispatcher } from "../../../tooling/environment/pilot-batch-cancellation-dispatcher.mjs";
 import { applyWorkflowRelease } from "../../../tooling/environment/workflow-release-install.mjs";
 import { createPersistentMerchantOrderQueue } from "../../../apps/api/src/persistent-merchant-order-queue.ts";
@@ -71,6 +77,7 @@ import { createPostgresOrdinaryRefundReconciliationRuntime } from "../../rms/pay
 import { createPostgresOrdinaryRefundPositionSource } from "../../rms/payment/src/infrastructure/ordinary-refund-position-source.ts";
 import { createMerchantWorkforcePermissionSource } from "../../../apps/api/src/merchant-workforce-authority-source.ts";
 import { createMerchantMfaStepUp } from "../../../apps/api/src/merchant-mfa-step-up.ts";
+import { kdsOperatorProfileAllows } from "../../../apps/api/src/merchant-kds-operator-profile.ts";
 import { createMerchantOrdinaryRefundRequest } from "../../../apps/api/src/merchant-ordinary-refund-request.ts";
 import { createMerchantOrdinaryRefundApproval } from "../../../apps/api/src/merchant-ordinary-refund-approval.ts";
 import { createMerchantOrdinaryRefundItems } from "../../../apps/api/src/merchant-ordinary-refund-items.ts";
@@ -689,6 +696,27 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       assert.equal(await stockReserved(stock.accountReference), reservedBefore);
       // Another scan finds nothing more to cancel.
       assert.equal(await cancellation.runOnce(), 0);
+      // WP-2423 item 5: the cancellation published the Order's OrderCancelled event in the same
+      // transaction, at the cancelled Order version, stating exactly the stored cancellation.
+      const cancelledEvents = await one(
+        "SELECT event_id::text AS id,aggregate_version::int AS version,actor_type,payload_json AS payload,aggregate_id::text AS aggregate FROM platform_eventing.outbox_event WHERE event_type='OrderCancelled' AND aggregate_id=$1",
+        [orderReference],
+      );
+      assert.equal(cancelledEvents.length, 1);
+      assert.equal(cancelledEvents[0].version, 4);
+      assert.equal(cancelledEvents[0].actor_type, "System");
+      assert.equal(cancelledEvents[0].payload.orderBatchReference, R2.batch.orderBatchReference);
+      assert.equal(cancelledEvents[0].payload.reasonCode, "CHECKOUT_DEADLINE_REACHED");
+      assert.equal(
+        await transactions(api).run((tx) =>
+          orderCancelledEventMatchesRecord(tx, ownerScope, {
+            aggregateId: orderReference,
+            aggregateVersion: 4n,
+            payload: cancelledEvents[0].payload,
+          }),
+        ),
+        true,
+      );
 
       // ── 3. The customer's order status: round 2 shown as cancelled because unpaid.
       const guestBinding = (transaction) => ({
@@ -899,6 +927,9 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
           "workflow.operate",
           "task.claim",
           "dining.session.close",
+          // Closing a table from Tables also needs closing its Order (the page then reads each
+          // open session's Order, measured below).
+          "order.close",
         ],
       });
       const queue = createPersistentMerchantOrderQueue({
@@ -1104,10 +1135,15 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       // Measured 2026-10-14 (before → after): order queue 349 → 168, order detail 384 → 170,
       // tables 156 → 87, dining order progress 652 → 100, kitchen up to its projection read
       // 130 → 38, pickup 105 → 59, Task inbox with five Dining Tasks 486 → 170.
+      // 2026-10-15: the staff-round, round-date and close-session additions had raised tables to
+      // 135 (one full permission resolution per offered action) and the queue/detail to 180/182;
+      // the offered actions now come from one permission read with the read's own, and card-machine
+      // payments are read once per page: tables 65 (with the session-Order read for closing),
+      // order queue 131, order detail 133.
       const budgets = {
-        orderQueue: 200,
-        orderDetail: 200,
-        diningTables: 110,
+        orderQueue: 160,
+        orderDetail: 160,
+        diningTables: 80,
         diningOrderProgress: 130,
         kitchenUntilProjection: 60,
         pickup: 75,
@@ -1115,6 +1151,90 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       };
       for (const [name, budget] of Object.entries(budgets))
         assert.ok(queries[name] <= budget, "merchant read queries " + JSON.stringify(queries));
+
+      // ── 3d. Tables scale with the page, not with each open table (WP-2423): the same read with
+      // a second occupied table (test-only owner rows, rolled back) costs no more queries. A store
+      // has 20–40 tables polled every few seconds, so a per-table owner read would multiply.
+      const secondTable = async (client) => {
+        const tableReference = scope.storeReference.slice(0, 24) + "00000000a0f1";
+        const sessionReference = scope.storeReference.slice(0, 24) + "00000000a0f2";
+        const startedAt = time(-minutes(20));
+        const session = parseDiningSession({
+          diningSessionReference: sessionReference,
+          brandReference: scope.brandReference,
+          storeReference: scope.storeReference,
+          tableReference,
+          tableAssignmentVersion: 1,
+          phase: "Active",
+          version: 2,
+          startedByActorReference: id(0x6f1),
+          startedAt,
+          hostParticipantReference: id(0x6f2),
+        });
+        const table = createDiningTable({
+          ...ownerScope,
+          tableReference,
+          stableLabel: "SYNTHETIC-SECOND",
+          areaReference: tableReference.slice(0, 24) + "00000000a0f3",
+          areaCode: "ROOM",
+          capacity: 2,
+          accessibilityAttributes: [],
+          lifecycle: "Published",
+          qrStatus: "Active",
+          qrVersion: 1,
+          operationalState: "Available",
+          blockReasonCode: null,
+          activeDiningSessionReference: sessionReference,
+          aggregateVersion: 1,
+          createdAt: startedAt,
+          observedAt: startedAt,
+        });
+        await client.query(
+          "INSERT INTO rms_dining.dining_table (table_id,tenant_id,brand_id,store_id,version,table_snapshot,created_at,observed_at) VALUES ($1,$2,$3,$4,1,$5::jsonb,$6,$6)",
+          [
+            tableReference,
+            tenant,
+            scope.brandReference,
+            scope.storeReference,
+            JSON.stringify(table),
+            startedAt,
+          ],
+        );
+        await client.query(
+          "INSERT INTO rms_dining.dining_session (session_id,tenant_id,brand_id,store_id,table_id,version,phase,session_snapshot,started_at) VALUES ($1,$2,$3,$4,$5,2,'Active',$6::jsonb,$7)",
+          [
+            sessionReference,
+            tenant,
+            scope.brandReference,
+            scope.storeReference,
+            tableReference,
+            JSON.stringify(session),
+            startedAt,
+          ],
+        );
+      };
+      const tablesWith = async (before) => {
+        queryCount.value = 0;
+        const view = await createMerchantDiningTables({
+          persistence: {
+            ...merchantPersistence,
+            transactions: transactions(api, { before, rollback: true }),
+          },
+          authentication: queueSession.authentication,
+          tableAvailabilityCommandEnabled: true,
+        })({ ...staffSession, query: { afterTableReference: null, limit: 100 } });
+        return { view, queries: queryCount.value };
+      };
+      const oneTable = await tablesWith(null);
+      const twoTables = await tablesWith(secondTable);
+      assert.equal(oneTable.view.items.filter((t) => t.session !== null).length, 1);
+      assert.equal(twoTables.view.items.filter((t) => t.session !== null).length, 2);
+      assert.equal(twoTables.view.canCloseSessions, true);
+      assert.ok(
+        twoTables.queries - oneTable.queries <= 2,
+        "tables read queries by open tables " +
+          JSON.stringify({ one: oneTable.queries, two: twoTables.queries }),
+      );
 
       // ── 4b. Redelivery of round 2's event after the cancellation is a completed duplicate.
       assert.deepEqual(await consume(event2), { status: "duplicate_completed" });
@@ -1851,6 +1971,10 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
           store: storeFact,
           actorReference,
           sessionReference: id(0xa00 + Object.keys(cookies).indexOf(cookie)),
+          // As the real Store scope: these are browser sign-ins, not kitchen display Sessions,
+          // so the kitchen display profile limit allows every action (the roles still decide).
+          kdsOperatorProfileAllows: (requested) =>
+            kdsOperatorProfileAllows({ policy: { code: "WorkforceStandard" } }, requested),
           allowed: async () => (await decide(action))?.effect === "Allow",
           authorizeAction: decide,
         };
@@ -2228,6 +2352,97 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
           (line) => line.lineReference !== items2[0].orderItemReference,
         ),
       );
+
+      // ── 8. WP-2423 Q26: the kitchen remakes a finished round-3 dish; the table is told which.
+      // Test-only stand-in: the owner marks round 3's first work item Completed (kitchen
+      // completion is covered by the Kitchen suites). The remake itself is the actual Kitchen
+      // rework command under the restricted API role.
+      const remadeAt = now();
+      await admin.query(
+        "UPDATE rms_kitchen.kitchen_work_item SET status='Completed',completed_quantity=required_quantity,version=version+1,updated_at=$2 WHERE kitchen_work_item_id=$1",
+        [pay3.workItems[0], remadeAt],
+      );
+      const rework = createPostgresKitchenReworkStore({
+        brandReference: scope.brandReference,
+        storeReference: scope.storeReference,
+        nextReference: fresh,
+      });
+      const remade = await transactions(api).run((tx) =>
+        rework.execute(tx, {
+          command: {
+            action: "CreateKitchenRework",
+            idempotencyKey: fresh(),
+            originalWorkItemReference: pay3.workItems[0],
+            reasonCode: "DROPPED",
+            note: null,
+            quantity: 1,
+            correlationReference: fresh(),
+          },
+          actorReference: staff,
+          occurredAt: now(),
+        }),
+      );
+      assert.equal(remade.status, "Applied");
+      // The guest's table view, through the actual HTTP handler's serialization (JSON on the wire).
+      const tableHandler = new CustomerDiningSessionHandler({
+        allowedOrigin: "https://synthetic-journey.invalid",
+        port: tableRead,
+      }).handler();
+      const wire = await new Promise((resolve, reject) => {
+        const response = {
+          statusCode: 0,
+          setHeader: () => undefined,
+          status(code) {
+            this.statusCode = code;
+            return this;
+          },
+          json(body) {
+            resolve({ status: this.statusCode, body: JSON.parse(JSON.stringify(body)) });
+            return this;
+          },
+        };
+        Promise.resolve(
+          tableHandler(
+            {
+              get: (name) => (name === "sec-fetch-site" ? "same-origin" : undefined),
+              query: {},
+              body: undefined,
+              headers: {
+                cookie: "__Host-bop-guest=" + guest.sessionCredential,
+                "x-csrf-token": guest.csrfCredential,
+              },
+            },
+            response,
+            reject,
+          ),
+        ).catch(reject);
+      });
+      assert.equal(wire.status, 200);
+      const round3 = wire.body.session.rounds[2];
+      const remadeName = round3.items.find((item) => item.beingRemade === true)?.displayName;
+      assert.equal(
+        round3.items.filter((item) => Object.hasOwn(item, "beingRemade")).length,
+        1,
+        "only the remade dish is marked",
+      );
+      assert.ok(round3.items.every((item) => item.beingRemade === undefined || item.beingRemade));
+      assert.ok(
+        Object.values(items3[0].catalog.localizedNames).includes(remadeName),
+        "the remade dish is round 3's first item",
+      );
+      // A dish being made again is neither ready nor served; earlier rounds are not marked.
+      assert.ok(!["Ready", "Served"].includes(round3.status));
+      for (const round of wire.body.session.rounds.slice(0, 2))
+        assert.ok(round.items.every((item) => !Object.hasOwn(item, "beingRemade")));
+      // The PWA's own decoder accepts the wire view and keeps the mark.
+      assert.equal(
+        parseDiningSessionView(wire.body).rounds[2].items.filter((item) => item.beingRemade).length,
+        1,
+      );
+      const wireJson = JSON.stringify(wire.body);
+      for (const reference of [remade.item.reworkReference, pay3.workItems[0], orderReference])
+        assert.ok(!wireJson.includes(reference), reference);
+      assert.doesNotMatch(wireJson, /DROPPED|rework/u);
     } finally {
       vi.unstubAllEnvs();
       signedIn.cookies = new Set();

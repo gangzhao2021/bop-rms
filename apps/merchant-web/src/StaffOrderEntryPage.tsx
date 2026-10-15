@@ -3,7 +3,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { createDiningSessionClient } from "./dining-session-client.js";
 import { validSlipReference } from "./CardMachineRefundAction.js";
-import { createOrderAcceptanceClient } from "./order-acceptance-client.js";
 import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { storeLocalInstant, storeTime } from "./StoreTime.js";
@@ -119,7 +118,7 @@ function placeErrorText(
   }
 }
 
-function payErrorText(error: CounterOrderClientError) {
+export function payErrorText(error: CounterOrderClientError) {
   switch (error.code) {
     case "AmountChanged":
       return error.totalMinor === null
@@ -157,6 +156,48 @@ export function paidAtInstant(
   const time = (local === null ? new Date(value) : new Date(local)).getTime();
   if (!Number.isFinite(time) || time > now || now - time > 72 * 60 * 60 * 1000) return null;
   return new Date(Math.floor(time / 1000) * 1000).toISOString();
+}
+
+/** WP-2423 item 5: minutes before the payment time ends when staff are warned urgently. */
+export const paymentUrgentMinutes = 10;
+
+/**
+ * WP-2423 item 5 ("warn before timeouts"): what staff are told about the time left to record a
+ * card-machine payment. A table round not recorded by then is cancelled automatically and never
+ * reaches the kitchen; a counter order is released. Nothing is charged in the system either way.
+ */
+export function paymentWindowNotice(input: {
+  readonly payBy: string;
+  readonly now: number;
+  readonly tableMode: boolean;
+  readonly timeZone?: string | undefined;
+}): { readonly tier: "warning" | "urgent"; readonly ended: boolean; readonly text: string } {
+  const at = storeTime(input.payBy, input.timeZone);
+  const remainingMs = Date.parse(input.payBy) - input.now;
+  if (remainingMs <= 0)
+    return {
+      tier: "urgent",
+      ended: true,
+      text: input.tableMode
+        ? `The time to pay this round ended at ${at}. It was not sent to the kitchen and is cancelled automatically; nothing was charged in the system. If you charged the card machine, refund it on the machine.`
+        : `The time to pay this order ended at ${at}. It is released and its items go back to stock. If you charged the card machine, refund it on the machine.`,
+    };
+  const minutes = Math.max(1, Math.ceil(remainingMs / 60_000));
+  if (minutes <= paymentUrgentMinutes)
+    return {
+      tier: "urgent",
+      ended: false,
+      text: input.tableMode
+        ? `${minutes} min left: record the payment by ${at} or this round is cancelled and its items go back to stock.`
+        : `${minutes} min left: record the payment by ${at} or the order is released and its items go back to stock.`,
+    };
+  return {
+    tier: "warning",
+    ended: false,
+    text: input.tableMode
+      ? `Record the payment by ${at}. The kitchen starts this order once it is recorded here; if it isn't recorded by then, the round is cancelled.`
+      : `Record the payment by ${at}. If it isn't paid by then the order is released and its items go back to stock.`,
+  };
 }
 
 /**
@@ -212,6 +253,14 @@ export function StaffOrderEntryPage({
   const placeOperation = useRef<string | null>(null);
   const payOperation = useRef<string | null>(null);
   const chargeHeading = useRef<HTMLHeadingElement>(null);
+  // WP-2423 item 5: the clock behind the payment-time warning, ticking while payment is due.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (phase !== "Charge" && phase !== "Recording") return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(timer);
+  }, [phase]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -342,8 +391,9 @@ export function StaffOrderEntryPage({
     payOperation.current ??= serviceOperationReference();
     setPhase("Recording");
     setProblem(null);
+    let recorded;
     try {
-      await client.recordPayment({
+      recorded = await client.recordPayment({
         operationReference: payOperation.current,
         orderReference: placed.orderReference,
         orderBatchReference: placed.orderBatchReference,
@@ -363,17 +413,9 @@ export function StaffOrderEntryPage({
       setPhase("Charge");
       return;
     }
-    setPhase("Paid");
-    try {
-      await createOrderAcceptanceClient(fetcher)
-        .prepare({
-          acceptanceReference: serviceOperationReference(),
-          operationReference: serviceOperationReference(),
-          orderReference: placed.orderReference,
-          orderBatchReference: placed.orderBatchReference,
-          expectedOrderVersion: placed.orderVersion,
-        })
-        .execute(csrf);
+    // WP-2423 D1: the server accepts the paid order or round with the payment record (at the
+    // Order's current version), so it reaches the kitchen even if this page is closed now.
+    if (recorded.acceptance === "Accepted") {
       setPhase("Accepted");
       // A paper order was usually made and handed over already; it still goes through the list so
       // its records close, and nothing expires or is refunded by mistake.
@@ -386,11 +428,12 @@ export function StaffOrderEntryPage({
             ? "Recorded after the outage and accepted. If it was already made and handed over, mark it ready in Kitchen and handed over in Pickup."
             : "Paid and sent to the kitchen.",
       );
-    } catch {
-      setPaidNote(
-        "Paid. Accept it in Orders now: an order that isn't accepted in time expires and must be refunded on the card machine.",
-      );
+      return;
     }
+    setPhase("Paid");
+    setPaidNote(
+      "Paid, but not sent to the kitchen yet. Accept it in Orders now (or ask a manager to): an order that isn't accepted in time expires and must be refunded on the card machine.",
+    );
   };
 
   const startOver = () => {
@@ -623,14 +666,17 @@ export function StaffOrderEntryPage({
                       {line.note ? <span className="bop-muted"> · Note: {line.note}</span> : null}
                     </span>
                     <span>{each === null ? "" : cad(each.toString())}</span>
-                    <button
-                      type="button"
-                      disabled={!ordering}
-                      aria-label={`Remove ${line.item.name}`}
-                      onClick={() => changeLines(lines.filter((other) => other.key !== line.key))}
-                    >
-                      Remove
-                    </button>
+                    {/* WP-2423 D5: once sent, an item is changed by cancelling it on the order. */}
+                    {ordering ? (
+                      <button
+                        type="button"
+                        disabled={phase !== "Building"}
+                        aria-label={`Remove ${line.item.name}`}
+                        onClick={() => changeLines(lines.filter((other) => other.key !== line.key))}
+                      >
+                        Remove
+                      </button>
+                    ) : null}
                   </li>
                 );
               })}
@@ -776,11 +822,23 @@ export function StaffOrderEntryPage({
             </dl>
             {phase === "Charge" || phase === "Recording" ? (
               <>
-                <p className="order-accept-by" data-tier="warning" role="note">
-                  {tableMode
-                    ? `Record the payment by ${storeTime(placed.payBy, timeZone)}. The kitchen starts this order once it is recorded here.`
-                    : `Record the payment by ${storeTime(placed.payBy, timeZone)}. If it isn't paid by then the order is released and its items go back to stock.`}
-                </p>
+                {(() => {
+                  const notice = paymentWindowNotice({
+                    payBy: placed.payBy,
+                    now,
+                    tableMode,
+                    timeZone,
+                  });
+                  return (
+                    <p
+                      className="order-accept-by"
+                      data-tier={notice.tier}
+                      role={notice.tier === "urgent" ? "alert" : "note"}
+                    >
+                      {notice.text}
+                    </p>
+                  );
+                })()}
                 <form
                   onSubmit={(event) => {
                     event.preventDefault();

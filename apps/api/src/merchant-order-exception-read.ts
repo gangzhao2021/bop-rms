@@ -29,7 +29,9 @@ export type MerchantExceptionReconciliationDetail =
       readonly resolvedAt: string | null;
     }
   | { readonly type: "Payment" }
-  | { readonly type: "UnmatchedCharge" };
+  | { readonly type: "UnmatchedCharge" }
+  /** WP-2423 D3: the detail could not be read; the card says so instead of guessing its kind. */
+  | { readonly type: "Unavailable" };
 
 /** Authorized BFF read composition; trusted adapters must resolve session, scope and coverage.
  * Raw source digests, payment references and financial facts never enter the browser DTO, except
@@ -60,7 +62,7 @@ export function createMerchantOrderExceptionRead(options: {
   ): Promise<ReadonlyMap<string, string>>;
   /**
    * WP-2423: what each Payment reconciliation difference is about; a missing entry shows the
-   * card without it. Never fails the page: an unreadable detail is left out.
+   * card without it. Never fails the page: an unreadable detail is answered as `Unavailable`.
    */
   reconciliationDetails?(
     tx: ConsumerTransaction,

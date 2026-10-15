@@ -100,6 +100,8 @@ export class CustomerDiningSessionHandler {
               ...(item.priceBeforeTax === undefined
                 ? {}
                 : { priceBeforeTax: money(item.priceBeforeTax) }),
+              // WP-2423 Q26: only while the kitchen is making this item again (as on pickup).
+              ...(item.beingRemade === true ? { beingRemade: true } : {}),
             })),
             ...(round.subtotal === undefined || round.tax === undefined
               ? {}

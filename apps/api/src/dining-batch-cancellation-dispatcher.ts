@@ -51,7 +51,7 @@ export function createDiningBatchCancellationDispatcher(options: {
     for (const expiry of page) {
       if (
         !sameScope(expiry) ||
-        expiry.status !== "PaymentFailed" ||
+        (expiry.status !== "PaymentFailed" && expiry.status !== "AwaitingPaymentResolution") ||
         expiry.observedAt > at ||
         (previous !== null && expiry.recordReference <= previous) ||
         batches.has(expiry.orderBatchReference)
@@ -65,10 +65,17 @@ export function createDiningBatchCancellationDispatcher(options: {
       if (stopping) break;
       if (parseOrderingInstant(options.now()) < at) return fail();
       const operationReference = expiry.recordReference;
-      const result = readClosedRecord(await options.cancel({ operationReference, expiry }), [
-        "status",
-        "record",
-      ]);
+      const outcome = await options.cancel({ operationReference, expiry });
+      // WP-2423: a round still unresolved at its deadline whose payment was started (online or on
+      // the card machine) is not cancelled; it is rechecked until Payment records its outcome.
+      if (
+        expiry.status === "AwaitingPaymentResolution" &&
+        (outcome as { status?: unknown } | null)?.status === "NotEligible"
+      ) {
+        readClosedRecord(outcome, ["status", "reason"]);
+        continue;
+      }
+      const result = readClosedRecord(outcome, ["status", "record"]);
       if (result.status !== "Created" && result.status !== "Existing") return fail();
       const record = parseOrderBatchCheckoutCancellation(result.record);
       if (

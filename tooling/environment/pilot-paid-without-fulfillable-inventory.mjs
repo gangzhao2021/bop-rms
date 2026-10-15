@@ -2,7 +2,10 @@ import console from "node:console";
 import { supervisedCycleFailures } from "../../apps/worker/dist/outbox-workload.js";
 import { createPaidWithoutFulfillableInventoryRelease } from "../../apps/api/dist/paid-without-fulfillable-inventory-release.js";
 import { createPaymentCompensationWorkload } from "../../apps/worker/dist/payment-compensation-workload.js";
-import { parseOrderingReference } from "../../packages/rms/ordering/src/index.ts";
+import {
+  createPostgresPaidAcceptanceLapseClosure,
+  parseOrderingReference,
+} from "../../packages/rms/ordering/src/index.ts";
 import { createInternalCompensationCandidates } from "./pilot-compensation-candidates.mjs";
 import { isPilotRuntime } from "./pilot-environment.mjs";
 const unavailable = () => {
@@ -37,11 +40,29 @@ export function createInternalPaidWithoutFulfillableInventory(resources, { syste
       disposition.brandReference === scope.brandReference &&
       disposition.storeReference === scope.storeReference,
   });
+  // WP-2423 item 5: a paid pickup the Store did not accept in time (CapacityExpired, including an
+  // outage hold that expired) is also closed as an Order, in the same transaction as its stock
+  // release; the refund stays with Payment's compensation. Complete rescans cover earlier orders.
+  const closure = createPostgresPaidAcceptanceLapseClosure({
+    brandReference: scope.brandReference,
+    storeReference: scope.storeReference,
+    authorize: async () => active(),
+  });
   return Object.freeze({
     discover: (input) => candidates.discover(input),
     release: (disposition) => {
       if (!active()) return unavailable();
-      return resources.transactions.run((tx) => release(tx, disposition));
+      return resources.transactions.run(async (tx) => {
+        const released = await release(tx, disposition);
+        if (disposition.reason === "CapacityExpired")
+          await closure.close(tx, {
+            paymentEventReference: disposition.paymentEventReference,
+            closedAt: resources.now(),
+            terminationReference: resources.credentials.reference(),
+            auditReference: resources.credentials.reference(),
+          });
+        return released;
+      });
     },
   });
 }

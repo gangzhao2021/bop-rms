@@ -6,9 +6,13 @@ const mocks = vi.hoisted(() => ({
   source: vi.fn(),
   workflow: vi.fn(),
   append: vi.fn(),
+  intent: vi.fn(),
+  card: vi.fn(),
 }));
 vi.mock("@rms/payment", () => ({
   createPostgresPaymentOperationFence: () => ({ acquire: mocks.fence }),
+  createPostgresPaymentIntentCreationStore: () => ({ resolveOperation: mocks.intent }),
+  createPostgresCardMachinePaymentStore: () => ({ loadByPaymentOperation: mocks.card }),
 }));
 vi.mock("@rms/ordering", async (original) => ({
   ...(await original<typeof import("@rms/ordering")>()),
@@ -97,6 +101,8 @@ function composition() {
   const newReference = vi.fn(() => id(seq++));
   const inventory = vi.fn(async () => true);
   mocks.fence.mockReset().mockResolvedValue(undefined);
+  mocks.intent.mockReset().mockResolvedValue(null);
+  mocks.card.mockReset().mockResolvedValue(null);
   mocks.lookup.mockReset().mockImplementation(async () => {
     expect(mocks.fence).toHaveBeenCalledTimes(1);
     return null;
@@ -170,7 +176,7 @@ function composition() {
 it("retains one transaction through fence, lookup, current source, policy and append", async () => {
   const f = composition(),
     result = await f.service.cancel(f.input);
-  expect(result.status).toBe("Created");
+  if (result.status !== "Created") throw new Error("expected Created");
   expect(f.inventory).toHaveBeenCalledWith(f.tx, { mode: "Release", cancellation: result.record });
   expect(f.inventory.mock.invocationCallOrder[0]).toBeGreaterThan(
     mocks.append.mock.invocationCallOrder[0] ?? 0,
@@ -233,4 +239,55 @@ it("rechecks cancellation authority after verifying original Inventory completio
   });
   await expect(f.service.cancel(f.input)).rejects.toThrow("DINING_BATCH_CANCELLATION_UNAVAILABLE");
   expect(f.rolledBack()).toBe(true);
+});
+
+// WP-2423 item 5: a round with no payment ever started is cancelled with its own reason.
+function neverPaid() {
+  const f = composition();
+  const expiry = { ...f.f.expiry, status: "AwaitingPaymentResolution", paymentEvidence: null };
+  mocks.source.mockResolvedValue({
+    expiry,
+    items: f.f.items,
+    orderVersion: 7,
+    checkpoint: f.f.record.expectedSourceCheckpoint,
+    observedAt: f.f.record.cancelledAt,
+    progress: { phase: "InProgress" },
+  });
+  mocks.append.mockImplementation(async (_tx, record) => ({ status: "Created", record }));
+  return { ...f, input: { ...f.input, expiry } };
+}
+it("cancels a round with no payment started as PAYMENT_NOT_STARTED and names an event", async () => {
+  const f = neverPaid();
+  const result = await f.service.cancel(f.input);
+  if (result.status !== "Created") throw new Error("expected Created");
+  expect(result.record.reasonCode).toBe("PAYMENT_NOT_STARTED");
+  expect(mocks.intent).toHaveBeenCalledWith(f.f.record.paymentOperationReference);
+  expect(mocks.card.mock.calls[0]?.[1]).toBe(f.f.record.paymentOperationReference);
+  expect(mocks.intent.mock.invocationCallOrder[0]).toBeGreaterThan(
+    mocks.fence.mock.invocationCallOrder[0] ?? 0,
+  );
+  const options = mocks.append.mock.calls[0]?.[2] as { eventReference(): string };
+  expect(options.eventReference()).toMatch(/^0190ee34-/u);
+  expect(f.inventory).toHaveBeenCalledWith(f.tx, { mode: "Release", cancellation: result.record });
+});
+it.each(["online", "card machine"])(
+  "leaves an unresolved round alone when a payment was started (%s)",
+  async (kind) => {
+    const f = neverPaid();
+    if (kind === "online") mocks.intent.mockResolvedValue({ intent: {} });
+    else mocks.card.mockResolvedValue({ cardMachinePaymentReference: id(70) });
+    expect(await f.service.cancel(f.input)).toEqual({
+      status: "NotEligible",
+      reason: "PaymentStarted",
+    });
+    expect(mocks.append).not.toHaveBeenCalled();
+    expect(f.inventory).not.toHaveBeenCalled();
+  },
+);
+it("keeps the failed-payment reason and never reads Payment starts for it", async () => {
+  const f = composition();
+  const result = await f.service.cancel(f.input);
+  if (result.status !== "Created") throw new Error("expected Created");
+  expect(result.record.reasonCode).toBe("CHECKOUT_DEADLINE_REACHED");
+  expect(mocks.intent).not.toHaveBeenCalled();
 });

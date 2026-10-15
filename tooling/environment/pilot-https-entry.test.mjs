@@ -133,6 +133,8 @@ it("preserves configured refund roles, provider and Pickup workstation without g
       "createInternalMerchantPickup",
       "createInternalMerchantAcceptance",
       "createInternalMerchantSession",
+      // WP-2423 item 4: refresh online rounds before a card-machine refund's receipt version.
+      "refreshOrderReceiptObservations",
       // WP-2423 P6: the unmatched capture refund is sent through the configured provider.
       "refundUnmatchedCapture",
       // WP-2423 Q5: TEST-ONLY authenticator step-up verifier over the private runtime directory.

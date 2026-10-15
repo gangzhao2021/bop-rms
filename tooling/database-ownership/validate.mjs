@@ -2249,7 +2249,19 @@ async function scanUnsupported(root, module, diagnostics) {
           // WP-2423 Q7 slice 2: the staff member and command behind a staff-entered dine-in round.
           "src/infrastructure/persistence/staff-dining-round-entry-store.ts": {
             owner: "ordering",
-            tables: ["staff_dining_round_entry", "order_batch", "order_header"],
+            tables: [
+              "staff_dining_round_entry",
+              "order_batch",
+              "order_header",
+              // WP-2423 item 5: staff rounds still awaiting their card-machine payment, by table.
+              "order_capacity_link",
+              "order_batch_checkout_cancellation",
+              "order_staff_cancellation",
+              "order_acceptance_record",
+              "order_payment_acceptance_wait",
+              "order_payment_disposition_record",
+              "order_termination_record",
+            ],
           },
         }[moduleRelative];
         const acceptedPilotPublicationAsset =

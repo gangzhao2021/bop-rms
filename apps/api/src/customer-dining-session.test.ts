@@ -177,3 +177,34 @@ it("WP-2423 D5: sends item prices before tax and the round and table subtotal an
   });
   expect(body.session.summary.due).toEqual(money("0"));
 });
+
+it("WP-2423 Q26: tells the table which dish the kitchen is making again, and only that dish", async () => {
+  const f = await setup();
+  const remade = view();
+  const round = remade.rounds[0];
+  const ramen = round?.items[0];
+  if (round === undefined || ramen === undefined) throw new Error("fixture");
+  f.read.mockResolvedValueOnce({
+    ...remade,
+    rounds: [
+      {
+        ...round,
+        items: [
+          { ...ramen, beingRemade: true },
+          { ...ramen, displayName: "Gyoza", quantity: 1 },
+        ],
+      },
+    ],
+  });
+  const body = (await (await f.send()).json()) as {
+    session: { rounds: { items: Record<string, unknown>[] }[] };
+  };
+  const items = body.session.rounds[0]?.items ?? [];
+  expect(items[0]).toMatchObject({ displayName: "Ramen", beingRemade: true });
+  expect(items[1]).not.toHaveProperty("beingRemade");
+  // Without a remake the field is absent, not false.
+  const plain = (await (await f.send()).json()) as {
+    session: { rounds: { items: Record<string, unknown>[] }[] };
+  };
+  expect(plain.session.rounds[0]?.items[0]).not.toHaveProperty("beingRemade");
+});

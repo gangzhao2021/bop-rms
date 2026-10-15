@@ -1,6 +1,7 @@
 import {
   createPostgresPaymentReconciliationExceptionDetailReader,
   createPostgresReconciliationFollowUpQuery,
+  type PaymentReconciliationExceptionDetail,
 } from "@rms/payment";
 import { createMerchantBusinessDayWindows } from "./merchant-business-day-window.js";
 import { listStoreOrderNumbers } from "@rms/ordering";
@@ -46,6 +47,11 @@ export function createPersistentMerchantOrderExceptions(options: {
       window: { readonly businessDate: string; readonly startsAt: string; readonly endsAt: string },
     ): Promise<{ readonly original: string; readonly rechecks: readonly string[] }>;
   };
+  /**
+   * WP-2423 D3: an unexpected failure reading what a payment reconciliation difference is about
+   * (the card then says its details could not be loaded). Callers log code and frames only.
+   */
+  onUnexpected?(error: unknown): void;
 }) {
   const persistence = options.persistence,
     resolve = createMerchantStoreScope(persistence);
@@ -162,19 +168,32 @@ export function createPersistentMerchantOrderExceptions(options: {
       reconciliationDetails: async (tx, scope, sources) => {
         if (!matches(await authorize(tx), scope)) return unavailable();
         const result = new Map<string, MerchantExceptionReconciliationDetail>();
-        let details;
+        const reader = createPostgresPaymentReconciliationExceptionDetailReader({
+          scope,
+          authorize: async (t) => t === tx && matches(await authorize(t), scope),
+        });
+        const references = sources.map((source) => source.sourceReference);
+        const ownRefusal = (error: unknown) =>
+          error instanceof Error && error.message === "MERCHANT_ORDER_EXCEPTION_UNAVAILABLE";
+        let details: ReadonlyMap<string, PaymentReconciliationExceptionDetail>;
         try {
-          details = await createPostgresPaymentReconciliationExceptionDetailReader({
-            scope,
-            authorize: async (t) => t === tx && matches(await authorize(t), scope),
-          })(
-            tx,
-            sources.map((source) => source.sourceReference),
-          );
+          details = await reader(tx, references);
         } catch (error) {
-          if (error instanceof Error && error.message === "MERCHANT_ORDER_EXCEPTION_UNAVAILABLE")
-            throw error;
-          return result; // The cards show without what the difference is about.
+          if (ownRefusal(error)) throw error;
+          options.onUnexpected?.(error);
+          // WP-2423 D3: one unreadable difference must not hide every other card's detail, nor
+          // show as the wrong kind of card: read each on its own and mark the unreadable ones.
+          const each = new Map<string, PaymentReconciliationExceptionDetail>();
+          for (const reference of references) {
+            try {
+              for (const [key, value] of await reader(tx, [reference])) each.set(key, value);
+            } catch (itemError) {
+              if (ownRefusal(itemError)) throw itemError;
+              options.onUnexpected?.(itemError);
+              result.set(reference, Object.freeze({ type: "Unavailable" as const }));
+            }
+          }
+          details = each;
         }
         const days = createMerchantBusinessDayWindows({
           persistence,
@@ -206,8 +225,8 @@ export function createPersistentMerchantOrderExceptions(options: {
             result.set(reference, Object.freeze({ type: detail.kind }));
             continue;
           }
-          if (detail.openingCheck === null) continue;
           const check = detail.openingCheck;
+          if (check === null) continue; // Marked below: never shown as another kind of card.
           result.set(
             reference,
             Object.freeze({
@@ -226,6 +245,11 @@ export function createPersistentMerchantOrderExceptions(options: {
             }),
           );
         }
+        for (const reference of references)
+          if (!result.has(reference)) {
+            options.onUnexpected?.(new Error("PAYMENT_RECONCILIATION_DETAIL_MISSING"));
+            result.set(reference, Object.freeze({ type: "Unavailable" as const }));
+          }
         return result;
       },
       metadata: async (tx, scope, sources) => {

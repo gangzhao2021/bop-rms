@@ -9,6 +9,7 @@ import { parsePaymentReference } from "../../application/payment-provider-adapte
 import { createPostgresPaymentIntentCreationStore } from "./payment-intent-creation-store.js";
 import { createPostgresPaymentTerminalStore } from "./payment-terminal-store.js";
 import { createPostgresPaymentCompensationRefundPositionSource } from "./payment-compensation-refund-position-source.js";
+import { createPostgresCardMachinePaymentStore } from "./card-machine-payment-store.js";
 type RequestScope = Pick<
   OrdinaryRefundRequest,
   "tenantReference" | "brandReference" | "storeReference"
@@ -40,6 +41,13 @@ export function createPostgresOrdinaryRefundCaptureSource(options: {
   readonly now: () => string;
   readonly authorize: (tx: ConsumerTransaction, request: OrdinaryRefundRequest) => Promise<boolean>;
   readonly validatePricing: (tx: ConsumerTransaction, input: PricingInput) => Promise<boolean>;
+  /**
+   * WP-2423 item 4: also accept a payment taken on the Store's own card machine (its refund is made
+   * on that machine and recorded; it is never prepared or sent to a Provider). Request, escalation
+   * and approval sources pass true; operation preparation and dispatch never do, so a card-machine
+   * leg can never become a Provider refund.
+   */
+  readonly allowCardMachine?: boolean;
 }) {
   const scope = {
     tenantReference: String(parsePaymentReference(options.scope.tenantReference)),
@@ -110,6 +118,71 @@ export function createPostgresOrdinaryRefundCaptureSource(options: {
         return true;
       },
     });
+    /**
+     * WP-2423 item 4: a card-machine payment of this Order. A request naming it names only it (its
+     * refund is one machine refund, recorded once). Other occupancy is what was already refunded on
+     * the machine for another reason (a cancellation or an order that could not be fulfilled);
+     * ordinary requests are counted by the caller from the request history.
+     */
+    const cardMachineBalance = async (payment: OrdinaryRefundRequest["payments"][number]) => {
+      const cards = createPostgresCardMachinePaymentStore({
+        scope: { brandReference: scope.brandReference, storeReference: scope.storeReference },
+        authorize: async (_tx, query) => {
+          await authorize();
+          return query.orderReference === request.orderReference;
+        },
+      });
+      const card = await cards.loadByIntent(tx, payment.paymentIntentReference);
+      if (
+        card === null ||
+        request.payments.length !== 1 ||
+        card.tenantReference !== scope.tenantReference ||
+        card.environment !== scope.environment ||
+        card.orderReference !== request.orderReference ||
+        card.cardMachinePaymentReference !== payment.paymentTransactionReference ||
+        card.paymentAttemptReference !== payment.paymentAttemptReference ||
+        card.cardMachinePaymentReference !== payment.firstCaptureReference ||
+        card.recordedAt > request.requestedAt ||
+        card.takenAt > card.recordedAt ||
+        card.preparation.total.currencyCode !== "CAD" ||
+        card.preparation.total.amountMinor <= 0n
+      )
+        return fail();
+      // Same fence as recording a machine refund of this payment.
+      await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+        "CardMachineRefund:" +
+          scope.brandReference +
+          ":" +
+          scope.storeReference +
+          ":" +
+          card.cardMachinePaymentReference,
+      ]);
+      const refunds = await cards.refunds(tx, card.cardMachinePaymentReference);
+      const other = refunds
+        .filter((refund) => refund.sourceKind !== "OrdinaryRefund")
+        .reduce((sum, refund) => sum + refund.amountMinor, 0n);
+      if (
+        refunds.some((refund) => refund.orderReference !== request.orderReference) ||
+        refunds.reduce((sum, refund) => sum + refund.amountMinor, 0n) >
+          card.preparation.total.amountMinor ||
+        (await options.validatePricing(tx, {
+          request,
+          payment,
+          history: input.history,
+          preparation: card.preparation,
+        })) !== true
+      )
+        return fail();
+      return Object.freeze({
+        paymentAttemptReference: payment.paymentAttemptReference,
+        capturedAmountMinor: card.preparation.total.amountMinor,
+        otherOccupiedAmountMinor: other,
+        firstCapturedAt: card.takenAt,
+        firstCaptureRecordedAt: card.recordedAt,
+        // Refunded on the Store's machine and recorded: there is no Provider refund to bind.
+        providerBinding: null,
+      });
+    };
     const balances = [];
     // Parser orders payment attempts deterministically before acquiring their locks.
     for (const payment of request.payments) {
@@ -123,6 +196,10 @@ export function createPostgresOrdinaryRefundCaptureSource(options: {
           request.orderReference,
         ],
       );
+      if (identities.rows.length === 0 && options.allowCardMachine === true) {
+        balances.push(await cardMachineBalance(payment));
+        continue;
+      }
       if (identities.rows.length !== 1) return fail();
       const operation = String(parsePaymentReference(identities.rows[0]?.operation));
       await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [

@@ -84,6 +84,7 @@ export { createPostgresPaymentProviderObservationStore } from "./infrastructure/
 export {
   createPostgresPaymentStatusStore,
   listStoreOrderBatchPaymentOutcomes,
+  listStoreOrderBatchesWithOnlinePayment,
   listStoreOrderOnlinePaidTotals,
 } from "./infrastructure/persistence/payment-status-store.js";
 
@@ -174,6 +175,7 @@ export type {
 } from "./infrastructure/ordinary-refund-operation-execution-source.js";
 export {
   ordinaryRefundClaimKind,
+  ordinaryRefundPaymentAmount,
   type OrdinaryRefundCancellationClaim,
 } from "./application/ordinary-refund-request.js";
 
@@ -205,6 +207,7 @@ export {
   OrdinaryRefundDeclineError,
   ordinaryRefundDeclineReasons,
   createPostgresSoleOperatorRefundSummaryReader,
+  listOrdinaryRefundApprovalReferences,
 } from "./infrastructure/persistence/ordinary-refund-approval-store.js";
 // WP-2423 Q19: how an approval satisfied the "another person" rule, and the sole-operator fact.
 export {

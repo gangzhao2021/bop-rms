@@ -9,6 +9,7 @@ import {
 } from "@bop/publishing";
 import { MerchantProductWriteFeatureDisabled } from "./merchant-product-write-authority.js";
 import { AcceptanceHoldRefundError } from "./merchant-order-acceptance-hold-refund.js";
+import { MerchantOrderAcceptanceError } from "./merchant-order-acceptance-command.js";
 import { StaffOrderCancellationError } from "./merchant-order-staff-cancellation.js";
 import { StaffItemCancellationError } from "./merchant-order-item-staff-cancellation.js";
 import { CounterOrderError } from "./merchant-counter-order.js";
@@ -503,6 +504,65 @@ describe("merchant order exception read route", () => {
     expect(read).toHaveBeenCalledExactlyOnceWith(sessionCookie);
     expect(result.headers.get("cache-control")).toBe("no-store");
   });
+  it("D3: returns what each payment reconciliation difference is about", async () => {
+    const item = {
+      exceptionReference: "0190fa86-0000-7000-8000-000000000020",
+      orderReference: null,
+      orderNumber: null,
+      kind: "PaymentReconciliationDifference" as const,
+      severity: "High" as const,
+      status: "Resolved" as const,
+      providerState: "Confirmed" as const,
+      compensationStatus: "NotRequested" as const,
+      sourceOwner: "Payment" as const,
+      createdAt: "2026-10-10T08:00:04.214Z",
+      dueAt: "2026-10-10T08:15:04.214Z",
+      ownerStatus: "Unassigned" as const,
+      sourceFinal: true,
+    };
+    const day = {
+      type: "BusinessDayTotals" as const,
+      businessDate: "2026-10-09",
+      captured: { storeMinor: "5650", providerMinor: "5650" },
+      refunded: { storeMinor: "0", providerMinor: "2260" },
+      checkedAt: "2026-10-10T08:00:04.214Z",
+      resolvedAt: "2026-10-15T13:32:56.580Z",
+    };
+    const read = vi.fn(async () => ({
+      screenId: "OPS-ORDER-EXCEPTION" as const,
+      projectionName: "merchant_order_exception_v1" as const,
+      storeLabel: "Synthetic Store",
+      businessDate: "2026-10-15",
+      projectedAt: "2026-10-15T15:00:00.000Z",
+      freshnessStatus: "Fresh" as const,
+      items: [
+        { ...item, reconciliation: day },
+        {
+          ...item,
+          exceptionReference: "0190fa86-0000-7000-8000-000000000021",
+          reconciliation: { type: "Unavailable" as const },
+        },
+        {
+          ...item,
+          exceptionReference: "0190fa86-0000-7000-8000-000000000022",
+          kind: "PaidWithoutFulfillableOrder" as const,
+        },
+      ],
+    }));
+    const root = await serve(fakeService(), read);
+    const result = await request(root, "/merchant/order-exceptions", {
+      headers: {
+        host: "merchant.invalid",
+        cookie: "__Host-bop-merchant=" + sessionCookie,
+        "sec-fetch-site": "same-origin",
+      },
+    });
+    expect(result.status).toBe(200);
+    const body = (await result.json()) as { items: Record<string, unknown>[] };
+    expect(body.items[0]?.reconciliation).toEqual(day);
+    expect(body.items[1]?.reconciliation).toEqual({ type: "Unavailable" });
+    expect(body.items[2]).not.toHaveProperty("reconciliation");
+  });
   it.each([
     {
       path: "/merchant/order-exceptions?store_id=synthetic",
@@ -792,6 +852,18 @@ it("protects order acceptance transport and returns only public status/version",
   const failure = await submit();
   expect(failure.status).toBe(403);
   expect(await failure.json()).toEqual({ error: "request_denied" });
+  // WP-2423 D1: an authorized acceptance that did not happen is a conflict, never a refusal.
+  for (const [code, error] of [
+    ["ORDER_ACCEPTANCE_VERSION_CONFLICT", "order_changed"],
+    ["ORDER_ACCEPTANCE_ALREADY_ACCEPTED", "already_accepted"],
+    ["ORDER_ACCEPTANCE_NOT_ACCEPTABLE", "order_not_acceptable"],
+  ] as const) {
+    accept.mockRejectedValueOnce(new MerchantOrderAcceptanceError(code));
+    const conflict = await submit();
+    expect(conflict.status).toBe(409);
+    expect(conflict.headers.get("cache-control")).toBe("no-store");
+    expect(await conflict.json()).toEqual({ error });
+  }
   const unconfigured = await serve(fakeService());
   const unavailable = await request(unconfigured, "/merchant/orders/accept", {
     method: "POST",
@@ -2533,7 +2605,12 @@ it("WP-2423 Q9-G1: protects the outage refund decision transport and maps refusa
 async function serveCounter(
   options: Pick<
     MerchantBffRouterOptions,
-    "counterMenu" | "counterOrder" | "cardMachinePayment" | "cardMachineRefund" | "staffDiningRound"
+    | "counterMenu"
+    | "counterOrder"
+    | "cardMachinePayment"
+    | "cardMachineRefund"
+    | "cardMachineOrdinaryRefund"
+    | "staffDiningRound"
   > = {},
 ) {
   const app = express();
@@ -2657,7 +2734,13 @@ it("WP-2423 Q7: protects counter order and card-machine transport and maps refus
 
   const paidResponse = await submit("/orders/card-machine-payment");
   expect(paidResponse.status).toBe(200);
-  expect(await paidResponse.json()).toEqual(paid);
+  // WP-2423 D1: without a server-side acceptance composed, the page is told to accept in Orders.
+  expect(await paidResponse.json()).toEqual({ ...paid, acceptance: "NotAccepted" });
+  cardMachinePayment.mockResolvedValueOnce({ ...paid, acceptance: "Accepted" } as never);
+  expect(await (await submit("/orders/card-machine-payment")).json()).toEqual({
+    ...paid,
+    acceptance: "Accepted",
+  });
   for (const [code, status, error] of [
     ["CARD_MACHINE_INPUT_INVALID", 400, "card_machine_input_invalid"],
     ["CARD_MACHINE_PERMISSION_DENIED", 403, "card_machine_permission_denied"],
@@ -2747,6 +2830,79 @@ it("WP-2423 Q7: protects counter order and card-machine transport and maps refus
         })
       ).status,
     ).toBe(503);
+});
+
+it("WP-2423 item 4: records an item refund made on the card machine and maps refusals to stable codes", async () => {
+  const recorded = {
+    status: "Recorded" as const,
+    orderReference: "0190fa02-0000-7000-8000-000000000001",
+    requestReference: "0190fa02-0000-7000-8000-000000000002",
+    amountMinor: "621",
+    refundedAt: "2026-10-15T15:02:00.000Z",
+    receipt: "NoDigitalReceipt" as const,
+  };
+  const cardMachineOrdinaryRefund = vi.fn<
+    NonNullable<MerchantBffRouterOptions["cardMachineOrdinaryRefund"]>
+  >(async () => ({ ...recorded, actorReference: "synthetic-private" }) as typeof recorded);
+  const root = await serveCounter({ cardMachineOrdinaryRefund });
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const submit = (extra: Record<string, string> = {}, path = "") =>
+    request(root, "/merchant/payments/refunds/card-machine-record" + path, {
+      method: "POST",
+      body: '{"a":1}',
+      headers: { ...headers, ...extra },
+    });
+  for (const extra of [
+    { Origin: "https://foreign.invalid" },
+    { "Sec-Fetch-Site": "cross-site" },
+    { "X-BOP-CSRF": "" },
+    { Cookie: "" },
+  ])
+    expect((await submit(extra)).status).toBe(403);
+  expect((await submit({}, "?store=other")).status).toBe(403);
+  expect(cardMachineOrdinaryRefund).not.toHaveBeenCalled();
+  const ok = await submit();
+  expect(ok.status).toBe(200);
+  expect(ok.headers.get("cache-control")).toBe("no-store");
+  expect(await ok.json()).toEqual(recorded);
+  expect(cardMachineOrdinaryRefund).toHaveBeenCalledWith({
+    sessionCookie,
+    csrf,
+    command: { a: 1 },
+  });
+  for (const [code, status, error] of [
+    ["CARD_MACHINE_REFUND_INPUT_INVALID", 400, "card_machine_refund_input_invalid"],
+    ["CARD_MACHINE_REFUND_PERMISSION_DENIED", 403, "card_machine_refund_permission_denied"],
+    ["CARD_MACHINE_REFUND_NOT_FOUND", 404, "card_machine_refund_not_found"],
+    ["CARD_MACHINE_REFUND_NOTHING_OWED", 409, "nothing_to_refund"],
+    ["CARD_MACHINE_REFUND_IDEMPOTENCY_CONFLICT", 409, "card_machine_refund_conflict"],
+    ["CARD_MACHINE_REFUND_APPROVAL_REQUIRED", 409, "approval_required"],
+    ["CARD_MACHINE_REFUND_UNAVAILABLE", 503, "card_machine_refund_unavailable"],
+  ] as const) {
+    cardMachineOrdinaryRefund.mockRejectedValueOnce(new CardMachineRefundCommandError(code));
+    const refused = await submit();
+    expect(refused.status).toBe(status);
+    expect(await refused.json()).toEqual({ error });
+  }
+  cardMachineOrdinaryRefund.mockRejectedValueOnce(new Error("synthetic-private"));
+  const denied = await submit();
+  expect(denied.status).toBe(403);
+  expect(await denied.text()).not.toContain("synthetic");
+  const unconfigured = await serveCounter();
+  expect(
+    (
+      await request(unconfigured, "/merchant/payments/refunds/card-machine-record", {
+        method: "POST",
+        headers,
+        body: "{}",
+      })
+    ).status,
+  ).toBe(503);
 });
 
 it("WP-2423 Q7 slice 2: protects the staff table round transport and maps refusals to stable codes", async () => {
@@ -3346,6 +3502,7 @@ it("protects refund items transport and strips private nested data", async () =>
     unclaimedQuantity: 1,
     paymentCaptured: true,
     paymentIntentReference: id(31),
+    paymentMethod: "Online" as const,
   };
   const query = vi.fn<NonNullable<MerchantBffRouterOptions["ordinaryRefundItems"]>>(async () => ({
     orderReference: id(1),
@@ -3368,6 +3525,7 @@ it("protects refund items transport and strips private nested data", async () =>
           declinedByYou: false,
         },
         progress: "Declined" as const,
+        paymentMethod: "Online" as const,
       },
     ],
     items: [{ ...item, customerNote: "private" }],
@@ -3414,6 +3572,7 @@ it("protects refund items transport and strips private nested data", async () =>
           declinedByYou: false,
         },
         progress: "Declined" as const,
+        paymentMethod: "Online",
       },
     ],
     items: [item],
@@ -3545,6 +3704,7 @@ it("protects refund payment context and preserves unknown amounts", async () => 
     orderBatchReference: id(4),
     observedAt: "2026-09-20T12:00:00.000Z",
     paymentState: "Unresolved" as const,
+    paymentMethod: "Online" as const,
     currencyCode: null,
     capturedAmountMinor: null,
     confirmedRefundMinor: null,
@@ -3615,6 +3775,8 @@ it("protects refund status and strips private execution details", async () => {
     paymentAttemptReference: id(2),
     paymentIntentReference: id(1),
     state: "NotDispatched" as const,
+    method: "Online" as const,
+    refundedOnCardMachineAt: null,
     executionOperationReference: null,
     executionApprovalReference: null,
     amountMinor: "1130",

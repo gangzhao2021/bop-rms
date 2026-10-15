@@ -2,6 +2,10 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { createMerchantRefundPaymentContext } from "./merchant-refund-payment-context.js";
 import { kdsOperatorProfileAllows } from "./merchant-kds-operator-profile.js";
 const d = vi.hoisted(() => ({
+  cards: (): unknown => ({
+    loadByIntent: async () => null,
+    loadByBatch: async () => null,
+  }),
   resolve: vi.fn(),
   workforce: vi.fn(),
   binding: vi.fn(),
@@ -14,6 +18,8 @@ vi.mock("./merchant-workforce-authority-source.js", () => ({
 }));
 vi.mock("@rms/payment", async (original) => ({
   ...(await original<object>()),
+  // WP-2423 item 4: no card-machine payment unless a test says so.
+  createPostgresCardMachinePaymentStore: () => d.cards(),
   createPostgresPaymentIntentBindingSource: () => d.binding,
   createPostgresPaymentTerminalStore: () => ({ read: d.terminal }),
   createPostgresOrderPaymentRefundPosition: () => d.position,
@@ -83,6 +89,7 @@ it("binds actual captured payment and returns distinct confirmed and pending ref
     ...binding,
     observedAt: at,
     paymentState: "Captured",
+    paymentMethod: "Online",
     currencyCode: "CAD",
     capturedAmountMinor: "2260",
     confirmedRefundMinor: "100",
@@ -106,6 +113,7 @@ it.each([null, { ...terminal, outcome: "Failed" }])(
       ...binding,
       observedAt: at,
       paymentState: value === null ? "Unresolved" : "Failed",
+      paymentMethod: "Online",
       currencyCode: null,
       capturedAmountMinor: null,
       confirmedRefundMinor: null,

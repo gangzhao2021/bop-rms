@@ -134,3 +134,29 @@ export function createRefundReceiptIssuance(options: {
     });
   };
 }
+
+/**
+ * WP-2423 item 4: whether the Order has a digital receipt a refund version can follow. Counter
+ * orders paid on the Store's card machine have none (the machine prints its own slip).
+ */
+export async function hasDigitalReceipt(
+  transaction: ConsumerTransaction,
+  options: {
+    brandReference: string;
+    storeReference: string;
+    orderReference: string;
+    authorize(transaction: ConsumerTransaction): Promise<boolean>;
+  },
+): Promise<boolean> {
+  const chain = await createPostgresDigitalReceiptStore({
+    brandReference: options.brandReference,
+    storeReference: options.storeReference,
+    authorize: async (tx, access) =>
+      access.action === "Read" &&
+      String(access.orderReference) === options.orderReference &&
+      (await options.authorize(tx)),
+    validateSources: async () => false,
+  }).load({ transaction, orderReference: options.orderReference });
+  const latest = chain?.records.at(-1);
+  return latest !== undefined && latest.kind !== "Void";
+}

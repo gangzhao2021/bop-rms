@@ -55,6 +55,11 @@ vi.mock("@rms/ordering", async (importOriginal) => {
       },
       loadBatch: async (_tx: unknown, guest: string) => state.batches.get(guest) ?? null,
     }),
+    // WP-2423 D1: a later round's table Order is at the version its rounds moved it to (7), not
+    // the Order header's version (4).
+    createPostgresAdditionalDiningExecutionReader: () => ({
+      loadBySubmission: async () => ({ orderVersion: 7 }),
+    }),
   };
 });
 
@@ -221,7 +226,7 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
       orderReference: id(20),
       orderBatchReference: id(21),
       orderNumber: "7",
-      orderVersion: 4,
+      orderVersion: 7,
       tableLabel: "T4",
       orderMinor: "2260",
       tipMinor: "300",

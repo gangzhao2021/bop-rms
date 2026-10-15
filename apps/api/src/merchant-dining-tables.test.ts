@@ -6,6 +6,20 @@ const mock = vi.hoisted(() => ({
   store: vi.fn(),
   loadSessions: vi.fn(),
   codes: vi.fn(),
+  awaiting: vi.fn(),
+  cardPaid: vi.fn(),
+  sessionOrders: vi.fn(),
+}));
+vi.mock("@rms/ordering", async (original) => ({
+  ...(await original<typeof import("@rms/ordering")>()),
+  createPostgresStaffDiningRoundEntryStore: vi.fn(() => ({
+    listAwaitingPaymentByTables: mock.awaiting,
+  })),
+  listStoreDiningSessionOrders: mock.sessionOrders,
+}));
+vi.mock("@rms/payment", async (original) => ({
+  ...(await original<typeof import("@rms/payment")>()),
+  createPostgresCardMachinePaymentStore: vi.fn(() => ({ listByBatches: mock.cardPaid })),
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => mock.resolve }));
 vi.mock("@rms/dining", async (original) => ({
@@ -21,6 +35,13 @@ function setup() {
     authorizeAction = vi.fn(async (): Promise<{ effect: "Allow" | "Deny" }> => ({
       effect: "Allow",
     })),
+    // One permission read answers every action the page needs (WP-2423 query budget).
+    authorizeActions = vi.fn(
+      async (actions: readonly string[]) =>
+        new Map(
+          await Promise.all(actions.map(async (a) => [a, await authorizeAction(a)] as const)),
+        ),
+    ),
     tx = { query: vi.fn() },
     authorize = vi.fn(async () => ({ sessionReference: id(9) }));
   mock.resolve.mockResolvedValue({
@@ -29,10 +50,14 @@ function setup() {
     store: { storeReference: id(3) },
     allowed,
     authorizeAction,
+    authorizeActions,
   });
   mock.store.mockReturnValue({ listTables: mock.list });
   mock.loadSessions.mockResolvedValue([]);
   mock.codes.mockResolvedValue(new Map());
+  mock.awaiting.mockResolvedValue([]);
+  mock.cardPaid.mockResolvedValue(new Map());
+  mock.sessionOrders.mockResolvedValue(new Map());
   mock.list.mockResolvedValue({
     items: [
       {
@@ -52,6 +77,7 @@ function setup() {
   return {
     allowed,
     authorizeAction,
+    authorizeActions,
     tx,
     authorize,
     read: createMerchantDiningTables({
@@ -82,18 +108,19 @@ it("uses current selected scope and projects only safe fields", async () => {
   expect(view.items[0]).not.toHaveProperty("privateField");
   expect(view.items[0]?.elapsedMinutes).toBeNull();
   expect(view.canOperateTables).toBe(true);
+  expect(f.authorizeActions).toHaveBeenCalledOnce();
   expect(f.authorizeAction).toHaveBeenCalledWith("dining.operate");
   expect(mock.list).toHaveBeenCalledWith(
     expect.objectContaining({ afterTableReference: null, limit: 10 }),
   );
 });
-it("exposes table operation controls only for the distinct dining.operate grant", async () => {
+it("refuses the page before any table read without the dining.operate grant", async () => {
   const f = setup();
-  f.authorizeAction.mockResolvedValueOnce({ effect: "Deny" });
-  const view = await f.read(f.input);
-  expect(view.items).toHaveLength(1);
-  expect(view.canOperateTables).toBe(false);
-  expect(mock.list).toHaveBeenCalledOnce();
+  f.authorizeAction.mockImplementation(async (action?: unknown) => ({
+    effect: action === "dining.operate" ? "Deny" : "Allow",
+  }));
+  await expect(f.read(f.input)).rejects.toThrow("DINING_TABLES_PERMISSION_DENIED");
+  expect(mock.list).not.toHaveBeenCalled();
 });
 it("does not expose table command affordances when the BFF command is unconfigured", async () => {
   const f = setup();
@@ -135,8 +162,10 @@ it("adds elapsed minutes from the current scoped Active Session", async () => {
   const view = await f.read(f.input);
   expect(view.items[0]?.elapsedMinutes).toBe(18);
   expect(mock.loadSessions).toHaveBeenCalledWith([id(5)]);
-  // WP-2423: resolved in full at the start and re-checked in full once before the reply only.
-  expect(f.allowed).toHaveBeenCalledTimes(2);
+  // WP-2423: resolved in full at the start (one read for all of the page's actions) and
+  // re-checked in full once before the reply only.
+  expect(f.authorizeActions).toHaveBeenCalledOnce();
+  expect(f.allowed).toHaveBeenCalledOnce();
 });
 it("does not return elapsed Session data if Store authority changes during the owner read", async () => {
   const f = setup();
@@ -165,7 +194,7 @@ it("does not return elapsed Session data if Store authority changes during the o
     },
   ]);
   // Allowed at the start; refused by the full re-check before the reply.
-  f.allowed.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+  f.allowed.mockResolvedValueOnce(false);
   await expect(f.read(f.input)).rejects.toThrow("DINING_TABLES_PERMISSION_DENIED");
   expect(mock.loadSessions).toHaveBeenCalledWith([id(5)]);
 });
@@ -181,10 +210,10 @@ it.each([
 });
 it("denies before data read and on authority loss", async () => {
   const f = setup();
-  f.allowed.mockResolvedValue(false);
+  f.authorizeAction.mockResolvedValueOnce(null as never);
   await expect(f.read(f.input)).rejects.toThrow();
   expect(mock.list).not.toHaveBeenCalled();
-  f.allowed.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+  f.allowed.mockResolvedValueOnce(false);
   await expect(f.read(f.input)).rejects.toThrow();
 });
 it("WP-2423 Q11: shows until when each table's current printed code works, or none", async () => {
@@ -218,4 +247,103 @@ it("WP-2423 Q11: shows until when each table's current printed code works, or no
     null,
     null,
   ]);
+});
+
+it("WP-2423 item 5: lists the party's staff rounds still awaiting card-machine payment, with their deadline", async () => {
+  const f = setup();
+  mock.list.mockResolvedValueOnce({
+    items: [4, 6].map((n) => ({
+      tableReference: id(n),
+      stableLabel: "T" + String(n),
+      areaCode: "MAIN",
+      capacity: 4,
+      lifecycle: "Published",
+      operationalState: "Available",
+      aggregateVersion: 3,
+      activeDiningSessionReference: id(n + 1),
+    })),
+    nextAfterTableReference: null,
+  });
+  mock.loadSessions.mockResolvedValueOnce(
+    [5, 7].map((n) => ({
+      diningSessionReference: id(n),
+      brandReference: id(2),
+      storeReference: id(3),
+      phase: "Active",
+      startedAt: "2026-09-25T11:42:00.000Z",
+    })),
+  );
+  const round = (table: number, session: number, batch: number, payBy: string) => ({
+    tableReference: id(table),
+    diningSessionReference: id(session),
+    orderReference: id(40),
+    orderBatchReference: id(batch),
+    payBy,
+  });
+  mock.awaiting.mockResolvedValueOnce([
+    round(4, 5, 41, "2026-09-25T12:10:00.000Z"),
+    // Paid on the card machine but not yet seen by Ordering: not waiting.
+    round(4, 5, 42, "2026-09-25T12:15:00.000Z"),
+    // An earlier party's round at table 6 is not this party's.
+    round(6, 99, 43, "2026-09-25T12:20:00.000Z"),
+  ]);
+  mock.cardPaid.mockResolvedValueOnce(new Map([[id(42), { cardMachinePaymentReference: id(44) }]]));
+  const view = await f.read(f.input);
+  expect(mock.awaiting.mock.calls[0]?.[1]).toEqual([id(4), id(6)]);
+  // One Payment read for all of the party's rounds, whatever their number (no read per round).
+  expect(mock.cardPaid).toHaveBeenCalledOnce();
+  expect(mock.cardPaid.mock.calls[0]?.[1]).toEqual([
+    { orderReference: id(40), orderBatchReference: id(41) },
+    { orderReference: id(40), orderBatchReference: id(42) },
+  ]);
+  expect(view.items.map((item) => item.staffRoundsAwaitingPayment)).toEqual([
+    [{ payBy: "2026-09-25T12:10:00.000Z" }],
+    [],
+  ]);
+  expect(JSON.stringify(view)).not.toContain(id(41));
+});
+
+it("WP-2423 D4: gives each open session's phase, version and Order to staff who may close tables", async () => {
+  const f = setup();
+  mock.list.mockResolvedValue({
+    items: [
+      {
+        tableReference: id(4),
+        stableLabel: "T4",
+        areaCode: "MAIN",
+        capacity: 4,
+        lifecycle: "Published",
+        operationalState: "Available",
+        aggregateVersion: 3,
+        activeDiningSessionReference: id(5),
+      },
+    ],
+    nextAfterTableReference: null,
+  });
+  mock.loadSessions.mockResolvedValue([
+    {
+      diningSessionReference: id(5),
+      brandReference: id(2),
+      storeReference: id(3),
+      phase: "Active",
+      version: 3,
+      startedAt: "2026-09-25T11:42:00.000Z",
+    },
+  ]);
+  mock.sessionOrders.mockResolvedValueOnce(new Map([[id(5), id(40)]]));
+  const view = await f.read(f.input);
+  expect(view.canCloseSessions).toBe(true);
+  expect(f.authorizeAction).toHaveBeenCalledWith("dining.session.close");
+  expect(f.authorizeAction).toHaveBeenCalledWith("order.close");
+  expect(mock.sessionOrders.mock.calls[0]?.[2]).toEqual([id(5)]);
+  expect(view.items[0]?.session).toEqual({ phase: "Active", version: 3, orderReference: id(40) });
+  // Without the closing permission (Front of House): nothing to close with, no Order looked up.
+  f.authorizeAction.mockImplementation(async (action?: unknown) => ({
+    effect: action === "dining.session.close" ? "Deny" : "Allow",
+  }));
+  mock.sessionOrders.mockClear();
+  const denied = await f.read(f.input);
+  expect(denied.canCloseSessions).toBe(false);
+  expect(mock.sessionOrders).not.toHaveBeenCalled();
+  expect(denied.items[0]?.session).toEqual({ phase: "Active", version: 3, orderReference: null });
 });

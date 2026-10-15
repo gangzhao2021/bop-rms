@@ -1,9 +1,11 @@
 import type { ConsumerTransaction } from "@bop/eventing";
 import { readClosedRecord, parseOpaqueUuidV7 } from "@bop/identity";
 import {
+  createPostgresCardMachinePaymentStore,
   createPostgresOrdinaryRefundRequestRuntime,
   createOrdinaryRefundRoleResolver,
 } from "@rms/payment";
+import { cardMachineWholeRefundSource } from "./merchant-card-machine-refund.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { createMerchantWorkforcePermissionSource } from "./merchant-workforce-authority-source.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -169,6 +171,31 @@ export function createMerchantOrdinaryRefundRequest(options: {
           requestRole === "Manager" || (requestRole === "Owner" && (await soleOperatorEffective()))
         );
       };
+      // WP-2423 item 4: a round paid on the Store's card machine that the store cancelled (or that
+      // could not be fulfilled) is refunded in full from the order page, not by an item request.
+      const cards = createPostgresCardMachinePaymentStore({
+        scope,
+        // Checked in full at the start and again before the reply.
+        authorize: async (_tx, query) => query.orderReference === orderReference,
+      });
+      const batches = new Set(
+        (Array.isArray(raw.items) ? raw.items : []).flatMap((item: unknown) => {
+          const batch =
+            item !== null && typeof item === "object"
+              ? (item as { orderBatchReference?: unknown }).orderBatchReference
+              : undefined;
+          return typeof batch === "string" ? [batch] : [];
+        }),
+      );
+      for (const batch of batches) {
+        const card = await cards.loadByBatch(
+          businessTransaction,
+          orderReference,
+          String(parseOpaqueUuidV7(batch, "ACTOR_REFERENCE_INVALID")),
+        );
+        if (card !== null && (await cardMachineWholeRefundSource(businessTransaction, scope, card)))
+          return deny();
+      }
       const runtime = createPostgresOrdinaryRefundRequestRuntime({
         scope: {
           ...scope,

@@ -7,10 +7,19 @@ import {
   parseDiningInstant,
   parseDiningReference,
 } from "@rms/dining";
+import {
+  createPostgresStaffDiningRoundEntryStore,
+  listStoreDiningSessionOrders,
+} from "@rms/ordering";
+import { createPostgresCardMachinePaymentStore } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
+/** The Tables page's own permission first, then the actions it offers. */
+const tableCloseActions = ["dining.session.close", "order.close", "dining.item.serve"] as const;
+const tablePageActions = Object.freeze(["dining.operate", ...tableCloseActions]);
+
 export function createMerchantDiningTables(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
@@ -41,6 +50,10 @@ export function createMerchantDiningTables(options: {
       withMerchantTransactionAuthorization(
         {
           transaction: tx,
+          // WP-2423: the read's permission and the page's offered actions (operating tables;
+          // closing a session needs closing both the session and its Order and serving its items,
+          // the permissions the closing commands check) come from one current-fact read, not one
+          // full resolution per action; the commands re-authorize in full when staff use them.
           resolve: async () => {
             const current = await resolve(
               tx,
@@ -48,19 +61,22 @@ export function createMerchantDiningTables(options: {
               "dining.operate",
               authenticated.sessionReference,
             );
-            if (!(await current.allowed())) return denied();
-            return current;
+            const decisions = await current.authorizeActions(tablePageActions);
+            if (decisions.get("dining.operate")?.effect !== "Allow") return denied();
+            return Object.freeze({
+              current,
+              canOperateTables: options.tableAvailabilityCommandEnabled === true,
+              canCloseSessions: tableCloseActions.every(
+                (action) => decisions.get(action)?.effect === "Allow",
+              ),
+            });
           },
-          recheck: async (current) => (await current.allowed()) === true,
+          recheck: async ({ current }) => (await current.allowed()) === true,
           denied,
         },
         async (authority) => {
-          const current = authority.scope;
+          const { current, canOperateTables, canCloseSessions } = authority.scope;
           const authorize = () => authority.guard();
-          const tableOperationPermission = await current.authorizeAction("dining.operate");
-          const canOperateTables =
-            options.tableAvailabilityCommandEnabled === true &&
-            tableOperationPermission?.effect === "Allow";
           const store = createPostgresDiningTableStore(
             { run: (work) => work(tx) },
             {
@@ -78,6 +94,8 @@ export function createMerchantDiningTables(options: {
             table.activeDiningSessionReference === null ? [] : [table.activeDiningSessionReference],
           );
           const elapsedMinutes = new Map<string, number>();
+          // WP-2423 D4: each open session's phase and version, for closing it from this page.
+          const sessionFacts = new Map<string, { phase: string; version: number }>();
           if (activeReferences.length > 0) {
             const observedAt = Date.parse(parseDiningInstant(options.persistence.now()));
             const sessions = await createPostgresDiningSessionReadStore(
@@ -104,6 +122,10 @@ export function createMerchantDiningTables(options: {
                 session.diningSessionReference,
                 Math.floor((observedAt - startedAt) / 60_000),
               );
+              sessionFacts.set(session.diningSessionReference, {
+                phase: session.phase,
+                version: session.version,
+              });
             }
           }
           // WP-2423 Q11: each table's printed code, so staff see a missing or soon-ending code here.
@@ -112,6 +134,65 @@ export function createMerchantDiningTables(options: {
             brandReference: current.context.brand.brandReference,
             storeReference: current.store.storeReference,
           }).loadLatestForTables(page.items.map((table) => table.tableReference));
+          // WP-2423 item 5 ("warn before timeouts"): rounds staff entered at each table that still
+          // wait for their card-machine payment, and when each is cancelled if not recorded.
+          const scoped = {
+            brandReference: String(current.context.brand.brandReference),
+            storeReference: String(current.store.storeReference),
+          };
+          const cardPayments = createPostgresCardMachinePaymentStore({
+            scope: scoped,
+            authorize: async () => authorize(),
+          });
+          // One Ordering read for every table on the page and one Payment read for all of their
+          // rounds: the cost does not grow with the number of open tables or rounds.
+          const sessionOfTable = new Map<string, string | null>(
+            page.items.map((table) => [
+              String(table.tableReference),
+              table.activeDiningSessionReference === null
+                ? null
+                : String(table.activeDiningSessionReference),
+            ]),
+          );
+          const candidates = (
+            await createPostgresStaffDiningRoundEntryStore({
+              ...scoped,
+              authorize: async () => authorize(),
+            }).listAwaitingPaymentByTables(
+              tx,
+              page.items
+                .filter((table) => table.activeDiningSessionReference !== null)
+                .map((table) => table.tableReference),
+            )
+          ).filter(
+            // Only the party now at the table; an earlier session's round is not theirs.
+            (round) => sessionOfTable.get(round.tableReference) === round.diningSessionReference,
+          );
+          const paidOnCardMachine = await cardPayments.listByBatches(
+            tx,
+            candidates.map((round) => ({
+              orderReference: round.orderReference,
+              orderBatchReference: round.orderBatchReference,
+            })),
+          );
+          const awaiting = new Map<string, string[]>();
+          for (const round of candidates) {
+            if (paidOnCardMachine.has(round.orderBatchReference)) continue;
+            awaiting.set(round.tableReference, [
+              ...(awaiting.get(round.tableReference) ?? []),
+              round.payBy,
+            ]);
+          }
+          // WP-2423 D4: closing a table's session from this page — offered to staff who may close
+          // both the session and its Order, with the session's Order (one read for every open
+          // session) so the close dialog checks its rounds when it is opened, not on every poll.
+          const sessionOrders = canCloseSessions
+            ? await listStoreDiningSessionOrders(
+                tx as unknown as Parameters<typeof listStoreDiningSessionOrders>[0],
+                scoped,
+                activeReferences,
+              )
+            : new Map<string, string>();
           const codeUntil = (table: (typeof page.items)[number]) => {
             const issue = codes.get(table.tableReference);
             return table.qrStatus === "Active" && issue?.qrVersion === table.qrVersion
@@ -120,6 +201,7 @@ export function createMerchantDiningTables(options: {
           };
           return Object.freeze({
             canOperateTables,
+            canCloseSessions,
             items: Object.freeze(
               page.items.map((table) =>
                 Object.freeze({
@@ -136,6 +218,22 @@ export function createMerchantDiningTables(options: {
                       ? null
                       : (elapsedMinutes.get(table.activeDiningSessionReference) ?? null),
                   qrCodeValidUntil: codeUntil(table),
+                  session:
+                    table.activeDiningSessionReference === null
+                      ? null
+                      : Object.freeze({
+                          phase:
+                            sessionFacts.get(table.activeDiningSessionReference)?.phase ?? null,
+                          version:
+                            sessionFacts.get(table.activeDiningSessionReference)?.version ?? null,
+                          orderReference:
+                            sessionOrders.get(table.activeDiningSessionReference) ?? null,
+                        }),
+                  staffRoundsAwaitingPayment: Object.freeze(
+                    (awaiting.get(table.tableReference) ?? [])
+                      .slice(0, 20)
+                      .map((payBy) => Object.freeze({ payBy })),
+                  ),
                 }),
               ),
             ),

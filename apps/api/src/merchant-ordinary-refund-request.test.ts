@@ -1,6 +1,10 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { createMerchantOrdinaryRefundRequest } from "./merchant-ordinary-refund-request.js";
 const d = vi.hoisted(() => ({
+  cards: (): unknown => ({
+    loadByIntent: async () => null,
+    loadByBatch: async () => null,
+  }),
   resolve: vi.fn(),
   workforce: vi.fn(),
   compose: vi.fn(),
@@ -12,6 +16,8 @@ vi.mock("./merchant-workforce-authority-source.js", () => ({
 }));
 vi.mock("@rms/payment", async (original) => ({
   ...(await original<object>()),
+  // WP-2423 item 4: no card-machine payment unless a test says so.
+  createPostgresCardMachinePaymentStore: () => d.cards(),
   createPostgresOrdinaryRefundRequestRuntime: d.compose,
 }));
 const id = (n: number) => "01909974-0000-7000-8000-" + n.toString(16).padStart(12, "0");

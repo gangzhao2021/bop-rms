@@ -251,7 +251,7 @@ describe("Event Catalog source", () => {
     },
   );
   it("registers the authoritative bounded Event facts and metric labels", () => {
-    expect(eventCatalog).toHaveLength(142);
+    expect(eventCatalog).toHaveLength(143);
     const byType = new Map(eventCatalog.map((entry) => [entry.eventType, entry]));
     for (const eventType of [
       "DeviceActivated",
@@ -601,6 +601,7 @@ describe("Event Catalog source", () => {
       "OptionSetPublicationReleaseRecorded:v1",
       "OptionSetReviewContentRecorded:v1",
       "OrderAmended:v1",
+      "OrderCancelled:v1",
       "OrderConfirmed:v1",
       "OrderCreated:v1",
       "OrderSubmitted:v1",
@@ -1306,7 +1307,7 @@ describe("Event consumer compatibility", () => {
   if (firstConsumer === undefined) throw new Error("EVENT_CONSUMER_FIXTURE_MISSING");
 
   it("covers every accepted producer-to-consumer relation exactly", () => {
-    expect(eventConsumerContracts).toHaveLength(152);
+    expect(eventConsumerContracts).toHaveLength(153);
     expect(() =>
       assertEventConsumerCompatibility(eventCatalog, eventConsumerContracts),
     ).not.toThrow();

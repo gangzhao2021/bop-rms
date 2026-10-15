@@ -226,3 +226,16 @@ export function businessDateLabel(businessDate: string, today: string | null | u
   const difference = Math.round((dateValue(today) - dateValue(businessDate)) / dayMs);
   return difference === 0 ? `Today · ${text}` : difference === 1 ? `Yesterday · ${text}` : text;
 }
+
+/**
+ * WP-2423 D4: a table's Order opened on an earlier business day that had a round on a later one —
+ * "Opened Sun, Oct 11 · ordered again Today · Thu, Oct 15". Its order number belongs to the day
+ * it was opened; the later round is that later day's work.
+ */
+export function openedEarlierText(
+  openedOn: string,
+  listedOn: string,
+  today: string | null | undefined,
+): string {
+  return `Opened ${businessDateText(openedOn)} · ordered again ${businessDateLabel(listedOn, today)}`;
+}

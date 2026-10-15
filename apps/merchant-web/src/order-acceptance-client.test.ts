@@ -78,3 +78,23 @@ it("discards late success after context cancellation", async () => {
     createOrderAcceptanceClient(fetcher).prepare(command).execute(csrf, controller.signal),
   ).rejects.toMatchObject({ code: "OutcomeUnknown" });
 });
+
+it("WP-2423 D1: reads why the server did not accept (409) instead of a permission refusal", async () => {
+  for (const [error, conflict] of [
+    ["order_changed", "Changed"],
+    ["already_accepted", "AlreadyAccepted"],
+    ["order_not_acceptable", "NotAcceptable"],
+    ["something_else", "Changed"],
+  ] as const) {
+    const fetcher = vi.fn<typeof fetch>(
+      async () => new Response(JSON.stringify({ error }), { status: 409 }),
+    );
+    await expect(
+      createOrderAcceptanceClient(fetcher).prepare(command).execute(csrf),
+    ).rejects.toMatchObject({ code: "Conflict", conflict });
+  }
+  const denied = vi.fn<typeof fetch>(async () => new Response("{}", { status: 403 }));
+  await expect(
+    createOrderAcceptanceClient(denied).prepare(command).execute(csrf),
+  ).rejects.toMatchObject({ code: "PermissionDenied", conflict: null });
+});

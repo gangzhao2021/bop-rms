@@ -8,7 +8,11 @@ export type BatchPaymentOutcome = "Succeeded" | "Failed";
 /** A dine-in round still waiting for its payment, as staff see it on the order screen. */
 export type MerchantBatchPaymentDue = null | {
   readonly status: "Failed" | "Awaiting";
-  /** When the round is cancelled automatically (only when its payment failed). */
+  /**
+   * When the round is cancelled automatically: when its payment failed, or (WP-2423 item 5) when
+   * no payment was ever started for it (a staff-entered round not yet paid on the card machine).
+   * Null while a started payment is still open.
+   */
   readonly cancelsAt: string | null;
 };
 
@@ -22,6 +26,11 @@ export function resolveMerchantBatchPaymentDue(input: {
   /** Dining-owned batches and when their payment window ends. */
   readonly deadlines: ReadonlyMap<string, string>;
   readonly outcomes: ReadonlyMap<string, BatchPaymentOutcome>;
+  /**
+   * WP-2423 item 5: batches for which a payment was started (an online payment, or one recorded on
+   * the card machine). Absent: unknown, so only a failed payment has a cancellation time.
+   */
+  readonly paymentStarted?: ReadonlySet<string>;
 }): MerchantBatchPaymentDue {
   const reference = input.batch.orderBatchReference;
   const deadline = input.deadlines.get(reference);
@@ -38,13 +47,22 @@ export function resolveMerchantBatchPaymentDue(input: {
   if (outcome === "Succeeded") return null;
   return outcome === "Failed"
     ? Object.freeze({ status: "Failed" as const, cancelsAt: deadline })
-    : Object.freeze({ status: "Awaiting" as const, cancelsAt: null });
+    : Object.freeze({
+        status: "Awaiting" as const,
+        cancelsAt:
+          input.paymentStarted !== undefined && !input.paymentStarted.has(reference)
+            ? deadline
+            : null,
+      });
 }
 
 export interface CustomerBatchPayment {
   readonly orderBatchReference: string;
   readonly status: BatchPaymentOutcome | "Awaiting";
-  /** When the round is cancelled automatically; only for a failed, not yet cancelled round. */
+  /**
+   * When the round is cancelled automatically; only for a failed, or (WP-2423 item 5) never-started,
+   * not yet cancelled round.
+   */
   readonly cancelsAt: string | null;
 }
 
@@ -54,6 +72,8 @@ export function resolveCustomerBatchPayments(input: {
   readonly deadlines: ReadonlyMap<string, string>;
   readonly outcomes: ReadonlyMap<string, BatchPaymentOutcome>;
   readonly cancelled: ReadonlySet<string>;
+  /** WP-2423 item 5: batches whose payment was started (see the merchant resolver). */
+  readonly paymentStarted?: ReadonlySet<string>;
 }): readonly CustomerBatchPayment[] {
   return Object.freeze(
     input.batchReferences.flatMap((orderBatchReference) => {
@@ -65,7 +85,13 @@ export function resolveCustomerBatchPayments(input: {
           orderBatchReference,
           status,
           cancelsAt:
-            status === "Failed" && !input.cancelled.has(orderBatchReference) ? deadline : null,
+            !input.cancelled.has(orderBatchReference) &&
+            (status === "Failed" ||
+              (status === "Awaiting" &&
+                input.paymentStarted !== undefined &&
+                !input.paymentStarted.has(orderBatchReference)))
+              ? deadline
+              : null,
         }),
       ];
     }),

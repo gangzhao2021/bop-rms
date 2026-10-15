@@ -303,6 +303,8 @@ export interface RecordedCardPayment {
   readonly amountMinor: string;
   readonly recordingReason: "AtCounter" | "RecordedAfterOutage";
   readonly takenAt: string;
+  /** WP-2423 D1: the server accepted it with the payment (it is in the kitchen), or not. */
+  readonly acceptance: "Accepted" | "NotAccepted";
 }
 
 async function errorOf(response: Response): Promise<Record<string, unknown>> {
@@ -455,9 +457,11 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
           "recordingReason",
           "takenAt",
           "recordedAt",
+          "acceptance",
         ]);
         if (
           (raw.status !== "Recorded" && raw.status !== "AlreadyRecorded") ||
+          (raw.acceptance !== "Accepted" && raw.acceptance !== "NotAccepted") ||
           raw.orderReference !== command.orderReference ||
           (raw.recordingReason !== "AtCounter" && raw.recordingReason !== "RecordedAfterOutage") ||
           typeof raw.amountMinor !== "string" ||
@@ -470,6 +474,7 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
           amountMinor: raw.amountMinor,
           recordingReason: raw.recordingReason,
           takenAt: raw.takenAt,
+          acceptance: raw.acceptance,
         });
       }
       const body = await errorOf(response);

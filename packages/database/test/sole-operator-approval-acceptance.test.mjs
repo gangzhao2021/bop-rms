@@ -6,6 +6,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { URL } from "node:url";
 import pg from "pg";
 import { it, vi } from "vitest";
+import { kdsOperatorProfileAllows } from "../../../apps/api/src/merchant-kds-operator-profile.ts";
 import {
   createIdentityActor,
   generateHotp,
@@ -344,6 +345,10 @@ it("sole operator: set by the Brand Owner, self-approval with MFA, lapse on a se
           sessionReference: id(800 + Object.keys(cookies).indexOf(cookie)),
           allowed: async () => (await decide(action))?.effect === "Allow",
           authorizeAction: decide,
+          // As the real Store scope for a browser sign-in (not a kitchen display): the profile
+          // limit allows every action and the roles still decide.
+          kdsOperatorProfileAllows: (requested) =>
+            kdsOperatorProfileAllows({ policy: { code: "WorkforceStandard" } }, requested),
         };
       };
       // Brand-scope decision: the real Permission owner over Brand-wide roles only.

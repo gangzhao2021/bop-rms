@@ -69,3 +69,36 @@ it.each(["retry", "throw", "reject"])(
     });
   },
 );
+
+it("acknowledges only declared unsubscribed event types without delivery (WP-2423 5e)", async () => {
+  const deliver = vi.fn().mockResolvedValue({ status: "processed" });
+  const adapter = createConsumerOutboxTransport({
+    delivery: { deliver },
+    subscriptions: [{ eventType: "SyntheticChanged", consumerNames: ["first:v1"] }],
+    acknowledgedWithoutSubscribers: ["AvailabilityRuleCreated"],
+  });
+  await expect(
+    adapter.publish({ ...envelope, eventType: "AvailabilityRuleCreated" }, { attemptCount: 1 }),
+  ).resolves.toEqual({ status: "acknowledged" });
+  expect(deliver).not.toHaveBeenCalled();
+  await expect(
+    adapter.publish({ ...envelope, eventType: "OtherChanged" }, { attemptCount: 1 }),
+  ).resolves.toEqual({ status: "failed", errorCode: "TRANSPORT_REJECTED" });
+  await expect(adapter.publish(envelope, { attemptCount: 1 })).resolves.toEqual({
+    status: "acknowledged",
+  });
+  expect(deliver).toHaveBeenCalledTimes(1);
+});
+
+it.each([[["SyntheticChanged"]], [["bad type"]], [["Twice", "Twice"]]])(
+  "rejects an unsubscribed declaration that overlaps, is malformed or repeats: %j",
+  (acknowledgedWithoutSubscribers) => {
+    expect(() =>
+      createConsumerOutboxTransport({
+        delivery: { deliver: vi.fn() },
+        subscriptions: [{ eventType: "SyntheticChanged", consumerNames: ["first:v1"] }],
+        acknowledgedWithoutSubscribers,
+      }),
+    ).toThrow("OUTBOX_UNSUBSCRIBED_EVENT_TYPES_INVALID");
+  },
+);

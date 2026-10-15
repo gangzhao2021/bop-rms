@@ -34,6 +34,8 @@ export function createConsumerOutboxRuntime(options: {
   readonly newLeaseToken: () => string;
   readonly failureRecorder?: ConsumerFailureRecorder;
   readonly config?: Partial<OutboxDispatcherConfig>;
+  /** Event types this deployment publishes with no subscriber (see the transport). */
+  readonly acknowledgedWithoutSubscribers?: readonly string[];
 }) {
   if (options.services.length === 0) throw new TypeError("OUTBOX_CONSUMERS_REQUIRED");
   const registry = new ConsumerRegistry(options.services.map((service) => service.registration));
@@ -70,6 +72,9 @@ export function createConsumerOutboxRuntime(options: {
           eventType,
           consumerNames,
         })),
+        ...(options.acknowledgedWithoutSubscribers
+          ? { acknowledgedWithoutSubscribers: options.acknowledgedWithoutSubscribers }
+          : {}),
       }),
       dispatch: options.dispatch,
       scopes: options.scopes,

@@ -31,6 +31,7 @@ import {
   createPostgresPaymentCompensationRefundPositionSource,
   createPostgresPaymentStatusStore,
   listStoreOrderBatchPaymentOutcomes,
+  listStoreOrderBatchesWithOnlinePayment,
 } from "@rms/payment";
 import type { createCustomerOrderStatusRead } from "./customer-order-status-read.js";
 import { createDiningOrderDeliveryProgress } from "./dining-order-delivery-progress.js";
@@ -82,6 +83,11 @@ export interface CustomerDiningSessionFacts {
     >;
     readonly paymentOutcomes: ReadonlyMap<string, "Succeeded" | "Failed">;
     readonly paymentDeadlines: ReadonlyMap<string, string>;
+    /**
+     * WP-2423 item 5: rounds whose payment was started (online or on the card machine). A round
+     * awaiting payment with none is cancelled automatically at its deadline, and guests are told.
+     */
+    readonly paymentStarted?: ReadonlySet<string>;
     readonly unpaidCancellations: ReadonlySet<string>;
     readonly staffCancellations: ReadonlyMap<
       string,
@@ -144,7 +150,10 @@ export interface CustomerDiningSessionView {
     readonly submittedAt: string;
     readonly status: DiningRoundStatus;
     readonly payment: DiningRoundPayment;
-    /** When a round whose payment failed is cancelled automatically. */
+    /**
+     * When a round whose payment failed, or (WP-2423 item 5) one with no payment started, is
+     * cancelled automatically.
+     */
     readonly cancelsAt: string | null;
     readonly storeCancellationReason: DiningStoreCancellationReason | null;
     readonly items: readonly {
@@ -286,6 +295,8 @@ export function composeCustomerDiningSession(
     } else if (outcome === undefined) {
       status = "AwaitingPayment";
       payment = "Awaiting";
+      if (order.paymentStarted !== undefined && !order.paymentStarted.has(reference))
+        cancelsAt = deadline;
       due += itemsTotal;
     } else {
       payment = "Paid";
@@ -554,6 +565,11 @@ function postgresDependencies(
       }).listByOrder(transaction, orderReference);
       for (const entry of cardMachinePayments)
         paymentOutcomes.set(entry.payment.orderBatchReference, "Succeeded");
+      const paymentStarted = new Set(
+        await listStoreOrderBatchesWithOnlinePayment(transaction, scope, [orderReference]),
+      );
+      for (const entry of cardMachinePayments)
+        paymentStarted.add(entry.payment.orderBatchReference);
       if (!(await stillAuthorized())) return denied();
       const staffCancellations = new Map<
         string,
@@ -708,6 +724,7 @@ function postgresDependencies(
           ),
           paymentOutcomes,
           paymentDeadlines,
+          paymentStarted,
           unpaidCancellations,
           staffCancellations,
           itemCancellations,

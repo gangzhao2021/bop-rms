@@ -116,6 +116,8 @@ export interface RefundApprovalEntry {
   readonly orderNumber: string;
   readonly requestReference: string;
   readonly paymentIntentReferences: readonly string[];
+  /** WP-2423 item 4: refunded on the store's card machine (staff record it) or sent online. */
+  readonly paymentMethod: "Online" | "CardMachine";
   readonly currencyCode: "CAD";
   readonly amountMinor: string;
   readonly reasonCode: string;
@@ -143,6 +145,7 @@ function entry(value: unknown): RefundApprovalEntry {
     "orderNumber",
     "requestReference",
     "paymentIntentReferences",
+    "paymentMethod",
     "currencyCode",
     "amountMinor",
     "reasonCode",
@@ -163,6 +166,7 @@ function entry(value: unknown): RefundApprovalEntry {
     typeof raw.soleOperatorApproval !== "boolean" ||
     (raw.soleOperatorApproval && (!raw.requestedByYou || !raw.canApprove)) ||
     raw.currencyCode !== "CAD" ||
+    (raw.paymentMethod !== "Online" && raw.paymentMethod !== "CardMachine") ||
     (raw.state !== "AwaitingApproval" && raw.state !== "Approved") ||
     typeof raw.requestedByYou !== "boolean" ||
     typeof raw.canApprove !== "boolean" ||
@@ -187,6 +191,7 @@ function entry(value: unknown): RefundApprovalEntry {
     orderNumber: text(raw.orderNumber),
     requestReference: ref(raw.requestReference),
     paymentIntentReferences: Object.freeze(raw.paymentIntentReferences.map(ref)),
+    paymentMethod: raw.paymentMethod,
     currencyCode: "CAD" as const,
     amountMinor: money(raw.amountMinor),
     reasonCode: raw.reasonCode,
@@ -406,7 +411,9 @@ export function createRefundApprovalClient(fetcher: typeof fetch = fetch) {
                 if (
                   payment.state !== "SendRecorded" &&
                   payment.state !== "Sending" &&
-                  payment.state !== "ResultUnknown"
+                  payment.state !== "ResultUnknown" &&
+                  // WP-2423 item 4: approved; staff refund it on the store's card machine.
+                  payment.state !== "RecordOnCardMachine"
                 )
                   return invalid();
                 return Object.freeze({

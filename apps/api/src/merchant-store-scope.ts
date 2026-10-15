@@ -134,6 +134,57 @@ function createMerchantStoreScopeResolver(
       if (requestedAction === "merchant.access") return navigation;
       return assess(requestedAction);
     };
+    type Decision = Awaited<ReturnType<typeof assessSelection>>;
+    /**
+     * WP-2423: several actions from one current-fact read (Session, selection, membership, store
+     * assignment and one permission packet), instead of one full resolution per action. Each
+     * action is answered as `authorizeAction` would (null unless navigation is allowed and the
+     * Session's kitchen display profile allows it).
+     */
+    const assessSelectionActions = async (
+      fresh: Awaited<ReturnType<typeof selectedContext>>,
+      requestedActions: readonly string[],
+    ): Promise<ReadonlyMap<string, Decision>> => {
+      const unique = [...new Set(requestedActions)].filter((a) => a !== "merchant.access");
+      const decisions = new Map<string, Decision>(requestedActions.map((a) => [a, null]));
+      const memberships = createPostgresCurrentMembershipSource(tx, fresh.context);
+      const membership = resolveActiveMembership(
+        await memberships.findMemberships(actorReference, context.brand.brandReference),
+        actorReference,
+        context.brand.brandReference,
+        fresh.context.resolvedAt,
+      );
+      const storeAssignment = resolveActiveStoreAssignment(
+        membership,
+        await memberships.findStoreAssignments(
+          membership.membershipReference,
+          store.storeReference,
+        ),
+        store.storeReference,
+        fresh.context.resolvedAt,
+      );
+      const policy = permissionPolicy ?? createPostgresCurrentPermissionPolicySource(tx);
+      const result = await policy.authorizeActionsWithRoles({
+        tenantContext: fresh.context,
+        membership,
+        storeAssignment,
+        actions: Object.freeze(["merchant.access", ...unique]),
+      });
+      retain(field(result, "validUntil"), fresh.context.resolvedAt, true);
+      check();
+      const navigation = result.decisions[0];
+      if (navigation === undefined || result.decisions.length !== unique.length + 1)
+        return denied();
+      if (navigation.effect !== "Allow") return decisions;
+      if (decisions.has("merchant.access") && kdsOperatorProfileAllows(session, "merchant.access"))
+        decisions.set("merchant.access", navigation);
+      unique.forEach((action, index) => {
+        const decision = result.decisions[index + 1];
+        if (decision === undefined) return denied();
+        if (kdsOperatorProfileAllows(session, action)) decisions.set(action, decision);
+      });
+      return decisions;
+    };
     const authorizeAction = async (requestedAction: string) => {
       const observedAt = check(),
         current = await currentSession(tx, sessionCookie);
@@ -148,6 +199,26 @@ function createMerchantStoreScopeResolver(
       )
         return null;
       return assessSelection(fresh, requestedAction);
+    };
+    /** Several actions at one checkpoint: one current-fact read for all of them. */
+    const authorizeActions = async (
+      requestedActions: readonly string[],
+    ): Promise<ReadonlyMap<string, Decision>> => {
+      if (requestedActions.length < 1 || requestedActions.length > 15) return denied();
+      const none = new Map<string, Decision>(requestedActions.map((a) => [a, null]));
+      const observedAt = check(),
+        current = await currentSession(tx, sessionCookie);
+      retainSession(current, observedAt);
+      if (current.sessionReference !== session.sessionReference) return none;
+      const fresh = await selectedContext(tx, current);
+      if (
+        fresh.tenantReference !== selected.tenantReference ||
+        fresh.context.brand.brandReference !== context.brand.brandReference ||
+        fresh.context.store?.storeReference !== store.storeReference ||
+        fresh.context.actor.actorReference !== actorReference
+      )
+        return none;
+      return assessSelectionActions(fresh, requestedActions);
     };
     const allowed = async () => (await authorizeAction(action))?.effect === "Allow";
     if (initiallyAuthorized && context.actor.actorReference !== actorReference) return denied();
@@ -170,6 +241,7 @@ function createMerchantStoreScopeResolver(
       initialObservedAt: context.resolvedAt,
       allowed,
       authorizeAction,
+      authorizeActions,
       // This is an observation boundary, not permission. Call allowed/action
       // first, or consume the initialAuthorization from the fixed initial entry;
       // subsequent session/policy reads may only shorten it.

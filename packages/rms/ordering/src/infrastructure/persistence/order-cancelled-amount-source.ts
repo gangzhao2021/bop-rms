@@ -32,7 +32,7 @@ export function createPostgresOrderCancelledAmountSource(options: Options) {
       const rows = (
         await tx.query(
           `SELECT c.cancellation_id::text,c.order_batch_id::text,c.cancelled_at,c.cancelled_order_version,
-         (c.phase='Cancelled' AND c.reason_code='CHECKOUT_DEADLINE_REACHED'
+         (c.phase='Cancelled' AND c.reason_code IN ('CHECKOUT_DEADLINE_REACHED','PAYMENT_NOT_STARTED')
           AND EXISTS(SELECT 1 FROM rms_ordering.order_batch b WHERE b.brand_id=c.brand_id AND b.store_id=c.store_id AND b.order_id=c.order_id AND b.order_batch_id=c.order_batch_id AND b.submission_id=c.submission_id)
           AND EXISTS(SELECT 1 FROM rms_ordering.order_revision r WHERE r.brand_id=c.brand_id AND r.store_id=c.store_id AND r.order_id=c.order_id AND r.revision_id=c.cancellation_id AND r.kind='BatchCancellation' AND r.previous_revision_id=c.expected_source_checkpoint AND r.expected_version=c.expected_order_version AND r.version=c.cancelled_order_version AND r.occurred_at=c.cancelled_at)
           AND c.order_item_ids=ARRAY(SELECT i.order_item_id::uuid FROM rms_ordering.order_item i WHERE i.brand_id=c.brand_id AND i.store_id=c.store_id AND i.order_id=c.order_id AND i.order_batch_id=c.order_batch_id ORDER BY i.order_item_id)) AS source_bound

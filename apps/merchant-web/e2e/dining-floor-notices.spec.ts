@@ -72,7 +72,7 @@ test("@production Tables board shows open time in hours or days and flags long-o
   await expect(tile("T1")).toContainText("Open 3 h 20 min");
   await expect(tile("T1")).not.toContainText("Open for a long time");
   await expect(tile("T2")).toContainText("Open 24 days");
-  await expect(tile("T2")).toContainText("Open for a long time — check the table and close");
+  await expect(tile("T2")).toContainText("Open for a long time — if the guests have left");
   await expect(tile("T3")).toContainText("No table QR code. Ask a manager to print one.");
   await expect(page.getByText(/34992|min elapsed/u)).toHaveCount(0);
   for (const width of [1440, 1024, 390]) {

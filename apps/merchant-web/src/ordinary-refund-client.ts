@@ -102,6 +102,7 @@ export interface RefundItem {
   readonly unclaimedQuantity: number;
   readonly paymentCaptured: boolean;
   readonly paymentIntentReference: string | null;
+  readonly paymentMethod: "Online" | "CardMachine" | null;
 }
 export interface RefundRequestCommand {
   readonly orderReference: string;
@@ -254,6 +255,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
             "orderBatchReference",
             "observedAt",
             "paymentState",
+            "paymentMethod",
             "currencyCode",
             "capturedAmountMinor",
             "confirmedRefundMinor",
@@ -262,6 +264,12 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
           ],
         );
         if (typeof data.canRequest !== "boolean") return fail();
+        // WP-2423 item 4: a payment taken on the store's card machine is refunded on that machine.
+        if (
+          data.paymentMethod !== "Online" &&
+          (data.paymentMethod !== "CardMachine" || data.paymentState !== "Captured")
+        )
+          return fail();
         if (
           data.paymentIntentReference !== paymentIntentReference ||
           typeof data.observedAt !== "string" ||
@@ -302,6 +310,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
           orderBatchReference: ref(data.orderBatchReference),
           observedAt: data.observedAt,
           paymentState: data.paymentState,
+          paymentMethod: data.paymentMethod as "Online" | "CardMachine",
           currencyCode: data.paymentState === "Captured" ? ("CAD" as const) : null,
           capturedAmountMinor,
           confirmedRefundMinor,
@@ -355,12 +364,29 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
             "paymentAttemptReference",
             "paymentIntentReference",
             "state",
+            "method",
+            "refundedOnCardMachineAt",
             "executionOperationReference",
             "executionApprovalReference",
             "amountMinor",
             "confirmedMinor",
             "pendingMinor",
           ]);
+          // WP-2423 item 4: refunded on the store's card machine (recorded there) or online.
+          if (entry.method !== "Online" && entry.method !== "CardMachine") return fail();
+          const cardMachine = entry.method === "CardMachine";
+          if (
+            (cardMachine &&
+              (entry.executionOperationReference !== null ||
+                (entry.state !== "NotDispatched" && entry.state !== "Confirmed"))) ||
+            ((!cardMachine || entry.state !== "Confirmed") &&
+              entry.refundedOnCardMachineAt !== null) ||
+            (cardMachine &&
+              entry.state === "Confirmed" &&
+              (typeof entry.refundedOnCardMachineAt !== "string" ||
+                !Number.isFinite(Date.parse(entry.refundedOnCardMachineAt))))
+          )
+            return fail();
           if (
             entry.state !== "NotDispatched" &&
             entry.state !== "Prepared" &&
@@ -380,7 +406,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
           )
             return fail();
           const executionOperationReference =
-            entry.state === "NotDispatched"
+            entry.state === "NotDispatched" || cardMachine
               ? entry.executionOperationReference === null
                 ? null
                 : fail()
@@ -397,6 +423,8 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
             paymentAttemptReference: ref(entry.paymentAttemptReference),
             paymentIntentReference: ref(entry.paymentIntentReference),
             state: entry.state,
+            method: entry.method as "Online" | "CardMachine",
+            refundedOnCardMachineAt: entry.refundedOnCardMachineAt as string | null,
             amountMinor,
             confirmedMinor,
             pendingMinor,
@@ -484,12 +512,16 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
               "unclaimedQuantity",
               "paymentCaptured",
               "paymentIntentReference",
+              "paymentMethod",
             ]),
             quantity = count(item.quantity, 1, 999),
             unclaimedQuantity = count(item.unclaimedQuantity, 0, quantity);
           if (
             typeof item.paymentCaptured !== "boolean" ||
-            (!item.paymentCaptured && unclaimedQuantity !== 0)
+            (!item.paymentCaptured && unclaimedQuantity !== 0) ||
+            (item.paymentCaptured
+              ? item.paymentMethod !== "Online" && item.paymentMethod !== "CardMachine"
+              : item.paymentMethod !== null)
           )
             return fail();
           return Object.freeze({
@@ -504,6 +536,8 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
               : item.paymentIntentReference === null
                 ? null
                 : fail(),
+            /** WP-2423 item 4: refunded on the store's card machine, or online. */
+            paymentMethod: item.paymentMethod as "Online" | "CardMachine" | null,
           });
         });
         if (new Set(items.map((item) => item.orderItemReference)).size !== items.length)
@@ -525,8 +559,10 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
             "amountMinor",
             "decline",
             "progress",
+            "paymentMethod",
           ]);
           if (
+            (entry.paymentMethod !== "Online" && entry.paymentMethod !== "CardMachine") ||
             !["Recorded", "Sending", "Refunded", "Declined"].includes(String(entry.progress)) ||
             (entry.progress === "Declined") !== (entry.decline !== null)
           )
@@ -578,6 +614,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
             amountMinor: money(entry.amountMinor),
             decline,
             progress: entry.progress as "Recorded" | "Sending" | "Refunded" | "Declined",
+            paymentMethod: entry.paymentMethod as "Online" | "CardMachine",
           });
         });
         if (
@@ -596,6 +633,65 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
           items: Object.freeze(items),
         });
       }, false);
+    },
+    /**
+     * WP-2423 item 4: the refund of a request was made on the store's card machine; record it.
+     * One operation per attempt (retry with the same operation after an unknown result).
+     */
+    async recordCardMachineRefund(
+      value: {
+        readonly operationReference: string;
+        readonly orderReference: string;
+        readonly requestReference: string;
+        readonly slipReference: string | null;
+        readonly refundedAt: string | null;
+      },
+      csrf: string,
+      signal?: AbortSignal,
+    ) {
+      const body = {
+        operationReference: ref(value.operationReference),
+        orderReference: ref(value.orderReference),
+        requestReference: ref(value.requestReference),
+        slipReference: value.slipReference,
+        refundedAt: value.refundedAt,
+      };
+      if (
+        (body.slipReference !== null &&
+          (!/^[A-Za-z0-9][A-Za-z0-9 #./-]{0,39}$/u.test(body.slipReference) ||
+            body.slipReference.replace(/[^0-9]/gu, "").length > 12)) ||
+        (body.refundedAt !== null && !Number.isFinite(Date.parse(body.refundedAt)))
+      )
+        return fail();
+      return boundary(async () => {
+        const data = exact(
+          await send(
+            "/merchant/payments/refunds/card-machine-record",
+            JSON.stringify(body),
+            csrf,
+            200,
+            signal,
+          ),
+          ["status", "orderReference", "requestReference", "amountMinor", "refundedAt", "receipt"],
+        );
+        if (
+          (data.status !== "Recorded" && data.status !== "AlreadyRecorded") ||
+          data.orderReference !== body.orderReference ||
+          data.requestReference !== body.requestReference ||
+          typeof data.refundedAt !== "string" ||
+          !Number.isFinite(Date.parse(data.refundedAt)) ||
+          (data.receipt !== "Issued" &&
+            data.receipt !== "NoDigitalReceipt" &&
+            data.receipt !== "NotIssued")
+        )
+          return fail();
+        return Object.freeze({
+          status: data.status as "Recorded" | "AlreadyRecorded",
+          amountMinor: money(data.amountMinor),
+          refundedAt: data.refundedAt,
+          receipt: data.receipt as "Issued" | "NoDigitalReceipt" | "NotIssued",
+        });
+      }, true);
     },
     prepareRequest(value: RefundRequestCommand) {
       const snapshot = command(value),

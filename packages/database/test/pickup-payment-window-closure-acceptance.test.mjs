@@ -14,6 +14,7 @@ import {
   createOrderTerminatedPaymentDisposition,
   createPostgresOrderExecutionReader,
   createPostgresOrderInitialExecutionReader,
+  createPostgresPaidAcceptanceLapseClosure,
   loadPickupPaymentWindowClosure,
 } from "../../rms/ordering/src/index.ts";
 import { createPickupPaymentWindowClosure } from "../../../apps/api/src/pickup-payment-window-closure.ts";
@@ -904,6 +905,128 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
         }).close({ link: open.link }),
       );
       assert.equal(dineIn.link.owner, "Dining");
+
+      // WP-2423 item 5 (Q1/Q9-G1): a paid pickup the Store did not accept in time (Ordering recorded
+      // PaidWithoutFulfillableOrder / CapacityExpired; Payment refunds it) is also ended as an
+      // Order — a System termination bound to that disposition, with revision and Audit.
+      const lapse = createPostgresPaidAcceptanceLapseClosure({
+        brandReference: brand,
+        storeReference: store,
+        authorize: async () => allowed,
+      });
+      const settledEvent = id(481);
+      const lapseInput = (paymentEventReference) => ({
+        paymentEventReference,
+        closedAt: new Date().toISOString(),
+        terminationReference: id(0x7a00 + references++),
+        auditReference: id(0x7b00 + references++),
+      });
+      const beforeLapse = await counts();
+      allowed = false;
+      await assert.rejects(scoped((tx) => lapse.close(tx, lapseInput(settledEvent))));
+      allowed = true;
+      assert.deepEqual(await counts(), beforeLapse);
+      const lapsed = await scoped((tx) => lapse.close(tx, lapseInput(settledEvent)));
+      assert.equal(lapsed.status, "Closed");
+      assert.deepEqual(await counts(), {
+        ...beforeLapse,
+        terminations: beforeLapse.terminations + 1,
+        revisions: beforeLapse.revisions + 1,
+        audits: beforeLapse.audits + 1,
+      });
+      const lapseRow = (
+        await admin.query(
+          "SELECT previous_phase,phase,actor_type,actor_id,reason_code,purpose_code,permission_code,expected_order_version,terminated_order_version FROM rms_ordering.order_termination_record WHERE order_id=$1",
+          [settled.refs.order],
+        )
+      ).rows;
+      assert.deepEqual(lapseRow, [
+        {
+          previous_phase: "Submitted",
+          phase: "Cancelled",
+          actor_type: "System",
+          actor_id: null,
+          reason_code: "ACCEPTANCE_WINDOW_EXPIRED",
+          purpose_code: "PaidOrderAcceptanceLapseClosure",
+          permission_code: "order.acceptance-window.close",
+          expected_order_version: 1,
+          terminated_order_version: 2,
+        },
+      ]);
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT actor_type,reason_code,source_channel FROM platform_audit.audit_record WHERE target_id=$1 AND action_code='ORDER_TERMINATED'",
+            [settled.refs.order],
+          )
+        ).rows,
+        [
+          {
+            actor_type: "System",
+            reason_code: "ACCEPTANCE_WINDOW_EXPIRED",
+            source_channel: "SYSTEM",
+          },
+        ],
+      );
+      const lapsedExecution = await scoped((tx) =>
+        createPostgresOrderExecutionReader({
+          brandReference: brand,
+          storeReference: store,
+          sha256: (value) => "sha256:" + sha256Hex(value),
+          authorize: async () => true,
+        }).loadByBatch({
+          transaction: tx,
+          orderReference: settled.refs.order,
+          orderBatchReference: settled.refs.batch,
+        }),
+      );
+      assert.equal(lapsedExecution.phase, "Cancelled");
+      // The customer page still reads it as "not accepted in time · refunded", not "not paid".
+      assert.equal(
+        await scoped((tx) => loadPickupPaymentWindowClosure(tx, scope, settled.refs.order)),
+        null,
+      );
+      // Replay (every inventory rescan) verifies and writes nothing.
+      const lapseAgain = await scoped((tx) => lapse.close(tx, lapseInput(settledEvent)));
+      assert.equal(lapseAgain.status, "AlreadyClosed");
+      assert.equal(lapseAgain.record.terminationReference, lapsed.record.terminationReference);
+      assert.deepEqual(await counts(), {
+        ...beforeLapse,
+        terminations: beforeLapse.terminations + 1,
+        revisions: beforeLapse.revisions + 1,
+        audits: beforeLapse.audits + 1,
+      });
+      // Another reason (a payment after the System closed it), or a dine-in round, is not this.
+      assert.deepEqual(
+        await scoped((tx) => lapse.close(tx, lapseInput(late.paymentEventReference))),
+        {
+          status: "NotEligible",
+          reason: "NotAcceptanceLapse",
+        },
+      );
+      await disposition(dineIn.refs, {
+        dispositionReference: id(580),
+        paymentEventReference: id(581),
+        paymentTransactionReference: id(582),
+        reason: "CapacityExpired",
+        sourceCheckpoint: dineIn.refs.submission,
+        sourceVersion: 1,
+        evaluatedAt: createdAt,
+      });
+      assert.deepEqual(await scoped((tx) => lapse.close(tx, lapseInput(id(581)))), {
+        status: "NotEligible",
+        reason: "NotAcceptanceLapse",
+      });
+      // Another Store cannot close it.
+      await assert.rejects(
+        scoped((tx) =>
+          createPostgresPaidAcceptanceLapseClosure({
+            brandReference: brand,
+            storeReference: id(999),
+            authorize: async () => true,
+          }).close(tx, lapseInput(settledEvent)),
+        ),
+      );
     } finally {
       for (const name of [role, other]) {
         await admin.query("DROP OWNED BY " + name);

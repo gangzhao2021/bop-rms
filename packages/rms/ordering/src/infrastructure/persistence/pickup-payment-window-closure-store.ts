@@ -375,3 +375,206 @@ export async function loadPickupPaymentWindowClosure(
   if (rows.length === 0) return null;
   return Object.freeze({ closedAt: parseOrderingInstant(rows[0]?.closed_at) });
 }
+
+/**
+ * WP-2423 item 5 (Q1/Q9-G1): code-owned System policy that closes a paid pickup Order the Store did
+ * not accept in time. Ordering already recorded the payment as PaidWithoutFulfillableOrder /
+ * CapacityExpired (the acceptance window ended, or an outage hold expired) and Payment refunds it;
+ * this ends the Order itself (Submitted → Cancelled), so it no longer reads as a live submitted
+ * order anywhere. Like the payment window closure, the window is a fixed product rule, not a
+ * Store-configurable workflow; its references identify this policy version in the history.
+ */
+export const paidAcceptanceLapseClosurePolicy = Object.freeze({
+  reasonCode: "ACCEPTANCE_WINDOW_EXPIRED",
+  purposeCode: "PaidOrderAcceptanceLapseClosure",
+  permissionCode: "order.acceptance-window.close",
+  workflowVersionReference: "019a0c00-2423-7012-8000-000000000003",
+  transitionReference: "019a0c00-2423-7012-8000-000000000004",
+} as const);
+
+/** One closure operation per Order (retries and concurrent workers resolve to the same one). */
+function lapseOperationReference(brand: string, store: string, order: string) {
+  const h = createHash("sha256")
+    .update(canonicalizeRfc8785(["PaidOrderAcceptanceLapseClosure/v1", brand, store, order]))
+    .digest("hex");
+  return parseOrderingReference(
+    order.slice(0, 14) + "7" + h.slice(0, 3) + "-8" + h.slice(3, 6) + "-" + h.slice(6, 18),
+  );
+}
+
+export type PaidAcceptanceLapseClosureResult = Readonly<
+  | { status: "Closed" | "AlreadyClosed"; record: OrderTerminationRecord }
+  /**
+   * Not a pickup acceptance lapse (another disposition or reason, or a dine-in round), the Order
+   * already ended another way, or it moved on (accepted).
+   */
+  | { status: "NotEligible"; reason: "NotAcceptanceLapse" | "Terminated" | "Accepted" }
+>;
+
+/**
+ * Closes the pickup Order of a PaidWithoutFulfillableOrder / CapacityExpired disposition as
+ * Cancelled by the System, bound to that disposition (append-only termination, revision and Audit;
+ * no refund here — Payment's compensation owns that). The caller owns the transaction (roll back on
+ * any thrown failure). Replay returns AlreadyClosed and writes nothing.
+ */
+export function createPostgresPaidAcceptanceLapseClosure(options: {
+  brandReference: string;
+  storeReference: string;
+  authorize(
+    transaction: ConsumerTransaction,
+    identity: Readonly<{ orderReference: string; orderBatchReference: string }>,
+  ): Promise<boolean>;
+}) {
+  const brand = parseOrderingReference(options.brandReference),
+    store = parseOrderingReference(options.storeReference);
+  return Object.freeze({
+    async close(
+      transaction: ConsumerTransaction,
+      value: unknown,
+    ): Promise<PaidAcceptanceLapseClosureResult> {
+      const raw = readClosedRecord(value, [
+        "paymentEventReference",
+        "closedAt",
+        "terminationReference",
+        "auditReference",
+      ]);
+      const paymentEventReference = parseOrderingReference(raw.paymentEventReference),
+        closedAt = parseOrderingInstant(raw.closedAt),
+        terminationReference = parseOrderingReference(raw.terminationReference),
+        auditReference = parseOrderingReference(raw.auditReference);
+      await scoped(transaction, brand, store);
+      // The disposition is Ordering's own append-only record, re-read here; never the caller's copy.
+      const found = await transaction.query(
+        `SELECT d.disposition_id::text AS disposition,d.order_id::text AS "orderReference",
+          d.order_batch_id::text AS "orderBatchReference",d.submission_id::text AS submission,
+          d.source_digest AS digest,d.reason,h.order_type,
+          to_char(d.evaluated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS evaluated
+        FROM rms_ordering.order_payment_disposition_record d
+        JOIN rms_ordering.order_header h ON h.brand_id=d.brand_id AND h.store_id=d.store_id AND h.order_id=d.order_id
+        WHERE d.brand_id=$1 AND d.store_id=$2 AND d.payment_event_id=$3
+          AND d.disposition='PaidWithoutFulfillableOrder' LIMIT 2`,
+        [brand, store, paymentEventReference],
+      );
+      if (found.rows.length !== 1) return fail();
+      const row = found.rows[0] ?? fail();
+      const identity = Object.freeze({
+        orderReference: parseOrderingReference(row.orderReference),
+        orderBatchReference: parseOrderingReference(row.orderBatchReference),
+      });
+      const allowed = async (tx: ConsumerTransaction) =>
+        tx === transaction && (await options.authorize(tx, identity)) === true;
+      if (!(await allowed(transaction))) return fail();
+      if (row.reason !== "CapacityExpired" || row.order_type !== "Pickup")
+        return Object.freeze({
+          status: "NotEligible" as const,
+          reason: "NotAcceptanceLapse" as const,
+        });
+      const evaluatedAt = parseOrderingInstant(row.evaluated);
+      if (closedAt < evaluatedAt) return fail();
+      const sole = await createPostgresPickupOrderCompletionLookup({
+        brandReference: brand,
+        storeReference: store,
+        authorize: async (tx) => allowed(tx),
+      }).loadByOrder({ transaction, orderReference: identity.orderReference });
+      if (
+        sole === null ||
+        sole.orderBatchReference !== identity.orderBatchReference ||
+        sole.submissionReference !== parseOrderingReference(row.submission)
+      )
+        return fail();
+      const operationReference = lapseOperationReference(brand, store, identity.orderReference);
+      const terminal = await transaction.query(
+        "SELECT operation_id::text AS operation,termination_id::text AS termination FROM rms_ordering.order_termination_record WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 LIMIT 2",
+        [brand, store, identity.orderReference],
+      );
+      if (terminal.rows.length > 1) return fail();
+      if (terminal.rows.length === 1) {
+        if (terminal.rows[0]?.operation !== operationReference)
+          return Object.freeze({ status: "NotEligible" as const, reason: "Terminated" as const });
+        const prior = await transaction.query(
+          'SELECT termination_id AS "terminationReference",operation_id AS "operationReference",brand_id AS "brandReference",store_id AS "storeReference",order_id AS "orderReference",order_batch_id AS "orderBatchReference",expected_order_version AS "expectedOrderVersion",terminated_order_version AS "terminatedOrderVersion",expected_source_checkpoint AS "expectedSourceCheckpoint",previous_phase AS "previousPhase",phase,actor_type AS "actorType",actor_id AS "actorReference",purpose_code AS "purposeCode",permission_code AS "permissionCode",reason_code AS "reasonCode",workflow_version_id AS "workflowVersionReference",transition_id AS "transitionReference",source_digest AS "sourceDigest",terminated_at AS "terminatedAt" FROM rms_ordering.order_termination_record WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3',
+          [brand, store, operationReference],
+        );
+        const original = prior.rows[0];
+        const record = parseOrderTerminationRecord({
+          ...original,
+          terminatedAt:
+            original?.terminatedAt instanceof Date
+              ? original.terminatedAt.toISOString()
+              : original?.terminatedAt,
+        });
+        if (
+          prior.rows.length !== 1 ||
+          record.reasonCode !== paidAcceptanceLapseClosurePolicy.reasonCode ||
+          record.actorType !== "System" ||
+          !(await allowed(transaction))
+        )
+          return fail();
+        return Object.freeze({ status: "AlreadyClosed" as const, record });
+      }
+      const execution = await createPostgresOrderInitialExecutionReader({
+        brandReference: brand,
+        storeReference: store,
+        authorize: async (tx) => allowed(tx),
+      }).loadByBatch({ transaction, ...identity });
+      if (execution.phase !== "Submitted")
+        return Object.freeze({ status: "NotEligible" as const, reason: "Accepted" as const });
+      if (closedAt < execution.occurredAt) return fail();
+      const policy = paidAcceptanceLapseClosurePolicy;
+      const record = parseOrderTerminationRecord({
+        terminationReference,
+        operationReference,
+        brandReference: brand,
+        storeReference: store,
+        orderReference: identity.orderReference,
+        orderBatchReference: identity.orderBatchReference,
+        expectedOrderVersion: execution.version,
+        terminatedOrderVersion: execution.version + 1,
+        expectedSourceCheckpoint: execution.checkpoint,
+        previousPhase: "Submitted",
+        phase: "Cancelled",
+        actorType: "System",
+        actorReference: null,
+        purposeCode: policy.purposeCode,
+        permissionCode: policy.permissionCode,
+        reasonCode: policy.reasonCode,
+        workflowVersionReference: policy.workflowVersionReference,
+        transitionReference: policy.transitionReference,
+        sourceDigest: sha256({
+          kind: "PaidOrderAcceptanceLapseClosure/v1",
+          dispositionReference: row.disposition,
+          dispositionDigest: row.digest,
+          paymentEventReference,
+        }),
+        terminatedAt: closedAt,
+      });
+      const result = await createPostgresOrderTerminationStore({
+        brandReference: brand,
+        storeReference: store,
+        authorize: async (tx, candidate) =>
+          candidate.operationReference === operationReference && (await allowed(tx)),
+        validateCurrentSource: async (tx, candidate) =>
+          tx === transaction && candidate.operationReference === operationReference,
+        audit: async (candidate) => ({
+          auditId: auditReference,
+          brandId: brand,
+          storeId: store,
+          actor: { type: "System" },
+          actionCode: "ORDER_TERMINATED",
+          targetType: "Order",
+          targetId: candidate.orderReference,
+          correlationId: candidate.operationReference,
+          reasonCode: candidate.reasonCode,
+          occurredAt: candidate.terminatedAt,
+          sourceChannel: "SYSTEM",
+          afterSummary: { phase: candidate.phase },
+          dataClassification: "Restricted",
+          retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+          retentionPolicyVersion: 1,
+        }),
+      }).commit({ transaction, record });
+      if (result.status !== "Created" || !(await allowed(transaction))) return fail();
+      return Object.freeze({ status: "Closed" as const, record: result.record });
+    },
+  });
+}

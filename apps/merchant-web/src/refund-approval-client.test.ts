@@ -23,6 +23,7 @@ const entry = {
   orderNumber: "A-0042",
   requestReference: id(2),
   paymentIntentReferences: [id(3)],
+  paymentMethod: "Online",
   currencyCode: "CAD",
   amountMinor: "12500",
   reasonCode: "WRONG_ITEM",

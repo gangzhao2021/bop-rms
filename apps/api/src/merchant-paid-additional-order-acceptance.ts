@@ -61,6 +61,30 @@ export function createMerchantPaidAdditionalOrderAcceptance(
   const digest = (current: Context) =>
     hash(encodeAdditionalDiningBatchSnapshot(current.execution.snapshot));
   return Object.freeze({
+    /**
+     * WP-2423 (staff card-machine rounds): the batch's current Order version and acceptance, read
+     * from the same paid context the commit checks, so a server-side acceptance names the version
+     * the Order is at now (a table Order moves with every other round).
+     */
+    async current(input: { transaction: ConsumerTransaction; paymentEvent: unknown }) {
+      if (!(await options.authorizeActor(input.transaction))) return unavailable();
+      const event = parsePaymentSucceededEnvelope(input.paymentEvent);
+      if (event.tenantId !== scope.brandReference || event.storeId !== scope.storeReference)
+        return unavailable();
+      const current = await options.context.resolve(input.transaction, event);
+      const accepted = current.execution.acceptance;
+      return Object.freeze({
+        orderVersion: current.execution.orderVersion,
+        acceptance:
+          accepted === null
+            ? null
+            : Object.freeze({
+                acceptanceReference: String(accepted.acceptanceReference),
+                operationReference: String(accepted.operationReference),
+                acceptedOrderVersion: accepted.acceptedOrderVersion,
+              }),
+      });
+    },
     async commit(input: {
       transaction: ConsumerTransaction;
       command: unknown;

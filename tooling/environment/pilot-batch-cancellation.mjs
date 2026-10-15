@@ -99,7 +99,8 @@ export async function createInternalBatchCancellation(
       if (
         !active() ||
         !sameScope(expiry) ||
-        expiry.status !== "PaymentFailed" ||
+        // WP-2423: a failed payment, or none ever started (the service proved it from Payment).
+        (expiry.status !== "PaymentFailed" && expiry.status !== "AwaitingPaymentResolution") ||
         !evidence.progress.kitchenEvidenceComplete
       )
         return unavailable();

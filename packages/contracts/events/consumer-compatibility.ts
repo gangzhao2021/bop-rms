@@ -713,6 +713,14 @@ export const eventConsumerContracts = defineEventConsumerContracts([
     "store",
     "replace_order_status_projection",
   ),
+  // WP-2423: the status projection records the Order version of an unpaid round's cancellation.
+  contract(
+    "ordering.order-status-projection",
+    "@rms/ordering",
+    "OrderCancelled",
+    "store",
+    "advance_order_status_projection",
+  ),
   contract(
     "ordering.payment-outcome",
     "@rms/ordering",

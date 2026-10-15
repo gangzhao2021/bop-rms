@@ -6,6 +6,7 @@ import {
   estimatedLineMinor,
   paidAtInstant,
   StaffOrderEntryPage,
+  paymentWindowNotice,
 } from "./StaffOrderEntryPage.js";
 import {
   CounterOrderClientError,
@@ -207,6 +208,35 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
         takenAt: null,
       }),
     ).rejects.toMatchObject({ code: "AmountChanged", totalMinor: "1310" });
+    // WP-2423 D1: the server says whether it sent the paid order to the kitchen with the record.
+    const recorded = {
+      status: "Recorded",
+      orderReference: id(20),
+      orderBatchReference: id(21),
+      amountMinor: "1280",
+      recordingReason: "AtCounter",
+      takenAt: "2026-10-13T18:01:00.000Z",
+      recordedAt: "2026-10-13T18:01:00.000Z",
+    };
+    const payWith = (body: unknown) =>
+      createCounterOrderClient(
+        "a".repeat(43),
+        (async () =>
+          new Response(JSON.stringify(body), { status: 200 })) as unknown as typeof fetch,
+      ).recordPayment({
+        operationReference: id(31),
+        orderReference: id(20),
+        orderBatchReference: id(21),
+        expectedTotalMinor: "1280",
+        slipReference: null,
+        takenAt: null,
+      });
+    for (const acceptance of ["Accepted", "NotAccepted"] as const)
+      expect((await payWith({ ...recorded, acceptance })).acceptance).toBe(acceptance);
+    await expect(payWith(recorded)).rejects.toBeInstanceOf(CounterOrderClientError);
+    await expect(payWith({ ...recorded, acceptance: "Maybe" })).rejects.toBeInstanceOf(
+      CounterOrderClientError,
+    );
   });
 
   it("starts by loading the menu", () => {
@@ -293,5 +323,50 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
     );
     expect(markup).toContain("Table order");
     expect(markup).not.toContain("Counter order");
+  });
+});
+
+describe("WP-2423 item 5: warns before the time to record the payment ends", () => {
+  const payBy = "2026-10-15T16:30:00.000Z";
+  const at = (iso: string) => Date.parse(iso);
+  it("tells staff the time, then the minutes left, then what happened", () => {
+    expect(
+      paymentWindowNotice({
+        payBy,
+        now: at("2026-10-15T16:05:00.000Z"),
+        tableMode: true,
+        timeZone: "UTC",
+      }),
+    ).toEqual({
+      tier: "warning",
+      ended: false,
+      text: "Record the payment by 16:30. The kitchen starts this order once it is recorded here; if it isn't recorded by then, the round is cancelled.",
+    });
+    expect(
+      paymentWindowNotice({
+        payBy,
+        now: at("2026-10-15T16:22:10.000Z"),
+        tableMode: true,
+        timeZone: "UTC",
+      }),
+    ).toEqual({
+      tier: "urgent",
+      ended: false,
+      text: "8 min left: record the payment by 16:30 or this round is cancelled and its items go back to stock.",
+    });
+    const ended = paymentWindowNotice({ payBy, now: at(payBy), tableMode: true, timeZone: "UTC" });
+    expect(ended).toMatchObject({ tier: "urgent", ended: true });
+    expect(ended.text).toContain("It was not sent to the kitchen and is cancelled automatically");
+    expect(ended.text).toContain("refund it on the machine");
+    expect(
+      paymentWindowNotice({
+        payBy,
+        now: at("2026-10-15T16:25:00.000Z"),
+        tableMode: false,
+        timeZone: "UTC",
+      }).text,
+    ).toBe(
+      "5 min left: record the payment by 16:30 or the order is released and its items go back to stock.",
+    );
   });
 });

@@ -79,6 +79,7 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 - `OptionSetPublicationReleaseRecorded:v1` — owner `@rms/catalog`; experimental; brand; indirect_identifier
 - `OptionSetReviewContentRecorded:v1` — owner `@rms/catalog`; experimental; brand; indirect_identifier
 - `OrderAmended:v1` — owner `@rms/ordering`; stable; store; indirect_identifier
+- `OrderCancelled:v1` — owner `@rms/ordering`; experimental; store; indirect_identifier
 - `OrderConfirmed:v1` — owner `@rms/ordering`; stable; store; indirect_identifier
 - `OrderCreated:v1` — owner `@rms/ordering`; stable; store; indirect_identifier
 - `OrderSubmitted:v1` — owner `@rms/ordering`; experimental; store; indirect_identifier
