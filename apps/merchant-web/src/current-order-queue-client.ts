@@ -89,6 +89,19 @@ function parseStaffCancellation(value: unknown, submittedAt: string) {
     refundAmountMinor: refundAmountMinor as string | null,
   });
 }
+/** WP-2423 Q7 slice 2: a dine-in round staff entered for the table, and its card-machine payment. */
+function parseStaffRound(value: unknown, orderType: unknown) {
+  if (value === null) return null;
+  const raw = exact(value, ["recordedAfterOutage", "paidOnCardMachine"]);
+  if (typeof raw.recordedAfterOutage !== "boolean" || orderType !== "DineIn") return fail();
+  let paid = null;
+  if (raw.paidOnCardMachine !== null) {
+    const p = exact(raw.paidOnCardMachine, ["amountMinor", "takenAt"]);
+    if (typeof p.amountMinor !== "string" || !minorPattern.test(p.amountMinor)) return fail();
+    paid = Object.freeze({ amountMinor: p.amountMinor, takenAt: instant(p.takenAt) });
+  }
+  return Object.freeze({ recordedAfterOutage: raw.recordedAfterOutage, paidOnCardMachine: paid });
+}
 /** WP-2423 Q7: a pickup order staff took at the counter, and its card-machine payment. */
 function parseCounter(value: unknown, sourceChannel: unknown) {
   if (value === null || value === undefined) return null;
@@ -315,6 +328,8 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
     const batches = item.batches.map((value) => {
       const withPaymentDue =
         value !== null && typeof value === "object" && Object.hasOwn(value, "paymentDue");
+      const withStaffRound =
+        value !== null && typeof value === "object" && Object.hasOwn(value, "staffRound");
       const batch = exact(value, [
         "orderBatchReference",
         "sequence",
@@ -324,7 +339,9 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         "staffCancellation",
         "canCancelItems",
         ...(withPaymentDue ? ["paymentDue"] : []),
+        ...(withStaffRound ? ["staffRound"] : []),
       ]);
+      const staffRound = parseStaffRound(batch.staffRound ?? null, item.orderType);
       const orderBatchReference = reference(batch.orderBatchReference);
       const staffCancellation = parseStaffCancellation(batch.staffCancellation, submittedAt);
       if (withPaymentDue && batch.paymentDue === undefined) return fail();
@@ -399,6 +416,8 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         canCancelItems: batch.canCancelItems,
         /** WP-2423: this dine-in round is unpaid; when its payment failed, when it is cancelled. */
         paymentDue,
+        /** WP-2423 Q7 slice 2: staff entered this round for the table; its card-machine payment. */
+        staffRound,
       });
     });
     const counter = parseCounter(item.counter, item.sourceChannel);

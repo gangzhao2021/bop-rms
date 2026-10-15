@@ -1,6 +1,7 @@
 import { StatePanel } from "@bop-rms/ui";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
+import { createDiningSessionClient } from "./dining-session-client.js";
 import { validSlipReference } from "./CardMachineRefundAction.js";
 import { createOrderAcceptanceClient } from "./order-acceptance-client.js";
 import { orderMoney } from "./order-money.js";
@@ -23,6 +24,8 @@ interface Line {
   readonly item: CounterMenuItem;
   readonly quantity: number;
   readonly options: readonly { optionReference: string; name: string; quantity: number }[];
+  /** WP-2423 Q7 slice 2: the guest's note for the kitchen (table rounds only). */
+  readonly note?: string | null;
 }
 
 /** What staff see for an item: about its base price plus chosen options (the order total decides). */
@@ -64,14 +67,33 @@ const menuError: Record<string, [string, string]> = {
     "Counter orders are not available to you",
     "Taking an order for a customer needs the staff ordering permission at this store.",
   ],
+  TableUnavailable: [
+    "This table can't take an order now",
+    "It may be marked unavailable or its session may be closing. Check it on the Tables page.",
+  ],
+  TableUnknown: ["Table not found", "Open the table from the Tables page to take its order."],
   Unavailable: [
     "The menu could not be loaded",
     "Check the connection and try again. If the system stays down, take the order on paper and record it here afterwards.",
   ],
 };
 
-function placeErrorText(error: CounterOrderClientError, lines: readonly Line[]) {
+function placeErrorText(
+  error: CounterOrderClientError,
+  lines: readonly Line[],
+  table: string | null = null,
+) {
   switch (error.code) {
+    case "TableCartHasItems":
+      return `Guests at this table have items in their shared cart that haven't been sent${
+        error.pendingItems.length > 0
+          ? ` (${error.pendingItems.map((item) => `${item.quantity} × ${item.name}`).join(", ")})`
+          : ""
+      }. Ask them to send or remove those items on their phone, then send this order again.`;
+    case "TableCheckoutInProgress":
+      return "A guest at this table is paying on their phone right now. Wait a minute, then send again.";
+    case "TableUnavailable":
+      return `${table ?? "This table"} can't take an order now (marked unavailable, or its session is closing). Check the table on the Tables page.`;
     case "ItemUnavailable": {
       const line = error.lineIndex === null ? undefined : lines[error.lineIndex];
       return line
@@ -79,7 +101,9 @@ function placeErrorText(error: CounterOrderClientError, lines: readonly Line[]) 
         : "An item can't be sold right now. Check the order and send again.";
     }
     case "StoreNotTakingOrders":
-      return "Pickup hours are over, so the counter can't take a new order now. A paper order taken earlier can still be entered under Paper order.";
+      return table !== null
+        ? "The store is closed, so no new table orders can be taken now. A paper order taken earlier can still be entered under Paper order."
+        : "Pickup hours are over, so the counter can't take a new order now. A paper order taken earlier can still be entered under Paper order.";
     case "NotPriced":
       return "This order could not be priced. Check the items and options and send again.";
     case "NotFinished":
@@ -153,6 +177,16 @@ export function StaffOrderEntryPage({
   readonly fetcher?: typeof fetch | undefined;
 }) {
   const client = useMemo(() => createCounterOrderClient(csrf, fetcher), [csrf, fetcher]);
+  // WP-2423 Q7 slice 2 (DEC-STAFF-DINE-IN-ROUND): opened from the Tables page for one table.
+  const [searchParams] = useSearchParams();
+  const requestedTable = searchParams.get("table");
+  const tableReference =
+    requestedTable !== null &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(requestedTable)
+      ? requestedTable
+      : null;
+  const tableMode = requestedTable !== null;
+  const [tableLabel, setTableLabel] = useState<string | null>(null);
   const [menu, setMenu] = useState<
     { kind: "Loading" } | { kind: "Error"; code: string } | { kind: "Ready"; menu: CounterMenu }
   >({ kind: "Loading" });
@@ -162,6 +196,7 @@ export function StaffOrderEntryPage({
     item: CounterMenuItem;
     choices: Record<string, string[]>;
     quantity: number;
+    note: string;
   } | null>(null);
   const [tip, setTip] = useState<"0" | "10" | "15" | "18" | "Custom">("0");
   const [customTip, setCustomTip] = useState("");
@@ -181,9 +216,31 @@ export function StaffOrderEntryPage({
   useEffect(() => {
     const controller = new AbortController();
     setMenu({ kind: "Loading" });
-    client
-      .loadMenu(controller.signal)
-      .then((value) => {
+    if (tableMode && tableReference === null) {
+      setMenu({ kind: "Error", code: "TableUnknown" });
+      return () => controller.abort();
+    }
+    const loadTable = async () => {
+      if (tableReference === null) return;
+      // The table's name as staff know it, from the Tables list (paged, at most 500 tables).
+      const tables = createDiningSessionClient(fetcher);
+      let after: string | null = null;
+      for (let page = 0; page < 10; page += 1) {
+        const result = await tables.tables(csrf, after, controller.signal);
+        const found = result.items.find((table) => table.tableReference === tableReference);
+        if (found !== undefined) {
+          if (found.lifecycle !== "Published" || found.operationalState !== "Available")
+            throw new CounterOrderClientError("TableUnavailable");
+          setTableLabel(found.stableLabel);
+          return;
+        }
+        if (result.next === null) break;
+        after = result.next;
+      }
+      throw new CounterOrderClientError("TableUnavailable");
+    };
+    Promise.all([client.loadMenu(controller.signal, tableMode ? "DineIn" : "Pickup"), loadTable()])
+      .then(([value]) => {
         if (!controller.signal.aborted) setMenu({ kind: "Ready", menu: value });
       })
       .catch((error: unknown) => {
@@ -191,13 +248,14 @@ export function StaffOrderEntryPage({
         setMenu({
           kind: "Error",
           code:
-            error instanceof CounterOrderClientError && error.code === "PermissionDenied"
-              ? "PermissionDenied"
+            error instanceof CounterOrderClientError &&
+            (error.code === "PermissionDenied" || error.code === "TableUnavailable")
+              ? error.code
               : "Unavailable",
         });
       });
     return () => controller.abort();
-  }, [client, reload]);
+  }, [client, reload, csrf, fetcher, tableMode, tableReference]);
   useEffect(() => {
     if (phase === "Charge") chargeHeading.current?.focus();
   }, [phase]);
@@ -236,19 +294,29 @@ export function StaffOrderEntryPage({
     setPhase("Sending");
     setProblem(null);
     try {
-      const order = await client.placeOrder({
-        operationReference: placeOperation.current,
-        lines: lines.map((line) => ({
-          sellableReference: line.item.sellableReference,
-          quantity: line.quantity,
-          optionSelections: line.options.map((option) => ({
-            optionReference: option.optionReference,
-            quantity: option.quantity,
-          })),
+      const chosen = lines.map((line) => ({
+        sellableReference: line.item.sellableReference,
+        quantity: line.quantity,
+        optionSelections: line.options.map((option) => ({
+          optionReference: option.optionReference,
+          quantity: option.quantity,
         })),
-        tip: chosenTip,
-        recordedAfterOutage: paper,
-      });
+      }));
+      const order =
+        tableReference !== null
+          ? await client.placeTableRound({
+              operationReference: placeOperation.current,
+              tableReference,
+              lines: chosen.map((line, index) => ({ ...line, note: lines[index]?.note ?? null })),
+              tip: chosenTip,
+              recordedAfterOutage: paper,
+            })
+          : await client.placeOrder({
+              operationReference: placeOperation.current,
+              lines: chosen,
+              tip: chosenTip,
+              recordedAfterOutage: paper,
+            });
       setPlaced(order);
       payOperation.current = null;
       setPhase("Charge");
@@ -261,7 +329,9 @@ export function StaffOrderEntryPage({
       // order); anything else starts over as a new order.
       if (failure.code !== "OutcomeUnknown" && failure.code !== "InProgress")
         placeOperation.current = null;
-      setProblem(placeErrorText(failure, lines));
+      setProblem(
+        placeErrorText(failure, lines, tableLabel === null ? null : `Table ${tableLabel}`),
+      );
       setPhase("Building");
     }
   };
@@ -308,9 +378,13 @@ export function StaffOrderEntryPage({
       // A paper order was usually made and handed over already; it still goes through the list so
       // its records close, and nothing expires or is refunded by mistake.
       setPaidNote(
-        placed.recordedAfterOutage
-          ? "Recorded after the outage and accepted. If it was already made and handed over, mark it ready in Kitchen and handed over in Pickup."
-          : "Paid and sent to the kitchen.",
+        tableMode
+          ? placed.recordedAfterOutage
+            ? "Recorded after the outage and added to the table's order. If it was already made and served, mark it ready in Kitchen and served on the order."
+            : "Paid and sent to the kitchen. It shows on the table's order as entered by staff."
+          : placed.recordedAfterOutage
+            ? "Recorded after the outage and accepted. If it was already made and handed over, mark it ready in Kitchen and handed over in Pickup."
+            : "Paid and sent to the kitchen.",
       );
     } catch {
       setPaidNote(
@@ -334,9 +408,14 @@ export function StaffOrderEntryPage({
     setPhase("Building");
   };
 
+  const pageTitle = tableMode
+    ? tableLabel === null
+      ? "Table order"
+      : `Table ${tableLabel} order`
+    : "Counter order";
   if (menu.kind === "Loading")
     return (
-      <WorkspacePage title="Counter order" meta={storeLabel}>
+      <WorkspacePage title={pageTitle} meta={storeLabel}>
         <StatePanel heading="Loading the menu" status>
           <p>Loading what the store sells now…</p>
         </StatePanel>
@@ -345,13 +424,15 @@ export function StaffOrderEntryPage({
   if (menu.kind === "Error") {
     const [heading, text] = menuError[menu.code] ?? (menuError.Unavailable as [string, string]);
     return (
-      <WorkspacePage title="Counter order" meta={storeLabel}>
+      <WorkspacePage title={pageTitle} meta={storeLabel}>
         <StatePanel heading={heading} tone="error" status>
           <p>{text}</p>
           {menu.code === "Unavailable" ? (
             <button type="button" onClick={() => setReload((value) => value + 1)}>
               Try again
             </button>
+          ) : tableMode ? (
+            <Link to="/operations/dining">Back to Tables</Link>
           ) : (
             <Link to="/app">Back to home</Link>
           )}
@@ -363,8 +444,12 @@ export function StaffOrderEntryPage({
   const ordering = phase === "Building" || phase === "Sending";
   return (
     <WorkspacePage
-      title="Counter order"
-      meta={`${storeLabel} · Pickup · paid on the store's card machine`}
+      title={pageTitle}
+      meta={
+        tableMode
+          ? `${storeLabel} · Dine-in · added to the table's order · paid on the store's card machine`
+          : `${storeLabel} · Pickup · paid on the store's card machine`
+      }
       className="counter-order"
     >
       <div className="counter-order__layout">
@@ -389,7 +474,7 @@ export function StaffOrderEntryPage({
                       disabled={!item.available || !ordering || item.priceMinor === null}
                       aria-label={`Add ${item.name}`}
                       onClick={() =>
-                        setChoosing({ item, choices: defaultChoices(item), quantity: 1 })
+                        setChoosing({ item, choices: defaultChoices(item), quantity: 1, note: "" })
                       }
                     >
                       Add
@@ -429,6 +514,7 @@ export function StaffOrderEntryPage({
                     item: choosing.item,
                     quantity: choosing.quantity,
                     options,
+                    note: tableMode && choosing.note.trim() !== "" ? choosing.note.trim() : null,
                   },
                 ]);
                 setChoosing(null);
@@ -495,6 +581,19 @@ export function StaffOrderEntryPage({
                   }
                 />
               </label>
+              {tableMode ? (
+                <label className="counter-order__note">
+                  Note for the kitchen (optional)
+                  <input
+                    value={choosing.note}
+                    maxLength={140}
+                    autoComplete="off"
+                    onChange={(event) =>
+                      setChoosing({ ...choosing, note: event.currentTarget.value })
+                    }
+                  />
+                </label>
+              ) : null}
               <div className="card-actions">
                 <button type="submit" disabled={!choicesComplete(choosing.item, choosing.choices)}>
                   Add to order
@@ -521,6 +620,7 @@ export function StaffOrderEntryPage({
                           · {line.options.map((option) => option.name).join(", ")}
                         </span>
                       ) : null}
+                      {line.note ? <span className="bop-muted"> · Note: {line.note}</span> : null}
                     </span>
                     <span>{each === null ? "" : cad(each.toString())}</span>
                     <button
@@ -620,6 +720,12 @@ export function StaffOrderEntryPage({
               </p>
             ) : null}
           </fieldset>
+          {tableMode && ordering ? (
+            <p className="field-hint">
+              Sending gives this order its own table code, so a table code you handed out that
+              hasn&apos;t been used yet stops working. Guests already at the table stay joined.
+            </p>
+          ) : null}
           {problem !== null && ordering ? <p role="alert">{problem}</p> : null}
           {ordering ? (
             <div className="card-actions">
@@ -643,7 +749,9 @@ export function StaffOrderEntryPage({
           >
             <h2 id="counter-charge" ref={chargeHeading} tabIndex={-1}>
               {phase === "Paid" || phase === "Accepted"
-                ? `Order ${placed.orderNumber} paid`
+                ? tableMode
+                  ? `Table ${placed.tableLabel ?? tableLabel ?? ""} order paid`
+                  : `Order ${placed.orderNumber} paid`
                 : `Charge ${cad(placed.totalMinor)} on the card machine`}
             </h2>
             <dl>
@@ -669,8 +777,9 @@ export function StaffOrderEntryPage({
             {phase === "Charge" || phase === "Recording" ? (
               <>
                 <p className="order-accept-by" data-tier="warning" role="note">
-                  Record the payment by {storeTime(placed.payBy, timeZone)}. If it isn&apos;t paid
-                  by then the order is released and its items go back to stock.
+                  {tableMode
+                    ? `Record the payment by ${storeTime(placed.payBy, timeZone)}. The kitchen starts this order once it is recorded here.`
+                    : `Record the payment by ${storeTime(placed.payBy, timeZone)}. If it isn't paid by then the order is released and its items go back to stock.`}
                 </p>
                 <form
                   onSubmit={(event) => {
@@ -720,8 +829,9 @@ export function StaffOrderEntryPage({
                   </div>
                 </form>
                 <p className="bop-muted">
-                  Card declined? Try another card. Not paying? Leave it: the order is released at{" "}
-                  {storeTime(placed.payBy, timeZone)}.
+                  {tableMode
+                    ? `Card declined? Try another card. Nothing goes to the kitchen until this is recorded; after ${storeTime(placed.payBy, timeZone)} it can no longer be paid here and must be sent again.`
+                    : `Card declined? Try another card. Not paying? Leave it: the order is released at ${storeTime(placed.payBy, timeZone)}.`}
                 </p>
               </>
             ) : (
@@ -729,8 +839,9 @@ export function StaffOrderEntryPage({
                 <p role="status">{paidNote ?? "Paid on the card machine."}</p>
                 <div className="card-actions">
                   <button type="button" onClick={startOver}>
-                    New counter order
+                    {tableMode ? "Another order for this table" : "New counter order"}
                   </button>
+                  {tableMode ? <Link to="/operations/dining">Back to Tables</Link> : null}
                   <Link to="/operations/orders">Open Orders</Link>
                 </div>
               </>

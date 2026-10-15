@@ -10,7 +10,12 @@ import { createPersistentMerchantOrderExceptions } from "../../apps/api/dist/per
 import { createPersistentMerchantSettlement } from "../../apps/api/dist/persistent-merchant-settlement.js";
 import { createPersistentMerchantOperationsAlerts } from "../../apps/api/dist/merchant-operations-alerts.js";
 import { createPersistentMerchantStoreReports } from "../../apps/api/dist/persistent-merchant-store-reports.js";
-import { dailySettlementRunReference } from "./pilot-daily-settlement-reference.mjs";
+import {
+  dailySettlementRunReference,
+  dailySettlementRecheckRunReference,
+  dailySettlementRecheckLimit,
+  dailySettlementDayEnd,
+} from "./pilot-daily-settlement-reference.mjs";
 import { createPostgresPublishedStoreOperatingStatusReader } from "../../packages/rms/store/src/index.ts";
 import { createMerchantCompensationReconciliationQuery } from "../../apps/api/dist/merchant-compensation-reconciliation-query.js";
 import { createMerchantCompensationReconciliationCommand } from "../../apps/api/dist/merchant-compensation-reconciliation-command.js";
@@ -110,6 +115,7 @@ export async function createInternalMerchant(
     createInternalTableQr,
     createInternalStaffPinCredentials,
     readOperationsAlertBoard,
+    loadDailySettlementCoverage,
   },
 ) {
   const session = await createInternalMerchantSession(resources);
@@ -402,6 +408,27 @@ export async function createInternalMerchant(
       ...persistence,
       transactions: createInternalExceptionSnapshotTransactions(resources),
     },
+    // WP-2423: a business day's totals difference names its day by the scheduler's own runs.
+    settlementDays: {
+      dayEndOf: dailySettlementDayEnd,
+      runReferences: async (scope, window) => {
+        for (const key of ["brandReference", "storeReference"])
+          if (scope[key] !== selected[key]) throw new Error("INTERNAL_EXCEPTION_SCOPE_DENIED");
+        const day = {
+          brandReference: scope.brandReference,
+          storeReference: scope.storeReference,
+          businessDate: window.businessDate,
+          startsAt: window.startsAt,
+          endsAt: window.endsAt,
+        };
+        return {
+          original: dailySettlementRunReference(day).runReference,
+          rechecks: Array.from({ length: dailySettlementRecheckLimit }, (_, n) =>
+            dailySettlementRecheckRunReference(day, n + 1),
+          ),
+        };
+      },
+    },
     metadata: async (tx, { scope, storeLabel, sources }) => {
       if (
         scope.tenantReference !== selected.tenantReference ||
@@ -531,6 +558,36 @@ export async function createInternalMerchant(
           endsAt: window.endsAt,
         }).runReference;
       },
+      // WP-2423: the re-check runs the settlement worker derives for that day, in order.
+      settlementRecheckRunReferences: async (scope, window) => {
+        for (const key of ["brandReference", "storeReference"])
+          if (scope[key] !== selected[key]) throw new Error("INTERNAL_SETTLEMENT_SCOPE_DENIED");
+        const day = {
+          brandReference: scope.brandReference,
+          storeReference: scope.storeReference,
+          businessDate: window.businessDate,
+          startsAt: window.startsAt,
+          endsAt: window.endsAt,
+        };
+        return Array.from({ length: dailySettlementRecheckLimit }, (_, n) =>
+          dailySettlementRecheckRunReference(day, n + 1),
+        );
+      },
+      // WP-2423: the first business day the installation's settlement coverage starts.
+      ...(loadDailySettlementCoverage === undefined
+        ? {}
+        : {
+            firstBusinessDate: async (scope) => {
+              for (const key of ["tenantReference", "brandReference", "storeReference"])
+                if (scope[key] !== selected[key])
+                  throw new Error("INTERNAL_SETTLEMENT_SCOPE_DENIED");
+              const coverage = await loadDailySettlementCoverage();
+              for (const key of ["tenantReference", "brandReference", "storeReference"])
+                if (coverage.scope[key] !== selected[key])
+                  throw new Error("INTERNAL_SETTLEMENT_SCOPE_DENIED");
+              return coverage.firstWindow.businessDate;
+            },
+          }),
     }),
   );
   // WP-2423 Q13: the operations monitor's alert board for the installation's Store (Home).
@@ -1130,6 +1187,12 @@ export async function createInternalMerchant(
               ...(counter.counterOrder === undefined
                 ? {}
                 : { counterOrder: storePresence.wrap(presenceScope, counter.counterOrder) }),
+              // WP-2423 Q7 slice 2: staff-entered dine-in rounds for a table.
+              ...(counter.staffDiningRound === undefined
+                ? {}
+                : {
+                    staffDiningRound: storePresence.wrap(presenceScope, counter.staffDiningRound),
+                  }),
             };
           })()),
       orderAcceptanceHoldRefund,

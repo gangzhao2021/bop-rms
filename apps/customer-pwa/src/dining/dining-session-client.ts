@@ -27,7 +27,8 @@ export type DiningCancellationReason =
 
 export interface DiningRound {
   readonly roundNumber: number;
-  readonly orderedBy: "You" | "AnotherGuest";
+  /** WP-2423 Q7 slice 2: "Staff" — a round staff entered for the table. */
+  readonly orderedBy: "You" | "AnotherGuest" | "Staff";
   readonly submittedAt: string;
   readonly status: DiningRoundStatus;
   readonly payment: DiningRoundPayment;
@@ -237,7 +238,7 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
     }
     return Object.freeze({
       roundNumber: index + 1,
-      orderedBy: oneOf(round.orderedBy, ["You", "AnotherGuest"] as const),
+      orderedBy: oneOf(round.orderedBy, ["You", "AnotherGuest", "Staff"] as const),
       submittedAt: time(round.submittedAt),
       status: oneOf(round.status, statuses),
       payment: oneOf(round.payment, payments),

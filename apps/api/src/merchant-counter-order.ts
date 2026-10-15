@@ -109,11 +109,15 @@ export interface CounterGuestPipeline {
       readonly sellableReference: string;
       readonly quantity: number;
       readonly optionSelections: readonly { optionReference: string; quantity: number }[];
+      /** The guest's note for the kitchen (dine-in staff rounds); none at the counter. */
+      readonly customerNote?: string | null;
       readonly requestedAt: string;
     },
   ): Promise<
     | { readonly status: "Applied"; readonly cartVersion: number }
     | { readonly status: "NotAvailable" }
+    /** Another guest at the table is paying for the table's Cart (dine-in only). */
+    | { readonly status: "CheckoutInProgress" }
   >;
   quote(
     credentials: CounterGuestCredentials,

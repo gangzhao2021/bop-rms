@@ -155,7 +155,13 @@ const settlementMissingGraceMs = 6 * 60 * 60_000;
  * reconciliation differences: owner exception source items not yet closed by a refund; settlement:
  * the daily settlement status (days with differences, and closed days still missing after 6 h).
  */
-export async function readBusinessSignals({ resources, installation, now, dependencies }) {
+export async function readBusinessSignals({
+  resources,
+  installation,
+  now,
+  dependencies,
+  settlementExceptions = null,
+}) {
   const age = (instant) => (instant === null ? 0 : Math.max(0, now - Date.parse(instant)));
   const iso = (value) =>
     value === null || value === undefined ? null : new Date(value).toISOString();
@@ -189,6 +195,13 @@ export async function readBusinessSignals({ resources, installation, now, depend
     if (after === null) break;
   }
 
+  // WP-2423: a recent clean settlement answer may be reused (see createBusinessObserver).
+  if (settlementExceptions !== null)
+    return {
+      stuckUpdates,
+      reconciliationDifferences: { count: open, oldestAgeMs: age(oldest) },
+      settlementExceptions,
+    };
   const settlement = await dependencies.readSettlementStatus({ resources, installation });
   const problems = settlement.days.filter(
     (day) =>
@@ -203,20 +216,46 @@ export async function readBusinessSignals({ resources, installation, now, depend
   };
 }
 
+/**
+ * How often business signals are read. WP-2423 (2026-10-15): a payment problem staff resolve
+ * should leave the Home within about 3 minutes (one read plus the 2 quiet minutes), so stuck
+ * updates and open payment differences — a few indexed queries — are read every minute. The
+ * day-end settlement scan (up to 31 closed days, each a Store business-day read and its
+ * settlement runs) is reread every minute only while it reports a problem, so a resolved day
+ * clears just as fast; while every day is settled it is reread every 5 minutes.
+ */
+export const BUSINESS_SIGNAL_INTERVAL_MS = 60_000;
+export const SETTLEMENT_SCAN_INTERVAL_MS = 5 * 60_000;
 /** Reads business signals every `intervalMs`, keeping one api-role resource set while it works. */
-export function createBusinessObserver({ runtimeDirectory, intervalMs = 5 * 60_000, load }) {
+export function createBusinessObserver({
+  runtimeDirectory,
+  intervalMs = BUSINESS_SIGNAL_INTERVAL_MS,
+  settlementIntervalMs = SETTLEMENT_SCAN_INTERVAL_MS,
+  load,
+}) {
   let state = null;
   let last = undefined;
   let lastAt = 0;
+  let settlement = null;
+  let settlementAt = 0;
   return async (now) => {
     if (last !== undefined && last !== "unreadable" && now - lastAt < intervalMs) return last;
     try {
       state ??= await load(runtimeDirectory);
-      last = await readBusinessSignals({ ...state, now });
+      const reuse =
+        settlement !== null && settlement.count === 0 && now - settlementAt < settlementIntervalMs
+          ? settlement
+          : null;
+      last = await readBusinessSignals({ ...state, now, settlementExceptions: reuse });
+      if (reuse === null) {
+        settlement = last.settlementExceptions;
+        settlementAt = now;
+      }
       lastAt = now;
     } catch {
       await state?.resources?.close?.().catch(() => undefined);
       state = null;
+      settlement = null;
       last = "unreadable";
     }
     return last;

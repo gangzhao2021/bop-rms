@@ -223,6 +223,41 @@ it("loads the open business day's settlement with card-machine payments, also wh
         refunded: { count: 0, amountMinor: "0", currencyCode: "CAD" },
       });
 
+      // WP-2423 (v15 Sep 19 answered 403): a day before the Store's settlement records begin is
+      // an answer naming the first covered day, after the caller's scope is resolved; the first
+      // covered day itself reads normally.
+      const covered = createPersistentMerchantSettlement({
+        persistence: {
+          ...session.persistence,
+          transactions,
+          now,
+          publication: {
+            configurationType: "STORE_CONFIGURATION",
+            purposeCode: "STORE_CONFIGURATION",
+            requiredLiveGateRequirementCodes: ["SYNTHETIC_STORE_READY"],
+          },
+        },
+        resolveConfiguration: async () => ({
+          providerAccountReference: id(20),
+          environment: "Test",
+        }),
+        settlementRunReference: async () => null,
+        firstBusinessDate: async () => today,
+      });
+      const dayBefore = new Date(Date.parse(today + "T12:00:00.000Z") - 86_400_000)
+        .toISOString()
+        .slice(0, 10);
+      await assert.rejects(
+        covered({ sessionCookie: session.sessionCookie, businessDate: dayBefore }),
+        (error) =>
+          error.code === "MERCHANT_SETTLEMENT_NOT_COVERED" && error.firstBusinessDate === today,
+      );
+      await assert.rejects(
+        covered({ sessionCookie: "not-a-session", businessDate: dayBefore }),
+        (error) => error.code !== "MERCHANT_SETTLEMENT_NOT_COVERED",
+      );
+      assert.equal((await read(covered)).businessDate, today);
+
       // The Store's order exceptions (same staff permission), measured here as the nearest
       // acceptance with a real staff session (WP-2423 query budget): the scope is resolved at the
       // start and once before the reply, not inside each owner read.

@@ -1523,6 +1523,9 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                   key={state.workspace.selectedScope.storeReference + state.csrf}
                   csrf={state.csrf}
                   storeLabel={state.workspace.selectedScope.storeLabel}
+                  canTakeOrders={state.workspace.navigation.some(
+                    (item) => item.screenId === "OPS-ORDER-ENTRY",
+                  )}
                   navigation={state.workspace.navigation.map((item) => (
                     <a
                       key={item.screenId}

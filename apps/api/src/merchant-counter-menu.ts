@@ -14,8 +14,9 @@ export class CounterMenuError extends Error {
 }
 
 /**
- * WP-2423 Q7: the counter item picker shows exactly the pickup menu a customer sees right now
- * (items, options, prices and sold-out state from the published menu and the Store's stock), so
+ * WP-2423 Q7: the counter item picker shows exactly the menu a customer sees right now (pickup at
+ * the counter; dine-in for a staff-entered table round): items, options, prices and sold-out state
+ * from the published menu and the Store's stock, so
  * staff and customers never disagree. Read under the staff ordering permission.
  */
 export function createMerchantCounterMenu(options: {
@@ -26,7 +27,11 @@ export function createMerchantCounterMenu(options: {
   locale: string;
 }) {
   const resolveScope = createMerchantStoreScope(options.persistence);
-  return async (input: { sessionCookie: unknown }): Promise<CustomerMenuFound> => {
+  return async (input: {
+    sessionCookie: unknown;
+    /** WP-2423 Q7 slice 2: a staff-entered table round sells the dine-in menu. */
+    orderType?: "Pickup" | "DineIn";
+  }): Promise<CustomerMenuFound> => {
     const scope = await options.persistence.transactions
       .run(async (transaction) => {
         const resolved = await resolveScope(
@@ -50,7 +55,7 @@ export function createMerchantCounterMenu(options: {
       result = await options.menu.getPublishedMenu({
         publicStoreReference: options.publicStoreReference(scope),
         channelCode: "CUSTOMER_PWA",
-        orderTypeCode: "PICKUP",
+        orderTypeCode: input.orderType === "DineIn" ? "DINE_IN" : "PICKUP",
         locale: options.locale,
         requestedAt: options.persistence.now(),
         searchTerm: null,

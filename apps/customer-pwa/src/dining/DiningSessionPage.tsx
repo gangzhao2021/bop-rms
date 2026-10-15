@@ -37,6 +37,12 @@ const paymentText: Readonly<Record<DiningRoundPayment, string>> = {
   Refunded: "Refunded",
   RefundPending: "Refund on its way",
 };
+/** WP-2423 Q7 slice 2: who ordered a round, in the guest's words (never a staff name). */
+const orderedByText: Readonly<Record<DiningRound["orderedBy"], string>> = {
+  You: "Ordered by you",
+  AnotherGuest: "Ordered by another guest",
+  Staff: "Entered by staff",
+};
 const settled: ReadonlySet<DiningRoundStatus> = new Set([
   "NotPaidCancelled",
   "StoreCancelled",
@@ -78,7 +84,9 @@ function RoundNote({ round }: { readonly round: DiningRound }) {
       <p>
         {round.orderedBy === "You"
           ? "Finish paying for this round so the kitchen can start it."
-          : "The kitchen starts this round once it is paid."}
+          : round.orderedBy === "Staff"
+            ? "Staff entered this round for your table. Pay them on the card machine and the kitchen starts it."
+            : "The kitchen starts this round once it is paid."}
       </p>
     );
   return null;
@@ -89,8 +97,7 @@ function RoundCard({ round }: { readonly round: DiningRound }) {
   return (
     <article className="order-status__card order-status__batch" aria-labelledby={headingId}>
       <h3 id={headingId}>
-        Round {round.roundNumber} ·{" "}
-        {round.orderedBy === "You" ? "Ordered by you" : "Ordered by another guest"}
+        Round {round.roundNumber} · {orderedByText[round.orderedBy]}
       </h3>
       <dl className="dining-session__round-facts">
         <div>

@@ -227,7 +227,12 @@ export {
   createPostgresPaymentCompensationActionOutcomeEvidence,
 } from "./infrastructure/persistence/payment-compensation-provider-evidence.js";
 
-export { createPostgresPaymentReconciliationExceptionSource } from "./infrastructure/persistence/payment-reconciliation-exception-source.js";
+export {
+  createPostgresPaymentReconciliationExceptionSource,
+  createPostgresPaymentReconciliationExceptionDetailReader,
+  paymentReconciliationExceptionDetailLimit,
+  type PaymentReconciliationExceptionDetail,
+} from "./infrastructure/persistence/payment-reconciliation-exception-source.js";
 
 export {
   createPostgresPaymentReconciliationRunSource,
@@ -239,6 +244,8 @@ export {
   createPostgresPaymentReconciliationDaySource,
   paymentReconciliationDayDifferenceLimit,
   paymentReconciliationDaySettlementCheckLimit,
+  paymentReconciliationDayRecheckLimit,
+  paymentReconciliationDayAdditionalCheckLimit,
   type PaymentReconciliationDay,
   type PaymentReconciliationDayRun,
   type PaymentReconciliationDayCheck,

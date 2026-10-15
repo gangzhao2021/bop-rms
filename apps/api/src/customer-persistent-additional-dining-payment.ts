@@ -151,6 +151,23 @@ export function createCustomerPersistentAdditionalDiningPayment(
     });
   }
   return Object.freeze({
+    /** WP-2423 Q7 slice 2: submit the round and start its clock without a Provider call. */
+    async prepare(value: unknown) {
+      const raw = readClosedRecord(value, [
+        "sessionCredential",
+        "csrfCredential",
+        "checkoutSessionReference",
+        "selectionReference",
+        "tip",
+      ]);
+      return (
+        await compose({
+          sessionCredential: raw.sessionCredential,
+          csrfCredential: raw.csrfCredential,
+          checkoutSessionReference: raw.checkoutSessionReference,
+        })
+      ).prepare(value);
+    },
     async create(value: unknown) {
       const raw = readClosedRecord(value, [
         "sessionCredential",

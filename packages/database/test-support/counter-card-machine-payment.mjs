@@ -61,6 +61,8 @@ export async function exerciseCounterCardMachinePayment({
     "GRANT SELECT,INSERT ON rms_payment.card_machine_payment,rms_payment.card_machine_refund,rms_ordering.counter_order_entry TO " +
       role,
   );
+  // WP-2423 Q7 slice 2: the staff record of a dine-in round (pilot-acl-additions, api SELECT).
+  await admin.query("GRANT SELECT ON rms_ordering.staff_dining_round_entry TO " + role);
   await admin.query(
     "GRANT SELECT ON rms_ordering.order_acceptance_record,rms_ordering.order_acceptance_hold,rms_ordering.order_acceptance_hold_resolution,rms_ordering.order_termination_record,rms_ordering.order_fulfillment_completion_record,rms_ordering.order_item_staff_cancellation,rms_ordering.order_staff_cancellation,rms_ordering.order_batch_checkout_cancellation TO " +
       role,

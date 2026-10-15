@@ -3,6 +3,7 @@ import type { ConsumerTransaction } from "@bop/eventing";
 import { readClosedRecord } from "@bop/identity";
 import {
   createPostgresCounterOrderEntryStore,
+  createPostgresStaffDiningRoundEntryStore,
   parseOrderingReference,
   type OrderPaymentPreparationEvidence,
 } from "@rms/ordering";
@@ -22,6 +23,7 @@ import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { readCounterPaymentPreparation } from "./counter-payment-preparation.js";
+import { readStaffDiningRoundPaymentPreparation } from "./staff-dining-round-payment-preparation.js";
 import { counterOrderPermission } from "./merchant-counter-order.js";
 
 export const cardMachinePaymentCommandErrorCodes = [
@@ -96,13 +98,102 @@ export function parseCardMachinePaymentCommand(value: unknown) {
   }
 }
 
+export type StaffCardMachineOrderKind = "CounterPickup" | "DiningInitial" | "DiningAdditional";
+
+/**
+ * The staff entry behind an order batch and its current payment preparation: a counter pickup
+ * order (DEC-COUNTER-PAYMENT-RECORD) or a dine-in round staff entered (DEC-STAFF-DINE-IN-ROUND).
+ * Null when no staff member entered this batch.
+ */
+async function resolveStaffEntry(
+  tx: ConsumerTransaction,
+  scope: { tenantReference: string; brandReference: string; storeReference: string },
+  allowed: () => Promise<boolean>,
+  command: { orderReference: string; orderBatchReference: string },
+  options: { now(): string; nextReference(): string },
+) {
+  const owners = {
+    brandReference: scope.brandReference,
+    storeReference: scope.storeReference,
+    authorize: allowed,
+  };
+  const counter = createPostgresCounterOrderEntryStore(owners);
+  const entry = (await counter.listByOrders(tx, [command.orderReference])).get(
+    command.orderReference,
+  );
+  if (entry !== undefined) {
+    const order = await counter.loadOrder(tx, String(entry.cartReference));
+    if (
+      order === null ||
+      String(order.orderReference) !== command.orderReference ||
+      String(order.orderBatchReference) !== command.orderBatchReference
+    )
+      return null;
+    const current = await readCounterPaymentPreparation(
+      tx,
+      {
+        scope,
+        now: options.now,
+        nextPreparationReference: options.nextReference,
+        authorize: allowed,
+      },
+      {
+        submissionReference: String(order.submissionReference),
+        guestSessionReference: String(entry.guestSessionReference),
+        tipSelectionReference: String(entry.tipSelectionReference),
+      },
+    );
+    return {
+      kind: "CounterPickup" as const,
+      submissionReference: String(order.submissionReference),
+      current,
+    };
+  }
+  const round = (
+    await createPostgresStaffDiningRoundEntryStore(owners).listByOrders(tx, [
+      command.orderReference,
+    ])
+  ).get(command.orderBatchReference);
+  if (round === undefined || round.orderReference !== command.orderReference) return null;
+  const batch = await createPostgresStaffDiningRoundEntryStore(owners).loadBatch(
+    tx,
+    String(round.entry.guestSessionReference),
+  );
+  if (
+    batch === null ||
+    String(batch.orderReference) !== command.orderReference ||
+    String(batch.orderBatchReference) !== command.orderBatchReference
+  )
+    return null;
+  const current = await readStaffDiningRoundPaymentPreparation(
+    tx,
+    {
+      scope,
+      now: options.now,
+      nextPreparationReference: options.nextReference,
+      authorize: allowed,
+    },
+    {
+      submissionReference: String(batch.submissionReference),
+      guestSessionReference: String(round.entry.guestSessionReference),
+      tipSelectionReference: String(round.entry.tipSelectionReference),
+    },
+  );
+  return {
+    kind: current?.additional === true ? ("DiningAdditional" as const) : ("DiningInitial" as const),
+    submissionReference: String(batch.submissionReference),
+    current,
+  };
+}
+
 /**
  * WP-2423 Q7 (DEC-COUNTER-PAYMENT-RECORD decision 1–2): after the Store's card machine approved the
  * payment, staff record it. The amount is the server's payment preparation total (quote with tax
  * plus the tip choice), checked against what staff charged; the same payment admission as an
  * online payment (order still payable, capacity clock open, reserved stock intact) applies; the
  * Payment record, its PaymentSucceeded event and audit are one transaction, so the order reaches
- * acceptance and the kitchen through the ordinary consumers. Only counter orders take this payment.
+ * acceptance and the kitchen through the ordinary consumers. Only counter orders and dine-in rounds
+ * staff entered for a table (WP-2423 Q7 slice 2, DEC-STAFF-DINE-IN-ROUND) take this payment.
  */
 export function createMerchantCardMachinePayment(options: {
   persistence: PersistentMerchantBffOptions;
@@ -113,6 +204,9 @@ export function createMerchantCardMachinePayment(options: {
     scope: { tenantReference: string; brandReference: string; storeReference: string };
     preparation: OrderPaymentPreparationEvidence;
     allowed(): Promise<boolean>;
+    /** Which online payment admission applies: a counter pickup order, or a staff-entered
+     * dine-in round (the table Order's first round or a later one). */
+    kind: StaffCardMachineOrderKind;
   }): PaymentIntentClaimAdmission;
   environment: "Test" | "Live";
   nextReference(): string;
@@ -196,35 +290,15 @@ export function createMerchantCardMachinePayment(options: {
           null
         )
           return fail("CARD_MACHINE_ALREADY_PAID");
-        // Only an order staff took at the counter is paid on the Store's card machine.
-        const entry = (
-          await createPostgresCounterOrderEntryStore({
-            brandReference: scope.brandReference,
-            storeReference: scope.storeReference,
-            authorize: allowed,
-          }).listByOrders(tx, [command.orderReference])
-        ).get(command.orderReference);
-        if (entry === undefined) return fail("CARD_MACHINE_NOT_FOUND");
-        const order = await createPostgresCounterOrderEntryStore({
-          brandReference: scope.brandReference,
-          storeReference: scope.storeReference,
-          authorize: allowed,
-        }).loadOrder(tx, String(entry.cartReference));
-        if (
-          order === null ||
-          String(order.orderReference) !== command.orderReference ||
-          String(order.orderBatchReference) !== command.orderBatchReference
-        )
-          return fail("CARD_MACHINE_NOT_FOUND");
-        const current = await readCounterPaymentPreparation(
-          tx,
-          { scope, now, nextPreparationReference: options.nextReference, authorize: allowed },
-          {
-            submissionReference: String(order.submissionReference),
-            guestSessionReference: String(entry.guestSessionReference),
-            tipSelectionReference: String(entry.tipSelectionReference),
-          },
-        );
+        // Only an order staff took at the counter, or a dine-in round staff entered for a table,
+        // is paid on the Store's card machine.
+        const staffEntry = await resolveStaffEntry(tx, scope, allowed, command, {
+          now,
+          nextReference: options.nextReference,
+        });
+        if (staffEntry === null) return fail("CARD_MACHINE_NOT_FOUND");
+        const order = { submissionReference: staffEntry.submissionReference };
+        const current = staffEntry.current;
         if (current === null) return fail("CARD_MACHINE_NOT_PAYABLE");
         const preparation = current.preparation;
         const total = preparation.total.amountMinor.toString();
@@ -255,7 +329,7 @@ export function createMerchantCardMachinePayment(options: {
           auditReference: options.nextReference(),
         });
         const admitted = await options
-          .admission({ scope, preparation, allowed })
+          .admission({ scope, preparation, allowed, kind: staffEntry.kind })
           .admit(tx, cardMachinePaymentIntentView(record), recordedAt);
         if (
           admitted === false ||

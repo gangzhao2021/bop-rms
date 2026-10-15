@@ -137,6 +137,32 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
     expect(html).toContain("Served");
   });
 
+  // WP-2423 Q7 slice 2 (DEC-STAFF-DINE-IN-ROUND): a round staff entered for the table.
+  it("shows a round staff entered for the table and how it is paid", () => {
+    const html = render({
+      status: "ready",
+      refreshing: false,
+      view: view({
+        rounds: [
+          round(),
+          round({
+            roundNumber: 2,
+            orderedBy: "Staff",
+            status: "AwaitingPayment",
+            payment: "Awaiting",
+          }),
+          round({ roundNumber: 3, orderedBy: "Staff", status: "Queued", payment: "Paid" }),
+        ],
+      }),
+    });
+    expect(html).toContain("Round 2 · Entered by staff");
+    expect(html).toContain("Round 3 · Entered by staff");
+    expect(html).toContain(
+      "Staff entered this round for your table. Pay them on the card machine and the kitchen starts it.",
+    );
+    expect(html).not.toMatch(/\bStaff\b(?! entered)|card_machine|StoreCardMachine/u);
+  });
+
   it("never shows names, contact details, internal codes or references", () => {
     const html = render({ status: "ready", view: view(), refreshing: false });
     expect(html).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}/u);

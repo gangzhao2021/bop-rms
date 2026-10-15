@@ -144,6 +144,8 @@ export function composeMerchantDependencies(
       return f.createInternalCounterOrder(resources, persistence, authentication, {
         customer,
         loadPickupWorkflow: () => installation.loadWorkflow("Pickup"),
+        // WP-2423 Q7 slice 2: staff-entered dine-in rounds pass the dine-in payment workflow.
+        loadDiningWorkflow: () => installation.loadWorkflow("DineIn"),
         loadPickupQrToken: async () =>
           (await qr.loadInternalPickupQr(await installation.loadProfile())).token(),
         expectedDatabaseName: installation.database,
@@ -195,6 +197,8 @@ export function composeMerchantDependencies(
       }),
     // WP-2423 Q18 option A: staff PIN pepper and shared-tablet key (TEST-ONLY derived keys).
     createInternalStaffPinCredentials: credentials.createInternalStaffPinCredentials,
+    // WP-2423: the settlement page answers a day before coverage with the first covered day.
+    loadDailySettlementCoverage: installation.loadDailySettlementCoverage,
     createInternalMerchantSession: (r) =>
       f.createInternalMerchantSession(r, {
         loadEmployee: () => installation.loadCustomerData("internal-test-merchant.json"),

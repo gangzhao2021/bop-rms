@@ -12,6 +12,7 @@ import { AcceptanceHoldRefundError } from "./merchant-order-acceptance-hold-refu
 import { StaffOrderCancellationError } from "./merchant-order-staff-cancellation.js";
 import { StaffItemCancellationError } from "./merchant-order-item-staff-cancellation.js";
 import { CounterOrderError } from "./merchant-counter-order.js";
+import { StaffDiningRoundError } from "./merchant-staff-dining-round.js";
 import { CounterMenuError } from "./merchant-counter-menu.js";
 import { CardMachinePaymentCommandError } from "./merchant-card-machine-payment.js";
 import { CardMachineRefundCommandError } from "./merchant-card-machine-refund.js";
@@ -2103,6 +2104,28 @@ describe("WP-2423 P1 merchant settlement read route", () => {
     expect(result.headers.get("cache-control")).toBe("no-store");
     expect(await result.json()).toEqual({ error: "settlement_busy" });
   });
+  it("WP-2423: answers a day before the Store's records begin with its first day, not denied", async () => {
+    const root = await serveSettlement(async () => {
+      throw Object.assign(new Error("MERCHANT_SETTLEMENT_NOT_COVERED"), {
+        code: "MERCHANT_SETTLEMENT_NOT_COVERED",
+        firstBusinessDate: "2026-09-20",
+      });
+    });
+    const result = await request(root, "/merchant/settlement?businessDate=2026-09-19", { headers });
+    expect(result.status).toBe(404);
+    expect(result.headers.get("cache-control")).toBe("no-store");
+    expect(await result.json()).toEqual({
+      error: "settlement_not_covered",
+      firstBusinessDate: "2026-09-20",
+    });
+    const malformed = await serveSettlement(async () => {
+      throw Object.assign(new Error("x"), {
+        code: "MERCHANT_SETTLEMENT_NOT_COVERED",
+        firstBusinessDate: "soon",
+      });
+    });
+    expect((await request(malformed, "/merchant/settlement", { headers })).status).toBe(403);
+  });
 });
 describe("WP-2423 Q14 store reports routes", () => {
   type Reports = NonNullable<MerchantBffRouterOptions["storeReports"]>;
@@ -2510,7 +2533,7 @@ it("WP-2423 Q9-G1: protects the outage refund decision transport and maps refusa
 async function serveCounter(
   options: Pick<
     MerchantBffRouterOptions,
-    "counterMenu" | "counterOrder" | "cardMachinePayment" | "cardMachineRefund"
+    "counterMenu" | "counterOrder" | "cardMachinePayment" | "cardMachineRefund" | "staffDiningRound"
   > = {},
 ) {
   const app = express();
@@ -2687,7 +2710,17 @@ it("WP-2423 Q7: protects counter order and card-machine transport and maps refus
   expect(menuResponse.status).toBe(200);
   expect(menuResponse.headers.get("cache-control")).toBe("no-store");
   expect(await menuResponse.json()).toEqual({ screenId: "OPS-ORDER-ENTRY", menu });
-  expect(counterMenu).toHaveBeenCalledWith({ sessionCookie });
+  expect(counterMenu).toHaveBeenCalledWith({ sessionCookie, orderType: "Pickup" });
+  // WP-2423 Q7 slice 2: a table round reads the dine-in menu; nothing else is accepted.
+  expect(
+    (await request(root, "/merchant/counter/menu?orderType=DineIn", { headers: readHeaders }))
+      .status,
+  ).toBe(200);
+  expect(counterMenu).toHaveBeenLastCalledWith({ sessionCookie, orderType: "DineIn" });
+  expect(
+    (await request(root, "/merchant/counter/menu?orderType=Delivery", { headers: readHeaders }))
+      .status,
+  ).toBe(403);
   counterMenu.mockRejectedValueOnce(new CounterMenuError("COUNTER_MENU_PERMISSION_DENIED"));
   expect((await request(root, "/merchant/counter/menu", { headers: readHeaders })).status).toBe(
     403,
@@ -2714,6 +2747,92 @@ it("WP-2423 Q7: protects counter order and card-machine transport and maps refus
         })
       ).status,
     ).toBe(503);
+});
+
+it("WP-2423 Q7 slice 2: protects the staff table round transport and maps refusals to stable codes", async () => {
+  const placed = {
+    status: "Placed" as const,
+    orderReference: "0190fa01-0000-7000-8000-000000000011",
+    orderBatchReference: "0190fa01-0000-7000-8000-000000000012",
+    orderNumber: "7",
+    orderVersion: 4,
+    tableLabel: "T4",
+    orderMinor: "2260",
+    tipMinor: "300",
+    totalMinor: "2560",
+    payBy: "2026-10-15T18:30:00.000Z",
+    recordedAfterOutage: false,
+  };
+  const staffDiningRound = vi.fn<NonNullable<MerchantBffRouterOptions["staffDiningRound"]>>(
+    async () => ({ ...placed, guestCredential: "synthetic-private" }) as typeof placed,
+  );
+  const root = await serveCounter({ staffDiningRound });
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const submit = (extra: Record<string, string> = {}, path = "/merchant/dining/staff-rounds") =>
+    request(root, path, { method: "POST", body: '{"a":1}', headers: { ...headers, ...extra } });
+  for (const extra of [
+    { Origin: "https://foreign.invalid" },
+    { "Sec-Fetch-Site": "cross-site" },
+    { "X-BOP-CSRF": "" },
+    { Cookie: "" },
+  ])
+    expect((await submit(extra)).status).toBe(403);
+  expect((await submit({}, "/merchant/dining/staff-rounds?store=other")).status).toBe(403);
+  expect(staffDiningRound).not.toHaveBeenCalled();
+  const response = await submit();
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual(placed);
+  expect(staffDiningRound).toHaveBeenCalledWith({ sessionCookie, csrf, command: { a: 1 } });
+  for (const [code, status, error] of [
+    ["STAFF_ROUND_INPUT_INVALID", 400, "staff_round_input_invalid"],
+    ["STAFF_ROUND_PERMISSION_DENIED", 403, "staff_round_permission_denied"],
+    ["STAFF_ROUND_STORE_NOT_TAKING_ORDERS", 409, "store_not_taking_dine_in_orders"],
+    ["STAFF_ROUND_TABLE_UNAVAILABLE", 409, "table_unavailable"],
+    ["STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS", 409, "table_checkout_in_progress"],
+    ["STAFF_ROUND_NOT_PRICED", 409, "order_not_priced"],
+    ["STAFF_ROUND_NOT_FINISHED", 409, "staff_round_not_finished"],
+    ["STAFF_ROUND_IN_PROGRESS", 409, "staff_round_in_progress"],
+    ["STAFF_ROUND_IDEMPOTENCY_CONFLICT", 409, "staff_round_conflict"],
+    ["STAFF_ROUND_UNAVAILABLE", 503, "staff_round_unavailable"],
+  ] as const) {
+    staffDiningRound.mockRejectedValueOnce(new StaffDiningRoundError(code));
+    const refused = await submit();
+    expect(refused.status).toBe(status);
+    expect(await refused.json()).toEqual({ error });
+  }
+  staffDiningRound.mockRejectedValueOnce(
+    new StaffDiningRoundError("STAFF_ROUND_ITEM_UNAVAILABLE", 1),
+  );
+  expect(await (await submit()).json()).toEqual({ error: "item_unavailable", lineIndex: 1 });
+  staffDiningRound.mockRejectedValueOnce(
+    new StaffDiningRoundError("STAFF_ROUND_TABLE_CART_HAS_ITEMS", null, [
+      { name: "Iced Latte", quantity: 1 },
+    ]),
+  );
+  expect(await (await submit()).json()).toEqual({
+    error: "table_cart_has_items",
+    items: [{ name: "Iced Latte", quantity: 1 }],
+  });
+  staffDiningRound.mockRejectedValueOnce(new Error("synthetic-private"));
+  const denied = await submit();
+  expect(denied.status).toBe(403);
+  expect(await denied.text()).not.toContain("synthetic");
+  const unconfigured = await serveCounter();
+  expect(
+    (
+      await request(unconfigured, "/merchant/dining/staff-rounds", {
+        method: "POST",
+        headers,
+        body: "{}",
+      })
+    ).status,
+  ).toBe(503);
 });
 
 async function serveDiningClosing(diningClosing?: MerchantBffRouterOptions["diningClosing"]) {

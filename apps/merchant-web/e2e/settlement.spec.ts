@@ -326,3 +326,95 @@ test("@production WP-2423 Settlement explains an open day difference and a day r
     await page.screenshot({ path: `test-results/settlement-recheck-${width}.png`, fullPage: true });
   }
 });
+
+test("@production WP-2423 Settlement keeps a day settled twice readable and answers a day before the store's records", async ({
+  page,
+}) => {
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: { ...scope, timeZone: "America/Toronto" },
+          authorizedStores: [scope],
+          businessDate: "2026-09-22",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "PAY-RECONCILIATION",
+              label: "Settlement",
+              href: "/app/operations/payment-reconciliation",
+              permission: "operations.order-exception.manage",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  // v15 Sep 20: the day was settled once by a run outside its schedule (earlier) and once by the
+  // scheduled run; both matched. v15 Sep 19: before the store started using the system.
+  const requested: (string | null)[] = [];
+  await page.route("**/merchant/settlement*", (route) => {
+    const date = new URL(route.request().url()).searchParams.get("businessDate");
+    requested.push(date);
+    if (date === "2026-09-19")
+      return route.fulfill({
+        status: 404,
+        headers,
+        json: { error: "settlement_not_covered", firstBusinessDate: "2026-09-20" },
+      });
+    const base = closedView("2026-09-20");
+    const settlement = base.reconciliation.settlement;
+    const scheduled = settlement.checks[0];
+    return route.fulfill({
+      headers,
+      json: {
+        ...base,
+        reconciliation: {
+          ...base.reconciliation,
+          settlement: {
+            ...settlement,
+            recheck: null,
+            additionalChecks: [
+              {
+                ...scheduled,
+                checkReference: id(31),
+                runReference: id(30),
+                checkedAt: "2026-09-22T11:22:18.000Z",
+              },
+            ],
+          },
+        },
+      },
+    });
+  });
+  await page.goto("/app/operations/payment-reconciliation?businessDate=2026-09-20");
+  await expect(page.getByRole("heading", { name: "Business day: Sun, Sep 20" })).toBeVisible();
+  await expect(
+    page.getByText("Settled · the day's totals match the provider statement"),
+  ).toBeVisible();
+  await expect(page.getByText("Earlier check of Sun, Sep 20")).toBeVisible();
+  await expect(page.getByText("Provider statement for Sun, Sep 20")).toBeVisible();
+  await expect(page.getByText("Reconciliation records could not be read.")).toHaveCount(0);
+  await expectNoInternalText(page);
+  expect(requested).toEqual(["2026-09-20"]);
+
+  await page.getByRole("textbox", { name: "Business day" }).fill("2026-09-19");
+  await page.getByRole("button", { name: "Show", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "No settlement records for this day" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/Sat, Sep 19 is before the store started using this system/),
+  ).toBeVisible();
+  await expect(page.getByText("Permission denied")).toHaveCount(0);
+  await expectNoInternalText(page);
+  await page.getByRole("button", { name: "Show Sun, Sep 20" }).click();
+  await expect(page.getByRole("heading", { name: "Business day: Sun, Sep 20" })).toBeVisible();
+  expect(requested).toEqual(["2026-09-20", "2026-09-19", "2026-09-20"]);
+});

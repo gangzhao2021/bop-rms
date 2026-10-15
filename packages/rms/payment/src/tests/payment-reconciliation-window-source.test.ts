@@ -76,7 +76,7 @@ function setup() {
   const query = vi.fn(async (sql: string) => ({
     rows: sql.includes("AS candidate_reference")
       ? rows.candidates
-      : sql.includes("recheck_count")
+      : sql.includes("r.candidate_id=$3")
         ? rows.rechecks
         : sql.includes("FROM rms_payment.payment_reconciliation_run") &&
             sql.includes("mode='DailySettlement'") &&
@@ -239,7 +239,6 @@ it("WP-2423: reads the day's latest re-check as its current result beside the fi
       internal_refunded_minor: "2260",
       provider_refunded_minor: "2260",
       exception_reference: null,
-      recheck_count: 1,
     },
   ];
   f.rows.recheckRuns = [
@@ -251,17 +250,110 @@ it("WP-2423: reads the day's latest re-check as its current result beside the fi
       completed_at: new Date("2026-10-15T12:00:01.000Z"),
     },
   ];
-  const result = await f.read(f.tx, { startsAt, endsAt, settlementRunReference: id(5) });
+  const result = await f.read(f.tx, {
+    startsAt,
+    endsAt,
+    settlementRunReference: id(5),
+    recheckRunReferences: [id(10), id(12)],
+  });
   expect(result.settlement?.checks[0]).toMatchObject({ outcome: "Difference" });
   expect(result.settlement?.recheck).toMatchObject({
     run: { runReference: id(10), mode: "DailySettlement" },
     check: { outcome: "Matched", internalRefundedMinor: "2260", providerRefundedMinor: "2260" },
     count: 1,
   });
+  expect(result.settlement?.additionalChecks).toEqual([]);
   const later = (f.query.mock.calls as unknown as [string, unknown[]][]).find(([sql]) =>
-    sql.includes("recheck_count"),
+    sql.includes("r.candidate_id=$3"),
   );
-  expect(later?.[1]).toEqual([id(2), id(3), id(7), id(5), endsAt]);
+  expect(later?.[1]).toEqual([id(2), id(3), id(7), id(5), endsAt, 2 + 5 + 1]);
+});
+it("WP-2423: a duplicate original settlement of the day is history, never its re-check (Sep 20)", async () => {
+  // v15 Sep 20: an earlier settlement run outside the day's schedule (checked 04:55) and the
+  // scheduled run (05:33); the earlier one must not be read as a later check.
+  const f = setup();
+  f.rows.rechecks = [
+    {
+      ...f.rows.settlementChecks[0],
+      check_reference: id(21),
+      run_reference: id(20),
+      checked_at: new Date("2026-09-22T11:00:00.500Z"),
+    },
+  ];
+  const result = await f.read(f.tx, {
+    startsAt,
+    endsAt,
+    settlementRunReference: id(5),
+    recheckRunReferences: [id(10)],
+  });
+  expect(result.settlement?.checks[0]).toMatchObject({ outcome: "Matched", runReference: id(5) });
+  expect(result.settlement?.recheck).toBeNull();
+  expect(result.settlement?.additionalChecks).toEqual([
+    expect.objectContaining({ runReference: id(20), outcome: "Matched" }),
+  ]);
+  // A later run that is not one of the day's re-check references stays history too.
+  const later = setup();
+  later.rows.rechecks = [
+    {
+      ...later.rows.settlementChecks[0],
+      check_reference: id(21),
+      run_reference: id(20),
+      checked_at: new Date("2026-10-15T12:00:00.500Z"),
+      outcome: "Difference",
+      difference_reason: "AmountMismatch",
+    },
+  ];
+  const kept = await later.read(later.tx, {
+    startsAt,
+    endsAt,
+    settlementRunReference: id(5),
+    recheckRunReferences: [id(10)],
+  });
+  expect(kept.settlement?.recheck).toBeNull();
+  expect(kept.settlement?.checks[0]?.outcome).toBe("Matched");
+  expect(kept.settlement?.additionalChecks[0]).toMatchObject({ outcome: "Difference" });
+});
+it("WP-2423: re-checks count in their scheduled order and refuse an earlier re-check", async () => {
+  const f = setup();
+  const check = (n: number, run: number, at: string) => ({
+    ...f.rows.settlementChecks[0],
+    check_reference: id(n),
+    run_reference: id(run),
+    checked_at: new Date(at),
+  });
+  f.rows.rechecks = [
+    check(11, 10, "2026-10-15T12:00:00.500Z"),
+    check(13, 12, "2026-10-16T12:00:00.500Z"),
+  ];
+  f.rows.recheckRuns = [{ ...f.rows.settlementRuns[0], run_reference: id(12) }];
+  const result = await f.read(f.tx, {
+    startsAt,
+    endsAt,
+    settlementRunReference: id(5),
+    recheckRunReferences: [id(10), id(12), id(14)],
+  });
+  expect(result.settlement?.recheck).toMatchObject({ check: { runReference: id(12) }, count: 2 });
+  const swapped = setup();
+  swapped.rows.rechecks = [
+    check(11, 10, "2026-10-16T12:00:00.500Z"),
+    check(13, 12, "2026-10-15T12:00:00.500Z"),
+  ];
+  await expect(
+    swapped.read(swapped.tx, {
+      startsAt,
+      endsAt,
+      settlementRunReference: id(5),
+      recheckRunReferences: [id(10), id(12)],
+    }),
+  ).rejects.toMatchObject({ code: "PAYMENT_RECONCILIATION_DEPENDENCY_UNAVAILABLE" });
+  await expect(
+    f.read(f.tx, {
+      startsAt,
+      endsAt,
+      settlementRunReference: id(5),
+      recheckRunReferences: [id(5)],
+    }),
+  ).rejects.toThrow();
 });
 it("WP-2423: a day checked once has no re-check", async () => {
   const f = setup();

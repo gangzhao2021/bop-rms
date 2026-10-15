@@ -399,7 +399,7 @@ export async function verifyPersistentMerchantBff({
   );
   await admin.query("GRANT USAGE ON SCHEMA rms_ordering TO " + role);
   await admin.query(
-    "GRANT SELECT ON rms_ordering.order_header,rms_ordering.order_submission_record,rms_ordering.order_batch,rms_ordering.order_number_allocation,rms_ordering.order_item,rms_ordering.order_revision,rms_ordering.order_acceptance_record,rms_ordering.order_acceptance_hold,rms_ordering.order_acceptance_hold_resolution,rms_ordering.order_termination_record,rms_ordering.order_fulfillment_completion_record,rms_ordering.order_payment_disposition_record,rms_ordering.order_payment_acceptance_wait,rms_ordering.order_item_staff_cancellation,rms_ordering.order_staff_cancellation,rms_ordering.counter_order_entry TO " +
+    "GRANT SELECT ON rms_ordering.order_header,rms_ordering.order_submission_record,rms_ordering.order_batch,rms_ordering.order_number_allocation,rms_ordering.order_item,rms_ordering.order_revision,rms_ordering.order_acceptance_record,rms_ordering.order_acceptance_hold,rms_ordering.order_acceptance_hold_resolution,rms_ordering.order_termination_record,rms_ordering.order_fulfillment_completion_record,rms_ordering.order_payment_disposition_record,rms_ordering.order_payment_acceptance_wait,rms_ordering.order_item_staff_cancellation,rms_ordering.order_staff_cancellation,rms_ordering.counter_order_entry,rms_ordering.staff_dining_round_entry TO " +
       role,
   );
   await admin.query(

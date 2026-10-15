@@ -139,3 +139,145 @@ export function createPostgresPaymentReconciliationExceptionSource(options: {
     }
   };
 }
+
+/**
+ * WP-2423: what a reconciliation exception is about, for the staff Exceptions card.
+ * - BusinessDayTotals: a business day's settlement check found the day's totals differ from the
+ *   payment provider's statement (no single payment); the check and, once a later check of the
+ *   same day matched, that resolution.
+ * - Payment: one payment's check differed.
+ * - UnmatchedCharge: no check opened it — a charge the payment provider reported that matches no
+ *   payment or order of the Store.
+ */
+export interface PaymentReconciliationExceptionDetail {
+  readonly exceptionReference: string;
+  readonly kind: "BusinessDayTotals" | "Payment" | "UnmatchedCharge";
+  /** BusinessDayTotals only: the settlement check that found the difference. */
+  readonly openingCheck: {
+    readonly runReference: string;
+    readonly checkedAt: string;
+    readonly differenceReason: string | null;
+    readonly internalCapturedMinor: string;
+    readonly providerCapturedMinor: string | null;
+    readonly internalRefundedMinor: string;
+    readonly providerRefundedMinor: string | null;
+  } | null;
+  /** BusinessDayTotals only: the later matching check of the same day that resolved it. */
+  readonly resolution: { readonly resolvedAt: string; readonly runReference: string } | null;
+}
+/** The most exceptions one detail read answers (the Exceptions page reads at most 500). */
+export const paymentReconciliationExceptionDetailLimit = 500;
+/**
+ * WP-2423: read-only, Store-scoped detail of reconciliation exceptions (see the type). Amounts are
+ * the day's totals the day-end settlement page already shows the same staff; never Provider
+ * references or payment identifiers.
+ */
+export function createPostgresPaymentReconciliationExceptionDetailReader(options: {
+  readonly scope: { readonly brandReference: string; readonly storeReference: string };
+  authorize(tx: ConsumerTransaction): Promise<boolean>;
+}) {
+  const scope = Object.freeze({
+    brandReference: String(parsePaymentReference(options.scope.brandReference)),
+    storeReference: String(parsePaymentReference(options.scope.storeReference)),
+  });
+  const unavailable = (): never => {
+    throw new PaymentCompensationError("PAYMENT_COMPENSATION_SOURCE_UNAVAILABLE");
+  };
+  const instant = (value: unknown): string => {
+    const text = value instanceof Date ? value.toISOString() : value;
+    if (typeof text !== "string" || !Number.isFinite(Date.parse(text))) return unavailable();
+    return new Date(text).toISOString();
+  };
+  const minor = (value: unknown): string =>
+    typeof value === "string" && /^(0|[1-9][0-9]*)$/u.test(value) ? value : unavailable();
+  const optionalMinor = (value: unknown) => (value === null ? null : minor(value));
+  return async (
+    tx: ConsumerTransaction,
+    exceptionReferences: readonly string[],
+  ): Promise<ReadonlyMap<string, PaymentReconciliationExceptionDetail>> => {
+    const references = [
+      ...new Set(exceptionReferences.map((r) => String(parsePaymentReference(r)))),
+    ];
+    if (references.length > paymentReconciliationExceptionDetailLimit) return unavailable();
+    if ((await options.authorize(tx)) !== true)
+      throw new PaymentCompensationError("PAYMENT_COMPENSATION_PERMISSION_DENIED");
+    const details = new Map<string, PaymentReconciliationExceptionDetail>();
+    if (references.length === 0) return details;
+    await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+      scope.brandReference,
+      scope.storeReference,
+    ]);
+    const result = await tx.query(
+      `SELECT e.reconciliation_exception_id::text AS exception_reference,o.mode,o.unlinked,
+o.run_reference,o.checked_at,o.difference_reason,o.internal_captured_minor,o.provider_captured_minor,
+o.internal_refunded_minor,o.provider_refunded_minor,s.resolved_at,
+s.reconciliation_run_id::text AS resolution_run_reference
+FROM rms_payment.payment_reconciliation_exception e
+LEFT JOIN LATERAL (SELECT r.mode,r.payment_intent_id IS NULL AS unlinked,
+  r.reconciliation_run_id::text AS run_reference,r.checked_at,r.difference_reason,
+  r.internal_captured_minor::text AS internal_captured_minor,
+  r.provider_captured_minor::text AS provider_captured_minor,
+  r.internal_refunded_minor::text AS internal_refunded_minor,
+  r.provider_refunded_minor::text AS provider_refunded_minor
+  FROM rms_payment.payment_reconciliation_record r
+  WHERE r.brand_id=e.brand_id AND r.store_id=e.store_id
+    AND r.reconciliation_exception_id=e.reconciliation_exception_id
+  ORDER BY r.checked_at,r.reconciliation_check_id LIMIT 1) o ON true
+LEFT JOIN rms_payment.payment_reconciliation_resolution s
+  ON s.brand_id=e.brand_id AND s.store_id=e.store_id
+  AND s.reconciliation_exception_id=e.reconciliation_exception_id
+WHERE e.brand_id=$1 AND e.store_id=$2 AND e.reconciliation_exception_id=ANY($3::uuid[])`,
+      [scope.brandReference, scope.storeReference, references],
+    );
+    if (!Array.isArray(result.rows) || result.rows.length > references.length) return unavailable();
+    for (const row of result.rows as Record<string, unknown>[]) {
+      const exceptionReference = String(parsePaymentReference(row.exception_reference));
+      if (!references.includes(exceptionReference) || details.has(exceptionReference))
+        return unavailable();
+      const day = row.mode === "DailySettlement" && row.unlinked === true;
+      const kind =
+        row.mode === null || row.mode === undefined
+          ? ("UnmatchedCharge" as const)
+          : day
+            ? ("BusinessDayTotals" as const)
+            : row.mode === "Operational"
+              ? ("Payment" as const)
+              : unavailable();
+      if (kind !== "BusinessDayTotals" && row.resolved_at !== null) return unavailable();
+      details.set(
+        exceptionReference,
+        Object.freeze({
+          exceptionReference,
+          kind,
+          openingCheck: day
+            ? Object.freeze({
+                runReference: String(parsePaymentReference(row.run_reference)),
+                checkedAt: instant(row.checked_at),
+                differenceReason:
+                  row.difference_reason === null
+                    ? null
+                    : typeof row.difference_reason === "string" &&
+                        /^[A-Za-z]{1,64}$/u.test(row.difference_reason)
+                      ? row.difference_reason
+                      : unavailable(),
+                internalCapturedMinor: minor(row.internal_captured_minor),
+                providerCapturedMinor: optionalMinor(row.provider_captured_minor),
+                internalRefundedMinor: minor(row.internal_refunded_minor),
+                providerRefundedMinor: optionalMinor(row.provider_refunded_minor),
+              })
+            : null,
+          resolution:
+            row.resolved_at === null
+              ? null
+              : Object.freeze({
+                  resolvedAt: instant(row.resolved_at),
+                  runReference: String(parsePaymentReference(row.resolution_run_reference)),
+                }),
+        }),
+      );
+    }
+    if ((await options.authorize(tx)) !== true)
+      throw new PaymentCompensationError("PAYMENT_COMPENSATION_PERMISSION_DENIED");
+    return details;
+  };
+}

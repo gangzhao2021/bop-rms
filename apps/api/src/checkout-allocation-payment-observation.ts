@@ -1,6 +1,9 @@
 import type { ConsumerTransaction } from "@bop/eventing";
 import { parseCheckoutSessionAllocation, parseOrderingReference } from "@rms/ordering";
 import {
+  cardMachinePaymentIntentView,
+  cardMachineTerminalView,
+  createPostgresCardMachinePaymentStore,
   createPostgresPaymentIntentCreationStore,
   createPostgresPaymentTerminalStore,
   parsePaymentInstant,
@@ -58,6 +61,38 @@ export function createCheckoutAllocationPaymentObservation(options: {
           return at;
         };
         if (stored === null) {
+          // WP-2423 Q7: a payment staff recorded from the Store's card machine (a counter order or
+          // a staff-entered dine-in round) is this checkout's terminal, successful payment.
+          const card = await createPostgresCardMachinePaymentStore({
+            scope: { brandReference: scope.brandReference, storeReference: scope.storeReference },
+            authorize: async (tx) => tx === transaction && (await options.authorize(transaction)),
+          }).loadByPaymentOperation(transaction, allocation.paymentOperationReference);
+          if (card !== null) {
+            const payment = cardMachinePaymentIntentView(card),
+              p = payment.intent.preparation;
+            const at = await finish();
+            if (
+              p.brandReference !== allocation.brandReference ||
+              p.storeReference !== allocation.storeReference ||
+              p.guestSessionReference !== allocation.guestSessionReference ||
+              p.submissionReference !== allocation.submissionReference ||
+              p.sourceCartReference !== allocation.cartReference ||
+              p.sourceCartVersion !== allocation.cartVersion ||
+              p.quoteReference !== allocation.quoteReference ||
+              card.environment !== scope.environment ||
+              card.recordedAt > at ||
+              card.recordedAt < allocation.allocatedAt
+            )
+              return unavailable();
+            return Object.freeze({
+              status: "Terminal" as const,
+              outcome: "Succeeded" as const,
+              payment,
+              terminal: cardMachineTerminalView(card) as unknown as NonNullable<
+                Awaited<ReturnType<ReturnType<typeof createPostgresPaymentTerminalStore>["read"]>>
+              >,
+            });
+          }
           await finish();
           return Object.freeze({
             status: "Unresolved" as const,

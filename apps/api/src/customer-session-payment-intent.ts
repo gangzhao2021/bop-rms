@@ -54,7 +54,60 @@ export function createCustomerSessionPaymentIntent(options: CustomerSessionPayme
     throw new CheckoutSessionServiceError("INPUT_INVALID");
 
   const reader = createCustomerCheckoutSessionRead(options.access);
+  const parseRequest = (value: unknown) => {
+    try {
+      const raw = readClosedRecord(value, [
+        "sessionCredential",
+        "csrfCredential",
+        "checkoutSessionReference",
+        "selectionReference",
+        "tip",
+      ]);
+      const tip = createMoney(raw.tip as Money);
+      if (
+        tip.currencyCode !== "CAD" ||
+        tip.amountMinor < 0n ||
+        tip.amountMinor > 9223372036854775807n
+      )
+        throw new Error("invalid tip");
+      return {
+        input: {
+          sessionCredential: parseGuestRawCredential(raw.sessionCredential),
+          csrfCredential: parseGuestRawCredential(raw.csrfCredential),
+          checkoutSessionReference: String(parseOrderingReference(raw.checkoutSessionReference)),
+        },
+        selectionReference: String(parseOrderingReference(raw.selectionReference)),
+        tip,
+      };
+    } catch {
+      throw new CheckoutSessionServiceError("INPUT_INVALID");
+    }
+  };
   return Object.freeze({
+    /**
+     * WP-2423 Q7 slice 2: the same preparation steps as {@link create} (submit the round, record
+     * the tip, start the payment clock) without any Provider call; staff then take the payment on
+     * the Store's card machine. A payment already started online for this checkout is refused.
+     */
+    async prepare(value: unknown): Promise<OrderPaymentPreparationEvidence> {
+      const { input, selectionReference, tip } = parseRequest(value);
+      const session = parseCheckoutSession(await reader.read(input));
+      if (options.submissionKind === "Additional" && session.validation.orderType !== "DineIn")
+        throw new CheckoutSessionServiceError("INTENT_CONFLICT");
+      if ((await options.history.resolveOperation(session.paymentOperationReference)) !== null)
+        throw new CheckoutSessionServiceError("INTENT_CONFLICT");
+      const preparation = await prepareCustomerSessionPayment(options, {
+        input,
+        session,
+        selectionReference,
+        tip,
+      });
+      if (
+        JSON.stringify(parseCheckoutSession(await reader.read(input))) !== JSON.stringify(session)
+      )
+        throw new CheckoutSessionServiceError("INTENT_CONFLICT");
+      return preparation;
+    },
     async create(value: unknown) {
       let input: {
         sessionCredential: string;

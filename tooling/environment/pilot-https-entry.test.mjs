@@ -119,6 +119,8 @@ it("preserves configured refund roles, provider and Pickup workstation without g
       "exceptionPaymentMode",
       "providerAccountReference",
       "expectedDatabaseName",
+      // WP-2423: Settlement answers "not covered" before the first covered business day.
+      "loadDailySettlementCoverage",
       "roleMapping",
       "loadTaskQueue",
       "loadPricingCurrencyMetadata",

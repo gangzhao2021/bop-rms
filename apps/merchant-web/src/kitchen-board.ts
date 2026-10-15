@@ -22,6 +22,8 @@ export interface KitchenOrderLabel {
   readonly orderNumber: string;
   readonly orderType: "Pickup" | "DineIn";
   readonly tableLabel: string | null;
+  /** WP-2423 Q7 slice 2: staff entered this order or table round for the guests. */
+  readonly enteredByStaff?: boolean;
 }
 
 export interface KitchenBoardItem {
@@ -162,7 +164,13 @@ function selectedOptions(value: unknown): readonly KitchenSelectedOption[] {
 /** WP-2423 Q2: the Order's number and, for dine-in, its current table. */
 export function parseKitchenOrderLabel(value: unknown): KitchenOrderLabel | null {
   if (value === null) return null;
-  const input = closed(value, ["orderNumber", "orderType", "tableLabel"]);
+  // WP-2423 Q7 slice 2: enteredByStaff (servers before it answered without the field).
+  const input = closed(
+    value,
+    typeof value === "object" && Object.prototype.hasOwnProperty.call(value, "enteredByStaff")
+      ? ["orderNumber", "orderType", "tableLabel", "enteredByStaff"]
+      : ["orderNumber", "orderType", "tableLabel"],
+  );
   if (
     typeof input.orderNumber !== "string" ||
     !/^[A-Z0-9][A-Z0-9-]{0,39}$/u.test(input.orderNumber) ||
@@ -170,13 +178,15 @@ export function parseKitchenOrderLabel(value: unknown): KitchenOrderLabel | null
     (input.tableLabel !== null &&
       (input.orderType !== "DineIn" ||
         typeof input.tableLabel !== "string" ||
-        !/^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(input.tableLabel)))
+        !/^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(input.tableLabel))) ||
+    (input.enteredByStaff !== undefined && typeof input.enteredByStaff !== "boolean")
   )
     throw new Error("KITCHEN_BOARD_INVALID");
   return Object.freeze({
     orderNumber: input.orderNumber,
     orderType: input.orderType,
     tableLabel: input.tableLabel as string | null,
+    enteredByStaff: input.enteredByStaff === true,
   });
 }
 /** WP-2423 Q2: the Customer's note, as written (bounded, no control characters). */

@@ -52,6 +52,16 @@ export function createPersistentMerchantSettlement(options: {
     window: MerchantSettlementWindow,
   ): Promise<string | null>;
   /**
+   * WP-2423: the references the Store's scheduler derives for that closed day's re-checks, in
+   * order; without it a day shows no re-check.
+   */
+  settlementRecheckRunReferences?(
+    scope: MerchantSettlementScope,
+    window: MerchantSettlementWindow,
+  ): Promise<readonly string[]>;
+  /** WP-2423: the first business day the Store's settlement records cover; null when unknown. */
+  firstBusinessDate?(scope: MerchantSettlementScope): Promise<string | null>;
+  /**
    * Waits before each rerun of a read that lost a lock wait (lock timeout, deadlock or
    * serialization failure). The read writes nothing, so rerunning it is safe.
    */
@@ -176,6 +186,14 @@ export function createPersistentMerchantSettlement(options: {
       authorize: async (tx) => authorize(tx),
       storeLabel: async (tx) => storeOf(tx).displayName,
       now: () => persistence.now(),
+      ...(options.firstBusinessDate
+        ? {
+            firstBusinessDate: async (tx: ConsumerTransaction, scope: MerchantSettlementScope) => {
+              await authorize(tx);
+              return (await options.firstBusinessDate?.(scope)) ?? null;
+            },
+          }
+        : {}),
       window: async (tx, scope, businessDate): Promise<MerchantSettlementWindow> =>
         days(tx, scope).window(tx, businessDate),
       captured: (tx, scope, window) =>
@@ -361,10 +379,19 @@ export function createPersistentMerchantSettlement(options: {
         optional(async () => {
           const settlementRunReference =
             window.status === "Closed" ? await options.settlementRunReference(scope, window) : null;
+          const recheckRunReferences =
+            settlementRunReference !== null && options.settlementRecheckRunReferences
+              ? await options.settlementRecheckRunReferences(scope, window)
+              : [];
           const day = await createPostgresPaymentReconciliationDaySource({
             scope: { brandReference: scope.brandReference, storeReference: scope.storeReference },
             authorize: async (t) => guard(scope)(t),
-          })(tx, { startsAt: window.startsAt, endsAt: window.endsAt, settlementRunReference });
+          })(tx, {
+            startsAt: window.startsAt,
+            endsAt: window.endsAt,
+            settlementRunReference,
+            recheckRunReferences,
+          });
           return {
             settlement: day.settlement,
             operational: day.operational,

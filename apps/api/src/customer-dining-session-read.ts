@@ -23,8 +23,10 @@ import {
   OrderStatusProjectionError,
   type CartQueryTransactionRunner,
   type OrderItemProgressPhase,
+  createPostgresStaffDiningRoundEntryStore,
 } from "@rms/ordering";
 import {
+  createPostgresCardMachinePaymentStore,
   createPostgresOrdinaryRefundPositionSource,
   createPostgresPaymentCompensationRefundPositionSource,
   createPostgresPaymentStatusStore,
@@ -71,6 +73,8 @@ export interface CustomerDiningSessionFacts {
     }[];
     /** Per round: submitted by the asking guest. */
     readonly authorship: ReadonlyMap<string, boolean>;
+    /** WP-2423 Q7 slice 2: rounds staff entered for the table (DEC-STAFF-DINE-IN-ROUND). */
+    readonly staffRounds?: ReadonlySet<string>;
     /** Per item: Ordering/Kitchen phase and Dining's served quantity. */
     readonly delivery: ReadonlyMap<
       string,
@@ -135,7 +139,8 @@ export interface CustomerDiningSessionView {
   readonly checkedAt: string;
   readonly rounds: readonly {
     readonly roundNumber: number;
-    readonly orderedBy: "You" | "AnotherGuest";
+    /** WP-2423 Q7 slice 2: "Staff" for a round staff entered for the table. */
+    readonly orderedBy: "You" | "AnotherGuest" | "Staff";
     readonly submittedAt: string;
     readonly status: DiningRoundStatus;
     readonly payment: DiningRoundPayment;
@@ -302,7 +307,11 @@ export function composeCustomerDiningSession(
     }
     return Object.freeze({
       roundNumber: index + 1,
-      orderedBy: mine ? ("You" as const) : ("AnotherGuest" as const),
+      orderedBy: order.staffRounds?.has(reference)
+        ? ("Staff" as const)
+        : mine
+          ? ("You" as const)
+          : ("AnotherGuest" as const),
       submittedAt: batch.submittedAt,
       status,
       payment,
@@ -529,6 +538,22 @@ function postgresDependencies(
         orderReference,
       ]))
         unpaidCancellations.add(entry.orderBatchReference);
+      // WP-2423 Q7 slice 2: rounds staff entered for the table, paid on the Store's card machine.
+      const staffRounds = new Set(
+        (
+          await createPostgresStaffDiningRoundEntryStore({
+            ...scope,
+            authorize: async () => stillAuthorized(),
+          }).listByOrders(transaction, [orderReference])
+        ).keys(),
+      );
+      const cardMachinePayments = await createPostgresCardMachinePaymentStore({
+        scope,
+        authorize: async (_tx, target) =>
+          target.orderReference === orderReference && (await stillAuthorized()),
+      }).listByOrder(transaction, orderReference);
+      for (const entry of cardMachinePayments)
+        paymentOutcomes.set(entry.payment.orderBatchReference, "Succeeded");
       if (!(await stillAuthorized())) return denied();
       const staffCancellations = new Map<
         string,
@@ -622,6 +647,9 @@ function postgresDependencies(
       }
       // Refund positions per captured payment, as the receipt reads them (Payment owner sources).
       const refunds = { confirmedMinor: 0n, pendingMinor: 0n };
+      // A card-machine payment is refunded on the machine and recorded (only confirmed refunds).
+      for (const entry of cardMachinePayments)
+        for (const refund of entry.refunds) refunds.confirmedMinor += refund.amountMinor;
       for (const projection of payments) {
         if (projection.snapshot.terminalStatus !== "Succeeded") continue;
         const payment = {
@@ -685,10 +713,20 @@ function postgresDependencies(
           itemCancellations,
           remakes,
           ...(itemPrices === undefined ? {} : { itemPrices }),
-          payments: payments.map((projection) => ({
-            status: projection.snapshot.terminalStatus,
-            amount: projection.snapshot.amount,
-          })),
+          payments: [
+            ...payments.map((projection) => ({
+              status: projection.snapshot.terminalStatus,
+              amount: projection.snapshot.amount,
+            })),
+            ...cardMachinePayments.map((entry) => ({
+              status: "Succeeded" as const,
+              amount: {
+                amountMinor: entry.payment.preparation.total.amountMinor,
+                currencyCode: "CAD",
+              },
+            })),
+          ],
+          staffRounds,
           refunds,
         },
       };

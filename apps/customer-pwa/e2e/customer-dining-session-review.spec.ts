@@ -236,6 +236,69 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     });
   });
 
+  // WP-2423 Q7 slice 2 (DEC-STAFF-DINE-IN-ROUND): a round staff entered for the table.
+  test("shows rounds staff entered for the table and how they are paid", async ({ page }) => {
+    const [round1] = session.session.rounds;
+    if (round1 === undefined) throw new Error("fixture");
+    const staffRound = (roundNumber: number, status: string, payment: string) => ({
+      ...round1,
+      roundNumber,
+      orderedBy: "Staff",
+      submittedAt: "2026-10-13T17:58:00.000Z",
+      status,
+      payment,
+      items: [
+        {
+          displayName: "Synthetic shoyu ramen",
+          quantity: 1,
+          servedQuantity: 0,
+          cancelled: false,
+          lineTotal: cad("2034"),
+        },
+      ],
+      itemsTotal: cad("2034"),
+    });
+    await enterTable(page, () => ({
+      status: 200,
+      json: {
+        schemaVersion: 1,
+        session: {
+          ...session.session,
+          rounds: [
+            round1,
+            staffRound(2, "Queued", "Paid"),
+            staffRound(3, "AwaitingPayment", "Awaiting"),
+          ],
+          summary: { ...session.session.summary, due: cad("2034") },
+        },
+      },
+    }));
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { name: "Round 2 · Entered by staff" })).toBeVisible();
+    await expect(main.getByRole("heading", { name: "Round 3 · Entered by staff" })).toBeVisible();
+    const awaiting = main.getByRole("article", { name: "Round 3 · Entered by staff" });
+    await expect(awaiting).toContainText(
+      "Staff entered this round for your table. Pay them on the card machine and the kitchen starts it.",
+    );
+    await expect(
+      main.getByRole("article", { name: "Round 2 · Entered by staff" }).getByText("Paid", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expectNoInternalText(page);
+    await expect(
+      main.getByText(/\bStaff\b(?! entered)|StoreCardMachine|AwaitingPayment/u),
+    ).toHaveCount(0);
+    for (const width of [1440, 390, 320]) {
+      await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
+      await expectNoHorizontalOverflow(page);
+    }
+    await page.screenshot({
+      path: "test-results/customer-dining-session-staff-round-390.png",
+      fullPage: true,
+    });
+  });
+
   test("asks a guest who has not joined to join first", async ({ page }) => {
     await enterTable(page, () => ({ status: 404, json: { schemaVersion: 1 } }));
     const main = page.getByRole("main");

@@ -5,6 +5,7 @@ import {
   withDailySettlementRecheck,
 } from "./pilot-daily-settlement-recheck.mjs";
 import {
+  dailySettlementDayEnd,
   dailySettlementRunReference,
   dailySettlementRecheckRunReference,
 } from "./pilot-daily-settlement-reference.mjs";
@@ -206,4 +207,12 @@ it("the worker re-checks only when day-end settlement is idle, at most once per 
   at += 60_000;
   expect(await runOnce()).toEqual({ status: "Created", checkCount: 1 });
   expect(recheck).toHaveBeenCalledTimes(2);
+});
+
+it("WP-2423: a scheduled run and its re-checks name the day's end; other references are only hints", () => {
+  const named = { ...scope, ...day };
+  expect(dailySettlementDayEnd(dailySettlementRunReference(named).runReference)).toBe(day.endsAt);
+  expect(dailySettlementDayEnd(dailySettlementRecheckRunReference(named, 3))).toBe(day.endsAt);
+  expect(dailySettlementDayEnd("not a reference")).toBeNull();
+  expect(dailySettlementDayEnd(null)).toBeNull();
 });

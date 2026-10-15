@@ -33,6 +33,10 @@ const outcome = (value: unknown): PaymentReconciliationOutcome =>
 export const paymentReconciliationDayDifferenceLimit = 200;
 /** Checks one settlement run may carry (its `maxCandidates` ceiling). */
 export const paymentReconciliationDaySettlementCheckLimit = 100;
+/** Re-checks one business day may receive (the settlement worker's own ceiling). */
+export const paymentReconciliationDayRecheckLimit = 20;
+/** Other settlement checks of one day kept in its history (a run outside the day's schedule). */
+export const paymentReconciliationDayAdditionalCheckLimit = 5;
 const unmatchedOutcomes: readonly PaymentReconciliationOutcome[] = [
   "Difference",
   "Unresolved",
@@ -85,6 +89,12 @@ export interface PaymentReconciliationDay {
       readonly check: PaymentReconciliationDayCheck;
       readonly count: number;
     } | null;
+    /**
+     * WP-2423: settlement checks of the same day by a run the day's schedule did not derive (for
+     * example the day was settled twice while the scheduler was replaced), oldest first. History
+     * only: the day's result is its scheduled run and that run's re-checks.
+     */
+    readonly additionalChecks: readonly PaymentReconciliationDayCheck[];
   } | null;
   /** Runs whose cutoff fell inside the day, and every payment they checked, counted once. */
   readonly operational: {
@@ -188,13 +198,25 @@ export function createPostgresPaymentReconciliationDaySource(options: {
       readonly startsAt: string;
       readonly endsAt: string;
       readonly settlementRunReference: string | null;
+      /**
+       * WP-2423: the references the day's schedule derives for its re-checks, in order (1st
+       * re-check first). Omitted or empty: the day has no re-checks to look for.
+       */
+      readonly recheckRunReferences?: readonly string[];
     },
   ): Promise<PaymentReconciliationDay> => {
     const startsAt = instant(input.startsAt),
       endsAt = instant(input.endsAt),
       settlementRunReference =
-        input.settlementRunReference === null ? null : reference(input.settlementRunReference);
-    if (startsAt >= endsAt) return unavailable();
+        input.settlementRunReference === null ? null : reference(input.settlementRunReference),
+      recheckRunReferences = (input.recheckRunReferences ?? []).map(reference);
+    if (
+      startsAt >= endsAt ||
+      recheckRunReferences.length > paymentReconciliationDayRecheckLimit ||
+      new Set(recheckRunReferences).size !== recheckRunReferences.length ||
+      (settlementRunReference !== null && recheckRunReferences.includes(settlementRunReference))
+    )
+      return unavailable();
     const authorize = async () => {
       if (
         (await options.authorize(tx, {
@@ -303,7 +325,10 @@ ORDER BY r.checked_at,r.reconciliation_check_id LIMIT $4`,
           checks.some((check) => check.runReference !== run.runReference)
         )
           return unavailable();
-        // WP-2423: later settlement checks of the same day (same candidate, other runs).
+        // WP-2423: the day's other settlement checks (same candidate, other runs). A re-check is
+        // only a run under one of the references the day's schedule derives for its re-checks
+        // (in order); any other settlement run of the day is an additional check kept in the
+        // history, never mistaken for the day's current result by its time.
         const candidates = rows(
           await tx.query(
             `SELECT candidate_id::text AS candidate_reference FROM rms_payment.payment_reconciliation_record
@@ -312,46 +337,69 @@ WHERE brand_id=$1 AND store_id=$2 AND reconciliation_run_id=$3 AND mode='DailySe
           ),
         );
         let recheck: NonNullable<PaymentReconciliationDay["settlement"]>["recheck"] = null;
+        let additionalChecks: PaymentReconciliationDayCheck[] = [];
         if (candidates.length === 1) {
           const candidate = reference(candidates[0]?.candidate_reference);
-          const later = rows(
+          const others = rows(
             await tx.query(
-              `SELECT ${checkColumns},count(*) OVER ()::int AS recheck_count
-FROM rms_payment.payment_reconciliation_record r
+              `SELECT ${checkColumns} FROM rms_payment.payment_reconciliation_record r
 WHERE r.brand_id=$1 AND r.store_id=$2 AND r.candidate_id=$3 AND r.mode='DailySettlement'
   AND r.reconciliation_run_id<>$4 AND EXISTS (SELECT 1 FROM rms_payment.payment_reconciliation_run u
     WHERE u.reconciliation_run_id=r.reconciliation_run_id AND u.brand_id=r.brand_id
       AND u.store_id=r.store_id AND u.mode='DailySettlement' AND u.scheduled_at>=$5::timestamptz)
-ORDER BY r.checked_at DESC,r.reconciliation_check_id DESC LIMIT 1`,
+ORDER BY r.checked_at,r.reconciliation_check_id LIMIT $6`,
               [
                 scope.brandReference,
                 scope.storeReference,
                 candidate,
                 settlementRunReference,
                 endsAt,
+                recheckRunReferences.length + paymentReconciliationDayAdditionalCheckLimit + 1,
               ],
             ),
-          );
-          const latest = later[0];
+          ).map(toCheck);
+          if (
+            others.length >
+            recheckRunReferences.length + paymentReconciliationDayAdditionalCheckLimit
+          )
+            return unavailable();
+          const ordinal = (check: PaymentReconciliationDayCheck) =>
+            recheckRunReferences.indexOf(check.runReference) + 1;
+          // Re-checks count in order 1, 2, … like the worker and the status report do.
+          const rechecks: PaymentReconciliationDayCheck[] = [];
+          for (let n = 1; n <= recheckRunReferences.length; n++) {
+            const found = others.filter((check) => ordinal(check) === n);
+            if (found.length > 1) return unavailable();
+            const next = found[0];
+            if (next === undefined) break;
+            const previous = rechecks.at(-1)?.checkedAt ?? checks.at(-1)?.checkedAt ?? "";
+            if (next.checkedAt < previous) return unavailable();
+            rechecks.push(next);
+          }
+          additionalChecks = others.filter((check) => ordinal(check) === 0);
+          const latest = rechecks.at(-1);
           if (latest !== undefined) {
-            const check = toCheck(latest);
             const recheckRuns = rows(
               await tx.query(
                 `SELECT ${runColumns} FROM rms_payment.payment_reconciliation_run
 WHERE brand_id=$1 AND store_id=$2 AND reconciliation_run_id=$3 AND mode='DailySettlement'`,
-                [scope.brandReference, scope.storeReference, check.runReference],
+                [scope.brandReference, scope.storeReference, latest.runReference],
               ),
             );
             if (recheckRuns.length !== 1 || recheckRuns[0] === undefined) return unavailable();
-            if (check.checkedAt < (checks.at(-1)?.checkedAt ?? "")) return unavailable();
             recheck = Object.freeze({
               run: toRun(recheckRuns[0]),
-              check,
-              count: count(latest.recheck_count),
+              check: latest,
+              count: rechecks.length,
             });
           }
         } else if (candidates.length > 1) return unavailable();
-        settlement = Object.freeze({ run, checks: Object.freeze(checks), recheck });
+        settlement = Object.freeze({
+          run,
+          checks: Object.freeze(checks),
+          recheck,
+          additionalChecks: Object.freeze(additionalChecks),
+        });
       }
     }
     await authorize();

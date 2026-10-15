@@ -3,6 +3,14 @@ const databaseAccessManifestInput = {
   module: { moduleName: "ordering", packageName: "@rms/ordering", layer: "RMS" },
   tables: [
     {
+      table: "staff_dining_round_entry",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/ordering" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "counter_order_entry",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/ordering" },
@@ -377,6 +385,46 @@ const databaseAccessManifestInput = {
     },
   ],
   accesses: [
+    {
+      id: "staff-dining-round-entry.read.staff_dining_round_entry",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "staff_dining_round_entry" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/staff-dining-round-entry-store.ts",
+    },
+    {
+      id: "staff-dining-round-entry.write.staff_dining_round_entry",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "staff_dining_round_entry" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: null,
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/staff-dining-round-entry-store.ts",
+    },
+    {
+      id: "staff-dining-round-entry.read.order_batch",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_batch" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/staff-dining-round-entry-store.ts",
+    },
+    {
+      id: "staff-dining-round-entry.read.order_header",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_header" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/staff-dining-round-entry-store.ts",
+    },
     {
       id: "counter-order-entry.read.counter_order_entry",
       operation: "read",

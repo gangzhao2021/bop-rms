@@ -218,4 +218,80 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
     expect(markup).toContain("Counter order");
     expect(markup).toContain("Loading the menu");
   });
+
+  // WP-2423 Q7 slice 2 (DEC-STAFF-DINE-IN-ROUND): a round entered for a table.
+  it("sends a table round with notes and reads its refusals in staff words", async () => {
+    const placed = {
+      status: "Placed",
+      orderReference: id(20),
+      orderBatchReference: id(21),
+      orderNumber: "7",
+      orderVersion: 4,
+      tableLabel: "T4",
+      orderMinor: "2260",
+      tipMinor: "300",
+      totalMinor: "2560",
+      payBy: "2026-10-15T18:30:00.000Z",
+      recordedAfterOutage: false,
+    };
+    const responses: [number, unknown][] = [
+      [200, placed],
+      [409, { error: "table_cart_has_items", items: [{ name: "Iced latte", quantity: 2 }] }],
+      [409, { error: "table_checkout_in_progress" }],
+      [409, { error: "table_unavailable" }],
+      [409, { error: "store_not_taking_dine_in_orders" }],
+      [403, { error: "staff_round_permission_denied" }],
+    ];
+    const fetcher = vi.fn(async () => {
+      const [status, body] = responses.shift() ?? [500, {}];
+      return new Response(JSON.stringify(body), { status });
+    });
+    const client = createCounterOrderClient("a".repeat(43), fetcher as unknown as typeof fetch);
+    const command = {
+      operationReference: id(30),
+      tableReference: id(40),
+      lines: [{ sellableReference: id(5), quantity: 1, optionSelections: [], note: "No onions" }],
+      tip: { kind: "None" } as const,
+      recordedAfterOutage: false,
+    };
+    expect(await client.placeTableRound(command)).toMatchObject({
+      tableLabel: "T4",
+      totalMinor: "2560",
+    });
+    expect(fetcher).toHaveBeenCalledWith(
+      "/merchant/dining/staff-rounds",
+      expect.objectContaining({ method: "POST", body: JSON.stringify(command) }),
+    );
+    await expect(client.placeTableRound(command)).rejects.toMatchObject({
+      code: "TableCartHasItems",
+      pendingItems: [{ name: "Iced latte", quantity: 2 }],
+    });
+    await expect(client.placeTableRound(command)).rejects.toMatchObject({
+      code: "TableCheckoutInProgress",
+    });
+    await expect(client.placeTableRound(command)).rejects.toMatchObject({
+      code: "TableUnavailable",
+    });
+    await expect(client.placeTableRound(command)).rejects.toMatchObject({
+      code: "StoreNotTakingOrders",
+    });
+    await expect(client.placeTableRound(command)).rejects.toMatchObject({
+      code: "PermissionDenied",
+    });
+    // A table round's reply names its table; a counter order's never does.
+    expect(() => parsePlacedCounterOrder(placed)).toThrow();
+    const { tableLabel: _label, ...counter } = placed;
+    void _label;
+    expect(parsePlacedCounterOrder(counter).tableLabel).toBeNull();
+  });
+
+  it("loads the dine-in menu for a table opened from the Tables page", () => {
+    const markup = renderToStaticMarkup(
+      <MemoryRouter initialEntries={[`/operations/order-entry?table=${id(40)}`]}>
+        <StaffOrderEntryPage storeLabel="Toronto Pilot" csrf={"a".repeat(43)} />
+      </MemoryRouter>,
+    );
+    expect(markup).toContain("Table order");
+    expect(markup).not.toContain("Counter order");
+  });
 });

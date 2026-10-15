@@ -685,6 +685,9 @@ function WorkCard({
             ))}
           </ul>
         ) : null}
+        {item.orderLabel?.enteredByStaff ? (
+          <p className="kitchen-work-item__staff">Entered by staff</p>
+        ) : null}
         {item.customerNote ? (
           <p className="kitchen-work-item__note">
             <span>Note:</span> {item.customerNote}

@@ -123,6 +123,24 @@ describe("WP-2423 P2 store overview", () => {
     expect(loading).toContain("Reading current work…");
     expect(loading).not.toContain("Refresh");
   });
+  it('WP-2423: counts overdue exceptions in plain words (v15 showed "15 overdues")', () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <OverviewToday
+          timeZone="America/Toronto"
+          onRefresh={() => undefined}
+          state={{
+            orders: { kind: "Unavailable" },
+            pickups: { kind: "Unavailable" },
+            exceptions: { kind: "Ready", value: { open: 15, overdue: 15 } },
+            updatedAt: "2026-08-12T16:30:00.000Z",
+          }}
+        />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("15 overdue");
+    expect(html).not.toContain("overdues");
+  });
   it("never shows a pickup-only Store an orders 'ready' count that contradicts its pickups", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>

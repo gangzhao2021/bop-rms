@@ -1,6 +1,9 @@
 import { createOrderExceptionClient } from "./order-exception-client.js";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { MemoryRouter } from "react-router";
+import { StoreTimeZoneContext } from "./StoreTime.js";
+import { findInternalText } from "../e2e/internal-text-patterns.js";
 import {
   OrderExceptionPage,
   OrderExceptionScreen,
@@ -51,7 +54,7 @@ describe("WP-1809 Order Exception Workbench", () => {
       "exception-actions-unavailable",
     ])
       expect(html).not.toContain(value);
-    expect(html).toContain("Linked order · order number unavailable");
+    expect(html).toContain("Linked order · order number not shown");
     expect(html).not.toContain("018f0f58-767a-7f3b-a1d0-000000000902");
   });
   it("rejects client-resolved rows without source finality", () => {
@@ -182,7 +185,7 @@ it("renders an unassociated reconciliation record without enabling order-specifi
     items: [{ ...input.items[0], kind: "PaymentReconciliationDifference", orderReference: null }],
   });
   const html = renderToStaticMarkup(<OrderExceptionScreen view={view} csrf={"a".repeat(43)} />);
-  expect(html).toContain("Order reference unavailable");
+  expect(html).toContain("No matching order");
   expect(html).not.toContain("Review confirmed refund");
   expect(() =>
     parseOrderExceptionView({ ...input, items: [{ ...input.items[0], orderReference: null }] }),
@@ -207,9 +210,102 @@ it("does not advertise executable generic commands for a fresh unlinked payment 
       onRefresh={() => undefined}
     />,
   );
-  expect(html).toContain("No linked order is available");
-  expect(html).toContain("requires reconciliation review");
+  expect(html).toContain("No order is linked to this payment difference");
   const buttons = [...html.matchAll(/<button([^>]*)>(.*?)<\/button>/gu)];
   expect(buttons[0]?.[1]).not.toContain("disabled");
   for (const button of buttons.slice(1)) expect(button[1]).toContain("disabled");
+});
+
+describe("WP-2423 reconciliation cards say what the difference is about", () => {
+  const dayItem = (resolvedAt: string | null) => ({
+    ...fixture().items[0],
+    exceptionReference: "018f0f58-767a-7f3b-a1d0-000000000911",
+    orderReference: null,
+    kind: "PaymentReconciliationDifference",
+    severity: "High",
+    status: resolvedAt === null ? "Open" : "Resolved",
+    providerState: "Confirmed",
+    compensationStatus: "NotRequested",
+    sourceFinal: resolvedAt !== null,
+    reconciliation: {
+      type: "BusinessDayTotals",
+      businessDate: "2026-10-09",
+      captured: { storeMinor: "5650", providerMinor: "5650" },
+      refunded: { storeMinor: "0", providerMinor: "2260" },
+      checkedAt: "2026-10-10T08:00:03.000Z",
+      resolvedAt,
+    },
+  });
+  const render = (items: unknown[]) =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <StoreTimeZoneContext.Provider value="America/Toronto">
+          <OrderExceptionScreen
+            view={parseOrderExceptionView({ ...fixture(), items })}
+            csrf={"a".repeat(43)}
+            onRefresh={() => undefined}
+          />
+        </StoreTimeZoneContext.Provider>
+      </MemoryRouter>,
+    );
+  it("shows a resolved business-day difference with its day, the side that differed and the re-check", () => {
+    const html = render([dayItem("2026-10-15T13:32:56.580Z")]);
+    expect(html).toContain("Business day totals differ from the payment provider");
+    expect(html).toContain("Fri, Oct 9");
+    expect(html).toContain("Refunds: the payment provider has $22.60 more than the store.");
+    expect(html).not.toContain("Payments taken: the payment provider has");
+    expect(html).toContain("Resolved: the day was checked again");
+    expect(html).toContain('href="/app/operations/payment-reconciliation?businessDate=2026-10-09"');
+    expect(html).toContain("Open Settlement for Fri, Oct 9");
+    expect(html).toContain("Follow-up closed: this difference is resolved.");
+    for (const text of [
+      "Review unmatched charge",
+      "View charge details",
+      "Review current follow-up",
+      "Acknowledge payment difference",
+      "No matching order",
+      "No order is linked",
+      "Refresh the page",
+      "version",
+    ])
+      expect(html).not.toContain(text);
+    expect(findInternalText([html.replace(/<[^>]+>/gu, " ")])).toEqual([]);
+  });
+  it("keeps follow-up open for an unresolved business-day difference and points to Settlement", () => {
+    const html = render([dayItem(null)]);
+    expect(html).toContain("do not match the payment provider&#x27;s statement");
+    expect(html).toContain("Review current follow-up");
+    expect(html).not.toContain("View charge details");
+    expect(html).not.toContain("Review unmatched charge");
+  });
+  it("offers the charge and its refund only for a charge that matches no order", () => {
+    const html = render([{ ...dayItem(null), reconciliation: { type: "UnmatchedCharge" } }]);
+    expect(html).toContain("Charge that matches no order");
+    expect(html).toContain("View charge details");
+    expect(html).toContain("Review unmatched charge");
+    expect(html).toContain("matches no order or payment in this store");
+  });
+  it("refuses a detail on another kind or a malformed day total", () => {
+    expect(() =>
+      parseOrderExceptionView({
+        ...fixture(),
+        items: [{ ...fixture().items[0], reconciliation: { type: "Payment" } }],
+      }),
+    ).toThrow("ORDER_EXCEPTION_INVALID");
+    const bad = dayItem(null);
+    expect(() =>
+      parseOrderExceptionView({
+        ...fixture(),
+        items: [
+          {
+            ...bad,
+            reconciliation: {
+              ...bad.reconciliation,
+              refunded: { storeMinor: "-1", providerMinor: "0" },
+            },
+          },
+        ],
+      }),
+    ).toThrow("ORDER_EXCEPTION_INVALID");
+  });
 });

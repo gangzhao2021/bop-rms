@@ -1912,6 +1912,13 @@
 .kitchen-work-item__note span {
   font-weight: 700;
 }
+/* WP-2423 Q7 slice 2: a counter order or table round staff entered for the guests. */
+.kitchen-work-item__staff {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
 /* WP-2423 Q3: menu allergens are a full-width line; "Contains" reads first and strongest. */
 .kitchen-work-item__allergens {
   display: flex;
@@ -8865,4 +8872,30 @@ body:has(.product-complete-draft) .bop-shell__header,
 .system-alert__since,
 .system-alert__resolved {
   font-size: 13px;
+}
+/* WP-2423 Q7 slice 2 (DEC-STAFF-DINE-IN-ROUND): staff take an order for a table. */
+.counter-order__note {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bop-space-1);
+}
+.counter-order__note input {
+  min-height: 44px;
+  max-width: 100%;
+}
+.dining-take-order {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: var(--bop-space-2) var(--bop-space-3);
+  border: 1px solid var(--bop-color-text-default);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-text-default);
+  color: var(--bop-color-surface-default);
+  font-weight: 600;
+  text-decoration: none;
+}
+.order-staff-round {
+  margin: 0 0 var(--bop-space-2);
+  font-weight: 600;
 }

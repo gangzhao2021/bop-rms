@@ -1,4 +1,8 @@
-import { createPostgresReconciliationFollowUpQuery } from "@rms/payment";
+import {
+  createPostgresPaymentReconciliationExceptionDetailReader,
+  createPostgresReconciliationFollowUpQuery,
+} from "@rms/payment";
+import { createMerchantBusinessDayWindows } from "./merchant-business-day-window.js";
 import { listStoreOrderNumbers } from "@rms/ordering";
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
@@ -12,6 +16,7 @@ import {
 } from "./merchant-transaction-authorization.js";
 import {
   createMerchantOrderExceptionRead,
+  type MerchantExceptionReconciliationDetail,
   type MerchantExceptionScope,
 } from "./merchant-order-exception-read.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -28,6 +33,19 @@ export function createPersistentMerchantOrderExceptions(options: {
       sources: readonly OrderExceptionSource[];
     },
   ): Promise<Metadata>;
+  /**
+   * WP-2423: how the Store's scheduler names its settlement runs, so a business day's totals
+   * difference names its day. `dayEndOf` reads the day end a scheduled run's reference carries
+   * (null for any other run); the day is accepted only when that day's scheduled run or one of
+   * its re-checks is exactly the run that found the difference.
+   */
+  settlementDays?: {
+    dayEndOf(runReference: string): string | null;
+    runReferences(
+      scope: MerchantExceptionScope,
+      window: { readonly businessDate: string; readonly startsAt: string; readonly endsAt: string },
+    ): Promise<{ readonly original: string; readonly rechecks: readonly string[] }>;
+  };
 }) {
   const persistence = options.persistence,
     resolve = createMerchantStoreScope(persistence);
@@ -140,6 +158,75 @@ export function createPersistentMerchantOrderExceptions(options: {
             matches(await authorize(t), scope),
         })(tx, source.sourceReference);
         return result.assigned;
+      },
+      reconciliationDetails: async (tx, scope, sources) => {
+        if (!matches(await authorize(tx), scope)) return unavailable();
+        const result = new Map<string, MerchantExceptionReconciliationDetail>();
+        let details;
+        try {
+          details = await createPostgresPaymentReconciliationExceptionDetailReader({
+            scope,
+            authorize: async (t) => t === tx && matches(await authorize(t), scope),
+          })(
+            tx,
+            sources.map((source) => source.sourceReference),
+          );
+        } catch (error) {
+          if (error instanceof Error && error.message === "MERCHANT_ORDER_EXCEPTION_UNAVAILABLE")
+            throw error;
+          return result; // The cards show without what the difference is about.
+        }
+        const days = createMerchantBusinessDayWindows({
+          persistence,
+          scope,
+          timeZone: (await current(tx)).store.timeZone,
+          authorize: async (t) => t === tx && matches(await authorize(t), scope),
+        });
+        const businessDateOf = async (runReference: string): Promise<string | null> => {
+          const settlementDays = options.settlementDays;
+          const endsAt = settlementDays?.dayEndOf(runReference) ?? null;
+          if (!settlementDays || endsAt === null) return null;
+          try {
+            const lastInstant = new Date(Date.parse(endsAt) - 1).toISOString();
+            const { businessDate } = await days.today(tx, lastInstant);
+            const window = await days.window(tx, businessDate);
+            if (window.status !== "Closed" || window.endsAt !== endsAt) return null;
+            const runs = await settlementDays.runReferences(scope, window);
+            return runs.original === runReference || runs.rechecks.includes(runReference)
+              ? businessDate
+              : null;
+          } catch (error) {
+            if (error instanceof Error && error.message === "MERCHANT_ORDER_EXCEPTION_UNAVAILABLE")
+              throw error;
+            return null;
+          }
+        };
+        for (const [reference, detail] of details) {
+          if (detail.kind !== "BusinessDayTotals") {
+            result.set(reference, Object.freeze({ type: detail.kind }));
+            continue;
+          }
+          if (detail.openingCheck === null) continue;
+          const check = detail.openingCheck;
+          result.set(
+            reference,
+            Object.freeze({
+              type: "BusinessDayTotals" as const,
+              businessDate: await businessDateOf(check.runReference),
+              captured: Object.freeze({
+                storeMinor: check.internalCapturedMinor,
+                providerMinor: check.providerCapturedMinor,
+              }),
+              refunded: Object.freeze({
+                storeMinor: check.internalRefundedMinor,
+                providerMinor: check.providerRefundedMinor,
+              }),
+              checkedAt: check.checkedAt,
+              resolvedAt: detail.resolution?.resolvedAt ?? null,
+            }),
+          );
+        }
+        return result;
       },
       metadata: async (tx, scope, sources) => {
         if (!matches(await authorize(tx), scope)) return unavailable();

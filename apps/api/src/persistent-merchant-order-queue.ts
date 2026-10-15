@@ -1,6 +1,7 @@
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
   createPostgresCounterOrderEntryStore,
+  createPostgresStaffDiningRoundEntryStore,
   createPostgresStaffItemCancellationReader,
   createPostgresStaffOrderCancellationReader,
   listStoreConfirmedOrderBatches,
@@ -309,6 +310,17 @@ export function createPersistentMerchantOrderQueue(options: {
               } | null;
             }
           >();
+          /**
+           * WP-2423 Q7 slice 2: dine-in rounds staff entered for a table, by batch, and the
+           * card-machine payment of each (DEC-STAFF-DINE-IN-ROUND).
+           */
+          const staffRounds = new Map<
+            string,
+            {
+              recordedAfterOutage: boolean;
+              paidOnCardMachine: { amountMinor: string; takenAt: string } | null;
+            }
+          >();
           let confirmed: ReadonlySet<string> = new Set<string>();
           const started = new Set<string>();
           const itemCancellations = new Map<
@@ -369,6 +381,27 @@ export function createPersistentMerchantOrderQueue(options: {
                         refundedMinor: paid.refunds
                           .reduce((sum, refund) => sum + refund.amountMinor, 0n)
                           .toString(),
+                      },
+              });
+            }
+            const rounds = await createPostgresStaffDiningRoundEntryStore({
+              ...scoped,
+              authorize: stillAllowed,
+            }).listByOrders(businessTransaction, orderReferences);
+            for (const [batch, round] of rounds) {
+              const paid = await cardPayments.loadByBatch(
+                businessTransaction,
+                round.orderReference,
+                batch,
+              );
+              staffRounds.set(batch, {
+                recordedAfterOutage: round.entry.recordedAfterOutage,
+                paidOnCardMachine:
+                  paid === null
+                    ? null
+                    : {
+                        amountMinor: paid.preparation.total.amountMinor.toString(),
+                        takenAt: String(paid.takenAt),
                       },
               });
             }
@@ -611,6 +644,8 @@ export function createPersistentMerchantOrderQueue(options: {
                                 String(item.currentPhase),
                               )),
                         staffCancellation: cancellations.get(batch.orderBatchReference) ?? null,
+                        // WP-2423 Q7 slice 2: a round staff entered for the table (or null).
+                        staffRound: staffRounds.get(batch.orderBatchReference) ?? null,
                         paymentDue: resolveMerchantBatchPaymentDue({
                           orderType: item.orderType,
                           open:

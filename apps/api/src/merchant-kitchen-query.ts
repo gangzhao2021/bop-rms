@@ -12,7 +12,12 @@ import {
   type KitchenQueueItemView,
 } from "@rms/kitchen";
 import { listPublishedSellableAllergenDisclosures, sellableDisclosureKey } from "@rms/catalog";
-import { listStoreKitchenOrderLabels, listStoreOrderBusinessDates } from "@rms/ordering";
+import {
+  createPostgresCounterOrderEntryStore,
+  createPostgresStaffDiningRoundEntryStore,
+  listStoreKitchenOrderLabels,
+  listStoreOrderBusinessDates,
+} from "@rms/ordering";
 import { listDiningSessionTableLabels } from "@rms/dining";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
@@ -93,6 +98,11 @@ export interface KitchenOrderLabel {
   readonly orderNumber: string;
   readonly orderType: "Pickup" | "DineIn";
   readonly tableLabel: string | null;
+  /**
+   * WP-2423 Q7 slice 2: staff entered this order or round for the guests (a counter order or a
+   * table round entered by staff), so the kitchen reads "Entered by staff".
+   */
+  readonly enteredByStaff: boolean;
 }
 export interface KitchenPreparation {
   readonly allergens: KitchenItemAllergens;
@@ -128,7 +138,11 @@ const itemView = (item: KitchenQueueItemView, preparation: KitchenPreparation) =
 export async function kitchenPreparation(
   transaction: ConsumerTransaction,
   scope: { readonly brandReference: string; readonly storeReference: string },
-  items: readonly { readonly workItemReference: string; readonly orderReference: string }[],
+  items: readonly {
+    readonly workItemReference: string;
+    readonly orderReference: string;
+    readonly orderBatchReference?: string;
+  }[],
 ): Promise<ReadonlyMap<string, KitchenPreparation>> {
   const allergens = await kitchenAllergens(
     transaction,
@@ -155,9 +169,22 @@ export async function kitchenPreparation(
       ),
     ),
   ]);
+  // WP-2423 Q7 slice 2: counter orders and table rounds staff entered (Ordering's staff records).
+  const staffOwners = { ...scope, authorize: async () => true };
+  const counterOrders = await createPostgresCounterOrderEntryStore(staffOwners).listByOrders(
+    transaction,
+    orderReferences,
+  );
+  const staffRounds = await createPostgresStaffDiningRoundEntryStore(staffOwners).listByOrders(
+    transaction,
+    orderReferences,
+  );
   return new Map(
     items.map((item) => {
       const order = orders.get(item.orderReference);
+      const enteredByStaff =
+        counterOrders.has(item.orderReference) ||
+        (item.orderBatchReference !== undefined && staffRounds.has(item.orderBatchReference));
       const facts = allergens.get(item.workItemReference);
       return [
         item.workItemReference,
@@ -175,6 +202,7 @@ export async function kitchenPreparation(
                     order.diningSessionReference === null
                       ? null
                       : (tables.get(order.diningSessionReference) ?? null),
+                  enteredByStaff,
                 }),
         }),
       ] as const;

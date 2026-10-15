@@ -68,6 +68,15 @@ export interface MerchantSettlementUnmatchedCharges {
   readonly refunded: MerchantSettlementAmount;
 }
 const businessDatePattern = /^\d{4}-\d{2}-\d{2}$/u;
+/** WP-2423: the asked business day is before the Store's settlement records begin. */
+export const merchantSettlementNotCovered = "MERCHANT_SETTLEMENT_NOT_COVERED" as const;
+export class MerchantSettlementNotCoveredError extends Error {
+  readonly code = merchantSettlementNotCovered;
+  constructor(readonly firstBusinessDate: string) {
+    super(merchantSettlementNotCovered);
+    this.name = "MerchantSettlementNotCoveredError";
+  }
+}
 const sameScope = (a: MerchantSettlementScope, b: MerchantSettlementScope) =>
   a.tenantReference === b.tenantReference &&
   a.brandReference === b.brandReference &&
@@ -128,6 +137,15 @@ export function createMerchantSettlementRead(options: {
     scope: MerchantSettlementScope,
     window: MerchantSettlementWindow,
   ): Promise<MerchantSettlementUnmatchedCharges | null>;
+  /**
+   * WP-2423: the first business day the Store's settlement records cover (when it started using
+   * the system); null when not known. An earlier day has no records to show, which is an answer,
+   * not a refusal.
+   */
+  firstBusinessDate?(
+    tx: ConsumerTransaction,
+    scope: MerchantSettlementScope,
+  ): Promise<string | null>;
   now(): string;
 }) {
   return async (input: {
@@ -146,6 +164,18 @@ export function createMerchantSettlementRead(options: {
       const storeLabel = await options.storeLabel(tx, scope);
       if (typeof storeLabel !== "string" || !/^[^\p{Cc}\p{Cf}]{1,100}$/u.test(storeLabel))
         return unavailable();
+      if (input.businessDate !== null && options.firstBusinessDate !== undefined) {
+        const first = await options.firstBusinessDate(tx, scope);
+        if (first !== null && !businessDatePattern.test(first)) return unavailable();
+        if (first !== null && input.businessDate < first) {
+          const again = await options.authorize(tx, {
+            sessionCookie: input.sessionCookie,
+            permission,
+          });
+          if (!again || !sameScope(again, scope)) return unavailable();
+          throw new MerchantSettlementNotCoveredError(first);
+        }
+      }
       const window = await options.window(tx, scope, input.businessDate);
       if (
         !businessDatePattern.test(window.businessDate) ||

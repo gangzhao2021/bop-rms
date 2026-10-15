@@ -2,7 +2,11 @@ import { createContractParsers } from "./contract-parsers.js";
 
 /** WP-2423 P1 (PAY-RECONCILIATION): the day-end settlement view and its strict reader. */
 export class SettlementClientError extends Error {
-  constructor(readonly code: "PermissionDenied" | "Busy" | "Unavailable") {
+  constructor(
+    readonly code: "PermissionDenied" | "Busy" | "Unavailable" | "NotCovered",
+    /** WP-2423: with NotCovered, the first business day the Store's records cover. */
+    readonly firstBusinessDate: string | null = null,
+  ) {
     super(code);
     this.name = "SettlementClientError";
   }
@@ -61,6 +65,11 @@ export interface SettlementReconciliation {
       readonly check: SettlementCheck;
       readonly count: number;
     } | null;
+    /**
+     * WP-2423: other settlement checks of the same day outside its schedule (history only; the
+     * day's result is its scheduled check and that check's re-checks). Oldest first.
+     */
+    readonly additionalChecks: readonly SettlementCheck[];
   } | null;
   readonly operational: {
     readonly runCount: number;
@@ -236,6 +245,11 @@ export function parseSettlementView(value: unknown): SettlementView {
         Object.hasOwn(r.settlement, "recheck")
           ? ["recheck"]
           : []),
+        ...(r.settlement !== null &&
+        typeof r.settlement === "object" &&
+        Object.hasOwn(r.settlement, "additionalChecks")
+          ? ["additionalChecks"]
+          : []),
       ]);
       const settlementRun = run(s.run);
       if (
@@ -262,10 +276,22 @@ export function parseSettlementView(value: unknown): SettlementView {
           count: recheckCount,
         });
       }
+      const additional = s.additionalChecks === undefined ? [] : s.additionalChecks;
+      if (!Array.isArray(additional) || additional.length > 5) return fail();
+      const additionalChecks = additional.map((item) => check(item));
+      if (
+        additionalChecks.some(
+          (item) =>
+            item.runReference === settlementRun.runReference ||
+            item.runReference === recheck?.run.runReference,
+        )
+      )
+        return fail();
       settlement = Object.freeze({
         run: settlementRun,
         checks: Object.freeze(s.checks.map((item) => check(item, settlementRun.runReference))),
         recheck,
+        additionalChecks: Object.freeze(additionalChecks),
       });
     }
     const o = exact(r.operational, ["runCount", "latestRun", "paymentCount", "outcomes"]);
@@ -388,6 +414,19 @@ export function createSettlementClient(fetcher: typeof fetch = fetch) {
         );
         if (response.status === 401 || response.status === 403)
           throw new SettlementClientError("PermissionDenied");
+        // WP-2423: the day is before the Store's records begin (an answer, not a failure).
+        if (response.status === 404) {
+          const body = (await response.json().catch(() => null)) as {
+            error?: unknown;
+            firstBusinessDate?: unknown;
+          } | null;
+          if (
+            body?.error === "settlement_not_covered" &&
+            typeof body.firstBusinessDate === "string" &&
+            /^\d{4}-\d{2}-\d{2}$/u.test(body.firstBusinessDate)
+          )
+            throw new SettlementClientError("NotCovered", body.firstBusinessDate);
+        }
         // The Store's records were busy with live work for a moment; the page tries again.
         if (response.status === 503) {
           const busy = await response

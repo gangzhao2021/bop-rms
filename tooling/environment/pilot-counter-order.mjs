@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   GuestSessionService,
   createPostgresGuestSessionEntryStore,
@@ -36,6 +37,18 @@ import {
 import { createMerchantCounterMenu } from "../../apps/api/dist/merchant-counter-menu.js";
 import { createMerchantCardMachinePayment } from "../../apps/api/dist/merchant-card-machine-payment.js";
 import { createMerchantCardMachineCancellationRefund } from "../../apps/api/dist/merchant-card-machine-refund.js";
+import { createMerchantStaffDiningRound } from "../../apps/api/dist/merchant-staff-dining-round.js";
+import {
+  createStaffTableCode,
+  createStaffTableGuestPipeline,
+} from "../../apps/api/dist/table-guest-pipeline.js";
+import { createMerchantDiningJoinState } from "../../apps/api/dist/merchant-dining-join-state.js";
+import { createCustomerDiningJoinComposition } from "../../apps/api/dist/customer-dining-join-composition.js";
+import { createCustomerDiningBindingComposition } from "../../apps/api/dist/customer-dining-binding-composition.js";
+import { createCustomerDiningCartWithCatalogInventoryComposition } from "../../apps/api/dist/customer-dining-cart-composition.js";
+import { createCustomerAdditionalDiningPaymentAdmission } from "../../apps/api/dist/customer-additional-dining-payment-store.js";
+import { storeTakesOrder } from "../../apps/api/dist/customer-store-open-gate.js";
+import { createPostgresDiningTableStore } from "../../packages/rms/dining/src/index.ts";
 import { createPostgresPublishedStoreOperatingStatusReader } from "../../packages/rms/store/src/index.ts";
 import { createInternalPaymentPreparation } from "./pilot-payment-preparation.mjs";
 import { reportUnexpected } from "./pilot-merchant-pickup.mjs";
@@ -54,7 +67,7 @@ export async function createInternalCounterOrder(
   resources,
   persistence,
   authentication,
-  { customer, loadPickupWorkflow, loadPickupQrToken, expectedDatabaseName },
+  { customer, loadPickupWorkflow, loadDiningWorkflow, loadPickupQrToken, expectedDatabaseName },
 ) {
   const saved = await loadPickupWorkflow();
   if (
@@ -214,6 +227,19 @@ export async function createInternalCounterOrder(
       ? {}
       : { storeFacts: await customer.createInternalMenuStoreFacts(resources) }),
   });
+  const staffDiningRound =
+    loadDiningWorkflow === undefined
+      ? undefined
+      : await createInternalStaffDiningRound(resources, persistence, authentication, {
+          customer,
+          configuredEntry,
+          sessions,
+          store,
+          stores,
+          projections,
+          loadDiningWorkflow,
+          expectedDatabaseName,
+        });
   return {
     counterMenu: createMerchantCounterMenu({
       persistence,
@@ -237,11 +263,16 @@ export async function createInternalCounterOrder(
       onUnexpected: (error) => reportUnexpected("INTERNAL_CARD_MACHINE_PAYMENT_UNAVAILABLE", error),
       // The same owner admission an online payment of a pickup Order passes (order payable,
       // pickup capacity clock open, reserved stock intact), under this staff member's authority.
-      admission: ({ scope: selected, preparation, allowed }) => {
+      admission: ({ scope: selected, preparation, allowed, kind }) => {
         const authorize = async (_tx, value) =>
           value.submissionReference === String(preparation.submissionReference) &&
           value.actorReference === String(preparation.guestSessionReference) &&
           (await allowed());
+        // WP-2423 Q7 slice 2: a staff-entered table round passes the dine-in payment admission.
+        if (kind !== "CounterPickup") {
+          if (staffDiningRound === undefined) throw new Error("INTERNAL_STAFF_ROUND_UNAVAILABLE");
+          return staffDiningRound.admission({ selected, preparation, allowed, kind, authorize });
+        }
         return createCustomerOrderPaymentClaimAdmission({
           scope: {
             brandReference: selected.brandReference,
@@ -269,11 +300,262 @@ export async function createInternalCounterOrder(
         });
       },
     }),
+    ...(staffDiningRound === undefined ? {} : { staffDiningRound: staffDiningRound.command }),
     cardMachineRefund: createMerchantCardMachineCancellationRefund({
       persistence,
       authentication,
       nextReference: reference,
       onUnexpected: (error) => reportUnexpected("INTERNAL_CARD_MACHINE_REFUND_UNAVAILABLE", error),
     }),
+  };
+}
+
+/**
+ * WP-2423 Q7 slice 2 (DEC-STAFF-DINE-IN-ROUND): staff enter a dine-in round for a table on behalf
+ * of its guests (or a paper round taken during an outage) and take the payment on the Store's card
+ * machine. The table guest goes through the same customer owner ports a guest scanning the table
+ * QR uses: the table code staff issue on the Tables page (start session or fresh code, under the
+ * staff member's table authority), table QR entry, join, dining binding, the table's shared Cart
+ * with menu and sold-out checks, configured Quote with tax, checkout details, the dine-in
+ * checkout, the first-or-later round submission, tip and payment clock. No Provider is called.
+ */
+async function createInternalStaffDiningRound(
+  resources,
+  persistence,
+  authentication,
+  {
+    customer,
+    configuredEntry,
+    sessions,
+    store,
+    stores,
+    projections,
+    loadDiningWorkflow,
+    expectedDatabaseName,
+  },
+) {
+  const saved = await loadDiningWorkflow();
+  if (
+    !matchesPilotEnvironment(saved.environment) ||
+    saved.database !== expectedDatabaseName ||
+    saved.scope.storeReference !== resources.scope.storeReference
+  )
+    throw new Error("INTERNAL_STAFF_ROUND_ONLY");
+  const { scope, transactions, now, credentials } = resources,
+    reference = credentials.reference;
+  const tenantReference = resources.publicProfile.binding.tenantReference;
+  const fullScope = { tenantReference, ...scope };
+  const entry = configuredEntry.entry;
+  const items = await customer.createInternalTestItems(resources);
+  const diningCart = customer.createInternalDiningCart(resources, items);
+  const quote = (
+    await customer.createInternalChannelQuote(resources, configuredEntry, diningCart, items)
+  ).configuredCartQuote.dining;
+  const base = customer.createInternalCheckout(resources, configuredEntry, items.catalogCartItems);
+  // The staff command applies the opening rule itself (paper rounds are entered after closing).
+  const diningCheckout = customer.createInternalDiningCheckout(resources, configuredEntry, base, {
+    openGate: false,
+  });
+  const details = customer.createInternalCheckoutDetails(
+    resources,
+    entry,
+    diningCheckout.preparation,
+  ).channelCheckoutDetails.dining;
+  const pickupOrders = await customer.createInternalOrder(resources, base, items.catalogCartItems);
+  const diningOrders = await customer.createInternalOrder(
+    resources,
+    { ...base, preparation: diningCheckout.preparation },
+    items.catalogCartItems,
+    "DineIn",
+  );
+  // No Provider takes part: staff charge the round on the Store's own card machine.
+  const noProvider = {
+    simulation: true,
+    adapter: new Proxy(
+      {},
+      {
+        get: () => async () => {
+          throw new Error("INTERNAL_STAFF_ROUND_NO_PROVIDER");
+        },
+      },
+    ),
+  };
+  const payment = await customer.createInternalChannelPayment(
+    resources,
+    base,
+    diningCheckout,
+    pickupOrders,
+    diningOrders,
+    noProvider,
+    items.catalogCartItems,
+  );
+  const catalog = createCatalogSelectionDisplayQuery(projections);
+  const cart = createCustomerDiningCartWithCatalogInventoryComposition({
+    ...diningCart.catalogDiningCart,
+    scope,
+    sessions,
+    cartTransactions: transactions,
+    catalog,
+    stores,
+    now,
+    replacement: customer.createInternalCartReplacement(resources, configuredEntry),
+  });
+  const diningSession = {
+    store,
+    credentials: entry.session.credentials,
+    binding: entry.session.binding,
+  };
+  const join = createCustomerDiningJoinComposition({
+    ...configuredEntry.diningAdmission.join,
+    scope,
+    session: diningSession,
+    now,
+  });
+  const binding = createCustomerDiningBindingComposition({
+    ...configuredEntry.diningAdmission.binding,
+    scope,
+    session: diningSession,
+    now,
+  });
+  const owner = configuredEntry.diningOwner;
+  const joinState = createMerchantDiningJoinState({
+    persistence,
+    authentication,
+    credentials: owner.credentials,
+  });
+  const operatingNow = () =>
+    transactions.run((tx) =>
+      createPostgresPublishedStoreOperatingStatusReader(resources.operating)(tx, now()),
+    );
+  const pipeline = createStaffTableGuestPipeline({
+    takesOrder: async (input) =>
+      input.recordedAfterOutage || storeTakesOrder(await operatingNow(), "SeatedDineIn"),
+    openTable: createStaffTableCode({
+      loadTable: (tableReference) =>
+        transactions.run(async (tx) => {
+          const table = await createPostgresDiningTableStore(
+            { run: (work) => work(tx) },
+            fullScope,
+            {
+              hashIntent: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
+              equals: (a, b) => a === b,
+            },
+          ).loadTable(tableReference);
+          return table === null
+            ? null
+            : {
+                aggregateVersion: table.aggregateVersion,
+                activeDiningSessionReference: table.activeDiningSessionReference,
+                seatable: table.lifecycle === "Published" && table.operationalState === "Available",
+              };
+        }),
+      loadJoinState: async (staff, diningSessionReference) => {
+        try {
+          return await joinState({ ...staff, query: { diningSessionReference } });
+        } catch {
+          return null;
+        }
+      },
+      start: (staff, command) => owner.start({ ...staff, command }),
+      regenerate: (staff, command) => owner.regenerate({ ...staff, command }),
+      nextReference: reference,
+    }),
+    // The table's printed QR, as a guest scanning it would enter.
+    tableQrToken: async (tableReference) => {
+      const token = await configuredEntry.dining.currentToken(tableReference);
+      if (typeof token !== "string") throw new Error("INTERNAL_TABLE_QR_UNAVAILABLE");
+      return token;
+    },
+    entry: createPersistentCustomerEntryComposition({
+      ...entry.persistent,
+      // A paper round is entered after an outage even once the Store has closed; the staff
+      // command's own rule decides (see counterEntryOperatingReader).
+      sources: async (tx, input) => {
+        const sources = await entry.persistent.sources(tx, input);
+        if (sources.operatingReader === undefined) throw new Error("INTERNAL_STAFF_ENTRY_ONLY");
+        return {
+          ...sources,
+          operatingReader: counterEntryOperatingReader(sources.operatingReader, "DineIn"),
+        };
+      },
+      session: entry.session,
+    }),
+    join,
+    joinRequest: () => configuredEntry.diningAdmission.resolveRequestContext(),
+    binding,
+    sessions: {
+      authorize: async (input) => {
+        const guest = await sessions.authorize(input);
+        return { sessionReference: String(guest.sessionReference) };
+      },
+    },
+    cart,
+    quote,
+    details,
+    checkout: {
+      create: (value) =>
+        createCustomerCheckoutSessionComposition(diningCheckout.checkoutSessions).create(value),
+    },
+    payment,
+    nextReference: reference,
+    now,
+  });
+  return {
+    command: createMerchantStaffDiningRound({
+      persistence,
+      authentication,
+      pipeline,
+      nextReference: reference,
+      onUnexpected: (error) => reportUnexpected("INTERNAL_STAFF_DINING_ROUND_UNAVAILABLE", error),
+    }),
+    /** The online payment admission of the round's kind, under this staff member's authority. */
+    admission: ({ selected, preparation, kind, authorize }) => {
+      void preparation;
+      const inventory = {
+        workflow: saved.workflow.payment,
+        authorize,
+        authorizeOverride: async () => false,
+        resolveExpiryCutoff: createInternalExpiryCutoff(resources),
+      };
+      const owners = {
+        tenantReference: selected.tenantReference,
+        brandReference: selected.brandReference,
+        storeReference: selected.storeReference,
+      };
+      if (kind === "DiningAdditional")
+        return createCustomerAdditionalDiningPaymentAdmission({
+          scope: owners,
+          quoteVersion: 2,
+          authorizeHistory: async (tx, value) =>
+            value.submissionReference === String(preparation.submissionReference) &&
+            (await authorize(tx, {
+              submissionReference: value.submissionReference,
+              actorReference: String(preparation.guestSessionReference),
+            })),
+          inventory,
+        });
+      return createCustomerOrderPaymentClaimAdmission({
+        scope: { brandReference: selected.brandReference, storeReference: selected.storeReference },
+        quoteVersion: 2,
+        capacityForOrder: (currentOrder) =>
+          createCustomerCapacityPaymentClaimAdmission({
+            scope: owners,
+            owner: "Dining",
+            inventory: createCustomerInventoryPaymentClaimAdmission({
+              scope: owners,
+              authorize,
+              evaluate: createCustomerIntactReservationPaymentAction({
+                scope: owners,
+                currentOrder,
+                quoteVersion: 2,
+                workflow: saved.workflow.payment,
+                authorize,
+                authorizeOverride: async () => false,
+              }),
+              resolveExpiryCutoff: createInternalExpiryCutoff(resources),
+            }),
+          }),
+      });
+    },
   };
 }

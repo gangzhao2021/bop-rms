@@ -179,7 +179,7 @@ export function OverviewToday({
           label="Open exceptions"
           read={state.exceptions}
           value={(e) => String(e.open)}
-          detail={(e) => (e.overdue === 0 ? "None overdue" : plural(e.overdue, "overdue"))}
+          detail={(e) => (e.overdue === 0 ? "None overdue" : `${e.overdue} overdue`)}
           href="/operations/order-exceptions"
           linkLabel="View exceptions"
         />

@@ -432,6 +432,7 @@ export {
 
 // WP-2423 Q7: staff-taken counter pickup orders.
 export * from "./infrastructure/persistence/counter-order-entry-store.js";
+export * from "./infrastructure/persistence/staff-dining-round-entry-store.js";
 
 // WP-2423 Q9-G1 (DEC-OUTAGE-ACCEPTANCE-HOLD): paid pickup orders held while the Store is offline.
 export * from "./application/order-acceptance-hold.js";

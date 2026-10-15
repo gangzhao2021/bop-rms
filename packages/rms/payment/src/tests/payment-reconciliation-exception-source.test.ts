@@ -1,6 +1,9 @@
 import { expect, it, vi } from "vitest";
 import type { ConsumerTransaction } from "@bop/eventing";
-import { createPostgresPaymentReconciliationExceptionSource } from "../infrastructure/persistence/payment-reconciliation-exception-source.js";
+import {
+  createPostgresPaymentReconciliationExceptionDetailReader,
+  createPostgresPaymentReconciliationExceptionSource,
+} from "../infrastructure/persistence/payment-reconciliation-exception-source.js";
 const id = (n: number) => "0190fa85-0000-7000-8000-" + String(n).padStart(12, "0");
 const at = "2026-09-21T00:00:00.000Z";
 function setup(rows: Record<string, unknown>[] = [row(10), row(11)]) {
@@ -167,4 +170,76 @@ it("refuses conflicting records and mismatched record or resolver identity", asy
     orderReference: id(22),
   });
   await expect(f.read(f.tx, { afterExceptionReference: null, limit: 5 })).rejects.toThrow();
+});
+
+it("WP-2423: tells a business day's totals difference, a payment's and an unmatched charge apart", async () => {
+  const detailRow = (n: number, extra: Record<string, unknown>) => ({
+    exception_reference: id(n),
+    mode: null,
+    unlinked: null,
+    run_reference: null,
+    checked_at: null,
+    difference_reason: null,
+    internal_captured_minor: null,
+    provider_captured_minor: null,
+    internal_refunded_minor: null,
+    provider_refunded_minor: null,
+    resolved_at: null,
+    resolution_run_reference: null,
+    ...extra,
+  });
+  const rows = [
+    detailRow(20, {
+      mode: "DailySettlement",
+      unlinked: true,
+      run_reference: id(30),
+      checked_at: new Date("2026-10-10T08:00:03.000Z"),
+      difference_reason: "RefundMismatch",
+      internal_captured_minor: "5650",
+      provider_captured_minor: "5650",
+      internal_refunded_minor: "0",
+      provider_refunded_minor: "2260",
+      resolved_at: new Date("2026-10-15T13:32:56.580Z"),
+      resolution_run_reference: id(31),
+    }),
+    detailRow(21, { mode: "Operational", unlinked: false }),
+    detailRow(22, {}),
+  ];
+  const query = vi.fn(async (sql: string) => ({
+    rows: sql.includes("FROM rms_payment") ? rows : [],
+    rowCount: 0,
+  }));
+  const authorize = vi.fn(async () => true);
+  const read = createPostgresPaymentReconciliationExceptionDetailReader({
+    scope: { brandReference: id(1), storeReference: id(2) },
+    authorize,
+  });
+  const tx = { query } as unknown as ConsumerTransaction;
+  const details = await read(tx, [id(20), id(21), id(22)]);
+  expect(details.get(id(20))).toEqual({
+    exceptionReference: id(20),
+    kind: "BusinessDayTotals",
+    openingCheck: {
+      runReference: id(30),
+      checkedAt: "2026-10-10T08:00:03.000Z",
+      differenceReason: "RefundMismatch",
+      internalCapturedMinor: "5650",
+      providerCapturedMinor: "5650",
+      internalRefundedMinor: "0",
+      providerRefundedMinor: "2260",
+    },
+    resolution: { resolvedAt: "2026-10-15T13:32:56.580Z", runReference: id(31) },
+  });
+  expect(details.get(id(21))).toMatchObject({ kind: "Payment", openingCheck: null });
+  expect(details.get(id(22))).toMatchObject({ kind: "UnmatchedCharge", resolution: null });
+  const sql = query.mock.calls.map(([text]) => text).find((text) => text.includes("ANY($3"));
+  expect(sql).toContain("e.brand_id=$1 AND e.store_id=$2");
+  expect(authorize).toHaveBeenCalledTimes(2);
+  // No reference asked: no query; a denied scope and a foreign row are refused.
+  expect((await read(tx, [])).size).toBe(0);
+  authorize.mockResolvedValueOnce(false);
+  await expect(read(tx, [id(20)])).rejects.toMatchObject({
+    code: "PAYMENT_COMPENSATION_PERMISSION_DENIED",
+  });
+  await expect(read(tx, [id(20)])).rejects.toThrow();
 });

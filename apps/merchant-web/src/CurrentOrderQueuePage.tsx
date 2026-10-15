@@ -710,7 +710,9 @@ export function CurrentOrderQueueRows({
                       data-tier={batch.paymentDue.status === "Failed" ? "urgent" : "warning"}
                     >
                       {order.batches.length > 1 ? `Batch ${batch.sequence}: ` : ""}
-                      {paymentDueText(batch.paymentDue, timeZone, now)}
+                      {batch.staffRound !== null && batch.paymentDue.status === "Awaiting"
+                        ? "Entered by staff · awaiting card-machine payment"
+                        : paymentDueText(batch.paymentDue, timeZone, now)}
                     </span>
                   ),
                 )}
@@ -801,7 +803,25 @@ export function CurrentOrderQueueRows({
                   <h3>
                     Batch {batch.sequence}
                     {batch.sequence === 1 ? " · Initial" : " · Additional"}
+                    {batch.staffRound !== null ? " · Entered by staff" : ""}
                   </h3>
+                  {batch.staffRound !== null &&
+                  (batch.staffRound.paidOnCardMachine !== null ||
+                    batch.staffRound.recordedAfterOutage) ? (
+                    <p className="order-staff-round" role="note">
+                      {batch.staffRound.paidOnCardMachine !== null
+                        ? `Paid on card machine ${orderMoney({
+                            amountMinor: batch.staffRound.paidOnCardMachine.amountMinor,
+                            currencyCode: "CAD",
+                          })} · ${storeTime(batch.staffRound.paidOnCardMachine.takenAt, timeZone, true)}`
+                        : ""}
+                      {batch.staffRound.paidOnCardMachine !== null &&
+                      batch.staffRound.recordedAfterOutage
+                        ? " · "
+                        : ""}
+                      {batch.staffRound.recordedAfterOutage ? "Recorded after outage" : ""}
+                    </p>
+                  ) : null}
                   {batch.staffCancellation !== null ? (
                     <p className="order-workbench-closed order-staff-cancellation" role="note">
                       {staffCancellationSummary(order, batch)}

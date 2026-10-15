@@ -149,3 +149,35 @@ it("WP-2423 Q19: beside a closed day, shows the current day's self-approved refu
   expect(open.currentDaySelfApprovedRefunds).toBeNull();
   expect(today).toHaveBeenCalledTimes(1);
 });
+it("WP-2423: a day before the Store's records begin answers with the first day, after re-checking scope", async () => {
+  const tx = { query: vi.fn() } as ConsumerTransaction;
+  const authorize = vi.fn(async () => scope);
+  const windowRead = vi.fn(async () => window);
+  const read = createMerchantSettlementRead({
+    transactions: { run: async (work) => work(tx) },
+    authorize,
+    storeLabel: async () => "Synthetic Store",
+    window: windowRead,
+    captured: async () => null,
+    refunded: async () => null,
+    reconciliation: async () => emptyDay,
+    firstBusinessDate: async () => "2026-09-20",
+    now: () => "2026-09-22T09:00:00.000Z",
+  });
+  await expect(read({ sessionCookie: "c", businessDate: "2026-09-19" })).rejects.toMatchObject({
+    code: "MERCHANT_SETTLEMENT_NOT_COVERED",
+    firstBusinessDate: "2026-09-20",
+  });
+  expect(windowRead).not.toHaveBeenCalled();
+  expect(authorize).toHaveBeenCalledTimes(2);
+  // The first covered day and the latest closed day read normally.
+  await expect(read({ sessionCookie: "c", businessDate: "2026-09-21" })).resolves.toMatchObject({
+    businessDate: "2026-09-21",
+  });
+  await expect(read({ sessionCookie: "c", businessDate: null })).resolves.toBeTruthy();
+  // A changed scope is still refused, not answered.
+  authorize.mockResolvedValueOnce(scope).mockResolvedValueOnce({ ...scope, storeReference: id(9) });
+  await expect(read({ sessionCookie: "c", businessDate: "2026-09-19" })).rejects.toThrow(
+    "MERCHANT_SETTLEMENT_UNAVAILABLE",
+  );
+});

@@ -11,6 +11,9 @@ export class CounterOrderClientError extends Error {
     readonly code:
       | "PermissionDenied"
       | "StoreNotTakingOrders"
+      | "TableUnavailable"
+      | "TableCartHasItems"
+      | "TableCheckoutInProgress"
       | "ItemUnavailable"
       | "NotPriced"
       | "NotFinished"
@@ -27,6 +30,8 @@ export class CounterOrderClientError extends Error {
     readonly lineIndex: number | null = null,
     /** AmountChanged: the amount to charge now. */
     readonly totalMinor: string | null = null,
+    /** TableCartHasItems: what guests put in the table's shared cart and haven't sent. */
+    readonly pendingItems: readonly { readonly name: string; readonly quantity: number }[] = [],
   ) {
     super("Counter order request failed");
     this.name = "CounterOrderClientError";
@@ -228,6 +233,10 @@ export interface CounterOrderLine {
   readonly quantity: number;
   readonly optionSelections: readonly { optionReference: string; quantity: number }[];
 }
+/** WP-2423 Q7 slice 2: a table round's line may carry the guest's note for the kitchen. */
+export interface TableRoundLine extends CounterOrderLine {
+  readonly note: string | null;
+}
 export type CounterTip =
   | { readonly kind: "None" }
   | { readonly kind: "Percent"; readonly percent: 10 | 15 | 18 | 20 }
@@ -244,9 +253,12 @@ export interface PlacedCounterOrder {
   readonly totalMinor: string;
   readonly payBy: string;
   readonly recordedAfterOutage: boolean;
+  /** WP-2423 Q7 slice 2: the table a staff-entered round joined (null at the counter). */
+  readonly tableLabel: string | null;
 }
-export function parsePlacedCounterOrder(value: unknown): PlacedCounterOrder {
+export function parsePlacedCounterOrder(value: unknown, table = false): PlacedCounterOrder {
   const raw = record(value, [
+    ...(table ? ["tableLabel"] : []),
     "status",
     "orderReference",
     "orderBatchReference",
@@ -282,6 +294,7 @@ export function parsePlacedCounterOrder(value: unknown): PlacedCounterOrder {
     totalMinor: raw.totalMinor as string,
     payBy: raw.payBy,
     recordedAfterOutage: raw.recordedAfterOutage,
+    tableLabel: table && raw.tableLabel !== null ? text(raw.tableLabel, 120) : null,
   });
 }
 
@@ -323,22 +336,81 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
     }
   };
   return Object.freeze({
-    async loadMenu(signal?: AbortSignal): Promise<CounterMenu> {
+    /** The menu customers see now; `DineIn` for a staff-entered table round. */
+    async loadMenu(
+      signal?: AbortSignal,
+      orderType: "Pickup" | "DineIn" = "Pickup",
+    ): Promise<CounterMenu> {
       let response: Response;
       try {
-        response = await fetcher("/merchant/counter/menu", {
-          credentials: "same-origin",
-          redirect: "error",
-          cache: "no-store",
-          ...(signal ? { signal } : {}),
-          headers: { Accept: "application/json" },
-        });
+        response = await fetcher(
+          orderType === "DineIn"
+            ? "/merchant/counter/menu?orderType=DineIn"
+            : "/merchant/counter/menu",
+          {
+            credentials: "same-origin",
+            redirect: "error",
+            cache: "no-store",
+            ...(signal ? { signal } : {}),
+            headers: { Accept: "application/json" },
+          },
+        );
       } catch {
         throw new CounterOrderClientError("Unavailable");
       }
       if (response.status === 403) throw new CounterOrderClientError("PermissionDenied");
       if (!response.ok) throw new CounterOrderClientError("Unavailable");
       return parseCounterMenu(await response.json());
+    },
+    /**
+     * WP-2423 Q7 slice 2: a round for a table on behalf of its guests (or a paper round after an
+     * outage), sent to the table's order; the reply is the amount to charge on the card machine.
+     */
+    async placeTableRound(command: {
+      readonly operationReference: string;
+      readonly tableReference: string;
+      readonly lines: readonly TableRoundLine[];
+      readonly tip: CounterTip;
+      readonly recordedAfterOutage: boolean;
+    }): Promise<PlacedCounterOrder> {
+      const response = await post("/merchant/dining/staff-rounds", command);
+      if (response.ok) return parsePlacedCounterOrder(await response.json(), true);
+      const body = await errorOf(response);
+      const code = body.error;
+      if (response.status === 403) throw new CounterOrderClientError("PermissionDenied");
+      if (code === "item_unavailable")
+        throw new CounterOrderClientError(
+          "ItemUnavailable",
+          typeof body.lineIndex === "number" ? body.lineIndex : null,
+        );
+      if (code === "table_cart_has_items")
+        throw new CounterOrderClientError(
+          "TableCartHasItems",
+          null,
+          null,
+          Array.isArray(body.items)
+            ? body.items.flatMap((item: unknown) => {
+                const entry = item as { name?: unknown; quantity?: unknown } | null;
+                return typeof entry?.name === "string" &&
+                  entry.name.length > 0 &&
+                  entry.name.length <= 200 &&
+                  Number.isSafeInteger(entry.quantity)
+                  ? [{ name: entry.name, quantity: entry.quantity as number }]
+                  : [];
+              })
+            : [],
+        );
+      if (code === "table_checkout_in_progress")
+        throw new CounterOrderClientError("TableCheckoutInProgress");
+      if (code === "table_unavailable") throw new CounterOrderClientError("TableUnavailable");
+      if (code === "store_not_taking_dine_in_orders")
+        throw new CounterOrderClientError("StoreNotTakingOrders");
+      if (code === "order_not_priced") throw new CounterOrderClientError("NotPriced");
+      if (code === "staff_round_not_finished") throw new CounterOrderClientError("NotFinished");
+      if (code === "staff_round_in_progress") throw new CounterOrderClientError("InProgress");
+      if (code === "staff_round_conflict") throw new CounterOrderClientError("Conflict");
+      if (response.status === 400) throw new CounterOrderClientError("Invalid");
+      throw new CounterOrderClientError(response.status >= 500 ? "OutcomeUnknown" : "Unavailable");
     },
     async placeOrder(command: {
       readonly operationReference: string;

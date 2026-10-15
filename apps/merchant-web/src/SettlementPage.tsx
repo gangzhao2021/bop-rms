@@ -1,6 +1,6 @@
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import {
   createSettlementClient,
   SettlementClientError,
@@ -353,6 +353,14 @@ export function SettlementReport({
                   </thead>
                   <tbody>
                     {[
+                      ...settlement.additionalChecks
+                        .filter(
+                          (check) => check.checkedAt < (settlement.checks[0]?.checkedAt ?? ""),
+                        )
+                        .map((check) => ({
+                          check,
+                          label: `Earlier check of ${businessDateText(view.businessDate)}`,
+                        })),
                       ...settlement.checks.map((check) => ({
                         check,
                         label:
@@ -371,6 +379,14 @@ export function SettlementReport({
                                   : `Checked again (${ordinal(settlement.recheck.count)} time)`,
                             },
                           ]),
+                      ...settlement.additionalChecks
+                        .filter(
+                          (check) => check.checkedAt >= (settlement.checks[0]?.checkedAt ?? ""),
+                        )
+                        .map((check) => ({
+                          check,
+                          label: `Additional check of ${businessDateText(view.businessDate)}`,
+                        })),
                     ].map(({ check, label }) => (
                       <tr key={check.checkReference}>
                         <td data-label="Statement">{label}</td>
@@ -392,6 +408,15 @@ export function SettlementReport({
                     The first check found a difference. The day was checked again after new records
                     arrived and now matches the provider statement, so that difference is resolved.
                     Both checks stay in the history.
+                  </p>
+                ) : null}
+                {settlement.additionalChecks.length > 0 ? (
+                  <p role="note" className="settlement__resolved">
+                    This day was checked more than once when it closed. The day&apos;s result is its
+                    scheduled check
+                    {settlement.recheck === null ? "" : " and the checks made again after it"}; the
+                    other {settlement.additionalChecks.length === 1 ? "check stays" : "checks stay"}{" "}
+                    in the history.
                   </p>
                 ) : null}
                 {currentChecks(settlement)
@@ -484,8 +509,33 @@ export function SettlementReport({
   );
 }
 
+/** WP-2423: a business day before the Store's records begin — an answer, not a refusal. */
+export function SettlementNotCovered({
+  requestedDate,
+  firstBusinessDate,
+  onShowDay,
+}: {
+  readonly requestedDate: string | null;
+  readonly firstBusinessDate: string;
+  readonly onShowDay?: (businessDate: string) => void;
+}) {
+  return (
+    <StatePanel heading="No settlement records for this day" tone="neutral" status>
+      <p>
+        {requestedDate === null ? "This day" : businessDateText(requestedDate)} is before the store
+        started using this system, so there is nothing to settle. The store&apos;s records begin on{" "}
+        {businessDateText(firstBusinessDate)}.
+      </p>
+      <button type="button" onClick={() => onShowDay?.(firstBusinessDate)}>
+        Show {businessDateText(firstBusinessDate)}
+      </button>
+    </StatePanel>
+  );
+}
+
 type State =
   | { readonly kind: "Loading" | "PermissionDenied" | "Busy" | "Unavailable" }
+  | { readonly kind: "NotCovered"; readonly firstBusinessDate: string }
   | { readonly kind: "Ready"; readonly view: SettlementView };
 
 /** WP-2423 P1 (PAY-RECONCILIATION): the Store's day-end page. */
@@ -502,8 +552,13 @@ export function SettlementPage({
   // WP-2423 Q21: the latest day staff can ask for is the Store's current business day (after
   // midnight, before the business-day start, that is still the previous calendar date).
   const latestDay = useStoreBusinessDay()?.businessDate;
-  const [requested, setRequested] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
+  // WP-2423: other screens (Exceptions) open a given day with ?businessDate=YYYY-MM-DD.
+  const [search] = useSearchParams();
+  const linkedDay = search.get("businessDate");
+  const initialDay =
+    linkedDay !== null && /^\d{4}-\d{2}-\d{2}$/u.test(linkedDay) ? linkedDay : null;
+  const [requested, setRequested] = useState<string | null>(initialDay);
+  const [draft, setDraft] = useState(initialDay ?? "");
   const [state, setState] = useState<State>({ kind: "Loading" });
   const [revision, setRevision] = useState(0);
   const [busyRetries, setBusyRetries] = useState(0);
@@ -521,9 +576,18 @@ export function SettlementPage({
         })
         .catch((error: unknown) => {
           if (!controller.signal.aborted)
-            setState({
-              kind: error instanceof SettlementClientError ? error.code : "Unavailable",
-            });
+            setState(
+              error instanceof SettlementClientError &&
+                error.code === "NotCovered" &&
+                error.firstBusinessDate !== null
+                ? { kind: "NotCovered", firstBusinessDate: error.firstBusinessDate }
+                : {
+                    kind:
+                      error instanceof SettlementClientError && error.code !== "NotCovered"
+                        ? error.code
+                        : "Unavailable",
+                  },
+            );
         });
     },
     [client],
@@ -602,6 +666,15 @@ export function SettlementPage({
               : "The store's records are busy with orders and payments. Trying again in a few seconds…"}
           </p>
         </StatePanel>
+      ) : state.kind === "NotCovered" ? (
+        <SettlementNotCovered
+          requestedDate={requested}
+          firstBusinessDate={state.firstBusinessDate}
+          onShowDay={(businessDate) => {
+            setDraft(businessDate);
+            setRequested(businessDate);
+          }}
+        />
       ) : state.kind === "Unavailable" ? (
         <StatePanel heading="Settlement unavailable" tone="error" status>
           <p>

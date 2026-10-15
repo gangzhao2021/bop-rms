@@ -22,6 +22,28 @@ it("explains stale read-only state without asserting a completed financial resol
       readOnly
     />,
   );
-  expect(html).toContain("Refresh the workbench before changing follow-up");
+  expect(html).toContain("Refresh the page before acknowledging or assigning this difference");
   expect(html).not.toContain("Follow-up recorded");
+});
+it("WP-2423: a resolved difference shows its follow-up as closed history with no actions", () => {
+  const html = renderToStaticMarkup(
+    <ReconciliationFollowUpAction
+      exceptionReference="0190fa82-0000-7000-8000-000000000001"
+      csrf={"a".repeat(43)}
+      readOnly
+      closed
+      showChargeDetails={false}
+    />,
+  );
+  expect(html).toContain("Follow-up closed: this difference is resolved.");
+  expect(html).toContain("Show follow-up history");
+  for (const text of [
+    "Review current follow-up",
+    "Acknowledge payment difference",
+    "Assign to me",
+    "View charge details",
+    "Refresh the page",
+    "version",
+  ])
+    expect(html).not.toContain(text);
 });

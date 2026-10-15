@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { expectNoInternalText } from "./internal-text-guard";
 
 const stores = [1, 2].map((n) => ({
   brandLabel: "Synthetic Brand",
@@ -192,7 +193,7 @@ test("@production exception filters and clear remain keyboard operable", async (
   await expect(owner).toBeFocused();
   await owner.press("A");
   await expect(owner).toHaveValue("Assigned");
-  const provider = page.getByRole("combobox", { name: "Provider state", exact: true });
+  const provider = page.getByRole("combobox", { name: "Payment provider status", exact: true });
   await page.keyboard.press("Tab");
   await expect(provider).toBeFocused();
   await provider.press("U");
@@ -268,7 +269,7 @@ test("@production workbench displays the full 500-row backlog", async ({ page })
   await expect(
     page.getByRole("heading", { name: "Paid without a fulfillable order", exact: true }).last(),
   ).toBeAttached();
-  await expect(page.getByText("Linked order · order number unavailable").first()).toBeVisible();
+  await expect(page.getByText("Linked order · order number not shown").first()).toBeVisible();
   await expect(page.getByText("018f0f58-767a-7f3b-a1d0-000000000902", { exact: true })).toHaveCount(
     0,
   );
@@ -363,7 +364,8 @@ test("@production compensation acknowledgment remains keyboard operable and retr
   await page.keyboard.press("Enter");
   await expect(
     page.getByRole("status").filter({
-      hasText: "Operations reconciliation recorded. Refresh the workbench to check case closure.",
+      hasText:
+        "Your check of the refund is recorded. Refresh the page to see whether the case is closed.",
     }),
   ).toBeFocused();
   expect(bodies).toHaveLength(2);
@@ -457,7 +459,8 @@ test("@production compensation unknown preserves focus moved during the request"
   await page.keyboard.press("Enter");
   await expect(
     page.getByRole("status").filter({
-      hasText: "Operations reconciliation recorded. Refresh the workbench to check case closure.",
+      hasText:
+        "Your check of the refund is recorded. Refresh the page to see whether the case is closed.",
     }),
   ).toBeFocused();
   expect(writes).toHaveLength(2);
@@ -518,9 +521,7 @@ test("@production unassociated reconciliation stays visible alongside a linked c
   const compensation = page.locator("article").filter({
     has: page.getByRole("heading", { name: "Paid without a fulfillable order", exact: true }),
   });
-  await expect(
-    reconciliation.getByText("Order reference unavailable", { exact: true }),
-  ).toBeVisible();
+  await expect(reconciliation.getByText("No matching order", { exact: true })).toBeVisible();
   await expect(reconciliation.getByRole("button", { name: "Review confirmed refund" })).toHaveCount(
     0,
   );
@@ -537,14 +538,12 @@ test("@production unassociated reconciliation stays visible alongside a linked c
   linked = true;
   await page.getByRole("button", { name: "Refresh" }).click();
   await expect(
-    reconciliation.getByText("Linked order · order number unavailable", { exact: true }),
+    reconciliation.getByText("Linked order · order number not shown", { exact: true }),
   ).toBeVisible();
   await expect(
     reconciliation.getByText("018f0f58-767a-7f3b-a1d0-000000000904", { exact: true }),
   ).toHaveCount(0);
-  await expect(
-    reconciliation.getByText("Order reference unavailable", { exact: true }),
-  ).toHaveCount(0);
+  await expect(reconciliation.getByText("No matching order", { exact: true })).toHaveCount(0);
   await expect(reconciliation.getByRole("button", { name: "Review confirmed refund" })).toHaveCount(
     0,
   );
@@ -629,7 +628,7 @@ for (const failure of ["unknown", "conflict", "self", "denied"] as const) {
       exact: true,
     });
     await review.click();
-    await expect(region.getByText("Follow-up: Open · version 1")).toBeVisible();
+    await expect(region.getByText(/^Follow-up: not yet acknowledged · last changed/)).toBeVisible();
     await expect(region.getByRole("combobox", { name: "Assign to" })).toBeDisabled();
     await expect(region.getByRole("button", { name: "Assign payment difference" })).toBeDisabled();
     await context.setOffline(true);
@@ -659,19 +658,17 @@ for (const failure of ["unknown", "conflict", "self", "denied"] as const) {
     } else {
       await expect(
         region.getByText(
-          failure === "denied"
-            ? /Action was not accepted/
-            : /Another action changed this exception/,
+          failure === "denied" ? /Action was not accepted/ : /Someone else changed this follow-up/,
         ),
       ).toBeVisible();
       await expect(acknowledge).toHaveCount(0);
       await expect(region.getByRole("button", { name: "Retry same follow-up" })).toHaveCount(0);
       await review.click();
-      await expect(region.getByText("Follow-up: Assigned · version 2")).toBeVisible();
+      await expect(region.getByText(/^Follow-up: assigned · last changed/)).toBeVisible();
       await acknowledge.click();
     }
     await expect(
-      region.getByText(/Follow-up recorded.*financial exception remains open/),
+      region.getByText(/Follow-up recorded.*stays open until it is resolved/),
     ).toBeVisible();
     await expect(review).toBeEnabled();
     expect(writes).toHaveLength(2);
@@ -767,4 +764,141 @@ test("@production employee directory pagination clears stale choices on failure"
   await expect(region.getByRole("button", { name: "Assign payment difference" })).toBeDisabled();
   await expect(region.getByRole("button", { name: "Assign to me", exact: true })).toBeEnabled();
   expect(writes).toBe(0);
+});
+
+test("@production WP-2423 a business day's totals difference resolved on re-check reads as such (v15 Oct 9)", async ({
+  page,
+}) => {
+  const writes: string[] = [];
+  page.on("request", (request) => {
+    // Reads that travel as POST (the follow-up query) are not changes.
+    if (
+      request.method() !== "GET" &&
+      !request.url().endsWith("/merchant/session/activity") &&
+      !request.url().endsWith("/follow-up-query")
+    )
+      writes.push(request.url());
+  });
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          ...workspace(0),
+          selectedScope: { ...stores[0], timeZone: "America/Toronto" },
+        },
+      },
+      headers,
+    }),
+  );
+  const base = view(0).items[0];
+  const day = (n: number, resolvedAt: string | null) => ({
+    ...base,
+    exceptionReference: "018f0f58-767a-7f3b-a1d0-00000000092" + n,
+    kind: "PaymentReconciliationDifference",
+    severity: "High",
+    orderReference: null,
+    orderNumber: null,
+    providerState: "Confirmed",
+    compensationStatus: "NotRequested",
+    status: resolvedAt === null ? "Open" : "Resolved",
+    sourceFinal: resolvedAt !== null,
+    reconciliation: {
+      type: "BusinessDayTotals",
+      businessDate: "2026-08-10",
+      captured: { storeMinor: "5650", providerMinor: "5650" },
+      refunded: { storeMinor: "0", providerMinor: "2260" },
+      checkedAt: "2026-08-11T08:00:03.000Z",
+      resolvedAt,
+    },
+  });
+  await page.route("**/merchant/order-exceptions", (route) =>
+    route.fulfill({
+      json: {
+        ...view(0),
+        freshnessStatus: "Fresh",
+        items: [
+          day(1, "2026-08-12T13:32:56.580Z"),
+          {
+            ...base,
+            exceptionReference: "018f0f58-767a-7f3b-a1d0-000000000923",
+            kind: "PaymentReconciliationDifference",
+            severity: "High",
+            orderReference: null,
+            orderNumber: null,
+            providerState: "Confirmed",
+            compensationStatus: "Completed",
+            status: "Resolved",
+            sourceFinal: true,
+            reconciliation: { type: "UnmatchedCharge" },
+          },
+        ],
+      },
+      headers,
+    }),
+  );
+  let followUpQueries = 0;
+  await page.route("**/merchant/operations/order-exceptions/follow-up-query", (route) => {
+    followUpQueries++;
+    return route.fulfill({
+      json: {
+        version: 2,
+        followUpStatus: "Acknowledged",
+        acknowledged: true,
+        assigned: false,
+        updatedAt: "2026-08-11T15:00:00.000Z",
+      },
+      headers,
+    });
+  });
+  await page.goto("/operations/order-exceptions");
+  const card = page.locator("article").filter({
+    has: page.getByRole("heading", {
+      name: "Business day totals differ from the payment provider",
+    }),
+  });
+  await expect(card.getByText("Resolved", { exact: true })).toBeVisible();
+  await expect(card.getByText("Mon, Aug 10", { exact: true })).toBeVisible();
+  await expect(
+    card.getByText("Refunds: the payment provider has $22.60 more than the store."),
+  ).toBeVisible();
+  await expect(card.getByText(/^Resolved: the day was checked again/)).toBeVisible();
+  for (const name of [
+    "Review unmatched charge",
+    "View charge details",
+    "Review current follow-up",
+    "Acknowledge payment difference",
+    "Assign to me",
+  ])
+    await expect(card.getByRole("button", { name })).toHaveCount(0);
+  await expect(card.getByText(/No matching order|No order is linked|Refresh the page/)).toHaveCount(
+    0,
+  );
+  await card.getByRole("button", { name: "Show follow-up history" }).click();
+  await expect(card.getByText(/^Last follow-up before it closed: acknowledged/)).toBeVisible();
+  expect(followUpQueries).toBe(1);
+  // The resolved unmatched charge keeps its charge and refund review, without live follow-up.
+  const charge = page.locator("article").filter({
+    has: page.getByRole("heading", { name: "Charge that matches no order" }),
+  });
+  await expect(charge.getByRole("button", { name: "View charge details" })).toBeVisible();
+  await expect(charge.getByRole("button", { name: "Review unmatched charge" })).toBeVisible();
+  await expect(charge.getByRole("button", { name: "Acknowledge payment difference" })).toHaveCount(
+    0,
+  );
+  await expectNoInternalText(page);
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await card.screenshot({ path: `test-results/exceptions-business-day-${width}.png` });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await card.getByRole("link", { name: "Open Settlement for Mon, Aug 10" }).click();
+  await expect(page).toHaveURL(
+    /\/app\/operations\/payment-reconciliation\?businessDate=2026-08-10$/,
+  );
+  expect(writes).toEqual([]);
 });

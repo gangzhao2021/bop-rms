@@ -104,3 +104,71 @@ it("uses only trusted metadata source checks for a current older exception read"
   expect(orderNumbers).toHaveBeenCalledWith(expect.anything(), scope, [id(8)]);
   expect(result).not.toHaveProperty("currentSourceCheck");
 });
+it("WP-2423: says what each payment reconciliation difference is about, and only for those", async () => {
+  const base = {
+    tenantReference: scope.tenantReference,
+    brandReference: scope.brandReference,
+    storeReference: scope.storeReference,
+    paymentReference: null,
+    diningReference: null,
+    severity: "High" as const,
+    sourceOwner: "Payment" as const,
+    providerState: "Confirmed" as const,
+    compensationStatus: "NotRequested" as const,
+    sourceVersion: 1n,
+    sourceDigest: `sha256:${"b".repeat(64)}`,
+    createdAt: "2026-09-12T14:00:00.000Z",
+    updatedAt: "2026-09-12T14:30:00.000Z",
+  };
+  const day = {
+    ...base,
+    sourceReference: id(20),
+    orderReference: null,
+    kind: "PaymentReconciliationDifference" as const,
+    sourceStatus: "Final" as const,
+    resolutionEvidenceReference: id(21),
+  };
+  const linked = {
+    ...base,
+    sourceReference: id(22),
+    orderReference: id(23),
+    paymentReference: id(24),
+    kind: "PaidWithoutFulfillableOrder" as const,
+    sourceStatus: "Open" as const,
+    resolutionEvidenceReference: null,
+  };
+  const detail = {
+    type: "BusinessDayTotals" as const,
+    businessDate: "2026-09-11",
+    captured: { storeMinor: "5650", providerMinor: "5650" },
+    refunded: { storeMinor: "0", providerMinor: "2260" },
+    checkedAt: "2026-09-12T08:00:03.000Z",
+    resolvedAt: "2026-09-12T14:30:00.000Z",
+  };
+  const reconciliationDetails = vi.fn(async () => new Map([[id(20), detail]]));
+  const read = createMerchantOrderExceptionRead({
+    transactions: { run: async (work) => work({ query: vi.fn() }) },
+    authorize: async () => scope,
+    sources: () => ({
+      list: async () => ({ items: [day, linked], nextAfterSourceReference: null }),
+    }),
+    reconciliationDetails,
+    metadata: async () => ({
+      storeLabel: "Synthetic Store",
+      businessDate: "2026-09-12",
+      checkpointReference: id(5),
+      projectedAt: at,
+      freshnessStatus: "Fresh",
+      currentSourceCheck: "Complete" as const,
+    }),
+  });
+  const result = await read("synthetic-cookie");
+  expect(reconciliationDetails).toHaveBeenCalledWith(expect.anything(), scope, [day]);
+  expect(result.items.find((item) => item.exceptionReference === id(20))).toMatchObject({
+    status: "Resolved",
+    reconciliation: detail,
+  });
+  expect(result.items.find((item) => item.exceptionReference === id(22))).not.toHaveProperty(
+    "reconciliation",
+  );
+});

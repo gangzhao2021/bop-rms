@@ -3,6 +3,7 @@ import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 import { StoreBusinessDayContext } from "./StoreBusinessDay.js";
 import {
+  SettlementNotCovered,
   SettlementPage,
   SettlementReport,
   formatSettlementMoney,
@@ -244,5 +245,59 @@ describe("WP-2423 Q21: the latest day staff can ask for is the Store's business 
       </MemoryRouter>,
     );
     expect(markup).toContain('max="2026-10-14"');
+  });
+});
+
+describe("WP-2423 settlement history and coverage", () => {
+  it("keeps a second settlement check of the day in the history without changing its result (v15 Sep 20)", () => {
+    const view = settlementViewFixture();
+    const settlement = view.reconciliation.settlement;
+    const first = settlement.checks[0];
+    if (!first) throw Error("fixture");
+    Object.assign(settlement, {
+      additionalChecks: [
+        {
+          ...first,
+          checkReference: "018f7700-0000-7000-8000-0000000000c2",
+          runReference: "018f7700-0000-7000-8000-0000000000c1",
+          checkedAt: new Date(Date.parse(first.checkedAt) - 60_000).toISOString(),
+        },
+      ],
+    });
+    const html = render(view);
+    expect(html).toContain("Settled · the day&#x27;s totals match the provider statement");
+    expect(html).toContain("Earlier check of Mon, Sep 21");
+    expect(html).toContain("Provider statement for Mon, Sep 21");
+    expect(html).toContain("checked more than once when it closed");
+    expect(html).not.toContain("could not be read");
+  });
+  it("answers a day before the store's records begin with its first day", () => {
+    const html = renderToStaticMarkup(
+      <SettlementNotCovered requestedDate="2026-09-19" firstBusinessDate="2026-09-20" />,
+    );
+    expect(html).toContain("No settlement records for this day");
+    expect(html).toContain("Sat, Sep 19 is before the store started using this system");
+    expect(html).toContain("begin on Sun, Sep 20");
+    expect(html).toContain("Show Sun, Sep 20");
+    expect(html).not.toContain("Permission");
+  });
+});
+
+describe("WP-2423: Exceptions open Settlement on a given day", () => {
+  it("starts on the day named in the link", () => {
+    const markup = renderToStaticMarkup(
+      <MemoryRouter
+        initialEntries={["/app/operations/payment-reconciliation?businessDate=2026-10-09"]}
+      >
+        <SettlementPage storeLabel="Synthetic Store" timeZone="America/Toronto" />
+      </MemoryRouter>,
+    );
+    expect(markup).toContain('value="2026-10-09"');
+    const plain = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/app/operations/payment-reconciliation?businessDate=soon"]}>
+        <SettlementPage storeLabel="Synthetic Store" timeZone="America/Toronto" />
+      </MemoryRouter>,
+    );
+    expect(plain).toContain('value=""');
   });
 });

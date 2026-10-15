@@ -687,6 +687,56 @@ it("WP-2423: reads an unpaid dine-in round's payment due and refuses malformed o
     ).toThrow();
 });
 
+it("WP-2423 Q7 slice 2: reads a round staff entered for the table and its card-machine payment", () => {
+  const batch = row().batches[0];
+  const dining = (staffRound: unknown, orderType = "DineIn") => ({
+    ...row(),
+    orderType,
+    currentPhase: "Accepted",
+    batches: [
+      batch,
+      {
+        ...batch,
+        orderBatchReference: id(92),
+        sequence: 2,
+        acceptanceStatus: "NotAccepted",
+        paymentDue: { status: "Awaiting", cancelsAt: null },
+        staffRound,
+      },
+    ],
+  });
+  const parse = (item: unknown) =>
+    parseCurrentOrderQueue({ items: [item], nextAfterOrderReference: null }).items[0]?.batches[1]
+      ?.staffRound;
+  expect(parse(dining({ recordedAfterOutage: false, paidOnCardMachine: null }))).toEqual({
+    recordedAfterOutage: false,
+    paidOnCardMachine: null,
+  });
+  const paid = {
+    recordedAfterOutage: true,
+    paidOnCardMachine: { amountMinor: "2560", takenAt: "2026-09-14T00:10:00.000Z" },
+  };
+  expect(parse(dining(paid))).toEqual(paid);
+  expect(parse(dining(null))).toBeNull();
+  // Older servers without the key read as no staff round.
+  expect(
+    parseCurrentOrderQueue({ items: [row()], nextAfterOrderReference: null }).items[0]?.batches[0]
+      ?.staffRound,
+  ).toBeNull();
+  for (const invalid of [
+    dining({ recordedAfterOutage: "no", paidOnCardMachine: null }),
+    dining({
+      ...paid,
+      paidOnCardMachine: { amountMinor: "25.60", takenAt: paid.paidOnCardMachine.takenAt },
+    }),
+    dining({ ...paid, extra: true }),
+    dining(paid, "Pickup"),
+  ])
+    expect(() =>
+      parseCurrentOrderQueue({ items: [invalid], nextAfterOrderReference: null }),
+    ).toThrow();
+});
+
 it("WP-2423 Q10: admits the pickup customer's contact on the detail and refuses anything else", () => {
   const pickup = { ...detail(), order: { ...row(1), orderType: "Pickup" } };
   const contact = {

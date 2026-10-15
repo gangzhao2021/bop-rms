@@ -6,6 +6,7 @@ import {
   type FullSignInRequired,
 } from "./full-sign-in.js";
 import { serviceOperationReference } from "./service-control-client.js";
+import { SourceTime } from "./StoreTime.js";
 
 export interface UnmatchedCaptureRefundView {
   readonly status: "NotApplicable" | "Unrefunded" | "Requested" | "Approved" | "Refunded";
@@ -109,7 +110,7 @@ export function UnmatchedCaptureRefundAction({
     }
   };
   const failureText: Record<Exclude<Failure, FullSignInRequired>, string> = {
-    Denied: "You do not have refund authority for this Store.",
+    Denied: "You do not have refund authority for this store.",
     SameApprover: "The person who requested this refund cannot approve it. Ask another manager.",
     Changed: "This refund changed. Review it again.",
     Unknown: "Result unknown. Retry the same action to recover its result.",
@@ -121,7 +122,7 @@ export function UnmatchedCaptureRefundAction({
           Review unmatched charge
         </button>
         {view?.status === "NotApplicable" ? (
-          <p>No Provider charge without a matching order is recorded for this exception.</p>
+          <p>No charge without a matching order is recorded for this difference.</p>
         ) : null}
         {failure === FULL_SIGN_IN_REQUIRED ? (
           <FullSignInPrompt csrf={csrf} fetcher={fetcher} />
@@ -136,28 +137,39 @@ export function UnmatchedCaptureRefundAction({
     <section className="unmatched-refund" aria-label="Unmatched charge refund">
       <dl>
         <div>
-          <dt>Charged by the payment Provider</dt>
+          <dt>Charged by the payment provider</dt>
           <dd>
-            {amount} · {view.capturedAt}
+            {amount} · {view.capturedAt ? <SourceTime instant={view.capturedAt} /> : null}
           </dd>
         </div>
         <div>
           <dt>Refund</dt>
           <dd>
-            {view.status === "Refunded"
-              ? `Refunded in full · ${view.refundedAt}`
-              : view.status === "Approved"
-                ? `Approved · ${view.approvedAt} · Provider result not yet confirmed`
-                : view.status === "Requested"
-                  ? `Requested · ${view.requestedAt} · awaiting approval by another manager`
-                  : "Not requested"}
+            {view.status === "Refunded" ? (
+              <>
+                Refunded in full ·{" "}
+                {view.refundedAt ? <SourceTime instant={view.refundedAt} /> : null}
+              </>
+            ) : view.status === "Approved" ? (
+              <>
+                Approved · {view.approvedAt ? <SourceTime instant={view.approvedAt} /> : null} · the
+                payment provider has not confirmed it yet
+              </>
+            ) : view.status === "Requested" ? (
+              <>
+                Requested · {view.requestedAt ? <SourceTime instant={view.requestedAt} /> : null} ·
+                awaiting approval by another manager
+              </>
+            ) : (
+              "Not requested"
+            )}
           </dd>
         </div>
       </dl>
       {next === "Request" ? (
         <>
           <p>
-            No order or payment of this Store matches this charge. Refund it in full to the card it
+            No order or payment of this store matches this charge. Refund it in full to the card it
             came from. Another manager must approve before it is sent.
           </p>
           <label>
@@ -167,7 +179,7 @@ export function UnmatchedCaptureRefundAction({
               disabled={readOnly}
               onChange={(event) => setConfirmed(event.currentTarget.checked)}
             />
-            I checked that no order of this Store was paid by this charge
+            I checked that no order of this store was paid by this charge
           </label>
           <button disabled={readOnly || busy || !confirmed} onClick={() => void post("request")}>
             {failure === "Unknown" ? "Retry same request" : `Request refund of ${amount}`}
@@ -211,7 +223,7 @@ export function UnmatchedCaptureRefundAction({
             : busy
               ? "Working…"
               : view.providerResult === "Unknown"
-                ? "Approved. The Provider did not confirm yet; retry sending to recover its result."
+                ? "Approved. The payment provider has not confirmed it yet; send it again to get its answer."
                 : null}
       </p>
     </section>

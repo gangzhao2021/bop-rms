@@ -63,6 +63,25 @@ describe("WP-2423 P1 settlement client", () => {
       code: "Unavailable",
     });
   });
+  it("WP-2423: maps a day before the store's records begin to its first day", async () => {
+    const before = createSettlementClient((async () =>
+      Response.json(
+        { error: "settlement_not_covered", firstBusinessDate: "2026-09-20" },
+        { status: 404 },
+      )) as unknown as typeof fetch);
+    await expect(before.load("2026-09-19", new AbortController().signal)).rejects.toMatchObject({
+      code: "NotCovered",
+      firstBusinessDate: "2026-09-20",
+    });
+    const odd = createSettlementClient((async () =>
+      Response.json(
+        { error: "settlement_not_covered" },
+        { status: 404 },
+      )) as unknown as typeof fetch);
+    await expect(odd.load("2026-09-19", new AbortController().signal)).rejects.toMatchObject({
+      code: "Unavailable",
+    });
+  });
 });
 
 describe("WP-2423 settlement re-check and unmatched charges", () => {
@@ -103,6 +122,29 @@ describe("WP-2423 settlement re-check and unmatched charges", () => {
     expect(
       parseSettlementView(settlementViewFixture()).reconciliation?.settlement?.recheck,
     ).toBeNull();
+  });
+  it("WP-2423: reads other settlement checks of the day as history, never as its own run", () => {
+    const view = settlementViewFixture();
+    const first = view.reconciliation.settlement.checks[0];
+    if (!first) throw Error("fixture");
+    const other = {
+      ...first,
+      checkReference: "018f7700-0000-7000-8000-0000000000c2",
+      runReference: "018f7700-0000-7000-8000-0000000000c1",
+    };
+    const withOther = (checks: unknown) => ({
+      ...view,
+      reconciliation: {
+        ...view.reconciliation,
+        settlement: { ...view.reconciliation.settlement, additionalChecks: checks },
+      },
+    });
+    expect(
+      parseSettlementView(withOther([other])).reconciliation?.settlement?.additionalChecks,
+    ).toHaveLength(1);
+    expect(parseSettlementView(view).reconciliation?.settlement?.additionalChecks).toEqual([]);
+    expect(() => parseSettlementView(withOther([first]))).toThrow("Unavailable");
+    expect(() => parseSettlementView(withOther(null))).toThrow("Unavailable");
   });
   it("refuses a re-check without a count, of the same run, or a malformed unmatched total", () => {
     expect(() => parseSettlementView(withRecheck(0))).toThrow("Unavailable");

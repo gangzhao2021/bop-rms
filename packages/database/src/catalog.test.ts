@@ -696,6 +696,7 @@ describe("migration catalog", () => {
       "2000_051_create_staff_pin_sign_in",
       "2000_052_create_payment_observation_snapshot_index",
       "2000_053_create_reconciliation_difference_resolution",
+      "2000_054_create_staff_dining_round_entry",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

@@ -12,7 +12,12 @@ import {
   createPostgresDiningCheckoutCommitmentStore,
 } from "../../packages/rms/dining/src/index.ts";
 import { createCustomerConfiguredDiningSessionValidation } from "../../apps/api/dist/customer-dining-session-validation.js";
-export function createInternalDiningCheckout(resources, entry, pickup) {
+/**
+ * `openGate: false` (WP-2423 Q7 slice 2) is the staff-entered table round: the staff command
+ * applies its own opening rule before the table guest is opened and again before payment (a paper
+ * round taken during an outage is entered even after closing), as the counter does for pickup.
+ */
+export function createInternalDiningCheckout(resources, entry, pickup, { openGate = true } = {}) {
   const scope = {
       tenantReference: resources.publicProfile.binding.tenantReference,
       ...resources.scope,
@@ -82,7 +87,8 @@ export function createInternalDiningCheckout(resources, entry, pickup) {
   const options = {
     ...pickup.checkoutSessions,
     validate: async (input) => {
-      if (!(await takesOrder(input))) throw new CheckoutSessionServiceError("STORE_CLOSED");
+      if (openGate && !(await takesOrder(input)))
+        throw new CheckoutSessionServiceError("STORE_CLOSED");
       const guest = await identity.authorize({
         sessionCredential: input.sessionCredential,
         csrfCredential: input.csrfCredential,

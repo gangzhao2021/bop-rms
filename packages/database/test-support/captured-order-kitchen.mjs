@@ -69,7 +69,7 @@ export async function exerciseCapturedOrderKitchen({
   );
   // WP-2423 Q7: the order queue shows counter orders and their card-machine payments.
   await admin.query(
-    "GRANT SELECT ON rms_ordering.counter_order_entry,rms_payment.card_machine_payment,rms_payment.card_machine_refund TO " +
+    "GRANT SELECT ON rms_ordering.counter_order_entry,rms_ordering.staff_dining_round_entry,rms_payment.card_machine_payment,rms_payment.card_machine_refund TO " +
       role,
   );
   await admin.query("GRANT SELECT,INSERT,UPDATE ON platform_eventing.consumer_inbox TO " + role);

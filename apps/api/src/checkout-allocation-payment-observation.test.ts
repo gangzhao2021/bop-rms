@@ -1,9 +1,11 @@
 import { expect, it, vi, beforeEach } from "vitest";
-const mocks = vi.hoisted(() => ({ creation: vi.fn(), terminal: vi.fn() }));
+const mocks = vi.hoisted(() => ({ creation: vi.fn(), terminal: vi.fn(), card: vi.fn() }));
 vi.mock("@rms/payment", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   createPostgresPaymentIntentCreationStore: () => ({ resolveOperation: mocks.creation }),
   createPostgresPaymentTerminalStore: () => ({ read: mocks.terminal }),
+  // WP-2423 Q7: a payment staff recorded from the Store's card machine.
+  createPostgresCardMachinePaymentStore: () => ({ loadByPaymentOperation: mocks.card }),
 }));
 import { createCheckoutAllocationPaymentObservation } from "./checkout-allocation-payment-observation.js";
 const id = (n: number) => "0190ed94-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -93,6 +95,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.creation.mockResolvedValue(payment());
   mocks.terminal.mockResolvedValue(terminal());
+  mocks.card.mockResolvedValue(null);
 });
 it("matches exact allocation to captured Payment without claiming whole-order clearance", async () => {
   const f = fixture(),
@@ -153,4 +156,48 @@ it("denies foreign scope before owner reads", async () => {
     fixture().source.resolve(tx, { ...allocation(), storeReference: id(99) }),
   ).rejects.toThrow();
   expect(mocks.creation).not.toHaveBeenCalled();
+});
+
+// WP-2423 Q7 slice 2: a counter order or staff-entered dine-in round paid on the card machine is
+// this checkout's successful payment, so the payment window expiry records it as paid in time.
+it("reads a card-machine payment of the checkout as its successful terminal payment", async () => {
+  mocks.creation.mockResolvedValue(null);
+  const card = {
+    tenantReference: id(30),
+    brandReference: id(1),
+    storeReference: id(2),
+    cardMachinePaymentReference: id(31),
+    paymentIntentReference: id(32),
+    paymentAttemptReference: id(33),
+    paymentOperationReference: id(10),
+    operationReference: id(34),
+    intentDigest: "sha256:" + "d".repeat(64),
+    orderReference: id(14),
+    orderBatchReference: id(15),
+    submissionReference: id(9),
+    preparation: payment().intent.preparation,
+    environment: "Test",
+    slipReference: null,
+    recordingReason: "AtCounter",
+    takenAt: "2026-09-20T11:05:00.000Z",
+    recordedAt: "2026-09-20T11:05:00.000Z",
+    actorReference: id(35),
+    eventReference: id(36),
+    auditReference: id(37),
+  };
+  mocks.card.mockResolvedValue(card);
+  const result = await fixture().source.resolve(tx, allocation());
+  expect(mocks.card).toHaveBeenCalledWith(tx, id(10));
+  expect(result).toMatchObject({ status: "Terminal", outcome: "Succeeded" });
+  if (result.status !== "Terminal") throw new Error("fixture result");
+  expect(result.payment.intent.paymentMethod).toBe("StoreCardMachine");
+  expect(result.terminal.occurredAt).toBe(card.recordedAt);
+  // Another checkout's card-machine payment is never taken for this one.
+  mocks.card.mockResolvedValue({
+    ...card,
+    preparation: { ...card.preparation, submissionReference: id(99) },
+  });
+  await expect(fixture().source.resolve(tx, allocation())).rejects.toThrow(
+    "CHECKOUT_PAYMENT_OBSERVATION_UNAVAILABLE",
+  );
 });

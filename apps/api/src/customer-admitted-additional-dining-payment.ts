@@ -66,6 +66,17 @@ export function createCustomerAdmittedAdditionalDiningPayment(options: {
     });
   }
   return Object.freeze({
+    /** WP-2423 Q7 slice 2: the round's payment preparation for the Store's card machine. */
+    async prepare(value: unknown) {
+      const raw = readClosedRecord(value, [
+        "sessionCredential",
+        "csrfCredential",
+        "checkoutSessionReference",
+        "selectionReference",
+        "tip",
+      ]);
+      return payment(raw).prepare(value);
+    },
     async create(value: unknown) {
       const raw = readClosedRecord(value, [
         "sessionCredential",

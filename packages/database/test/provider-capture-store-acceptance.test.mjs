@@ -12,6 +12,7 @@ import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import {
   createPaymentReconciliationService,
   createPostgresPaymentReconciliationDaySource,
+  createPostgresPaymentReconciliationExceptionDetailReader,
   createPostgresPaymentReconciliationRepository,
   createPostgresProviderCaptureExceptionStore,
   createPostgresUnmatchedCaptureRefundStore,
@@ -636,11 +637,65 @@ it("atomically records unlinked capture evidence with Audit, concurrent replay a
             startsAt: days.refund.startsAt,
             endsAt: days.refund.endsAt,
             settlementRunReference: id(800),
+            recheckRunReferences: [id(801), id(802)],
           }),
         );
         assert.equal(day.settlement.checks[0].outcome, "Difference");
         assert.equal(day.settlement.recheck.check.outcome, "Matched");
         assert.equal(day.settlement.recheck.run.runReference, id(801));
+        assert.equal(day.settlement.recheck.count, 1);
+        assert.deepEqual(day.settlement.additionalChecks, []);
+        // WP-2423: the Exceptions card reads what the difference is about and how it was resolved.
+        const details = await run((tx) =>
+          createPostgresPaymentReconciliationExceptionDetailReader({
+            scope: { brandReference: id(2), storeReference: id(3) },
+            authorize: async () => true,
+          })(tx, [id(900)]),
+        );
+        assert.deepEqual(details.get(id(900)), {
+          exceptionReference: id(900),
+          kind: "BusinessDayTotals",
+          openingCheck: {
+            runReference: id(800),
+            checkedAt: before.result.checks[0].checkedAt,
+            differenceReason: "RefundMismatch",
+            internalCapturedMinor: "0",
+            providerCapturedMinor: "0",
+            internalRefundedMinor: "0",
+            providerRefundedMinor: "2260",
+          },
+          resolution: {
+            resolvedAt: after.result.checks[0].checkedAt,
+            runReference: id(801),
+          },
+        });
+        // v15 Sep 20: the capture day was settled twice at close — first by a run outside the
+        // day's schedule, then by the scheduled run. The earlier one is history, never read as a
+        // later check of the day (that read failed and the page said the records could not be read).
+        const duplicate = await settle(id(810), captureDay.candidate);
+        await sleep(5);
+        const scheduled = await settle(id(811), captureDay.candidate);
+        assert.equal(duplicate.result.checks[0].outcome, "Matched");
+        assert.equal(scheduled.result.checks[0].outcome, "Matched");
+        assert.ok(duplicate.result.checks[0].checkedAt < scheduled.result.checks[0].checkedAt);
+        const twice = await run((tx) =>
+          createPostgresPaymentReconciliationDaySource({
+            scope: { brandReference: id(2), storeReference: id(3) },
+            authorize: async () => true,
+          })(tx, {
+            startsAt: days.capture.startsAt,
+            endsAt: days.capture.endsAt,
+            settlementRunReference: id(811),
+            recheckRunReferences: [id(812), id(813)],
+          }),
+        );
+        assert.equal(twice.settlement.run.runReference, id(811));
+        assert.equal(twice.settlement.checks[0].outcome, "Matched");
+        assert.equal(twice.settlement.recheck, null);
+        assert.deepEqual(
+          twice.settlement.additionalChecks.map((check) => [check.runReference, check.outcome]),
+          [[id(810), "Matched"]],
+        );
         // Another Store sees no resolution.
         await run(async (tx) => {
           await tx.query(

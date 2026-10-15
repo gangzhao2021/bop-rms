@@ -6,15 +6,32 @@ import {
   type CaptureEvidenceSummary,
 } from "./reconciliation-follow-up-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
+import { SourceTime } from "./StoreTime.js";
+import { formatSettlementMoney } from "./SettlementPage.js";
 const client = createReconciliationFollowUpClient();
+/** Staff words for the follow-up states (never the record's version). */
+const followUpLabel: Record<FollowUpView["followUpStatus"], string> = {
+  Open: "not yet acknowledged",
+  Acknowledged: "acknowledged",
+  Assigned: "assigned",
+};
 export function ReconciliationFollowUpAction({
   exceptionReference,
   csrf,
   readOnly,
+  closed = false,
+  showChargeDetails = true,
 }: {
   exceptionReference: string;
   csrf: string;
   readOnly: boolean;
+  /**
+   * WP-2423: the difference is resolved, so its follow-up is closed: its last state is shown as
+   * history and nothing can be acknowledged or assigned any more.
+   */
+  closed?: boolean;
+  /** WP-2423: only a charge that matches no order has the payment provider's charge to show. */
+  showChargeDetails?: boolean;
 }) {
   const fieldId = useId(),
     [evidence, setEvidence] = useState<CaptureEvidenceSummary | null | undefined>(undefined),
@@ -57,7 +74,7 @@ export function ReconciliationFollowUpAction({
     } catch {
       if (!controller.signal.aborted)
         setMessage(
-          "Current follow-up unavailable. Restore your connection and access, then review again.",
+          "The follow-up could not be read. Restore your connection and access, then review again.",
         );
     } finally {
       pending.current = null;
@@ -76,14 +93,14 @@ export function ReconciliationFollowUpAction({
       if (!controller.signal.aborted) setEvidence(result);
     } catch {
       if (!controller.signal.aborted)
-        setMessage("Capture evidence unavailable. Check your access and try again.");
+        setMessage("The charge details could not be read. Check your access and try again.");
     } finally {
       pending.current = null;
       if (!controller.signal.aborted) setBusy(false);
     }
   }
   async function loadAssignees(after: string | null) {
-    if (pending.current || unknown || !online || readOnly || !view) return;
+    if (pending.current || unknown || !online || readOnly || closed || !view) return;
     const controller = new AbortController();
     pending.current = controller;
     setBusy(true);
@@ -111,7 +128,7 @@ export function ReconciliationFollowUpAction({
     }
   }
   async function submit(action: "Acknowledge" | "Assign" | "AssignSelf" | "Retry") {
-    if (pending.current || !view || readOnly || !online) return;
+    if (pending.current || !view || readOnly || closed || !online) return;
     if (unknown ? action !== "Retry" : action === "Retry") return;
     if (action === "Acknowledge" && view.acknowledged) return;
     if (action === "Assign" && !assignees.some((person) => person.reference === selection)) return;
@@ -135,7 +152,7 @@ export function ReconciliationFollowUpAction({
         setView(null);
         intent.current = null;
         setMessage(
-          "Follow-up recorded. Review current follow-up to see the latest state. The financial exception remains open.",
+          "Follow-up recorded. Review current follow-up to see the latest. The payment difference stays open until it is resolved.",
         );
       }
     } catch (error) {
@@ -146,8 +163,8 @@ export function ReconciliationFollowUpAction({
           intent.current = null;
           setMessage(
             error.kind === "Conflict"
-              ? "Another action changed this exception. Review the current state before trying again."
-              : "Action was not accepted. Check your access and review the current state before trying again.",
+              ? "Someone else changed this follow-up. Review it again before trying again."
+              : "Action was not accepted. Check your access and review the follow-up again before trying again.",
           );
         } else {
           setUnknown(true);
@@ -161,48 +178,49 @@ export function ReconciliationFollowUpAction({
       if (!controller.signal.aborted) setBusy(false);
     }
   }
-  const disabled = busy || readOnly || !online || unknown;
+  const disabled = busy || readOnly || closed || !online || unknown;
+  if (closed)
+    return (
+      <section aria-label="Payment reconciliation follow-up">
+        <p>Follow-up closed: this difference is resolved.</p>
+        <button disabled={busy || !online} onClick={() => void load()}>
+          Show follow-up history
+        </button>
+        {showChargeDetails ? (
+          <button disabled={busy || !online} onClick={() => void loadEvidence()}>
+            View charge details
+          </button>
+        ) : null}
+        {evidence !== undefined ? <ChargeDetails evidence={evidence} /> : null}
+        {view ? (
+          <p>
+            Last follow-up before it closed: {followUpLabel[view.followUpStatus]} ·{" "}
+            <SourceTime instant={view.updatedAt} />
+          </p>
+        ) : null}
+        <p role="status" aria-live="polite">
+          {busy ? "Working…" : message}
+        </p>
+      </section>
+    );
   return (
     <section aria-label="Payment reconciliation follow-up">
       <button disabled={busy || unknown || !online} onClick={() => void load()}>
         Review current follow-up
       </button>
-      <button disabled={busy || unknown || !online} onClick={() => void loadEvidence()}>
-        View capture evidence
-      </button>
-      {evidence === null ? (
-        <p>
-          No provider-only capture evidence is recorded for this exception. This does not mean the
-          difference is resolved.
-        </p>
-      ) : evidence ? (
-        <section aria-label="Capture evidence summary">
-          <p>
-            Captured amount: CAD {(BigInt(evidence.amountMinor) / 100n).toString()}.
-            {(BigInt(evidence.amountMinor) % 100n).toString().padStart(2, "0")}
-          </p>
-          <p>
-            Environment: {evidence.environment === "Test" ? "Test — simulated payment" : "Live"}
-          </p>
-          <p>
-            Captured at (UTC): <time dateTime={evidence.occurredAt}>{evidence.occurredAt}</time>
-          </p>
-          <p>
-            Evidence observed at (UTC):{" "}
-            <time dateTime={evidence.observedAt}>{evidence.observedAt}</time>
-          </p>
-          <p>
-            No internal payment operation was found when this evidence was recorded. This historical
-            evidence does not establish the current financial outcome.
-          </p>
-        </section>
+      {showChargeDetails ? (
+        <button disabled={busy || unknown || !online} onClick={() => void loadEvidence()}>
+          View charge details
+        </button>
       ) : null}
+      {evidence !== undefined ? <ChargeDetails evidence={evidence} /> : null}
       {!online ? <p role="status">Offline — follow-up is read-only.</p> : null}
-      {readOnly ? <p>Refresh the workbench before changing follow-up.</p> : null}
+      {readOnly ? <p>Refresh the page before acknowledging or assigning this difference.</p> : null}
       {view ? (
         <>
           <p>
-            Follow-up: {view.followUpStatus} · version {view.version}
+            Follow-up: {followUpLabel[view.followUpStatus]} · last changed{" "}
+            <SourceTime instant={view.updatedAt} />
           </p>
           <button
             disabled={disabled || view.acknowledged}
@@ -251,6 +269,31 @@ export function ReconciliationFollowUpAction({
       ) : null}
       <p role="status" aria-live="polite">
         {busy ? "Working…" : message}
+      </p>
+    </section>
+  );
+}
+
+/** The charge the payment provider reported that matches no order, in the Store's time. */
+function ChargeDetails({ evidence }: { evidence: CaptureEvidenceSummary | null }) {
+  if (evidence === null)
+    return (
+      <p>
+        No charge without a matching order is recorded for this difference. That alone does not mean
+        the difference is resolved.
+      </p>
+    );
+  return (
+    <section aria-label="Charge details">
+      <p>
+        Charge of {formatSettlementMoney(evidence.amountMinor)} taken{" "}
+        <SourceTime instant={evidence.occurredAt} />
+        {evidence.environment === "Test" ? " (test payment, no real money)" : ""}.
+      </p>
+      <p>
+        Recorded <SourceTime instant={evidence.observedAt} />. When it was recorded, no order or
+        payment of this store matched it. This record alone does not show whether it has since been
+        refunded.
       </p>
     </section>
   );

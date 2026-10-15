@@ -6,6 +6,8 @@ import { StatePanel } from "@bop-rms/ui";
 import { Freshness, SourceTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { businessDateText } from "./StoreBusinessDay.js";
+import { formatSettlementMoney } from "./SettlementPage.js";
+import { Link } from "react-router";
 
 /** Staff labels for the exception kinds and states the projection carries. */
 export const exceptionKindLabel: Record<OrderExceptionItem["kind"], string> = {
@@ -15,6 +17,7 @@ export const exceptionKindLabel: Record<OrderExceptionItem["kind"], string> = {
   PaidWithoutFulfillableOrder: "Paid without a fulfillable order",
 };
 const providerStateLabel: Record<OrderExceptionItem["providerState"], string> = {
+  // Shown as "Payment provider status".
   NotApplicable: "Not applicable",
   Pending: "Pending",
   Unknown: "Unknown",
@@ -46,7 +49,21 @@ export interface OrderExceptionItem {
   readonly dueAt: string;
   readonly ownerStatus: "Unassigned" | "Assigned";
   readonly sourceFinal: boolean;
+  /** WP-2423: what a payment reconciliation difference is about (absent from older servers). */
+  readonly reconciliation?: OrderExceptionReconciliation;
 }
+/** WP-2423: a business day's totals, one payment, or a charge that matches no order. */
+export type OrderExceptionReconciliation =
+  | {
+      readonly type: "BusinessDayTotals";
+      readonly businessDate: string | null;
+      readonly captured: { readonly storeMinor: string; readonly providerMinor: string | null };
+      readonly refunded: { readonly storeMinor: string; readonly providerMinor: string | null };
+      readonly checkedAt: string;
+      readonly resolvedAt: string | null;
+    }
+  | { readonly type: "Payment" }
+  | { readonly type: "UnmatchedCharge" };
 
 export interface OrderExceptionView {
   readonly screenId: "OPS-ORDER-EXCEPTION";
@@ -99,6 +116,42 @@ function businessDate(value: unknown) {
     throw new Error("ORDER_EXCEPTION_INVALID");
   return value;
 }
+const MINOR = /^(0|[1-9][0-9]{0,15})$/u;
+function reconciliation(value: unknown): OrderExceptionReconciliation {
+  const type = (value as { type?: unknown } | null)?.type;
+  if (type === "Payment" || type === "UnmatchedCharge") {
+    exact(value, ["type"]);
+    return Object.freeze({ type });
+  }
+  const raw = exact(value, [
+    "type",
+    "businessDate",
+    "captured",
+    "refunded",
+    "checkedAt",
+    "resolvedAt",
+  ]);
+  if (raw.type !== "BusinessDayTotals") throw new Error("ORDER_EXCEPTION_INVALID");
+  const pair = (input: unknown) => {
+    const p = exact(input, ["storeMinor", "providerMinor"]);
+    if (
+      typeof p.storeMinor !== "string" ||
+      !MINOR.test(p.storeMinor) ||
+      (p.providerMinor !== null &&
+        (typeof p.providerMinor !== "string" || !MINOR.test(p.providerMinor)))
+    )
+      throw new Error("ORDER_EXCEPTION_INVALID");
+    return Object.freeze({ storeMinor: p.storeMinor, providerMinor: p.providerMinor });
+  };
+  return Object.freeze({
+    type: "BusinessDayTotals",
+    businessDate: raw.businessDate === null ? null : businessDate(raw.businessDate),
+    captured: pair(raw.captured),
+    refunded: pair(raw.refunded),
+    checkedAt: instant(raw.checkedAt),
+    resolvedAt: raw.resolvedAt === null ? null : instant(raw.resolvedAt),
+  });
+}
 export function parseOrderExceptionView(value: unknown): OrderExceptionView {
   const input = exact(value, [
     "screenId",
@@ -122,7 +175,10 @@ export function parseOrderExceptionView(value: unknown): OrderExceptionView {
     throw new Error("ORDER_EXCEPTION_INVALID");
   const items = Object.freeze(
     input.items.map((value) => {
+      const hasDetail =
+        value !== null && typeof value === "object" && Object.hasOwn(value, "reconciliation");
       const row = exact(value, [
+        ...(hasDetail ? ["reconciliation"] : []),
         "exceptionReference",
         "orderReference",
         "orderNumber",
@@ -152,6 +208,7 @@ export function parseOrderExceptionView(value: unknown): OrderExceptionView {
         !["Unassigned", "Assigned"].includes(String(row.ownerStatus)) ||
         typeof row.sourceFinal !== "boolean" ||
         (row.status === "Resolved") !== row.sourceFinal ||
+        (hasDetail && row.kind !== "PaymentReconciliationDifference") ||
         (row.orderNumber !== null &&
           (row.orderReference === null ||
             typeof row.orderNumber !== "string" ||
@@ -169,6 +226,7 @@ export function parseOrderExceptionView(value: unknown): OrderExceptionView {
             : ref(row.orderReference),
         createdAt: instant(row.createdAt),
         dueAt: instant(row.dueAt),
+        ...(hasDetail ? { reconciliation: reconciliation(row.reconciliation) } : {}),
       }) as unknown as OrderExceptionItem;
     }),
   );
@@ -289,7 +347,7 @@ export function OrderExceptionScreen({
             </select>
           </label>
           <label>
-            Provider state
+            Payment provider status
             <select
               value={providerFilter}
               onChange={(event) => setProviderFilter(event.currentTarget.value)}
@@ -348,93 +406,212 @@ export function OrderExceptionScreen({
               hidden={!visibleReferences.has(item.exceptionReference)}
               key={item.exceptionReference}
             >
-              <header>
-                <div>
-                  <p
-                    className="bop-eyebrow order-exception__severity"
-                    data-severity={item.severity}
-                  >
-                    {item.severity} · due <SourceTime instant={item.dueAt} />
-                  </p>
-                  <h3>{exceptionKindLabel[item.kind]}</h3>
-                </div>
-                <strong className="order-exception__status" data-status={item.status}>
-                  {item.status}
-                </strong>
-              </header>
-              <dl>
-                <div>
-                  <dt>Created</dt>
-                  <dd>
-                    <SourceTime instant={item.createdAt} />
-                  </dd>
-                </div>
-                <div>
-                  <dt>Order</dt>
-                  <dd>
-                    {item.orderReference === null
-                      ? "Order reference unavailable"
-                      : item.orderNumber !== null
-                        ? `Order ${item.orderNumber}`
-                        : "Linked order · order number unavailable"}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Provider state</dt>
-                  <dd>{providerStateLabel[item.providerState]}</dd>
-                </div>
-                <div>
-                  <dt>Compensation</dt>
-                  <dd>{compensationLabel[item.compensationStatus]}</dd>
-                </div>
-                <div>
-                  <dt>Owner</dt>
-                  <dd>{item.ownerStatus}</dd>
-                </div>
-              </dl>
-              {csrf &&
-              item.kind === "PaidWithoutFulfillableOrder" &&
-              item.sourceOwner === "Payment" &&
-              item.orderReference !== null ? (
-                <CompensationReconciliationAction
-                  orderReference={item.orderReference}
-                  caseReference={item.exceptionReference}
-                  csrf={csrf}
-                  readOnly={readOnly}
-                />
-              ) : null}
-              {csrf &&
-              item.kind === "PaymentReconciliationDifference" &&
-              item.sourceOwner === "Payment" ? (
-                <ReconciliationFollowUpAction
-                  key={item.exceptionReference + ":" + csrf}
-                  exceptionReference={item.exceptionReference}
-                  csrf={csrf}
-                  readOnly={readOnly || item.sourceFinal}
-                />
-              ) : null}
-              {item.orderReference === null ? (
-                <p>
-                  No linked order is available. This payment difference requires reconciliation
-                  review.
-                </p>
-              ) : null}
-              {csrf &&
-              item.kind === "PaymentReconciliationDifference" &&
-              item.sourceOwner === "Payment" &&
-              item.orderReference === null ? (
-                <UnmatchedCaptureRefundAction
-                  key={item.exceptionReference + ":refund:" + csrf}
-                  exceptionReference={item.exceptionReference}
-                  csrf={csrf}
-                  readOnly={readOnly}
-                />
-              ) : null}
+              <OrderExceptionCard item={item} csrf={csrf} readOnly={readOnly} />
             </article>
           ))}
         </div>
       </>
     </WorkspacePage>
+  );
+}
+/** "Refunds: the payment provider has $22.60 more than the store" — which side differed and by how much. */
+function totalsDifference(
+  label: string,
+  pair: { readonly storeMinor: string; readonly providerMinor: string | null },
+): string | null {
+  if (pair.providerMinor === null)
+    return `${label}: the payment provider's figure could not be read`;
+  const gap = BigInt(pair.providerMinor) - BigInt(pair.storeMinor);
+  if (gap === 0n) return null;
+  return `${label}: the payment provider has ${formatSettlementMoney(
+    (gap < 0n ? -gap : gap).toString(),
+  )} ${gap > 0n ? "more" : "less"} than the store`;
+}
+const settlementLink = (businessDate: string | null) =>
+  businessDate === null
+    ? "/app/operations/payment-reconciliation"
+    : `/app/operations/payment-reconciliation?businessDate=${businessDate}`;
+
+/** WP-2423: one exception card, worded for what the exception is about. */
+function OrderExceptionCard({
+  item,
+  csrf,
+  readOnly,
+}: {
+  readonly item: OrderExceptionItem;
+  readonly csrf: string | undefined;
+  readonly readOnly: boolean;
+}) {
+  const detail = item.reconciliation;
+  const payment = item.kind === "PaymentReconciliationDifference" && item.sourceOwner === "Payment";
+  const header = (title: string) => (
+    <header>
+      <div>
+        <p className="bop-eyebrow order-exception__severity" data-severity={item.severity}>
+          {item.severity} · due <SourceTime instant={item.dueAt} />
+        </p>
+        <h3>{title}</h3>
+      </div>
+      <strong className="order-exception__status" data-status={item.status}>
+        {item.status}
+      </strong>
+    </header>
+  );
+  if (payment && detail?.type === "BusinessDayTotals") {
+    const day = detail.businessDate === null ? null : businessDateText(detail.businessDate);
+    const differences = [
+      totalsDifference("Payments taken", detail.captured),
+      totalsDifference("Refunds", detail.refunded),
+    ].filter((text): text is string => text !== null);
+    return (
+      <>
+        {header("Business day totals differ from the payment provider")}
+        <dl>
+          <div>
+            <dt>Business day</dt>
+            <dd>{day ?? "Shown in Settlement"}</dd>
+          </div>
+          <div>
+            <dt>Found</dt>
+            <dd>
+              <SourceTime instant={detail.checkedAt} />
+            </dd>
+          </div>
+          <div>
+            <dt>Payments taken (store / payment provider)</dt>
+            <dd>
+              {formatSettlementMoney(detail.captured.storeMinor)} /{" "}
+              {detail.captured.providerMinor === null
+                ? "could not be read"
+                : formatSettlementMoney(detail.captured.providerMinor)}
+            </dd>
+          </div>
+          <div>
+            <dt>Refunds (store / payment provider)</dt>
+            <dd>
+              {formatSettlementMoney(detail.refunded.storeMinor)} /{" "}
+              {detail.refunded.providerMinor === null
+                ? "could not be read"
+                : formatSettlementMoney(detail.refunded.providerMinor)}
+            </dd>
+          </div>
+          <div>
+            <dt>Owner</dt>
+            <dd>{item.ownerStatus}</dd>
+          </div>
+        </dl>
+        {differences.length > 0 ? (
+          <ul className="order-exception__differences">
+            {differences.map((text) => (
+              <li key={text}>{text}.</li>
+            ))}
+          </ul>
+        ) : null}
+        {detail.resolvedAt !== null ? (
+          <p role="note">
+            Resolved: the day was checked again <SourceTime instant={detail.resolvedAt} /> and now
+            matches the payment provider&apos;s statement. Nothing more to do; both checks stay in
+            the day&apos;s history.
+          </p>
+        ) : (
+          <p>
+            The store&apos;s totals for {day ?? "this business day"} do not match the payment
+            provider&apos;s statement. Settlement explains the difference and what to do.
+          </p>
+        )}
+        <p>
+          <Link to={settlementLink(detail.businessDate)}>
+            {day === null ? "Open Settlement" : `Open Settlement for ${day}`}
+          </Link>
+        </p>
+        {csrf ? (
+          <ReconciliationFollowUpAction
+            key={item.exceptionReference + ":" + csrf}
+            exceptionReference={item.exceptionReference}
+            csrf={csrf}
+            readOnly={readOnly || item.sourceFinal}
+            closed={item.sourceFinal}
+            showChargeDetails={false}
+          />
+        ) : null}
+      </>
+    );
+  }
+  const unmatched = payment && item.orderReference === null && detail?.type !== "Payment";
+  return (
+    <>
+      {header(
+        unmatched && detail?.type === "UnmatchedCharge"
+          ? "Charge that matches no order"
+          : exceptionKindLabel[item.kind],
+      )}
+      <dl>
+        <div>
+          <dt>Created</dt>
+          <dd>
+            <SourceTime instant={item.createdAt} />
+          </dd>
+        </div>
+        <div>
+          <dt>Order</dt>
+          <dd>
+            {item.orderReference === null
+              ? "No matching order"
+              : item.orderNumber !== null
+                ? `Order ${item.orderNumber}`
+                : "Linked order · order number not shown"}
+          </dd>
+        </div>
+        <div>
+          <dt>Payment provider status</dt>
+          <dd>{providerStateLabel[item.providerState]}</dd>
+        </div>
+        <div>
+          <dt>Compensation</dt>
+          <dd>{compensationLabel[item.compensationStatus]}</dd>
+        </div>
+        <div>
+          <dt>Owner</dt>
+          <dd>{item.ownerStatus}</dd>
+        </div>
+      </dl>
+      {csrf &&
+      item.kind === "PaidWithoutFulfillableOrder" &&
+      item.sourceOwner === "Payment" &&
+      item.orderReference !== null ? (
+        <CompensationReconciliationAction
+          orderReference={item.orderReference}
+          caseReference={item.exceptionReference}
+          csrf={csrf}
+          readOnly={readOnly}
+        />
+      ) : null}
+      {csrf && payment ? (
+        <ReconciliationFollowUpAction
+          key={item.exceptionReference + ":" + csrf}
+          exceptionReference={item.exceptionReference}
+          csrf={csrf}
+          readOnly={readOnly || item.sourceFinal}
+          closed={item.sourceFinal}
+          showChargeDetails={unmatched}
+        />
+      ) : null}
+      {item.orderReference === null ? (
+        <p>
+          {detail?.type === "UnmatchedCharge"
+            ? "The payment provider took this charge, but it matches no order or payment in this store. Review it below and refund it if no order was paid by it."
+            : "No order is linked to this payment difference. Review it with the payment provider's records."}
+        </p>
+      ) : null}
+      {csrf && unmatched ? (
+        <UnmatchedCaptureRefundAction
+          key={item.exceptionReference + ":refund:" + csrf}
+          exceptionReference={item.exceptionReference}
+          csrf={csrf}
+          readOnly={readOnly}
+        />
+      ) : null}
+    </>
   );
 }
 const defaultExceptionClient = createOrderExceptionClient();

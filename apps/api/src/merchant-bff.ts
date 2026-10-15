@@ -199,6 +199,10 @@ import {
 import { CounterMenuError, type createMerchantCounterMenu } from "./merchant-counter-menu.js";
 import { CounterOrderError, type createMerchantCounterOrder } from "./merchant-counter-order.js";
 import {
+  StaffDiningRoundError,
+  type createMerchantStaffDiningRound,
+} from "./merchant-staff-dining-round.js";
+import {
   AcceptanceHoldRefundError,
   type createMerchantOrderAcceptanceHoldRefund,
 } from "./merchant-order-acceptance-hold-refund.js";
@@ -597,6 +601,8 @@ export interface MerchantBffRouterOptions {
   readonly counterMenu?: ReturnType<typeof createMerchantCounterMenu>;
   /** WP-2423 Q7: staff take a pickup order at the counter or enter a paper order afterwards. */
   readonly counterOrder?: ReturnType<typeof createMerchantCounterOrder>;
+  /** WP-2423 Q7 slice 2: staff enter a dine-in round for a table (or a paper round afterwards). */
+  readonly staffDiningRound?: ReturnType<typeof createMerchantStaffDiningRound>;
   /** WP-2423 Q7: staff record a payment the Store's card machine approved. */
   readonly cardMachinePayment?: ReturnType<typeof createMerchantCardMachinePayment>;
   /** WP-2423 Q7: staff record the card-machine refund of a cancelled card-machine order. */
@@ -1779,6 +1785,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
                       refundMethod: batch.staffCancellation.refundMethod,
                       refundAmountMinor: batch.staffCancellation.refundAmountMinor,
                     },
+              // WP-2423 Q7 slice 2: a round staff entered for the table and its card-machine payment.
+              staffRound: batch.staffRound,
             })),
             currentPhase: item.currentPhase,
             currentVersion: item.currentVersion,
@@ -1877,6 +1885,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
                       refundMethod: batch.staffCancellation.refundMethod,
                       refundAmountMinor: batch.staffCancellation.refundAmountMinor,
                     },
+              // WP-2423 Q7 slice 2: a round staff entered for the table and its card-machine payment.
+              staffRound: batch.staffRound,
             })),
             currentPhase: item.currentPhase,
             currentVersion: item.currentVersion,
@@ -1981,6 +1991,19 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             .set("Cache-Control", NO_STORE)
             .set("Retry-After", "5")
             .json({ error: "settlement_busy" });
+          return;
+        }
+        // WP-2423: a day before the Store's records begin is an answer, not a refusal.
+        const notCovered = error as { code?: unknown; firstBusinessDate?: unknown } | null;
+        if (
+          notCovered?.code === "MERCHANT_SETTLEMENT_NOT_COVERED" &&
+          typeof notCovered.firstBusinessDate === "string" &&
+          /^\d{4}-\d{2}-\d{2}$/u.test(notCovered.firstBusinessDate)
+        ) {
+          response.status(404).set("Cache-Control", NO_STORE).json({
+            error: "settlement_not_covered",
+            firstBusinessDate: notCovered.firstBusinessDate,
+          });
           return;
         }
         denied(response);
@@ -10382,7 +10405,9 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       request.method !== "GET" ||
       request.body !== undefined ||
       sessionCookie === null ||
-      Object.keys(request.query).length !== 0 ||
+      // WP-2423 Q7 slice 2: ?orderType=DineIn for a staff-entered table round.
+      Object.keys(request.query).some((key) => key !== "orderType") ||
+      (request.query.orderType !== undefined && request.query.orderType !== "DineIn") ||
       rawHeaderValues(request, "origin").length > 1 ||
       rawHeaderValues(request, "sec-fetch-site").length !== 1
     ) {
@@ -10394,7 +10419,10 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       return;
     }
     void options
-      .counterMenu({ sessionCookie })
+      .counterMenu({
+        sessionCookie,
+        orderType: request.query.orderType === "DineIn" ? "DineIn" : "Pickup",
+      })
       .then((menu) => {
         response.set("Cache-Control", NO_STORE);
         response.json({ screenId: "OPS-ORDER-ENTRY", menu });
@@ -10478,6 +10506,66 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             error.code === "COUNTER_ORDER_ITEM_UNAVAILABLE"
               ? { error: code, lineIndex: error.lineIndex }
               : { error: code },
+          );
+      });
+  });
+  // WP-2423 Q7 slice 2 (DEC-STAFF-DINE-IN-ROUND): staff enter a round for a table on behalf of its
+  // guests (or a paper round after an outage); the reply is the amount to charge on the card machine.
+  router.post("/dining/staff-rounds", sameOriginMutation(options), (request, response) => {
+    const auth = mutation(request, response);
+    if (auth === null) return;
+    if (!options.staffDiningRound) {
+      response.status(503).json({ error: "staff_round_unavailable" });
+      return;
+    }
+    void options
+      .staffDiningRound({ ...auth, command: request.body })
+      .then((result) => {
+        response.set("Cache-Control", NO_STORE);
+        response.json({
+          status: result.status,
+          orderReference: result.orderReference,
+          orderBatchReference: result.orderBatchReference,
+          orderNumber: result.orderNumber,
+          orderVersion: result.orderVersion,
+          tableLabel: result.tableLabel,
+          orderMinor: result.orderMinor,
+          tipMinor: result.tipMinor,
+          totalMinor: result.totalMinor,
+          payBy: result.payBy,
+          recordedAfterOutage: result.recordedAfterOutage,
+        });
+      })
+      .catch((error: unknown) => {
+        if (!(error instanceof StaffDiningRoundError)) {
+          denied(response);
+          return;
+        }
+        const [status, code] = (
+          {
+            STAFF_ROUND_INPUT_INVALID: [400, "staff_round_input_invalid"],
+            STAFF_ROUND_PERMISSION_DENIED: [403, "staff_round_permission_denied"],
+            STAFF_ROUND_STORE_NOT_TAKING_ORDERS: [409, "store_not_taking_dine_in_orders"],
+            STAFF_ROUND_TABLE_UNAVAILABLE: [409, "table_unavailable"],
+            STAFF_ROUND_TABLE_CART_HAS_ITEMS: [409, "table_cart_has_items"],
+            STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS: [409, "table_checkout_in_progress"],
+            STAFF_ROUND_ITEM_UNAVAILABLE: [409, "item_unavailable"],
+            STAFF_ROUND_NOT_PRICED: [409, "order_not_priced"],
+            STAFF_ROUND_NOT_FINISHED: [409, "staff_round_not_finished"],
+            STAFF_ROUND_IN_PROGRESS: [409, "staff_round_in_progress"],
+            STAFF_ROUND_IDEMPOTENCY_CONFLICT: [409, "staff_round_conflict"],
+            STAFF_ROUND_UNAVAILABLE: [503, "staff_round_unavailable"],
+          } as const
+        )[error.code];
+        response
+          .status(status)
+          .set("Cache-Control", NO_STORE)
+          .json(
+            error.code === "STAFF_ROUND_ITEM_UNAVAILABLE"
+              ? { error: code, lineIndex: error.lineIndex }
+              : error.code === "STAFF_ROUND_TABLE_CART_HAS_ITEMS"
+                ? { error: code, items: error.pendingItems.slice(0, 30) }
+                : { error: code },
           );
       });
   });

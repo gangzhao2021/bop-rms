@@ -1,6 +1,7 @@
 import { DiningHostTransferAction } from "./DiningHostTransferAction.js";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AppFrame } from "@bop-rms/ui";
+import { Link } from "react-router";
 import {
   createDiningSessionClient,
   DiningSessionClientError,
@@ -54,10 +55,13 @@ export function DiningSessionWorkspace({
   csrf,
   storeLabel,
   navigation,
+  canTakeOrders = false,
 }: {
   readonly csrf: string;
   readonly storeLabel: string;
   readonly navigation?: ReactNode;
+  /** WP-2423 Q7 slice 2: the staff member may enter a round for a table (staff ordering). */
+  readonly canTakeOrders?: boolean;
 }) {
   const [tables, setTables] = useState<StaffDiningTable[]>([]),
     [next, setNext] = useState<string | null>(null),
@@ -485,6 +489,21 @@ export function DiningSessionWorkspace({
                     </dd>
                   </div>
                 </dl>
+                {canTakeOrders && eligible ? (
+                  // WP-2423 Q7 slice 2: a round for guests who can't or won't order on a phone.
+                  <section aria-label="Take an order for this table">
+                    <p>
+                      Order for guests who can&apos;t or won&apos;t use their phone, or enter a
+                      paper order after an outage. It joins this table&apos;s order.
+                    </p>
+                    <Link
+                      className="dining-take-order"
+                      to={`/operations/order-entry?table=${encodeURIComponent(selected.tableReference)}`}
+                    >
+                      Take order for table {selected.stableLabel}
+                    </Link>
+                  </section>
+                ) : null}
                 <section aria-label="Dining session action">
                   <p>
                     {selected.currentDiningSessionReference

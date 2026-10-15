@@ -82,3 +82,18 @@ export function dailySettlementRecheckRunReference(day, recheck) {
     ),
   );
 }
+
+/**
+ * WP-2423: the business day end a daily settlement run reference names (its time part, see
+ * dailySettlementRunReference), or null when it is not shaped like one. Only a hint: the caller
+ * re-derives that day's references and accepts the day only on an exact match.
+ */
+export function dailySettlementDayEnd(runReference) {
+  if (
+    typeof runReference !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(runReference)
+  )
+    return null;
+  const at = parseInt(runReference.slice(0, 8) + runReference.slice(9, 13), 16);
+  return Number.isSafeInteger(at) ? new Date(at).toISOString() : null;
+}

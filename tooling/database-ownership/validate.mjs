@@ -2246,6 +2246,11 @@ async function scanUnsupported(root, module, diagnostics) {
             owner: "ordering",
             tables: ["counter_order_entry", "order_batch"],
           },
+          // WP-2423 Q7 slice 2: the staff member and command behind a staff-entered dine-in round.
+          "src/infrastructure/persistence/staff-dining-round-entry-store.ts": {
+            owner: "ordering",
+            tables: ["staff_dining_round_entry", "order_batch", "order_header"],
+          },
         }[moduleRelative];
         const acceptedPilotPublicationAsset =
           pilotPublicationAsset !== undefined &&

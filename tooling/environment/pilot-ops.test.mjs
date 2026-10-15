@@ -236,6 +236,66 @@ describe("WP-2423 Q13 observations", () => {
     expect(await observe(T0 + MIN)).toBe("unreadable");
     expect(load).toHaveBeenCalledTimes(2);
   });
+  it("WP-2423: reads payment signals every minute and rescans settlement every minute only while it has a problem", async () => {
+    const counts = { settlement: 0, exceptions: 0 };
+    let settlementProblem = true,
+      openDifferences = 1;
+    const resources = {
+      scope: { brandReference: "b", storeReference: "s" },
+      transactions: { run: async (work) => work({ query: async () => ({ rows: [] }) }) },
+      database: {
+        transactions: () => ({
+          run: async (work) => work({ query: async () => ({ rows: [] }) }),
+        }),
+      },
+    };
+    const load = vi.fn(async () => ({
+      resources,
+      installation: {},
+      dependencies: {
+        createReconciliationExceptions: () => async () => {
+          counts.exceptions++;
+          return {
+            items: Array.from({ length: openDifferences }, () => ({
+              state: "Open",
+              openedAt: new Date(T0 - MIN).toISOString(),
+            })),
+            nextAfterExceptionReference: null,
+          };
+        },
+        readSettlementStatus: async () => {
+          counts.settlement++;
+          return {
+            days: [
+              {
+                state: "Recorded",
+                endsAt: new Date(T0 - 60 * MIN).toISOString(),
+                outcome: settlementProblem ? "Difference" : "Matched",
+              },
+            ],
+          };
+        },
+      },
+    }));
+    const observe = createBusinessObserver({ runtimeDirectory: ".local/pilot-test", load });
+    expect((await observe(T0)).settlementExceptions.count).toBe(1);
+    expect(await observe(T0 + 30_000)).toMatchObject({ reconciliationDifferences: { count: 1 } });
+    expect(counts).toEqual({ settlement: 1, exceptions: 1 });
+    // Staff resolve the difference: both signals clear on the next minute's read.
+    settlementProblem = false;
+    openDifferences = 0;
+    expect(await observe(T0 + MIN)).toMatchObject({
+      reconciliationDifferences: { count: 0 },
+      settlementExceptions: { count: 0 },
+    });
+    expect(counts).toEqual({ settlement: 2, exceptions: 2 });
+    // While every day is settled, the settlement scan waits 5 minutes; payment signals do not.
+    await observe(T0 + 2 * MIN);
+    await observe(T0 + 3 * MIN);
+    expect(counts).toEqual({ settlement: 2, exceptions: 4 });
+    await observe(T0 + 6 * MIN);
+    expect(counts).toEqual({ settlement: 3, exceptions: 5 });
+  });
 });
 
 describe("WP-2423 Q13 test alert command", () => {

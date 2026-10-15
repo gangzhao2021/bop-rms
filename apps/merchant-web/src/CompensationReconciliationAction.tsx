@@ -4,6 +4,7 @@ import {
   type CompensationView,
 } from "./compensation-reconciliation-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
+import { SourceTime } from "./StoreTime.js";
 const client = createCompensationReconciliationClient();
 export function CompensationReconciliationAction({
   orderReference,
@@ -66,7 +67,7 @@ export function CompensationReconciliationAction({
     } catch {
       if (!controller.signal.aborted)
         setMessage(
-          "Confirmed refund unavailable. Refresh when the refund is confirmed and your access is current.",
+          "The confirmed refund could not be read. Refresh once the refund is confirmed and your access is current.",
         );
     } finally {
       pending.current = null;
@@ -92,7 +93,7 @@ export function CompensationReconciliationAction({
         setUnknown(false);
         setRecorded(true);
         setMessage(
-          "Operations reconciliation recorded. Refresh the workbench to check case closure.",
+          "Your check of the refund is recorded. Refresh the page to see whether the case is closed.",
         );
       }
     } catch {
@@ -122,7 +123,7 @@ export function CompensationReconciliationAction({
       {view ? (
         <>
           <p>
-            Confirmed refund: {amount} · {view.refund.confirmedAt}
+            Confirmed refund: {amount} · <SourceTime instant={view.refund.confirmedAt} />
           </p>
           <p>Case: {view.caseState}</p>
           {recorded ? (

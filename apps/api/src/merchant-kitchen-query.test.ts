@@ -230,6 +230,8 @@ it("WP-2423 Q3: serves the published menu disclosure per work item and restores 
     orderNumber: "14",
     orderType: "DineIn",
     tableLabel: "T4",
+    // WP-2423 Q7 slice 2: no staff record names this order or round.
+    enteredByStaff: false,
   });
   expect(result.items[0]?.customerNote).toBe("Synthetic note: no onions");
   expect(result.items[0]?.allergens).toEqual({

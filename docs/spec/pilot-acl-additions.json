@@ -3114,6 +3114,24 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (WP-2423 staff PIN, Owner chose A)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "staff_dining_round_entry",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q7 staff dine-in): DEC-STAFF-DINE-IN-ROUND — staff enter a dine-in round for a table on behalf of guests who can't or won't use a phone (or a paper round after an outage) through the ordinary table guest path; this append-only record names the staff member, the table and session, and is read by the order queue, kitchen, the guests' table view and the card-machine payment of the round"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "staff_dining_round_entry",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q7 staff dine-in): DEC-STAFF-DINE-IN-ROUND — staff enter a dine-in round for a table on behalf of guests who can't or won't use a phone (or a paper round after an outage) through the ordinary table guest path; this append-only record names the staff member, the table and session, and is read by the order queue, kitchen, the guests' table view and the card-machine payment of the round"
     }
   ]
 }

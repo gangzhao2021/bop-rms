@@ -50,6 +50,8 @@ export function counterCheckoutDetailsCommand(input: {
  */
 export function counterEntryOperatingReader(
   reader: CustomerEntryOperatingReader,
+  /** WP-2423 Q7 slice 2: a staff-entered table round enters with the table QR (DineIn). */
+  mode: "Pickup" | "DineIn" = "Pickup",
 ): CustomerEntryOperatingReader {
   return Object.freeze({
     async readCurrent(input: Parameters<CustomerEntryOperatingReader["readCurrent"]>[0]) {
@@ -59,7 +61,7 @@ export function counterEntryOperatingReader(
         ...current,
         state: "Open" as const,
         availableServiceModes: Object.freeze([
-          ...new Set([...current.availableServiceModes, "Pickup" as const]),
+          ...new Set([...current.availableServiceModes, mode]),
         ]),
       });
     },
@@ -104,6 +106,7 @@ export function createCounterGuestPipeline(options: {
   const failed = (): never => {
     throw new Error("COUNTER_GUEST_PIPELINE_UNAVAILABLE");
   };
+  const steps = createGuestOrderSteps(options);
   const pipeline: CounterGuestPipeline = {
     takesOrder: (input) => options.takesOrder(input),
     async open(input) {
@@ -190,6 +193,37 @@ export function createCounterGuestPipeline(options: {
         cartVersion: cart.view.cart.version,
       });
     },
+    ...steps,
+    async preparePayment(credentials, input): Promise<OrderPaymentPreparationEvidence> {
+      if (!(await options.takesOrder({ recordedAfterOutage: input.recordedAfterOutage })))
+        throw new CheckoutSessionServiceError("STORE_CLOSED");
+      const read = { ...credentials, checkoutSessionReference: input.checkoutSessionReference };
+      const session: CheckoutSession = parseCheckoutSession(await options.checkout.read(read));
+      return prepareCustomerSessionPayment(options.payment(credentials), {
+        input: read,
+        session,
+        selectionReference: input.selectionReference,
+        tip: input.tip as Money,
+      });
+    },
+  };
+  return Object.freeze(pipeline);
+}
+
+/**
+ * The customer cart, quote, checkout details and checkout steps a staff-entered order takes on
+ * behalf of its guest (WP-2423 Q7): the same owner ports the customer app's HTTP handlers call.
+ */
+export function createGuestOrderSteps(options: {
+  cart: Pick<CustomerCartPort, "addItem">;
+  quote: CustomerQuotePort;
+  details: Pick<CustomerCheckoutDetailsPort, "save">;
+  checkout: { create(value: unknown): Promise<unknown> };
+}): Pick<CounterGuestPipeline, "addItem" | "quote" | "saveDetails" | "startCheckout"> {
+  const failed = (): never => {
+    throw new Error("COUNTER_GUEST_PIPELINE_UNAVAILABLE");
+  };
+  return {
     async addItem(credentials, input) {
       const result = await options.cart.addItem({
         guestCredential: credentials.sessionCredential,
@@ -201,12 +235,14 @@ export function createCounterGuestPipeline(options: {
         sellableReference: input.sellableReference,
         quantity: input.quantity,
         optionSelections: input.optionSelections,
-        customerNote: null,
+        customerNote: input.customerNote ?? null,
       });
       if (result.status === "Applied")
         return { status: "Applied" as const, cartVersion: result.view.cart.version };
       // Not on the menu now, sold out, or an option the item does not take.
       if (result.status === "SelectionInvalid") return { status: "NotAvailable" as const };
+      // A table guest is paying for this table's Cart right now (dine-in only).
+      if (result.status === "CheckoutInProgress") return { status: "CheckoutInProgress" as const };
       return failed();
     },
     async quote(credentials, input) {
@@ -282,18 +318,5 @@ export function createCounterGuestPipeline(options: {
         throw error;
       }
     },
-    async preparePayment(credentials, input): Promise<OrderPaymentPreparationEvidence> {
-      if (!(await options.takesOrder({ recordedAfterOutage: input.recordedAfterOutage })))
-        throw new CheckoutSessionServiceError("STORE_CLOSED");
-      const read = { ...credentials, checkoutSessionReference: input.checkoutSessionReference };
-      const session: CheckoutSession = parseCheckoutSession(await options.checkout.read(read));
-      return prepareCustomerSessionPayment(options.payment(credentials), {
-        input: read,
-        session,
-        selectionReference: input.selectionReference,
-        tip: input.tip as Money,
-      });
-    },
   };
-  return Object.freeze(pipeline);
 }

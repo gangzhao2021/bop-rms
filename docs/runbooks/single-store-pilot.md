@@ -1760,7 +1760,11 @@ Where alerts appear:
 Noise control: a failed entry probe must last 2 minutes before it alerts; each problem is sent once,
 again only if it gets worse or after a reminder interval (urgent 3 hours, today 24 hours), and
 "Resolved" is sent after 2 quiet minutes. Each channel sends at most 6 messages an hour; anything
-waiting is merged into the next message. Alert state is kept in `<runtime>/ops/alert-state.json`,
+waiting is merged into the next message. Payment signals (stuck updates, open payment differences)
+are read every minute; the day-end settlement scan every minute while it shows a problem and every
+5 minutes while every day is settled. A payment or settlement problem staff resolve therefore leaves
+the Home within about 3 minutes (the next read plus the 2 quiet minutes); a new day-end settlement
+problem appears within about 5 minutes. Alert state is kept in `<runtime>/ops/alert-state.json`,
 so a restart does not resend. Messages contain only fixed text, counts and times: never names,
 phone numbers, emails, order details, tokens or passwords.
 

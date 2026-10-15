@@ -132,6 +132,10 @@ export async function createInternalAdditionalPayment(
   }
   return {
     resolveRequest,
+    // WP-2423 Q7 slice 2: the same preparation for a staff-entered round paid on the card machine.
+    async prepare(input) {
+      return (await resolveRequest(input)).service.prepare(input);
+    },
     // WP-2423 Q20: another card for this round's existing payment after a decline.
     async retry(input) {
       return (await resolveRequest(input)).service.retry(input);
