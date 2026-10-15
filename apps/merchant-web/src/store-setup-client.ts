@@ -22,7 +22,9 @@ export class StoreSetupClientError extends Error {
       | "Unavailable"
       | "OutcomeUnknown"
       | "ScopeChanged"
-      | "Stale",
+      | "Stale"
+      // WP-2423 Q15/Q16: the Brand has no tax classifications to choose from yet.
+      | "NotRegistered",
   ) {
     super("Store setup could not be confirmed");
     this.name = "StoreSetupClientError";
@@ -741,6 +743,7 @@ export function createStoreSetupClient(fetcher: typeof fetch = fetch) {
       if (response.status === 403) return fail("Denied");
       if (response.status === 409) return fail("Conflict");
       if (response.status === 400) return fail("Invalid");
+      if (classificationRead && response.status === 404) return fail("NotRegistered");
       if (
         !response.ok ||
         response.headers.get("cache-control") !== "no-store" ||

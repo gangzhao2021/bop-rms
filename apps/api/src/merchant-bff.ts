@@ -2585,8 +2585,10 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
     const conflict =
       code === "STORE_SETUP_OPERATION_VERSION_CONFLICT" ||
       code === "STORE_SETUP_OPERATION_IDEMPOTENCY_CONFLICT";
+    // WP-2423 Q15/Q16: an empty Brand classification registry is an answer, not an outage.
+    const none = code === "STORE_SETUP_OPERATION_CLASSIFICATIONS_NOT_REGISTERED";
     response
-      .status(invalid ? 400 : forbidden ? 403 : conflict ? 409 : 503)
+      .status(invalid ? 400 : forbidden ? 403 : conflict ? 409 : none ? 404 : 503)
       .set("Cache-Control", NO_STORE)
       .json({
         error: invalid
@@ -2595,7 +2597,9 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             ? "request_denied"
             : conflict
               ? "store_setup_conflict"
-              : "store_setup_unavailable",
+              : none
+                ? "store_setup_classifications_not_registered"
+                : "store_setup_unavailable",
       });
   };
   router.get("/store-setup", safeRead(options), (request, response) => {

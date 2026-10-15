@@ -32,8 +32,12 @@
  * v13 (2026-10-14): kitchen.ticket.close_stale (WP-2423, DEC-KITCHEN-STALE-TICKETS): close a kitchen
  * ticket left open from an earlier business day with a reason (no refund, no Order change). Owner
  * and Store Manager hold it (Store Manager through the `kitchen.` prefix); Kitchen does not.
+ * v14 (2026-10-14, WP-2423 Q15/Q16): the legacy name `catalog.tax-classification.read`, still checked
+ * by the Brand tax classification registry, is held by whoever reads both Products and tax
+ * configuration (Brand Owner, Menu Manager), so the Owner can see fee classification choices in
+ * Store setup. Registering classifications (`catalog.tax-classification.manage`) is unchanged.
  */
-export const storePermissionCatalogVersion = 13 as const;
+export const storePermissionCatalogVersion = 14 as const;
 export type PermissionRisk = "Low" | "Medium" | "High";
 export interface StorePermissionDefinition {
   readonly code: string;
@@ -416,6 +420,8 @@ export const legacyPermissionReplacements: Readonly<Record<string, readonly stri
     "pricing.tax-config.manage": ["pricing.tax_config.manage"],
     "operations.order-exception.manage": ["operations.order_exception.manage"],
     "integration.manage": ["integration.receipt_template.manage"],
+    // v14 (WP-2423 Q15/Q16): read by the tax classification registry (Store setup fee choices).
+    "catalog.tax-classification.read": ["catalog.product.read", "pricing.tax_config.read"],
   });
 
 export type StoreRoleTemplateCode =

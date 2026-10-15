@@ -80,6 +80,8 @@ export function createMerchantStoreFeeContextClassifications(options: {
     return checkPort();
   };
   const mapped = (error: unknown): never => {
+    if (error instanceof CatalogError && error.code === "CATALOG_TAX_CLASSIFICATION_NOT_REGISTERED")
+      return fail("STORE_SETUP_OPERATION_CLASSIFICATIONS_NOT_REGISTERED");
     if (
       (error instanceof CatalogError && error.code === "CATALOG_PERMISSION_DENIED") ||
       (error instanceof BrowserSessionError && error.code === "BROWSER_SESSION_DENIED") ||

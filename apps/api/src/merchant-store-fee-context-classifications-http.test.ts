@@ -210,6 +210,11 @@ it("cannot validate choices using their own lease when the trusted clock or prod
 it.each([
   ["STORE_SETUP_OPERATION_PERMISSION_DENIED", 403, "request_denied"],
   ["STORE_SETUP_OPERATION_DEPENDENCY_UNAVAILABLE", 503, "store_setup_unavailable"],
+  [
+    "STORE_SETUP_OPERATION_CLASSIFICATIONS_NOT_REGISTERED",
+    404,
+    "store_setup_classifications_not_registered",
+  ],
 ] as const)("keeps %s finite", async (code, status, error) => {
   const send = await serve(
     port(async () => {

@@ -40,7 +40,8 @@ async function install(page: Page) {
     writes: [] as Record<string, unknown>[],
     resolves: [] as Record<string, unknown>[],
     errors: [] as string[],
-    choiceMode: "Active" as "Active" | "Retired" | "Missing" | "Denied" | "Foreign",
+    choiceMode: "Active" as
+      "Active" | "Retired" | "Missing" | "Denied" | "Foreign" | "NotRegistered",
     delayChoices: false,
     releaseChoices: (() => undefined) as () => void,
     choicesStarted: 0,
@@ -104,6 +105,8 @@ async function install(page: Page) {
         });
       }
       if (mode === "Denied") return respond(route, { error: "request_denied" }, 403);
+      if (mode === "NotRegistered")
+        return respond(route, { error: "store_setup_classifications_not_registered" }, 404);
       const observedAt = new Date().toISOString();
       const value = parseTaxConfigClassificationChoices({
         profile: "TaxConfigClassificationChoicesV1",
@@ -543,7 +546,18 @@ test("@production Store fee contexts reject unavailable retired or foreign class
   await panel
     .getByRole("button", { name: "Refresh fee classification choices", exact: true })
     .click();
-  await expect(panel.getByRole("status")).toContainText("Classification choices unavailable");
+  await expect(panel.getByRole("status")).toContainText(
+    "Classification choices could not be loaded",
+  );
+  // WP-2423 Q15/Q16: a Brand with no tax classifications gets a plain answer, not "unavailable".
+  f.control.choiceMode = "NotRegistered";
+  await panel
+    .getByRole("button", { name: "Refresh fee classification choices", exact: true })
+    .click();
+  await expect(panel.getByRole("status")).toContainText(
+    "No tax classifications are set up for this Brand yet",
+  );
+  await expect(panel.getByRole("status")).not.toContainText("unavailable");
   f.control.choiceMode = "Active";
   await panel
     .getByRole("button", { name: "Refresh fee classification choices", exact: true })

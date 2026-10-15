@@ -204,6 +204,7 @@ const messages: Record<StoreSetupClientError["code"], string> = {
   ScopeChanged:
     "The selected Store or signed-in session changed. Open setup for the current Store.",
   Stale: "The current settings check expired. Refresh to read the current Store again.",
+  NotRegistered: "No tax classifications are set up for this Brand yet.",
 };
 const root = (view: StoreSetupWorkspace) => ({
   reference: view.setup.snapshot?.setupDraftReference ?? null,
@@ -1952,7 +1953,7 @@ export function StoreSetupFeeContextEditor({
   const [choices, setChoices] = useState<Awaited<ReturnType<typeof client.classifications>> | null>(
     null,
   );
-  const [error, setError] = useState(false),
+  const [error, setError] = useState<false | "Unavailable" | "NotRegistered" | "Denied">(false),
     [reload, setReload] = useState(0);
   const generation = useRef(0);
   useEffect(() => {
@@ -1969,8 +1970,14 @@ export function StoreSetupFeeContextEditor({
       .then((v) => {
         if (token === generation.current && !controller.signal.aborted) setChoices(v);
       })
-      .catch(() => {
-        if (token === generation.current && !controller.signal.aborted) setError(true);
+      .catch((reason: unknown) => {
+        if (token === generation.current && !controller.signal.aborted)
+          setError(
+            reason instanceof StoreSetupClientError &&
+              (reason.code === "NotRegistered" || reason.code === "Denied")
+              ? reason.code
+              : "Unavailable",
+          );
       });
     return () => {
       generation.current++;
@@ -1991,9 +1998,23 @@ export function StoreSetupFeeContextEditor({
     <section className="store-setup-fee-contexts" aria-label="Fee contexts">
       <h4>Fee contexts</h4>
       <p>Draft configuration only. These selections do not set fees, rates or effective policy.</p>
-      {error && (
+      {error === "NotRegistered" && (
         <p role="status">
-          Classification choices unavailable. Unconfigured or disabled settings can still be saved.
+          No tax classifications are set up for this Brand yet, so these fees cannot be turned on
+          here. Leave each fee as Unconfigured or Disabled; you can still save the rest of this
+          setup.
+        </p>
+      )}
+      {error === "Denied" && (
+        <p role="status">
+          Choosing a tax classification needs permission to read Products and tax settings. Leave
+          each fee as Unconfigured or Disabled; you can still save the rest of this setup.
+        </p>
+      )}
+      {error === "Unavailable" && (
+        <p role="status">
+          Classification choices could not be loaded. Refresh to try again; Unconfigured or disabled
+          settings can still be saved.
         </p>
       )}
       <button type="button" disabled={disabled} onClick={() => setReload((v) => v + 1)}>

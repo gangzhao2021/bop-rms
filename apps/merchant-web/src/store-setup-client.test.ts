@@ -620,6 +620,17 @@ it("loads optional fee choices with the actual selected scope header, fresh clos
     }),
   ).rejects.toThrow();
   expect(fetcher).toHaveBeenCalledTimes(1);
+  // WP-2423 Q15/Q16: no registered classifications is its own answer; other 404s stay unavailable.
+  await expect(
+    createStoreSetupClient(async () =>
+      response({ error: "store_setup_classifications_not_registered" }, 404),
+    ).classifications({ storeReference: id(3), expectedScope: scope }),
+  ).rejects.toMatchObject({ code: "NotRegistered" });
+  await expect(
+    createStoreSetupClient(async () => response({ error: "x" }, 404)).load({
+      storeReference: id(3),
+    }),
+  ).rejects.toMatchObject({ code: "Unavailable" });
 });
 it("rejects forged save generation before dispatch and suppresses stale fee choices after Actor switch", async () => {
   const fetcher = vi.fn<typeof fetch>(async () => response(feeChoices()));

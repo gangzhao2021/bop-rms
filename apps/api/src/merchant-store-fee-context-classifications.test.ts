@@ -265,8 +265,9 @@ it.each(["denied", "storeOnly", "foreign"] as const)(
 it("does not invent a registry when the actual owner has no records", async () => {
   const f = fixture();
   f.state.missing = true;
+  // WP-2423 Q15/Q16: no registered classifications is a plain answer, never invented choices.
   await expect(f.read()).rejects.toMatchObject({
-    code: "STORE_SETUP_OPERATION_DEPENDENCY_UNAVAILABLE",
+    code: "STORE_SETUP_OPERATION_CLASSIFICATIONS_NOT_REGISTERED",
   });
 });
 it("late fine withdrawal refuses COMMIT", async () => {

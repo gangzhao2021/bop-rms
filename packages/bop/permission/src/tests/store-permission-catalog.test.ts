@@ -4,6 +4,7 @@ import {
   legacyPermissionReplacements,
   storePermissionCatalog,
   storePermissionCodes,
+  brandRoleTemplateActions,
   storeRoleTemplateActions,
   storeRoleTemplates,
 } from "../catalog/store-permission-catalog.js";
@@ -107,5 +108,15 @@ describe("DEC-PERM-CATALOG Store permission catalog", () => {
     expect(
       storePermissionCatalog().find((entry) => entry.code === "kitchen.ticket.close_stale"),
     ).toMatchObject({ module: "kitchen", risk: "Medium" });
+  });
+  it("lets the Brand Owner and Menu Manager read fee classification choices (v14)", () => {
+    for (const role of ["brand-owner", "menu-manager"] as const)
+      expect(brandRoleTemplateActions(role), role).toContain("catalog.tax-classification.read");
+    for (const role of ["recipe-developer", "recipe-reviewer"] as const)
+      expect(brandRoleTemplateActions(role), role).not.toContain("catalog.tax-classification.read");
+    for (const role of ["brand-owner", "menu-manager"] as const)
+      expect(brandRoleTemplateActions(role), role).not.toContain(
+        "catalog.tax-classification.manage",
+      );
   });
 });

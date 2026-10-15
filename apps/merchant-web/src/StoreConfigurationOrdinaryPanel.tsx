@@ -108,6 +108,7 @@ const messages: Record<StoreSetupClientError["code"], string> = {
   ScopeChanged:
     "The selected Store or Actor changed. Return to the original scope to recover its request.",
   Unavailable: "Configuration is unavailable. Retry without discarding a pending original.",
+  NotRegistered: "No tax classifications are set up for this Brand yet.",
   OutcomeUnknown:
     "The result is unknown. Recover the original request before sending another command.",
 };

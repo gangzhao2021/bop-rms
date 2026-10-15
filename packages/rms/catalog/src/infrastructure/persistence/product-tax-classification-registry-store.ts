@@ -441,7 +441,8 @@ export function createPostgresProductTaxClassificationRegistryStore(
       await context(h);
       await h.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [key]);
       const registry = (await history(h)).current;
-      if (!registry || registry.registeredAt > observation.observedAt) return fail();
+      if (!registry) return fail("CATALOG_TAX_CLASSIFICATION_NOT_REGISTERED");
+      if (registry.registeredAt > observation.observedAt) return fail();
       await h.hold("catalog.tax-classification.read", "Read", registry);
       await h.register("catalog.tax-classification.read", "Read", registry);
       const source = Object.freeze({

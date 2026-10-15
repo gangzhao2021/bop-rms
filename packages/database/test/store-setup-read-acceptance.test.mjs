@@ -4,6 +4,11 @@ import { URL } from "node:url";
 import pg from "pg";
 import { it, vi } from "vitest";
 import { createMerchantStoreSetup } from "../../../apps/api/src/merchant-store-setup.ts";
+import { createMerchantStoreSetupReferences } from "../../../apps/api/src/merchant-store-setup-references.ts";
+import { createMerchantStorePaymentConfiguration } from "../../../apps/api/src/merchant-store-payment-configuration.ts";
+import { createMerchantReceiptTemplateDraft } from "../../../apps/api/src/merchant-receipt-template-draft.ts";
+import { createMerchantReceiptTemplateArtifacts } from "../../../apps/api/src/merchant-receipt-template-artifacts.ts";
+import { brandRoleTemplateActions } from "../../bop/permission/src/index.ts";
 import {
   StoreSetupOperationError,
   createUnconfiguredStoreSetupDraftContent,
@@ -18,8 +23,10 @@ const id = (n) => "01a7e000-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 /**
  * WP-2423 Q15/Q16: the Owner opens Store setup (where Receipts and privacy lives). The read runs as
  * a restricted NOBYPASSRLS role holding exactly the rendered pilot API grants (pilot ACL matrix +
- * additions): an Owner (organization.manage) gets the Store and its setup; a Store Manager without
- * it is refused (403, not 503).
+ * additions): an Owner (organization.manage, plus the Brand Owner template at Brand scope) gets the
+ * Store, its setup and every Store setup sub-read (address/contact, payment configuration, receipt
+ * template drafts and presets, fee classification choices); a Store Manager without it is refused
+ * (403, not 503).
  */
 it("WP-2423: the Owner reads Store setup under the pilot API grants", async () => {
   await withIsolatedDatabase({ caseId: "wp2423_setup_read" }, async (context) => {
@@ -83,6 +90,49 @@ it("WP-2423: the Owner reads Store setup under the pilot API grants", async () =
         at: now(),
         extraPermissions: ["organization.manage"],
       });
+      // The Owner's Brand role (Brand Owner template at Brand scope) carries what the fee
+      // classification registry checks; v13 and earlier did not hold catalog.tax-classification.read.
+      const brandActions = brandRoleTemplateActions("brand-owner");
+      for (const action of ["catalog.manage", "catalog.tax-classification.read"])
+        assert.ok(brandActions.includes(action), action);
+      {
+        const membership = (
+          await admin.query(
+            "SELECT membership_id FROM bop_membership.membership WHERE actor_id=$1",
+            [id(10)],
+          )
+        ).rows[0].membership_id;
+        const from = new Date(Date.now() - 60000).toISOString(),
+          until = new Date(Date.now() + 3600000).toISOString();
+        await admin.query(
+          "INSERT INTO bop_permission.role VALUES($1,$2,NULL,'synthetic_brand_owner','Active',$3,$4,1,$3,$3)",
+          [id(0x900), scope.brandReference, from, until],
+        );
+        await admin.query(
+          "INSERT INTO bop_permission.role_assignment VALUES($1,$2,$3,NULL,$4,$5,NULL,'Active',$6,$7,1,$6,$6)",
+          [id(0x901), id(0x900), membership, id(10), scope.brandReference, from, until],
+        );
+        let n = 0x910;
+        for (const action of ["catalog.manage", "catalog.tax-classification.read"]) {
+          let permission = (
+            await admin.query(
+              "SELECT permission_id FROM bop_permission.permission_definition WHERE action_code=$1",
+              [action],
+            )
+          ).rows[0]?.permission_id;
+          if (!permission) {
+            permission = id(n++);
+            await admin.query(
+              "INSERT INTO bop_permission.permission_definition VALUES ($1,$2,'Active',1,$3,$3)",
+              [permission, action, from],
+            );
+          }
+          await admin.query(
+            "INSERT INTO bop_permission.permission_grant VALUES($1,$2,$3,$4,NULL,'Active',$5,$6,1,$5,$5)",
+            [id(n++), id(0x900), permission, scope.brandReference, from, until],
+          );
+        }
+      }
       // Before the store_setup_draft_* api grants this read failed as 503 (permission denied for
       // table store_setup_draft_revision behind STORE_SETUP_OPERATION_DEPENDENCY_UNAVAILABLE).
       const value = await read(owner);
@@ -90,6 +140,67 @@ it("WP-2423: the Owner reads Store setup under the pilot API grants", async () =
       assert.equal(value.store.storeReference, scope.storeReference);
       assert.equal(value.scope.actorReference, id(10));
       assert.equal(value.setup.snapshot, null);
+
+      // Store setup sub-reads. Before the WP-2423 Q15/Q16 additions each failed as 503 on a
+      // missing api grant (permission denied for table store_setup_reference_version,
+      // store_payment_configuration_version, digital_receipt_template_draft_revision,
+      // digital_receipt_template_artifact_version, product_tax_classification_registry_record).
+      const ports = (session) => ({
+        persistence: session.persistence,
+        authentication: session.authentication,
+        nextReference: () => id(next++),
+      });
+      const input = {
+        sessionCookie: owner.sessionCookie,
+        expectedStoreReference: scope.storeReference,
+      };
+      const references = await createMerchantStoreSetupReferences(ports(owner)).read(input);
+      assert.equal(references.profile, "StoreSetupReferencesCurrentV1");
+      assert.equal(references.address, null);
+      assert.equal(references.contact, null);
+      const payment = await createMerchantStorePaymentConfiguration(ports(owner)).read(input);
+      assert.equal(payment.profile, "StorePaymentConfigurationCurrentV1");
+      assert.equal(payment.snapshot, null);
+      const drafts = await createMerchantReceiptTemplateDraft(ports(owner)).list({
+        ...input,
+        afterTemplate: null,
+      });
+      assert.equal(drafts.profile, "DigitalReceiptTemplateDraftRosterV1");
+      assert.deepEqual(drafts.entries, []);
+      const artifacts = await createMerchantReceiptTemplateArtifacts(ports(owner)).read(input);
+      assert.equal(artifacts.profile, "DigitalReceiptTemplateArtifactsCurrentV1");
+      assert.equal(artifacts.layout, null);
+      assert.equal(artifacts.compliance, null);
+      // No Brand tax classifications yet: a plain answer (404 in the BFF), not an outage.
+      await assert.rejects(
+        setupFor(owner).classifications(input),
+        (error) =>
+          error instanceof StoreSetupOperationError &&
+          error.code === "STORE_SETUP_OPERATION_CLASSIFICATIONS_NOT_REGISTERED",
+      );
+
+      // Step 7: the Owner saves the Store contact and reads it back.
+      const contact = {
+        contactName: "Synthetic Store contact",
+        businessPhone: "+14165550100",
+        website: "https://example.invalid/",
+      };
+      await createMerchantStoreSetupReferences(ports(owner)).write({
+        sessionCookie: owner.sessionCookie,
+        csrf: owner.csrf,
+        expectedScope: { ...scope, actorReference: id(10) },
+        kind: "Contact",
+        command: {
+          command: "SaveReference",
+          operationReference: id(41),
+          expectedReference: null,
+          expectedRevision: 0,
+          content: contact,
+        },
+      });
+      const savedReferences = await createMerchantStoreSetupReferences(ports(owner)).read(input);
+      assert.equal(savedReferences.contact.revision, 1);
+      assert.deepEqual(savedReferences.contact.content, contact);
 
       // The Owner saves a draft on the same page and reads it back.
       const content = {

@@ -2817,6 +2817,159 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_setup_reference_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_setup_reference_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_setup_reference_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_setup_reference_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "store_payment_configuration_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "store_payment_configuration_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "store_payment_configuration_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "store_payment_configuration_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_draft_revision",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_draft_revision",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_draft_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_draft_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_artifact_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_artifact_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_artifact_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_artifact_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_tax_classification_registry_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
     }
   ]
 }

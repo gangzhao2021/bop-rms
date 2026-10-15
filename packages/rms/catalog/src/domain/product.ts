@@ -13,6 +13,9 @@ export const catalogErrorCodes = [
   "CATALOG_DEPENDENCY_UNAVAILABLE",
   // WP-2423 Q19: the person who submitted a menu for review cannot approve it (unless sole operator).
   "CATALOG_INDEPENDENT_APPROVAL_REQUIRED",
+  // WP-2423 Q15/Q16: the Brand has not registered any tax classifications yet (an empty state, not
+  // a failure); readers that need a registry still treat it as unavailable.
+  "CATALOG_TAX_CLASSIFICATION_NOT_REGISTERED",
 ] as const;
 export type CatalogErrorCode = (typeof catalogErrorCodes)[number];
 

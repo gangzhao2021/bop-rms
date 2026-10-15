@@ -393,7 +393,16 @@ it.each(["missing", "coherence", "digest", "gap", "foreign"])(
         }),
       ];
     const consumer = vi.fn();
-    await expect(h.store.withCurrentRegistry(observation(), consumer)).rejects.toThrow();
+    // WP-2423 Q15/Q16: only a Brand with no registry at all reads as "not registered".
+    const refusal = h.store.withCurrentRegistry(observation(), consumer);
+    if (fault === "missing")
+      await expect(refusal).rejects.toMatchObject({
+        code: "CATALOG_TAX_CLASSIFICATION_NOT_REGISTERED",
+      });
+    else
+      await expect(refusal).rejects.not.toMatchObject({
+        code: "CATALOG_TAX_CLASSIFICATION_NOT_REGISTERED",
+      });
     expect(consumer).not.toHaveBeenCalled();
   },
 );
