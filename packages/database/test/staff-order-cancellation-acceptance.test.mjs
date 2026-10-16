@@ -1232,9 +1232,17 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       });
       const holding = async () =>
         new Map(
-          (await scoped((tx) => readEarlierOrdersHoldingStock(tx, scope, tomorrow()))).map(
-            (entry) => [entry.orderBatchReference, entry],
-          ),
+          // The Orders read passes its authorized scope, which also carries the Session (v15
+          // 2026-10-16: an exact three-key Inventory scope check emptied the list).
+          (
+            await scoped((tx) =>
+              readEarlierOrdersHoldingStock(
+                tx,
+                { ...scope, sessionReference: "01a10000-0000-7000-8000-000000000001" },
+                tomorrow(),
+              ),
+            )
+          ).map((entry) => [entry.orderBatchReference, entry]),
         );
       let held = await holding();
       assert.equal(held.get(pickup.batches[0].batch)?.state, "Open");

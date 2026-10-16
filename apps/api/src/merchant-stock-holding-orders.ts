@@ -53,7 +53,14 @@ export async function readEarlierOrdersHoldingStock(
 ): Promise<readonly EarlierOrderHoldingStock[]> {
   if (!/^\d{4}-\d{2}-\d{2}$/u.test(today.businessDate)) throw new Error("STOCK_HOLDING_INVALID");
   const startsAt = parseOrderingInstant(today.startsAt);
-  const held = await listStoreSubmissionsHoldingStock(transaction as never, scope, {
+  // The Inventory read takes exactly the Store scope; a caller's authorized scope also carries its
+  // Session, which the read refuses (2026-10-16 v15: the held-stock list was always empty).
+  const storeScope = {
+    tenantReference: scope.tenantReference,
+    brandReference: scope.brandReference,
+    storeReference: scope.storeReference,
+  };
+  const held = await listStoreSubmissionsHoldingStock(transaction as never, storeScope, {
     limit: 500,
     heldBefore: startsAt,
   });
