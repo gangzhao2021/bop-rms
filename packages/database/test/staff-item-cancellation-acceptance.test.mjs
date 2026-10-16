@@ -1,6 +1,6 @@
 import { canonicalizeRfc8785, sha256Hex } from "../../bop/audit/src/index.ts";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { URL } from "node:url";
@@ -16,11 +16,32 @@ import {
 import {
   createKitchenWorkLifecycleService,
   createPostgresKitchenWorkLifecycleStore,
+  parseKitchenItemReadyEnvelope,
 } from "../../rms/kitchen/src/index.ts";
 import {
+  createOrderFulfillmentCompletionRecord,
+  createPostgresOrderExecutionReader,
+  createPostgresOrderFulfillmentCompletionStore,
+  createPostgresOrderFulfillmentSourceStore,
   createPostgresOrderKitchenSourceStore,
+  createPostgresOrderPaymentDispositionReader,
   createPostgresStaffOrderCancellationReader,
+  parseFulfillmentCompletedEnvelope,
 } from "../../rms/ordering/src/index.ts";
+import {
+  createFulfillmentReadinessService,
+  createPickupCredentialProvider,
+  createPickupFulfillmentService,
+  createPostgresFulfillmentReadinessStore,
+  createPostgresPickupFulfillmentStore,
+  createPostgresPickupProofIssuer,
+  createPostgresPickupProofStore,
+  validatePickupProof,
+} from "../../rms/fulfillment/src/index.ts";
+import { appendAuditRecordInTransaction } from "../../bop/audit/src/index.ts";
+import { loadOutboxEnvelope } from "../../bop/eventing/src/index.ts";
+import { createMerchantPickupHandoff } from "../../../apps/api/src/merchant-pickup-handoff.ts";
+import { createPickupReadinessCurrentSource } from "../../../tooling/environment/pilot-pickup-readiness.mjs";
 import {
   createPaymentProviderSnapshot,
   createPostgresOrdinaryRefundRequestRuntime,
@@ -1027,7 +1048,8 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
       const raceStart = await seedOrder(4000); // scenario 4a
       const raceCancel = await seedOrder(5000); // scenario 4b
       const legacy = await seedOrder(6000, { perLine: false }); // scenario 8
-      assert.deepEqual(await stock(), { onHand: "50", reserved: "18" });
+      const journey = await seedOrder(7000); // scenario 9
+      assert.deepEqual(await stock(), { onHand: "50", reserved: "21" });
 
       // Store business-date publication for Payment's businessDate port (synthetic Store
       // configuration, actual published owner records and proof).
@@ -1344,7 +1366,7 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
         [pickup.batch.reservations[0]]: "0",
         [pickup.batch.reservations[1]]: "1",
       });
-      assert.deepEqual(await stock(), { onHand: "50", reserved: "16" });
+      assert.deepEqual(await stock(), { onHand: "50", reserved: "19" });
       const releases = (
         await admin.query(
           "SELECT record_json FROM rms_inventory.stock_movement WHERE movement_type='Release'",
@@ -1782,6 +1804,436 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
         } finally {
           vi.unstubAllEnvs();
         }
+      }
+
+      // ── Scenario 9 (v15 order 10): a pickup order goes all the way to collection after a staff
+      // item cancellation. The fulfillment is created from the confirmed Order (version 2); staff
+      // cancel one line (version 3); the kitchen completes the remaining line; Fulfillment records it
+      // ready, the guest code is issued, staff check it and hand over, and Ordering records the
+      // Order fulfilled. Readiness, proof and handoff run the pilot's own current-source check
+      // (`createPickupReadinessCurrentSource`) over the real Ordering source; every step runs as
+      // the pilot runtime role. Test-only stand-ins: the confirmed Order
+      // is the owner-seeded one above, and the published completion Workflow gate is not under test.
+      {
+        merchant.allowed = () => true;
+        merchant.store = store;
+        const refs = journey.batch;
+        // The pilot business worker runs as the pilot runtime (API) role, like the staff commands.
+        const worker = scoped;
+        const now = () => new Date().toISOString();
+        const derive = (prefix) => (purpose, identity) => {
+          const digest = createHash("sha256")
+            .update(purpose + ":" + identity)
+            .digest("hex");
+          return (
+            prefix +
+            "-" +
+            digest.slice(0, 4) +
+            "-7" +
+            digest.slice(4, 7) +
+            "-8" +
+            digest.slice(7, 10) +
+            "-" +
+            digest.slice(10, 22)
+          );
+        };
+        const audit = {
+          append: ({ transaction, record }) => appendAuditRecordInTransaction(transaction, record),
+        };
+        /** The stored OrderConfirmed event, as the pilot's confirmation resolver reads it. */
+        const resolveConfirmation = async (transaction, orderReference) => {
+          assert.equal(orderReference, journey.order);
+          const stored = await createPostgresOrderPaymentDispositionReader(
+            scope,
+          ).loadByPaymentEvent({ transaction, paymentEventReference: refs.event });
+          return stored.orderConfirmedEvent;
+        };
+        // The seeded lines carry quote version 1 snapshots (see the kitchen source above).
+        const fulfillmentSource = createPostgresOrderFulfillmentSourceStore({
+          brandReference: brand,
+          storeReference: store,
+          quoteVersion: 1,
+          sha256: sha,
+          authorize: async () => true,
+        });
+        const validateCurrentSource = createPickupReadinessCurrentSource({
+          scope: { brandReference: brand, storeReference: store },
+          sha256: sha,
+          now,
+          authorize: () => true,
+          resolveConfirmation,
+          quoteVersion: 1,
+        });
+
+        // OrderConfirmed: the pickup fulfillment of both lines, from the exact current Order.
+        const confirmed = await worker((tx) => resolveConfirmation(tx, journey.order));
+        assert.equal(confirmed.aggregateVersion, 2n);
+        const created = await worker((tx) =>
+          createPickupFulfillmentService({
+            authorization: { authorize: async () => true },
+            orderingSource: {
+              resolve: (input) => fulfillmentSource.resolve({ transaction: tx, query: input }),
+            },
+            references: { derive: derive("0190fa32") },
+            digests: { sha256: sha },
+            repository: createPostgresPickupFulfillmentStore({
+              brandReference: brand,
+              storeReference: store,
+              sha256: sha,
+              authorize: async () => true,
+              validateCurrentSource: async (transaction, effect) =>
+                (
+                  await fulfillmentSource.resolve({
+                    transaction,
+                    query: {
+                      brandReference: brand,
+                      storeReference: store,
+                      observedAt: effect.aggregate.createdAt,
+                      orderReference: effect.aggregate.orderReference,
+                      orderBatchReference: effect.aggregate.orderBatchReference,
+                      confirmationReference: effect.aggregate.confirmationReference,
+                      sourceEventReference: effect.aggregate.sourceEventReference,
+                      sourceAggregateVersion: effect.aggregate.sourceAggregateVersion,
+                      sourceSnapshotDigest: effect.aggregate.sourceSnapshotDigest,
+                    },
+                  })
+                ).evidenceDigest === effect.aggregate.sourceEvidenceDigest,
+            }),
+            audit,
+          }).consume(tx, confirmed),
+        );
+        assert.equal(created.status, "Created");
+        const fulfillment = created.effect.aggregate;
+        assert.equal(fulfillment.items.length, 2);
+
+        // Staff cancel line B before the kitchen starts it: Order version 3, its fulfillment item
+        // cancelled in the same transaction; line A remains.
+        const cancelledLine = await cancel(journey, [1]);
+        assert.equal(cancelledLine.status, "Cancelled");
+        journey.version = 3;
+        assert.deepEqual(
+          (
+            await admin.query(
+              "SELECT order_item_id::text AS item,aggregate_version_before::int AS before,aggregate_version_after::int AS after,phase_after FROM rms_fulfillment.fulfillment_item_cancellation WHERE order_id=$1",
+              [journey.order],
+            )
+          ).rows,
+          [{ item: refs.items[1], before: 1, after: 2, phase_after: "Pending" }],
+        );
+        // Creating a fulfillment still needs the exact current Order; version 2 no longer is.
+        await assert.rejects(
+          worker((tx) =>
+            fulfillmentSource.resolve({
+              transaction: tx,
+              query: { ...refs.sourceQuery, observedAt: now() },
+            }),
+          ),
+          { code: "ORDER_FULFILLMENT_SOURCE_CONFLICT" },
+        );
+        // The fulfillment created from version 2 is still the Order's (only lines were cancelled).
+        assert.equal(await worker((tx) => validateCurrentSource(tx, journey.order)), true);
+
+        // The kitchen completes line A; Kitchen publishes it ready.
+        const lane = kitchen(journey);
+        assert.equal((await lane.accept(0)).outcome, "Accepted");
+        assert.equal((await lane.start(0)).outcome, "Started");
+        assert.equal((await lane.complete(0)).outcome, "CompletedAndOrderItemReady");
+        const kitchenEvent = async (type) => {
+          const found = (
+            await admin.query(
+              "SELECT event_id::text AS id FROM platform_eventing.outbox_event WHERE event_type=$1 AND payload_json->>'orderReference'=$2",
+              [type, journey.order],
+            )
+          ).rows;
+          assert.equal(found.length, 1);
+          return scoped((tx) => loadOutboxEnvelope(tx, found[0].id));
+        };
+        const itemReady = parseKitchenItemReadyEnvelope(await kitchenEvent("KitchenItemReady"));
+        assert.equal(itemReady.payload.orderItemReference, refs.items[0]);
+        assert.equal((await kitchenEvent("KitchenOrderReady")).eventType, "KitchenOrderReady");
+
+        // fulfillment.kitchen-item-ready: line A ready makes the pickup Ready (B is cancelled).
+        const readinessOptions = {
+          brandReference: brand,
+          storeReference: store,
+          sha256: sha,
+          now,
+          authorize: async () => true,
+          validateCurrentSource,
+        };
+        const applied = await worker((tx) =>
+          createFulfillmentReadinessService({
+            authorization: { authorize: async () => true },
+            references: { derive: derive("0190fa33") },
+            digests: { sha256: sha },
+            repository: createPostgresFulfillmentReadinessStore(readinessOptions),
+            audit,
+          }).consume(tx, itemReady),
+        );
+        assert.equal(applied.status, "Applied");
+        assert.equal(applied.effect.operation.phaseAfter, "Ready");
+        assert.equal(applied.effect.operation.aggregateVersionAfter, 3n);
+
+        // fulfillment.internal-pickup-proof: the guest's pickup code is issued.
+        const credentials = createPickupCredentialProvider([
+          { version: 1, derivationKey: randomBytes(32), selectorKey: randomBytes(32) },
+        ]);
+        const proofOptions = {
+          ...readinessOptions,
+          appendAudit: (tx, fact) =>
+            appendAuditRecordInTransaction(tx, {
+              auditId: fresh(),
+              brandId: brand,
+              storeId: store,
+              actor: { type: "System" },
+              actionCode: "PICKUP_PROOF_" + fact.kind.toUpperCase(),
+              targetType: "Fulfillment",
+              targetId: fact.fulfillmentReference,
+              beforeSummary: null,
+              afterSummary: { operation: fact.kind },
+              reasonCode: "PICKUP_PROOF",
+              correlationId: fact.correlationReference,
+              occurredAt: fact.occurredAt,
+              sourceChannel: "EVENT_CONSUMER",
+              dataClassification: "Confidential",
+              retentionPolicyCode: "FULFILLMENT_BUSINESS_RECORD",
+              retentionPolicyVersion: 1,
+            }),
+        };
+        const issued = await worker((tx) =>
+          createPostgresPickupProofIssuer({
+            store: proofOptions,
+            credentials,
+            pepperVersion: 1,
+            nextReference: fresh,
+            publicOrderReference: () => randomBytes(16).toString("base64url"),
+          }).ensureIssued({
+            transaction: tx,
+            orderReference: journey.order,
+            idempotencyReference: fresh(),
+            correlationReference: refs.correlation,
+          }),
+        );
+        assert.equal(issued.status, "Issued");
+        // The guest reads the six-digit code; staff type it at the counter.
+        const proofStore = createPostgresPickupProofStore(proofOptions);
+        const guestCode = await scoped(async (tx) => {
+          const current = await proofStore.lockByOrder({
+            transaction: tx,
+            orderReference: journey.order,
+          });
+          const saved = await proofStore.currentCounterCode({
+            transaction: tx,
+            orderReference: journey.order,
+          });
+          return credentials.recoverCounterCode({
+            brandReference: brand,
+            capability: current.capability,
+            counterCode: saved,
+            observedAt: now(),
+          });
+        });
+        assert.match(guestCode, /^[0-9]{6}$/u);
+        const checked = await scoped(async (tx) => {
+          const current = await proofStore.lockByOrder({
+            transaction: tx,
+            orderReference: journey.order,
+          });
+          const record = validatePickupProof({
+            source: current.source,
+            capability: current.capability,
+            selectorHash: current.capability.selectorHash,
+            generation: current.capability.generation,
+            expectedCapabilityVersion: 1,
+            observedAt: now(),
+            verificationReference: fresh(),
+            operationReference: fresh(),
+            idempotencyReference: fresh(),
+            correlationReference: fresh(),
+          });
+          return proofStore.verify({
+            transaction: tx,
+            orderReference: journey.order,
+            selectorHash: credentials.hashCredential({
+              brandReference: brand,
+              storeReference: store,
+              fulfillmentReference: fulfillment.fulfillmentReference,
+              purpose: "PickupHandoff",
+              kind: "HumanCode",
+              pepperVersion: current.capability.pepperVersion,
+              credential: guestCode,
+            }),
+            record: { ...record, verificationMethod: "HumanCode" },
+            rejection: { actorReference: staff },
+          });
+        });
+        assert.equal(checked.status, "Applied");
+
+        // The pickup screen's current state: Ready, with the version staff hand over against.
+        const pickupState = await scoped((tx) =>
+          createPostgresFulfillmentReadinessStore(readinessOptions).lockPickupHandoffByOrder({
+            brandReference: brand,
+            storeReference: store,
+            transaction: tx,
+            orderReference: journey.order,
+          }),
+        );
+        assert.equal(pickupState.source.canonicalPhase, "Ready");
+        assert.deepEqual(
+          pickupState.source.items.map((line) => String(line.fulfillmentItemReference)),
+          [String(fulfillment.items[0].fulfillmentItemReference)],
+        );
+        // Staff hand line A over (the merchant handoff command); only line A is handed over.
+        const workstation = { pickupLocationReference: id(7801), deviceReference: id(7802) };
+        const handedOver = await createMerchantPickupHandoff({
+          persistence: persistence(null),
+          authentication,
+          installContext,
+          nextReference: fresh,
+          store: {
+            sha256: sha,
+            validateCurrentSource,
+            deriveCompletionReference: derive("0190fa39"),
+            admit: async (_tx, handoff) =>
+              handoff.deviceReference === workstation.deviceReference &&
+              handoff.pickupLocationReference === workstation.pickupLocationReference,
+            appendAudit: async (transaction, entry) =>
+              appendAuditRecordInTransaction(transaction, {
+                auditId: entry.auditReference,
+                brandId: brand,
+                storeId: store,
+                actor: { type: "User", reference: entry.actorReference },
+                actionCode: entry.actionCode,
+                targetType: "Fulfillment",
+                targetId: entry.fulfillmentReference,
+                afterSummary: { action: entry.purpose },
+                reasonCode: "PICKUP_HANDOFF",
+                correlationId: entry.correlationReference,
+                occurredAt: entry.occurredAt,
+                sourceChannel: "MERCHANT_WEB",
+                dataClassification: "Confidential",
+                retentionPolicyCode: "FULFILLMENT_BUSINESS_RECORD",
+                retentionPolicyVersion: 1,
+              }),
+          },
+        })({
+          ...session,
+          command: {
+            orderReference: journey.order,
+            storeReference: store,
+            fulfillmentReference: fulfillment.fulfillmentReference,
+            expectedAggregateVersion: String(pickupState.source.aggregateVersion),
+            verificationReference: checked.record.verificationReference,
+            recipientType: "Customer",
+            recipientDisplayMask: "S***",
+            ...workstation,
+            quantities: [
+              {
+                fulfillmentItemReference: fulfillment.items[0].fulfillmentItemReference,
+                quantity: LINES[0].quantity,
+              },
+            ],
+            idempotencyReference: fresh(),
+            correlationReference: refs.correlation,
+          },
+        });
+        assert.equal(handedOver.nextPhase, "Completed");
+
+        // FulfillmentCompleted: Ordering records the Order fulfilled from its current revision
+        // (the item cancellation, version 3), as the order-completion consumer does.
+        const completedEvent = (
+          await admin.query(
+            "SELECT event_id::text AS id FROM platform_eventing.outbox_event WHERE event_type='FulfillmentCompleted' AND payload_json->>'orderReference'=$1",
+            [journey.order],
+          )
+        ).rows;
+        assert.equal(completedEvent.length, 1);
+        const fulfilled = await worker(async (tx) => {
+          const event = parseFulfillmentCompletedEnvelope(
+            await loadOutboxEnvelope(tx, completedEvent[0].id),
+          );
+          const state = await createPostgresOrderExecutionReader({
+            brandReference: brand,
+            storeReference: store,
+            sha256: sha,
+            authorize: async () => true,
+          }).loadByBatch({
+            transaction: tx,
+            orderReference: journey.order,
+            orderBatchReference: refs.batch,
+          });
+          assert.deepEqual([state.phase, state.version], ["Accepted", 3]);
+          const record = createOrderFulfillmentCompletionRecord(
+            {
+              completionReference: fresh(),
+              operationReference: fresh(),
+              auditReference: fresh(),
+              brandReference: brand,
+              storeReference: store,
+              orderReference: journey.order,
+              orderBatchReference: refs.batch,
+              orderType: "Pickup",
+              phaseBefore: state.phase,
+              expectedOrderVersion: state.version,
+              expectedSourceCheckpoint: state.checkpoint,
+              fulfilledOrderVersion: state.version + 1,
+              phase: "Fulfilled",
+              closureStatus: "Open",
+              actorType: "System",
+              actorReference: null,
+              purposeCode: "OrderFulfillment",
+              permissionCode: "order.fulfill",
+              workflowVersionReference: id(7803),
+              transitionReference: id(7804),
+              completedAt: event.occurredAt,
+              recordedAt: now(),
+              sourceEvent: event,
+            },
+            sha,
+          );
+          return createPostgresOrderFulfillmentCompletionStore({
+            brandReference: brand,
+            storeReference: store,
+            sha256: sha,
+            authorize: async () => true,
+            // Test-only: the published completion Workflow is covered by its own suites.
+            validateCurrentWorkflow: async () => true,
+            audit: async (r) => ({
+              auditId: r.auditReference,
+              brandId: r.brandReference,
+              storeId: r.storeReference,
+              actor: { type: "System" },
+              actionCode: "ORDER_FULFILLED",
+              targetType: "Order",
+              targetId: r.orderReference,
+              correlationId: r.operationReference,
+              occurredAt: r.recordedAt,
+              afterSummary: { phase: "Fulfilled", closureStatus: "Open" },
+              reasonCode: "FULFILLMENT_COMPLETED",
+              sourceChannel: "SYSTEM",
+              dataClassification: "Restricted",
+              retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+              retentionPolicyVersion: 1,
+            }),
+          }).commit({ transaction: tx, record });
+        });
+        assert.equal(fulfilled.status, "Created");
+        assert.deepEqual(
+          (
+            await admin.query(
+              "SELECT kind,version FROM rms_ordering.order_revision WHERE order_id=$1 ORDER BY version",
+              [journey.order],
+            )
+          ).rows,
+          [
+            { kind: "Initial", version: 1 },
+            { kind: "Acceptance", version: 2 },
+            { kind: "StaffItemCancellation", version: 3 },
+            { kind: "Fulfillment", version: 4 },
+          ],
+        );
+        // The fulfilled Order still reads as this fulfillment's Order (pickup history, receipts).
+        assert.equal(await worker((tx) => validateCurrentSource(tx, journey.order)), true);
       }
 
       // History stays append-only for the API role.

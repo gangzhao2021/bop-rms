@@ -12,6 +12,61 @@ import {
   createPostgresFulfillmentReadinessStore,
 } from "../../packages/rms/fulfillment/src/index.ts";
 import { isPilotRuntime } from "./pilot-environment.mjs";
+/**
+ * Whether the Pickup Order behind a fulfillment is still the confirmed Order its fulfillment was
+ * created from (readiness, pickup proof, guest code and handoff all ask this). The Order may have
+ * moved on only by staff item cancellations (WP-2423 Q6 step 2: the cancelled lines' fulfillment
+ * items were cancelled in the same transaction), or have been fulfilled from this fulfillment.
+ */
+export function createPickupReadinessCurrentSource({
+  scope,
+  sha256,
+  now,
+  authorize,
+  resolveConfirmation,
+  quoteVersion = 2,
+}) {
+  const source = createPostgresOrderFulfillmentSourceStore({
+    ...scope,
+    quoteVersion,
+    sha256,
+    authorize: async () => authorize(),
+  });
+  return async (transaction, orderReference) => {
+    const selected = await resolveConfirmation(transaction, orderReference);
+    if (orderReference !== selected.payload.orderReference) return false;
+    const execution = await createPostgresOrderExecutionReader({
+      ...scope,
+      sha256,
+      authorize: async () => authorize(),
+    }).loadByBatch({
+      transaction,
+      orderReference,
+      orderBatchReference: selected.payload.orderBatchReference,
+    });
+    if (execution.phase === "Fulfilled")
+      return (
+        execution.completion !== null &&
+        execution.completion.orderReference === orderReference &&
+        execution.completion.orderBatchReference === selected.payload.orderBatchReference &&
+        execution.completion.sourceEvent.payload.orderReference === orderReference
+      );
+    const current = await source.resolveIssued({
+      transaction,
+      query: {
+        ...scope,
+        orderReference,
+        orderBatchReference: selected.payload.orderBatchReference,
+        confirmationReference: selected.payload.confirmationReference,
+        sourceEventReference: selected.eventId,
+        sourceAggregateVersion: selected.aggregateVersion,
+        sourceSnapshotDigest: selected.payload.sourceSnapshotDigest,
+        observedAt: now(),
+      },
+    });
+    return current.orderType === "Pickup";
+  };
+}
 export function createInternalPickupReadiness(
   resources,
   confirmation = null,
@@ -44,51 +99,19 @@ export function createInternalPickupReadiness(
     },
   };
   const resolveConfirmation = createConfirmation(resources);
-  const source = createPostgresOrderFulfillmentSourceStore({
-    ...scope,
-    quoteVersion: 2,
-    sha256: hash,
-    authorize: async () => active(),
-  });
   const storeOptions = {
     ...scope,
     sha256: hash,
     now: resources.now,
     authorize: async () => active(),
-    validateCurrentSource: async (transaction, orderReference) => {
-      const selected = confirmation ?? (await resolveConfirmation(transaction, orderReference));
-      if (orderReference !== selected.payload.orderReference) return false;
-      const execution = await createPostgresOrderExecutionReader({
-        ...scope,
-        sha256: hash,
-        authorize: async () => active(),
-      }).loadByBatch({
-        transaction,
-        orderReference,
-        orderBatchReference: selected.payload.orderBatchReference,
-      });
-      if (execution.phase === "Fulfilled")
-        return (
-          execution.completion !== null &&
-          execution.completion.orderReference === orderReference &&
-          execution.completion.orderBatchReference === selected.payload.orderBatchReference &&
-          execution.completion.sourceEvent.payload.orderReference === orderReference
-        );
-      const current = await source.resolve({
-        transaction,
-        query: {
-          ...scope,
-          orderReference,
-          orderBatchReference: selected.payload.orderBatchReference,
-          confirmationReference: selected.payload.confirmationReference,
-          sourceEventReference: selected.eventId,
-          sourceAggregateVersion: selected.aggregateVersion,
-          sourceSnapshotDigest: selected.payload.sourceSnapshotDigest,
-          observedAt: resources.now(),
-        },
-      });
-      return current.orderType === "Pickup";
-    },
+    validateCurrentSource: createPickupReadinessCurrentSource({
+      scope,
+      sha256: hash,
+      now: resources.now,
+      authorize: async () => active(),
+      resolveConfirmation: async (transaction, orderReference) =>
+        confirmation ?? (await resolveConfirmation(transaction, orderReference)),
+    }),
   };
   const repository = createPostgresFulfillmentReadinessStore(storeOptions);
   const service = createFulfillmentReadinessService({

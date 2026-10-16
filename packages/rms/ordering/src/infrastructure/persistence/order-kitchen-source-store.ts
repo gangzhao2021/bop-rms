@@ -10,9 +10,8 @@ import { createPostgresOrderCreationQueryStore } from "./order-creation-query-st
 import { createPostgresOrderPaymentDispositionReader } from "./order-payment-disposition-store.js";
 import {
   createPostgresOrderInitialExecutionReader,
-  type OrderInitialRevision,
+  initialRevisionIsCurrent,
 } from "./order-termination-store.js";
-import { ORDER_REVISION_KIND_POLICY } from "../../domain/order-revision-kind.js";
 import { parseOrderingReference } from "../../domain/cart.js";
 import {
   OrderKitchenSourceError,
@@ -186,7 +185,7 @@ export function createPostgresOrderKitchenSourceStore(options: {
               if (current.phase !== "Accepted" || current.occurredAt > request.observedAt)
                 return null;
               if (
-                !issuedRevisionIsCurrent(
+                !initialRevisionIsCurrent(
                   revisions,
                   request.sourceAggregateVersion,
                   sourceCheckpoint,
@@ -221,21 +220,4 @@ export function createPostgresOrderKitchenSourceStore(options: {
     resolveIssued: (input: { transaction: ConsumerTransaction; query: unknown }) =>
       resolveSource(input, "Issued"),
   });
-}
-
-function issuedRevisionIsCurrent(
-  revisions: readonly OrderInitialRevision[],
-  sourceVersion: bigint,
-  sourceCheckpoint: string,
-  revision: "Exact" | "Issued",
-) {
-  const index = revisions.findIndex(
-    (entry) => BigInt(entry.version) === sourceVersion && entry.checkpoint === sourceCheckpoint,
-  );
-  if (index < 0) return false;
-  const later = revisions.slice(index + 1);
-  if (revision === "Exact") return later.length === 0;
-  return later.every(
-    (entry) => ORDER_REVISION_KIND_POLICY[entry.kind].cancellation === "StaffItems",
-  );
 }

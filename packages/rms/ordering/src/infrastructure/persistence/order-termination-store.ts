@@ -1,5 +1,6 @@
 import { resolveOrderRevisionChain } from "../../domain/order-revision-chain.js";
 import {
+  ORDER_REVISION_KIND_POLICY,
   isTerminalOrderRevisionKind,
   persistedOrderRevisionKindPolicy,
   type OrderRevisionKind,
@@ -121,6 +122,30 @@ export type OrderInitialRevision = Readonly<{
   version: number;
   checkpoint: string;
 }>;
+
+/**
+ * Whether work issued from the initial-window revision at `sourceVersion`/`sourceCheckpoint` is
+ * still current. "Exact": no later revision. "Issued": every later revision only cancelled item
+ * lines inside the Order (policy `cancellation: "StaffItems"`); that cancellation retires the same
+ * lines' kitchen and fulfillment work in its own transaction, so the remaining work is unchanged.
+ * Any other later revision (termination, whole-Batch cancellation) makes the issued work stale.
+ */
+export function initialRevisionIsCurrent(
+  revisions: readonly OrderInitialRevision[],
+  sourceVersion: bigint,
+  sourceCheckpoint: string,
+  revision: "Exact" | "Issued",
+): boolean {
+  const index = revisions.findIndex(
+    (entry) => BigInt(entry.version) === sourceVersion && entry.checkpoint === sourceCheckpoint,
+  );
+  if (index < 0) return false;
+  const later = revisions.slice(index + 1);
+  if (revision === "Exact") return later.length === 0;
+  return later.every(
+    (entry) => ORDER_REVISION_KIND_POLICY[entry.kind].cancellation === "StaffItems",
+  );
+}
 
 async function initialHistoryChain(tx: ConsumerTransaction, scope: Scope) {
   const revisions: OrderInitialRevision[] = [];

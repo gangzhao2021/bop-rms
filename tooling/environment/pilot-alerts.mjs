@@ -134,7 +134,7 @@ export const ALERT_CATALOG = Object.freeze({
     raiseAfterMs: 0,
     title: () => "Order or payment updates are stuck",
     summary: (p) =>
-      `${count(p.count, "update", "updates")} (such as a payment result or an order change) could not be processed after automatic retries (oldest ${formatDuration(p.oldestAgeMs)} ago). Paid orders may look unpaid or not reach the kitchen.`,
+      `${count(p.count, "update", "updates")} (such as a payment result or an order change) could not be processed after automatic retries (oldest ${formatDuration(p.oldestAgeMs)} ago). Paid orders may look unpaid, not reach the kitchen, or not show as ready for pickup after the kitchen finished them.`,
     action: () =>
       "Do not take a second payment from guests who say they paid. Check Orders and Exceptions; ask the pilot operator to review the stuck updates (dead-letter list) and retry them.",
     runbook: "alert-payment-updates",
