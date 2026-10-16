@@ -21,11 +21,12 @@ export const menuDraftApiGrants = [
   "GRANT SELECT,INSERT,UPDATE ON rms_catalog.menu,rms_catalog.menu_version TO ROLE_",
   "GRANT SELECT,INSERT,UPDATE,DELETE ON rms_catalog.menu_section,rms_catalog.sellable_placement,rms_catalog.menu_section_category,rms_catalog.menu_version_store,rms_catalog.menu_version_channel,rms_catalog.menu_version_order_type TO ROLE_",
   "GRANT SELECT,INSERT ON rms_catalog.menu_operation_record,rms_catalog.menu_operation_snapshot TO ROLE_",
-  "GRANT SELECT ON rms_catalog.menu_review_content,rms_catalog.menu_publication_revision TO ROLE_",
+  "GRANT SELECT ON rms_catalog.menu_review_content,rms_catalog.menu_publication_revision,rms_catalog.menu_publication_release TO ROLE_",
   "GRANT EXECUTE ON FUNCTION rms_catalog.menu_version_submitted(uuid) TO ROLE_",
 ];
 
-/** WP-2423 / DEC-MENU-REVISION: Menu drafts, their freeze once submitted, and revisions, under RLS. */
+/** WP-2423 / DEC-MENU-REVISION: Menu drafts, their freeze once submitted, revisions and discarding
+ * an open draft back to the released version, under RLS. */
 it("creates and edits a Menu draft, freezes it once submitted and revises it", async () => {
   await withIsolatedDatabase({ caseId: "wp2423_menu_draft" }, async (context) => {
     const admin = new Client(context.clientConfig);
@@ -405,6 +406,110 @@ it("creates and edits a Menu draft, freezes it once submitted and revises it", a
         "CATALOG_MENU_REVISE",
         "CATALOG_MENU_REPLACEDRAFT",
       ]);
+
+      // WP-2423 (v15 2026-10-16): discarding the open draft. Never released: nothing to go back to.
+      const discard = (operationReference, expectedAggregateVersion) =>
+        run((s) =>
+          s.discardMenuDraft({
+            menuReference: menu.menuReference,
+            expectedAggregateVersion,
+            operationReference,
+            requestedAt: now(),
+          }),
+        );
+      await assert.rejects(
+        discard(op(), 4),
+        (error) => error.code === "CATALOG_LIFECYCLE_CONFLICT",
+      );
+      // The first version is released (TEST-ONLY fixture row standing in for a publication).
+      await admin.query("SET session_replication_role = replica");
+      await admin.query(
+        "INSERT INTO rms_catalog.menu_publication_release(release_id,lifecycle_id,lifecycle_version,menu_id,menu_version_id,brand_id,release_sequence,previous_release_id,release_kind,snapshot_digest,created_at) VALUES($1,$2,1,$3,$4,$5,1,NULL,'Publish',$6,$7)",
+        [
+          id(600),
+          id(500),
+          menu.menuReference,
+          menu.draft.versionReference,
+          brandReference,
+          "sha256:" + "c".repeat(64),
+          now(),
+        ],
+      );
+      await admin.query("SET session_replication_role = DEFAULT");
+      await assert.rejects(discard(op(), 3), (error) => error.code === "CATALOG_VERSION_CONFLICT");
+      const discardOperation = op();
+      const discarded = await discard(discardOperation, 4);
+      assert.equal(discarded.status, "Applied");
+      assert.equal(discarded.aggregate.aggregateVersion, 5);
+      assert.equal(discarded.aggregate.draft.versionReference, menu.draft.versionReference);
+      assert.deepEqual(
+        discarded.aggregate.draft.sections[0].placements.map((p) => p.sellableReference),
+        [small, large],
+      );
+      assert.equal((await discard(discardOperation, 4)).status, "AlreadyApplied");
+      // The released version is current again; the discarded draft keeps its rows (history).
+      const afterDiscard = (
+        await admin.query(
+          "SELECT v.menu_version_id::text id,(m.current_version_id=v.menu_version_id) current,(SELECT count(*) FROM rms_catalog.sellable_placement p JOIN rms_catalog.menu_section s ON s.menu_section_id=p.menu_section_id WHERE s.menu_version_id=v.menu_version_id)::int placements FROM rms_catalog.menu_version v JOIN rms_catalog.menu m ON m.menu_id=v.menu_id ORDER BY v.created_at",
+        )
+      ).rows;
+      assert.deepEqual(afterDiscard, [
+        { id: menu.draft.versionReference, current: true, placements: 2 },
+        { id: revised.aggregate.draft.versionReference, current: false, placements: 1 },
+      ]);
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT action_code,result_aggregate_version FROM rms_catalog.menu_operation_record WHERE operation_id=$1",
+            [discardOperation],
+          )
+        ).rows,
+        [{ action_code: "DiscardDraft", result_aggregate_version: 5 }],
+      );
+      // Nothing left to discard; the published version is revised again as usual.
+      await assert.rejects(
+        discard(op(), 5),
+        (error) => error.code === "CATALOG_LIFECYCLE_CONFLICT",
+      );
+      const again = await run((s) =>
+        s.reviseMenu({
+          menuReference: menu.menuReference,
+          expectedAggregateVersion: 5,
+          operationReference: op(),
+          requestedAt: now(),
+        }),
+      );
+      assert.equal(again.aggregate.aggregateVersion, 6);
+      // A draft in review (submitted) is not discarded: withdraw it first.
+      await admin.query("SET session_replication_role = replica");
+      await admin.query(
+        "INSERT INTO rms_catalog.menu_publication_revision(lifecycle_id,lifecycle_version,menu_id,menu_version_id,brand_id,snapshot_digest,state,validation_evidence_id,approval_evidence_id,changed_at) VALUES($1,1,$2,$3,$4,$5,'Draft',NULL,NULL,$6)",
+        [
+          id(501),
+          menu.menuReference,
+          again.aggregate.draft.versionReference,
+          brandReference,
+          "sha256:" + "d".repeat(64),
+          now(),
+        ],
+      );
+      await admin.query("SET session_replication_role = DEFAULT");
+      await assert.rejects(
+        discard(op(), 6),
+        (error) =>
+          error.code === "CATALOG_DEPENDENCY_UNAVAILABLE" ||
+          error.code === "CATALOG_LIFECYCLE_CONFLICT",
+      );
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT action_code FROM platform_audit.audit_record WHERE target_type='CatalogMenu' ORDER BY occurred_at",
+          )
+        ).rows
+          .map((row) => row.action_code)
+          .slice(4),
+        ["CATALOG_MENU_DISCARDDRAFT", "CATALOG_MENU_REVISE"],
+      );
     } finally {
       await admin.query("RESET ROLE").catch(() => undefined);
       await admin.query("DROP OWNED BY " + role).catch(() => undefined);

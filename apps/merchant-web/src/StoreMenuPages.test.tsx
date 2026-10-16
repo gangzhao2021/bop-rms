@@ -3,6 +3,7 @@ import {
   channelText,
   createMenuClient,
   itemsNotOfferedHere,
+  mayDiscardDraft,
   MenuPageError,
   orderTypeText,
   menuRevisionAction,
@@ -91,11 +92,38 @@ describe("WP-2423 menu page helpers", () => {
     expect(menuRevisionAction("Archived", false)?.label).toBe("Start a revision");
     expect(menuRevisionAction("Archived", false)?.note).not.toMatch(/published menu/u);
   });
+  it("offers discarding only an open draft of a published menu, to someone who may edit menus", () => {
+    const release = {
+      releaseReference: "r",
+      sequence: 1,
+      menuVersionReference: "v1",
+      createdAt: "2026-10-16T18:05:00.000Z",
+    };
+    const view = (change: Record<string, unknown> = {}) =>
+      ({
+        permissions: { mayEdit: true },
+        publication: null,
+        latestRelease: release,
+        menu: { versionReference: "v2" },
+        ...change,
+      }) as unknown as Parameters<typeof mayDiscardDraft>[0];
+    expect(mayDiscardDraft(view())).toBe(true);
+    expect(mayDiscardDraft(view({ permissions: { mayEdit: false } }))).toBe(false);
+    // Never published: nothing to go back to. In review: withdraw it first.
+    expect(mayDiscardDraft(view({ latestRelease: null }))).toBe(false);
+    expect(mayDiscardDraft(view({ publication: status("InReview") }))).toBe(false);
+    // The published version itself is not a draft.
+    expect(mayDiscardDraft(view({ menu: { versionReference: "v1" } }))).toBe(false);
+  });
   it("maps server refusals and lost connections to page errors", async () => {
     const refused = createMenuClient("csrf", async () =>
       Response.json({ error: "Frozen" }, { status: 409 }),
     );
     await expect(refused.load(null)).rejects.toMatchObject({ code: "Frozen" });
+    const notDiscardable = createMenuClient("csrf", async () =>
+      Response.json({ error: "NotDiscardable" }, { status: 409 }),
+    );
+    await expect(notDiscardable.load(null)).rejects.toMatchObject({ code: "NotDiscardable" });
     const forbidden = createMenuClient("csrf", async () => new Response("", { status: 403 }));
     await expect(forbidden.load(null)).rejects.toMatchObject({ code: "PermissionDenied" });
     const offline = createMenuClient("csrf", async () => {

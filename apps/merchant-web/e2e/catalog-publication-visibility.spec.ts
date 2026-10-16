@@ -288,3 +288,121 @@ test("@production a published menu lists items not offered at this Store and off
   await expect(page.getByRole("heading", { name: "Not offered at this Store" })).toHaveCount(0);
   expect(menuCommands.map((command) => command.action)).toEqual(["Approve", "Publish"]);
 });
+
+test("@production an open menu draft can be discarded after confirming; customers keep the published menu", async ({
+  page,
+}) => {
+  await session(page, [
+    {
+      screenId: "CAT-MENU-LIST",
+      label: "Menus",
+      href: "/app/commerce/menus",
+      permission: "catalog.menu.read",
+    },
+  ]);
+  let discarded = false;
+  const commands: Record<string, unknown>[] = [];
+  await page.route("**/merchant/commerce/menus/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "CAT-MENU-BUILDER",
+        sourceAsOf: new Date().toISOString(),
+        viewer: owner,
+        permissions: {
+          mayRead: true,
+          mayEdit: true,
+          maySubmit: true,
+          mayApprove: false,
+          mayPublish: false,
+        },
+        menus: [],
+        menu: {
+          menuReference: id(40),
+          internalCode: "ALL_DAY",
+          aggregateVersion: discarded ? 8 : 7,
+          versionReference: discarded ? id(41) : id(47),
+          name: "All day",
+          storeReferences: [id(99)],
+          channelCodes: ["CUSTOMER_PWA"],
+          orderTypeCodes: ["PICKUP"],
+          sections: [
+            {
+              sectionReference: discarded ? id(42) : id(48),
+              code: "DRINKS",
+              name: "Drinks",
+              items: [
+                {
+                  placementReference: discarded ? id(43) : id(49),
+                  skuReference: id(50),
+                  featured: false,
+                },
+              ],
+            },
+          ],
+        },
+        publication: discarded
+          ? {
+              lifecycleReference: id(45),
+              lifecycleVersion: 4,
+              state: "Published",
+              snapshotDigest: "sha256:" + "b".repeat(64),
+              changedAt: "2026-10-16T18:05:00.000Z",
+            }
+          : null,
+        latestRelease: {
+          releaseReference: id(46),
+          sequence: 1,
+          menuVersionReference: id(41),
+          createdAt: "2026-10-16T18:05:00.000Z",
+        },
+        submittedBy: null,
+        soleOperator: null,
+        sellables: [
+          {
+            skuReference: id(50),
+            skuCode: "SKU-50",
+            productName: "Latte",
+            sizeName: "Small",
+            active: true,
+            priceMinor: "400",
+            offeredHere: true,
+          },
+        ],
+        mayOfferHere: true,
+        allergenRegistry: true,
+      },
+    }),
+  );
+  await page.route("**/merchant/commerce/menus/command", (route) => {
+    const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+    commands.push(body);
+    discarded = true;
+    return route.fulfill({ headers, json: { status: "Applied" } });
+  });
+  await page.goto("/app/commerce/menus/" + id(40));
+  await expect(page.getByText("Draft — being edited")).toBeVisible();
+  await page.getByRole("button", { name: "Discard this draft" }).click();
+  const question = page.getByRole("group", { name: /Discard this draft\?/u });
+  await expect(question).toContainText("Customers keep seeing the published menu");
+  await expectNoInternalText(page);
+  await noOverflow(page, "menu-discard-draft");
+  // Changing one's mind sends nothing.
+  await question.getByRole("button", { name: "Keep the draft" }).click();
+  expect(commands).toEqual([]);
+  await page.getByRole("button", { name: "Discard this draft" }).click();
+  await page.getByRole("button", { name: "Discard draft", exact: true }).click();
+  await expect(
+    page.getByText("Draft discarded. The menu is back to its published version."),
+  ).toBeVisible();
+  expect(commands).toEqual([
+    expect.objectContaining({
+      action: "DiscardDraft",
+      menuReference: id(40),
+      expectedAggregateVersion: 7,
+    }),
+  ]);
+  await expect(page.getByRole("button", { name: "Discard this draft" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Start a revision" })).toBeVisible();
+  await expectNoInternalText(page);
+});

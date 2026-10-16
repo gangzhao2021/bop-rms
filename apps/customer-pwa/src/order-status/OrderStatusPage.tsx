@@ -89,14 +89,24 @@ export const orderReceivedPollIntervalMs = 2_000;
  * screen; check often so the page turns to "collected" within seconds of the handoff, not ~10 s.
  */
 export const orderAwaitingCollectionPollIntervalMs = 3_000;
+/**
+ * WP-2423 (v15 2026-10-16): an accepted order the kitchen is still making. The guest is watching for
+ * "Ready" (a pickup guest is often already at the counter), so the page must turn within a few
+ * seconds of the kitchen finishing, not after a 15 s wait. This deployment has no live channel for
+ * guests (`/bff/realtime` is not wired and the HTTP client reports live updates unavailable), so
+ * this pace is the update path.
+ */
+export const orderPreparingPollIntervalMs = 3_000;
 /** Longest wait between checks after repeated failures of a normally paced order. */
 export const orderStatusPollErrorCapMs = 60_000;
 
 /**
- * How the page re-reads an order: a just-received order and a ready pickup quickly, any other
- * open order at the normal pace, and not at all once the order is settled or live updates are on.
+ * How the page re-reads an order: a just-received order, an accepted order the kitchen is making and
+ * a ready pickup quickly, any other open order at the normal pace, and not at all once the order is
+ * settled or live updates are on.
  */
-export type OrderStatusPollMode = "received" | "awaiting-collection" | "active" | "stopped";
+export type OrderStatusPollMode =
+  "received" | "preparing" | "awaiting-collection" | "active" | "stopped";
 export interface OrderStatusPoll {
   readonly mode: OrderStatusPollMode;
   /** Checks that failed in a row since the last successful read. */
@@ -116,6 +126,17 @@ export function isAwaitingCollection(view: OrderStatusView): boolean {
   );
 }
 
+/**
+ * An accepted order whose food is still queued or being made: the next change the guest waits for
+ * is "Ready". A dine-in round already served, or one waiting for payment, is not.
+ */
+export function isInPreparation(view: OrderStatusView): boolean {
+  const phase = view.order.canonicalPhase;
+  if (isOrderSettled(view) || (phase !== "Accepted" && phase !== "In Progress")) return false;
+  const kitchen = kitchenStatus(view);
+  return kitchen === "Queued" || kitchen === "Preparing" || kitchen === "Unknown";
+}
+
 /** The next polling state after the order status changed. */
 export function advanceOrderStatusPoll(
   previous: OrderStatusPoll,
@@ -131,7 +152,9 @@ export function advanceOrderStatusPoll(
             ? "stopped"
             : isAwaitingCollection(state.view)
               ? "awaiting-collection"
-              : "active",
+              : isInPreparation(state.view)
+                ? "preparing"
+                : "active",
         errors: 0,
       };
     // A check in flight keeps the current pace.
@@ -158,9 +181,11 @@ export function nextOrderStatusPollDelayMs(poll: OrderStatusPoll): number | null
       ? orderReceivedPollIntervalMs
       : poll.mode === "awaiting-collection"
         ? orderAwaitingCollectionPollIntervalMs
-        : poll.mode === "active"
-          ? orderStatusPollIntervalMs
-          : null;
+        : poll.mode === "preparing"
+          ? orderPreparingPollIntervalMs
+          : poll.mode === "active"
+            ? orderStatusPollIntervalMs
+            : null;
   if (base === null) return null;
   const cap =
     base < orderStatusPollIntervalMs ? orderStatusPollIntervalMs : orderStatusPollErrorCapMs;

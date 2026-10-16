@@ -10,6 +10,7 @@ import {
   MenuPageError,
   channelText,
   itemsNotOfferedHere,
+  mayDiscardDraft,
   menuRevisionAction,
   menuStage,
   orderTypeText,
@@ -35,6 +36,8 @@ const copy: Record<MenuErrorCode | "Loading", string> = {
   Frozen:
     "This version was submitted for review and can no longer change. Refresh, then withdraw it or start a revision to change it.",
   NotRevisable: "Only a submitted or published version can be revised; keep editing this one.",
+  NotDiscardable:
+    "Only a draft that is not in review, of a menu that has been published, can be discarded. Refresh and check again.",
   ReviewBlocked:
     "The review could not be prepared. Every item needs a published recipe whose ingredients all have current allergen declarations (see Allergens and Recipes), and the Brand allergen list must be approved.",
   OptionPriceMissing:
@@ -203,6 +206,7 @@ function MenuBuilder({
   const [loadedVersion, setLoadedVersion] = useState<number | null>(null);
   const [pending, setPending] = useState<MenuCommand | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [message, setMessage] = useState<{ tone: "error" | "neutral"; text: string } | null>(null);
   useEffect(() => {
     if (state.kind !== "Found") return;
@@ -229,6 +233,7 @@ function MenuBuilder({
   const stage = menuStage(view.publication);
   const editable = stage === "Editing" && view.permissions.mayEdit;
   const revision = menuRevisionAction(stage, view.latestRelease !== null);
+  const discardable = mayDiscardDraft(view);
   const sellables = new Map(view.sellables.map((item) => [item.skuReference, item]));
   const label = (sku: string) => {
     const item = sellables.get(sku);
@@ -727,6 +732,53 @@ function MenuBuilder({
             </button>{" "}
             {revision.note}
           </p>
+        ) : null}
+        {discardable ? (
+          confirmDiscard || pending?.action === "DiscardDraft" ? (
+            <div role="group" aria-labelledby="discard-draft-question">
+              <p id="discard-draft-question">
+                Discard this draft? The menu goes back to its published version and the changes in
+                this draft are set aside (they stay in the menu's history). Customers keep seeing
+                the published menu; nothing changes for them.
+              </p>
+              <p>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    void send(
+                      {
+                        action: "DiscardDraft",
+                        operationReference: newOperationReference(),
+                        menuReference: menu.menuReference,
+                        expectedAggregateVersion: menu.aggregateVersion,
+                      },
+                      "Draft discarded. The menu is back to its published version.",
+                    ).then(() => setConfirmDiscard(false));
+                  }}
+                >
+                  {pending?.action === "DiscardDraft" ? "Retry discard" : "Discard draft"}
+                </button>{" "}
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    setConfirmDiscard(false);
+                    if (pending?.action === "DiscardDraft") setPending(null);
+                  }}
+                >
+                  Keep the draft
+                </button>
+              </p>
+            </div>
+          ) : (
+            <p>
+              <button type="button" disabled={busy} onClick={() => setConfirmDiscard(true)}>
+                Discard this draft
+              </button>{" "}
+              Not making changes after all? Go back to the published menu.
+            </p>
+          )
         ) : null}
       </section>
     </AppFrame>

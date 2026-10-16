@@ -21,7 +21,9 @@ import type { ProductLifecycleTransaction } from "./product-lifecycle-store.js";
 /**
  * WP-2423 / DEC-MENU-REVISION: Menu draft repository for `category-menu-service`. A Menu points at its
  * current version; `ReplaceDraft` rewrites that version's content while it has not been submitted,
- * `Revise` starts a new current version once it has been submitted or published. Operation records,
+ * `Revise` starts a new current version once it has been submitted or published, and `DiscardDraft`
+ * (WP-2423, v15 2026-10-16) points the Menu back at its latest released version while the current
+ * version is an unsubmitted draft; the draft version keeps its rows as history. Operation records,
  * result snapshots and audits are append-only; all writes run in the caller's transaction in the
  * Brand scope.
  */
@@ -44,12 +46,20 @@ export function createPostgresMenuDraftStore(options: {
       brand,
     ]);
   };
-  const read = (tx: ProductLifecycleTransaction, menu: string, at: string) =>
+  const read = (tx: ProductLifecycleTransaction, menu: string, at: string, version?: string) =>
     createPostgresMenuDraftSource({
       brandReference: brand,
       transactions: { run: (work) => work(tx) },
       authorize: async () => true,
-    }).load(menu, at);
+    }).load(menu, at, version);
+  /** The version of the Menu's latest release (what customers were last given), if any. */
+  const latestRelease = async (tx: ProductLifecycleTransaction, menu: string) =>
+    (
+      await tx.query<{ version: string }>(
+        "SELECT menu_version_id::text version FROM rms_catalog.menu_publication_release WHERE brand_id=$1 AND menu_id=$2 ORDER BY release_sequence DESC LIMIT 1",
+        [brand, menu],
+      )
+    ).rows[0]?.version ?? null;
   const lock = (tx: ProductLifecycleTransaction, key: string) =>
     tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [key]);
   const replay = async (
@@ -280,6 +290,14 @@ export function createPostgresMenuDraftStore(options: {
         await scope(tx, menu);
         return (await read(tx, menu, options.now()))?.aggregate ?? null;
       }),
+    loadLatestRelease: (reference) =>
+      options.transactions.run(async (tx) => {
+        const menu = parseCatalogReference(reference);
+        await scope(tx, menu);
+        const version = await latestRelease(tx, menu);
+        if (version === null) return null;
+        return (await read(tx, menu, options.now(), version))?.aggregate ?? null;
+      }),
     codeAvailable: (input) =>
       options.transactions.run(async (tx) => {
         await scope(tx, input.excludingMenuReference);
@@ -348,7 +366,9 @@ export function createPostgresMenuDraftStore(options: {
         const aggregate = parseMenuAggregate(input.record.aggregate);
         const value = { ...input.record, aggregate };
         if (
-          (value.action !== "ReplaceDraft" && value.action !== "Revise") ||
+          (value.action !== "ReplaceDraft" &&
+            value.action !== "Revise" &&
+            value.action !== "DiscardDraft") ||
           aggregate.brandReference !== brand ||
           aggregate.aggregateVersion !== input.expectedAggregateVersion + 1
         )
@@ -356,7 +376,11 @@ export function createPostgresMenuDraftStore(options: {
         const audit = checkAudit(
           input.audit,
           aggregate,
-          value.action === "Revise" ? "CATALOG_MENU_REVISE" : "CATALOG_MENU_REPLACEDRAFT",
+          value.action === "Revise"
+            ? "CATALOG_MENU_REVISE"
+            : value.action === "DiscardDraft"
+              ? "CATALOG_MENU_DISCARDDRAFT"
+              : "CATALOG_MENU_REPLACEDRAFT",
         );
         const menu = aggregate.menuReference;
         await scope(tx, menu);
@@ -394,6 +418,16 @@ export function createPostgresMenuDraftStore(options: {
             ],
           );
           await insertContent(tx, aggregate, { insert: false, revisionOf: null });
+        } else if (value.action === "DiscardDraft") {
+          // Only an unsubmitted draft is discarded, back to the latest released version.
+          const released = await latestRelease(tx, menu);
+          if (
+            isSubmitted ||
+            released === null ||
+            released === currentVersion ||
+            aggregate.draft.versionReference !== released
+          )
+            return fail("CATALOG_LIFECYCLE_CONFLICT");
         } else {
           // A revision starts only from a submitted or published version.
           if (!isSubmitted || aggregate.draft.versionReference === currentVersion)

@@ -48,6 +48,8 @@ import { retryTransactionConflict } from "./transaction-conflict-retry.js";
  * (catalog.menu.approve, Publishing approval) and it is published (catalog.menu.publish), effective at
  * once in the Store's time zone. Publishing updates the customer menu projection in the same flow.
  * A submitted or published version is frozen: changes start a revision (catalog.menu.update).
+ * An unsubmitted draft of a published Menu can be discarded (catalog.menu.update): the Menu returns to
+ * its latest release and the draft stays as history.
  */
 export class MerchantMenuError extends Error {
   constructor(
@@ -57,6 +59,8 @@ export class MerchantMenuError extends Error {
       | "Conflict"
       | "Frozen"
       | "NotRevisable"
+      /** WP-2423: only an unsubmitted draft of a Menu that has been published can be discarded. */
+      | "NotDiscardable"
       | "ReviewBlocked"
       | "OptionPriceMissing"
       | "TaxNotCovered"
@@ -108,6 +112,13 @@ export type MenuCommandBody =
     }
   | {
       readonly action: "Revise";
+      readonly operationReference: string;
+      readonly menuReference: string;
+      readonly expectedAggregateVersion: number;
+    }
+  | {
+      /** WP-2423: discard the open draft; the menu goes back to its latest release. */
+      readonly action: "DiscardDraft";
       readonly operationReference: string;
       readonly menuReference: string;
       readonly expectedAggregateVersion: number;
@@ -190,11 +201,11 @@ export function parseMenuCommandBody(value: unknown): MenuCommandBody {
     };
   }
   if (
-    r.action === "Revise" &&
+    (r.action === "Revise" || r.action === "DiscardDraft") &&
     keys === "action,expectedAggregateVersion,menuReference,operationReference"
   )
     return {
-      action: "Revise",
+      action: r.action,
       operationReference: ref(r.operationReference),
       menuReference: ref(r.menuReference),
       expectedAggregateVersion: version(r.expectedAggregateVersion),
@@ -631,7 +642,8 @@ export function createMerchantMenus(options: {
             body.publishOperationReference,
           ),
         };
-      if (body.action !== "SaveDraft" && body.action !== "Revise") return fail("Invalid");
+      if (body.action !== "SaveDraft" && body.action !== "Revise" && body.action !== "DiscardDraft")
+        return fail("Invalid");
       const edit = body;
       return await retryTransactionConflict(() =>
         options.persistence.transactions.run((tx) =>
@@ -703,6 +715,29 @@ export function createMerchantMenus(options: {
                 },
               },
             });
+            if (edit.action === "DiscardDraft") {
+              // Only an open (unsubmitted) draft of a Menu that has a release; otherwise there is
+              // nothing to go back to, or the version is in review (withdraw it first).
+              const summary = (await listBrandMenus(ptx(tx) as never, s.owner)).find(
+                (candidate) => candidate.menuReference === edit.menuReference,
+              );
+              if (summary === undefined) return fail("NotFound");
+              if (summary.aggregateVersion !== edit.expectedAggregateVersion) fail("Conflict");
+              if (
+                summary.publication !== null ||
+                summary.latestRelease === null ||
+                summary.latestRelease.menuVersionReference === summary.currentVersionReference
+              )
+                fail("NotDiscardable");
+              await brandScope(tx, brand);
+              const result = await service.discardMenuDraft({
+                menuReference: edit.menuReference,
+                expectedAggregateVersion: edit.expectedAggregateVersion,
+                operationReference: edit.operationReference,
+                requestedAt: at,
+              });
+              return { status: result.status, menu: menuView(result.aggregate) };
+            }
             if (edit.action === "Revise") {
               const result = await service.reviseMenu({
                 menuReference: edit.menuReference,
@@ -799,6 +834,8 @@ export function createMerchantMenus(options: {
           return fail("Frozen");
         if (error.code === "CATALOG_LIFECYCLE_CONFLICT" && body.action === "Revise")
           return fail("NotRevisable");
+        if (error.code === "CATALOG_LIFECYCLE_CONFLICT" && body.action === "DiscardDraft")
+          return fail("NotDiscardable");
         if (error.code === "CATALOG_DEPENDENCY_UNAVAILABLE" && body.action === "Submit")
           return fail("ReviewBlocked");
         if (error.code === "CATALOG_PERMISSION_DENIED" && body.action === "Approve")

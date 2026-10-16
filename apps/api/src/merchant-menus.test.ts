@@ -40,6 +40,12 @@ describe("WP-2423 menu command body", () => {
         menuReference: id(2),
         expectedAggregateVersion: 4,
       },
+      {
+        action: "DiscardDraft",
+        operationReference: id(1),
+        menuReference: id(2),
+        expectedAggregateVersion: 5,
+      },
       { action: "Submit", operationReference: id(1), menuReference: id(2) },
       {
         action: "Approve",
@@ -109,6 +115,10 @@ describe("WP-2423 menu command body", () => {
         expectedVersion: 3,
         snapshotDigest: "sha256:xyz",
       },
+    ],
+    [
+      "a discard without its expected version",
+      { action: "DiscardDraft", operationReference: id(1), menuReference: id(2) },
     ],
     ["an unknown action", { action: "Archive", operationReference: id(1), menuReference: id(2) }],
   ])("rejects %s", (_, body) => expect(invalid(body)).toBe(true));

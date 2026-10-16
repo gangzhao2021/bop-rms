@@ -6,6 +6,7 @@ export type MenuErrorCode =
   | "Conflict"
   | "Frozen"
   | "NotRevisable"
+  | "NotDiscardable"
   | "ReviewBlocked"
   | "OptionPriceMissing"
   | "TaxNotCovered"
@@ -121,6 +122,13 @@ export type MenuCommand =
     }
   | {
       readonly action: "Revise";
+      readonly operationReference: string;
+      readonly menuReference: string;
+      readonly expectedAggregateVersion: number;
+    }
+  | {
+      /** WP-2423: discard the open draft; the menu goes back to its latest release. */
+      readonly action: "DiscardDraft";
       readonly operationReference: string;
       readonly menuReference: string;
       readonly expectedAggregateVersion: number;
@@ -256,6 +264,19 @@ export function menuRevisionAction(
     done: "A new version was started from this one; edit it and submit it for review.",
   };
 }
+/**
+ * WP-2423 (v15 2026-10-16): an open draft of a menu that has been published can be discarded by
+ * whoever may edit menus; the menu goes back to its last published version and customers see no
+ * change. A version in review is withdrawn first; a never-published menu has nothing to go back to.
+ */
+export function mayDiscardDraft(view: MenuBuilderView): boolean {
+  return (
+    view.permissions.mayEdit &&
+    menuStage(view.publication) === "Editing" &&
+    view.latestRelease !== null &&
+    view.latestRelease.menuVersionReference !== view.menu.versionReference
+  );
+}
 export const priceText = (minor: string | null) =>
   minor === null
     ? null
@@ -271,6 +292,7 @@ const codes = new Set<MenuErrorCode>([
   "Conflict",
   "Frozen",
   "NotRevisable",
+  "NotDiscardable",
   "ReviewBlocked",
   "OptionPriceMissing",
   "TaxNotCovered",

@@ -12,7 +12,7 @@ export interface CategoryMenuAuthorizationEvidence {
 }
 
 export type CategoryOperationAction = "Create" | "Move" | "ChangeLifecycle";
-export type MenuOperationAction = "Create" | "ReplaceDraft" | "Revise";
+export type MenuOperationAction = "Create" | "ReplaceDraft" | "Revise" | "DiscardDraft";
 
 export interface CategoryOperationRecord {
   readonly action: CategoryOperationAction;
@@ -94,6 +94,11 @@ export interface CategoryRepositoryPort {
 export interface MenuRepositoryPort {
   resolveOperation(operationReference: CatalogReference): Promise<MenuOperationRecord | null>;
   load(menuReference: CatalogReference): Promise<MenuAggregate | null>;
+  /**
+   * WP-2423: the Menu as of its latest release (the version customers were last given), or null
+   * when it was never published. Used to discard an open draft.
+   */
+  loadLatestRelease(menuReference: CatalogReference): Promise<MenuAggregate | null>;
   codeAvailable(input: {
     readonly brandReference: CatalogReference;
     readonly internalCode: string;

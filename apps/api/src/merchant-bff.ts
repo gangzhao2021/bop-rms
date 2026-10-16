@@ -7179,6 +7179,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
     Conflict: 409,
     Frozen: 409,
     NotRevisable: 409,
+    NotDiscardable: 409,
     ReviewBlocked: 409,
     OptionPriceMissing: 409,
     TaxNotCovered: 409,

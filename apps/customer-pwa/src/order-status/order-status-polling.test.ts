@@ -3,6 +3,7 @@ import {
   advanceOrderStatusPoll,
   nextOrderStatusPollDelayMs,
   orderAwaitingCollectionPollIntervalMs,
+  orderPreparingPollIntervalMs,
   orderReceivedPollIntervalMs,
   orderStatusPollErrorCapMs,
   orderStatusPollIntervalMs,
@@ -106,9 +107,20 @@ describe("WP-2423: order status polling pace", () => {
     expect(delayFor(ready(view("Rejected")))).toBeNull();
   });
 
+  it("checks an accepted order every 3 s while the kitchen makes it (v15 2026-10-16: ready took 13 s)", () => {
+    expect(orderPreparingPollIntervalMs).toBe(3_000);
+    expect(delayFor(ready(view("Accepted")))).toBe(3_000);
+    expect(delayFor(ready(view("Accepted", { kitchen: "Queued" })))).toBe(3_000);
+    expect(delayFor(ready(view("In Progress", { kitchen: "InProgress" })))).toBe(3_000);
+    expect(delayFor(ready(view("In Progress", { orderType: "DineIn", kitchen: "Queued" })))).toBe(
+      3_000,
+    );
+    // Live updates, when a deployment has them, still replace polling.
+    expect(delayFor(ready(view("Accepted"), "available"))).toBeNull();
+  });
+
   it("keeps the normal pace for other open orders and the quick pace for a just-received one", () => {
     expect(delayFor(ready(view("Submitted")))).toBe(orderStatusPollIntervalMs);
-    expect(delayFor(ready(view("In Progress", { kitchen: "InProgress" })))).toBe(15_000);
     // A dine-in round that is ready is brought to the table; nobody waits at a counter.
     expect(delayFor(ready(view("Ready", { orderType: "DineIn" })))).toBe(15_000);
     expect(delayFor(received)).toBe(orderReceivedPollIntervalMs);
@@ -196,31 +208,37 @@ describe("WP-2423: the order page while the guest waits at the counter", () => {
     stop();
   });
 
-  it("speeds up when the order turns ready and backs off while checks fail", async () => {
+  it("shows ready within 3 s of the kitchen finishing and backs off while checks fail", async () => {
     const fake = fakeController(ready(view("In Progress", { kitchen: "InProgress" })), [
+      () => ready(view("In Progress", { kitchen: "InProgress" })),
       () => ready(view("Ready")),
       () => ({ status: "unavailable" }),
       () => ({ status: "unavailable" }),
       () => ready(view("Ready")),
     ]);
     const stop = startOrderStatusPolling(fake.controller);
-    await vi.advanceTimersByTimeAsync(14_999);
+    await vi.advanceTimersByTimeAsync(2_999);
     expect(fake.refresh).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1); // 15 s: now ready, at the counter
+    await vi.advanceTimersByTimeAsync(1); // 3 s: still being made
     expect(fake.refresh).toHaveBeenCalledTimes(1);
+    expect(fake.getState()).toEqual(ready(view("In Progress", { kitchen: "InProgress" })));
+    // The kitchen finishes here; the next check, 3 s later, shows the code.
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(fake.refresh).toHaveBeenCalledTimes(2);
+    expect(fake.getState()).toEqual(ready(view("Ready")));
     await vi.advanceTimersByTimeAsync(3_000); // fails
-    expect(fake.refresh).toHaveBeenCalledTimes(2);
-    await vi.advanceTimersByTimeAsync(5_999);
-    expect(fake.refresh).toHaveBeenCalledTimes(2);
-    await vi.advanceTimersByTimeAsync(1); // 6 s later, fails again
     expect(fake.refresh).toHaveBeenCalledTimes(3);
-    await vi.advanceTimersByTimeAsync(12_000); // 12 s later, succeeds
+    await vi.advanceTimersByTimeAsync(5_999);
+    expect(fake.refresh).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(1); // 6 s later, fails again
     expect(fake.refresh).toHaveBeenCalledTimes(4);
-    await vi.advanceTimersByTimeAsync(3_000); // back to every 3 s
+    await vi.advanceTimersByTimeAsync(12_000); // 12 s later, succeeds
     expect(fake.refresh).toHaveBeenCalledTimes(5);
+    await vi.advanceTimersByTimeAsync(3_000); // back to every 3 s
+    expect(fake.refresh).toHaveBeenCalledTimes(6);
     stop();
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(fake.refresh).toHaveBeenCalledTimes(5);
+    expect(fake.refresh).toHaveBeenCalledTimes(6);
   });
 
   it("skips checks while the page is hidden and checks at once when it is shown again", async () => {

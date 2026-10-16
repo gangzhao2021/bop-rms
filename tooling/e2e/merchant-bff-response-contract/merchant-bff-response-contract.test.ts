@@ -537,6 +537,7 @@ const kitchenView = {
   operatorStatus: "Named",
   storeReference,
   canCloseEarlierDayTickets: true,
+  awaitingAcceptance: [],
   items: [kitchenItem(1, "Queued"), kitchenItem(2, "Completed")],
   nextCursor: null,
 } satisfies KitchenList;

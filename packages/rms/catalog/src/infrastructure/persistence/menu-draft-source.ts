@@ -53,7 +53,7 @@ const selectDraft = `SELECT jsonb_build_object(
  WHERE s.menu_version_id=v.menu_version_id AND p.menu_id=m.menu_id AND p.brand_id=m.brand_id
  AND (p.created_at>$3::timestamptz OR date_trunc('milliseconds',p.created_at)<>p.created_at))) coherent
 FROM rms_catalog.menu m JOIN rms_catalog.menu_version v ON v.menu_id=m.menu_id AND v.brand_id=m.brand_id
- AND v.menu_version_id=m.current_version_id
+ AND v.menu_version_id=COALESCE($4::uuid,m.current_version_id)
 WHERE m.brand_id=$1 AND m.menu_id=$2 AND v.status='Draft'
 FOR SHARE OF m,v`;
 
@@ -66,9 +66,14 @@ export function createPostgresMenuDraftSource(options: {
 }) {
   const brand = parseCatalogReference(options.brandReference);
   return Object.freeze({
-    async load(menuReference: string, observedAt: string) {
+    /**
+     * The Menu's current version, or (WP-2423, discarding a draft) the given version of the same Menu
+     * with the Menu's own fields.
+     */
+    async load(menuReference: string, observedAt: string, versionReference?: string) {
       const menu = parseCatalogReference(menuReference),
-        at = parseCatalogInstant(observedAt);
+        at = parseCatalogInstant(observedAt),
+        version = versionReference === undefined ? null : parseCatalogReference(versionReference);
       return options.transactions.run(async (tx) => {
         const allowed = async () => {
           if (!(await options.authorize(tx, menu)))
@@ -84,6 +89,7 @@ export function createPostgresMenuDraftSource(options: {
             brand,
             menu,
             at,
+            version,
           ]);
           await allowed();
           if (result.rows.length === 0) return null;
