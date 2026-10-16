@@ -320,7 +320,7 @@ export function createPostgresDigitalReceiptTemplateArtifactStore(
     await restore();
     const found = rows(
       await query(
-        `SELECT ${versionColumns} FROM rms_device.digital_receipt_template_artifact_version WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND artifact_kind=$4 ORDER BY revision DESC LIMIT 1`,
+        `SELECT ${versionColumns} FROM rms_device.digital_receipt_template_artifact_version WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND artifact_kind=$4 ORDER BY digital_receipt_template_artifact_version.revision DESC LIMIT 1`,
         [fixed.tenantReference, fixed.brandReference, fixed.storeReference, kind],
       ),
     );

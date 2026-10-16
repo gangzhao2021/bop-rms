@@ -325,7 +325,7 @@ export function createPostgresStoreSetupDraftStore(options: StoreSetupDraftStore
   const readLatest = async () => {
     const data = rows(
       await query(
-        `SELECT ${revisionColumns} FROM rms_store.store_setup_draft_revision WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 ORDER BY revision DESC LIMIT 1`,
+        `SELECT ${revisionColumns} FROM rms_store.store_setup_draft_revision WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 ORDER BY store_setup_draft_revision.revision DESC LIMIT 1`,
         [fixed.tenantReference, fixed.brandReference, fixed.storeReference],
       ),
     );

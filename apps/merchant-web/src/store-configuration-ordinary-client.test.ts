@@ -270,6 +270,88 @@ it("prepares detached scoped intent and sends the exact command wrapper", async 
   expect(fetcher.mock.calls[0]?.[0]).toBe("/merchant/store-configuration/ordinary-command");
   expect(fetcher.mock.calls[0]?.[1]?.body).toBe(canonicalPublicationValue({ command: p.command }));
 });
+it("sends the Owner's own approval as sole operator only for Approve and names its refusals (WP-2423)", async () => {
+  const cursor = await original(id(92), "Approve"),
+    fetcher = vi.fn<typeof fetch>(async () => response(await terminal(cursor))),
+    client = createStoreConfigurationOrdinaryClient(fetcher);
+  const command: StoreConfigurationOrdinaryCommand = {
+    profile: "StoreConfigurationOrdinaryCommandV1",
+    ...scope,
+    operationReference: cursor.operationReference,
+    action: "Approve",
+    expectedHead: cursor.expectedHead,
+  };
+  const p = await client.prepare(command);
+  await client.execute(p, { csrf }, "SoleOperator");
+  expect(fetcher.mock.calls[0]?.[1]?.body).toBe(
+    canonicalPublicationValue({ command: p.command, approvalMode: "SoleOperator" }),
+  );
+  // Never for another step.
+  const materialize = await prepared(client);
+  await expect(client.execute(materialize, { csrf }, "SoleOperator")).rejects.toMatchObject({
+    code: "Invalid",
+  });
+  expect(fetcher).toHaveBeenCalledOnce();
+  const refused = (error: string) =>
+    createStoreConfigurationOrdinaryClient(
+      vi.fn<typeof fetch>(
+        async () =>
+          new Response(JSON.stringify({ error }), {
+            status: 403,
+            headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+          }),
+      ),
+    );
+  for (const [error, code] of [
+    ["sole_operator_not_in_effect", "SoleOperatorNotInEffect"],
+    ["sole_operator_needs_verification", "SoleOperatorNeedsVerification"],
+    ["request_denied", "Denied"],
+  ] as const) {
+    const c = refused(error);
+    await expect(
+      c.execute(await c.prepare(command), { csrf }, "SoleOperator"),
+    ).rejects.toMatchObject({ code });
+  }
+});
+it("accepts the sole-operator view only for a configuration from setup awaiting approval (WP-2423)", async () => {
+  const pending = { ...configuration("PendingApproval"), setupBasis: basis };
+  const view = {
+    profile: "StoreConfigurationOrdinaryWorkspaceV1",
+    scope,
+    latest: pending,
+    current: null,
+    expectedHead: {
+      configurationReference: pending.configurationReference,
+      configurationVersion: pending.configurationVersion,
+      contentDigest: await publicationValueDigest(pending),
+    },
+    original: null,
+    observedAt: at,
+    validUntil: until,
+    businessReferenceValidation: "NotEvaluated",
+    soleOperator: { status: "Effective", otherApprovers: [], verifiedUntil: null },
+  };
+  await expect(parseStoreConfigurationOrdinaryWorkspace(view, scope)).resolves.toMatchObject({
+    soleOperator: { status: "Effective", otherApprovers: [], verifiedUntil: null },
+  });
+  const draft = { ...pending, lifecycle: "Draft" };
+  await expect(
+    parseStoreConfigurationOrdinaryWorkspace(
+      {
+        ...view,
+        latest: draft,
+        expectedHead: { ...view.expectedHead, contentDigest: await publicationValueDigest(draft) },
+      },
+      scope,
+    ),
+  ).rejects.toThrow();
+  await expect(
+    parseStoreConfigurationOrdinaryWorkspace(
+      { ...view, soleOperator: { status: "Maybe", otherApprovers: [], verifiedUntil: null } },
+      scope,
+    ),
+  ).rejects.toThrow();
+});
 it("resolves exact original pins then requires an owner-read original in fresh POST state", async () => {
   const cursor = await original(),
     fetcher = vi.fn<typeof fetch>();

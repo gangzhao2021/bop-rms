@@ -19,6 +19,24 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      // WP-2423 (v15 D2/D3): withdrawal or decline of a configuration that is not published.
+      table: "store_configuration_withdrawal",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/store" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: Store configuration sole-operator approval mark.
+      table: "store_configuration_sole_operator_approval",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/store" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "store_configuration_original_operation",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/store" },
@@ -185,6 +203,46 @@ const databaseAccessManifestInput = {
       principal: { kind: "module", id: "@rms/store" },
       readPattern: null,
       source: "packages/rms/store/src/infrastructure/persistence/store-presence-store.ts",
+    },
+    {
+      id: "configuration-withdrawal.read.store_configuration_withdrawal",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_store", table: "store_configuration_withdrawal" },
+      principal: { kind: "module", id: "@rms/store" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/store/src/infrastructure/persistence/store-configuration-withdrawal-store.ts",
+    },
+    {
+      id: "configuration-withdrawal.write.store_configuration_withdrawal",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_store", table: "store_configuration_withdrawal" },
+      principal: { kind: "module", id: "@rms/store" },
+      readPattern: null,
+      source:
+        "packages/rms/store/src/infrastructure/persistence/store-configuration-withdrawal-store.ts",
+    },
+    {
+      id: "configuration-sole-operator.read.store_configuration_sole_operator_approval",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_store", table: "store_configuration_sole_operator_approval" },
+      principal: { kind: "module", id: "@rms/store" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/store/src/infrastructure/persistence/store-configuration-sole-operator-store.ts",
+    },
+    {
+      id: "configuration-sole-operator.write.store_configuration_sole_operator_approval",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_store", table: "store_configuration_sole_operator_approval" },
+      principal: { kind: "module", id: "@rms/store" },
+      readPattern: null,
+      source:
+        "packages/rms/store/src/infrastructure/persistence/store-configuration-sole-operator-store.ts",
     },
     {
       id: "configuration-original.read.store_configuration_original_operation",

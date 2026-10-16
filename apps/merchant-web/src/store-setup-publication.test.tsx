@@ -29,6 +29,11 @@ const live = {
     exceptions: [{ localDate: "2026-12-25", kind: "Holiday", intervals: [] }],
     weeklySchedule: Array.from({ length: 7 }, (_, i) => ({ isoWeekday: i + 1, intervals: [] })),
     effectiveFrom: "2026-10-01T04:00:00.000Z",
+    source: "StoreOverride",
+    timeZone: "America/Toronto",
+    businessDayStartLocalTime: "04:00:00",
+    enabledServiceModes: ["DineIn", "Pickup"],
+    capacityConfigurationReference: null,
   } as unknown as StoreConfigurationSnapshot,
 };
 
@@ -64,15 +69,27 @@ describe("WP-2423 DEC-STORE-SETUP-PUBLICATION Store setup publication screens", 
     expect(findInternalText([staticText(html)])).toEqual([]);
     const change = liveStoreSettingsChange(content, live);
     expect(change).toEqual({
+      // WP-2423 v15: the live Store's operating settings fill what the setup has none of.
+      source: { state: "Configured", value: "StoreOverride" },
+      timeZone: { state: "Configured", value: "America/Toronto" },
+      businessDayStartLocalTime: { state: "Configured", value: "04:00:00" },
+      enabledServiceModes: { state: "Configured", value: ["DineIn", "Pickup"] },
+      weeklySchedule: { state: "Configured", value: live.current.weeklySchedule },
+      capacityConfigurationReference: { state: "Configured", value: null },
       taxConfigurationReference: { state: "Configured", value: id(15) },
       brandBaseVersionReference: { state: "Configured", value: id(11) },
       exceptions: { state: "Configured", value: live.current.exceptions },
       effectiveFrom: { state: "Configured", value: live.observedAt },
       effectiveUntil: { state: "Configured", value: null },
     });
-    // Holidays already in the setup are kept.
-    const kept = { ...content, exceptions: { state: "Configured" as const, value: [] } };
+    // Holidays and operating settings already in the setup are kept.
+    const kept = {
+      ...content,
+      exceptions: { state: "Configured" as const, value: [] },
+      timeZone: { state: "Configured" as const, value: "America/Vancouver" },
+    };
     expect(liveStoreSettingsChange(kept, live).exceptions).toBe(kept.exceptions);
+    expect(liveStoreSettingsChange(kept, live)).not.toHaveProperty("timeZone");
     expect(
       renderToStaticMarkup(
         <StoreSetupLiveSettings

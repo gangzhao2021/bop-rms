@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createStoreConfigurationAdministrationService,
   StoreConfigurationAdministrationServiceError,
@@ -430,5 +430,69 @@ describe("fresh server preparation", () => {
       }).submit({ ...command(configuration("PendingApproval")), expectedVersion: 1 }),
     ).rejects.toMatchObject({ code: "STORE_CONFIGURATION_DEPENDENCY_UNAVAILABLE" });
     expect(h.operations.size).toBe(0);
+  });
+});
+
+describe("WP-2423 (v15 D2/D3) open changes and withdrawals", () => {
+  const pending = () => createStoreConfigurationVersion(configuration("PendingApproval"));
+  const next = (actor: string) =>
+    command(
+      {
+        ...configuration("Draft"),
+        configurationReference: id(30),
+        configurationVersion: 2,
+        supersedesConfigurationReference: id(1),
+        authoredByReference: actor,
+      },
+      id(31),
+      actor,
+    );
+  const withExpected = (input: ReturnType<typeof command>) => ({ ...input, expectedVersion: 1 });
+  it("never replaces another person's open change unless it was withdrawn or declined", async () => {
+    for (const withdrawn of [false, true]) {
+      const harness = ports(pending());
+      const isWithdrawn = vi.fn(async () => withdrawn);
+      const service = createStoreConfigurationAdministrationService({
+        ...harness.value,
+        withdrawals: { isWithdrawn },
+      });
+      const other = service.saveDraft(withExpected(next(id(40))));
+      if (withdrawn) await expect(other).resolves.toMatchObject({ status: "Applied" });
+      else
+        await expect(other).rejects.toMatchObject({
+          code: "STORE_CONFIGURATION_OPEN_CHANGE_BY_ANOTHER",
+        });
+      expect(isWithdrawn).toHaveBeenCalledOnce();
+    }
+    // The author may replace their own open change.
+    const own = ports(pending());
+    await expect(
+      createStoreConfigurationAdministrationService({
+        ...own.value,
+        withdrawals: { isWithdrawn: async () => false },
+      }).saveDraft(withExpected(next(id(10)))),
+    ).resolves.toMatchObject({ status: "Applied" });
+  });
+  it("refuses every further step of a withdrawn configuration", async () => {
+    const harness = ports(pending()),
+      service = createStoreConfigurationAdministrationService({
+        ...harness.value,
+        withdrawals: { isWithdrawn: async () => true },
+      });
+    await expect(
+      service.approve({
+        ...command(
+          {
+            ...configuration("Approved"),
+            approvedByReference: id(11),
+            approvalEvidenceReference: id(12),
+          },
+          id(33),
+          id(11),
+        ),
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({ code: "STORE_CONFIGURATION_WITHDRAWN" });
+    expect(harness.operations.size).toBe(0);
   });
 });

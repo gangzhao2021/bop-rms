@@ -450,7 +450,11 @@ describe("held Brand configuration authoring owner (controlled Core boundary, no
     const sql = f.query.mock.calls.map((call) => call[0]);
     expect(
       sql.findIndex((text) => text.includes("brand_configuration_authoring_operation WHERE")),
-    ).toBeLessThan(sql.findIndex((text) => text.includes("ORDER BY revision DESC")));
+    ).toBeLessThan(
+      sql.findIndex((text) =>
+        text.includes("ORDER BY brand_configuration_authoring_revision.revision DESC"),
+      ),
+    );
     expect(sql.findIndex((text) => text.includes("BrandConfigurationOriginal"))).toBe(-1);
     const locks = f.query.mock.calls.filter((call) => call[0].includes("pg_advisory"));
     expect(locks[0]?.[1]).toEqual([`BrandConfigurationOriginal:${id(10)}`]);

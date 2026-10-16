@@ -26,7 +26,17 @@ export class StoreSetupClientError extends Error {
       // WP-2423 Q15/Q16: the Brand has no tax classifications to choose from yet.
       | "NotRegistered"
       // WP-2423: refused because the person signed in with a PIN that is not yet confirmed.
-      | "FullSignInRequired",
+      | "FullSignInRequired"
+      // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: the Owner's own approval was refused because sole
+      // operator is not in effect for them now, or their verification is older than 15 minutes.
+      | "SoleOperatorNotInEffect"
+      | "SoleOperatorNeedsVerification"
+      // WP-2423 (v15 D2/D3): the saved setup has settings that are not set; another person's
+      // configuration change is still open; or this configuration was withdrawn or declined.
+      | "SetupIncomplete"
+      | "SetupOutdated"
+      | "OpenChangeByAnother"
+      | "Withdrawn",
   ) {
     super("Store setup could not be confirmed");
     this.name = "StoreSetupClientError";

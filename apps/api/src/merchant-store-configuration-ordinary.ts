@@ -8,6 +8,11 @@ import { BrowserSessionError, readClosedRecord } from "@bop/identity";
 import { parseBusinessAction } from "@bop/permission";
 import { parseCanonicalInstant, parseStoreReference } from "@bop/tenant";
 import {
+  readStoreConfigurationWithdrawal,
+  assessStoreSetupDraftCompleteness,
+  StoreConfigurationAdministrationServiceError,
+  StoreSetupOperationError,
+  readStoreConfigurationSubmitter,
   createPostgresStoreConfigurationOriginalStore,
   createPostgresStoreConfigurationAuthoringSource,
   createPostgresStoreConfigurationHistorySource,
@@ -41,10 +46,23 @@ import {
 } from "./merchant-store-configuration-ordinary-values.js";
 import type { createMerchantStoreConfiguration } from "./merchant-store-configuration.js";
 import type { StoreConfigurationPublicationChecks } from "./merchant-store-configuration-publication-checks.js";
+import {
+  merchantStoreSoleOperatorGate,
+  MerchantSoleOperatorGateError,
+  requireMerchantStoreSoleOperator,
+  type ResolveContext,
+} from "./merchant-sole-operator.js";
 
 type Existing = Parameters<typeof createMerchantStoreConfiguration>[0];
 type Scope = Parameters<Existing["configure"]>[1];
 type Commit = Parameters<ReturnType<Existing["configure"]>["appendAudit"]>[1];
+/** WP-2423 DEC-SOLE-OPERATOR-APPROVAL: an approval the approver gave alone as sole operator is
+ * marked on the audit packet, so its audit record says so. */
+export type MerchantStoreConfigurationOrdinaryAuditInput = Commit & {
+  readonly approvalMode?: "SoleOperator";
+};
+/** The permission whose holders decide whether sole operator is in effect at the Store. */
+const soleOperatorPermission = "store.service.approve";
 const refs = {
   canonicalize: canonicalizeRfc8785,
   hashIntent: (text: string) => "sha256:" + sha256Hex(text),
@@ -92,6 +110,18 @@ export interface MerchantStoreConfigurationOrdinaryOptions extends Omit<
     readonly publicationChecks?: (
       configuration: StoreConfigurationVersion,
     ) => Promise<StoreConfigurationPublicationChecks>;
+    readonly appendAudit: (
+      tx: Parameters<Existing["configure"]>[0],
+      input: MerchantStoreConfigurationOrdinaryAuditInput,
+    ) => Promise<void>;
+  };
+  /**
+   * WP-2423 DEC-SOLE-OPERATOR-APPROVAL (Owner decision 2026-10-16): the run's workforce context
+   * for evaluating who else at the Store holds Store configuration approval (each member as an
+   * approval would evaluate them). Absent: an Owner never approves their own configuration.
+   */
+  readonly soleOperator?: {
+    resolveContext(tx: Parameters<Existing["configure"]>[0], scope: Scope): ResolveContext;
   };
   nextReference(): string;
   /** Actual public-owner producers. Absence blocks fresh transitions only. */
@@ -195,6 +225,7 @@ export function createMerchantStoreConfigurationOrdinary(
       expectedStoreReference?: unknown;
       command?: unknown;
       original?: unknown;
+      approvalMode?: unknown;
     },
     write: boolean,
     historyRequest?: { beforeSequence: number | null },
@@ -244,6 +275,19 @@ export function createMerchantStoreConfigurationOrdinary(
         })()
       : undefined;
     if (write && !command) fail("STORE_CONFIGURATION_ORIGINAL_INPUT_INVALID");
+    // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: asked explicitly, only for a fresh Approve, and only
+    // where the deployment evaluates the Store's approvers.
+    const soleRequested = input.approvalMode !== undefined;
+    if (
+      soleRequested &&
+      (input.approvalMode !== "SoleOperator" ||
+        !write ||
+        command?.profile !== "StoreConfigurationOrdinaryCommandV1" ||
+        command.action !== "Approve" ||
+        options.soleOperator === undefined)
+    )
+      fail("STORE_CONFIGURATION_ORIGINAL_INPUT_INVALID");
+    let soleRefusal: MerchantSoleOperatorGateError | undefined;
     const session =
       write || input.original !== undefined || historyRequest !== undefined
         ? await authorize
@@ -332,6 +376,12 @@ export function createMerchantStoreConfigurationOrdinary(
           (authority) => runAuthorized(tx, authority),
         ),
       )
+      .catch((error: unknown) => {
+        // WP-2423: the transaction host reports owner failures generically; the sole-operator
+        // refusal of this run says why (not in effect, verify again).
+        if (soleRefusal !== undefined) throw soleRefusal;
+        throw error;
+      })
       .finally(() => {
         sourceRegistrationOpen = false;
         rechecked = false;
@@ -698,6 +748,10 @@ export function createMerchantStoreConfigurationOrdinary(
             digest(snapshot.snapshot) !== command.setupSelector.sourceSnapshotDigest
           )
             fail("STORE_CONFIGURATION_ORIGINAL_VERSION_CONFLICT");
+          // WP-2423 (v15 D2): an unfinished saved setup is answered as such (it was a 503 and an
+          // unknown result), before any configuration is made from it.
+          if (assessStoreSetupDraftCompleteness(snapshot.snapshot).missingPaths.length !== 0)
+            throw new StoreSetupOperationError("STORE_SETUP_OPERATION_INCOMPLETE");
         }
         const state = (await latest("Write")) ?? (await current()),
           head = state
@@ -709,6 +763,30 @@ export function createMerchantStoreConfigurationOrdinary(
             : { configurationReference: null, configurationVersion: 0, contentDigest: null };
         if (digest(head) !== digest(command.expectedHead))
           fail("STORE_CONFIGURATION_ORIGINAL_VERSION_CONFLICT");
+        if (command.action === "Materialize" && snapshot?.snapshot) {
+          // WP-2423 (v15 D2/D3): say plainly why a configuration cannot be created now: another
+          // person's change is still open (approve and publish, or decline it first), or the Store's
+          // configuration changed after the setup was saved (save the setup again).
+          if (
+            state !== null &&
+            (state.lifecycle === "Draft" ||
+              state.lifecycle === "PendingApproval" ||
+              state.lifecycle === "Approved") &&
+            String(state.authoredByReference) !== fixed.actorReference &&
+            (await readStoreConfigurationWithdrawal(tx, {
+              brandReference: fixed.brandReference,
+              storeReference: fixed.storeReference,
+              configurationReference: state.configurationReference,
+            })) === null
+          )
+            throw new StoreConfigurationAdministrationServiceError(
+              "STORE_CONFIGURATION_OPEN_CHANGE_BY_ANOTHER",
+            );
+          if (
+            snapshot.snapshot.baseConfigurationReference !== (state?.configurationReference ?? null)
+          )
+            throw new StoreSetupOperationError("STORE_SETUP_OPERATION_OUTDATED");
+        }
         const at = check(),
           configuredOptions = configuration();
         let candidate: StoreConfigurationVersion;
@@ -791,6 +869,35 @@ export function createMerchantStoreConfigurationOrdinary(
                     await fresh();
                     return base.context;
                   },
+                  // WP-2423: only when asked; decided now in this transaction (Store gate).
+                  ...(soleRequested && options.soleOperator
+                    ? {
+                        soleOperatorApproval: async (
+                          actual: Parameters<Existing["configure"]>[0],
+                          packet: { readonly occurredAt: string },
+                        ) => {
+                          if (actual !== tx || !options.soleOperator) return fail();
+                          await fresh();
+                          try {
+                            return await requireMerchantStoreSoleOperator(tx as never, {
+                              tenantReference: fixed.tenantReference,
+                              brandReference: fixed.brandReference,
+                              storeReference: fixed.storeReference,
+                              actorReference: fixed.actorReference,
+                              permissionCode: soleOperatorPermission,
+                              observedAt: String(packet.occurredAt),
+                              resolveContext: options.soleOperator.resolveContext(tx, active),
+                              allowed: authorized,
+                            });
+                          } catch (error) {
+                            if (error instanceof MerchantSoleOperatorGateError) soleRefusal = error;
+                            throw error;
+                          } finally {
+                            check();
+                          }
+                        },
+                      }
+                    : {}),
                   // The Publishing decision taken at the start of this run (no query); every
                   // decision used is re-checked in full before the commit.
                   publishingAuthorization: () => ({
@@ -810,7 +917,11 @@ export function createMerchantStoreConfigurationOrdinary(
           },
           appendAudit: async (actual, packet) => {
             if (actual !== tx) fail();
-            await configuredOptions.appendAudit(actual, packet);
+            const marked: MerchantStoreConfigurationOrdinaryAuditInput =
+              soleRequested && packet.operation.command === "Approve"
+                ? Object.freeze({ ...packet, approvalMode: "SoleOperator" as const })
+                : packet;
+            await configuredOptions.appendAudit(actual, marked);
             committed.input = packet;
             check();
           },
@@ -834,11 +945,25 @@ export function createMerchantStoreConfigurationOrdinary(
       const recordedLatest = await latest("Read"),
         published = await current();
       expectedState = recordedLatest ?? published;
+      // WP-2423 (v15 D2/D3): whether the latest change that is not published was withdrawn or
+      // declined (it then takes no further step; the next change builds on it).
+      const withdrawal =
+        recordedLatest !== null &&
+        (recordedLatest.lifecycle === "Draft" ||
+          recordedLatest.lifecycle === "PendingApproval" ||
+          recordedLatest.lifecycle === "Approved")
+          ? await readStoreConfigurationWithdrawal(tx, {
+              brandReference: fixed.brandReference,
+              storeReference: fixed.storeReference,
+              configurationReference: recordedLatest.configurationReference,
+            })
+          : null;
       // WP-2423 DEC-STORE-SETUP-PUBLICATION: a configuration from Store setup that still awaits
       // sending, approval or publication carries its checks, so the Owner sees what blocks it.
       const evaluate = configuration().publicationChecks;
       const publicationChecks =
         evaluate !== undefined &&
+        withdrawal === null &&
         recordedLatest !== null &&
         recordedLatest.setupBasis !== undefined &&
         (recordedLatest.lifecycle === "Draft" ||
@@ -846,6 +971,34 @@ export function createMerchantStoreConfigurationOrdinary(
           recordedLatest.lifecycle === "Approved")
           ? await evaluate(recordedLatest)
           : undefined;
+      // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: the Owner who created or sent the configuration
+      // awaiting approval sees whether they may approve it alone, and why not.
+      let soleOperator: Awaited<ReturnType<typeof merchantStoreSoleOperatorGate>> | undefined;
+      if (
+        options.soleOperator !== undefined &&
+        withdrawal === null &&
+        recordedLatest !== null &&
+        recordedLatest.setupBasis !== undefined &&
+        recordedLatest.lifecycle === "PendingApproval" &&
+        (String(recordedLatest.authoredByReference) === fixed.actorReference ||
+          (await readStoreConfigurationSubmitter(tx, {
+            brandReference: fixed.brandReference,
+            storeReference: fixed.storeReference,
+            configurationReference: recordedLatest.configurationReference,
+          })) === fixed.actorReference)
+      ) {
+        await fresh();
+        soleOperator = await merchantStoreSoleOperatorGate(tx as never, {
+          tenantReference: fixed.tenantReference,
+          brandReference: fixed.brandReference,
+          storeReference: fixed.storeReference,
+          actorReference: fixed.actorReference,
+          permissionCode: soleOperatorPermission,
+          observedAt: check(),
+          resolveContext: options.soleOperator.resolveContext(tx, active),
+          allowed: authorized,
+        });
+      }
       finish();
       return parseMerchantStoreConfigurationOrdinaryWorkspace(
         {
@@ -865,6 +1018,24 @@ export function createMerchantStoreConfigurationOrdinary(
           validUntil: deadline,
           businessReferenceValidation: "NotEvaluated",
           ...(publicationChecks === undefined ? {} : { publicationChecks }),
+          ...(withdrawal === null
+            ? {}
+            : {
+                latestWithdrawal: {
+                  kind: withdrawal.kind,
+                  withdrawnAt: withdrawal.withdrawnAt,
+                  byYou: withdrawal.actorReference === fixed.actorReference,
+                },
+              }),
+          ...(soleOperator === undefined
+            ? {}
+            : {
+                soleOperator: {
+                  status: soleOperator.status,
+                  otherApprovers: soleOperator.otherApprovers,
+                  verifiedUntil: soleOperator.verifiedUntil,
+                },
+              }),
         },
         fixed,
       );
@@ -906,6 +1077,8 @@ export function createMerchantStoreConfigurationOrdinary(
       csrf: unknown;
       command: unknown;
       expectedScope: unknown;
+      /** WP-2423: "SoleOperator" when the Owner approves their own configuration alone. */
+      approvalMode?: unknown;
     }) => {
       const value = await execute(input, true);
       if (value.profile !== "StoreConfigurationOrdinaryReceiptV1") return fail();

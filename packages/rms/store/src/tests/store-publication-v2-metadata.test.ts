@@ -13,9 +13,9 @@ vi.mock("@bop/publishing", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@bop/publishing")>()),
   createPostgresPublishingMutationStore: () => ({
     resolveCurrentRelease: sources.release,
-    resolveCurrentReleaseIndependentApproval: sources.independent,
+    resolveCurrentReleaseRecordedApproval: sources.independent,
     resolvePublicationCandidate: sources.candidate,
-    resolveCurrentIndependentApproval: sources.currentIndependent,
+    resolveCurrentRecordedApproval: sources.currentIndependent,
   }),
   createPostgresCurrentLiveGateSource: () => sources.liveGate,
 }));
@@ -126,6 +126,30 @@ const references = () => ({
   hashIntent: (text: string) => `sha256:${createHash("sha256").update(text).digest("hex")}`,
 });
 
+/** WP-2423: a transaction answering the Store's sole-operator mark read with `mark` (or none). */
+function markTx(mark: Record<string, unknown> | null) {
+  return {
+    query: vi.fn(async (sql: string) =>
+      sql.includes("store_configuration_sole_operator_approval")
+        ? { rows: mark === null ? [] : [mark] }
+        : { rows: [{}] },
+    ),
+  };
+}
+function markRow(actor: string) {
+  return {
+    brand: id(2),
+    store: id(3),
+    configuration: id(1),
+    operation: id(32),
+    evidence: id(12),
+    mode: "SoleOperator",
+    actor,
+    mfa: new Date("2026-10-05T09:50:00.000Z"),
+    at: new Date(at),
+    audit: id(40),
+  };
+}
 function packet(value: ReturnType<typeof configuration>) {
   const scope = createPublishingScope({
       kind: "Store",
@@ -287,7 +311,7 @@ describe("Store V2 publication metadata guard", () => {
 
 function independent(current: ReturnType<typeof packet>) {
   return {
-    profile: "RecordedReleasedIndependentPublishingApprovalV1",
+    profile: "RecordedReleasedPublishingApprovalV1",
     tenantReference: parsePublishingReference(id(16)),
     scope: current.release.scope,
     familyReference: current.release.familyReference,
@@ -363,6 +387,46 @@ it("refuses current release drift and a submitter who also approved", async () =
   expect(sources.liveGate).not.toHaveBeenCalled();
 });
 
+it("accepts a released self-approval only with the Store's recorded sole-operator approval (WP-2423)", async () => {
+  sources.release.mockReset();
+  sources.independent.mockReset();
+  sources.liveGate.mockReset();
+  sources.liveGate.mockResolvedValue(undefined);
+  const value = configuration(),
+    current = packet(value),
+    record = independent(current),
+    approver = String(record.approvedByActorReference);
+  const sameActor = {
+    ...record,
+    requestedByActorReference: record.approvedByActorReference,
+    recordedIndependence: "SameActor",
+  };
+  sources.release.mockResolvedValue(current);
+  sources.independent.mockResolvedValue(sameActor);
+  const mark = { ...markRow(approver), operation: String(record.approvalOperationReference) };
+  await expect(authority()(markTx(mark), value, at)).resolves.toMatchObject({
+    configuration: value,
+  });
+  for (const wrong of [
+    null,
+    { ...mark, actor: id(77) },
+    { ...mark, operation: id(79) },
+    { ...mark, evidence: id(78) },
+  ])
+    await expect(authority()(markTx(wrong), value, at)).rejects.toThrow(
+      "STORE_CURRENT_PUBLICATION_UNAVAILABLE",
+    );
+  // The report must say what the history shows.
+  sources.independent.mockResolvedValue({ ...sameActor, recordedIndependence: "Verified" });
+  await expect(authority()(markTx(mark), value, at)).rejects.toThrow(
+    "STORE_CURRENT_PUBLICATION_UNAVAILABLE",
+  );
+  sources.independent.mockResolvedValue({ ...record, recordedIndependence: "SameActor" });
+  await expect(authority()(markTx(mark), value, at)).rejects.toThrow(
+    "STORE_CURRENT_PUBLICATION_UNAVAILABLE",
+  );
+});
+
 it("does not renew or require today's historical approval period for the released content", async () => {
   sources.release.mockReset();
   sources.independent.mockReset();
@@ -422,7 +486,7 @@ function approvedFixture() {
       previousRelease: null,
     };
   const recorded = {
-    profile: "CurrentIndependentPublishingApprovalV1",
+    profile: "CurrentRecordedPublishingApprovalV1",
     tenantReference: parsePublishingReference(id(16)),
     scope: lifecycle.scope,
     familyReference: lifecycle.familyReference,
@@ -555,15 +619,21 @@ describe("Store V2 current independent approval authority", () => {
   });
   it("refuses actual approval Actor/evidence drift and original Submitter self-approval", async () => {
     const h = approvedFixture();
-    // A structurally self-approved configuration is refused by the owning parser
-    // before any current authority source is requested.
+    // A structurally self-approved legacy configuration is refused by the owning parser; one
+    // from Store setup parses (WP-2423 sole operator) and is refused below without its mark.
     expect(() =>
       createStoreConfigurationVersion({
-        ...h.value,
+        ...configuration(false),
         authoredByReference: h.value.approvedByReference,
       }),
     ).toThrow();
-    expect(sources.candidate).not.toHaveBeenCalled();
+    const self = createStoreConfigurationVersion({
+      ...h.value,
+      authoredByReference: h.value.approvedByReference,
+    });
+    await expect(approvedAuthority()(markTx(null), self, at)).rejects.toThrow(
+      "STORE_CURRENT_APPROVAL_UNAVAILABLE",
+    );
     sources.candidate.mockResolvedValue({
       ...h.current,
       approvalEvidence: createPublishingApprovalEvidence({
@@ -582,6 +652,45 @@ describe("Store V2 current independent approval authority", () => {
     await expect(approvedAuthority()({ query: vi.fn() }, h.value, at)).rejects.toThrow(
       "STORE_CURRENT_APPROVAL_UNAVAILABLE",
     );
+  });
+  it("accepts the submitter's own approval only with the recorded sole-operator approval (WP-2423)", async () => {
+    const h = approvedFixture(),
+      approver = String(h.recorded.approvedByActorReference);
+    const sameActor = {
+      ...h.recorded,
+      requestedByActorReference: h.recorded.approvedByActorReference,
+      recordedIndependence: "SameActor",
+    };
+    sources.currentIndependent.mockResolvedValue(sameActor);
+    const tx = markTx(markRow(approver));
+    await expect(approvedAuthority()(tx, h.value, at)).resolves.toMatchObject({
+      configuration: h.value,
+    });
+    expect(tx.query.mock.calls.some(([sql]) => String(sql).includes("sole_operator"))).toBe(true);
+    // No mark, a mark for someone else or another approval, or a mismatched report: refused.
+    for (const mark of [
+      null,
+      markRow(id(77)),
+      { ...markRow(approver), evidence: id(78) },
+      { ...markRow(approver), at: new Date("2026-10-05T09:00:00.000Z") },
+    ])
+      await expect(approvedAuthority()(markTx(mark), h.value, at)).rejects.toThrow(
+        "STORE_CURRENT_APPROVAL_UNAVAILABLE",
+      );
+    sources.currentIndependent.mockResolvedValue({
+      ...sameActor,
+      recordedIndependence: "Verified",
+    });
+    await expect(approvedAuthority()(markTx(markRow(approver)), h.value, at)).rejects.toThrow(
+      "STORE_CURRENT_APPROVAL_UNAVAILABLE",
+    );
+    // An independent approval never reads a mark.
+    sources.currentIndependent.mockResolvedValue(h.recorded);
+    const plain = markTx(null);
+    await expect(approvedAuthority()(plain, h.value, at)).resolves.toMatchObject({
+      configuration: h.value,
+    });
+    expect(plain.query).not.toHaveBeenCalled();
   });
   it("refuses evidence times before configuration creation, mismatch, and unclamped approval deadline", async () => {
     const h = approvedFixture();

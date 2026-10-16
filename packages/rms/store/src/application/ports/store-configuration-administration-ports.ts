@@ -81,4 +81,9 @@ export interface StoreConfigurationAdministrationPorts {
   readonly liveGate: {
     validate(configuration: StoreConfigurationVersion): Promise<boolean>;
   };
+  /** WP-2423 (v15 D2/D3): whether the latest configuration (not published) was withdrawn or
+   * declined. Absent: none is (the database still refuses steps of a withdrawn one). */
+  readonly withdrawals?: {
+    isWithdrawn(configuration: StoreConfigurationVersion): Promise<boolean>;
+  };
 }

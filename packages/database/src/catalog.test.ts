@@ -701,6 +701,8 @@ describe("migration catalog", () => {
       "2000_057_alter_staff_cancellation_guest_left",
       "2000_058_alter_eventing_retry_policy_v2",
       "2000_059_alter_staff_cancellation_already_refunded_accepted",
+      "2000_060_create_store_configuration_sole_operator_approval",
+      "2000_061_create_store_configuration_withdrawal",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

@@ -180,7 +180,7 @@ export async function exerciseStoreConfigurationOrdinaryRuntimeHttp(input) {
     }
   }
   await admin.query(
-    "GRANT SELECT,INSERT ON rms_store.store_configuration_authoring_operation,rms_store.store_configuration_original_operation,rms_store.store_configuration_version,rms_store.store_configuration_publication_content TO " +
+    "GRANT SELECT,INSERT ON rms_store.store_configuration_authoring_operation,rms_store.store_configuration_original_operation,rms_store.store_configuration_version,rms_store.store_configuration_publication_content,rms_store.store_configuration_withdrawal,rms_store.store_configuration_sole_operator_approval TO " +
       role,
   );
   await admin.query(

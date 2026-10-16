@@ -356,6 +356,11 @@ import type {
 } from "@bop/identity";
 import express, { type Request, type RequestHandler, type Router } from "express";
 import { httpRequestLimits } from "./http-security.js";
+import { MerchantSoleOperatorGateError } from "./merchant-sole-operator.js";
+import {
+  createMerchantStoreConfigurationWithdrawal,
+  MerchantStoreConfigurationWithdrawalError,
+} from "./merchant-store-configuration-withdrawal.js";
 
 export interface MerchantWorkspaceSnapshot {
   readonly screenId: "HOME-OVERVIEW";
@@ -524,6 +529,8 @@ export interface MerchantStoreConfigurationOrdinaryPort {
       csrf: string;
       command: StoreConfigurationOrdinaryCommand | StoreConfigurationOrdinaryResolve;
       expectedScope: StoreConfigurationOriginalScope;
+      /** WP-2423 DEC-SOLE-OPERATOR-APPROVAL: the Owner approves their own configuration alone. */
+      approvalMode?: "SoleOperator";
     }>,
   ): Promise<unknown>;
 }
@@ -738,6 +745,10 @@ export interface MerchantBffRouterOptions {
   readonly storeConfigurationState?: ReturnType<typeof createMerchantStoreConfiguration>["read"];
   /** WP-2423 Q4: an hours change on a Store whose configuration came from Store setup. */
   readonly storeHoursDraft?: ReturnType<typeof createMerchantStoreHoursSetupDraft>;
+  /** WP-2423 (v15 D2/D3): withdraw or decline the Store's configuration that is not published. */
+  readonly storeConfigurationWithdrawal?: ReturnType<
+    typeof createMerchantStoreConfigurationWithdrawal
+  >;
   readonly serviceControlState?: ReturnType<typeof createMerchantServiceControl>["read"];
   /** WP-2423 Q21: the selected Store's current business day (date, start, end). */
   readonly businessDay?: ReturnType<typeof createMerchantServiceControl>["businessDay"];
@@ -2384,6 +2395,19 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
   });
 
   const ordinaryFailure = (response: express.Response, error: unknown): void => {
+    // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: why the Owner's own approval was not accepted.
+    if (error instanceof MerchantSoleOperatorGateError) {
+      response
+        .status(403)
+        .set("Cache-Control", NO_STORE)
+        .json({
+          error:
+            error.code === "NotInEffect"
+              ? "sole_operator_not_in_effect"
+              : "sole_operator_needs_verification",
+        });
+      return;
+    }
     const code =
       error instanceof StoreConfigurationOriginalError ||
       error instanceof StoreConfigurationAdministrationError ||
@@ -2391,6 +2415,21 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       error instanceof StoreConfigurationAdministrationServiceError
         ? error.code
         : undefined;
+    // WP-2423 (v15 D2/D3): refusals the Owner can act on, each with its plain reason.
+    const reason =
+      code === "STORE_SETUP_OPERATION_INCOMPLETE"
+        ? "store_setup_incomplete"
+        : code === "STORE_SETUP_OPERATION_OUTDATED"
+          ? "store_setup_outdated"
+          : code === "STORE_CONFIGURATION_OPEN_CHANGE_BY_ANOTHER"
+            ? "open_change_by_another"
+            : code === "STORE_CONFIGURATION_WITHDRAWN"
+              ? "store_configuration_withdrawn"
+              : null;
+    if (reason !== null) {
+      response.status(409).set("Cache-Control", NO_STORE).json({ error: reason });
+      return;
+    }
     const invalid =
       code === "STORE_CONFIGURATION_ORIGINAL_INPUT_INVALID" ||
       code === "STORE_CONFIGURATION_INPUT_INVALID";
@@ -2721,8 +2760,18 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             .catch(() => denied(response));
           return;
         }
-        const body = readClosedRecord(request.body, ["command"]),
-          input = ordinaryInput(body.command, expectedScope),
+        const withMode =
+          request.body !== null &&
+          typeof request.body === "object" &&
+          Object.hasOwn(request.body, "approvalMode");
+        const body = readClosedRecord(request.body, [
+            "command",
+            ...(withMode ? ["approvalMode"] : []),
+          ]),
+          input = ordinaryInput(body.command, expectedScope);
+        if (withMode && body.approvalMode !== "SoleOperator")
+          throw new StoreConfigurationOriginalError("STORE_CONFIGURATION_ORIGINAL_INPUT_INVALID");
+        const approvalMode = withMode ? ("SoleOperator" as const) : undefined,
           port = options.storeConfigurationOrdinary,
           write = port?.write;
         const clock = options.storeConfigurationOrdinaryClock,
@@ -2739,7 +2788,13 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           return;
         }
         void write
-          .call(port, { sessionCookie, csrf, command: input.parsed, expectedScope })
+          .call(port, {
+            sessionCookie,
+            csrf,
+            command: input.parsed,
+            expectedScope,
+            ...(approvalMode === undefined ? {} : { approvalMode }),
+          })
           .then((value) => {
             try {
               if (
@@ -11207,7 +11262,12 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           error instanceof Error
             ? Object.getOwnPropertyDescriptor(error, "code")?.value
             : undefined;
-        if (
+        // WP-2423 (v15 D2/D3): another person's open change, or a withdrawn one, said plainly.
+        if (code === "STORE_CONFIGURATION_OPEN_CHANGE_BY_ANOTHER")
+          response.status(409).json({ error: "open_change_by_another" });
+        else if (code === "STORE_CONFIGURATION_WITHDRAWN")
+          response.status(409).json({ error: "store_configuration_withdrawn" });
+        else if (
           code === "STORE_CONFIGURATION_VERSION_CONFLICT" ||
           code === "STORE_CONFIGURATION_IDEMPOTENCY_CONFLICT"
         )
@@ -11225,6 +11285,41 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         else denied(response);
       });
   });
+
+  // WP-2423 (v15 D2/D3): withdraw (own) or decline (another person's) the Store's configuration
+  // that is not published yet; append-only record and audit.
+  router.post(
+    "/store-configuration/withdrawal",
+    sameOriginMutation(options),
+    (request, response) => {
+      response.set("Cache-Control", NO_STORE);
+      const sessionCookie = cookie(request, "__Host-bop-merchant");
+      const csrf = exactHeader(request, "x-bop-csrf");
+      if (sessionCookie === null || csrf === null || Object.keys(request.query).length !== 0) {
+        denied(response);
+        return;
+      }
+      const port = options.storeConfigurationWithdrawal;
+      if (!port) {
+        response.status(503).json({ error: "store_configuration_unavailable" });
+        return;
+      }
+      void port({ sessionCookie, csrf, command: request.body })
+        .then((result) => response.json({ status: result.status, kind: result.kind }))
+        .catch((error: unknown) => {
+          if (transactionConflictRetryLater(response, error)) return;
+          if (!(error instanceof MerchantStoreConfigurationWithdrawalError)) {
+            response.status(503).json({ error: "store_configuration_unavailable" });
+            return;
+          }
+          if (error.code === "Invalid")
+            response.status(400).json({ error: "store_configuration_withdrawal_invalid" });
+          else if (error.code === "Conflict")
+            response.status(409).json({ error: "store_configuration_conflict" });
+          else denied(response);
+        });
+    },
+  );
 
   // WP-2423 Q4: the Store Manager's hours change when the configuration came from Store setup.
   router.post(
@@ -11253,6 +11348,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
               : undefined;
           if (code === "STORE_SETUP_OPERATION_UNPUBLISHED_CHANGES")
             response.status(409).json({ error: "store_setup_has_unpublished_changes" });
+          else if (code === "STORE_CONFIGURATION_OPEN_CHANGE_BY_ANOTHER")
+            response.status(409).json({ error: "open_change_by_another" });
           else if (
             code === "STORE_CONFIGURATION_VERSION_CONFLICT" ||
             code === "STORE_CONFIGURATION_IDEMPOTENCY_CONFLICT" ||

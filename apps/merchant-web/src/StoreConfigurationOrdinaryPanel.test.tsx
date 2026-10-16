@@ -499,3 +499,39 @@ it("unchanged dispatch permission still sends only after reserve and clears only
   });
   expect(calls).toEqual(["reserve", "pending", "execute", "original refresh", "complete"]);
 });
+it("dispatches the Owner's own approval as sole operator only when asked (WP-2423)", async () => {
+  const cursor = await original(id(94), "Approve"),
+    receipt = await terminal(cursor),
+    fresh = await workspace(cursor);
+  const actual = createStoreConfigurationOrdinaryClient(),
+    prepared = await actual.prepare({
+      profile: "StoreConfigurationOrdinaryCommandV1",
+      ...scope,
+      operationReference: cursor.operationReference,
+      action: "Approve",
+      expectedHead: cursor.expectedHead,
+    });
+  const journal = { load: vi.fn(async () => cursor), reserve: vi.fn(), complete: vi.fn() };
+  const execute = vi.fn(async () => receipt);
+  const client = { ...actual, execute, refreshOriginal: vi.fn(async () => fresh) };
+  const run = (approvalMode?: "SoleOperator") =>
+    executeStoreConfigurationOriginal({
+      client,
+      journal,
+      prepared,
+      csrf,
+      signal: new AbortController().signal,
+      isCurrent: () => true,
+      canDispatch: () => true,
+      onReserved: () => undefined,
+      ...(approvalMode === undefined ? {} : { approvalMode }),
+    });
+  await run("SoleOperator");
+  expect(execute).toHaveBeenLastCalledWith(
+    prepared,
+    expect.objectContaining({ csrf }),
+    "SoleOperator",
+  );
+  await run();
+  expect(execute).toHaveBeenLastCalledWith(prepared, expect.objectContaining({ csrf }), undefined);
+});

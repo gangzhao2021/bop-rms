@@ -7,6 +7,8 @@ import { createMerchantReceiptTemplateArtifacts } from "../../apps/api/dist/merc
 import { createMerchantStorePaymentConfiguration } from "../../apps/api/dist/merchant-store-payment-configuration.js";
 import { createMerchantStoreSetupReferences } from "../../apps/api/dist/merchant-store-setup-references.js";
 import { createMerchantStoreSetup } from "../../apps/api/dist/merchant-store-setup.js";
+import { createMerchantStoreConfigurationWithdrawal } from "../../apps/api/dist/merchant-store-configuration-withdrawal.js";
+import { logUnexpected } from "./pilot-merchant-pickup.mjs";
 import {
   createInternalStoreConfigurationOrdinary,
   readPublishedStoreConfiguration,
@@ -48,6 +50,12 @@ export async function createInternalStoreSetupBff(
     }),
     storeConfigurationOrdinary,
     storeConfigurationOrdinaryClock: Object.freeze({ now: persistence.now.bind(persistence) }),
+    // WP-2423 (v15 D2/D3): withdraw (own) or decline (another person's) a Store configuration
+    // change that is not published (Store setup step 8 and Hours & ordering).
+    storeConfigurationWithdrawal: logUnexpected(
+      "INTERNAL_STORE_CONFIGURATION_WITHDRAWAL_UNAVAILABLE",
+      createMerchantStoreConfigurationWithdrawal({ persistence, authentication }),
+    ),
   };
 }
 

@@ -30,6 +30,8 @@ const moduleManifestInput = {
       "store_configuration_version",
       "store_configuration_authoring_operation",
       "store_configuration_original_operation",
+      "store_configuration_sole_operator_approval",
+      "store_configuration_withdrawal",
       "store_configuration_review_snapshot",
       "store_configuration_publication_content",
       "store_weekly_service_period",

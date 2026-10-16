@@ -581,3 +581,24 @@ it("fresh absent Resolve writes real Internal Audit and durable Abandoned; late 
   expect(f.configure).not.toHaveBeenCalled();
   expect(f.next).toHaveBeenCalledTimes(1);
 });
+
+it("WP-2423: accepts a sole-operator approval request only for Approve where approvers are evaluated", async () => {
+  const hooks = vi.fn(),
+    f = fixture(hooks);
+  // Validate is not an approval; and this deployment composes no sole-operator evaluation.
+  await expect(
+    f.service.write({
+      ...f.read,
+      csrf: "synthetic",
+      command: f.command,
+      approvalMode: "SoleOperator",
+    }),
+  ).rejects.toMatchObject({ code: "STORE_CONFIGURATION_ORIGINAL_INPUT_INVALID" });
+  const approve = parseStoreConfigurationOrdinaryCommand({ ...f.command, action: "Approve" });
+  for (const approvalMode of ["SoleOperator", "Independent", null])
+    await expect(
+      f.service.write({ ...f.read, csrf: "synthetic", command: approve, approvalMode }),
+    ).rejects.toMatchObject({ code: "STORE_CONFIGURATION_ORIGINAL_INPUT_INVALID" });
+  expect(f.configure).not.toHaveBeenCalled();
+  expect(hooks).not.toHaveBeenCalled();
+});

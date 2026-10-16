@@ -6,6 +6,8 @@ import {
   StoreConfigurationFeeBasisView,
   StoreConfigurationEditingBoundary,
   StoreHoursDraftForm,
+  storeConfigurationEditBase,
+  storeConfigurationOpenChange,
   storeConfigurationStateLabel,
 } from "./StoreConfigurationEditor.js";
 import {
@@ -266,4 +268,72 @@ it("WP-2423 Q4: offers the hours draft for a configuration from Store setup", ()
   expect(html).toContain("Fees in the published settings");
   expect(html).not.toContain('disabled=""><legend>Hours');
   expect(findInternalText([staticText(html)])).toEqual([]);
+});
+
+// WP-2423 (v15 D2/D3): whose change is open is shown; another person's is never replaced silently.
+it("shows another person's open change, blocks saving over it and offers to decline it", () => {
+  const base = hoursView({ ...configuration("PendingApproval"), authoredByReference: id(40) });
+  const view = parseStoreConfigurationView(
+    { ...base, viewerActorReference: id(10), latestWithdrawal: null },
+    id(3),
+  );
+  expect(storeConfigurationOpenChange(view)).toBe("SomeoneElse");
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <StoreHoursDraftForm
+        view={view}
+        draft={storeConfigurationEditBase(view) as NonNullable<typeof view.current>}
+        disabled={false}
+        onDraftChange={() => undefined}
+        onCommand={() => undefined}
+        onWithdraw={() => undefined}
+      />
+    </MemoryRouter>,
+  );
+  expect(html).toContain("Someone else’s change (version 2, waiting for approval) is still open");
+  expect(html).toContain("Decline this change");
+  expect(html).toMatch(/<button type="submit" disabled="">Save hours draft<\/button>/u);
+  expect(findInternalText([staticText(html)])).toEqual([]);
+  // Your own open change: editing continues from it, and you may withdraw it.
+  const own = parseStoreConfigurationView(
+    { ...base, viewerActorReference: id(40), latestWithdrawal: null },
+    id(3),
+  );
+  expect(storeConfigurationOpenChange(own)).toBe("Yours");
+  expect(storeConfigurationEditBase(own)?.configurationVersion).toBe(2);
+  // Withdrawn: the next change starts from the published hours (nothing carried).
+  const withdrawn = parseStoreConfigurationView(
+    {
+      ...base,
+      viewerActorReference: id(10),
+      latestWithdrawal: { kind: "Declined", withdrawnAt: at, byYou: true },
+    },
+    id(3),
+  );
+  expect(storeConfigurationOpenChange(withdrawn)).toBe("None");
+  expect(storeConfigurationEditBase(withdrawn)?.configurationVersion).toBe(1);
+  const closed = renderToStaticMarkup(
+    <MemoryRouter>
+      <StoreHoursDraftForm
+        view={withdrawn}
+        draft={storeConfigurationEditBase(withdrawn) as NonNullable<typeof view.current>}
+        disabled={false}
+        onDraftChange={() => undefined}
+        onCommand={() => undefined}
+      />
+    </MemoryRouter>,
+  );
+  expect(closed).toContain("Latest change: Declined");
+  expect(closed).not.toContain("Approve reviewed configuration");
+  // A malformed withdrawal is refused.
+  expect(() =>
+    parseStoreConfigurationView(
+      {
+        ...base,
+        viewerActorReference: id(10),
+        latestWithdrawal: { kind: "Deleted", withdrawnAt: at, byYou: true },
+      },
+      id(3),
+    ),
+  ).toThrow();
 });

@@ -21,6 +21,10 @@ export type StoreConfigurationAdministrationServiceErrorCode =
   | "STORE_CONFIGURATION_APPROVAL_INVALID"
   | "STORE_CONFIGURATION_PUBLISHING_INVALID"
   | "STORE_CONFIGURATION_LIVE_GATE_INVALID"
+  // WP-2423 (v15 D2/D3): another person's change that is not published is still open (approve,
+  // withdraw or decline it first); or this configuration was withdrawn or declined.
+  | "STORE_CONFIGURATION_OPEN_CHANGE_BY_ANOTHER"
+  | "STORE_CONFIGURATION_WITHDRAWN"
   | "STORE_CONFIGURATION_DEPENDENCY_UNAVAILABLE";
 
 export class StoreConfigurationAdministrationServiceError extends Error {
@@ -162,6 +166,21 @@ export function createStoreConfigurationAdministrationService(
       .catch(dependency);
     if ((current?.configurationVersion ?? 0) !== input.expectedVersion)
       return fail("STORE_CONFIGURATION_VERSION_CONFLICT");
+    // WP-2423 (v15 D2/D3): a change that is not published is never silently replaced by another
+    // person's new change, and a withdrawn or declined one takes no further step.
+    const open =
+      current !== null &&
+      (current.lifecycle === "Draft" ||
+        current.lifecycle === "PendingApproval" ||
+        current.lifecycle === "Approved");
+    const withdrawn =
+      open && ports.withdrawals !== undefined
+        ? await ports.withdrawals.isWithdrawn(current).catch(dependency)
+        : false;
+    if (command === "SaveDraft") {
+      if (open && !withdrawn && current.authoredByReference !== input.actorReference)
+        return fail("STORE_CONFIGURATION_OPEN_CHANGE_BY_ANOTHER");
+    } else if (withdrawn) return fail("STORE_CONFIGURATION_WITHDRAWN");
     if (
       configuration.setupBasis !== undefined &&
       ["Submit", "Approve", "Publish"].includes(command) &&

@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 import { URL } from "node:url";
 import pg from "pg";
 import { canonicalizeRfc8785, sha256Hex } from "../../bop/audit/src/index.ts";
+import { createIdentityActor } from "../../bop/identity/src/index.ts";
 import { createEffectivePeriod } from "../../bop/effective-period/src/index.ts";
 import {
   createTaxConfigurationSnapshot,
@@ -27,6 +28,7 @@ import {
 import { seedJourneyStorePublication } from "./dine-in-journey-seed.mjs";
 import { seedMerchantAcceptanceSession } from "./merchant-acceptance-session.mjs";
 import { seedTaxConfiguration } from "./tax-configuration-seed.mjs";
+import { seedSoleOperatorSetting, seedStepUp } from "./sole-operator-brand-gate.mjs";
 
 const require = createRequire(new URL("../../../apps/api/package.json", import.meta.url));
 const express = require("express");
@@ -156,8 +158,22 @@ export async function exercisePilotStoreSetupPublication(input) {
       timeZone: "America/Toronto",
     });
     const resources = { operating, transactions, now, credentials: { reference: next } };
+    // Identity roster double (pilot `currentActor`): an active workforce actor per reference, so
+    // the sole-operator gate evaluates each Store member as an approval would (TEST-ONLY).
+    const currentActor = async (_tx, reference, authenticatedAt) =>
+      createIdentityActor({
+        actorType: "User",
+        actorReference: reference,
+        accountKind: "Workforce",
+        status: "Active",
+        authenticationMethod: "Oidc",
+        verificationLevel: "SingleFactor",
+        authenticatedAt,
+        recentMfaAt: null,
+      });
     const persistenceFor = (reader) => ({
       ...reader.persistence,
+      currentActor,
       transactions,
       now,
       publication: {
@@ -583,7 +599,523 @@ export async function exercisePilotStoreSetupPublication(input) {
       }
     })();
     assert.equal(isolated, 0);
-    return { published };
+
+    // WP-2423 DEC-SOLE-OPERATOR-APPROVAL (Owner decision 2026-10-16): the Owner approves and
+    // publishes their own configuration alone only while sole operator is in effect for them
+    // (the Brand setting is on and nobody else at the Store holds Store configuration approval),
+    // with a second factor at most 15 minutes old; recorded as sole operator with audit.
+    const soleCounts = async () => ({
+      ...(await counts()),
+      marks: (
+        await admin.query(
+          "SELECT count(*)::int n FROM rms_store.store_configuration_sole_operator_approval",
+        )
+      ).rows[0].n,
+    });
+    const ownApproval = (send, selected, head, mode = "SoleOperator") =>
+      send("store-configuration/ordinary-command", {
+        command: command(selected, "Approve", head),
+        ...(mode === null ? {} : { approvalMode: mode }),
+      });
+    const refusedUnchanged = async (attempt, status, error) => {
+      const before = await soleCounts();
+      const reply = await attempt();
+      assert.equal(reply.status, status, JSON.stringify(reply.body));
+      if (error !== undefined) assert.deepEqual(reply.body, { error });
+      assert.deepEqual(await soleCounts(), before);
+    };
+    let ownHead;
+    await listen(session, async (send, selected) => {
+      // A later closing time, saved on the published configuration, created and sent.
+      const current = await send("store-setup?storeReference=" + store);
+      assert.equal(current.status, 200, JSON.stringify(current.body));
+      const head = current.body.setup.snapshot;
+      const later = weeklySchedule.map((day) => ({
+        ...day,
+        intervals: day.intervals.map((i) => ({ ...i, endLocalTime: "21:00:00" })),
+      }));
+      const saved = await send("store-setup", {
+        command: "SaveDraft",
+        operationReference: next(),
+        expectedSetupReference: head.setupDraftReference,
+        expectedRevision: head.revision,
+        content: {
+          ...head.content,
+          weeklySchedule: { state: "Configured", value: later },
+          effectiveFrom: { state: "Configured", value: now() },
+        },
+      });
+      assert.equal(saved.status, 200, JSON.stringify(saved.body));
+      const revised = saved.body.snapshot;
+      assert.equal(revised.baseConfigurationReference, published.configurationReference);
+      let workspace = await workspaceOf(send);
+      const created = await send("store-configuration/ordinary-command", {
+        command: command(selected, "Materialize", workspace.body.expectedHead, {
+          setupSelector: {
+            setupDraftReference: revised.setupDraftReference,
+            sourceRevision: revised.revision,
+            sourceSnapshotDigest: hash(revised),
+          },
+          reasonCode: "STORE_SETUP_MATERIALIZATION",
+        }),
+      });
+      assert.equal(created.status, 200, JSON.stringify(created.body));
+      workspace = await workspaceOf(send);
+      assert(workspace.body.publicationChecks.checks.every((c) => c.outcome === "Pass"));
+      // No sole-operator view before it is sent for approval.
+      assert.equal(Object.hasOwn(workspace.body, "soleOperator"), false);
+      const sent = await send("store-configuration/ordinary-command", {
+        command: command(selected, "Submit", workspace.body.expectedHead),
+      });
+      assert.equal(sent.status, 200, JSON.stringify(sent.body));
+      workspace = await workspaceOf(send);
+      assert.equal(workspace.body.latest.lifecycle, "PendingApproval");
+      assert.equal(workspace.body.latest.authoredByReference, owner);
+      // Setting off: the Owner is told another person must approve; asking alone is refused.
+      assert.equal(workspace.body.soleOperator.status, "NotSet");
+      ownHead = workspace.body.expectedHead;
+      await refusedUnchanged(
+        () => ownApproval(send, selected, ownHead),
+        403,
+        "sole_operator_not_in_effect",
+      );
+      await refusedUnchanged(() => ownApproval(send, selected, ownHead, null), 503);
+      await refusedUnchanged(() => ownApproval(send, selected, ownHead, "Independent"), 400);
+    });
+    // The second Owner reads no sole-operator view for a configuration they neither made nor sent.
+    await listen(manager, async (send) => {
+      const workspace = await workspaceOf(send);
+      assert.equal(workspace.status, 200, JSON.stringify(workspace.body));
+      assert.equal(Object.hasOwn(workspace.body, "soleOperator"), false);
+    });
+    // Setting on (owner-seeded Organization fact), but the second Owner still holds approval.
+    const sid = (n) => id(0x9c000 + n);
+    await seedSoleOperatorSetting(admin, {
+      id: sid,
+      n: 0,
+      tenantReference: scope.tenantReference,
+      brandReference: scope.brandReference,
+      actorReference: owner,
+      state: "On",
+      version: 1,
+    });
+    await listen(session, async (send, selected) => {
+      const workspace = await workspaceOf(send);
+      assert.equal(workspace.body.soleOperator.status, "OtherApprovers");
+      assert.equal(workspace.body.soleOperator.otherApprovers.length, 1);
+      await refusedUnchanged(
+        () => ownApproval(send, selected, ownHead),
+        403,
+        "sole_operator_not_in_effect",
+      );
+    });
+    // The second Owner's Store configuration approval is withdrawn (owner-seeded Permission fact):
+    // the Owner is now the only holder.
+    const withdrawn = await admin.query(
+      "UPDATE bop_permission.permission_grant SET lifecycle='Revoked',version=version+1 WHERE role_id=$1 AND store_id=$2 AND lifecycle='Active' AND permission_id IN (SELECT permission_id FROM bop_permission.permission_definition WHERE action_code='store.service.approve')",
+      ["01902433-0000-7000-8000-000000000004", store],
+    );
+    assert.equal(withdrawn.rowCount, 1);
+    let soleApproved, soleStepUpAt;
+    await listen(session, async (send, selected) => {
+      let workspace = await workspaceOf(send);
+      assert.deepEqual(workspace.body.soleOperator, {
+        status: "Effective",
+        otherApprovers: [],
+        verifiedUntil: null,
+      });
+      // In effect but not verified, or verified more than 15 minutes ago: refused.
+      await refusedUnchanged(
+        () => ownApproval(send, selected, ownHead),
+        403,
+        "sole_operator_needs_verification",
+      );
+      await seedStepUp(admin, {
+        id: sid,
+        n: 10,
+        brandReference: scope.brandReference,
+        storeReference: store,
+        actorReference: owner,
+        ageMs: 20 * 60000,
+      });
+      await refusedUnchanged(
+        () => ownApproval(send, selected, ownHead),
+        403,
+        "sole_operator_needs_verification",
+      );
+      soleStepUpAt = await seedStepUp(admin, {
+        id: sid,
+        n: 20,
+        brandReference: scope.brandReference,
+        storeReference: store,
+        actorReference: owner,
+      });
+      workspace = await workspaceOf(send);
+      assert.equal(
+        workspace.body.soleOperator.verifiedUntil,
+        new Date(Date.parse(soleStepUpAt) + 15 * 60000).toISOString(),
+      );
+      // Not asked as sole operator: still refused (never implied).
+      await refusedUnchanged(() => ownApproval(send, selected, ownHead, null), 503);
+      const approved = await ownApproval(send, selected, ownHead);
+      assert.equal(approved.status, 200, JSON.stringify(approved.body));
+      assert.equal(approved.body.outcome, "Committed");
+      workspace = await workspaceOf(send);
+      soleApproved = workspace.body.latest;
+      assert.equal(soleApproved.lifecycle, "Approved");
+      assert.equal(soleApproved.approvedByReference, owner);
+      assert.equal(soleApproved.authoredByReference, owner);
+      assert.equal(Object.hasOwn(workspace.body, "soleOperator"), false);
+      const result = await send("store-configuration/ordinary-command", {
+        command: command(selected, "Publish", workspace.body.expectedHead),
+      });
+      assert.equal(result.status, 200, JSON.stringify(result.body));
+      workspace = await workspaceOf(send);
+      assert.equal(
+        workspace.body.current.configurationReference,
+        soleApproved.configurationReference,
+      );
+      assert.equal(workspace.body.current.approvedByReference, owner);
+    });
+    // Recorded as sole operator: the mark, the audit, the published version and the Publishing
+    // review history; the Store runs on it (current and as-published proofs).
+    const marks = (
+      await admin.query(
+        "SELECT configuration_id::text configuration,actor_id::text actor,approval_mode,approval_evidence_id::text evidence,actor_mfa_at,approved_at FROM rms_store.store_configuration_sole_operator_approval",
+      )
+    ).rows;
+    assert.equal(marks.length, 1);
+    assert.equal(marks[0].configuration, soleApproved.configurationReference);
+    assert.equal(marks[0].actor, owner);
+    assert.equal(marks[0].approval_mode, "SoleOperator");
+    assert.equal(marks[0].evidence, soleApproved.approvalEvidenceReference);
+    assert.equal(marks[0].actor_mfa_at.toISOString(), soleStepUpAt);
+    const soleAudits = (
+      await admin.query(
+        "SELECT actor_reference::text actor,reason_code,after_summary_json FROM platform_audit.audit_record WHERE target_id=$1 AND action_code='STORE_CONFIGURATION_CHANGED' ORDER BY occurred_at",
+        [soleApproved.configurationReference],
+      )
+    ).rows;
+    assert.deepEqual(
+      soleAudits.map((a) => [a.actor, a.reason_code]),
+      [
+        [owner, "STORE_SETUP_PUBLICATION"],
+        [owner, "STORE_SETUP_PUBLICATION"],
+        [owner, "STORE_SETUP_PUBLICATION_SOLE_OPERATOR"],
+        [owner, "STORE_SETUP_PUBLICATION"],
+      ],
+    );
+    assert.deepEqual(soleAudits[2].after_summary_json, { approvalMode: "SoleOperator" });
+    const version = (
+      await admin.query(
+        "SELECT authored_by_reference::text authored,approved_by_reference::text approved FROM rms_store.store_configuration_version WHERE configuration_id=$1",
+        [soleApproved.configurationReference],
+      )
+    ).rows[0];
+    assert.deepEqual(version, { authored: owner, approved: owner });
+    const reviewActors = (
+      await admin.query(
+        "SELECT operation_code,actor_id::text actor FROM bop_publishing.publishing_mutation_record WHERE lifecycle_id=$1 ORDER BY lifecycle_version",
+        [soleApproved.configurationReference],
+      )
+    ).rows;
+    assert.deepEqual(
+      reviewActors.map((r) => r.actor),
+      [owner, owner, owner, owner],
+    );
+    const running = await transactions.run((tx) =>
+      readPublishedStoreConfiguration(operating, tx, now(), async () => true),
+    );
+    assert.equal(running.configuration.configurationReference, soleApproved.configurationReference);
+    const asPublished = await transactions.run((tx) =>
+      readPublishedStoreConfiguration(operating, tx, now(), async () => true, "AsPublished"),
+    );
+    assert.equal(
+      asPublished.configuration.configurationReference,
+      soleApproved.configurationReference,
+    );
+    await createInternalStoreConfigurationOrdinary(resources, {
+      persistence: persistenceFor(session),
+      authentication: session.authentication,
+    });
+    await assert.rejects(
+      admin.query(
+        "UPDATE rms_store.store_configuration_sole_operator_approval SET approval_mode='SoleOperator'",
+      ),
+    );
+    // Another Store is unaffected: it sees no mark, and its own history still refuses an approver
+    // who is the author without a sole-operator approval of its own (database checks).
+    const otherScoped = async (work) => {
+      const client = new pg.Client(clientConfig);
+      await client.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SET LOCAL ROLE " + api);
+        await client.query(
+          "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+          [scope.tenantReference, scope.brandReference, otherStore],
+        );
+        return await work(client);
+      } finally {
+        await client.query("ROLLBACK").catch(() => undefined);
+        await client.end();
+      }
+    };
+    assert.equal(
+      await otherScoped(
+        async (client) =>
+          (
+            await client.query(
+              "SELECT count(*)::int n FROM rms_store.store_configuration_sole_operator_approval",
+            )
+          ).rows[0].n,
+      ),
+      0,
+    );
+    await assert.rejects(
+      admin.query(
+        "INSERT INTO rms_store.store_configuration_version SELECT * FROM jsonb_populate_record(NULL::rms_store.store_configuration_version,(SELECT to_jsonb(v)||jsonb_build_object('configuration_id',$2::text,'store_id',$3::text,'configuration_version',1,'supersedes_configuration_reference',NULL) FROM rms_store.store_configuration_version v WHERE configuration_id=$1))",
+        [soleApproved.configurationReference, id(0x9e10), otherStore],
+      ),
+      /store configuration approval needs another person/u,
+    );
+    await assert.rejects(
+      admin.query(
+        "INSERT INTO rms_store.store_configuration_authoring_operation SELECT * FROM jsonb_populate_record(NULL::rms_store.store_configuration_authoring_operation,(SELECT to_jsonb(a)||jsonb_build_object('operation_id',$2::text,'store_id',$3::text,'audit_reference',$4::text,'configuration_json',a.configuration_json||jsonb_build_object('storeReference',$3::text)) FROM rms_store.store_configuration_authoring_operation a WHERE configuration_id=$1 AND command_type='Approve'))",
+        [soleApproved.configurationReference, id(0x9e11), otherStore, id(0x9e12)],
+      ),
+      /store configuration approval needs another person/u,
+    );
+    // A mark that no self-approval committed with is refused at COMMIT.
+    const orphan = new pg.Client(clientConfig);
+    await orphan.connect();
+    try {
+      await orphan.query("BEGIN");
+      await orphan.query(
+        "INSERT INTO rms_store.store_configuration_sole_operator_approval SELECT brand_id,$1::text::platform_helpers.uuid_v7,configuration_id,$2::text::platform_helpers.uuid_v7,approval_evidence_id,approval_mode,actor_id,actor_mfa_at,approved_at,$3::text::platform_helpers.uuid_v7,data_classification FROM rms_store.store_configuration_sole_operator_approval",
+        [otherStore, id(0x9e13), id(0x9e14)],
+      );
+      await assert.rejects(orphan.query("COMMIT"), /must mark a self-approval/u);
+    } finally {
+      await orphan.query("ROLLBACK").catch(() => undefined);
+      await orphan.end();
+    }
+
+    // WP-2423 (v15 live check of 48093a71, D2/D3): an unfinished saved setup is answered plainly
+    // (it was a 503 "result unknown"); an open change is never replaced by another person's new
+    // change; it is withdrawn by its author or declined by an approver (append-only, audited).
+    const withdrawals = async () =>
+      (
+        await admin.query(
+          "SELECT configuration_id::text configuration,withdrawal_kind kind,actor_id::text actor,withdrawn_lifecycle lifecycle FROM rms_store.store_configuration_withdrawal ORDER BY withdrawn_at",
+        )
+      ).rows;
+    const saveSetup = async (send, change) => {
+      const current = await send("store-setup?storeReference=" + store);
+      assert.equal(current.status, 200, JSON.stringify(current.body));
+      const head = current.body.setup.snapshot;
+      const saved = await send("store-setup", {
+        command: "SaveDraft",
+        operationReference: next(),
+        expectedSetupReference: head.setupDraftReference,
+        expectedRevision: head.revision,
+        content: {
+          ...head.content,
+          effectiveFrom: { state: "Configured", value: now() },
+          ...change,
+        },
+      });
+      assert.equal(saved.status, 200, JSON.stringify(saved.body));
+      return saved.body.snapshot;
+    };
+    const materialize = (send, selected, head, saved) =>
+      send("store-configuration/ordinary-command", {
+        command: command(selected, "Materialize", head, {
+          setupSelector: {
+            setupDraftReference: saved.setupDraftReference,
+            sourceRevision: saved.revision,
+            sourceSnapshotDigest: hash(saved),
+          },
+          reasonCode: "STORE_SETUP_MATERIALIZATION",
+        }),
+      });
+    const withdraw = (send, latest, auditReference = next()) =>
+      send("store-configuration/withdrawal", {
+        configurationReference: latest.configurationReference,
+        configurationVersion: latest.configurationVersion,
+        auditReference,
+      });
+    let ownOpen;
+    await listen(session, async (send, selected) => {
+      // D2: an unfinished saved setup is refused with its reason; nothing is recorded.
+      const unfinished = await saveSetup(send, {
+        capacityConfigurationReference: { state: "Unconfigured" },
+      });
+      let workspace = await workspaceOf(send);
+      await refusedUnchanged(
+        () => materialize(send, selected, workspace.body.expectedHead, unfinished),
+        409,
+        "store_setup_incomplete",
+      );
+      const finished = await saveSetup(send, {
+        capacityConfigurationReference: { state: "Configured", value: null },
+      });
+      const created = await materialize(send, selected, workspace.body.expectedHead, finished);
+      assert.equal(created.status, 200, JSON.stringify(created.body));
+      workspace = await workspaceOf(send);
+      const sent = await send("store-configuration/ordinary-command", {
+        command: command(selected, "Submit", workspace.body.expectedHead),
+      });
+      assert.equal(sent.status, 200, JSON.stringify(sent.body));
+      workspace = await workspaceOf(send);
+      ownOpen = workspace.body.latest;
+      assert.equal(ownOpen.lifecycle, "PendingApproval");
+      assert.equal(Object.hasOwn(workspace.body, "latestWithdrawal"), false);
+    });
+    // D3: the second Owner cannot replace the Owner's open change, nor decline it without
+    // Store configuration approval (withdrawn above).
+    await listen(manager, async (send, selected) => {
+      const workspace = await workspaceOf(send);
+      const setupNow = (await send("store-setup?storeReference=" + store)).body.setup.snapshot;
+      await refusedUnchanged(
+        () => materialize(send, selected, workspace.body.expectedHead, setupNow),
+        409,
+        "open_change_by_another",
+      );
+      const before = await soleCounts();
+      assert.equal((await withdraw(send, ownOpen)).status, 403);
+      assert.deepEqual(await soleCounts(), before);
+      assert.deepEqual(await withdrawals(), []);
+    });
+    // The Owner withdraws their own open change: it takes no further step; a retry returns it.
+    await listen(session, async (send, selected) => {
+      const auditReference = next();
+      const withdrawn = await withdraw(send, ownOpen, auditReference);
+      assert.equal(withdrawn.status, 200, JSON.stringify(withdrawn.body));
+      assert.deepEqual(withdrawn.body, { status: "Applied", kind: "Withdrawn" });
+      const again = await withdraw(send, ownOpen, auditReference);
+      assert.deepEqual(again.body, { status: "AlreadyApplied", kind: "Withdrawn" });
+      const workspace = await workspaceOf(send);
+      assert.equal(workspace.body.latestWithdrawal.kind, "Withdrawn");
+      assert.equal(workspace.body.latestWithdrawal.byYou, true);
+      assert.equal(Object.hasOwn(workspace.body, "publicationChecks"), false);
+      assert.equal(Object.hasOwn(workspace.body, "soleOperator"), false);
+      await refusedUnchanged(
+        () => ownApproval(send, selected, workspace.body.expectedHead),
+        409,
+        "store_configuration_withdrawn",
+      );
+    });
+    assert.deepEqual(await withdrawals(), [
+      {
+        configuration: ownOpen.configurationReference,
+        kind: "Withdrawn",
+        actor: owner,
+        lifecycle: "PendingApproval",
+      },
+    ]);
+    // The second Owner's change builds on the withdrawn one; the Owner cannot replace it but
+    // declines it (Store configuration approval), then creates their own.
+    let managerOpen;
+    await listen(manager, async (send, selected) => {
+      let workspace = await workspaceOf(send);
+      // The setup was saved on the configuration before the withdrawn one: refused plainly until
+      // it is saved again (it then builds on the latest configuration).
+      const stale = (await send("store-setup?storeReference=" + store)).body.setup.snapshot;
+      await refusedUnchanged(
+        () => materialize(send, selected, workspace.body.expectedHead, stale),
+        409,
+        "store_setup_outdated",
+      );
+      const rebased = await saveSetup(send, {});
+      assert.equal(rebased.baseConfigurationReference, ownOpen.configurationReference);
+      const created = await materialize(send, selected, workspace.body.expectedHead, rebased);
+      assert.equal(created.status, 200, JSON.stringify(created.body));
+      workspace = await workspaceOf(send);
+      managerOpen = workspace.body.latest;
+      assert.equal(managerOpen.authoredByReference, second);
+      assert.equal(managerOpen.supersedesConfigurationReference, ownOpen.configurationReference);
+    });
+    await listen(session, async (send, selected) => {
+      let workspace = await workspaceOf(send);
+      const setupNow = (await send("store-setup?storeReference=" + store)).body.setup.snapshot;
+      await refusedUnchanged(
+        () => materialize(send, selected, workspace.body.expectedHead, setupNow),
+        409,
+        "open_change_by_another",
+      );
+      const declined = await withdraw(send, managerOpen);
+      assert.deepEqual(declined.body, { status: "Applied", kind: "Declined" });
+      workspace = await workspaceOf(send);
+      assert.deepEqual(
+        {
+          kind: workspace.body.latestWithdrawal.kind,
+          byYou: workspace.body.latestWithdrawal.byYou,
+        },
+        { kind: "Declined", byYou: true },
+      );
+      const rebased = await saveSetup(send, {});
+      const created = await materialize(send, selected, workspace.body.expectedHead, rebased);
+      assert.equal(created.status, 200, JSON.stringify(created.body));
+    });
+    assert.deepEqual(
+      (await withdrawals()).map((w) => [w.configuration, w.kind, w.actor, w.lifecycle]),
+      [
+        [ownOpen.configurationReference, "Withdrawn", owner, "PendingApproval"],
+        [managerOpen.configurationReference, "Declined", owner, "Draft"],
+      ],
+    );
+    const withdrawalAudits = (
+      await admin.query(
+        "SELECT target_id::text target,reason_code,after_summary_json FROM platform_audit.audit_record WHERE action_code='STORE_CONFIGURATION_CHANGED' AND reason_code IN ('STORE_CONFIGURATION_WITHDRAWN','STORE_CONFIGURATION_DECLINED') ORDER BY occurred_at",
+      )
+    ).rows;
+    assert.deepEqual(
+      withdrawalAudits.map((a) => [a.target, a.reason_code, a.after_summary_json.withdrawal]),
+      [
+        [ownOpen.configurationReference, "STORE_CONFIGURATION_WITHDRAWN", "Withdrawn"],
+        [managerOpen.configurationReference, "STORE_CONFIGURATION_DECLINED", "Declined"],
+      ],
+    );
+    // The database refuses the same, whatever the caller: a further step of a withdrawn change,
+    // a new change over another person's open change, and editing a withdrawal.
+    const scopedAdmin = async (work) => {
+      const client = new pg.Client(clientConfig);
+      await client.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(
+          "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+          [scope.brandReference, store],
+        );
+        return await work(client);
+      } finally {
+        await client.query("ROLLBACK").catch(() => undefined);
+        await client.end();
+      }
+    };
+    await assert.rejects(
+      scopedAdmin((client) =>
+        client.query(
+          "INSERT INTO rms_store.store_configuration_authoring_operation SELECT * FROM jsonb_populate_record(NULL::rms_store.store_configuration_authoring_operation,(SELECT to_jsonb(a)||jsonb_build_object('operation_id',$2::text,'sequence_number',(SELECT max(sequence_number)+1 FROM rms_store.store_configuration_authoring_operation),'audit_reference',$3::text) FROM rms_store.store_configuration_authoring_operation a WHERE configuration_id=$1 AND command_type='Submit'))",
+          [ownOpen.configurationReference, id(0x9e20), id(0x9e21)],
+        ),
+      ),
+      /store configuration was withdrawn/u,
+    );
+    await assert.rejects(
+      scopedAdmin((client) =>
+        client.query(
+          "INSERT INTO rms_store.store_configuration_authoring_operation SELECT * FROM jsonb_populate_record(NULL::rms_store.store_configuration_authoring_operation,(SELECT to_jsonb(a)||jsonb_build_object('operation_id',$1::text,'sequence_number',a.sequence_number+1,'configuration_id',$1::text,'configuration_version',a.configuration_version+1,'expected_version',a.configuration_version,'audit_reference',$2::text,'actor_reference',$3::text,'configuration_json',a.configuration_json||jsonb_build_object('configurationReference',$1::text,'configurationVersion',a.configuration_version+1,'authoredByReference',$3::text)) FROM rms_store.store_configuration_authoring_operation a ORDER BY sequence_number DESC LIMIT 1))",
+          [id(0x9e22), id(0x9e23), second],
+        ),
+      ),
+      /another person's store configuration change is still open/u,
+    );
+    await assert.rejects(
+      admin.query("UPDATE rms_store.store_configuration_withdrawal SET reason_code='X'"),
+    );
+    return { published, soleApproved };
   } finally {
     for (const name of [api, worker]) {
       await admin.query("DROP OWNED BY " + name).catch(() => undefined);

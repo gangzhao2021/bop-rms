@@ -200,6 +200,36 @@ export function createPostgresStoreConfigurationAdministration(options: {
   });
 }
 
+/**
+ * WP-2423 DEC-SOLE-OPERATOR-APPROVAL: who sent one configuration for approval (its recorded Submit),
+ * or null when it was not sent. The caller holds the transaction and its authorization.
+ */
+export async function readStoreConfigurationSubmitter(
+  tx: Transaction,
+  input: {
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly configurationReference: string;
+  },
+): Promise<string | null> {
+  const brand = parseBrandReference(input.brandReference),
+    store = parseStoreReference(input.storeReference),
+    configuration = parseStoreAdministrationReference(input.configurationReference);
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  const found = rows(
+    await tx.query(
+      "SELECT actor_reference::text actor FROM rms_store.store_configuration_authoring_operation WHERE brand_id=$1 AND store_id=$2 AND configuration_id=$3 AND command_type='Submit' LIMIT 2",
+      [brand, store, configuration],
+    ),
+  );
+  if (found.length > 1) return unavailable();
+  const actor = found[0]?.actor;
+  return actor === undefined ? null : String(parseStoreAdministrationReference(actor));
+}
+
 /** Latest administration state, not proof of effective published configuration.
  * Caller must retain transaction and current authorization fence while composing
  * this with the independently verified current publication.

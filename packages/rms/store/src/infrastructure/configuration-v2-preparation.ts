@@ -31,6 +31,10 @@ import {
   createStorePublicationSetupBasisVerifier,
   type StorePublicationSetupSnapshotReferences,
 } from "./persistence/publication-setup-basis.js";
+import {
+  readStoreConfigurationSoleOperatorApproval,
+  recordStoreConfigurationSoleOperatorApproval,
+} from "./persistence/store-configuration-sole-operator-store.js";
 
 type Transaction = Parameters<
   Parameters<Parameters<typeof createPostgresPublishingMutationStore>[0]["run"]>[0]
@@ -73,6 +77,38 @@ export interface StoreConfigurationV2PreparationOptions {
     configuration: StoreConfigurationVersion,
     observedAt: string,
   ): Promise<string>;
+  /**
+   * WP-2423 DEC-SOLE-OPERATOR-APPROVAL (2026-10-16): present only when the approver explicitly
+   * approves their own configuration (they created it or sent it for approval) as sole operator.
+   * It must decide, in this transaction, that sole operator is in effect for them now and that
+   * their second factor is at most 15 minutes old, and throw otherwise. Absent, an approver who
+   * created or sent the configuration is refused; present, any other approval is refused.
+   */
+  soleOperatorApproval?(
+    tx: Transaction,
+    input: StoreConfigurationFreshPreparationInput,
+  ): Promise<{ readonly actorMfaAt: string }>;
+}
+/** WP-2423: the recorded sole-operator approval an approval by its own author or sender relies on. */
+export async function requireStoreConfigurationSoleOperatorApproval(
+  tx: Transaction,
+  input: {
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly configurationReference: string;
+    readonly approverReference: string;
+    readonly approvalEvidenceReference: string;
+  },
+): Promise<void> {
+  const mark = await readStoreConfigurationSoleOperatorApproval(tx, input);
+  if (
+    mark === null ||
+    mark.actorReference !== String(input.approverReference) ||
+    mark.approvalEvidenceReference !== String(input.approvalEvidenceReference)
+  )
+    throw new StoreConfigurationAdministrationServiceError(
+      "STORE_CONFIGURATION_DEPENDENCY_UNAVAILABLE",
+    );
 }
 /** Fresh-only hook. Call it through the owning administration service so original
  * arbitration/CAS precede all Core writes. Every callback must retain its actual
@@ -105,10 +141,19 @@ export function createPersistentStoreConfigurationV2Preparation(
       const d = Object.getOwnPropertyDescriptor(options, key);
       return d !== undefined && d.enumerable && "value" in d;
     });
-  if (!dataOptions())
+  const soleDescriptor = Object.getOwnPropertyDescriptor(options, "soleOperatorApproval");
+  if (
+    !dataOptions() ||
+    (soleDescriptor !== undefined &&
+      (!soleDescriptor.enumerable ||
+        !("value" in soleDescriptor) ||
+        typeof soleDescriptor.value !== "function"))
+  )
     throw new StoreConfigurationAdministrationServiceError(
       "STORE_CONFIGURATION_DEPENDENCY_UNAVAILABLE",
     );
+  const sole: StoreConfigurationV2PreparationOptions["soleOperatorApproval"] =
+    soleDescriptor?.value;
   const tenant = parsePublishingReference(options.tenantReference),
     brand = parsePublishingReference(options.brandReference),
     store = parsePublishingReference(options.storeReference),
@@ -184,6 +229,7 @@ export function createPersistentStoreConfigurationV2Preparation(
           options.validateSubmit !== validate ||
           options.approvalValidUntil !== approvalUntil ||
           options.liveGateEvidence !== liveGate ||
+          Object.getOwnPropertyDescriptor(options, "soleOperatorApproval")?.value !== sole ||
           options.tenantReference !== tenant ||
           options.brandReference !== brand ||
           options.storeReference !== store ||
@@ -351,11 +397,7 @@ export function createPersistentStoreConfigurationV2Preparation(
             });
           }
           if (stage === "Approve") {
-            if (
-              current.lifecycle !== "PendingApproval" ||
-              candidate.authoredByReference === input.actorReference
-            )
-              return fail();
+            if (current.lifecycle !== "PendingApproval") return fail();
             const recorded = await wait(() => owner.resolveCurrentLifecycleMutation(queryHead));
             if (
               recorded === null ||
@@ -365,10 +407,18 @@ export function createPersistentStoreConfigurationV2Preparation(
               recorded.next.snapshotDigest !== digest ||
               String(recorded.next.snapshotReference) !==
                 String(candidate.configurationReference) ||
-              recorded.audit.actor.type !== "User" ||
-              String(recorded.audit.actor.reference) === String(input.actorReference)
+              recorded.audit.actor.type !== "User"
             )
               return fail();
+            // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: another person approves what someone created or
+            // sent, except that person alone as an in-effect, re-verified sole operator; the
+            // sole-operator path is never used for someone else's configuration.
+            const self =
+              String(candidate.authoredByReference) === String(input.actorReference) ||
+              String(recorded.audit.actor.reference) === String(input.actorReference);
+            if (self !== (sole !== undefined)) return fail();
+            const soleOperator =
+              sole === undefined ? null : await wait(() => sole.call(options, tx, input));
             const businessUntil = parsePublishingInstant(
                 await wait(() => approvalUntil(tx, input)),
               ),
@@ -404,14 +454,45 @@ export function createPersistentStoreConfigurationV2Preparation(
                 ports,
               ),
             );
-            await wait(() =>
-              owner.resolveCurrentIndependentApproval({
-                ...queryHead,
-                snapshotReference: candidate.configurationReference,
-                snapshotDigest: digest,
-                requiredCheckCodes: codes,
-              }),
-            );
+            if (soleOperator === null)
+              await wait(() =>
+                owner.resolveCurrentIndependentApproval({
+                  ...queryHead,
+                  snapshotReference: candidate.configurationReference,
+                  snapshotDigest: digest,
+                  requiredCheckCodes: codes,
+                }),
+              );
+            else {
+              const recordedApproval = await wait(() =>
+                owner.resolveCurrentRecordedApproval({
+                  ...queryHead,
+                  snapshotReference: candidate.configurationReference,
+                  snapshotDigest: digest,
+                  requiredCheckCodes: codes,
+                }),
+              );
+              if (
+                recordedApproval.profile !== "CurrentRecordedPublishingApprovalV1" ||
+                String(recordedApproval.approvedByActorReference) !==
+                  String(input.actorReference) ||
+                recordedApproval.approvalEvidenceReference !== evidence.evidenceReference
+              )
+                return fail();
+              await wait(() =>
+                recordStoreConfigurationSoleOperatorApproval(tx, {
+                  brandReference: brand,
+                  storeReference: store,
+                  configurationReference: candidate.configurationReference,
+                  operationReference: input.operationReference,
+                  approvalEvidenceReference: evidence.evidenceReference,
+                  actorReference: input.actorReference,
+                  actorMfaAt: soleOperator.actorMfaAt,
+                  approvedAt: at,
+                  auditReference: input.auditReference,
+                }),
+              );
+            }
             return createStoreConfigurationVersion({
               ...candidate,
               lifecycle: "Approved",
@@ -429,19 +510,40 @@ export function createPersistentStoreConfigurationV2Preparation(
             String(approval.approvalEvidence.evidenceReference) !==
               String(current.approvalEvidenceReference) ||
             String(approval.approvalEvidence.approvedActorReference) !==
-              String(current.approvedByReference) ||
-            String(approval.approvalEvidence.approvedActorReference) ===
-              String(current.authoredByReference)
+              String(current.approvedByReference)
           )
             return fail();
-          await wait(() =>
-            owner.resolveCurrentIndependentApproval({
+          const recordedApproval = await wait(() =>
+            owner.resolveCurrentRecordedApproval({
               ...queryHead,
               snapshotReference: candidate.configurationReference,
               snapshotDigest: digest,
               requiredCheckCodes: codes,
             }),
           );
+          if (
+            recordedApproval.profile !== "CurrentRecordedPublishingApprovalV1" ||
+            String(recordedApproval.approvedByActorReference) !==
+              String(current.approvedByReference) ||
+            String(recordedApproval.approvalEvidenceReference) !==
+              String(current.approvalEvidenceReference)
+          )
+            return fail();
+          // WP-2423: approved by the person who created or sent it only with its recorded
+          // sole-operator approval.
+          if (
+            recordedApproval.recordedIndependence !== "Verified" ||
+            String(current.approvedByReference) === String(current.authoredByReference)
+          )
+            await wait(() =>
+              requireStoreConfigurationSoleOperatorApproval(tx, {
+                brandReference: brand,
+                storeReference: store,
+                configurationReference: candidate.configurationReference,
+                approverReference: String(current.approvedByReference),
+                approvalEvidenceReference: String(current.approvalEvidenceReference),
+              }),
+            );
           const release = createPublishingReleaseRecord({
             releaseId: nextId(),
             familyReference: family,

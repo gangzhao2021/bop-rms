@@ -97,7 +97,7 @@ export function createPostgresDigitalReceiptTemplateStore(options: {
   };
   const read = async (tx: ReceiptTemplateTransaction, template: string) => {
     const result = await tx.query(
-      "SELECT version_id,template_id,version_number::text AS version_number,version_code,publication_id,published_at,version_json FROM rms_device.digital_receipt_template_version WHERE brand_id=$1 AND store_id=$2 AND template_id=$3 ORDER BY version_number LIMIT 101",
+      "SELECT version_id,template_id,version_number::text AS version_number,version_code,publication_id,published_at,version_json FROM rms_device.digital_receipt_template_version WHERE brand_id=$1 AND store_id=$2 AND template_id=$3 ORDER BY digital_receipt_template_version.version_number LIMIT 101",
       [brand, store, template],
     );
     if (result.rows.length > 100) return fail();

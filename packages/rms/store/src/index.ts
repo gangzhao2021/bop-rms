@@ -68,6 +68,10 @@ export * from "./infrastructure/configuration-v2-preparation.js";
 
 export * from "./contracts/store-configuration-original.js";
 export * from "./infrastructure/persistence/store-configuration-original-store.js";
+// WP-2423 DEC-SOLE-OPERATOR-APPROVAL: Store configuration approved by its own author as sole operator.
+export * from "./infrastructure/persistence/store-configuration-sole-operator-store.js";
+// WP-2423 (v15 D2/D3): withdrawal or decline of a Store configuration that is not published.
+export * from "./infrastructure/persistence/store-configuration-withdrawal-store.js";
 
 // WP-2423 Q9-G1 (DEC-OUTAGE-ACCEPTANCE-HOLD): whether the Store's staff are online.
 export * from "./infrastructure/persistence/store-presence-store.js";

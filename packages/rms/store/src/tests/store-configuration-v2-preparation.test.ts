@@ -7,6 +7,7 @@ const core = vi.hoisted(() => ({
   candidate: vi.fn(),
   approval: vi.fn(),
   independent: vi.fn(),
+  recorded: vi.fn(),
   execute: vi.fn(),
 }));
 // Controlled public-owner boundaries exercise composition and ordering. They do
@@ -18,6 +19,7 @@ vi.mock("@bop/publishing", async (original) => ({
     resolvePublicationCandidate: core.candidate,
     resolveCurrentApproval: core.approval,
     resolveCurrentIndependentApproval: core.independent,
+    resolveCurrentRecordedApproval: core.recorded,
   }),
   executePublishingMutation: core.execute,
 }));
@@ -202,12 +204,22 @@ const hash = createStoreConfigurationPublicationHash({
   canonicalize: JSON.stringify,
   hashIntent: (text) => `sha256:${createHash("sha256").update(text).digest("hex")}`,
 });
-function fixture() {
+function fixture(extra: Record<string, unknown> = {}, mark: Record<string, unknown> | null = null) {
   let clock = at,
     ids = 100;
   const tx = {
-      query: async (sql: string) => ({
-        rows: sql.includes("store_setup_draft_revision") ? [setupRow()] : [],
+      // The recorded values of each statement stay readable through `query.mock.calls`.
+      query: vi.fn(async (sql: string, values?: readonly unknown[]) => {
+        void values;
+        return {
+          rows: sql.includes("store_setup_draft_revision")
+            ? [setupRow()]
+            : sql.startsWith("SELECT") &&
+                sql.includes("store_configuration_sole_operator_approval") &&
+                mark !== null
+              ? [mark]
+              : [],
+        };
       }),
     },
     validation = vi.fn(async () => ({
@@ -244,6 +256,7 @@ function fixture() {
     validateSubmit: validation,
     approvalValidUntil: approval,
     liveGateEvidence: liveGate,
+    ...extra,
   };
   const helper = createPersistentStoreConfigurationV2Preparation(options),
     prepare = helper.forTransaction(tx);
@@ -276,6 +289,21 @@ beforeEach(() => {
   vi.clearAllMocks();
   core.read.mockImplementation(async () => core.head);
   core.independent.mockResolvedValue({});
+  // The recorded approval as Publishing reports it, from the recorded Submit and Approve.
+  core.recorded.mockImplementation(async () => {
+    const review = core.mutations.find((m) => m.operation === "SubmitReview"),
+      approval = core.mutations.find((m) => m.operation === "Approve");
+    return {
+      profile: "CurrentRecordedPublishingApprovalV1",
+      approvedByActorReference: approval?.approvalEvidence?.approvedActorReference,
+      approvalEvidenceReference: approval?.approvalEvidence?.evidenceReference,
+      requestedByActorReference: review?.tenantContext.actor.actorReference,
+      recordedIndependence:
+        review?.tenantContext.actor.actorReference === approval?.tenantContext.actor.actorReference
+          ? "SameActor"
+          : "Verified",
+    };
+  });
   core.execute.mockImplementation(async (input: ExecutePublishingMutationInput) => {
     core.mutations.push(input);
     core.head = {
@@ -363,6 +391,113 @@ describe("fresh V2 actual Core composition", () => {
       next: { state: "Published" },
       release: { snapshotDigest: hash(saved), createdAt: at },
     });
+  });
+  it("refuses the author's own approval without the sole-operator port (WP-2423)", async () => {
+    const h = fixture(),
+      saved = modern(),
+      submitted = await h.prepare("Submit", h.input(saved), saved);
+    await expect(
+      h.prepare("Approve", h.input(submitted, id(10), id(22)), submitted),
+    ).rejects.toMatchObject({ code: "STORE_CONFIGURATION_DEPENDENCY_UNAVAILABLE" });
+    expect(core.mutations).toHaveLength(2);
+    expect(core.recorded).not.toHaveBeenCalled();
+  });
+  it("approves the author's own configuration as sole operator and records its mark (WP-2423)", async () => {
+    const sole = vi.fn(async () => ({ actorMfaAt: "2026-08-15T13:55:00.000Z" })),
+      h = fixture({ soleOperatorApproval: sole }),
+      saved = modern(),
+      submitted = await h.prepare("Submit", h.input(saved), saved),
+      input = h.input(submitted, id(10), id(22)),
+      approved = await h.prepare("Approve", input, submitted);
+    expect(sole).toHaveBeenCalledWith(h.tx, input);
+    expect(approved).toMatchObject({
+      lifecycle: "Approved",
+      authoredByReference: id(10),
+      approvedByReference: id(10),
+    });
+    expect(core.mutations).toHaveLength(3);
+    expect(core.independent).not.toHaveBeenCalled();
+    expect(core.recorded).toHaveBeenCalledOnce();
+    const insert = h.tx.query.mock.calls.find(([sql]) =>
+      sql.startsWith("INSERT INTO rms_store.store_configuration_sole_operator_approval"),
+    );
+    expect(insert?.[1]).toEqual([
+      id(2),
+      id(3),
+      id(1),
+      id(22),
+      approved.approvalEvidenceReference,
+      id(10),
+      "2026-08-15T13:55:00.000Z",
+      at,
+      id(21),
+    ]);
+  });
+  it("never uses the sole-operator path for someone else's configuration or when it refuses (WP-2423)", async () => {
+    const sole = vi.fn(async () => ({ actorMfaAt: "2026-08-15T13:55:00.000Z" })),
+      h = fixture({ soleOperatorApproval: sole }),
+      saved = modern(),
+      submitted = await h.prepare("Submit", h.input(saved), saved);
+    await expect(
+      h.prepare("Approve", h.input(submitted, id(11), id(22)), submitted),
+    ).rejects.toMatchObject({ code: "STORE_CONFIGURATION_DEPENDENCY_UNAVAILABLE" });
+    expect(sole).not.toHaveBeenCalled();
+    expect(core.mutations).toHaveLength(2);
+    core.head = null;
+    core.mutations = [];
+    const refusing = vi.fn(async () => {
+        throw new Error("controlled: sole operator not in effect");
+      }),
+      r = fixture({ soleOperatorApproval: refusing }),
+      again = await r.prepare("Submit", r.input(saved), saved);
+    await expect(r.prepare("Approve", r.input(again, id(10), id(22)), again)).rejects.toMatchObject(
+      { code: "STORE_CONFIGURATION_DEPENDENCY_UNAVAILABLE" },
+    );
+    expect(refusing).toHaveBeenCalledOnce();
+    expect(core.mutations).toHaveLength(2);
+    expect(() => fixture({ soleOperatorApproval: "not a function" })).toThrow();
+  });
+  it("publishes a sole-operator approval only with its recorded mark (WP-2423)", async () => {
+    const sole = vi.fn(async () => ({ actorMfaAt: "2026-08-15T13:55:00.000Z" })),
+      h = fixture({ soleOperatorApproval: sole }),
+      saved = modern(),
+      submitted = await h.prepare("Submit", h.input(saved), saved),
+      approved = await h.prepare("Approve", h.input(submitted, id(10), id(22)), submitted),
+      review = core.mutations[1],
+      approval = core.mutations[2];
+    if (!review?.validationEvidence || !approval?.approvalEvidence)
+      throw new Error("controlled recorded evidence missing");
+    core.candidate.mockResolvedValue({
+      lifecycle: approval.next,
+      validationEvidence: review.validationEvidence,
+      approvalEvidence: approval.approvalEvidence,
+      previousRelease: null,
+    });
+    const mark = {
+      brand: id(2),
+      store: id(3),
+      configuration: id(1),
+      operation: id(22),
+      evidence: approved.approvalEvidenceReference,
+      mode: "SoleOperator",
+      actor: id(10),
+      mfa: new Date("2026-08-15T13:55:00.000Z"),
+      at: new Date(at),
+      audit: id(21),
+    };
+    // Without its mark (a different transaction reading none) the publication is refused.
+    const unmarked = fixture();
+    await expect(
+      unmarked.prepare("Publish", unmarked.input(approved, id(10), id(23)), approved),
+    ).rejects.toMatchObject({ code: "STORE_CONFIGURATION_DEPENDENCY_UNAVAILABLE" });
+    const marked = fixture({}, mark),
+      published = await marked.prepare("Publish", marked.input(approved, id(10), id(23)), approved);
+    expect(published).toMatchObject({
+      lifecycle: "Published",
+      authoredByReference: id(10),
+      approvedByReference: id(10),
+    });
+    expect(hash(published)).toBe(hash(saved));
   });
   it("poisons a swallowed reentry and rejects a source that advances beyond the lease", async () => {
     const h = fixture(),
@@ -485,7 +620,7 @@ it("reads V2 actual Approved and independent history without any future publicat
     validationEvidence: validation,
   });
   const independent = {
-    profile: "CurrentIndependentPublishingApprovalV1",
+    profile: "CurrentRecordedPublishingApprovalV1",
     tenantReference: id(50),
     scope: head.scope,
     familyReference: head.familyReference,
@@ -504,7 +639,7 @@ it("reads V2 actual Approved and independent history without any future publicat
     validationCheckCodes: ["STORE_REFERENCE_CHECK"],
     observedAt: at,
   };
-  core.independent.mockResolvedValue(independent);
+  core.recorded.mockResolvedValue(independent);
   const authorize = createPostgresStoreV2ApprovalAuthorization({
     tenantReference: id(50),
     brandReference: id(2),
@@ -520,8 +655,15 @@ it("reads V2 actual Approved and independent history without any future publicat
     configuration: approved,
     contentDigest: hash(saved),
   });
-  core.independent.mockResolvedValue({ ...independent, familyReference: id(80) });
+  core.recorded.mockResolvedValue({ ...independent, familyReference: id(80) });
   await expect(authorize(h.tx, approved, at)).rejects.toThrow("STORE_CURRENT_APPROVAL_UNAVAILABLE");
-  core.independent.mockResolvedValue({ ...independent, requestedByActorReference: id(11) });
+  core.recorded.mockResolvedValue({ ...independent, requestedByActorReference: id(11) });
+  await expect(authorize(h.tx, approved, at)).rejects.toThrow("STORE_CURRENT_APPROVAL_UNAVAILABLE");
+  // WP-2423: reported as the submitter's own approval, it needs the recorded mark (none here).
+  core.recorded.mockResolvedValue({
+    ...independent,
+    requestedByActorReference: id(11),
+    recordedIndependence: "SameActor",
+  });
   await expect(authorize(h.tx, approved, at)).rejects.toThrow("STORE_CURRENT_APPROVAL_UNAVAILABLE");
 });

@@ -287,3 +287,72 @@ export async function requireMerchantBrandSoleOperator(
     throw new MerchantSoleOperatorGateError("NeedsReverification");
   return Object.freeze({ actorMfaAt: gate.actorMfaAt });
 }
+
+/**
+ * WP-2423 DEC-SOLE-OPERATOR-APPROVAL (Owner decision 2026-10-16): the same read for a Store gate
+ * (Store configuration approval): the Store's members are evaluated with `resolveContext`, as an
+ * approval would be; names are the Store's own. `allowed` must hold the caller's current access.
+ */
+export async function merchantStoreSoleOperatorGate(
+  tx: ConsumerTransaction,
+  input: StoreScope & {
+    readonly actorReference: string;
+    readonly permissionCode: string;
+    readonly observedAt: string;
+    readonly resolveContext: ResolveContext;
+    allowed(): Promise<boolean>;
+  },
+) {
+  const decision = await createMerchantSoleOperatorApproval({
+    resolveContext: input.resolveContext,
+    authorize: input.allowed,
+  })(tx, {
+    tenantReference: input.tenantReference,
+    brandReference: input.brandReference,
+    storeReference: input.storeReference,
+    permissionCode: input.permissionCode,
+    actorReference: input.actorReference,
+    observedAt: input.observedAt,
+  });
+  const actorMfaAt = await merchantActorRecentMfaAt(
+    tx,
+    { brandReference: input.brandReference, storeReference: input.storeReference },
+    input.actorReference,
+    input.observedAt,
+    input.allowed,
+  );
+  const members =
+    decision.otherHolderReferences.length === 0
+      ? []
+      : await listStoreMembers(tx, {
+          brandReference: input.brandReference,
+          storeReference: input.storeReference,
+        });
+  return Object.freeze({
+    status: decision.status,
+    otherApprovers: Object.freeze(
+      decision.otherHolderReferences.map((actor) =>
+        Object.freeze({
+          displayName:
+            members.find((member) => member.actorReference === actor)?.displayName ?? null,
+        }),
+      ),
+    ),
+    actorMfaAt,
+    verifiedUntil:
+      actorMfaAt !== null && soleOperatorMfaRecent(actorMfaAt, input.observedAt)
+        ? new Date(Date.parse(actorMfaAt) + soleOperatorMfaRecencyMilliseconds).toISOString()
+        : null,
+  });
+}
+/** The Store gate for a command: throws unless in effect with a second factor ≤ 15 minutes old. */
+export async function requireMerchantStoreSoleOperator(
+  tx: ConsumerTransaction,
+  input: Parameters<typeof merchantStoreSoleOperatorGate>[1],
+): Promise<{ readonly actorMfaAt: string }> {
+  const gate = await merchantStoreSoleOperatorGate(tx, input);
+  if (gate.status !== "Effective") throw new MerchantSoleOperatorGateError("NotInEffect");
+  if (gate.actorMfaAt === null || !soleOperatorMfaRecent(gate.actorMfaAt, input.observedAt))
+    throw new MerchantSoleOperatorGateError("NeedsReverification");
+  return Object.freeze({ actorMfaAt: gate.actorMfaAt });
+}

@@ -15,6 +15,7 @@ import {
   canonicalPublicationValue as canonical,
   publicationValueDigest,
 } from "./product-publication-command-client-v2.js";
+import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
 
 export type StoreConfigurationOrdinaryAction =
   "Materialize" | "Validate" | "Submit" | "Approve" | "Publish";
@@ -78,6 +79,15 @@ export interface StoreConfigurationOrdinaryWorkspace {
   /** WP-2423 DEC-STORE-SETUP-PUBLICATION: checks of the latest configuration while it awaits
    * sending, approval or publication. */
   readonly publicationChecks?: StoreConfigurationPublicationChecks;
+  /** WP-2423 DEC-SOLE-OPERATOR-APPROVAL: present only when the configuration awaiting approval was
+   * created or sent by the signed-in Owner: whether they may approve it alone, and why not. */
+  readonly soleOperator?: SoleOperatorGateView;
+  /** WP-2423 (v15 D2/D3): the latest configuration (not published) was withdrawn or declined. */
+  readonly latestWithdrawal?: {
+    readonly kind: "Withdrawn" | "Declined";
+    readonly withdrawnAt: string;
+    readonly byYou: boolean;
+  };
 }
 /** Every check blocks sending, approval and publication; the screen explains each in plain words. */
 export const storeConfigurationPublicationCheckCodes = [
@@ -409,7 +419,17 @@ export async function parseStoreConfigurationOrdinaryWorkspace(
         copy !== null &&
         typeof copy === "object" &&
         Object.hasOwn(copy, "publicationChecks") &&
-        (copy as { publicationChecks?: unknown }).publicationChecks !== undefined;
+        (copy as { publicationChecks?: unknown }).publicationChecks !== undefined,
+      hasSoleOperator =
+        copy !== null &&
+        typeof copy === "object" &&
+        Object.hasOwn(copy, "soleOperator") &&
+        (copy as { soleOperator?: unknown }).soleOperator !== undefined,
+      hasWithdrawal =
+        copy !== null &&
+        typeof copy === "object" &&
+        Object.hasOwn(copy, "latestWithdrawal") &&
+        (copy as { latestWithdrawal?: unknown }).latestWithdrawal !== undefined;
     const r = closed(copy, [
         "profile",
         "scope",
@@ -421,6 +441,8 @@ export async function parseStoreConfigurationOrdinaryWorkspace(
         "validUntil",
         "businessReferenceValidation",
         ...(hasChecks ? ["publicationChecks"] : []),
+        ...(hasSoleOperator ? ["soleOperator"] : []),
+        ...(hasWithdrawal ? ["latestWithdrawal"] : []),
       ]),
       scope = parseStoreSetupScope(r.scope),
       selected = parseStoreSetupScope(expectedScope);
@@ -506,6 +528,27 @@ export async function parseStoreConfigurationOrdinaryWorkspace(
         ),
       });
     }
+    const soleOperator = hasSoleOperator ? parseSoleOperatorGate(r.soleOperator) : null;
+    if (
+      soleOperator !== null &&
+      (latest === null || latest.lifecycle !== "PendingApproval" || latest.setupBasis === undefined)
+    )
+      return fail();
+    let latestWithdrawal: StoreConfigurationOrdinaryWorkspace["latestWithdrawal"];
+    if (hasWithdrawal) {
+      const w = closed(r.latestWithdrawal, ["kind", "withdrawnAt", "byYou"]);
+      if (
+        (w.kind !== "Withdrawn" && w.kind !== "Declined") ||
+        typeof w.byYou !== "boolean" ||
+        latest === null ||
+        latest.lifecycle === "Published" ||
+        soleOperator !== null
+      )
+        return fail();
+      const withdrawnAt = instant(w.withdrawnAt);
+      if (withdrawnAt > observedAt) return fail();
+      latestWithdrawal = Object.freeze({ kind: w.kind, withdrawnAt, byYou: w.byYou });
+    }
     if (Date.now() >= Date.parse(validUntil)) return fail("Stale");
     return Object.freeze({
       profile: r.profile,
@@ -518,6 +561,8 @@ export async function parseStoreConfigurationOrdinaryWorkspace(
       validUntil,
       businessReferenceValidation: r.businessReferenceValidation,
       ...(publicationChecks === undefined ? {} : { publicationChecks }),
+      ...(soleOperator === null ? {} : { soleOperator }),
+      ...(latestWithdrawal === undefined ? {} : { latestWithdrawal }),
     });
   } catch (error) {
     if (error instanceof StoreSetupClientError) throw error;

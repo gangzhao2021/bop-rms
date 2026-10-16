@@ -323,7 +323,7 @@ export function createPostgresStoreSetupReferenceStore(options: StoreSetupRefere
     await restore();
     const found = rows(
       await query(
-        `SELECT ${versionColumns} FROM rms_store.store_setup_reference_version WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND reference_kind=$4 ORDER BY revision DESC LIMIT 1`,
+        `SELECT ${versionColumns} FROM rms_store.store_setup_reference_version WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND reference_kind=$4 ORDER BY store_setup_reference_version.revision DESC LIMIT 1`,
         [fixed.tenantReference, fixed.brandReference, fixed.storeReference, kind],
       ),
     );

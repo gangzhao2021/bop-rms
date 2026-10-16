@@ -37,7 +37,15 @@ describe("WP-2423 Q19 sole operator decision", () => {
     expect(parseSoleOperatorPermissionCode("payment.refund.approve")).toBe(
       "payment.refund.approve",
     );
-    for (const code of ["publishing.release.publish", "identity.role.approve", "x"])
+    // Owner decision 2026-10-16: Store configuration approval (Store setup step 8) is a gate.
+    expect(parseSoleOperatorPermissionCode("store.service.approve")).toBe("store.service.approve");
+    for (const code of [
+      "publishing.release.publish",
+      "publishing.review.approve",
+      "store.service.publish",
+      "identity.role.approve",
+      "x",
+    ])
       expect(() => parseSoleOperatorPermissionCode(code)).toThrow();
     expect(parseSoleOperatorSettingReason("On", "OWNER_RUNS_STORE_ALONE")).toBe(
       "OWNER_RUNS_STORE_ALONE",

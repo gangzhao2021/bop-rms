@@ -244,6 +244,17 @@ const messages: Record<StoreSetupClientError["code"], string> = {
   Stale: "The current settings check expired. Refresh to read the current Store again.",
   NotRegistered: "No tax classifications are set up for this Brand yet.",
   FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
+  SoleOperatorNotInEffect:
+    "Sole operator is not in effect for you now, so another person with Owner access must approve this.",
+  SoleOperatorNeedsVerification:
+    "Your verification is more than 15 minutes old. Verify again, then approve.",
+  SetupIncomplete:
+    "The saved setup still has settings that are not set (see the list in this step). Finish them, save the setup, then create the configuration.",
+  SetupOutdated:
+    "The Store's configuration changed after this setup was saved. Save the setup again, then create the configuration.",
+  OpenChangeByAnother:
+    "Someone else's configuration change is still waiting. It must be approved and published, or declined, before a new configuration can be created.",
+  Withdrawn: "This configuration was withdrawn or declined. Create a new one from the saved setup.",
 };
 const root = (view: StoreSetupWorkspace) => ({
   reference: view.setup.snapshot?.setupDraftReference ?? null,
@@ -1209,19 +1220,19 @@ export function StoreSetupDraftPage({
     </AppFrame>
   );
 }
+/** WP-2423: what is still missing says where to set it (step names as on screen). */
+const notSet = (step: number) => `Not set yet (step ${step}, ${steps[step - 1]})`;
 function storeReview(content: StoreSetupContent): readonly (readonly [string, string])[] {
   return [
     [
       "Timezone",
-      content.timeZone.state === "Configured"
-        ? timeZoneLabel(content.timeZone.value)
-        : "Not configured",
+      content.timeZone.state === "Configured" ? timeZoneLabel(content.timeZone.value) : notSet(2),
     ],
     [
       "Business day start",
       content.businessDayStartLocalTime.state === "Configured"
         ? content.businessDayStartLocalTime.value
-        : "Not configured",
+        : notSet(2),
     ],
     [
       "Service modes",
@@ -1229,16 +1240,17 @@ function storeReview(content: StoreSetupContent): readonly (readonly [string, st
         ? content.enabledServiceModes.value
             .map((mode) => (mode === "DineIn" ? "Dine in" : mode))
             .join(", ")
-        : "Not configured",
+        : notSet(3),
     ],
     [
       "Weekly hours",
-      content.weeklySchedule.state === "Configured" ? "Configured draft hours" : "Not configured",
+      content.weeklySchedule.state === "Configured"
+        ? ((open) => `Open ${open} ${open === 1 ? "day" : "days"} a week`)(
+            content.weeklySchedule.value.filter((day) => day.intervals.length > 0).length,
+          )
+        : notSet(4),
     ],
-    [
-      "Address",
-      content.addressReference.state === "Configured" ? "Already configured" : "Not configured",
-    ],
+    ["Address", content.addressReference.state === "Configured" ? "Already configured" : notSet(2)],
     [
       "Fees",
       content.feeContexts?.state === "Configured"
@@ -1248,26 +1260,32 @@ function storeReview(content: StoreSetupContent): readonly (readonly [string, st
                 `${feeLabel(v.chargeType)}: ${v.state === "Enabled" ? "On" : v.state === "Disabled" ? "Off" : "Not set"}`,
             )
             .join(", ")
-        : "Not configured",
+        : notSet(5),
     ],
     [
-      "Tax and payment",
-      content.taxConfigurationReference.state === "Configured" &&
+      "Tax settings",
+      content.taxConfigurationReference.state === "Configured"
+        ? "Set (see Tax review)"
+        : "Not set yet (use the live Store's settings below)",
+    ],
+    [
+      "Payment",
       content.paymentConfigurationReference.state === "Configured"
         ? "Already configured"
-        : "Not configured",
+        : notSet(5),
     ],
+    ["Receipt", content.receiptReference.state === "Configured" ? "Already configured" : notSet(7)],
     [
       "Capacity",
       content.capacityConfigurationReference.state === "Unconfigured"
-        ? "Not configured"
+        ? notSet(6)
         : content.capacityConfigurationReference.value === null
           ? "No order limits"
           : "Already configured",
     ],
     [
       "Contacts",
-      content.contactReference.state === "Configured" ? "Already configured" : "Not configured",
+      content.contactReference.state === "Configured" ? "Already configured" : notSet(7),
     ],
   ];
 }
@@ -1284,7 +1302,9 @@ export function StoreSetupDraftReview({ content }: { readonly content: StoreSetu
       <p>
         {missing === null
           ? "Some edited times or wait values need correction before saving."
-          : `${missing} settings are not configured. An unfinished draft can be saved.`}
+          : missing === 0
+            ? "Every setting is set."
+            : `${missing} ${missing === 1 ? "setting is" : "settings are"} not set yet. An unfinished draft can be saved.`}
       </p>
       {content && (
         <ul>
@@ -2277,14 +2297,33 @@ export function StoreSetupFeeContextEditor({
   );
 }
 
+/** The live Store's own operating settings "Use the live Store's settings" also fills in where the
+ * setup has none yet (WP-2423 v15: a running Store starts its setup from what it runs today). Saved
+ * address, contact, payment and receipt settings are never taken: they are set in their steps. */
+const liveOperatingFields = [
+  "source",
+  "timeZone",
+  "businessDayStartLocalTime",
+  "enabledServiceModes",
+  "weeklySchedule",
+  "capacityConfigurationReference",
+] as const;
 /** The setup change "Use the live Store's settings" makes: tax and Brand settings of the live Store,
- * its holidays when the setup has none, and a start as soon as it is published (server time). */
+ * its holidays when the setup has none, a start as soon as it is published (server time), and the
+ * live Store's time zone, business day start, service modes, opening hours and order limits where
+ * the setup has none yet. Settings already in the setup are kept. */
 export function liveStoreSettingsChange(
   content: StoreSetupContent,
   live: StoreSetupLiveConfiguration & { readonly current: StoreConfigurationSnapshot },
 ): Partial<StoreSetupContent> {
   const current = live.current;
+  const operating = Object.fromEntries(
+    liveOperatingFields
+      .filter((field) => content[field].state !== "Configured")
+      .map((field) => [field, { state: "Configured", value: current[field] }]),
+  ) as Partial<StoreSetupContent>;
   return {
+    ...operating,
     taxConfigurationReference: { state: "Configured", value: current.taxConfigurationReference },
     brandBaseVersionReference: { state: "Configured", value: current.brandBaseVersionReference },
     exceptions:
@@ -2331,7 +2370,11 @@ export function StoreSetupLiveSettings({
       content.effectiveUntil.state === "Configured" &&
       content.effectiveUntil.value === null;
   const hours = same(content.weeklySchedule, current.weeklySchedule);
-  const complete = tax && brand && closures && start;
+  // The live operating settings the setup has none of yet (filled in by the button below).
+  const missingOperating = liveOperatingFields.filter(
+    (field) => content[field].state !== "Configured",
+  );
+  const complete = tax && brand && closures && start && missingOperating.length === 0;
   return (
     <section aria-label="Settings from the live Store">
       <h4>Settings from the live Store</h4>
@@ -2354,6 +2397,13 @@ export function StoreSetupLiveSettings({
             : "not set yet"}
         </li>
         <li>Takes effect: {start ? "as soon as it is published" : "not set yet"}</li>
+        {missingOperating.length > 0 && (
+          <li>
+            Time zone, business day start, service modes, opening hours and order limits not set in
+            this setup: the live Store&rsquo;s are used when you choose &ldquo;Use the live
+            Store&rsquo;s settings&rdquo;.
+          </li>
+        )}
         <li>
           Opening hours:{" "}
           {hours

@@ -354,7 +354,7 @@ export function createPostgresBrandStoreTopologyDraftStore(
     await restore();
     const data = rows(
       await query(
-        `SELECT ${revisionColumns} FROM bop_tenant.brand_store_topology_draft_revision WHERE tenant_id=$1 AND brand_id=$2 ORDER BY revision DESC LIMIT 1`,
+        `SELECT ${revisionColumns} FROM bop_tenant.brand_store_topology_draft_revision WHERE tenant_id=$1 AND brand_id=$2 ORDER BY brand_store_topology_draft_revision.revision DESC LIMIT 1`,
         [fixed.tenantReference, fixed.brandReference],
       ),
     );
@@ -380,7 +380,7 @@ export function createPostgresBrandStoreTopologyDraftStore(
       return fail();
     const data = rows(
       await query(
-        `SELECT ${revisionColumns} FROM bop_tenant.brand_store_topology_draft_revision WHERE tenant_id=$1 AND brand_id=$2 ORDER BY revision ASC LIMIT 1001`,
+        `SELECT ${revisionColumns} FROM bop_tenant.brand_store_topology_draft_revision WHERE tenant_id=$1 AND brand_id=$2 ORDER BY brand_store_topology_draft_revision.revision ASC LIMIT 1001`,
         [fixed.tenantReference, fixed.brandReference],
       ),
       1000,

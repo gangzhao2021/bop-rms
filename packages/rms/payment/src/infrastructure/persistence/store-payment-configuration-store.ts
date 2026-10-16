@@ -293,7 +293,7 @@ export function createPostgresStorePaymentConfigurationStore(
     await restore();
     const found = rows(
       await query(
-        `SELECT ${versionColumns} FROM rms_payment.store_payment_configuration_version WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 ORDER BY revision DESC LIMIT 1`,
+        `SELECT ${versionColumns} FROM rms_payment.store_payment_configuration_version WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 ORDER BY store_payment_configuration_version.revision DESC LIMIT 1`,
         [fixed.tenantReference, fixed.brandReference, fixed.storeReference],
       ),
     );

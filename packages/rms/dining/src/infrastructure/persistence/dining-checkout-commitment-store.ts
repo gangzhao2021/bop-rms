@@ -183,7 +183,7 @@ export function createPostgresDiningCheckoutCommitmentStore(
   async function history(tx: DiningTableTransaction, reference: string) {
     const found = rows(
       await tx.query(
-        "SELECT record_json AS record,version::text AS version FROM rms_dining.dining_checkout_commitment WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND commitment_id=$4 ORDER BY version",
+        "SELECT record_json AS record,version::text AS version FROM rms_dining.dining_checkout_commitment WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND commitment_id=$4 ORDER BY dining_checkout_commitment.version",
         [tenant, brand, store, reference],
       ),
       3,

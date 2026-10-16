@@ -15,8 +15,8 @@ vi.mock("@bop/publishing", async (importOriginal) => ({
   createPostgresPublishingMutationStore: () => ({
     resolveCurrentRelease: sources.current,
     resolvePublishedRelease: sources.published,
-    resolveCurrentReleaseIndependentApproval: sources.currentIndependent,
-    resolvePublishedReleaseIndependentApproval: sources.publishedIndependent,
+    resolveCurrentReleaseRecordedApproval: sources.currentIndependent,
+    resolvePublishedReleaseRecordedApproval: sources.publishedIndependent,
   }),
   createPostgresCurrentLiveGateSource: () => sources.liveGate,
 }));
@@ -205,7 +205,7 @@ function packet(
 }
 function independent(current: ReturnType<typeof packet>) {
   return {
-    profile: "RecordedReleasedIndependentPublishingApprovalV1",
+    profile: "RecordedReleasedPublishingApprovalV1",
     tenantReference: parsePublishingReference(id(16)),
     scope: current.release.scope,
     familyReference: current.release.familyReference,

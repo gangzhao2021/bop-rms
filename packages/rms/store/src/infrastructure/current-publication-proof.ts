@@ -7,6 +7,7 @@ import {
 } from "@bop/publishing";
 import { parseCanonicalInstant, parseBrandReference, parseStoreReference } from "@bop/tenant";
 import { createPostgresStorePublicationContentSource } from "./persistence/publication-content-source.js";
+import { readStoreConfigurationSoleOperatorApproval } from "./persistence/store-configuration-sole-operator-store.js";
 import {
   createStoreConfigurationVersion,
   validateStoreConfigurationForPublication,
@@ -126,7 +127,6 @@ function publicationAuthorization(
         // Verify them against the actual release/evidence instead of the digest.
         if (
           configuration.setupBasis.tenantReference !== tenant ||
-          String(configuration.authoredByReference) === String(approval.approvedActorReference) ||
           current.lifecycle.state !== "Published" ||
           current.lifecycle.lifecycleId !== release.sourceLifecycleId ||
           current.lifecycle.snapshotReference !== release.snapshotReference ||
@@ -187,13 +187,45 @@ function publicationAuthorization(
           requiredCheckCodes,
           observedAt: at,
         };
+        // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: the recorded review is read as it is; an approver
+        // who also created or sent the configuration is accepted only with the Store's recorded
+        // sole-operator approval of exactly this approval.
         const original =
           basis === "Current"
-            ? await publishing.resolveCurrentReleaseIndependentApproval(independence)
-            : await publishing.resolvePublishedReleaseIndependentApproval({
+            ? await publishing.resolveCurrentReleaseRecordedApproval(independence)
+            : await publishing.resolvePublishedReleaseRecordedApproval({
                 ...independence,
                 publicationReference: release.releaseId,
               });
+        const sameActor =
+          original.recordedIndependence !== "Verified" ||
+          original.requestedByActorReference === original.approvedByActorReference ||
+          original.authoredByActorReference === original.approvedByActorReference ||
+          String(configuration.authoredByReference) === String(original.approvedByActorReference);
+        if (
+          original.profile !== "RecordedReleasedPublishingApprovalV1" ||
+          original.recordedIndependence !==
+            (original.requestedByActorReference === original.approvedByActorReference ||
+            original.authoredByActorReference === original.approvedByActorReference
+              ? "SameActor"
+              : "Verified")
+        )
+          throw new Error();
+        if (sameActor) {
+          const mark = await readStoreConfigurationSoleOperatorApproval(tx, {
+            brandReference: scope.brandReference,
+            storeReference: String(scope.storeReference),
+            configurationReference: configuration.configurationReference,
+          });
+          if (
+            mark === null ||
+            mark.actorReference !== String(original.approvedByActorReference) ||
+            mark.approvalEvidenceReference !== String(original.approvalEvidenceReference) ||
+            mark.operationReference !== String(original.approvalOperationReference) ||
+            mark.approvedAt !== String(approval.approvedAt)
+          )
+            throw new Error();
+        }
         if (
           original.tenantReference !== tenant ||
           !sameScope(original.scope) ||
@@ -205,16 +237,12 @@ function publicationAuthorization(
           original.snapshotDigest !== contentDigest ||
           String(original.observedAt) !== String(at) ||
           String(original.approvedByActorReference) !== String(configuration.approvedByReference) ||
-          original.requestedByActorReference === original.approvedByActorReference ||
-          original.authoredByActorReference === original.approvedByActorReference ||
-          String(configuration.authoredByReference) === original.approvedByActorReference ||
           String(original.approvalEvidenceReference) !==
             String(configuration.approvalEvidenceReference) ||
           original.validationEvidenceReference !== validation.evidenceReference ||
           original.reviewVersion !== approval.reviewVersion ||
           original.approvedLifecycleVersion !== original.reviewVersion + 1 ||
           current.lifecycle.version !== original.approvedLifecycleVersion + 1 ||
-          original.recordedIndependence !== "Verified" ||
           JSON.stringify(original.validationCheckCodes) !== JSON.stringify(requiredCheckCodes) ||
           JSON.stringify(reviewCodes()) !== JSON.stringify(requiredCheckCodes) ||
           JSON.stringify(ordered(original.currentRelease)) !== JSON.stringify(ordered(current))
@@ -433,7 +461,6 @@ export function createPostgresStoreV2ApprovalAuthorization(
         candidate.brandReference !== scope.brandReference ||
         candidate.storeReference !== scope.storeReference ||
         candidate.updatedAt > at ||
-        candidate.approvedByReference === candidate.authoredByReference ||
         new Set(codes).size !== codes.length ||
         !/^sha256:[0-9a-f]{64}$/u.test(digest)
       )
@@ -451,7 +478,9 @@ export function createPostgresStoreV2ApprovalAuthorization(
           observedAt: at,
         },
         current = await owner.resolvePublicationCandidate(query),
-        independent = await owner.resolveCurrentIndependentApproval({
+        // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: read as recorded; an approval by the person who
+        // created or sent the configuration needs its recorded sole-operator approval (below).
+        independent = await owner.resolveCurrentRecordedApproval({
           ...query,
           snapshotReference: candidate.configurationReference,
           snapshotDigest: digest,
@@ -461,7 +490,7 @@ export function createPostgresStoreV2ApprovalAuthorization(
         validation = current.validationEvidence,
         head = current.lifecycle;
       if (
-        independent.profile !== "CurrentIndependentPublishingApprovalV1" ||
+        independent.profile !== "CurrentRecordedPublishingApprovalV1" ||
         independent.scope.kind !== scope.kind ||
         independent.scope.brandReference !== scope.brandReference ||
         independent.scope.storeReference !== scope.storeReference ||
@@ -498,12 +527,31 @@ export function createPostgresStoreV2ApprovalAuthorization(
         independent.approvalEvidenceReference !== approval.evidenceReference ||
         independent.validationEvidenceReference !== validation.evidenceReference ||
         independent.approvedByActorReference !== approval.approvedActorReference ||
-        independent.requestedByActorReference === approval.approvedActorReference ||
-        independent.recordedIndependence !== "Verified" ||
+        independent.recordedIndependence !==
+          (independent.requestedByActorReference === approval.approvedActorReference
+            ? "SameActor"
+            : "Verified") ||
         independent.snapshotDigest !== digest ||
         JSON.stringify(independent.validationCheckCodes) !== JSON.stringify(codes)
       )
         throw new Error();
+      if (
+        independent.recordedIndependence !== "Verified" ||
+        candidate.approvedByReference === candidate.authoredByReference
+      ) {
+        const mark = await readStoreConfigurationSoleOperatorApproval(tx, {
+          brandReference: scope.brandReference,
+          storeReference: String(scope.storeReference),
+          configurationReference: candidate.configurationReference,
+        });
+        if (
+          mark === null ||
+          mark.actorReference !== String(candidate.approvedByReference) ||
+          mark.approvalEvidenceReference !== String(approval.evidenceReference) ||
+          mark.approvedAt !== String(approval.approvedAt)
+        )
+          throw new Error();
+      }
       if (
         options.authorize !== authorize ||
         options.hashContent !== hashContent ||

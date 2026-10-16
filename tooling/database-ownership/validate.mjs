@@ -1078,6 +1078,22 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "rms_pricing" &&
           module.manifest.ownedDatabase?.tables?.includes("price_book_sole_operator_approval") &&
           moduleRelative === "src/infrastructure/persistence/price-book-sole-operator-store.ts";
+        // WP-2423 (Owner decision 2026-10-16): Store configuration sole-operator approval mark.
+        const acceptedStoreConfigurationSoleOperatorAsset =
+          module.packageName === "@rms/store" &&
+          module.manifest.ownedDatabase?.schema === "rms_store" &&
+          module.manifest.ownedDatabase?.tables?.includes(
+            "store_configuration_sole_operator_approval",
+          ) &&
+          moduleRelative ===
+            "src/infrastructure/persistence/store-configuration-sole-operator-store.ts";
+        // WP-2423 (v15 D2/D3): withdrawal or decline of an unpublished Store configuration.
+        const acceptedStoreConfigurationWithdrawalAsset =
+          module.packageName === "@rms/store" &&
+          module.manifest.ownedDatabase?.schema === "rms_store" &&
+          module.manifest.ownedDatabase?.tables?.includes("store_configuration_withdrawal") &&
+          moduleRelative ===
+            "src/infrastructure/persistence/store-configuration-withdrawal-store.ts";
         const acceptedMenuSoleOperatorAsset =
           module.packageName === "@rms/catalog" &&
           module.manifest.ownedDatabase?.schema === "rms_catalog" &&
@@ -3471,6 +3487,8 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedBrandSoleOperatorSettingAsset &&
           !acceptedPriceBookSoleOperatorAsset &&
           !acceptedMenuSoleOperatorAsset &&
+          !acceptedStoreConfigurationSoleOperatorAsset &&
+          !acceptedStoreConfigurationWithdrawalAsset &&
           !acceptedBrandLifecycleAsset &&
           !acceptedBrandConfigurationAuthoringAsset &&
           !acceptedPlatformBrandTemplateAsset &&

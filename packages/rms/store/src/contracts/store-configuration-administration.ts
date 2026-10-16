@@ -369,7 +369,10 @@ export function createStoreConfigurationVersion(value: unknown): StoreConfigurat
     (effectiveUntil !== null && Date.parse(effectiveUntil) <= Date.parse(effectiveFrom)) ||
     Date.parse(updatedAt) < Date.parse(createdAt) ||
     (approved === null) !== (approvalEvidence === null) ||
-    approved === authored ||
+    // WP-2423 DEC-SOLE-OPERATOR-APPROVAL (2026-10-16): only a configuration from Store setup may
+    // carry its own author as approver, and only where a sole-operator approval is recorded for it
+    // (checked by every approval, publication and runtime reader, and by the database).
+    (approved === authored && basis === undefined) ||
     (unapproved && (approved !== null || publication !== null || liveGate !== null)) ||
     (lifecycle === "Approved" &&
       (approved === null || publication !== null || liveGate !== null)) ||

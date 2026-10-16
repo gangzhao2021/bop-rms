@@ -1,6 +1,7 @@
 import { parseCanonicalInstant } from "@bop/tenant";
 import { createPostgresStoreConfigurationAdministration } from "./persistence/configuration-authoring-store.js";
 import { createPostgresStorePublicationMaterializer } from "./persistence/publication-materializer.js";
+import { readStoreConfigurationWithdrawal } from "./persistence/store-configuration-withdrawal-store.js";
 import {
   createPostgresStoreApprovalAuthorization,
   createPostgresStoreV2ApprovalAuthorization,
@@ -115,6 +116,15 @@ export function createPersistentStoreConfigurationAdministration(
               },
             },
             publishing: { validate: verify },
+            // WP-2423 (v15 D2/D3): the Store's withdrawal record of its latest configuration.
+            withdrawals: {
+              isWithdrawn: async (configuration) =>
+                (await readStoreConfigurationWithdrawal(transaction, {
+                  brandReference: options.brandReference,
+                  storeReference: options.storeReference,
+                  configurationReference: configuration.configurationReference,
+                })) !== null,
+            },
             // Combined authority is fenced for this exact candidate in this transaction.
             liveGate: { validate: async (configuration) => verified === configuration },
           };

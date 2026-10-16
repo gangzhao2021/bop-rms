@@ -8,6 +8,7 @@ import {
   createPostgresStoreConfigurationAuthoringSource,
   createStoreConfigurationVersion,
   createStoreConfigurationPublicationHash,
+  readStoreConfigurationWithdrawal,
   StoreConfigurationAdministrationServiceError,
 } from "@rms/store";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
@@ -380,9 +381,31 @@ export function createMerchantStoreConfiguration(options: {
               current.setupBasis.tenantReference !== scope.selected.tenantReference)
           )
             throw new Error("STORE_CONFIGURATION_READ_UNAVAILABLE");
+          // WP-2423 (v15 D2/D3): staff see whose change is open and whether it was withdrawn or
+          // declined, so no one replaces another person's open change without knowing it.
+          const withdrawal =
+            latest !== null &&
+            (latest.lifecycle === "Draft" ||
+              latest.lifecycle === "PendingApproval" ||
+              latest.lifecycle === "Approved")
+              ? await readStoreConfigurationWithdrawal(tx, {
+                  brandReference: scope.context.brand.brandReference,
+                  storeReference: scope.store.storeReference,
+                  configurationReference: latest.configurationReference,
+                })
+              : null;
           return Object.freeze({
             screenId: "STORE-HOURS-SERVICE" as const,
             storeReference: scope.store.storeReference,
+            viewerActorReference: String(scope.actorReference),
+            latestWithdrawal:
+              withdrawal === null
+                ? null
+                : Object.freeze({
+                    kind: withdrawal.kind,
+                    withdrawnAt: withdrawal.withdrawnAt,
+                    byYou: withdrawal.actorReference === String(scope.actorReference),
+                  }),
             current,
             latest,
             expectedVersion: latest?.configurationVersion ?? current?.configurationVersion ?? 0,

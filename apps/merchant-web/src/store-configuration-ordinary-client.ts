@@ -317,6 +317,44 @@ export class StoreConfigurationPublicationNotOfferedError extends Error {
   }
 }
 const ordinaryReadPath = "/merchant/store-configuration/ordinary?expectedStoreReference=";
+/** WP-2423 DEC-SOLE-OPERATOR-APPROVAL: why the Owner's own approval was refused, if it says so. */
+async function soleOperatorRefusal(
+  response: Response,
+): Promise<"SoleOperatorNotInEffect" | "SoleOperatorNeedsVerification" | null> {
+  try {
+    const text = await response.text();
+    if (text.length > 4096) return null;
+    const error = (JSON.parse(text) as { error?: unknown } | null)?.error;
+    return error === "sole_operator_not_in_effect"
+      ? "SoleOperatorNotInEffect"
+      : error === "sole_operator_needs_verification"
+        ? "SoleOperatorNeedsVerification"
+        : null;
+  } catch {
+    return null;
+  }
+}
+/** WP-2423 (v15 D2/D3): a refusal the Owner can act on, if the answer names it. */
+async function ordinaryConflictReason(
+  response: Response,
+): Promise<"SetupIncomplete" | "SetupOutdated" | "OpenChangeByAnother" | "Withdrawn" | null> {
+  try {
+    const text = await response.text();
+    if (text.length > 4096) return null;
+    const error = (JSON.parse(text) as { error?: unknown } | null)?.error;
+    return error === "store_setup_incomplete"
+      ? "SetupIncomplete"
+      : error === "store_setup_outdated"
+        ? "SetupOutdated"
+        : error === "open_change_by_another"
+          ? "OpenChangeByAnother"
+          : error === "store_configuration_withdrawn"
+            ? "Withdrawn"
+            : null;
+  } catch {
+    return null;
+  }
+}
 /** Actual ordinary routes share the /merchant BFF mount. No configuration body,
  * allocation metadata or original intent appears in a recovery URL. */
 export function createStoreConfigurationOrdinaryClient(fetcher: typeof fetch = fetch) {
@@ -389,8 +427,10 @@ export function createStoreConfigurationOrdinaryClient(fetcher: typeof fetch = f
         )
           return unknown();
       }
-      if (response.status === 403) return fail("Denied");
-      if (response.status === 409) return fail("Conflict");
+      if (response.status === 403)
+        return fail((mutating ? await soleOperatorRefusal(response) : null) ?? "Denied");
+      if (response.status === 409)
+        return fail((mutating ? await ordinaryConflictReason(response) : null) ?? "Conflict");
       if (response.status === 400) return fail("Invalid");
       if (response.status === 404 && !mutating && path.startsWith(ordinaryReadPath))
         throw new StoreConfigurationPublicationNotOfferedError();
@@ -548,6 +588,8 @@ export function createStoreConfigurationOrdinaryClient(fetcher: typeof fetch = f
     async execute(
       value: PreparedStoreConfigurationOrdinaryCommand,
       options: WriteOptions,
+      /** WP-2423: "SoleOperator" when the Owner approves their own configuration alone. */
+      approvalMode?: "SoleOperator",
     ): Promise<StoreConfigurationOrdinaryReceipt> {
       const r = safe(() =>
           record(copyProductCommandValue(value), ["command", "cursor", "intentDigest"]),
@@ -559,13 +601,18 @@ export function createStoreConfigurationOrdinaryClient(fetcher: typeof fetch = f
       if (
         canonical(scopeOf(cursor)) !== canonical(state.scope) ||
         r.intentDigest !== cursor.intentDigest ||
-        canonical(r.command) !== canonical(commandFrom(cursor))
+        canonical(r.command) !== canonical(commandFrom(cursor)) ||
+        (approvalMode !== undefined &&
+          (approvalMode !== "SoleOperator" || cursor.action !== "Approve"))
       )
         return fail();
       const raw = await request(
         "/merchant/store-configuration/ordinary-command",
         state,
-        { command: commandFrom(cursor) },
+        {
+          command: commandFrom(cursor),
+          ...(approvalMode === undefined ? {} : { approvalMode }),
+        },
         true,
       );
       return terminal(raw, cursor, state);

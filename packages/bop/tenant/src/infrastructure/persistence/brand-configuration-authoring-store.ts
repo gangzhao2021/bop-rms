@@ -416,7 +416,7 @@ export function createPostgresBrandConfigurationAuthoringStore(
     await restore();
     const found = rows(
       await query(
-        `SELECT ${legacyColumns} FROM bop_tenant.brand_configuration_version WHERE brand_id=$1 ORDER BY configuration_version DESC LIMIT 1`,
+        `SELECT ${legacyColumns} FROM bop_tenant.brand_configuration_version WHERE brand_id=$1 ORDER BY brand_configuration_version.configuration_version DESC LIMIT 1`,
         [fixed.brandReference],
       ),
     );
@@ -590,7 +590,7 @@ export function createPostgresBrandConfigurationAuthoringStore(
     await restore();
     const data = rows(
       await query(
-        `SELECT ${revisionColumns} FROM bop_tenant.brand_configuration_authoring_revision WHERE tenant_id=$1 AND brand_id=$2 ORDER BY revision DESC LIMIT 1`,
+        `SELECT ${revisionColumns} FROM bop_tenant.brand_configuration_authoring_revision WHERE tenant_id=$1 AND brand_id=$2 ORDER BY brand_configuration_authoring_revision.revision DESC LIMIT 1`,
         [fixed.tenantReference, fixed.brandReference],
       ),
     );
@@ -604,7 +604,7 @@ export function createPostgresBrandConfigurationAuthoringStore(
     await restore();
     const data = rows(
       await query(
-        `SELECT ${revisionColumns} FROM bop_tenant.brand_configuration_authoring_revision WHERE tenant_id=$1 AND brand_id=$2 AND ($3::integer IS NULL OR revision<$3) ORDER BY revision DESC LIMIT 3`,
+        `SELECT ${revisionColumns} FROM bop_tenant.brand_configuration_authoring_revision WHERE tenant_id=$1 AND brand_id=$2 AND ($3::integer IS NULL OR revision<$3) ORDER BY brand_configuration_authoring_revision.revision DESC LIMIT 3`,
         [fixed.tenantReference, fixed.brandReference, before],
       ),
       3,

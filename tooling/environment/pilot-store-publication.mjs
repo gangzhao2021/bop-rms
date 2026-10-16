@@ -13,6 +13,7 @@ import {
 import { createPostgresCurrentLiveGateSource } from "../../packages/bop/publishing/src/index.ts";
 import { currentStoreTaxConfigurationReference } from "../../packages/rms/pricing/src/index.ts";
 import { appendAuditRecordInTransaction, sha256Hex } from "../../packages/bop/audit/src/index.ts";
+import { createInternalRefundWorkforceContext } from "./pilot-refund-workforce.mjs";
 import {
   storeConfigurationContentHash,
   storeConfigurationSetupSnapshotReferences,
@@ -22,7 +23,8 @@ import {
 /**
  * WP-2423 DEC-STORE-SETUP-PUBLICATION: the Owner publishes a Store setup draft as the Store's
  * configuration (Store setup step 8): create from the saved setup, send for approval, another
- * person with Owner access approves, publish. Versions stay append-only with Publishing review
+ * person with Owner access approves (or, Owner decision 2026-10-16, the Owner alone while sole
+ * operator is in effect for them, re-verified within 15 minutes and recorded as such), publish. Versions stay append-only with Publishing review
  * records and audit. The checks every publication must pass are read in product (tax settings in
  * force, Brand settings unchanged, the Store's own time zone, opening hours, a start that is not in
  * the future, fees, and the Store's approved go-live check); the saved address, contact, payment
@@ -212,6 +214,23 @@ export async function createInternalStoreConfigurationOrdinary(
     actionPermissions: storeConfigurationPublicationPermissions,
     nextReference: () => resources.credentials.reference(),
     v2: createStoreConfigurationV2Ports(resources, context),
+    // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: who else at the Store holds Store configuration
+    // approval, each member read from Identity, Membership and Permission as an approval would be.
+    soleOperator: {
+      resolveContext: (tx, scope) =>
+        createInternalRefundWorkforceContext({
+          expected: {
+            tenantReference: scope.selected.tenantReference,
+            brandReference: scope.context.brand.brandReference,
+            storeReference: scope.store.storeReference,
+          },
+          persistence,
+          sessionActorReference: String(scope.actorReference),
+          sessionContext: async () => scope.context,
+          current: async (t) => t === tx && (await scope.allowed()),
+          permissions: ["store.service.approve"],
+        }),
+    },
     configure: (tx, scope, sourceHost) => {
       const authorize = async (transaction, at) =>
         (await scope.allowed()) && (await operating.authorize(transaction, at));
@@ -290,7 +309,13 @@ export async function createInternalStoreConfigurationOrdinary(
               targetType: "StoreConfiguration",
               targetId: input.operation.configuration.configurationReference,
               correlationId: input.operation.operationReference,
-              reasonCode: "STORE_SETUP_PUBLICATION",
+              // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: the Owner's own approval, given alone.
+              ...(input.approvalMode === "SoleOperator"
+                ? {
+                    reasonCode: "STORE_SETUP_PUBLICATION_SOLE_OPERATOR",
+                    afterSummary: { approvalMode: "SoleOperator" },
+                  }
+                : { reasonCode: "STORE_SETUP_PUBLICATION" }),
               occurredAt: input.audit.occurredAt,
             }),
           ),

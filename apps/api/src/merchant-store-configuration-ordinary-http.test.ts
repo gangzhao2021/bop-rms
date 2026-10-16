@@ -13,6 +13,7 @@ import {
 } from "@rms/store";
 import { createApp } from "./app.js";
 import { parseMerchantStoreConfigurationOrdinaryWorkspace } from "./merchant-store-configuration-ordinary-values.js";
+import { MerchantSoleOperatorGateError } from "./merchant-sole-operator.js";
 import type { MerchantBffService, MerchantStoreConfigurationOrdinaryPort } from "./merchant-bff.js";
 // Actual App/listener/middleware; controlled public host outputs are transport
 // evidence only, not native Session/IAM/Store/Core/Publishing qualification.
@@ -477,6 +478,57 @@ it("maps actual Administration gates without exposing internal errors", async ()
   const reply = await send(h.root);
   expect(reply.status).toBe(503);
   expect(reply.raw).not.toContain("Synthetic internal detail");
+});
+it("forwards only an explicit sole-operator approval and names its refusals (WP-2423)", async () => {
+  const endpoint = port(),
+    h = await serve(endpoint);
+  expect((await send(h.root, { body: { command, approvalMode: "SoleOperator" } })).status).toBe(
+    200,
+  );
+  expect(endpoint.write).toHaveBeenLastCalledWith({
+    sessionCookie: cookie,
+    csrf,
+    command,
+    expectedScope: scope,
+    approvalMode: "SoleOperator",
+  });
+  const calls = endpoint.write.mock.calls.length;
+  for (const approvalMode of ["Independent", null, ""])
+    expect((await send(h.root, { body: { command, approvalMode } })).status).toBe(400);
+  expect(endpoint.write).toHaveBeenCalledTimes(calls);
+  for (const [code, error] of [
+    ["NotInEffect", "sole_operator_not_in_effect"],
+    ["NeedsReverification", "sole_operator_needs_verification"],
+  ] as const) {
+    endpoint.write.mockRejectedValueOnce(new MerchantSoleOperatorGateError(code));
+    const reply = await send(h.root, { body: { command, approvalMode: "SoleOperator" } });
+    expect(reply.status).toBe(403);
+    expect(reply.body).toEqual({ error });
+  }
+});
+it("names the refusals an Owner can act on (WP-2423 v15 D2/D3)", async () => {
+  const endpoint = port(),
+    h = await serve(endpoint);
+  const { StoreConfigurationAdministrationServiceError } = await import("@rms/store");
+  for (const [error, reason] of [
+    [new StoreSetupOperationError("STORE_SETUP_OPERATION_INCOMPLETE"), "store_setup_incomplete"],
+    [new StoreSetupOperationError("STORE_SETUP_OPERATION_OUTDATED"), "store_setup_outdated"],
+    [
+      new StoreConfigurationAdministrationServiceError(
+        "STORE_CONFIGURATION_OPEN_CHANGE_BY_ANOTHER",
+      ),
+      "open_change_by_another",
+    ],
+    [
+      new StoreConfigurationAdministrationServiceError("STORE_CONFIGURATION_WITHDRAWN"),
+      "store_configuration_withdrawn",
+    ],
+  ] as const) {
+    endpoint.write.mockRejectedValueOnce(error);
+    const reply = await send(h.root);
+    expect(reply.status).toBe(409);
+    expect(reply.body).toEqual({ error: reason });
+  }
 });
 it("rejects wrong returned Actor, malformed clock and expired/unknown workspace", async () => {
   const endpoint = port(),

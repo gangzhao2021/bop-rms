@@ -302,8 +302,18 @@ export interface StoreConfigurationView {
   readonly latest: StoreConfigurationSnapshot | null;
   readonly expectedVersion: number;
   readonly observedAt: string;
+  /** WP-2423 (v15 D2/D3): the signed-in person, so the screen says whose change is open. */
+  readonly viewerActorReference?: string;
+  /** Present when the latest change (not published) was withdrawn by its author or declined. */
+  readonly latestWithdrawal?: {
+    readonly kind: "Withdrawn" | "Declined";
+    readonly withdrawnAt: string;
+    readonly byYou: boolean;
+  } | null;
 }
 export function parseStoreConfigurationView(raw: unknown, store: string): StoreConfigurationView {
+  const extended =
+    raw !== null && typeof raw === "object" && Object.hasOwn(raw, "viewerActorReference");
   const v = exact(raw, [
     "screenId",
     "storeReference",
@@ -311,6 +321,7 @@ export function parseStoreConfigurationView(raw: unknown, store: string): StoreC
     "latest",
     "expectedVersion",
     "observedAt",
+    ...(extended ? ["viewerActorReference", "latestWithdrawal"] : []),
   ]);
   if (v.screenId !== "STORE-HOURS-SERVICE" || !reference(store) || v.storeReference !== store)
     return invalid();
@@ -331,6 +342,27 @@ export function parseStoreConfigurationView(raw: unknown, store: string): StoreC
     v.expectedVersion !== (latest?.configurationVersion ?? current?.configurationVersion ?? 0)
   )
     return invalid();
+  let latestWithdrawal: StoreConfigurationView["latestWithdrawal"] = null;
+  if (extended && v.latestWithdrawal !== null) {
+    const w = exact(v.latestWithdrawal, ["kind", "withdrawnAt", "byYou"]);
+    if (
+      (w.kind !== "Withdrawn" && w.kind !== "Declined") ||
+      typeof w.byYou !== "boolean" ||
+      latest === null ||
+      latest.lifecycle === "Published"
+    )
+      return invalid();
+    latestWithdrawal = Object.freeze({
+      kind: w.kind,
+      withdrawnAt: instant(w.withdrawnAt),
+      byYou: w.byYou,
+    });
+  }
+  if (
+    extended &&
+    (typeof v.viewerActorReference !== "string" || !reference(v.viewerActorReference))
+  )
+    return invalid();
   return Object.freeze({
     screenId: "STORE-HOURS-SERVICE",
     storeReference: store,
@@ -338,6 +370,9 @@ export function parseStoreConfigurationView(raw: unknown, store: string): StoreC
     latest,
     expectedVersion: v.expectedVersion as number,
     observedAt,
+    ...(extended
+      ? { viewerActorReference: v.viewerActorReference as string, latestWithdrawal }
+      : {}),
   });
 }
 
@@ -368,6 +403,47 @@ export interface StoreHoursDraftCommand {
   readonly exceptions: StoreConfigurationSnapshot["exceptions"];
   /** The server time of the read the change was made from; it applies from then. */
   readonly effectiveFrom: string;
+}
+/** WP-2423 (v15 D3): another person's change is still open; it is never replaced silently. */
+export const OPEN_CHANGE_BY_ANOTHER_MESSAGE =
+  "Someone else's change to this Store's configuration is still waiting. It must be approved and published, or withdrawn or declined, before another change can be saved. Ask an Owner.";
+/** WP-2423 (v15 D2/D3): the change was withdrawn or declined and takes no further step. */
+export const STORE_CONFIGURATION_WITHDRAWN_MESSAGE =
+  "This change was withdrawn or declined. Make a new change instead.";
+/** WP-2423 (v15 D2/D3): withdraw your own open change, or decline someone else's (Owner). */
+export async function withdrawStoreConfiguration(
+  input: {
+    readonly configurationReference: string;
+    readonly configurationVersion: number;
+    readonly auditReference: string;
+  },
+  csrf: string,
+  fetcher: typeof fetch = fetch,
+): Promise<"Withdrawn" | "Declined"> {
+  const response = await fetcher("/merchant/store-configuration/withdrawal", {
+    method: "POST",
+    credentials: "same-origin",
+    cache: "no-store",
+    redirect: "error",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "X-BOP-CSRF": csrf,
+    },
+    body: JSON.stringify(input),
+  });
+  if (response.status === 403)
+    throw new Error("Permission denied. Only the person who made it, or an Owner, can do this.");
+  if (response.status === 409) throw new Error("Source changed. Refresh before trying again.");
+  if (!response.ok || response.headers.get("cache-control") !== "no-store")
+    throw new Error("Configuration request unavailable.");
+  const body = exact(await response.json(), ["status", "kind"]);
+  if (
+    !["Applied", "AlreadyApplied"].includes(String(body.status)) ||
+    (body.kind !== "Withdrawn" && body.kind !== "Declined")
+  )
+    throw new Error("Configuration request unavailable.");
+  return body.kind;
 }
 /** WP-2423 Q4: Store setup holds saved changes the latest configuration does not include. */
 export const STORE_SETUP_UNPUBLISHED_MESSAGE =
@@ -408,14 +484,15 @@ export function createStoreConfigurationClient(fetcher: typeof fetch = fetch) {
         );
       if (response.status === 409) {
         const answer: unknown = await response.json().catch(() => null);
-        if (
-          hours &&
-          answer !== null &&
-          typeof answer === "object" &&
-          Object.getOwnPropertyDescriptor(answer, "error")?.value ===
-            "store_setup_has_unpublished_changes"
-        )
+        const error =
+          answer !== null && typeof answer === "object"
+            ? Object.getOwnPropertyDescriptor(answer, "error")?.value
+            : undefined;
+        if (hours && error === "store_setup_has_unpublished_changes")
           throw new Error(STORE_SETUP_UNPUBLISHED_MESSAGE);
+        if (error === "open_change_by_another") throw new Error(OPEN_CHANGE_BY_ANOTHER_MESSAGE);
+        if (error === "store_configuration_withdrawn")
+          throw new Error(STORE_CONFIGURATION_WITHDRAWN_MESSAGE);
         throw new Error("Source changed. Refresh before trying again.");
       }
       // WP-2423 Q4: the change itself was not accepted; keep the form so staff can correct it.

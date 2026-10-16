@@ -8,6 +8,8 @@ const refundPermissions = ["payment.refund.request", "payment.refund.approve"];
  * recorded approver) is resolved through the Identity roster (`currentActor`) for request/approve
  * facts only, with Membership, Permission and MFA then read from their owners for that person.
  * Execution is never resolved for anyone but the signed-in actor; no session is borrowed.
+ * `permissions` (WP-2423 DEC-SOLE-OPERATOR-APPROVAL) names another approval permission set this
+ * context answers for instead (Store configuration approval); execution is then never answered.
  */
 export function createInternalRefundWorkforceContext({
   expected,
@@ -15,6 +17,7 @@ export function createInternalRefundWorkforceContext({
   sessionActorReference,
   sessionContext,
   current,
+  permissions = null,
 }) {
   const deny = () => {
     throw new Error("INTERNAL_REFUND_WORKFORCE_DENIED");
@@ -24,13 +27,13 @@ export function createInternalRefundWorkforceContext({
       if (query[key] !== expected[key]) deny();
     const observedAt = parseCanonicalInstant(query.observedAt);
     const own = query.actorReference === sessionActorReference;
-    if (
-      !(own ? [...refundPermissions, "payment.refund.execute"] : refundPermissions).includes(
-        query.permissionCode,
-      ) ||
-      !(await current(tx, observedAt))
-    )
-      deny();
+    const answered =
+      permissions !== null
+        ? permissions
+        : own
+          ? [...refundPermissions, "payment.refund.execute"]
+          : refundPermissions;
+    if (!answered.includes(query.permissionCode) || !(await current(tx, observedAt))) deny();
     const context = await sessionContext(tx, observedAt);
     if (
       context.actor.actorReference !== sessionActorReference ||

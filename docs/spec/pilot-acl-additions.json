@@ -3204,6 +3204,42 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (WP-2423 store setup publication): each Store setup publication step (create, send, approve, publish) records its original request so a lost answer can be recovered"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_sole_operator_approval",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 sole operator store configuration): Owner decision 2026-10-16 (\"扩展独营自批（推荐）\") — an Owner running the Store alone approves their own Store configuration from Store setup, marked as sole operator"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_sole_operator_approval",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 sole operator store configuration): Owner decision 2026-10-16 (\"扩展独营自批（推荐）\") — an Owner running the Store alone approves their own Store configuration from Store setup, marked as sole operator"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_withdrawal",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 sole operator store configuration): v15 live check D2/D3 — a Store configuration change that is not published is withdrawn by its author or declined by an approver (append-only record), and no change silently replaces another person's open change"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_withdrawal",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 sole operator store configuration): v15 live check D2/D3 — a Store configuration change that is not published is withdrawn by its author or declined by an approver (append-only record), and no change silently replaces another person's open change"
     }
   ]
 }

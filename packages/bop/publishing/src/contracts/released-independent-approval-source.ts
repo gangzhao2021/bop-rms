@@ -49,3 +49,17 @@ export interface RecordedReleasedIndependentPublishingApproval {
   readonly referenceEligibility: "NotEvaluated";
   readonly eligibility: "NotEvaluated";
 }
+
+/**
+ * WP-2423 DEC-SOLE-OPERATOR-APPROVAL (Store configuration, 2026-10-16): the same recorded review
+ * history, reported as it is when the approver also created or submitted it ("SameActor").
+ * Publishing never certifies such an approval: a consumer accepts "SameActor" only with its own
+ * recorded sole-operator approval for that exact approval. Every other check is unchanged.
+ */
+export interface RecordedReleasedPublishingApproval extends Omit<
+  RecordedReleasedIndependentPublishingApproval,
+  "profile" | "recordedIndependence"
+> {
+  readonly profile: "RecordedReleasedPublishingApprovalV1";
+  readonly recordedIndependence: "Verified" | "SameActor";
+}

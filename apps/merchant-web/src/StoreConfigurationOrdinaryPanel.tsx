@@ -17,7 +17,10 @@ import {
   type StoreConfigurationPublicationCheckCode,
   type StoreConfigurationPublicationChecks,
 } from "./store-configuration-pending-journal.js";
-import type { StoreConfigurationSnapshot } from "./store-configuration-client.js";
+import {
+  withdrawStoreConfiguration,
+  type StoreConfigurationSnapshot,
+} from "./store-configuration-client.js";
 import {
   StoreSetupClientError,
   type StoreSetupScope,
@@ -33,6 +36,7 @@ import {
   storeConfigurationStateLabel,
 } from "./StoreConfigurationEditor.js";
 import { StaffTime } from "./StoreTime.js";
+import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
 /** Configuration steps in staff words (WP-2423: no command or outcome codes on screen). */
 const actionLabel: Record<string, string> = {
   Materialize: "Create configuration from saved setup",
@@ -56,6 +60,8 @@ const doneText: Record<string, string> = {
   Approve: "Configuration approved.",
   Publish: "Configuration published.",
 };
+/** WP-2423 DEC-SOLE-OPERATOR-APPROVAL: the Owner's own approval, given alone. */
+const soleOperatorDoneText = "Configuration approved by you alone as sole operator.";
 const outcomeText = (action: string, outcome: "Committed" | "Abandoned") =>
   outcome === "Committed"
     ? (doneText[action] ?? "Change recorded.")
@@ -185,6 +191,8 @@ export async function executeStoreConfigurationOriginal(input: {
   isCurrent: () => boolean;
   canDispatch: () => boolean;
   onReserved: (cursor: StoreConfigurationOriginalCursor) => void;
+  /** WP-2423: "SoleOperator" when the Owner approves their own configuration alone. */
+  approvalMode?: "SoleOperator";
 }) {
   const check = () => {
     if (!input.isCurrent() || input.signal.aborted) denied();
@@ -194,10 +202,11 @@ export async function executeStoreConfigurationOriginal(input: {
   input.onReserved(input.prepared.cursor);
   check();
   if (!input.canDispatch()) throw new StoreSetupClientError("Conflict");
-  const receipt = await input.client.execute(input.prepared, {
-    csrf: input.csrf,
-    signal: input.signal,
-  });
+  const receipt = await input.client.execute(
+    input.prepared,
+    { csrf: input.csrf, signal: input.signal },
+    input.approvalMode,
+  );
   check();
   const workspace = await input.client.refreshOriginal(input.prepared.cursor, {
     csrf: input.csrf,
@@ -221,6 +230,18 @@ const messages: Record<StoreSetupClientError["code"], string> = {
     "Store configuration could not be loaded. Try again; any request still waiting is kept.",
   NotRegistered: "No tax classifications are set up for this Brand yet.",
   FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
+  SoleOperatorNotInEffect:
+    "Sole operator is not in effect for you now (it is off, or someone else also holds Owner access here), so another person with Owner access must approve this. Recover the request, then refresh.",
+  SoleOperatorNeedsVerification:
+    "Your verification is more than 15 minutes old, so the approval was not recorded. Recover the request, verify again, then approve.",
+  SetupIncomplete:
+    "The saved setup still has settings that are not set, so nothing was created. Recover the request, finish those settings in the earlier steps and save, then create the configuration.",
+  SetupOutdated:
+    "The Store's configuration changed after this setup was saved, so nothing was created. Recover the request, save the setup again, then create the configuration.",
+  OpenChangeByAnother:
+    "Someone else's configuration change is still waiting, so nothing was created. Recover the request; then it must be approved and published, or declined, first.",
+  Withdrawn:
+    "This configuration was withdrawn or declined, so this step was not recorded. Recover the request, then create a new configuration from the saved setup.",
   OutcomeUnknown:
     "The result is unknown. Recover the original request before sending another command.",
 };
@@ -360,7 +381,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
       }
     }
   }
-  async function act(action: StoreConfigurationOrdinaryAction) {
+  async function act(action: StoreConfigurationOrdinaryAction, approvalMode?: "SoleOperator") {
     if (running.current || pending || freshDisabled.current || !workspace || !journal.current)
       return;
     const epoch = generation.current,
@@ -426,12 +447,55 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
         onReserved: (cursor) => {
           if (current()) setPending(cursor);
         },
+        ...(approvalMode === undefined ? {} : { approvalMode }),
       });
       setWorkspace(after);
       setPending(null);
-      setNotice(`${outcomeText(action, receipt.outcome)} Current configuration refreshed.`);
+      setNotice(
+        `${approvalMode !== undefined && receipt.outcome === "Committed" ? soleOperatorDoneText : outcomeText(action, receipt.outcome)} Current configuration refreshed.`,
+      );
     } catch (e) {
       if (current()) setError(message(e));
+    } finally {
+      if (current()) {
+        running.current = false;
+        setBusy(false);
+      }
+    }
+  }
+  /** WP-2423 (v15 D2/D3): withdraw your own open configuration, or decline someone else's. */
+  async function withdrawLatest() {
+    const target = workspace?.latest;
+    if (running.current || pending || !target) return;
+    const epoch = generation.current,
+      c = new AbortController();
+    controller.current?.abort();
+    controller.current = c;
+    running.current = true;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    const current = () => epoch === generation.current && !c.signal.aborted;
+    try {
+      const kind = await withdrawStoreConfiguration(
+        {
+          configurationReference: target.configurationReference,
+          configurationVersion: target.configurationVersion,
+          auditReference: serviceOperationReference(),
+        },
+        props.csrf,
+      );
+      const next = await client.load(props.scope, { signal: c.signal });
+      if (current()) {
+        setWorkspace(next);
+        setNotice(
+          kind === "Withdrawn"
+            ? `Version ${target.configurationVersion} withdrawn. You can create a new configuration from the saved setup.`
+            : `Version ${target.configurationVersion} declined. A new configuration can now be created from the saved setup.`,
+        );
+      }
+    } catch (e) {
+      if (current()) setError(e instanceof Error ? e.message : messages.Unavailable);
     } finally {
       if (current()) {
         running.current = false;
@@ -485,7 +549,37 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
     current = workspace?.current,
     checks = workspace?.publicationChecks,
     ready = checksPass(checks),
-    locked = busy || historyBusy || !!pending || !!props.freshDisabled;
+    locked = busy || historyBusy || !!pending || !!props.freshDisabled,
+    // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: the server says when the signed-in Owner created or sent
+    // the configuration awaiting approval, and whether they may approve it alone.
+    soleOperator = workspace?.soleOperator,
+    // WP-2423 (v15 D2/D3): the latest change that is not published — whose it is, and whether it
+    // was withdrawn or declined; and whether the saved setup is complete.
+    withdrawal = workspace?.latestWithdrawal,
+    openLatest =
+      latest !== null &&
+      latest !== undefined &&
+      withdrawal === undefined &&
+      (latest.lifecycle === "Draft" ||
+        latest.lifecycle === "PendingApproval" ||
+        latest.lifecycle === "Approved"),
+    openByAnother = openLatest && latest.authoredByReference !== props.scope.actorReference,
+    openYours = openLatest && latest.authoredByReference === props.scope.actorReference,
+    setupIncomplete =
+      props.saved !== null &&
+      (Object.values(props.saved.content).some((part) => part?.state === "Unconfigured") ||
+        (props.saved.content.feeContexts?.state === "Configured" &&
+          props.saved.content.feeContexts.value.some((fee) => fee.state === "Unconfigured"))),
+    // The setup builds on the configuration that was latest when it was saved.
+    setupOutdated =
+      props.saved !== null &&
+      workspace !== null &&
+      props.saved.baseConfigurationReference !==
+        ((latest ?? current)?.configurationReference ?? null),
+    ownChange =
+      withdrawal === undefined &&
+      latest?.lifecycle === "PendingApproval" &&
+      (soleOperator !== undefined || latest.authoredByReference === props.scope.actorReference);
   // WP-2423 Q15/Q16: no publication path in this deployment; no panel rather than an outage.
   if (notOffered) return null;
   return (
@@ -570,13 +664,83 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
                 ; after that, create it again from the saved setup.
               </p>
             )}
-          {latest?.lifecycle === "PendingApproval" &&
-            latest.authoredByReference === props.scope.actorReference && (
+          {withdrawal && latest && (
+            <p>
+              Version {latest.configurationVersion} was{" "}
+              {withdrawal.kind === "Withdrawn" ? "withdrawn" : "declined"}
+              {withdrawal.byYou ? " by you" : ""} <StaffTime instant={withdrawal.withdrawnAt} />. It
+              can no longer be approved or published; create a new configuration from the saved
+              setup.
+            </p>
+          )}
+          {openByAnother && latest && (
+            <section aria-label="Configuration waiting from someone else">
               <p>
-                Another person with Owner access must approve this configuration. You cannot approve
-                a change you made.
+                Version {latest.configurationVersion}, made by someone else, is{" "}
+                {storeConfigurationStateLabel(latest.lifecycle).toLowerCase()}. A new configuration
+                cannot be created until it is approved and published, or declined. Declining keeps
+                it in the history; the person who made it can make a new change.
               </p>
-            )}
+              <button type="button" disabled={locked} onClick={() => void withdrawLatest()}>
+                Decline version {latest.configurationVersion}
+              </button>
+            </section>
+          )}
+          {openYours && latest && (
+            <section aria-label="Your configuration waiting">
+              <p>
+                Your version {latest.configurationVersion} is{" "}
+                {storeConfigurationStateLabel(latest.lifecycle).toLowerCase()}. Creating a new
+                configuration from the saved setup replaces it; or withdraw it to stop it being
+                approved.
+              </p>
+              <button type="button" disabled={locked} onClick={() => void withdrawLatest()}>
+                Withdraw version {latest.configurationVersion}
+              </button>
+            </section>
+          )}
+          {setupOutdated && !openByAnother && (
+            <p>
+              The Store&rsquo;s configuration changed after this setup was saved. Save the setup
+              again (it then builds on the latest configuration) before creating a configuration.
+            </p>
+          )}
+          {setupIncomplete && (
+            <p>
+              The saved setup still has settings that are not set (see the list above). Finish them
+              in the earlier steps and save before creating a configuration.
+            </p>
+          )}
+          {ownChange && latest && soleOperator !== undefined && (
+            <section aria-label="Approve your own configuration">
+              <h4>Approval</h4>
+              <SoleOperatorSelfApproval
+                gate={soleOperator}
+                csrf={props.csrf}
+                summary={
+                  <p>
+                    Version {latest.configurationVersion}, created from saved setup
+                    {latest.setupBasis ? ` revision ${latest.setupBasis.sourceRevision}` : ""}.{" "}
+                    {ready
+                      ? "Every check above has passed."
+                      : "Some checks above still need attention."}{" "}
+                    Once approved, you can publish it to the live Store.
+                  </p>
+                }
+                what="this Store configuration"
+                permissionName="Owner access to this Store"
+                actionLabel="Approve configuration on my own"
+                busy={locked || !ready}
+                onApprove={() => void act("Approve", "SoleOperator")}
+              />
+            </section>
+          )}
+          {ownChange && soleOperator === undefined && (
+            <p>
+              Another person with Owner access must approve this configuration. You cannot approve a
+              change you made.
+            </p>
+          )}
           {workspace.original && (
             <p>
               Last request: {outcomeText(workspace.original.action, workspace.original.outcome)}{" "}
@@ -586,21 +750,23 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
           <div className="store-setup-actions">
             <button
               type="button"
-              disabled={locked || !props.saved}
+              disabled={locked || !props.saved || setupIncomplete || setupOutdated || openByAnother}
               onClick={() => void act("Materialize")}
             >
               Create configuration from saved setup
             </button>
             <button
               type="button"
-              disabled={locked || latest?.lifecycle !== "Draft"}
+              disabled={locked || withdrawal !== undefined || latest?.lifecycle !== "Draft"}
               onClick={() => void act("Validate")}
             >
               Validate configuration
             </button>
             <button
               type="button"
-              disabled={locked || latest?.lifecycle !== "Draft" || !ready}
+              disabled={
+                locked || withdrawal !== undefined || latest?.lifecycle !== "Draft" || !ready
+              }
               onClick={() => void act("Submit")}
             >
               Submit configuration for review
@@ -609,8 +775,9 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
               type="button"
               disabled={
                 locked ||
+                withdrawal !== undefined ||
                 latest?.lifecycle !== "PendingApproval" ||
-                latest.authoredByReference === props.scope.actorReference ||
+                ownChange ||
                 !ready
               }
               onClick={() => void act("Approve")}
@@ -619,7 +786,9 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
             </button>
             <button
               type="button"
-              disabled={locked || latest?.lifecycle !== "Approved" || !ready}
+              disabled={
+                locked || withdrawal !== undefined || latest?.lifecycle !== "Approved" || !ready
+              }
               onClick={() => void act("Publish")}
             >
               Publish Store configuration

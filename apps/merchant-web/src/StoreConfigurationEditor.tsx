@@ -8,7 +8,11 @@ import {
   type StoreConfigurationCommand,
   type StoreHoursDraftCommand,
   STORE_SETUP_UNPUBLISHED_MESSAGE,
+  OPEN_CHANGE_BY_ANOTHER_MESSAGE,
+  STORE_CONFIGURATION_WITHDRAWN_MESSAGE,
+  withdrawStoreConfiguration,
 } from "./store-configuration-client.js";
+import { StaffTime } from "./StoreTime.js";
 import {
   serviceOperationReference,
   type ServiceMode,
@@ -35,6 +39,29 @@ export function storeConfigurationStateLabel(
     case "Archived":
       return "Archived";
   }
+}
+/** WP-2423 (v15 D2/D3): the change a new edit starts from — the latest one unless it was
+ * withdrawn or declined, then the published configuration (nothing is carried unintentionally). */
+export function storeConfigurationEditBase(
+  view: StoreConfigurationView,
+): StoreConfigurationSnapshot | null {
+  return view.latestWithdrawal ? (view.current ?? view.latest) : (view.latest ?? view.current);
+}
+/** WP-2423 (v15 D2/D3): whose change is open (not published, not withdrawn), if any. */
+export function storeConfigurationOpenChange(
+  view: StoreConfigurationView,
+): "None" | "Yours" | "SomeoneElse" | "Unknown" {
+  const latest = view.latest;
+  if (
+    latest === null ||
+    view.latestWithdrawal ||
+    (latest.lifecycle !== "Draft" &&
+      latest.lifecycle !== "PendingApproval" &&
+      latest.lifecycle !== "Approved")
+  )
+    return "None";
+  if (view.viewerActorReference === undefined) return "Unknown";
+  return latest.authoredByReference === view.viewerActorReference ? "Yours" : "SomeoneElse";
 }
 const serviceModeLabel = (mode: ServiceMode) =>
   mode === "DineIn" ? "Dine-in" : mode === "Pickup" ? "Pickup" : "Delivery";
@@ -78,7 +105,7 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
       const next = await client.load(store, active.signal);
       if (active.signal.aborted) return;
       setView(next);
-      setDraft(next.latest ?? next.current);
+      setDraft(storeConfigurationEditBase(next));
       setMessage("Configuration loaded.");
     } catch {
       if (!active.signal.aborted)
@@ -179,7 +206,7 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
       const next = await client.load(store, active.signal);
       if (active.signal.aborted) return;
       setView(next);
-      setDraft(next.latest ?? next.current);
+      setDraft(storeConfigurationEditBase(next));
       setMessage(
         completedCommand === "Publish"
           ? "Configuration published."
@@ -201,13 +228,51 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
         setDraft(null);
       } else if (
         text.startsWith("Change not accepted") ||
-        text === STORE_SETUP_UNPUBLISHED_MESSAGE
+        text === STORE_SETUP_UNPUBLISHED_MESSAGE ||
+        text === OPEN_CHANGE_BY_ANOTHER_MESSAGE ||
+        text === STORE_CONFIGURATION_WITHDRAWN_MESSAGE
       ) {
         // WP-2423 Q4: a definite rejection; keep the form so staff can correct and save again.
         pending.current = null;
         setUncertain(false);
       } else setUncertain(pending.current !== null);
       setMessage(text);
+    } finally {
+      if (!active.signal.aborted) {
+        running.current = false;
+        setBusy(false);
+      }
+    }
+  }
+  /** WP-2423 (v15 D2/D3): withdraw your own open change, or decline someone else's. */
+  async function withdraw() {
+    const latest = view?.latest;
+    if (running.current || !online || !latest || pending.current) return;
+    running.current = true;
+    setBusy(true);
+    const active = new AbortController();
+    controller.current = active;
+    try {
+      const kind = await withdrawStoreConfiguration(
+        {
+          configurationReference: latest.configurationReference,
+          configurationVersion: latest.configurationVersion,
+          auditReference: serviceOperationReference(),
+        },
+        csrf,
+      );
+      const next = await client.load(store, active.signal);
+      if (active.signal.aborted) return;
+      setView(next);
+      setDraft(storeConfigurationEditBase(next));
+      setMessage(
+        kind === "Withdrawn"
+          ? "Your change was withdrawn. The next change starts from the published hours."
+          : "The change was declined. The next change starts from the published hours.",
+      );
+    } catch (error) {
+      if (!active.signal.aborted)
+        setMessage(error instanceof Error ? error.message : "Configuration request unavailable.");
     } finally {
       if (!active.signal.aborted) {
         running.current = false;
@@ -240,6 +305,7 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
           disabled={disabled}
           onDraftChange={setDraft}
           onCommand={(command) => void save(command)}
+          onWithdraw={() => void withdraw()}
         />
       )}
     </section>
@@ -253,13 +319,20 @@ export function StoreHoursDraftForm({
   disabled,
   onDraftChange: setDraft,
   onCommand,
+  onWithdraw,
 }: {
   readonly view: StoreConfigurationView;
   readonly draft: StoreConfigurationSnapshot;
   readonly disabled: boolean;
   onDraftChange(draft: StoreConfigurationSnapshot): void;
   onCommand(command: "SaveDraft" | "Validate" | "Submit" | "Approve" | "Publish"): void;
+  /** WP-2423 (v15 D2/D3): withdraw your own open change, or decline someone else's. */
+  onWithdraw?(): void;
 }) {
+  const open = storeConfigurationOpenChange(view),
+    withdrawn = view.latestWithdrawal ?? null,
+    // A withdrawn or declined change takes no further step.
+    stepsClosed = withdrawn !== null;
   function updateInterval(day: number, index: number, change: Partial<ServiceInterval>) {
     setDraft({
       ...draft,
@@ -279,16 +352,57 @@ export function StoreHoursDraftForm({
     <form
       onSubmit={(event) => {
         event.preventDefault();
-        onCommand("SaveDraft");
+        if (open !== "SomeoneElse") onCommand("SaveDraft");
       }}
     >
       <p>
         {view.latest && view.latest.lifecycle !== "Published"
-          ? "Latest change: " + storeConfigurationStateLabel(view.latest.lifecycle)
+          ? "Latest change: " +
+            (withdrawn
+              ? withdrawn.kind === "Withdrawn"
+                ? "Withdrawn by the person who made it"
+                : "Declined"
+              : storeConfigurationStateLabel(view.latest.lifecycle))
           : view.current
             ? "No pending change. Customers see the published hours."
             : "No published hours yet."}
       </p>
+      {withdrawn && (
+        <p>
+          It was {withdrawn.kind === "Withdrawn" ? "withdrawn" : "declined"}
+          {withdrawn.byYou ? " by you" : ""} <StaffTime instant={withdrawn.withdrawnAt} />. The next
+          change starts from the published hours.
+        </p>
+      )}
+      {open === "SomeoneElse" && view.latest && (
+        <section aria-label="Change waiting from someone else">
+          <p>
+            Someone else&rsquo;s change (version {view.latest.configurationVersion},{" "}
+            {storeConfigurationStateLabel(view.latest.lifecycle).toLowerCase()}) is still open. It
+            is shown below. A new change cannot be saved until it is approved and published, or
+            declined. If you are an Owner you can review it here; otherwise ask an Owner.
+          </p>
+          {onWithdraw && (
+            <button type="button" disabled={disabled} onClick={onWithdraw}>
+              Decline this change
+            </button>
+          )}
+        </section>
+      )}
+      {open === "Yours" && view.latest && (
+        <section aria-label="Your change waiting">
+          <p>
+            You are editing your own change (version {view.latest.configurationVersion},{" "}
+            {storeConfigurationStateLabel(view.latest.lifecycle).toLowerCase()}). Saving again
+            replaces it; it then needs to be sent and approved again.
+          </p>
+          {onWithdraw && (
+            <button type="button" disabled={disabled} onClick={onWithdraw}>
+              Withdraw my change
+            </button>
+          )}
+        </section>
+      )}
       <p>
         Times are in {timeZoneLabel(draft.timeZone)}. The business day starts at{" "}
         {draft.businessDayStartLocalTime.slice(0, 5)}.
@@ -467,27 +581,29 @@ export function StoreHoursDraftForm({
             </button>
           </fieldset>
         </StoreConfigurationEditingBoundary>
-        <button type="submit">Save hours draft</button>
+        <button type="submit" disabled={open === "SomeoneElse"}>
+          Save hours draft
+        </button>
         <button
           type="button"
-          disabled={view.latest?.lifecycle !== "Draft" || !saved}
+          disabled={stepsClosed || view.latest?.lifecycle !== "Draft" || !saved}
           onClick={() => onCommand("Validate")}
         >
           Validate saved draft
         </button>
         <button
           type="button"
-          disabled={view.latest?.lifecycle !== "Draft" || !saved}
+          disabled={stepsClosed || view.latest?.lifecycle !== "Draft" || !saved}
           onClick={() => onCommand("Submit")}
         >
           Submit saved draft
         </button>
-        {view.latest?.lifecycle === "Approved" && (
+        {!stepsClosed && view.latest?.lifecycle === "Approved" && (
           <button type="button" disabled={!saved} onClick={() => onCommand("Publish")}>
             Publish approved configuration
           </button>
         )}
-        {view.latest?.lifecycle === "PendingApproval" && (
+        {!stepsClosed && view.latest?.lifecycle === "PendingApproval" && (
           <>
             {/* The view does not identify the signed-in person, so the author check is the
                 server's: approving your own change is refused. */}

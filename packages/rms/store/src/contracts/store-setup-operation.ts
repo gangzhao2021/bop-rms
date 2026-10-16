@@ -23,7 +23,13 @@ export class StoreSetupOperationError extends Error {
       | "STORE_SETUP_OPERATION_CLASSIFICATIONS_NOT_REGISTERED"
       // WP-2423 Q4: Store setup holds saved changes the Store's latest configuration does not
       // include yet, so an hours change cannot be based on it.
-      | "STORE_SETUP_OPERATION_UNPUBLISHED_CHANGES",
+      | "STORE_SETUP_OPERATION_UNPUBLISHED_CHANGES"
+      // WP-2423 (v15 D2): the saved setup still has settings that are not set, so no Store
+      // configuration can be created from it yet.
+      | "STORE_SETUP_OPERATION_INCOMPLETE"
+      // WP-2423 (v15 D2/D3): the Store's configuration changed after the setup was saved; saving
+      // the setup again builds it on the latest configuration.
+      | "STORE_SETUP_OPERATION_OUTDATED",
   ) {
     super("Store setup operation is unavailable");
     this.name = "StoreSetupOperationError";

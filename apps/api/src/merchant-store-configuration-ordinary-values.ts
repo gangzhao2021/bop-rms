@@ -36,6 +36,40 @@ export interface MerchantStoreConfigurationOrdinaryWorkspace {
   /** WP-2423 DEC-STORE-SETUP-PUBLICATION: the publication checks of the latest configuration while
    * it awaits sending, approval or publication; absent otherwise. */
   readonly publicationChecks?: StoreConfigurationPublicationChecks;
+  /** WP-2423 DEC-SOLE-OPERATOR-APPROVAL: present only when the configuration awaiting approval
+   * was created or sent by the reader: whether they may approve it alone (sole operator), who
+   * else holds Store configuration approval (by name), and until when their verification holds. */
+  readonly soleOperator?: MerchantStoreConfigurationSoleOperatorView;
+  /** WP-2423 (v15 D2/D3): present when the latest configuration (not published) was withdrawn by
+   * its author or declined by an approver. */
+  readonly latestWithdrawal?: {
+    readonly kind: "Withdrawn" | "Declined";
+    readonly withdrawnAt: string;
+    readonly byYou: boolean;
+  };
+}
+export interface MerchantStoreConfigurationSoleOperatorView {
+  readonly status: "Effective" | "NotSet" | "OtherApprovers";
+  readonly otherApprovers: readonly { readonly displayName: string | null }[];
+  readonly verifiedUntil: string | null;
+}
+function parseSoleOperatorView(value: unknown): MerchantStoreConfigurationSoleOperatorView {
+  const r = readClosedRecord(value, ["status", "otherApprovers", "verifiedUntil"]);
+  if (r.status !== "Effective" && r.status !== "NotSet" && r.status !== "OtherApprovers")
+    return invalid();
+  const others = r.otherApprovers;
+  if (!Array.isArray(others) || others.length > 100) return invalid();
+  return Object.freeze({
+    status: r.status,
+    otherApprovers: Object.freeze(
+      others.map((item: unknown) => {
+        const name = readClosedRecord(item, ["displayName"]).displayName;
+        if (name !== null && (typeof name !== "string" || name.length > 80)) return invalid();
+        return Object.freeze({ displayName: name });
+      }),
+    ),
+    verifiedUntil: r.verifiedUntil === null ? null : parseCanonicalInstant(r.verifiedUntil),
+  });
 }
 
 export function parseMerchantStoreConfigurationHistoryPage(
@@ -192,6 +226,16 @@ export function parseMerchantStoreConfigurationOrdinaryWorkspace(
       typeof value === "object" &&
       Object.hasOwn(value, "publicationChecks") &&
       (value as { publicationChecks?: unknown }).publicationChecks !== undefined;
+    const hasSoleOperator =
+      value !== null &&
+      typeof value === "object" &&
+      Object.hasOwn(value, "soleOperator") &&
+      (value as { soleOperator?: unknown }).soleOperator !== undefined;
+    const hasWithdrawal =
+      value !== null &&
+      typeof value === "object" &&
+      Object.hasOwn(value, "latestWithdrawal") &&
+      (value as { latestWithdrawal?: unknown }).latestWithdrawal !== undefined;
     const r = readClosedRecord(value, [
       "profile",
       "scope",
@@ -203,6 +247,8 @@ export function parseMerchantStoreConfigurationOrdinaryWorkspace(
       "validUntil",
       "businessReferenceValidation",
       ...(hasChecks ? ["publicationChecks"] : []),
+      ...(hasSoleOperator ? ["soleOperator"] : []),
+      ...(hasWithdrawal ? ["latestWithdrawal"] : []),
     ]);
     if (
       r.profile !== "StoreConfigurationOrdinaryWorkspaceV1" ||
@@ -280,6 +326,27 @@ export function parseMerchantStoreConfigurationOrdinaryWorkspace(
         publicationChecks.checkedAt > observedAt)
     )
       return invalid();
+    const soleOperator = hasSoleOperator ? parseSoleOperatorView(r.soleOperator) : undefined;
+    const latestWithdrawal = hasWithdrawal
+      ? (() => {
+          const w = readClosedRecord(r.latestWithdrawal, ["kind", "withdrawnAt", "byYou"]);
+          if (
+            (w.kind !== "Withdrawn" && w.kind !== "Declined") ||
+            typeof w.byYou !== "boolean" ||
+            latest === null ||
+            latest.lifecycle === "Published"
+          )
+            return invalid();
+          const withdrawnAt = parseCanonicalInstant(w.withdrawnAt);
+          if (withdrawnAt > observedAt) return invalid();
+          return Object.freeze({ kind: w.kind, withdrawnAt, byYou: w.byYou });
+        })()
+      : undefined;
+    if (
+      soleOperator !== undefined &&
+      (latest === null || latest.lifecycle !== "PendingApproval" || latest.setupBasis === undefined)
+    )
+      return invalid();
     return Object.freeze({
       profile: "StoreConfigurationOrdinaryWorkspaceV1",
       scope,
@@ -291,6 +358,8 @@ export function parseMerchantStoreConfigurationOrdinaryWorkspace(
       validUntil,
       businessReferenceValidation: "NotEvaluated",
       ...(publicationChecks === undefined ? {} : { publicationChecks }),
+      ...(soleOperator === undefined ? {} : { soleOperator }),
+      ...(latestWithdrawal === undefined ? {} : { latestWithdrawal }),
     });
   } catch {
     return invalid();

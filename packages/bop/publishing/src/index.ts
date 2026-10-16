@@ -36,7 +36,10 @@ export * from "./contracts/option-price-publication-policy.js";
 export * from "./contracts/option-price-review-operation.js";
 export * from "./infrastructure/persistence/option-price-review-operation-store.js";
 
-export type { RecordedReleasedIndependentPublishingApproval } from "./contracts/released-independent-approval-source.js";
+export type {
+  RecordedReleasedIndependentPublishingApproval,
+  RecordedReleasedPublishingApproval,
+} from "./contracts/released-independent-approval-source.js";
 export * from "./contracts/platform-publishing.js";
 export * from "./contracts/platform-publishing-source.js";
 export * from "./infrastructure/persistence/platform-publishing-store.js";
