@@ -1,3 +1,4 @@
+import { orderMoney } from "./order-money.js";
 import { RefundExecutionAction } from "./RefundExecutionAction.js";
 import { CardMachineRequestRefund } from "./CardMachineRequestRefund.js";
 import {
@@ -28,12 +29,7 @@ type Items = Awaited<ReturnType<typeof client.items>>;
 type Intent = ReturnType<typeof client.prepareRequest>;
 type Preview = Awaited<ReturnType<Intent["preview"]>>;
 const amount = (value: string | null) =>
-  value === null
-    ? "Unavailable"
-    : "CAD " +
-      (BigInt(value) / 100n).toString() +
-      "." +
-      (BigInt(value) % 100n).toString().padStart(2, "0");
+  value === null ? "Unavailable" : orderMoney({ amountMinor: value, currencyCode: "CAD" });
 const errorMessage = (error: unknown) =>
   needsFullSignIn(error)
     ? FULL_SIGN_IN_REQUIRED_TEXT

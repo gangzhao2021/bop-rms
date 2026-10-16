@@ -42,6 +42,9 @@ export function PickupCodePanel({
       controller.dispose();
     };
   }, [controller]);
+  useEffect(() => {
+    controller.followUntilReady?.(autoReveal);
+  }, [autoReveal, controller]);
   const checkedFor = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (!autoReveal) return;
@@ -74,7 +77,11 @@ export function PickupCodePanel({
       {state.status === "loading" ? <p role="status">Checking your pickup code…</p> : null}
       {state.status === "not-ready" ? (
         <>
-          <p role="status">Your order isn’t ready yet. The code appears here when it is.</p>
+          <p role="status">
+            {autoReveal
+              ? "Your order is ready. Your pickup code appears here in a moment."
+              : "Your order isn’t ready yet. The code appears here when it is."}
+          </p>
           {autoReveal ? null : closeButton}
         </>
       ) : null}

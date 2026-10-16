@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { orderMoney } from "./order-money.js";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
 import {
   FULL_SIGN_IN_REQUIRED,
@@ -21,11 +22,10 @@ export interface UnmatchedCaptureRefundView {
 }
 type Failure = "Denied" | FullSignInRequired | "SameApprover" | "Changed" | "Unknown";
 
-/** Whole-cent CAD from integer minor units; never binary floating point. */
+/** Whole-cent CAD from integer minor units in the app's one money format; never floating point. */
 export function formatMinorCad(amountMinor: string): string {
-  if (!/^[0-9]{1,12}$/u.test(amountMinor)) return "CAD amount unavailable";
-  const padded = amountMinor.padStart(3, "0");
-  return "CAD " + String(BigInt(padded.slice(0, -2))) + "." + padded.slice(-2);
+  if (!/^[0-9]{1,12}$/u.test(amountMinor)) return "Amount unavailable";
+  return orderMoney({ amountMinor: String(BigInt(amountMinor)), currencyCode: "CAD" });
 }
 export function unmatchedRefundFailure(status: number, error: unknown): Failure {
   if (isFullSignInRequired(status, { error })) return FULL_SIGN_IN_REQUIRED;

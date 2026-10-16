@@ -64,6 +64,27 @@ describe("DEC-PERM-CATALOG Store permission catalog", () => {
     for (const action of ["store.service.approve", "store.service.publish"])
       expect(owner, action).toContain(action);
   });
+  it("v16: the Store Manager submits setup-based hours for review but no menu, price or approval", () => {
+    const manager = storeRoleTemplateActions("store-manager");
+    for (const action of ["publishing.draft.create", "publishing.review.submit"])
+      expect(manager, action).toContain(action);
+    for (const action of [
+      "publishing.review.approve",
+      "publishing.release.publish",
+      "publishing.release.archive",
+      "publishing.release.rollback",
+      // What menus, option sets, price books and receipt templates also need to be submitted.
+      "catalog.menu.submit",
+      "catalog.option_set.submit",
+      "pricing.price-book.manage",
+      "pricing.price_book.update",
+      "organization.manage",
+      "organization.store.publish",
+    ])
+      expect(manager, action).not.toContain(action);
+    for (const role of ["front-of-house", "kitchen", "inventory-manager"] as const)
+      expect(storeRoleTemplateActions(role), role).not.toContain("publishing.review.submit");
+  });
   it("lets Kitchen and Front of House mark items sold out today without managing availability", () => {
     for (const role of ["kitchen", "front-of-house"] as const) {
       const actions = storeRoleTemplateActions(role);
@@ -114,10 +135,35 @@ describe("DEC-PERM-CATALOG Store permission catalog", () => {
       expect(brandRoleTemplateActions(role), role).toContain("catalog.tax-classification.read");
     for (const role of ["recipe-developer", "recipe-reviewer"] as const)
       expect(brandRoleTemplateActions(role), role).not.toContain("catalog.tax-classification.read");
-    for (const role of ["brand-owner", "menu-manager"] as const)
-      expect(brandRoleTemplateActions(role), role).not.toContain(
-        "catalog.tax-classification.manage",
-      );
+    // v16: managing classifications moved to the Brand Owner alone (next test).
+    expect(brandRoleTemplateActions("menu-manager")).not.toContain(
+      "catalog.tax-classification.manage",
+    );
+  });
+  it("lets only the Brand Owner (and the Store Owner's every-code template) manage tax classifications (v16)", () => {
+    const codes = ["catalog.tax_classification.manage", "catalog.tax-classification.manage"];
+    for (const code of codes) {
+      expect(brandRoleTemplateActions("brand-owner"), code).toContain(code);
+      expect(storeRoleTemplateActions("owner"), code).toContain(code);
+      for (const role of ["menu-manager", "recipe-developer", "recipe-reviewer"] as const)
+        expect(brandRoleTemplateActions(role), role + ":" + code).not.toContain(code);
+      for (const role of [
+        "store-manager",
+        "front-of-house",
+        "kitchen",
+        "inventory-manager",
+      ] as const)
+        expect(storeRoleTemplateActions(role), role + ":" + code).not.toContain(code);
+    }
+    // The Menu Manager still reads them and assigns existing ones to products.
+    for (const code of ["catalog.tax-classification.read", "catalog.product.update"])
+      expect(brandRoleTemplateActions("menu-manager"), code).toContain(code);
+    expect(
+      storePermissionCatalog().find((entry) => entry.code === "catalog.tax_classification.manage"),
+    ).toMatchObject({ module: "catalog", risk: "High", specified: false });
+    expect(legacyPermissionReplacements["catalog.tax-classification.manage"]).toEqual([
+      "catalog.tax_classification.manage",
+    ]);
   });
   it("lets only the Owner and Store Manager set up shared tablets and reset staff PINs (v15)", () => {
     const codes = ["identity.store_device.manage", "identity.staff_pin.reset"];

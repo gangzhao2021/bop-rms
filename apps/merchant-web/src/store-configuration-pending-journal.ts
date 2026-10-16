@@ -75,6 +75,31 @@ export interface StoreConfigurationOrdinaryWorkspace {
   readonly observedAt: string;
   readonly validUntil: string;
   readonly businessReferenceValidation: "NotEvaluated";
+  /** WP-2423 DEC-STORE-SETUP-PUBLICATION: checks of the latest configuration while it awaits
+   * sending, approval or publication. */
+  readonly publicationChecks?: StoreConfigurationPublicationChecks;
+}
+/** Every check blocks sending, approval and publication; the screen explains each in plain words. */
+export const storeConfigurationPublicationCheckCodes = [
+  "Tax",
+  "BrandSettings",
+  "TimeZone",
+  "BusinessDayStart",
+  "Hours",
+  "EffectiveDate",
+  "Fees",
+  "GoLive",
+] as const;
+export type StoreConfigurationPublicationCheckCode =
+  (typeof storeConfigurationPublicationCheckCodes)[number];
+export interface StoreConfigurationPublicationChecks {
+  readonly profile: "StoreConfigurationPublicationChecksV1";
+  readonly configurationReference: string;
+  readonly checkedAt: string;
+  readonly checks: readonly {
+    readonly code: StoreConfigurationPublicationCheckCode;
+    readonly outcome: "Pass" | "Fail";
+  }[];
 }
 const fail = (code: StoreSetupClientError["code"] = "Invalid"): never => {
   throw new StoreSetupClientError(code);
@@ -379,7 +404,13 @@ export async function parseStoreConfigurationOrdinaryWorkspace(
   expectedScope: StoreSetupScope,
 ): Promise<StoreConfigurationOrdinaryWorkspace> {
   try {
-    const r = closed(copied(value, 10485760), [
+    const copy = copied(value, 10485760),
+      hasChecks =
+        copy !== null &&
+        typeof copy === "object" &&
+        Object.hasOwn(copy, "publicationChecks") &&
+        (copy as { publicationChecks?: unknown }).publicationChecks !== undefined;
+    const r = closed(copy, [
         "profile",
         "scope",
         "latest",
@@ -389,6 +420,7 @@ export async function parseStoreConfigurationOrdinaryWorkspace(
         "observedAt",
         "validUntil",
         "businessReferenceValidation",
+        ...(hasChecks ? ["publicationChecks"] : []),
       ]),
       scope = parseStoreSetupScope(r.scope),
       selected = parseStoreSetupScope(expectedScope);
@@ -437,6 +469,43 @@ export async function parseStoreConfigurationOrdinaryWorkspace(
         original.occurredAt > observedAt)
     )
       return fail("ScopeChanged");
+    let publicationChecks: StoreConfigurationPublicationChecks | undefined;
+    if (hasChecks) {
+      const c = closed(r.publicationChecks, [
+        "profile",
+        "configurationReference",
+        "checkedAt",
+        "checks",
+      ]);
+      if (
+        c.profile !== "StoreConfigurationPublicationChecksV1" ||
+        latest === null ||
+        c.configurationReference !== latest.configurationReference ||
+        !Array.isArray(c.checks) ||
+        c.checks.length !== storeConfigurationPublicationCheckCodes.length
+      )
+        return fail();
+      const checkedAt = instant(c.checkedAt);
+      if (checkedAt > observedAt) return fail();
+      publicationChecks = Object.freeze({
+        profile: "StoreConfigurationPublicationChecksV1" as const,
+        configurationReference: latest.configurationReference,
+        checkedAt,
+        checks: Object.freeze(
+          (c.checks as unknown[]).map((entry, index) => {
+            const e = closed(entry, ["code", "outcome"]);
+            const code = storeConfigurationPublicationCheckCodes[index];
+            if (
+              code === undefined ||
+              e.code !== code ||
+              (e.outcome !== "Pass" && e.outcome !== "Fail")
+            )
+              return fail();
+            return Object.freeze({ code, outcome: e.outcome as "Pass" | "Fail" });
+          }),
+        ),
+      });
+    }
     if (Date.now() >= Date.parse(validUntil)) return fail("Stale");
     return Object.freeze({
       profile: r.profile,
@@ -448,6 +517,7 @@ export async function parseStoreConfigurationOrdinaryWorkspace(
       observedAt,
       validUntil,
       businessReferenceValidation: r.businessReferenceValidation,
+      ...(publicationChecks === undefined ? {} : { publicationChecks }),
     });
   } catch (error) {
     if (error instanceof StoreSetupClientError) throw error;

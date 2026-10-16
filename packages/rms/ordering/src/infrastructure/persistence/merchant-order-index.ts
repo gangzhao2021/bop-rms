@@ -174,6 +174,35 @@ export async function listStoreOrderNumbers(
 }
 
 /**
+ * WP-2423: which of the given Orders of the Store staff took at the counter (source channel `Pos`).
+ * The customer is standing at the counter, so no guest pickup code is sent and staff hand the
+ * order over in person. Orders of other Stores and unknown Orders are not returned. Caller
+ * authorizes and owns the transaction.
+ */
+export async function listStoreCounterOrders(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReferences: readonly string[],
+): Promise<ReadonlySet<string>> {
+  if (orderReferences.length === 0) return new Set();
+  if (orderReferences.length > 100) throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+  const orders = orderReferences.map((reference) => String(parseOrderingReference(reference)));
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [scope.brandReference, scope.storeReference],
+  );
+  const rows = (
+    await transaction.query(
+      "SELECT order_id::text order_id FROM rms_ordering.order_header WHERE brand_id=$1 AND store_id=$2 AND order_id=ANY($3::uuid[]) AND source_channel='Pos'",
+      [scope.brandReference, scope.storeReference, orders],
+    )
+  ).rows as readonly { order_id: unknown }[];
+  return new Set(
+    rows.map((row) => String(row.order_id)).filter((reference) => orders.includes(reference)),
+  );
+}
+
+/**
  * WP-2423 Q26: the business day each Order belongs to (order numbers restart every business day),
  * so staff screens can tell an earlier day's order from today's with the same number.
  */

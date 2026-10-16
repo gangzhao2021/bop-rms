@@ -40,6 +40,7 @@ import {
   parseMerchantStoreConfigurationHistoryPage,
 } from "./merchant-store-configuration-ordinary-values.js";
 import type { createMerchantStoreConfiguration } from "./merchant-store-configuration.js";
+import type { StoreConfigurationPublicationChecks } from "./merchant-store-configuration-publication-checks.js";
 
 type Existing = Parameters<typeof createMerchantStoreConfiguration>[0];
 type Scope = Parameters<Existing["configure"]>[1];
@@ -85,7 +86,13 @@ export interface MerchantStoreConfigurationOrdinaryOptions extends Omit<
     tx: Parameters<Existing["configure"]>[0],
     scope: Scope,
     sourceHost: MerchantStoreConfigurationOrdinarySourceHost,
-  ) => ReturnType<Existing["configure"]>;
+  ) => ReturnType<Existing["configure"]> & {
+    /** WP-2423 DEC-STORE-SETUP-PUBLICATION: the publication checks of a configuration created
+     * from Store setup, read from their owners in this run's transaction. */
+    readonly publicationChecks?: (
+      configuration: StoreConfigurationVersion,
+    ) => Promise<StoreConfigurationPublicationChecks>;
+  };
   nextReference(): string;
   /** Actual public-owner producers. Absence blocks fresh transitions only. */
   readonly v2?: Pick<
@@ -457,7 +464,8 @@ export function createMerchantStoreConfigurationOrdinary(
           afterCommit.push(() => syncVoid(pureAssertFinalized));
         },
       });
-      let configured: ReturnType<Existing["configure"]> | undefined;
+      let configured:
+        ReturnType<MerchantStoreConfigurationOrdinaryOptions["configure"]> | undefined;
       const configuration = () => (configured ??= configure.call(options, tx, active, sourceHost));
       let expectedState: StoreConfigurationVersion | null | undefined,
         headReader: ReturnType<typeof createPostgresStoreConfigurationAuthoringSource> | undefined;
@@ -826,6 +834,18 @@ export function createMerchantStoreConfigurationOrdinary(
       const recordedLatest = await latest("Read"),
         published = await current();
       expectedState = recordedLatest ?? published;
+      // WP-2423 DEC-STORE-SETUP-PUBLICATION: a configuration from Store setup that still awaits
+      // sending, approval or publication carries its checks, so the Owner sees what blocks it.
+      const evaluate = configuration().publicationChecks;
+      const publicationChecks =
+        evaluate !== undefined &&
+        recordedLatest !== null &&
+        recordedLatest.setupBasis !== undefined &&
+        (recordedLatest.lifecycle === "Draft" ||
+          recordedLatest.lifecycle === "PendingApproval" ||
+          recordedLatest.lifecycle === "Approved")
+          ? await evaluate(recordedLatest)
+          : undefined;
       finish();
       return parseMerchantStoreConfigurationOrdinaryWorkspace(
         {
@@ -844,6 +864,7 @@ export function createMerchantStoreConfigurationOrdinary(
           observedAt: check(),
           validUntil: deadline,
           businessReferenceValidation: "NotEvaluated",
+          ...(publicationChecks === undefined ? {} : { publicationChecks }),
         },
         fixed,
       );

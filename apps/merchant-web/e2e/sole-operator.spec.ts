@@ -186,7 +186,7 @@ test("@production a sole operator turns it on and approves their own refund afte
   // The list refreshes: the owner may now approve their own request after confirming it.
   const ownCard = page.getByRole("listitem").filter({ hasText: "Order A-0051" });
   await expect(ownCard).toContainText("you are the only person who can approve refunds");
-  const approve = ownCard.getByRole("button", { name: "Approve my own refund of CAD 116.00" });
+  const approve = ownCard.getByRole("button", { name: "Approve my own refund of $116.00" });
   await expect(approve).toBeDisabled();
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: 900 });

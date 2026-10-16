@@ -182,6 +182,26 @@ it("WP-2423: reads the Store's order numbers for given Orders", async () => {
   expect(String(query.mock.calls[1]?.[0])).toContain("brand_id=$1 AND store_id=$2");
   expect((await listStoreOrderNumbers(tx, scope, [])).size).toBe(0);
 });
+it("WP-2423: names only the given Orders of the Store that staff took at the counter", async () => {
+  const { tx, query } = fixture([]);
+  query.mockImplementation(async (sql: string) => ({
+    rows: sql.includes("source_channel='Pos'") ? [{ order_id: id(3) }, { order_id: id(9) }] : [],
+    rowCount: 0,
+  }));
+  const { listStoreCounterOrders } =
+    await import("../infrastructure/persistence/merchant-order-index.js");
+  const counter = await listStoreCounterOrders(tx, scope, [id(3), id(4)]);
+  // A row for an Order that was not asked about is never reported.
+  expect([...counter]).toEqual([id(3)]);
+  expect(String(query.mock.calls[1]?.[0])).toContain("brand_id=$1 AND store_id=$2");
+  expect((query.mock.calls[1] as unknown[] | undefined)?.[1]).toEqual([
+    scope.brandReference,
+    scope.storeReference,
+    [id(3), id(4)],
+  ]);
+  expect((await listStoreCounterOrders(tx, scope, [])).size).toBe(0);
+  await expect(listStoreCounterOrders(tx, scope, ["not-a-reference"])).rejects.toThrow();
+});
 it("WP-2423: reads one Order of the Store for its detail", async () => {
   const { tx, query } = fixture([row(4)]);
   const result = await createPostgresMerchantOrderIndex({

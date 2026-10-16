@@ -127,7 +127,7 @@ describe("HOME-OVERVIEW Merchant shell", () => {
     for (const value of [
       "Synthetic daily summary",
       "Orders today",
-      "CAD $1,284.60",
+      "$1,284.60",
       "Explore the operating system",
       "Orders",
       "Kitchen Board",

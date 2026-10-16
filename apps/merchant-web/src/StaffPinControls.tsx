@@ -188,13 +188,15 @@ export function StaffPinControls({
     }
   };
 
-  const verification = (label: string) => (
+  // WP-2423 item 7: one label everywhere; the text beside it already names the authenticator app.
+  const verification = () => (
     <StepUpVerification
       purpose="PinSessionElevation"
       csrf={csrf}
       verifiedUntil={status?.verifiedUntil ?? null}
       onVerified={onVerified}
-      label={label}
+      label="Verify it's you"
+      hint={false}
       fetcher={fetcher}
       loadServerStatus={false}
       explanation={PIN_ELEVATION_EXPLANATION}
@@ -207,7 +209,7 @@ export function StaffPinControls({
       {pinSignIn ? (
         <section className="staff-pin__notice" aria-label="PIN sign-in">
           <p>{PIN_SESSION_NOTICE}</p>
-          {verification("Verify it's you")}
+          {verification()}
         </section>
       ) : null}
       {status !== null && !pinSignIn && status.pin.state !== "Set" ? (
@@ -244,7 +246,7 @@ export function StaffPinControls({
         {needsVerification || (pinSignIn && !verified) ? (
           <div className="staff-pin__verify">
             <p>{PIN_FULL_SIGN_IN_TEXT}</p>
-            {verification("Verify with authenticator app")}
+            {verification()}
           </div>
         ) : null}
         <form

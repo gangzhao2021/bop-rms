@@ -568,7 +568,7 @@ test("@production a PIN sign-in needs the authenticator code for PIN and tablet 
   await expect(dialog.getByRole("alert").first()).toContainText(
     "You signed in with a PIN. Confirm it's you with your authenticator app, or sign in with your account, to change your PIN.",
   );
-  await dialog.getByRole("button", { name: "Verify with authenticator app" }).click();
+  await dialog.getByRole("button", { name: "Verify it's you" }).click();
   const code = page.getByRole("dialog", { name: "Confirm it is you" }).last();
   await code.getByLabel("Six-digit code").fill("123456");
   await code.getByRole("button", { name: "Verify" }).click();
@@ -596,6 +596,16 @@ test("@production a PIN sign-in needs the authenticator code for PIN and tablet 
   await expect(page.getByRole("heading", { name: "Staff PINs" })).toHaveCount(0);
   // The guidance is shown once, in the verification section only.
   await expect(page.getByText(/You signed in with a PIN\. Confirm it's you/u)).toHaveCount(1);
+  // WP-2423 item 7: one label for the step ("Verify it's you", as in the sidebar) and the
+  // authenticator hint is not repeated under the guidance that already says it.
+  await expect(
+    page
+      .getByRole("region", { name: "Confirm it's you" })
+      .getByRole("button", { name: "Verify it's you" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Confirm it is you with the code from your authenticator app."),
+  ).toHaveCount(0);
   await expect(page.getByText("Not done")).toHaveCount(0);
   await checkScreen(page, "tablets-full-sign-in", [1440, 390]);
 });

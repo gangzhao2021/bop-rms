@@ -166,8 +166,8 @@ it("WP-2423 Q5: approval outcomes keep the same approval reference for a retry",
 it("WP-2423 Q5: shows reasons and amounts in staff language", () => {
   expect(describeRefundReason("WRONG_ITEM")).toBe("Wrong item");
   expect(describeRefundReason("LEGACY_CODE")).toBe("Other reason");
-  expect(escalationReasonLabel.OrderOrdinaryTotalAboveCad100).toContain("more than CAD 100");
-  expect(formatCad("12505")).toBe("CAD 125.05");
+  expect(escalationReasonLabel.OrderOrdinaryTotalAboveCad100).toContain("more than $100");
+  expect(formatCad("12505")).toBe("$125.05");
   const html = renderToStaticMarkup(
     createElement(
       MemoryRouter,

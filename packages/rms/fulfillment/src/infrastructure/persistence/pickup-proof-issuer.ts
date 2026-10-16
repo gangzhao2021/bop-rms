@@ -1,4 +1,5 @@
 import type { ConsumerTransaction } from "@bop/eventing";
+import { listStoreCounterOrders } from "@rms/ordering";
 import {
   parsePickupProofReference,
   planPickupProofIssue,
@@ -29,6 +30,25 @@ export function createPostgresPickupProofIssuer(options: {
         correlationReference = parsePickupProofReference(input.correlationReference);
       if (!(await options.store.authorize(input.transaction, { access: "Issue", orderReference })))
         throw new PickupProofError("PICKUP_PROOF_UNAVAILABLE");
+      // WP-2423: an order staff took at the counter is handed to the customer standing there, by
+      // name or order number. A guest pickup code would only lock staff out of the handover, so
+      // none is issued (Ordering's own read of the order's channel decides). A caller treats
+      // NotApplicable as done, never as a retry.
+      const counterOrders = await listStoreCounterOrders(
+        input.transaction,
+        {
+          brandReference: String(parsePickupProofReference(options.store.brandReference)),
+          storeReference: String(parsePickupProofReference(options.store.storeReference)),
+        },
+        [orderReference],
+      );
+      if (counterOrders.has(orderReference)) {
+        if (
+          !(await options.store.authorize(input.transaction, { access: "Issue", orderReference }))
+        )
+          throw new PickupProofError("PICKUP_PROOF_UNAVAILABLE");
+        return Object.freeze({ status: "NotApplicable" as const, reason: "CounterOrder" as const });
+      }
       const current = await store.lockByOrder({ ...input, orderReference });
       const prior = await store.resolveByIdempotency({
         ...input,

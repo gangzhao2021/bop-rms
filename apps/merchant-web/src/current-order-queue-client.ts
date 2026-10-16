@@ -284,9 +284,13 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
     // WP-2423: what the Order was paid online (absent from an older server).
     const withPaidOnline =
       value !== null && typeof value === "object" && Object.hasOwn(value, "paidOnline");
+    // WP-2423: the refunds of that online payment on a list row (absent from an older server).
+    const withPosition =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "paymentPosition");
     const item = exact(value, [
       ...(withCounter ? ["counter"] : []),
       ...(withPaidOnline ? ["paidOnline"] : []),
+      ...(withPosition ? ["paymentPosition"] : []),
       ...(withHold ? ["acceptanceHold"] : []),
       ...(withBusinessDate ? ["businessDate"] : []),
       ...(withListedDate ? ["listedBusinessDate"] : []),
@@ -478,6 +482,14 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
     const counter = parseCounter(item.counter, item.sourceChannel);
     const paidOnline = parsePaidOnline(item.paidOnline);
     if (paidOnline !== null && counter !== null) return fail();
+    const paymentPosition = parsePaymentPosition(item.paymentPosition);
+    if (
+      paymentPosition !== null &&
+      (paidOnline === null ||
+        BigInt(paymentPosition.refundedMinor) + BigInt(paymentPosition.refundPendingMinor) >
+          BigInt(paidOnline.amountMinor))
+    )
+      return fail();
     if (
       item.currentVersion !== null &&
       batches[0]?.sequence !== 1 &&
@@ -490,6 +502,11 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       counter,
       /** WP-2423: what the customer paid online (null when unpaid, a counter order, or unknown). */
       paidOnline,
+      /**
+       * WP-2423: Payment's refunded and refunding amounts of that payment — the same position the
+       * order detail reads — on a list row whose order has a refund (null when none or not read).
+       */
+      paymentPosition,
       orderReference,
       orderNumber: item.orderNumber,
       orderType: item.orderType,

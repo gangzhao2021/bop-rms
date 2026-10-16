@@ -124,3 +124,33 @@ it("denies before source access and rejects a verification idempotency collision
   });
   expect(mocks.issue).not.toHaveBeenCalled();
 });
+it("WP-2423: issues no guest pickup code for an order staff took at the counter", async () => {
+  const f = setup();
+  const calls: unknown[][] = [];
+  const query = async <Row>(sql: string, values: readonly unknown[]) => {
+    calls.push([sql, values]);
+    return {
+      rows: (sql.includes("source_channel='Pos'") && (values[2] as string[]).includes(id(5))
+        ? [{ order_id: id(5) }]
+        : []) as unknown as readonly Row[],
+      rowCount: 0,
+    };
+  };
+  expect(await f.issuer.ensureIssued({ ...f.input, transaction: { query } })).toEqual({
+    status: "NotApplicable",
+    reason: "CounterOrder",
+  });
+  // Ordering's read is scoped to this Store and this order; nothing of the proof is touched.
+  expect(calls[1]?.[1]).toEqual([id(1), id(2), [id(5)]]);
+  expect(mocks.lockByOrder).not.toHaveBeenCalled();
+  expect(mocks.issue).not.toHaveBeenCalled();
+  // Authorization withdrawn while reading the channel: denied, not a silent no-op.
+  f.authorize.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+  await expect(f.issuer.ensureIssued({ ...f.input, transaction: { query } })).rejects.toMatchObject(
+    { code: "PICKUP_PROOF_UNAVAILABLE" },
+  );
+  // A guest order (no counter channel) still gets its code.
+  expect((await f.issuer.ensureIssued({ ...f.input, orderReference: id(8) })).status).toBe(
+    "Issued",
+  );
+});

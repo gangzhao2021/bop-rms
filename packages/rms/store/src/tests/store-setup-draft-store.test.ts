@@ -513,10 +513,9 @@ describe("Store setup borrowed transaction source (controlled SQL and Audit tran
     expect(f.database.operations).toHaveLength(0);
     await expect(f.finish()).rejects.toThrow();
   });
-  it.each([
-    { defaultLocale: "fr-CA", baseConfigurationReference: null },
-    { defaultLocale: "en-CA", baseConfigurationReference: id(20) },
-  ])(
+  // WP-2423 DEC-STORE-SETUP-PUBLICATION: a newer recorded configuration no longer blocks the draft
+  // (the next revision builds on it, see below); a changed Store locale still does.
+  it.each([{ defaultLocale: "fr-CA", baseConfigurationReference: null }])(
     "rejects stale authoring baseline as version conflict without new artifacts %j",
     async (changed) => {
       const first = fixture();
@@ -549,6 +548,36 @@ describe("Store setup borrowed transaction source (controlled SQL and Audit tran
       await expect(resumed.finish()).rejects.toThrow();
     },
   );
+  it("builds the next revision on a newer recorded configuration (WP-2423 publication)", async () => {
+    const first = fixture();
+    const original = await first.store.save(first.command());
+    await first.finish();
+    expect(original.snapshot?.baseConfigurationReference).toBeNull();
+    const resumed = fixture(first.database);
+    Object.defineProperty(resumed.options, "withCurrentSaveScope", {
+      value: async (
+        _tx: StoreSetupDraftTransaction,
+        _request: unknown,
+        work: (scope: StoreSetupActualScope) => Promise<unknown>,
+      ) =>
+        work({
+          tenantReference: id(1),
+          brandReference: id(2),
+          storeReference: id(3),
+          actorReference: id(4),
+          currencyCode: "CAD",
+          defaultLocale: "en-CA",
+          baseConfigurationReference: id(20),
+        }),
+    });
+    const store = createPostgresStoreSetupDraftStore(resumed.options);
+    const next = await store.save(
+      resumed.command(id(21), original.snapshot?.setupDraftReference ?? null, 1),
+    );
+    expect(next.snapshot?.revision).toBe(2);
+    expect(next.snapshot?.baseConfigurationReference).toBe(id(20));
+    expect(resumed.database.revisions).toHaveLength(2);
+  });
   it("late authority narrowing and whole saved snapshot drift fail the existing final guard", async () => {
     const f = fixture();
     await f.store.save(f.command());
@@ -681,5 +710,182 @@ describe("Store Setup V2 fee preparation persistence", () => {
       enumerable: true,
     });
     await expect(reader.finish()).rejects.toThrow();
+  });
+});
+describe("WP-2423 Q4 hours-only Store setup changes", () => {
+  const hours = {
+    weeklySchedule: {
+      state: "Configured",
+      value: Array.from({ length: 7 }, (_, index) => ({
+        isoWeekday: index + 1,
+        intervals:
+          index === 6
+            ? []
+            : [
+                {
+                  startLocalTime: "10:00:00",
+                  endLocalTime: "20:00:00",
+                  endsNextDay: false,
+                  serviceModes: ["Pickup"],
+                  orderCutoffSeconds: 600,
+                  leadTimeSeconds: 600,
+                },
+              ],
+      })),
+    },
+    exceptions: {
+      state: "Configured",
+      value: [{ localDate: "2026-12-25", kind: "Holiday", intervals: [] }],
+    },
+    effectiveFrom: { state: "Configured", value: "2026-10-05T09:59:00.000Z" },
+    effectiveUntil: { state: "Configured", value: null },
+  } as const;
+  /** A V2 setup line saved by the Owner (id(4)); the hours writer is the Store Manager (id(40)). */
+  async function seeded() {
+    const seed = fixture();
+    const owner = await seed.store.save(
+      parseStoreSetupSaveCommand({
+        ...seed.command(),
+        profile: "StoreSetupSaveV2",
+        content: createUnconfiguredStoreSetupDraftContentV2(),
+      }),
+    );
+    await seed.finish();
+    if (!owner.snapshot) throw new Error("Missing owner revision");
+    const manager = fixture(seed.database, id(40));
+    const options: StoreSetupDraftStoreOptions = {
+      ...manager.options,
+      changeScope: "Hours",
+      withCurrentSaveScope: async (_tx, _request, work) =>
+        work({
+          tenantReference: id(1),
+          brandReference: id(2),
+          storeReference: id(3),
+          actorReference: id(40),
+          defaultLocale: "en-CA",
+          currencyCode: "CAD",
+          baseConfigurationReference: id(70),
+        }),
+    };
+    const store = createPostgresStoreSetupDraftStore(options);
+    const save = (content: unknown, operation = id(60)) =>
+      parseStoreSetupSaveCommand({
+        ...manager.command(operation, owner.snapshot?.setupDraftReference ?? null, 1),
+        profile: "StoreSetupSaveV2",
+        content,
+      });
+    const finish = async () => {
+      for (const guard of manager.guards) await guard();
+      for (const final of manager.finals) final();
+      return store.assertFinalized(manager.tx);
+    };
+    return { seed, owner: owner.snapshot, manager, options, store, save, finish };
+  }
+  it("saves an hours-only revision as the Store Manager under store.service.save-draft", async () => {
+    const f = await seeded();
+    const recorded = await f.store.readRevision({
+      setupDraftReference: f.owner.setupDraftReference,
+      sourceRevision: 1,
+      sourceSnapshotDigest: hash(canonical(f.owner)),
+    });
+    expect(recorded).toEqual(f.owner);
+    const receipt = await f.store.save(f.save({ ...recorded.content, ...hours }));
+    expect(receipt.snapshot).toMatchObject({
+      revision: 2,
+      authoredByReference: id(40),
+      setupDraftReference: f.owner.setupDraftReference,
+      // The hours revision is based on the Store's latest configuration.
+      baseConfigurationReference: id(70),
+      content: { ...f.owner.content, ...hours },
+    });
+    await f.finish();
+    const holds = vi.mocked(f.options.authority.holdUntilTransactionCompletes).mock.calls;
+    expect(holds.length).toBeGreaterThan(0);
+    expect(holds.every(([, packet]) => packet.permission === "store.service.save-draft")).toBe(
+      true,
+    );
+    expect(f.manager.audits).toHaveLength(1);
+    // A retried request returns the recorded receipt without writing again.
+    const retry = fixture(f.seed.database, id(40));
+    const again = createPostgresStoreSetupDraftStore({ ...retry.options, changeScope: "Hours" });
+    expect(await again.save(f.save({ ...f.owner.content, ...hours }))).toEqual(receipt);
+    expect(retry.audits).toHaveLength(0);
+    expect(f.seed.database.revisions).toHaveLength(2);
+  });
+  it.each([
+    ["the time zone", { timeZone: { state: "Configured", value: "America/Vancouver" } }],
+    ["the address", { addressReference: { state: "Configured", value: id(99) } }],
+    [
+      "fees",
+      { feeContexts: { state: "Unconfigured" } as const, source: { state: "Unconfigured" } },
+    ],
+    ["unconfigured hours", { weeklySchedule: { state: "Unconfigured" } }],
+  ])("refuses an hours change that also changes %s", async (_label, change) => {
+    const f = await seeded();
+    const content = { ...f.owner.content, ...hours, ...change };
+    if (_label === "fees")
+      Object.assign(content, {
+        feeContexts: {
+          state: "Configured",
+          value: [
+            { chargeType: "ServiceCharge", state: "Disabled" },
+            { chargeType: "DeliveryFee", state: "Disabled" },
+            { chargeType: "Tip", state: "Disabled" },
+          ],
+        },
+        source: f.owner.content.source,
+      });
+    await expect(f.store.save(f.save(content))).rejects.toMatchObject({
+      code: "STORE_SETUP_OPERATION_PERMISSION_DENIED",
+    });
+    expect(f.manager.audits).toHaveLength(0);
+    expect(f.seed.database.revisions).toHaveLength(1);
+  });
+  it("never starts a Store setup or continues a V1 setup", async () => {
+    const empty = fixture(undefined, id(40));
+    const store = createPostgresStoreSetupDraftStore({ ...empty.options, changeScope: "Hours" });
+    await expect(
+      store.save(
+        parseStoreSetupSaveCommand({
+          ...empty.command(),
+          profile: "StoreSetupSaveV2",
+          content: { ...createUnconfiguredStoreSetupDraftContentV2(), ...hours },
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "STORE_SETUP_OPERATION_PERMISSION_DENIED" });
+    expect(empty.database.revisions).toHaveLength(0);
+    const v1 = fixture();
+    const saved = await v1.store.save(v1.command());
+    await v1.finish();
+    const manager = fixture(v1.database, id(40));
+    const hoursStore = createPostgresStoreSetupDraftStore({
+      ...manager.options,
+      changeScope: "Hours",
+    });
+    await expect(
+      hoursStore.save(
+        parseStoreSetupSaveCommand({
+          ...manager.command(id(61), saved.snapshot?.setupDraftReference ?? null, 1),
+          content: { ...createUnconfiguredStoreSetupDraftContent(), ...hours },
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "STORE_SETUP_OPERATION_PERMISSION_DENIED" });
+    expect(v1.database.revisions).toHaveLength(1);
+  });
+  it("keeps organization.manage for whole Store setup and refuses an unknown change scope", async () => {
+    const f = fixture();
+    await f.store.save(f.command());
+    await f.finish();
+    expect(
+      vi
+        .mocked(f.options.authority.holdUntilTransactionCompletes)
+        .mock.calls.every(([, packet]) => packet.permission === "organization.manage"),
+    ).toBe(true);
+    expect(() =>
+      createPostgresStoreSetupDraftStore({
+        ...fixture().options,
+        changeScope: "Everything" as "Hours",
+      }),
+    ).toThrow(expect.objectContaining({ code: "STORE_SETUP_OPERATION_DEPENDENCY_UNAVAILABLE" }));
   });
 });

@@ -153,7 +153,8 @@ export function createInternalKitchenCommand(resources, persistence, authenticat
       });
       if (original.status !== "Resolved") return false;
       const ticket = original.effect.ticket;
-      const current = await orderSource.resolve({
+      // Issued work stays current across later staff item cancellations (remaining lines unchanged).
+      const current = await orderSource.resolveIssued({
         transaction,
         query: {
           ...scope,

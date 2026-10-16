@@ -6,6 +6,8 @@ import { parseCanonicalInstant } from "@bop/tenant";
 import {
   createStoreSetupDraft,
   replaceStoreSetupDraftContent,
+  replaceStoreSetupDraftHours,
+  storeSetupHoursFields as hoursFields,
   parseStoreSetupDraft,
   StoreSetupDraftError,
   type StoreSetupActualScope,
@@ -50,7 +52,15 @@ export interface StoreSetupServiceModePreparationVersionSelector {
   readonly sourceRevision: number;
   readonly sourceSnapshotDigest: string;
 }
+/**
+ * WP-2423 Q4: the change a writer may make. Absent: whole Store setup (`organization.manage`).
+ * "Hours": a Store Manager's hours change (`store.service.save-draft`): a V2 save onto an existing
+ * V2 revision that replaces only opening hours, dated exceptions and the effective window.
+ */
+export type StoreSetupDraftChangeScope = "Hours";
+export type StoreSetupDraftAuthorityPermission = "organization.manage" | "store.service.save-draft";
 export interface StoreSetupDraftStoreOptions extends StoreSetupOperationScope {
+  readonly changeScope?: StoreSetupDraftChangeScope;
   readonly transaction: StoreSetupDraftTransaction;
   readonly clock: { now(): string };
   readonly originalObservedAt: string;
@@ -65,7 +75,7 @@ export interface StoreSetupDraftStoreOptions extends StoreSetupOperationScope {
       tx: StoreSetupDraftTransaction,
       input: Readonly<
         StoreSetupOperationScope & {
-          permission: "organization.manage";
+          permission: StoreSetupDraftAuthorityPermission;
           purposeCode: "STORE_SETUP_DRAFT";
           mode: Mode;
           requiredFields: typeof storeSetupDraftOperationFields;
@@ -110,6 +120,13 @@ const revisionColumns = `setup_draft_id,revision::text revision,operation_id,act
 /** Append-only setup only; no complete configuration, reference eligibility,
  * approval, publication or live gate is manufactured by this repository. */
 export function createPostgresStoreSetupDraftStore(options: StoreSetupDraftStoreOptions) {
+  const changeScope = Object.getOwnPropertyDescriptor(options, "changeScope");
+  if (changeScope && (!("value" in changeScope) || changeScope.value !== "Hours"))
+    throw new StoreSetupOperationError("STORE_SETUP_OPERATION_DEPENDENCY_UNAVAILABLE");
+  const hoursOnly = changeScope !== undefined;
+  const permission: StoreSetupDraftAuthorityPermission = hoursOnly
+    ? "store.service.save-draft"
+    : "organization.manage";
   const tx = options.transaction,
     queryPort = tx.query,
     clockOwner = options.clock,
@@ -262,7 +279,7 @@ export function createPostgresStoreSetupDraftStore(options: StoreSetupDraftStore
       tx,
       Object.freeze({
         ...fixed,
-        permission: "organization.manage",
+        permission,
         purposeCode: "STORE_SETUP_DRAFT",
         mode,
         requiredFields: storeSetupDraftOperationFields,
@@ -314,6 +331,18 @@ export function createPostgresStoreSetupDraftStore(options: StoreSetupDraftStore
     );
     return data[0] ? decodeRevision(data[0]) : null;
   };
+  /** WP-2423 Q4: true when `content` differs from the revision only in its hours fields. */
+  const hoursChangeOnly = (revision: StoreSetupDraft, content: StoreSetupSaveCommand["content"]) =>
+    Object.keys(revision.content).length === Object.keys(content).length &&
+    Object.keys(revision.content).every(
+      (field) =>
+        (hoursFields as readonly string[]).includes(field) ||
+        same(
+          Object.getOwnPropertyDescriptor(revision.content, field)?.value,
+          Object.getOwnPropertyDescriptor(content, field)?.value,
+        ),
+    ) &&
+    hoursFields.every((field) => content[field].state === "Configured");
   const heldRevisions = new Map<
     string,
     { selector: StoreSetupServiceModePreparationVersionSelector; snapshot: StoreSetupDraft }
@@ -693,6 +722,22 @@ export function createPostgresStoreSetupDraftStore(options: StoreSetupDraftStore
           preparation,
         });
       }),
+    /** WP-2423 Q4: one exact immutable recorded revision (held until COMMIT like the others).
+     * An hours change copies everything but hours from it, so a retried request rebuilds the
+     * identical change even after Store setup moved on. */
+    readRevision: (value: unknown) =>
+      protect(async () => {
+        const selector = parseVersionSelector(value);
+        await admit("Read", null);
+        const snapshot = await readRecordedRevision(selector);
+        const key = `${selector.setupDraftReference}:${selector.sourceRevision}`;
+        const old = heldRevisions.get(key);
+        if (old && !same(old.selector, selector))
+          return fail("STORE_SETUP_OPERATION_VERSION_CONFLICT");
+        heldRevisions.set(key, { selector, snapshot });
+        await hold("Read");
+        return snapshot;
+      }),
     readFeeContextPreparation: () =>
       protect(async () =>
         createStoreSetupFeeContextPreparation(
@@ -762,6 +807,16 @@ export function createPostgresStoreSetupDraftStore(options: StoreSetupDraftStore
           return fail("STORE_SETUP_OPERATION_VERSION_CONFLICT");
         if (current?.profile === "StoreSetupDraftV2" && command.profile !== "StoreSetupSaveV2")
           return fail("STORE_SETUP_OPERATION_VERSION_CONFLICT");
+        // WP-2423 Q4: an hours change never starts a setup, never changes the setup's version, and
+        // replaces nothing but hours, dated exceptions and the effective window.
+        if (
+          hoursOnly &&
+          (current === null ||
+            current.profile !== "StoreSetupDraftV2" ||
+            command.profile !== "StoreSetupSaveV2" ||
+            !hoursChangeOnly(current, command.content))
+        )
+          return fail("STORE_SETUP_OPERATION_PERMISSION_DENIED");
         let calls = 0;
         const completion: { value?: { receipt: StoreSetupOperationReceipt } } = {};
         const returned = await scopePort.call(
@@ -779,35 +834,39 @@ export function createPostgresStoreSetupDraftStore(options: StoreSetupDraftStore
             check();
             const at = check(),
               snapshot = current
-                ? replaceStoreSetupDraftContent(current, command.content, actual, {
-                    expectedRevision: command.expectedRevision,
-                    observedAt: at,
-                  })
-                : createStoreSetupDraft(
-                    {
-                      profile:
-                        command.profile === "StoreSetupSaveV2"
-                          ? "StoreSetupDraftV2"
-                          : "StoreSetupDraftV1",
-                      setupDraftReference: parseStoreAdministrationReference(
-                        nextPort.call(referenceOwner, "SetupDraft"),
-                      ),
-                      tenantReference: fixed.tenantReference,
-                      brandReference: fixed.brandReference,
-                      storeReference: fixed.storeReference,
-                      revision: 1,
-                      authoredByReference: fixed.actorReference,
-                      defaultLocale: actual.defaultLocale,
-                      currencyCode: actual.currencyCode,
-                      baseConfigurationReference: actual.baseConfigurationReference,
-                      content: command.content,
-                      createdAt: at,
-                      updatedAt: at,
-                      purposeCode: "STORE_SETUP_DRAFT",
-                      dataClassification: "ConfigurationMetadata",
-                    },
+                ? (hoursOnly ? replaceStoreSetupDraftHours : replaceStoreSetupDraftContent)(
+                    current,
+                    command.content,
                     actual,
-                  );
+                    { expectedRevision: command.expectedRevision, observedAt: at },
+                  )
+                : hoursOnly
+                  ? fail("STORE_SETUP_OPERATION_PERMISSION_DENIED")
+                  : createStoreSetupDraft(
+                      {
+                        profile:
+                          command.profile === "StoreSetupSaveV2"
+                            ? "StoreSetupDraftV2"
+                            : "StoreSetupDraftV1",
+                        setupDraftReference: parseStoreAdministrationReference(
+                          nextPort.call(referenceOwner, "SetupDraft"),
+                        ),
+                        tenantReference: fixed.tenantReference,
+                        brandReference: fixed.brandReference,
+                        storeReference: fixed.storeReference,
+                        revision: 1,
+                        authoredByReference: fixed.actorReference,
+                        defaultLocale: actual.defaultLocale,
+                        currencyCode: actual.currencyCode,
+                        baseConfigurationReference: actual.baseConfigurationReference,
+                        content: command.content,
+                        createdAt: at,
+                        updatedAt: at,
+                        purposeCode: "STORE_SETUP_DRAFT",
+                        dataClassification: "ConfigurationMetadata",
+                      },
+                      actual,
+                    );
             await hold("Save");
             await restore();
             await insert(

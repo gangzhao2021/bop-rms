@@ -20,7 +20,10 @@ export class StoreSetupOperationError extends Error {
       | "STORE_SETUP_OPERATION_IDEMPOTENCY_CONFLICT"
       | "STORE_SETUP_OPERATION_DEPENDENCY_UNAVAILABLE"
       // WP-2423 Q15/Q16: the Brand has no tax classifications to choose from yet.
-      | "STORE_SETUP_OPERATION_CLASSIFICATIONS_NOT_REGISTERED",
+      | "STORE_SETUP_OPERATION_CLASSIFICATIONS_NOT_REGISTERED"
+      // WP-2423 Q4: Store setup holds saved changes the Store's latest configuration does not
+      // include yet, so an hours change cannot be based on it.
+      | "STORE_SETUP_OPERATION_UNPUBLISHED_CHANGES",
   ) {
     super("Store setup operation is unavailable");
     this.name = "StoreSetupOperationError";

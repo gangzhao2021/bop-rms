@@ -7,6 +7,7 @@ const doubles = vi.hoisted(() => ({
   cancelled: vi.fn(),
   numbers: vi.fn(),
   days: vi.fn(),
+  counter: vi.fn(),
   remakes: vi.fn(),
 }));
 vi.mock("@rms/kitchen", async (original) => ({
@@ -19,6 +20,7 @@ vi.mock("@rms/ordering", async (original) => ({
   createPostgresStaffOrderCancellationReader: () => ({ listByOrders: doubles.cancelled }),
   listStoreOrderNumbers: doubles.numbers,
   listStoreOrderBusinessDates: doubles.days,
+  listStoreCounterOrders: doubles.counter,
 }));
 vi.mock("@rms/fulfillment", async (original) => ({
   ...(await original<object>()),
@@ -41,6 +43,7 @@ function setup(configured = true) {
   doubles.cancelled.mockResolvedValue([]);
   doubles.numbers.mockResolvedValue(new Map());
   doubles.days.mockResolvedValue(new Map());
+  doubles.counter.mockResolvedValue(new Set());
   doubles.remakes.mockResolvedValue([]);
   doubles.list.mockResolvedValue({
     source: "CurrentFulfillment",
@@ -204,4 +207,34 @@ it("WP-2423 Q26: flags a remake only on the pickup whose own order item is being
     [id(52), 1, "2026-09-19"],
   ]);
   expect(result.items[0]?.items[0]).not.toHaveProperty("orderItemReference");
+});
+
+it("WP-2423: marks the orders staff took at the counter so they are handed over in person", async () => {
+  const f = setup();
+  const item = (n: number) => ({
+    fulfillmentReference: id(40 + n),
+    orderReference: id(50 + n),
+    aggregateVersion: 2n,
+    items: [],
+  });
+  doubles.list.mockResolvedValue({
+    source: "CurrentFulfillment",
+    observedAt: "2026-09-19T12:00:00.000Z",
+    items: [item(1), item(2)],
+    nextAfterFulfillmentReference: null,
+  });
+  doubles.counter.mockResolvedValue(new Set([id(52)]));
+  const result = (await f.operation(f.input)) as {
+    items: { orderReference: string; takenAtCounter: boolean }[];
+  };
+  expect(result.items.map((value) => [value.orderReference, value.takenAtCounter])).toEqual([
+    [id(51), false],
+    [id(52), true],
+  ]);
+  // Ordering's read is scoped to this Store and only these orders.
+  expect(doubles.counter).toHaveBeenCalledWith(
+    expect.anything(),
+    { brandReference: id(3), storeReference: id(4) },
+    [id(51), id(52)],
+  );
 });

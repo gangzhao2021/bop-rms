@@ -342,7 +342,7 @@ test("@production compensation acknowledgment remains keyboard operable and retr
   const review = page.getByRole("button", { name: "Review confirmed refund" });
   await review.focus();
   await page.keyboard.press("Enter");
-  await expect(page.getByText(/Confirmed refund: CAD 11.30/)).toBeVisible();
+  await expect(page.getByText(/Confirmed refund: \$11.30/)).toBeVisible();
   const submit = page.getByRole("button", { name: "Record operations reconciliation" });
   await expect(submit).toBeDisabled();
   const confirmation = page.getByRole("checkbox", {
@@ -528,7 +528,7 @@ test("@production unassociated reconciliation stays visible alongside a linked c
   await expect(compensation.getByRole("button", { name: "Review confirmed refund" })).toBeEnabled();
   expect(queries).toHaveLength(0);
   await compensation.getByRole("button", { name: "Review confirmed refund" }).click();
-  await expect(compensation.getByText(/Confirmed refund: CAD 11.30/)).toBeVisible();
+  await expect(compensation.getByText(/Confirmed refund: \$11.30/)).toBeVisible();
   expect(queries).toEqual([
     {
       orderReference: "018f0f58-767a-7f3b-a1d0-000000000902",

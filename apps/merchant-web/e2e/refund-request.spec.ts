@@ -314,7 +314,7 @@ for (const recovery of ["retry", "history"] as const)
     await page.getByRole("link", { name: "Payment 1 · refunds and details" }).click();
     await expect(page).toHaveURL(new RegExp("/app/operations/payments/" + id(31) + "$"));
     await expect(page.getByRole("region", { name: "Payment financial summary" })).toContainText(
-      "CAD 22.60",
+      "$22.60",
     );
     await page.getByRole("link", { name: "Start refund request" }).click();
     await page.getByRole("button", { name: "Load refundable items" }).click();
@@ -327,14 +327,10 @@ for (const recovery of ["retry", "history"] as const)
     await page.getByRole("spinbutton", { name: /Latte/ }).fill("1");
     await page.getByRole("combobox", { name: "Reason" }).selectOption("CUSTOMER_REQUEST");
     await page.getByRole("button", { name: "Calculate refund" }).click();
-    await expect(page.getByRole("region", { name: "Refund calculation" })).toContainText(
-      "CAD 11.30",
-    );
+    await expect(page.getByRole("region", { name: "Refund calculation" })).toContainText("$11.30");
     // WP-2423 Q5: calculating again with an unchanged selection reuses the same request identity.
     await page.getByRole("button", { name: "Calculate refund" }).click();
-    await expect(page.getByRole("region", { name: "Refund calculation" })).toContainText(
-      "CAD 11.30",
-    );
+    await expect(page.getByRole("region", { name: "Refund calculation" })).toContainText("$11.30");
     expect(previews).toHaveLength(2);
     expect(previews[1]).toBe(previews[0]);
     await expect(page.getByRole("button", { name: "Record refund request" })).toBeDisabled();
@@ -373,7 +369,7 @@ for (const recovery of ["retry", "history"] as const)
     await expect(page.getByText("Original request recovered.", { exact: false })).toBeVisible();
     // The recorded request is listed straight away, without a manual refresh.
     await expect(page.getByRole("region", { name: "Recorded refund requests" })).toContainText(
-      "Request 1: CAD 11.30",
+      "Request 1: $11.30",
     );
     expect(previews).toHaveLength(2);
     expect(requests).toHaveLength(recovery === "retry" ? 2 : 1);
@@ -397,7 +393,7 @@ for (const recovery of ["retry", "history"] as const)
     await expect(page.getByText("Request remains recorded.", { exact: false })).toBeVisible();
     await expect(page.getByRole("button", { name: "Record refund request" })).toHaveCount(0);
     await expect(page.getByRole("region", { name: "Recorded refund requests" })).toContainText(
-      "Request 1: CAD 11.30",
+      "Request 1: $11.30",
     );
     // WP-2423 Q5: each recorded request shows where it stands without a separate check.
     await expect(page.getByRole("region", { name: "Recorded refund requests" })).toContainText(
@@ -407,7 +403,7 @@ for (const recovery of ["retry", "history"] as const)
     await page.getByRole("button", { name: "Check execution status for request 1" }).click();
     await expect(
       page.getByRole("region", { name: "Execution status for request 1" }),
-    ).toContainText("Not dispatched. Requested CAD 11.30; confirmed CAD 0.00; pending CAD 11.30.");
+    ).toContainText("Not dispatched. Requested $11.30; confirmed $0.00; pending $11.30.");
     await page.getByRole("button", { name: "Prepare refund execution" }).click();
     if (recovery === "history") {
       await expect(
@@ -438,7 +434,7 @@ for (const recovery of ["retry", "history"] as const)
       await expect(page.getByRole("button", { name: "Send refund", exact: true })).toBeDisabled();
       await page
         .getByRole("checkbox", {
-          name: "I confirm sending this CAD 11.30 refund to the original payment method",
+          name: "I confirm sending this $11.30 refund to the original payment method",
           exact: true,
         })
         .check();
@@ -480,8 +476,8 @@ for (const recovery of ["retry", "history"] as const)
         const status = page.getByRole("region", { name: "Execution status for request 1" });
         await expect(status).toContainText(
           phase === "Confirmed"
-            ? "confirmed CAD 11.30; pending CAD 0.00"
-            : "confirmed CAD 0.00; pending CAD 11.30",
+            ? "confirmed $11.30; pending $0.00"
+            : "confirmed $0.00; pending $11.30",
         );
         // WP-2423 Q5: the set-aside note appears only while an amount is still pending.
         await expect(
@@ -514,12 +510,12 @@ for (const recovery of ["retry", "history"] as const)
             summary
               .locator("div")
               .filter({ has: page.getByText("Confirmed refunds", { exact: true }) }),
-          ).toContainText("CAD 11.30");
+          ).toContainText("$11.30");
           await expect(
             summary
               .locator("div")
               .filter({ has: page.getByText("Pending refunds", { exact: true }) }),
-          ).toContainText("CAD 0.00");
+          ).toContainText("$0.00");
         }
         expect(sends).toHaveLength(2);
       }

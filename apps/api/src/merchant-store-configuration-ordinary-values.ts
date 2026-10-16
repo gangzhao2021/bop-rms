@@ -18,6 +18,10 @@ import {
   type StoreConfigurationHistoryPage,
   type StoreConfigurationHistoryEntry,
 } from "@rms/store";
+import {
+  parseStoreConfigurationPublicationChecks,
+  type StoreConfigurationPublicationChecks,
+} from "./merchant-store-configuration-publication-checks.js";
 
 export interface MerchantStoreConfigurationOrdinaryWorkspace {
   readonly profile: "StoreConfigurationOrdinaryWorkspaceV1";
@@ -29,6 +33,9 @@ export interface MerchantStoreConfigurationOrdinaryWorkspace {
   readonly observedAt: string;
   readonly validUntil: string;
   readonly businessReferenceValidation: "NotEvaluated";
+  /** WP-2423 DEC-STORE-SETUP-PUBLICATION: the publication checks of the latest configuration while
+   * it awaits sending, approval or publication; absent otherwise. */
+  readonly publicationChecks?: StoreConfigurationPublicationChecks;
 }
 
 export function parseMerchantStoreConfigurationHistoryPage(
@@ -180,6 +187,11 @@ export function parseMerchantStoreConfigurationOrdinaryWorkspace(
   expectedScope: StoreConfigurationOriginalScope,
 ): MerchantStoreConfigurationOrdinaryWorkspace {
   try {
+    const hasChecks =
+      value !== null &&
+      typeof value === "object" &&
+      Object.hasOwn(value, "publicationChecks") &&
+      (value as { publicationChecks?: unknown }).publicationChecks !== undefined;
     const r = readClosedRecord(value, [
       "profile",
       "scope",
@@ -190,6 +202,7 @@ export function parseMerchantStoreConfigurationOrdinaryWorkspace(
       "observedAt",
       "validUntil",
       "businessReferenceValidation",
+      ...(hasChecks ? ["publicationChecks"] : []),
     ]);
     if (
       r.profile !== "StoreConfigurationOrdinaryWorkspaceV1" ||
@@ -257,6 +270,16 @@ export function parseMerchantStoreConfigurationOrdinaryWorkspace(
           original.operation.configuration.setupBasis.tenantReference !== scope.tenantReference))
     )
       return invalid();
+    const publicationChecks = hasChecks
+      ? parseStoreConfigurationPublicationChecks(r.publicationChecks)
+      : undefined;
+    if (
+      publicationChecks !== undefined &&
+      (latest === null ||
+        publicationChecks.configurationReference !== latest.configurationReference ||
+        publicationChecks.checkedAt > observedAt)
+    )
+      return invalid();
     return Object.freeze({
       profile: "StoreConfigurationOrdinaryWorkspaceV1",
       scope,
@@ -267,6 +290,7 @@ export function parseMerchantStoreConfigurationOrdinaryWorkspace(
       observedAt,
       validUntil,
       businessReferenceValidation: "NotEvaluated",
+      ...(publicationChecks === undefined ? {} : { publicationChecks }),
     });
   } catch {
     return invalid();

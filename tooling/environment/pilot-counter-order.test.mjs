@@ -109,6 +109,10 @@ vi.mock("../../apps/api/dist/table-guest-pipeline.js", () => ({
     seen.tableCode = options;
     return "openTable";
   },
+  createStaffTableAbandonment: (options) => {
+    seen.tableAbandonment = options;
+    return "abandonTable";
+  },
   createStaffTableGuestPipeline: (options) => {
     seen.tablePipeline = options;
     return { name: "tablePipeline" };
@@ -339,6 +343,7 @@ it("composes the staff table round from the dine-in customer path, without the g
       return payment;
     }),
   };
+  const diningClosing = vi.fn(async () => ({ phase: "Closing", sessionVersion: 2 }));
   const counter = await createInternalCounterOrder(
     resources,
     { now: resources.now },
@@ -359,6 +364,7 @@ it("composes the staff table round from the dine-in customer path, without the g
       }),
       loadPickupQrToken: async () => "qr",
       expectedDatabaseName: "pilot",
+      diningClosing,
     },
   );
   expect(counter.staffDiningRound).toBe("staffRound");
@@ -369,6 +375,19 @@ it("composes the staff table round from the dine-in customer path, without the g
   expect(p.quote).toBe("diningQuote");
   expect(p.payment).toBe(payment);
   expect(p.openTable).toBe("openTable");
+  // WP-2423 item 7: a session the round started is closed again with the Tables page's closing
+  // command, under the staff member's own session; join state is read the same way as opening.
+  expect(p.abandonTable).toBe("abandonTable");
+  expect(seen.tableAbandonment.loadJoinState).toBe(seen.tableCode.loadJoinState);
+  await seen.tableAbandonment.close(
+    { sessionCookie: "c", csrf: "x" },
+    { action: "Begin", diningSessionReference: "session-1" },
+  );
+  expect(diningClosing).toHaveBeenCalledWith({
+    sessionCookie: "c",
+    csrf: "x",
+    command: { action: "Begin", diningSessionReference: "session-1" },
+  });
   expect(await p.tableQrToken("table-1")).toBe("table-qr");
   // No current code: null, so the staff command refuses before opening the table.
   expect(await p.tableQrToken("table-2")).toBeNull();

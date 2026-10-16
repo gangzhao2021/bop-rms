@@ -14,7 +14,10 @@ import {
   type StoreConfigurationOriginalCursor,
   type StoreConfigurationOrdinaryWorkspace,
   type StoreConfigurationOrdinaryAction,
+  type StoreConfigurationPublicationCheckCode,
+  type StoreConfigurationPublicationChecks,
 } from "./store-configuration-pending-journal.js";
+import type { StoreConfigurationSnapshot } from "./store-configuration-client.js";
 import {
   StoreSetupClientError,
   type StoreSetupScope,
@@ -57,11 +60,85 @@ const outcomeText = (action: string, outcome: "Committed" | "Abandoned") =>
   outcome === "Committed"
     ? (doneText[action] ?? "Change recorded.")
     : "That request did not go through; nothing changed.";
+/**
+ * WP-2423 DEC-STORE-SETUP-PUBLICATION: each publication check in staff words — what passed, or
+ * what blocks it and where to fix it. Every check blocks sending, approval and publication.
+ */
+const checkText: Record<StoreConfigurationPublicationCheckCode, { pass: string; fail: string }> = {
+  Tax: {
+    pass: "Tax settings are the ones in force for this Store.",
+    fail: "Tax settings are not the ones in force for this Store, or their registration or review has expired. Use the live Store's settings above, and check Tax review.",
+  },
+  BrandSettings: {
+    pass: "Brand settings are the same as the live Store's.",
+    fail: "Brand settings differ from the live Store's. Use the live Store's settings above.",
+  },
+  TimeZone: {
+    pass: "The time zone is the Store's own time zone.",
+    fail: "The time zone must be the Store's own time zone. Change it in step 2.",
+  },
+  BusinessDayStart: {
+    pass: "The business day starts at the same time as now.",
+    fail: "The business day must start at the same time as it does now, so past days and reports keep their boundaries. Change it back in step 2.",
+  },
+  Hours: {
+    pass: "Opening hours are complete.",
+    fail: "Opening hours need at least one opening period, and each period may only use service modes this Store offers. Check steps 3 and 4.",
+  },
+  EffectiveDate: {
+    pass: "It takes effect as soon as it is published.",
+    fail: "This configuration would take effect later or end on a date. Use the live Store's settings above so it takes effect when published, then save and create it again.",
+  },
+  Fees: {
+    pass: "Fees are set.",
+    fail: "A fee that is On may only apply to service modes this Store offers. Check step 5.",
+  },
+  GoLive: {
+    pass: "This Store's go-live check is approved.",
+    fail: "This Store's go-live check is not approved, so its configuration cannot be published.",
+  },
+};
+const checksPass = (checks: StoreConfigurationPublicationChecks | undefined) =>
+  checks === undefined || checks.checks.every((check) => check.outcome === "Pass");
+/** A configuration created from setup must be approved and published within 14 days. */
+const publicationWindowMs = 14 * 86400000;
+export function StoreConfigurationPublicationChecklist({
+  checks,
+}: {
+  readonly checks: StoreConfigurationPublicationChecks;
+}) {
+  const blocked = checks.checks.filter((check) => check.outcome === "Fail").length;
+  return (
+    <section aria-label="Publication checks">
+      <h4>Before it can be published</h4>
+      <p>
+        {blocked === 0
+          ? "Every check passed."
+          : `${blocked} ${blocked === 1 ? "check needs" : "checks need"} attention before this can be sent for approval or published.`}{" "}
+        Checked <StaffTime instant={checks.checkedAt} />.
+      </p>
+      <ul>
+        {checks.checks.map((check) => (
+          <li key={check.code}>
+            {check.outcome === "Pass" ? "Ready: " : "Needs attention: "}
+            {check.outcome === "Pass" ? checkText[check.code].pass : checkText[check.code].fail}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
 export interface StoreConfigurationOrdinaryPanelProps {
   readonly scope: StoreSetupScope;
   readonly csrf: string;
   readonly saved: StoreSetupSnapshot | null;
   readonly freshDisabled?: boolean;
+  /** The live (published) configuration and the server time it was read, for carrying settings
+   * Store setup does not edit (tax, Brand settings, dated closures, start). */
+  readonly onLiveConfiguration?: (live: {
+    readonly current: StoreConfigurationSnapshot | null;
+    readonly observedAt: string;
+  }) => void;
   readonly client?: ReturnType<typeof createStoreConfigurationOrdinaryClient>;
   readonly journalFactory?: (scope: StoreSetupScope) => StoreConfigurationPendingJournal;
 }
@@ -399,8 +476,15 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
       }
     }
   }
+  const onLive = props.onLiveConfiguration;
+  useEffect(() => {
+    if (workspace && onLive)
+      onLive({ current: workspace.current, observedAt: workspace.observedAt });
+  }, [workspace, onLive]);
   const latest = workspace?.latest,
     current = workspace?.current,
+    checks = workspace?.publicationChecks,
+    ready = checksPass(checks),
     locked = busy || historyBusy || !!pending || !!props.freshDisabled;
   // WP-2423 Q15/Q16: no publication path in this deployment; no panel rather than an outage.
   if (notOffered) return null;
@@ -471,6 +555,28 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
             </dd>
           </dl>
           {latest && <StoreConfigurationFeeBasisView configuration={latest} />}{" "}
+          {checks && <StoreConfigurationPublicationChecklist checks={checks} />}
+          {latest?.setupBasis !== undefined &&
+            (latest.lifecycle === "Draft" ||
+              latest.lifecycle === "PendingApproval" ||
+              latest.lifecycle === "Approved") && (
+              <p>
+                It must be approved and published by{" "}
+                <StaffTime
+                  instant={new Date(
+                    Date.parse(latest.createdAt) + publicationWindowMs,
+                  ).toISOString()}
+                />
+                ; after that, create it again from the saved setup.
+              </p>
+            )}
+          {latest?.lifecycle === "PendingApproval" &&
+            latest.authoredByReference === props.scope.actorReference && (
+              <p>
+                Another person with Owner access must approve this configuration. You cannot approve
+                a change you made.
+              </p>
+            )}
           {workspace.original && (
             <p>
               Last request: {outcomeText(workspace.original.action, workspace.original.outcome)}{" "}
@@ -494,7 +600,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
             </button>
             <button
               type="button"
-              disabled={locked || latest?.lifecycle !== "Draft"}
+              disabled={locked || latest?.lifecycle !== "Draft" || !ready}
               onClick={() => void act("Submit")}
             >
               Submit configuration for review
@@ -504,7 +610,8 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
               disabled={
                 locked ||
                 latest?.lifecycle !== "PendingApproval" ||
-                latest.authoredByReference === props.scope.actorReference
+                latest.authoredByReference === props.scope.actorReference ||
+                !ready
               }
               onClick={() => void act("Approve")}
             >
@@ -512,7 +619,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
             </button>
             <button
               type="button"
-              disabled={locked || latest?.lifecycle !== "Approved"}
+              disabled={locked || latest?.lifecycle !== "Approved" || !ready}
               onClick={() => void act("Publish")}
             >
               Publish Store configuration

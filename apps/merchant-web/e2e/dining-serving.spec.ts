@@ -121,6 +121,9 @@ test("@production serving retains its intent after a lost response and locks ref
   const submit = page.getByRole("button", { name: "Confirm served quantity", exact: true });
   await expect(submit).toBeDisabled();
   const quantity = page.getByRole("spinbutton");
+  // WP-2423 item 7: defaults to everything still to serve; staff can lower it.
+  await expect(quantity).toHaveValue("2");
+  await quantity.fill("1");
   await quantity.fill("2");
   await page
     .getByRole("checkbox", { name: "I confirm 2 × Meal delivered to table T1", exact: true })

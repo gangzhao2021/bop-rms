@@ -246,3 +246,82 @@ it("rejects noncanonical opaque proof encoding", () => {
     ).status,
   ).toBe("Ready");
 });
+
+it("keeps checking quietly after the order turns Ready until the code is issued (WP-2423)", async () => {
+  vi.useFakeTimers();
+  const answers: unknown[] = [
+    { schemaVersion: 1, status: "NotReady", orderReference: id(1) },
+    { schemaVersion: 1, status: "NotReady", orderReference: id(1) },
+    new PickupCodeClientError("service_unavailable"),
+    ready(),
+  ];
+  let calls = 0;
+  const seen: string[] = [];
+  const client: CustomerPickupCodeClient = {
+    load: async () => {
+      const answer = answers[calls++];
+      if (answer instanceof Error) throw answer;
+      return answer;
+    },
+  };
+  const controller = createPickupCodeController(id(1), "1001", client, () => now);
+  controller.subscribe(() => seen.push(controller.getState().status));
+  controller.followUntilReady?.(true);
+  await controller.reveal();
+  expect(controller.getState()).toEqual({ status: "not-ready" });
+  await vi.advanceTimersByTimeAsync(1_999);
+  expect(calls).toBe(1);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(calls).toBe(2);
+  expect(controller.getState()).toEqual({ status: "not-ready" });
+  await vi.advanceTimersByTimeAsync(3_000);
+  expect(calls).toBe(3);
+  expect(controller.getState()).toEqual({ status: "unavailable" });
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(calls).toBe(4);
+  expect(controller.getState().status).toBe("ready");
+  // Follow-ups never flash the "checking" state between answers.
+  expect(seen).toEqual(["loading", "not-ready", "not-ready", "unavailable", "ready"]);
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(calls).toBe(4);
+  controller.dispose();
+});
+
+it("stops following when the order is no longer Ready or the page closes", async () => {
+  vi.useFakeTimers();
+  let calls = 0;
+  const client: CustomerPickupCodeClient = {
+    load: async () => {
+      calls += 1;
+      return { schemaVersion: 1, status: "NotReady", orderReference: id(1) };
+    },
+  };
+  const controller = createPickupCodeController(id(1), "1001", client, () => now);
+  controller.followUntilReady?.(true);
+  await controller.reveal();
+  controller.followUntilReady?.(false);
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(calls).toBe(1);
+  controller.followUntilReady?.(true);
+  await vi.advanceTimersByTimeAsync(2_000);
+  expect(calls).toBe(2);
+  controller.dispose();
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(calls).toBe(2);
+});
+
+it("does not follow up a not-ready code before the order is Ready", async () => {
+  vi.useFakeTimers();
+  let calls = 0;
+  const client: CustomerPickupCodeClient = {
+    load: async () => {
+      calls += 1;
+      return { schemaVersion: 1, status: "NotReady", orderReference: id(1) };
+    },
+  };
+  const controller = createPickupCodeController(id(1), "1001", client, () => now);
+  await controller.reveal();
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(calls).toBe(1);
+  controller.dispose();
+});

@@ -538,9 +538,9 @@ export function RefundApprovalsPage({
       <section aria-labelledby="refund-approvals-heading" data-screen-id="APPROVAL-INBOX">
         <h2 id="refund-approvals-heading">Refunds awaiting approval</h2>
         <p>
-          Refunds above CAD 100 for an order, from an earlier business day or more than 24 hours
-          after payment need an owner or finance member who did not ask for them. Approve in person:
-          both of you confirm with your authenticator code, then the refund is sent.
+          Refunds above $100 for an order, from an earlier business day or more than 24 hours after
+          payment need an owner or finance member who did not ask for them. Approve in person: both
+          of you confirm with your authenticator code, then the refund is sent.
         </p>
         {state === "Loading" ? (
           <StatePanel heading="Loading refunds" status>

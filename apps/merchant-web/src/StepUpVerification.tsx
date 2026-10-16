@@ -38,6 +38,7 @@ export function StepUpVerification({
   fetcher,
   loadServerStatus = true,
   explanation,
+  hint = true,
 }: {
   readonly purpose: StepUpPurpose;
   readonly csrf: string;
@@ -50,6 +51,11 @@ export function StepUpVerification({
   readonly loadServerStatus?: boolean;
   /** What a verification allows, when it is not the default refunds and approvals wording. */
   readonly explanation?: string | undefined;
+  /**
+   * Show "Confirm it is you with the code from your authenticator app." before verifying. Off
+   * where the text around the button already says so, so the hint is never shown twice.
+   */
+  readonly hint?: boolean;
 }) {
   const client = useRef(createRefundApprovalClient(fetcher ?? fetch));
   const dialog = useRef<HTMLDialogElement>(null);
@@ -112,15 +118,17 @@ export function StepUpVerification({
   const titleId = "step-up-" + useId().replace(/[^A-Za-z0-9_-]/gu, "");
   return (
     <div className="step-up-verification">
-      <p role="status">
-        {current ? (
-          <>
-            Verified until <SourceTime instant={verifiedUntil} />.
-          </>
-        ) : (
-          "Confirm it is you with the code from your authenticator app."
-        )}
-      </p>
+      {current || hint ? (
+        <p role="status">
+          {current ? (
+            <>
+              Verified until <SourceTime instant={verifiedUntil} />.
+            </>
+          ) : (
+            "Confirm it is you with the code from your authenticator app."
+          )}
+        </p>
+      ) : null}
       {current ? null : (
         <button
           type="button"

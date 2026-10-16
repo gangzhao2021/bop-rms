@@ -747,8 +747,12 @@ export function CurrentOrderQueueRows({
   // filter changes; only orders staff opened themselves stay open across a refresh.
   const autoOpened = useRef(new Set<string>());
   const autoOpen = view.items.length === 1 || visibleOrderReferences?.size === 1;
+  // WP-2423: the list row reads the order's refund position with the list (orders with a refund),
+  // the same position the detail reads; an opened order's detail read fills in the rest.
   const positionOf = (order: CurrentOrderQueue["items"][number]) =>
-    single ? paymentPosition : paymentPositions?.get(order.orderReference);
+    single
+      ? (paymentPosition ?? order.paymentPosition ?? undefined)
+      : (order.paymentPosition ?? paymentPositions?.get(order.orderReference));
   // WP-2423 Q21: orders are grouped by the Store business day they belong to (order numbers restart
   // each business day; an order after midnight before the day's start belongs to the day before).
   const today = useStoreBusinessDay()?.businessDate ?? null;

@@ -53,7 +53,7 @@ const view = (
       busy={false}
       message={message}
       needsVerification={needsVerification}
-      verification={<button type="button">Verify with authenticator app</button>}
+      verification={<button type="button">Verify it's you</button>}
       pending={null}
       onLabel={noop}
       onRegister={noop}
@@ -116,7 +116,7 @@ describe("Shared tablets & PINs", () => {
     plain(view({ kind: "Failed" }));
     const verify = view({ kind: "Ready", read: full }, true);
     expect(verify).toContain("You signed in with a PIN. Confirm it&#x27;s you");
-    expect(verify).toContain("Verify with authenticator app");
+    expect(verify).toContain("Verify it&#x27;s you");
   });
   it("shows the PIN sign-in guidance once when a change or the list needs verification", () => {
     const guidance = "You signed in with a PIN. Confirm it&#x27;s you";
@@ -128,7 +128,7 @@ describe("Shared tablets & PINs", () => {
     const afterLoad = view({ kind: "NeedsVerification" }, true);
     expect(afterLoad.split(guidance)).toHaveLength(2);
     expect(afterLoad).not.toContain("Couldn&#x27;t load this page");
-    expect(afterLoad).toContain("Verify with authenticator app");
+    expect(afterLoad).toContain("Verify it&#x27;s you");
     plain(afterLoad);
     expect(commandFailureOutcome(new StaffPinError("Denied"), "Register")).toEqual({
       needsVerification: false,

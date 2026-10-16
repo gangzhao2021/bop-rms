@@ -204,7 +204,18 @@ export interface PickupCodeController {
   setOnline(value: boolean): void;
   dispose(): void;
   subscribe(listener: () => void): () => void;
+  /**
+   * WP-2423: the order is Ready, so the code is issued within seconds. While following, a
+   * not-ready or briefly unavailable answer is checked again on a short backoff until the code
+   * arrives, instead of waiting for the next order status refresh.
+   */
+  followUntilReady?(active: boolean): void;
 }
+
+/** Retry delays after a not-ready or unavailable answer while following; the last one repeats. */
+export const pickupCodeFollowDelaysMs: readonly number[] = Object.freeze([
+  2_000, 3_000, 5_000, 8_000, 15_000,
+]);
 
 export function createPickupCodeController(
   orderReference: string,
@@ -217,6 +228,13 @@ export function createPickupCodeController(
   let stopped = false;
   let request = 0;
   let expiryTimer: ReturnType<typeof setTimeout> | null = null;
+  let following = false;
+  let followAttempt = 0;
+  let followTimer: ReturnType<typeof setTimeout> | null = null;
+  const clearFollow = () => {
+    if (followTimer) clearTimeout(followTimer);
+    followTimer = null;
+  };
   const listeners = new Set<() => void>();
   let unsubscribeContext: (() => void) | undefined;
   const clearExpiry = () => {
@@ -229,10 +247,25 @@ export function createPickupCodeController(
   };
   const clearProof = (next: PickupCodeState) => {
     request += 1;
+    clearFollow();
     clearExpiry();
     publish(next);
   };
-  const query = async () => {
+  const scheduleFollow = () => {
+    clearFollow();
+    if (!following || stopped || !online) return;
+    const delay =
+      pickupCodeFollowDelaysMs[Math.min(followAttempt, pickupCodeFollowDelaysMs.length - 1)] ??
+      15_000;
+    followAttempt += 1;
+    followTimer = setTimeout(() => {
+      followTimer = null;
+      if (following && !stopped) void query(true);
+    }, delay);
+  };
+  /** A quiet follow-up keeps the current not-ready text on screen instead of flashing "checking". */
+  const query = async (quiet = false): Promise<void> => {
+    clearFollow();
     if (stopped || !reference.test(orderReference) || !/^[1-9][0-9]{0,18}$/u.test(orderNumber)) {
       clearProof({ status: "unavailable" });
       return;
@@ -243,7 +276,7 @@ export function createPickupCodeController(
     }
     const token = ++request;
     clearExpiry();
-    publish({ status: "loading" });
+    if (!quiet) publish({ status: "loading" });
     try {
       const result = parsePickupCodeResult(
         await client.load(orderReference),
@@ -255,8 +288,10 @@ export function createPickupCodeController(
       clearExpiry();
       if (result.status === "NotReady") {
         publish({ status: "not-ready" });
+        scheduleFollow();
         return;
       }
+      followAttempt = 0;
       publish({ status: "ready", view: result, refreshing: false });
       const delay = Date.parse(result.expiresAt) - clock();
       expiryTimer = setTimeout(() => clearProof({ status: "expired" }), Math.max(0, delay));
@@ -275,22 +310,36 @@ export function createPickupCodeController(
                     : "unavailable"
             : "unavailable";
         clearProof({ status });
+        if (status === "unavailable") scheduleFollow();
       }
     }
   };
   return Object.freeze({
     getState: () => state,
-    reveal: query,
-    refresh: query,
+    reveal: () => query(),
+    refresh: () => query(),
     close() {
       clearProof({ status: "hidden" });
     },
     setOnline(value: boolean) {
       online = value;
-      if (!value) clearProof({ status: "offline" });
+      if (!value) {
+        clearFollow();
+        clearProof({ status: "offline" });
+      } else if (following && state.status === "offline") void query();
+    },
+    followUntilReady(active: boolean) {
+      if (following === active) return;
+      following = active;
+      followAttempt = 0;
+      clearFollow();
+      if (active && (state.status === "not-ready" || state.status === "unavailable"))
+        scheduleFollow();
     },
     dispose() {
       stopped = true;
+      following = false;
+      clearFollow();
       request += 1;
       clearExpiry();
       unsubscribeContext?.();

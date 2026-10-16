@@ -116,11 +116,41 @@ describe("WP-2423 Q4 store hours reference guard", () => {
       ),
     ).toBe(false);
   });
-  it("rejects Setup-bound configurations and a missing baseline", () => {
-    const setupBasis = { profile: "StoreSetupConfigurationBasisV2" };
+  it("keeps an installed configuration and one from Store setup apart, and needs a baseline", () => {
+    const setupBasis = basis(1);
     expect(storeHoursChangeAllowed(baseline, { ...draft, setupBasis }, now)).toBe(false);
     expect(storeHoursChangeAllowed({ ...baseline, setupBasis }, draft, now)).toBe(false);
     expect(storeHoursChangeAllowed(null, draft, now)).toBe(false);
+  });
+});
+
+const fees = (state) =>
+  ["ServiceCharge", "DeliveryFee", "Tip"].map((chargeType) => ({ chargeType, state }));
+const basis = (revision, overrides = {}) => ({
+  profile: "StoreSetupConfigurationBasisV2",
+  tenantReference: id(40),
+  setupDraftReference: id(41),
+  sourceRevision: revision,
+  sourceSnapshotDigest: "sha256:" + String(revision).repeat(64).slice(0, 64),
+  feeContexts: fees("Disabled"),
+  ...overrides,
+});
+describe("WP-2423 Q4 hours change on a configuration from Store setup", () => {
+  const published = { ...baseline, setupBasis: basis(1) };
+  // The hours-only Store setup revision 2 and the draft configuration made from it.
+  const candidate = { ...draft, setupBasis: basis(2) };
+  it("accepts hours and closures from a newer hours-only Store setup revision", () => {
+    expect(storeHoursChangeAllowed(published, candidate, now)).toBe(true);
+  });
+  it.each([
+    ["fee settings", { setupBasis: basis(2, { feeContexts: fees("Unconfigured") }) }],
+    ["tenant", { setupBasis: basis(2, { tenantReference: id(99) }) }],
+    ["tax configuration", { taxConfigurationReference: id(30) }],
+    ["time zone", { timeZone: "America/Vancouver" }],
+    ["service modes", { enabledServiceModes: ["Pickup", "DineIn"] }],
+    ["effective window", { effectiveUntil: "2026-12-31T00:00:00.000Z" }],
+  ])("rejects a change to the %s", (_name, change) => {
+    expect(storeHoursChangeAllowed(published, { ...candidate, ...change }, now)).toBe(false);
   });
 });
 

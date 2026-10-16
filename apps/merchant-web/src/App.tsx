@@ -3,6 +3,7 @@ import { StorePublicProfilePanel } from "./StorePublicProfilePanel.js";
 import { createOptionSetClient } from "./store-option-set-page.js";
 import { createOptionPriceClient } from "./store-option-prices-page.js";
 import { createTaxReviewClient } from "./StoreTaxReviewPage.js";
+import { createTaxClassificationClient } from "./tax-classification-page.js";
 import { createOptionRecipeClient } from "./store-option-recipes-page.js";
 import { RefundPaymentPage } from "./RefundPaymentPage.js";
 import { DiningSessionWorkspace } from "./DiningSessionWorkspace.js";
@@ -97,6 +98,10 @@ const StoreOptionRecipesPage = lazyPage(
   "StoreOptionRecipesPage",
 );
 const StoreTaxReviewPage = lazyPage(() => import("./StoreTaxReviewPage.js"), "StoreTaxReviewPage");
+const TaxClassificationsPage = lazyPage(
+  () => import("./TaxClassificationsPage.js"),
+  "TaxClassificationsPage",
+);
 const CurrentStoreCapabilityPage = lazyPage(
   () => import("./CurrentStoreCapabilityPage.js"),
   "CurrentStoreCapabilityPage",
@@ -599,6 +604,11 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                     key={state.workspace.selectedScope.storeReference + state.csrf}
                     storeReference={state.workspace.selectedScope.storeReference}
                     csrf={state.csrf}
+                    {...(state.workspace.navigation.some(
+                      (item) => item.screenId === "CAT-TAX-CLASSIFICATION-LIST",
+                    )
+                      ? { taxClassificationsHref: "/app/commerce/tax-classifications" }
+                      : {})}
                   >
                     {/* WP-2423 DEC-STORE-CUSTOMER-NAME: the name, address and phone customers see. */}
                     <StorePublicProfilePanel csrf={state.csrf} />
@@ -891,6 +901,22 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           }
         />
         <Route
+          path="/app/commerce/tax-classifications"
+          element={
+            <SessionPending pending={sessionPending}>
+              {state.kind === "Ready" && !state.switching ? (
+                <TaxClassificationsPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  client={createTaxClassificationClient(state.csrf)}
+                  csrf={state.csrf}
+                />
+              ) : (
+                <TaxClassificationsPage />
+              )}
+            </SessionPending>
+          }
+        />
+        <Route
           path="/app/commerce/option-recipes"
           element={
             <SessionPending pending={sessionPending}>
@@ -1049,6 +1075,10 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                   storeLabel={state.workspace.selectedScope.storeLabel}
                   csrf={state.csrf}
                   timeZone={state.workspace.selectedScope.timeZone}
+                  tableQrHref={
+                    state.workspace.navigation.find((item) => item.screenId === "DIN-TABLE-LIST")
+                      ?.href
+                  }
                 />
               ) : (
                 <StatePanel heading="Counter order unavailable" status>

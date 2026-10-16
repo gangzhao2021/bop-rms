@@ -129,6 +129,56 @@ it("WP-2423: offers an in-person handoff when the pickup code expired or was nev
   expect(render("Locked")).toContain("Too many wrong codes for this order. Check the customer");
   expect(render("Expired")).not.toContain("Too many wrong codes for this order");
 });
+it("WP-2423: a counter order is handed over in person at once, never by pickup code", () => {
+  const fixture = pickupQueueFixture();
+  const render = (proofReadiness: string, takenAtCounter: boolean) => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <PickupQueueScreen
+          view={parsePickupQueueView({
+            ...fixture,
+            workstation: {
+              deviceReference: "01900000-0000-7000-8000-000000000008",
+              pickupLocationReference: "01900000-0000-7000-8000-000000000009",
+            },
+            items: fixture.items.map((item) => ({
+              ...item,
+              proofReadiness,
+              ...(takenAtCounter ? { takenAtCounter: true } : {}),
+            })),
+          })}
+          proofContext={{
+            csrf: "A".repeat(43),
+            storeReference: "01900000-0000-7000-8000-000000000004",
+          }}
+        />
+      </MemoryRouter>,
+    );
+    return html.slice(html.indexOf("<article"), html.indexOf("</article>"));
+  };
+  const counter = render("NotIssued", true);
+  expect(counter).toContain(
+    "Taken at the counter — hand over to the customer by name or order number.",
+  );
+  expect(counter).toContain("Not needed · taken at the counter");
+  expect(counter).toContain(">Hand over</button>");
+  expect(counter).toContain("This order was taken at the counter, so no pickup code was sent.");
+  expect(counter).toContain("Order number or the name they gave at the counter");
+  for (const text of ["Check pickup code", "No code sent", "check in person"])
+    expect(counter).not.toContain(text);
+  // A guest's QR pickup order keeps the code flow.
+  const guest = render("Ready", false);
+  expect(guest).not.toContain("Taken at the counter");
+  expect(guest).not.toContain(">Hand over</button>");
+  expect(render("NotIssued", false)).toContain("No code sent · check in person");
+  // Only `true` is accepted from the server.
+  expect(() =>
+    parsePickupQueueView({
+      ...fixture,
+      items: fixture.items.map((item) => ({ ...item, takenAtCounter: false })),
+    }),
+  ).toThrow("PICKUP_VIEW_INVALID");
+});
 it("WP-2423: confirms a recorded handover in plain words on the queue", () => {
   const html = renderToStaticMarkup(
     <MemoryRouter>

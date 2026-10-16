@@ -21,6 +21,7 @@ import {
   createOrderFulfillmentSourceEvidenceBinding,
   createOrderFulfillmentSourceLineBinding,
   parseConfirmedOrderFulfillmentSourceEvidence,
+  listStoreCounterOrders,
   parseOrderConfirmedEnvelope,
 } from "../../rms/ordering/src/index.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
@@ -56,7 +57,7 @@ const minutes = (base, n) => new Date(Date.parse(base) + n * 60_000).toISOString
  * controlled past instant so pickup windows can be crossed without waiting; one derivation is
  * forced to repeat a live code to prove the collision guard.
  */
-it("issues a unique six-digit code, accepts it once typed, records and locks wrong codes without the code, rejects other stores and expired days, and allows the in-person check once locked", async () => {
+it("issues a unique six-digit code, accepts it once typed, records and locks wrong codes without the code, rejects other stores and expired days, allows the in-person check once locked, and issues no code for a counter order", async () => {
   await withIsolatedDatabase({ caseId: "wp2423_pcode" }, async (context) => {
     const admin = new Client(context.clientConfig);
     await admin.connect();
@@ -109,8 +110,12 @@ it("issues a unique six-digit code, accepts it once typed, records and locks wro
       const asOwner = (store, work) => transaction(null, store, work);
       const asApi = (store, work) => transaction(api, store, work);
 
-      /** Synthetic confirmed pickup Order and Kitchen ready event, applied by the owner services. */
-      async function readyPickup(store, n, readyAt) {
+      /**
+       * Synthetic confirmed pickup Order and Kitchen ready event, applied by the owner services.
+       * With `channel`, Ordering's own Order header row (test-only stand-in written by the owner
+       * client) says how the order was taken: `Pos` is staff at the counter, `Qr` a guest.
+       */
+      async function readyPickup(store, n, readyAt, channel = null) {
         const scope = { brandReference: brand, storeReference: store };
         const order = id(0x1000 * n + 1),
           batch = id(0x1000 * n + 2),
@@ -118,6 +123,26 @@ it("issues a unique six-digit code, accepts it once typed, records and locks wro
           eventId = id(0x1000 * n + 4),
           item = id(0x1000 * n + 5);
         const confirmedAt = minutes(readyAt, -10);
+        if (channel !== null)
+          await asOwner(store, async (tx) => {
+            const day = confirmedAt.slice(0, 10);
+            await tx.query(
+              "INSERT INTO rms_ordering.order_number_allocation (order_id,brand_id,store_id,business_date," +
+                "sequence,order_number,allocated_at,business_date_configuration_id," +
+                "business_date_configuration_version,business_date_content_digest,time_zone," +
+                "business_day_start,business_date_boundary_at,boundary_disambiguation) " +
+                "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,$9,'America/Toronto','00:00:00',$7,'Exact')",
+              [order, brand, store, day, n, String(n), confirmedAt, id(0x1000 * n + 14), sha("d")],
+            );
+            await tx.query(
+              "INSERT INTO rms_ordering.order_header (order_id,brand_id,store_id,business_date," +
+                "order_number,order_type,source_channel,dining_session_id,created_by_actor_id," +
+                "submitted_by_actor_id,aggregate_version,canonical_phase,closure_status," +
+                "payment_status,created_at) VALUES ($1,$2,$3,$4,$5,'Pickup',$6,NULL,$7,$7,1," +
+                "'Submitted','Open','NotReported',$8)",
+              [order, brand, store, day, String(n), channel, id(0x1000 * n + 15), confirmedAt],
+            );
+          });
         const event = parseOrderConfirmedEnvelope({
           eventId,
           eventType: "OrderConfirmed",
@@ -644,6 +669,69 @@ it("issues a unique six-digit code, accepts it once typed, records and locks wro
       assert.equal((await issue(a3)).status, "Issued");
       forcedFirst = null;
       assert.equal((await codeRows(a3.fulfillment))[0].derivation_index, 0);
+
+      // ── Counter order (WP-2423): staff took it at the counter, so when it is ready the owner
+      // issues no guest code and staff hand it over in person at once; a guest's QR order still
+      // gets its code.
+      clock = minutes(t0, 70);
+      const counter = await readyPickup(storeA, 5, minutes(t0, 69), "Pos");
+      const guest = await readyPickup(storeA, 6, minutes(t0, 69), "Qr");
+      assert.deepEqual(
+        await asApi(storeA, (tx) =>
+          listStoreCounterOrders(tx, counter.scope, [counter.order, guest.order]),
+        ),
+        new Set([counter.order]),
+      );
+      assert.deepEqual(await issue(counter), { status: "NotApplicable", reason: "CounterOrder" });
+      // A replayed ready event is the same no-op.
+      assert.equal((await issue(counter)).status, "NotApplicable");
+      assert.equal((await issue(guest)).status, "Issued");
+      assert.match(await guestCode(guest), /^[0-9]{6}$/u);
+      assert.deepEqual(await codeRows(counter.fulfillment), []);
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM rms_fulfillment.pickup_proof_generation WHERE fulfillment_id=$1",
+            [counter.fulfillment],
+          )
+        ).rows[0].n,
+        0,
+      );
+      // The queue shows no code for it, and the in-person handover (no code issued) completes it
+      // immediately, with no wait for a code to lock or expire.
+      const counterQueue = await asApi(storeA, (tx) =>
+        createPostgresFulfillmentReadinessStore({
+          ...storeOptions(storeA),
+          authorizeQueue: async () => true,
+        }).listPickupQueue({
+          transaction: tx,
+          afterFulfillmentReference: null,
+          limit: 10,
+          includeCompleted: false,
+        }),
+      );
+      const counterItem = counterQueue.items.find(
+        (value) => value.fulfillmentReference === counter.fulfillment,
+      );
+      assert.equal(counterItem?.phase, "Ready");
+      assert.equal(counterItem?.proof, null);
+      const handedOver = await handOver(counter, inPerson(counter, "ProofNotIssued"));
+      assert.equal(handedOver.status, "Applied");
+      assert.equal(handedOver.effect.nextPhase, "Completed");
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM rms_fulfillment.fulfillment_completion_publication WHERE fulfillment_id=$1",
+            [counter.fulfillment],
+          )
+        ).rows[0].n,
+        1,
+      );
+      // The guest's QR order still refuses an in-person check while its code is valid.
+      await assert.rejects(
+        handOver(guest, inPerson(guest, "ProofNotIssued")),
+        (error) => error.code === "PICKUP_HANDOFF_VERIFICATION_FAILED",
+      );
     } finally {
       await admin.end();
     }

@@ -1,4 +1,4 @@
-import { expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createStoreConfigurationClient,
   parseStoreConfigurationView,
@@ -266,4 +266,64 @@ it("retains the entire fee basis in Save and lifecycle transport rather than dro
     );
   }
   expect(fetcher).toHaveBeenCalledTimes(5);
+});
+
+describe("WP-2423 Q4 hours draft of a configuration from Store setup", () => {
+  const command = {
+    expectedSetup: {
+      setupDraftReference: id(31),
+      sourceRevision: 7,
+      sourceSnapshotDigest: "sha256:" + "a".repeat(64),
+    },
+    setupOperationReference: id(40),
+    operationReference: id(41),
+    auditReference: id(42),
+    configurationReference: id(43),
+    expectedVersion: 2,
+    weeklySchedule: configuration("Draft").weeklySchedule,
+    exceptions: [],
+    effectiveFrom: at,
+  } as unknown as Parameters<
+    ReturnType<typeof createStoreConfigurationClient>["saveHoursDraft"]
+  >[0];
+  const answer = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "content-type": "application/json", "cache-control": "no-store" },
+    });
+  it("sends only the hours change to the hours draft route", async () => {
+    const fetcher = vi.fn(async () => answer(200, { status: "Applied", resultingVersion: 3 }));
+    await createStoreConfigurationClient(fetcher as unknown as typeof fetch).saveHoursDraft(
+      command,
+      "csrf",
+      new AbortController().signal,
+    );
+    const [url, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/merchant/store-configuration/hours-draft");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual(command);
+    expect(init.headers).toMatchObject({ "X-BOP-CSRF": "csrf" });
+  });
+  it.each([
+    [
+      409,
+      { error: "store_setup_has_unpublished_changes" },
+      "Store setup has changes that are not published yet. Ask the Owner to publish or finish them in Store setup first.",
+    ],
+    [
+      409,
+      { error: "store_configuration_conflict" },
+      "Source changed. Refresh before trying again.",
+    ],
+    [422, { error: "store_configuration_rejected" }, "Change not accepted."],
+    [403, { error: "request_denied" }, "Permission denied."],
+    [200, { status: "Applied", resultingVersion: 2 }, "Configuration request unavailable."],
+  ])("answers %s %j in plain words", async (status, body, message) => {
+    const fetcher = vi.fn(async () => answer(status, body));
+    const error = await createStoreConfigurationClient(fetcher as unknown as typeof fetch)
+      .saveHoursDraft(command, "csrf", new AbortController().signal)
+      .catch((reason: unknown) => reason);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message.startsWith(message)).toBe(true);
+  });
 });

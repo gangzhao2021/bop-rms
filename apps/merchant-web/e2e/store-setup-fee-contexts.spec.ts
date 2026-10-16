@@ -48,6 +48,8 @@ async function install(page: Page) {
     choicesStarted: 0,
     actorReference: scope.actorReference,
     chronology: [] as string[],
+    /** WP-2423: the session may manage the Brand's tax classifications (navigation entry). */
+    taxClassificationsNav: false,
   };
   let saved: StoreSetupDraft | null = null;
   const history: StoreSetupDraft[] = [];
@@ -78,6 +80,16 @@ async function install(page: Page) {
               label: "Store setup",
               permission: "organization.manage",
             },
+            ...(control.taxClassificationsNav
+              ? [
+                  {
+                    screenId: "CAT-TAX-CLASSIFICATION-LIST",
+                    href: "/app/commerce/tax-classifications",
+                    label: "Tax classifications",
+                    permission: "catalog.tax-classification.manage",
+                  },
+                ]
+              : []),
           ],
           businessDate: "2026-10-05",
           storeStatus: "Unavailable",
@@ -553,6 +565,8 @@ test("@production Store fee contexts reject unavailable retired or foreign class
     "No tax classifications are set up for this Brand yet",
   );
   await expect(panel.getByRole("status")).not.toContainText("unavailable");
+  // Without the manage permission there is no link to the tax classifications page.
+  await expect(panel.getByRole("link", { name: /tax classifications/u })).toHaveCount(0);
   f.control.choiceMode = "Active";
   await panel
     .getByRole("button", { name: "Refresh fee classification choices", exact: true })
@@ -638,4 +652,42 @@ test("@production Store fee contexts late Actor choices cannot replace new scope
     path: "/private/tmp/wp2421-store-setup-fee-contexts-mobile.png",
     fullPage: true,
   });
+});
+test("@production Store fee contexts link the Brand Owner to set up tax classifications when none exist", async ({
+  page,
+}) => {
+  const f = await install(page);
+  f.control.taxClassificationsNav = true;
+  f.control.choiceMode = "NotRegistered";
+  await open(page);
+  const panel = await feeStep(page);
+  await expect(panel.getByRole("status")).toContainText(
+    "No tax classifications are set up for this Brand yet",
+  );
+  const link = panel.getByRole("link", {
+    name: "Set up the Brand’s tax classifications",
+    exact: true,
+  });
+  await expect(link).toBeVisible();
+  await expectNoInternalText(page);
+  // Classifications that exist but are all retired also lead there.
+  f.control.choiceMode = "Retired";
+  await panel
+    .getByRole("button", { name: "Refresh fee classification choices", exact: true })
+    .click();
+  await expect(link).toBeVisible();
+  f.control.choiceMode = "Active";
+  await panel
+    .getByRole("button", { name: "Refresh fee classification choices", exact: true })
+    .click();
+  // Active choices: nothing to set up, so no link.
+  await expect(link).toHaveCount(0);
+  await expect(panel.getByRole("status")).toHaveCount(0);
+  f.control.choiceMode = "NotRegistered";
+  await panel
+    .getByRole("button", { name: "Refresh fee classification choices", exact: true })
+    .click();
+  await link.click();
+  await expect(page).toHaveURL(/\/app\/commerce\/tax-classifications$/u);
+  expect(f.control.errors).toEqual([]);
 });

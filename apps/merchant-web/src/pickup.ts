@@ -15,6 +15,11 @@ export interface PickupQueueItem {
   readonly remakeQuantity?: number;
   /** WP-2423 Q26: the order's business day (order numbers restart every business day). */
   readonly businessDate?: string;
+  /**
+   * WP-2423: staff took this order at the counter. No pickup code is sent; staff hand it over in
+   * person by name or order number as soon as it is ready.
+   */
+  readonly takenAtCounter?: true;
   readonly execution?: PickupExecution;
 }
 export interface PickupExecution {
@@ -98,6 +103,7 @@ function item(value: unknown): PickupQueueItem {
   const hasExecution = !!value && typeof value === "object" && Object.hasOwn(value, "execution");
   const hasRemake = !!value && typeof value === "object" && Object.hasOwn(value, "remakeQuantity");
   const hasDay = !!value && typeof value === "object" && Object.hasOwn(value, "businessDate");
+  const hasCounter = !!value && typeof value === "object" && Object.hasOwn(value, "takenAtCounter");
   const input = closed(value, [
     "fulfillmentReference",
     "orderReference",
@@ -112,6 +118,7 @@ function item(value: unknown): PickupQueueItem {
     "allergenCue",
     ...(hasRemake ? ["remakeQuantity"] : []),
     ...(hasDay ? ["businessDate"] : []),
+    ...(hasCounter ? ["takenAtCounter"] : []),
     ...(hasExecution ? ["execution"] : []),
   ]);
   if (
@@ -134,7 +141,9 @@ function item(value: unknown): PickupQueueItem {
         Number(input.remakeQuantity) < 1 ||
         Number(input.remakeQuantity) > 999)) ||
     (hasDay &&
-      (typeof input.businessDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(input.businessDate)))
+      (typeof input.businessDate !== "string" ||
+        !/^\d{4}-\d{2}-\d{2}$/u.test(input.businessDate))) ||
+    (hasCounter && input.takenAtCounter !== true)
   )
     throw new Error("PICKUP_VIEW_INVALID");
   return Object.freeze({
@@ -151,6 +160,7 @@ function item(value: unknown): PickupQueueItem {
     allergenCue: input.allergenCue as PickupQueueItem["allergenCue"],
     ...(hasRemake ? { remakeQuantity: Number(input.remakeQuantity) } : {}),
     ...(hasDay ? { businessDate: input.businessDate as string } : {}),
+    ...(hasCounter ? { takenAtCounter: true as const } : {}),
     ...(hasExecution ? { execution: parsePickupExecution(input.execution) } : {}),
   });
 }

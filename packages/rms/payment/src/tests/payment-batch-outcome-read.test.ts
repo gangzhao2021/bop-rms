@@ -3,6 +3,7 @@ import type { ConsumerTransaction } from "@bop/eventing";
 import {
   listStoreOrderBatchPaymentOutcomes,
   listStoreOrderOnlinePaidTotals,
+  listStoreOrdersWithOnlineRefunds,
 } from "../infrastructure/persistence/payment-status-store.js";
 
 const id = (n: number) => "0198a106-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -93,6 +94,42 @@ it("WP-2423: sums each Order's active succeeded online payments for the Orders p
     ).rejects.toMatchObject({ code: "PAYMENT_STATUS_DEPENDENCY_UNAVAILABLE" });
   await expect(
     listStoreOrderOnlinePaidTotals(
+      fixture([]).transaction,
+      scope,
+      Array.from({ length: 101 }, (_, n) => id(1000 + n)),
+    ),
+  ).rejects.toThrow();
+});
+
+it("WP-2423: lists the scoped Orders with an ordinary or compensation refund", async () => {
+  const f = fixture([{ order_id: id(50) }, { order_id: id(52) }]);
+  const found = await listStoreOrdersWithOnlineRefunds(f.transaction, scope, [
+    id(50),
+    id(51),
+    id(52),
+  ]);
+  expect([...found]).toEqual([id(50), id(52)]);
+  expect(f.query.mock.calls[0]?.[1]).toEqual([id(1), id(2)]);
+  const sql = String(f.query.mock.calls[1]?.[0]);
+  expect(sql).toContain("rms_payment.ordinary_refund_request");
+  expect(sql).toContain("rms_payment.payment_compensation_refund");
+  expect(sql).toContain("r.brand_id=$1 AND r.store_id=$2");
+  expect(sql).toContain("c.brand_id=$1 AND c.store_id=$2");
+  expect(f.query.mock.calls[1]?.[1]).toEqual([id(1), id(2), [id(50), id(51), id(52)]]);
+  const none = fixture([]);
+  expect([...(await listStoreOrdersWithOnlineRefunds(none.transaction, scope, []))]).toEqual([]);
+  expect(none.query).not.toHaveBeenCalled();
+  for (const rows of [
+    [{ order_id: id(99) }],
+    [{ order_id: id(50) }, { order_id: id(50) }],
+    [{ order_id: "order" }],
+    [{ order_id: id(50), extra: 1 }],
+  ])
+    await expect(
+      listStoreOrdersWithOnlineRefunds(fixture(rows).transaction, scope, [id(50)]),
+    ).rejects.toMatchObject({ code: "PAYMENT_STATUS_DEPENDENCY_UNAVAILABLE" });
+  await expect(
+    listStoreOrdersWithOnlineRefunds(
       fixture([]).transaction,
       scope,
       Array.from({ length: 101 }, (_, n) => id(1000 + n)),

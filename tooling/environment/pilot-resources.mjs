@@ -9,6 +9,11 @@ import { canonicalizeRfc8785, sha256Hex } from "../../packages/bop/audit/src/ind
 import { createPersistentPublicStoreProfileReader } from "../../apps/api/dist/persistent-public-store-profile.js";
 import { createPersistentEntryOperatingReader } from "../../apps/api/dist/persistent-entry-operating.js";
 import { createMerchantServicePauseProof } from "../../apps/api/dist/merchant-service-pause-proof.js";
+import {
+  storeConfigurationContentHash,
+  storeConfigurationSetupSnapshotReferences,
+  storeConfigurationValidationCheckCodes,
+} from "./pilot-store-publication-codes.mjs";
 export async function createInternalTestResources({
   createApplicationDatabase,
   createInternalTestCredentials,
@@ -67,8 +72,12 @@ export async function createInternalTestResources({
       configurationType: "STORE_CONFIGURATION",
       purposeCode: "STORE_CONFIGURATION",
       requiredLiveGateRequirementCodes: operatingConfiguration.liveGateRequirementCodes,
+      // WP-2423 DEC-STORE-SETUP-PUBLICATION: a configuration the Owner published from Store setup
+      // (V2) is verified with its own digest, check inventory and setup provenance.
+      requiredValidationCheckCodes: storeConfigurationValidationCheckCodes,
+      setupSnapshotReferences: storeConfigurationSetupSnapshotReferences,
       authorize: bindingAuthorization,
-      hashContent: hash,
+      hashContent: storeConfigurationContentHash,
       timeZone: store.timeZone,
       verifyPauseOperation: createMerchantServicePauseProof({
         brandReference: scope.brandReference,

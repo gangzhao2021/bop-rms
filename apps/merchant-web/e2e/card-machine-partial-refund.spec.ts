@@ -229,7 +229,7 @@ test("@production a manager refunds an item of a card-machine payment and record
   await page.goto("/app/operations/payments/" + id(31) + "/refund");
   const summary = page.getByRole("region", { name: "Payment financial summary" });
   await expect(summary).toContainText("Paid on the store's card machine");
-  await expect(summary).toContainText("CAD 24.86");
+  await expect(summary).toContainText("$24.86");
   await page.getByRole("button", { name: "Load refundable items" }).click();
   // Items paid on the card machine are never mixed with items paid online.
   await page.getByRole("spinbutton", { name: /Pad thai/ }).fill("1");
@@ -240,9 +240,9 @@ test("@production a manager refunds an item of a card-machine payment and record
   await page.getByRole("spinbutton", { name: /Green tea/ }).fill("0");
   await page.getByRole("button", { name: "Calculate refund" }).click();
   const calculation = page.getByRole("region", { name: "Refund calculation" });
-  await expect(calculation).toContainText("CAD 6.21");
+  await expect(calculation).toContainText("$6.21");
   await expect(calculation).toContainText("Tax");
-  await expect(calculation).toContainText("CAD 0.64");
+  await expect(calculation).toContainText("$0.64");
   await expect(calculation).toContainText("Paid on the store's card machine");
   await page.getByRole("checkbox", { name: /I confirm/ }).check();
   await page.getByRole("button", { name: "Record refund request" }).click();
@@ -269,15 +269,13 @@ test("@production a manager refunds an item of a card-machine payment and record
   // A card number is never accepted as the slip reference.
   const slip = page.getByRole("textbox", { name: "Slip reference (optional)" });
   await slip.fill("4111 1111 1111 1111");
-  await expect(
-    page.getByRole("button", { name: "Refunded CAD 6.21 on card machine" }),
-  ).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Refunded $6.21 on card machine" })).toBeDisabled();
   await slip.fill("REF 5521");
-  await page.getByRole("button", { name: "Refunded CAD 6.21 on card machine" }).click();
+  await page.getByRole("button", { name: "Refunded $6.21 on card machine" }).click();
   await expect(page.getByText(/Result unknown\. Record it again/u)).toBeVisible();
-  await page.getByRole("button", { name: "Refunded CAD 6.21 on card machine" }).click();
+  await page.getByRole("button", { name: "Refunded $6.21 on card machine" }).click();
   await expect(
-    page.getByText(/^Card-machine refund recorded: CAD 6\.21 refunded on the card machine/u),
+    page.getByText(/^Card-machine refund recorded: \$6\.21 refunded on the card machine/u),
   ).toBeVisible();
   // Without a reload: the request, its status and the payment amounts are reread from the server.
   await expect(requests).toContainText("Refunded on the card machine");
@@ -397,7 +395,7 @@ test("@production an owner approves a card-machine refund and is told to make it
   });
   await page.goto("/app/approvals");
   const card = page.getByRole("listitem").filter({ hasText: "T4-2" });
-  const approve = card.getByRole("button", { name: "Approve card machine refund of CAD 124.30" });
+  const approve = card.getByRole("button", { name: "Approve card machine refund of $124.30" });
   await expect(approve).toBeDisabled();
   await card.getByRole("button", { name: "Verify to approve" }).click();
   const dialog = page.getByRole("dialog", { name: "Confirm it is you" });
@@ -409,7 +407,7 @@ test("@production an owner approves a card-machine refund and is told to make it
     "Approved — refund it on the store's card machine, then record it",
   );
   await expect(card.getByRole("status")).toContainText(
-    "Refund CAD 124.30 on the store's card machine",
+    "Refund $124.30 on the store's card machine",
   );
   await expect(card.getByRole("link", { name: "Record the card machine refund" })).toHaveAttribute(
     "href",

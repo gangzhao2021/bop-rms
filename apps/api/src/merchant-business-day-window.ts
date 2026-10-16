@@ -1,4 +1,4 @@
-import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
+import { storeConfigurationProofHashing } from "./merchant-store-configuration-proof-hash.js";
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
   createPostgresAsPublishedStorePublicationProof,
@@ -53,7 +53,7 @@ export function createMerchantBusinessDayWindows(options: {
         storeReference: scope.storeReference,
         authorize: async () => options.authorize(t as ConsumerTransaction),
         configurationReference: candidate.configurationReference,
-        hashContent: (value) => "sha256:" + sha256Hex(canonicalizeRfc8785(value)),
+        ...storeConfigurationProofHashing,
       })(t, at);
       return {
         contentDigest: proof.contentDigest,

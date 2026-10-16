@@ -37,6 +37,16 @@ export function createMerchantStoreSetup(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
   nextReference(): string;
+  /**
+   * WP-2423 DEC-STORE-SETUP-PUBLICATION: the Store's current published configuration reference
+   * when no configuration was ever recorded through authoring (an installed configuration), so a
+   * saved setup builds on the configuration the Store actually runs. `authorize` holds this run.
+   */
+  currentConfiguration?: (
+    tx: Parameters<Parameters<PersistentMerchantBffOptions["transactions"]["run"]>[0]>[0],
+    at: string,
+    authorize: () => Promise<boolean>,
+  ) => Promise<string | null>;
 }) {
   const persistence = options.persistence,
     authentication = options.authentication;
@@ -440,15 +450,23 @@ export function createMerchantStoreSetup(options: {
               return true;
             },
           });
-          const base = await readBase(tx, check());
-          const baseReference = base?.configurationReference ?? null;
+          const currentConfiguration = options.currentConfiguration;
+          const readHead = async () => {
+            const recorded = await readBase(tx, check());
+            if (recorded) return recorded.configurationReference;
+            if (currentConfiguration === undefined) return null;
+            return currentConfiguration(tx, check(), async () => {
+              await fresh();
+              return true;
+            });
+          };
+          const baseReference = await readHead();
           let guarded = false;
           await host.registerBeforeCommit(
             tx,
             async () => {
               if (guarded) return fail();
-              const current = await readBase(tx, check());
-              if ((current?.configurationReference ?? null) !== baseReference)
+              if ((await readHead()) !== baseReference)
                 return fail("STORE_SETUP_OPERATION_VERSION_CONFLICT");
               guarded = true;
             },

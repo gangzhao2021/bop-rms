@@ -365,6 +365,7 @@ export * from "./contracts/product-publication-source-v2.js";
 export * from "./contracts/product-approval-v2.js";
 export * from "./contracts/product-publication-validation-context-v2.js";
 export * from "./contracts/product-tax-classification-registry.js";
+export * from "./contracts/product-tax-classification-registry-change.js";
 export * from "./infrastructure/persistence/product-tax-classification-registry-store.js";
 
 export * from "./contracts/product-publication-validation-report.js";

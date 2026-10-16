@@ -452,3 +452,47 @@ export async function listStoreOrderOnlinePaidTotals(
     return unavailable();
   }
 }
+
+/**
+ * WP-2423: which of the given Orders have any refund recorded against their online payment — an
+ * ordinary refund request (staff refunds and item-cancellation refunds) or a compensation refund
+ * (whole-batch cancellations and automatic refunds). Lets the Orders list read the exact refund
+ * position (the same one the order detail reads) only for Orders that have one. Read only; the
+ * caller authorizes the Orders and owns the transaction.
+ */
+export async function listStoreOrdersWithOnlineRefunds(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReferences: readonly string[],
+): Promise<ReadonlySet<string>> {
+  if (orderReferences.length > 100) return unavailable();
+  const brand = parsePaymentReference(scope.brandReference),
+    store = parsePaymentReference(scope.storeReference),
+    orders = orderReferences.map((reference) => parsePaymentReference(reference));
+  if (orders.length === 0) return new Set<string>();
+  try {
+    await transaction.query(
+      "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+      [brand, store],
+    );
+    const found = await transaction.query(
+      "SELECT r.order_id::text AS order_id FROM rms_payment.ordinary_refund_request r " +
+        "WHERE r.brand_id=$1 AND r.store_id=$2 AND r.order_id=ANY($3::uuid[]) " +
+        "UNION SELECT c.order_id::text FROM rms_payment.payment_compensation_refund c " +
+        "WHERE c.brand_id=$1 AND c.store_id=$2 AND c.order_id=ANY($3::uuid[]) LIMIT 101",
+      [brand, store, orders],
+    );
+    if (!Array.isArray(found.rows) || found.rows.length > 100) return unavailable();
+    const result = new Set<string>();
+    for (const row of found.rows as Record<string, unknown>[]) {
+      if (Object.keys(row).length !== 1) return unavailable();
+      const orderReference = parsePaymentReference(row.order_id);
+      if (!orders.includes(orderReference) || result.has(orderReference)) return unavailable();
+      result.add(orderReference);
+    }
+    return result;
+  } catch (error) {
+    if (error instanceof PaymentStatusProjectionError) throw error;
+    return unavailable();
+  }
+}

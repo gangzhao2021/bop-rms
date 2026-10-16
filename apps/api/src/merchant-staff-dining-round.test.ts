@@ -84,7 +84,13 @@ function setup(clock = { at: "2026-10-15T18:00:00.000Z" }) {
         status: "Opened" as const,
         diningSessionReference: id(31),
         joinCredential: "123456",
+        started: false,
+        generation: 2,
       };
+    }),
+    abandonTable: vi.fn(async (): Promise<"Closed" | "Kept"> => {
+      calls.push("abandonTable");
+      return "Closed";
     }),
     enter: vi.fn(async () => {
       calls.push("enter");
@@ -352,5 +358,76 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
       { ...base, extra: true },
     ])
       expect(() => parseStaffDiningRoundCommand(bad)).toThrow(StaffDiningRoundError);
+  });
+
+  it("WP-2423 item 7: closes a session it started when the round fails before anything was ordered", async () => {
+    const started = {
+      status: "Opened" as const,
+      diningSessionReference: id(31),
+      joinCredential: "123456",
+      started: true,
+      generation: 1,
+    };
+    // The table guest can't be bound after the table was opened: the empty session is closed.
+    const unbound = setup();
+    unbound.pipeline.openTable.mockResolvedValueOnce(started);
+    unbound.pipeline.bind.mockRejectedValueOnce(new Error("binding unavailable"));
+    await expect(unbound.send()).rejects.toMatchObject({ code: "STAFF_ROUND_UNAVAILABLE" });
+    expect(unbound.pipeline.abandonTable).toHaveBeenCalledTimes(1);
+    expect(unbound.pipeline.abandonTable).toHaveBeenCalledWith(
+      { sessionCookie: "cookie", csrf: "csrf" },
+      { tableReference: table, diningSessionReference: id(31), generation: 1 },
+    );
+    expect(unbound.pipeline.selectCart).not.toHaveBeenCalled();
+    // A sold-out line on a table this round opened: nothing ordered, the session is closed too.
+    state.entries.clear();
+    const soldOut = setup();
+    soldOut.pipeline.openTable.mockResolvedValueOnce(started);
+    soldOut.pipeline.addItem.mockResolvedValueOnce({ status: "NotAvailable" });
+    await expect(soldOut.send()).rejects.toMatchObject({ code: "STAFF_ROUND_ITEM_UNAVAILABLE" });
+    expect(soldOut.calls.at(-1)).toBe("abandonTable");
+    // Closing it failing never changes the answer staff get; it is reported.
+    state.entries.clear();
+    const stuck = setup();
+    stuck.pipeline.openTable.mockResolvedValueOnce(started);
+    stuck.pipeline.join.mockRejectedValueOnce(new Error("join unavailable"));
+    const closeFailure = new Error("closing unavailable");
+    stuck.pipeline.abandonTable.mockRejectedValueOnce(closeFailure);
+    await expect(stuck.send()).rejects.toMatchObject({ code: "STAFF_ROUND_UNAVAILABLE" });
+    expect(stuck.onUnexpected).toHaveBeenCalledWith(closeFailure);
+  });
+
+  it("WP-2423 item 7: keeps a session that had guests, or once the round's checkout started", async () => {
+    // The table already had a session (fresh code only): it is never closed for staff's failure.
+    const seated = setup();
+    seated.pipeline.bind.mockRejectedValueOnce(new Error("binding unavailable"));
+    await expect(seated.send()).rejects.toMatchObject({ code: "STAFF_ROUND_UNAVAILABLE" });
+    expect(seated.pipeline.abandonTable).not.toHaveBeenCalled();
+    // Checkout started: the round may exist, so the table's session stays for it.
+    state.entries.clear();
+    const submitted = setup();
+    submitted.pipeline.openTable.mockResolvedValueOnce({
+      status: "Opened",
+      diningSessionReference: id(31),
+      joinCredential: "123456",
+      started: true,
+      generation: 1,
+    });
+    submitted.pipeline.preparePayment.mockRejectedValueOnce(new Error("connection reset"));
+    await expect(submitted.send()).rejects.toMatchObject({ code: "STAFF_ROUND_UNAVAILABLE" });
+    expect(submitted.pipeline.abandonTable).not.toHaveBeenCalled();
+    // A round placed at a table this request opened keeps its session.
+    state.entries.clear();
+    state.batches.clear();
+    const placed = setup();
+    placed.pipeline.openTable.mockResolvedValueOnce({
+      status: "Opened",
+      diningSessionReference: id(31),
+      joinCredential: "123456",
+      started: true,
+      generation: 1,
+    });
+    await expect(placed.send()).resolves.toMatchObject({ status: "Placed" });
+    expect(placed.pipeline.abandonTable).not.toHaveBeenCalled();
   });
 });

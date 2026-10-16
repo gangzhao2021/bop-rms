@@ -465,7 +465,10 @@ export function StoreDevicesPage({
             setMessage({ tone: "neutral", text: "Verified. Try again now." });
             if (load.kind !== "Ready") refresh();
           }}
-          label="Verify with authenticator app"
+          // WP-2423 item 7: the same label as the sidebar; the guidance above already names
+          // the authenticator app, so the button's own hint is not repeated.
+          label="Verify it's you"
+          hint={false}
           fetcher={fetcher}
           loadServerStatus={false}
           explanation={PIN_ELEVATION_EXPLANATION}

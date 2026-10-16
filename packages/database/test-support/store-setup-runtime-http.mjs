@@ -2806,6 +2806,22 @@ export async function exerciseStoreSetupRuntimeHttp(context) {
           savedSetup: originalFee.snapshot,
         });
       }
+      // WP-2423 DEC-STORE-SETUP-PUBLICATION: publish the saved setup through the pilot composition.
+      if (typeof context.afterSetup === "function") {
+        stage = "AfterSetup";
+        await context.afterSetup({
+          admin,
+          clientConfig: context.clientConfig,
+          runId: context.runId,
+          transactions,
+          session,
+          manager,
+          scope,
+          now,
+          id,
+          savedSetup: originalFee.snapshot,
+        });
+      }
     });
   } catch (error) {
     const sql = sqlFailure ? ":" + sqlFailure.family + ":" + sqlFailure.code : "";

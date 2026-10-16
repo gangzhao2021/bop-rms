@@ -9,6 +9,10 @@ import {
   parseRoleAdministrationPageView,
   parseRoleAdministrationRouteReference,
   unavailableRoleAdministrationPageClient,
+  rolePermissionLabel,
+  roleScopeLabels,
+  roleStatusLabels,
+  roleTypeLabels,
   type RoleAdministrationItemView,
   type RoleAdministrationOperation,
   type RoleAdministrationPageClient,
@@ -112,7 +116,7 @@ function PermissionPicker({
                   onChange(next);
                 }}
               />{" "}
-              {entry.description} <code>{entry.action}</code>
+              {entry.description}
               {entry.highRisk ? <strong> · High risk</strong> : null}
             </label>
           ))}
@@ -256,7 +260,13 @@ function Editor({
           <ul>
             {role.permissions.map((permission) => (
               <li key={permission.action}>
-                <strong>{permission.action}</strong> · {permission.group}
+                <strong>
+                  {rolePermissionLabel(permission.action, view.catalog, permission.group)}
+                </strong>
+                {rolePermissionLabel(permission.action, view.catalog, permission.group) ===
+                permission.group
+                  ? ""
+                  : ` · ${permission.group}`}
                 {permission.highRisk ? " · High risk" : ""}
               </li>
             ))}
@@ -329,7 +339,7 @@ function Editor({
     </div>
   );
 }
-function Screen({
+export function RoleAdministrationScreen({
   view,
   client,
   csrf,
@@ -388,13 +398,12 @@ function Screen({
           <label>
             Status
             <select value={status} onChange={(event) => setStatus(event.currentTarget.value)}>
-              <option>All</option>
-              <option>Draft</option>
-              <option>InReview</option>
-              <option>Approved</option>
-              <option>Active</option>
-              <option>Rejected</option>
-              <option>Deactivated</option>
+              <option value="All">All</option>
+              {Object.entries(roleStatusLabels).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
             </select>
           </label>
         </div>
@@ -411,7 +420,8 @@ function Screen({
               tone={role.permissions.some((item) => item.highRisk) ? "offline" : "neutral"}
             >
               <p>
-                <strong>{role.status}</strong> · {role.scope} · {role.type} · version {role.version}
+                <strong>{roleStatusLabels[role.status]}</strong> · {roleScopeLabels[role.scope]} ·{" "}
+                {roleTypeLabels[role.type]} · version {role.version}
               </p>
               <p>{role.description}</p>
               <p>
@@ -482,7 +492,7 @@ function Page({
     };
   }, [client, id, screenId, generation]);
   return state.kind === "Found" ? (
-    <Screen view={state.view} client={client} csrf={csrf} reload={reload} />
+    <RoleAdministrationScreen view={state.view} client={client} csrf={csrf} reload={reload} />
   ) : (
     <Status state={state.kind} />
   );

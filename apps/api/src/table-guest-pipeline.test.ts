@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { createStaffTableCode, createStaffTableGuestPipeline } from "./table-guest-pipeline.js";
+import {
+  createStaffTableAbandonment,
+  createStaffTableCode,
+  createStaffTableGuestPipeline,
+} from "./table-guest-pipeline.js";
 
 // WP-2423 Q7 slice 2 (DEC-STAFF-DINE-IN-ROUND): the table guest steps map the customer ports'
 // answers exactly; owner ports are doubles that record what they are handed.
@@ -25,6 +29,7 @@ describe("staff table code", () => {
       start: vi.fn(async () => ({
         status: "Issued",
         session: { diningSessionReference: id(31) },
+        capability: { generation: 1 },
         joinCredential: "123456",
       })),
       regenerate: vi.fn(async () => ({ status: "Issued", joinCredential: "654321" })),
@@ -38,6 +43,8 @@ describe("staff table code", () => {
       status: "Opened",
       diningSessionReference: id(31),
       joinCredential: "123456",
+      started: true,
+      generation: 1,
     });
     expect(ports.start).toHaveBeenCalledWith(staff, {
       tableReference: id(30),
@@ -59,6 +66,8 @@ describe("staff table code", () => {
       status: "Opened",
       diningSessionReference: id(31),
       joinCredential: "654321",
+      started: false,
+      generation: null,
     });
     expect(ports.regenerate).toHaveBeenCalledWith(staff, {
       diningSessionReference: id(31),
@@ -115,6 +124,86 @@ describe("staff table code", () => {
   });
 });
 
+describe("staff table abandonment — WP-2423 item 7", () => {
+  const ports = () => {
+    let sequence = 0x250;
+    return {
+      loadJoinState: vi.fn(async () => ({
+        tableReference: id(30),
+        sessionVersion: 2,
+        tableAssignmentVersion: 3,
+        capabilityVersion: 2,
+        generation: 1,
+      })),
+      close: vi.fn(async (_staff: unknown, command: { action: "Begin" | "Finalize" }) =>
+        command.action === "Begin"
+          ? { phase: "Closing", sessionVersion: 3 }
+          : { phase: "Closed", sessionVersion: 4 },
+      ),
+      nextReference: () => id(++sequence),
+    };
+  };
+  const input = { tableReference: id(30), diningSessionReference: id(31), generation: 1 };
+
+  it("closes the empty session with the closing commands, as a manager does on the Tables page", async () => {
+    const p = ports();
+    expect(await createStaffTableAbandonment(p)(staff, input)).toBe("Closed");
+    expect(p.close.mock.calls).toEqual([
+      [
+        staff,
+        {
+          action: "Begin",
+          diningSessionReference: id(31),
+          operationReference: expect.any(String),
+          expectedSessionVersion: 2,
+        },
+      ],
+      [
+        staff,
+        {
+          action: "Finalize",
+          diningSessionReference: id(31),
+          operationReference: expect.any(String),
+          expectedSessionVersion: 3,
+        },
+      ],
+    ]);
+  });
+
+  it("keeps a session someone issued a newer code for, or that it can't read", async () => {
+    const newer = ports();
+    newer.loadJoinState.mockResolvedValueOnce({
+      tableReference: id(30),
+      sessionVersion: 2,
+      tableAssignmentVersion: 3,
+      capabilityVersion: 3,
+      generation: 2,
+    });
+    expect(await createStaffTableAbandonment(newer)(staff, input)).toBe("Kept");
+    expect(newer.close).not.toHaveBeenCalled();
+    const gone = ports();
+    gone.loadJoinState.mockResolvedValueOnce(null as never);
+    expect(await createStaffTableAbandonment(gone)(staff, input)).toBe("Kept");
+    expect(await createStaffTableAbandonment(ports())(staff, { ...input, generation: null })).toBe(
+      "Kept",
+    );
+  });
+
+  it("keeps it for staff who can't close sessions (no new permission), and reports other failures", async () => {
+    const frontOfHouse = ports();
+    frontOfHouse.close.mockRejectedValueOnce(
+      Object.assign(new Error("denied"), { code: "DINING_CLOSING_PERMISSION_DENIED" }),
+    );
+    expect(await createStaffTableAbandonment(frontOfHouse)(staff, input)).toBe("Kept");
+    expect(frontOfHouse.close).toHaveBeenCalledTimes(1);
+    const broken = ports();
+    broken.close.mockRejectedValueOnce(new Error("connection reset"));
+    await expect(createStaffTableAbandonment(broken)(staff, input)).rejects.toThrow(
+      "connection reset",
+    );
+  });
+});
+
 describe("staff table guest pipeline", () => {
   const credentials = { sessionCredential: "a".repeat(43), csrfCredential: "b".repeat(43) };
   const setup = () => {
@@ -122,6 +211,7 @@ describe("staff table guest pipeline", () => {
     const options = {
       takesOrder: vi.fn(async () => true),
       openTable: vi.fn(),
+      abandonTable: vi.fn(),
       tableQrToken: vi.fn(async () => "table-qr"),
       entry: {
         establish: vi.fn(async () => ({

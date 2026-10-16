@@ -115,3 +115,16 @@ it("shows a checking state instead of a tap when the order is ready", () => {
   expect(html).toContain("Checking your pickup code");
   expect(html).not.toContain("Show pickup code");
 });
+
+it("says the code is on its way, not that the order isn't ready, once the order is Ready", () => {
+  const html = renderToStaticMarkup(
+    <PickupCodePanel
+      orderReference={id(1)}
+      orderNumber="1001"
+      controller={controller({ status: "not-ready" })}
+      autoReveal
+    />,
+  );
+  expect(html).toContain("Your pickup code appears here in a moment.");
+  expect(html).not.toContain("isn’t ready yet");
+});

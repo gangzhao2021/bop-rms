@@ -142,7 +142,7 @@ export function composeMerchantDependencies(
     },
     // WP-2423 Q7: staff take counter pickup orders paid on the Store's own card machine; the walk-up
     // guest enters through the Store's pickup QR like a customer scanning it at the counter.
-    createInternalCounterOrder: (resources, persistence, authentication) => {
+    createInternalCounterOrder: (resources, persistence, authentication, extra = {}) => {
       const qr = f.createInternalQrLoaders({
         file: join(directory, "internal-test-qr-key.pem"),
         loadProfile: installation.loadProfile,
@@ -156,6 +156,7 @@ export function composeMerchantDependencies(
         loadPickupQrToken: async () =>
           (await qr.loadInternalPickupQr(await installation.loadProfile())).token(),
         expectedDatabaseName: installation.database,
+        ...extra,
       });
     },
     // WP-2423 Q11 (DEC-TABLE-QR-ISSUANCE): table QR codes signed with the TEST-ONLY local QR key

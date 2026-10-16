@@ -3132,6 +3132,78 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (WP-2423 Q7 staff dine-in): DEC-STAFF-DINE-IN-ROUND — staff enter a dine-in round for a table on behalf of guests who can't or won't use a phone (or a paper round after an outage) through the ordinary table guest path; this append-only record names the staff member, the table and session, and is read by the order queue, kitchen, the guests' table view and the card-machine payment of the round"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_tax_classification_registry_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 store setup publication): the Brand Owner adds, renames and retires the Brand's tax classifications in the product (append-only registry versions)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_submission",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 store setup publication): the Owner sends receipt templates for review and publishes them in Store setup, and publishing a Store setup checks the receipt template's published content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_submission",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 store setup publication): the Owner sends receipt templates for review and publishes them in Store setup, and publishing a Store setup checks the receipt template's published content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_submit_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 store setup publication): the Owner sends receipt templates for review and publishes them in Store setup, and publishing a Store setup checks the receipt template's published content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_submit_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 store setup publication): the Owner sends receipt templates for review and publishes them in Store setup, and publishing a Store setup checks the receipt template's published content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_lifecycle_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 store setup publication): the Owner sends receipt templates for review and publishes them in Store setup, and publishing a Store setup checks the receipt template's published content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_lifecycle_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 store setup publication): the Owner sends receipt templates for review and publishes them in Store setup, and publishing a Store setup checks the receipt template's published content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_original_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 store setup publication): each Store setup publication step (create, send, approve, publish) records its original request so a lost answer can be recovered"
     }
   ]
 }

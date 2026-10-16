@@ -2,6 +2,7 @@ import { resolveOrderRevisionChain } from "../../domain/order-revision-chain.js"
 import {
   isTerminalOrderRevisionKind,
   persistedOrderRevisionKindPolicy,
+  type OrderRevisionKind,
 } from "../../domain/order-revision-kind.js";
 import { orderRevisionOperationBoundSql } from "./order-revision-binding.js";
 import { decodeOrderFulfillmentCompletionRecord } from "../../application/order-fulfillment-completion-record.js";
@@ -95,16 +96,34 @@ async function fence(tx: ConsumerTransaction, scope: Omit<Scope, "orderBatchRefe
   ]);
 }
 async function current(tx: ConsumerTransaction, scope: Scope) {
+  return (await currentChain(tx, scope)).execution;
+}
+async function currentChain(tx: ConsumerTransaction, scope: Scope) {
   const completed = await tx.query(
     "SELECT completion_id FROM rms_ordering.order_fulfillment_completion_record WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 LIMIT 1",
     [scope.brandReference, scope.storeReference, scope.orderReference],
   );
   // This reader represents only the initial window; never return stale Accepted after delivery.
   if (completed.rows.length !== 0) return fail(true);
-  return initialHistory(tx, scope);
+  return initialHistoryChain(tx, scope);
 }
 
 async function initialHistory(tx: ConsumerTransaction, scope: Scope) {
+  return (await initialHistoryChain(tx, scope)).execution;
+}
+
+/** One revision of the initial window, in chain order (version and checkpoint it produced). */
+export type OrderInitialRevision = Readonly<{
+  kind: Extract<
+    OrderRevisionKind,
+    "Initial" | "Acceptance" | "StaffItemCancellation" | "Termination"
+  >;
+  version: number;
+  checkpoint: string;
+}>;
+
+async function initialHistoryChain(tx: ConsumerTransaction, scope: Scope) {
+  const revisions: OrderInitialRevision[] = [];
   const values = [
     scope.brandReference,
     scope.storeReference,
@@ -136,6 +155,7 @@ async function initialHistory(tx: ConsumerTransaction, scope: Scope) {
       row.submitted_at instanceof Date ? row.submitted_at.toISOString() : row.submitted_at,
     ),
   });
+  revisions.push({ kind: "Initial", version: state.version, checkpoint: state.checkpoint });
   const accepted = await tx.query(
     "SELECT acceptance_id,order_batch_id,expected_order_version,accepted_order_version,accepted_at FROM rms_ordering.order_acceptance_record " +
       "WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 LIMIT 2",
@@ -162,6 +182,7 @@ async function initialHistory(tx: ConsumerTransaction, scope: Scope) {
       checkpoint: parseOrderingReference(a.acceptance_id),
       occurredAt: at,
     });
+    revisions.push({ kind: "Acceptance", version: state.version, checkpoint: state.checkpoint });
   }
   // WP-2423 Q6 step 2a: staff item cancellations after acceptance advance the Order version while
   // the Order stays Accepted with its remaining lines.
@@ -191,6 +212,11 @@ async function initialHistory(tx: ConsumerTransaction, scope: Scope) {
       checkpoint: parseOrderingReference(c.cancellation),
       occurredAt: at,
     });
+    revisions.push({
+      kind: "StaffItemCancellation",
+      version: state.version,
+      checkpoint: state.checkpoint,
+    });
   }
   const terminal = await tx.query(
     "SELECT " +
@@ -219,8 +245,12 @@ async function initialHistory(tx: ConsumerTransaction, scope: Scope) {
       checkpoint: t.terminationReference,
       occurredAt: t.terminatedAt,
     });
+    revisions.push({ kind: "Termination", version: state.version, checkpoint: state.checkpoint });
   }
-  return parseOrderInitialExecution(state);
+  return Object.freeze({
+    execution: parseOrderInitialExecution(state),
+    revisions: Object.freeze(revisions.map((revision) => Object.freeze(revision))),
+  });
 }
 
 /** Current initial acceptance/termination only. Kitchen, amendment and financial gates remain separate. */
@@ -247,6 +277,27 @@ export function createPostgresOrderInitialExecutionReader(options: {
       if ((await options.authorize(input.transaction, scope)) !== true) return fail();
       await fence(input.transaction, scope);
       return current(input.transaction, scope);
+    },
+    /**
+     * The current initial window plus the revisions that produced it, so a caller holding an
+     * earlier revision (an issued kitchen ticket) can tell which kinds followed it. Same fence,
+     * authorization and fail-closed rules as `loadByBatch`.
+     */
+    async loadChainByBatch(input: {
+      transaction: ConsumerTransaction;
+      orderReference: string;
+      orderBatchReference: string;
+    }) {
+      const scope = Object.freeze({
+        brandReference: brand,
+        storeReference: store,
+        orderReference: parseOrderingReference(input.orderReference),
+        orderBatchReference: parseOrderingReference(input.orderBatchReference),
+      });
+      await setScope(input.transaction, scope);
+      if ((await options.authorize(input.transaction, scope)) !== true) return fail();
+      await fence(input.transaction, scope);
+      return currentChain(input.transaction, scope);
     },
   });
 }

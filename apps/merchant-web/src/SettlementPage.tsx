@@ -9,18 +9,14 @@ import {
   type SettlementReconciliation,
   type SettlementView,
 } from "./settlement-client.js";
+import { orderMoney } from "./order-money.js";
 import { businessDateText, useStoreBusinessDay } from "./StoreBusinessDay.js";
 import { Freshness, storeTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 
-/** "$12.34" from a minor-unit string; never floating point. */
+/** "$12.34" from a minor-unit string; the app's one money format (`orderMoney`). */
 export function formatSettlementMoney(amountMinor: string, currencyCode = "CAD"): string {
-  const negative = amountMinor.startsWith("-");
-  const digits = negative ? amountMinor.slice(1) : amountMinor;
-  const whole = digits.length > 2 ? digits.slice(0, -2) : "0";
-  const cents = digits.padStart(2, "0").slice(-2);
-  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/gu, ",");
-  return `${negative ? "-" : ""}${currencyCode === "CAD" ? "$" : currencyCode + " "}${grouped}.${cents}`;
+  return orderMoney({ amountMinor, currencyCode });
 }
 const netMinor = (captured: string, refunded: string) =>
   (BigInt(captured) - BigInt(refunded)).toString();
@@ -43,7 +39,7 @@ export const paymentStatusLabel: Record<string, string> = {
   RequiresCustomerAction: "Awaiting customer action",
   RequiresPaymentMethod: "Awaiting payment method",
   Processing: "Processing",
-  Captured: "Captured",
+  Captured: "Paid",
   Canceled: "Cancelled",
 };
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -178,7 +174,7 @@ export function SettlementReport({
       </section>
       <ul className="overview-counts settlement__totals" aria-label="Day totals">
         <li>
-          <span className="overview-count__label">Captured</span>
+          <span className="overview-count__label">Paid online</span>
           <strong className="overview-count__value">{money(view.captured)}</strong>
           <span className="overview-count__detail">
             {view.captured === null
@@ -204,7 +200,7 @@ export function SettlementReport({
                 )
               : "—"}
           </strong>
-          <span className="overview-count__detail">Captured minus refunded</span>
+          <span className="overview-count__detail">Paid online minus refunded</span>
         </li>
       </ul>
       {/* WP-2423 Q7: the Store's own card machine, kept apart to match its batch total. */}
@@ -347,7 +343,7 @@ export function SettlementReport({
                     <tr>
                       <th scope="col">Statement</th>
                       <th scope="col">Result</th>
-                      <th scope="col">Captured (ours / provider)</th>
+                      <th scope="col">Paid (ours / provider)</th>
                       <th scope="col">Refunded (ours / provider)</th>
                     </tr>
                   </thead>
@@ -391,7 +387,7 @@ export function SettlementReport({
                       <tr key={check.checkReference}>
                         <td data-label="Statement">{label}</td>
                         <td data-label="Result">{resultLabel(check)}</td>
-                        <td data-label="Captured">
+                        <td data-label="Paid">
                           {moneyPair(check.internalCapturedMinor, check.providerCapturedMinor)}
                         </td>
                         <td data-label="Refunded">
@@ -449,7 +445,7 @@ export function SettlementReport({
                   ) : null}
                 </ul>
                 <p className="bop-muted">
-                  Not in the Captured and Refunded totals above, which are the store&apos;s own
+                  Not in the Paid online and Refunded totals above, which are the store&apos;s own
                   orders. The provider statement check counts them on the store&apos;s side.
                 </p>
               </div>
@@ -467,7 +463,7 @@ export function SettlementReport({
                     <tr>
                       <th scope="col">Checked</th>
                       <th scope="col">Result</th>
-                      <th scope="col">Captured (ours / provider)</th>
+                      <th scope="col">Paid (ours / provider)</th>
                       <th scope="col">Refunded (ours / provider)</th>
                       <th scope="col">Exception</th>
                     </tr>
@@ -477,7 +473,7 @@ export function SettlementReport({
                       <tr key={d.checkReference}>
                         <td data-label="Checked">{storeTime(d.checkedAt, zone)}</td>
                         <td data-label="Result">{resultLabel(d)}</td>
-                        <td data-label="Captured">
+                        <td data-label="Paid">
                           {moneyPair(d.internalCapturedMinor, d.providerCapturedMinor)}
                         </td>
                         <td data-label="Refunded">

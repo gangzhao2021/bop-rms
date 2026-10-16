@@ -108,6 +108,24 @@ it("requires quantity/table confirmation and only renders for remaining Ready wo
   expect(render({ ...item, phase: "InProgress" })).toBe("");
 });
 
+it("WP-2423 item 7: offers the whole remaining quantity by default", () => {
+  const current = view();
+  const item = current.items[0];
+  if (!item) throw new Error("fixture item missing");
+  const html = renderToStaticMarkup(
+    <DiningServeAction
+      view={current}
+      item={{ ...item, orderedQuantity: 3, deliveredQuantity: 1, remainingQuantity: 2 }}
+      csrf={"A".repeat(43)}
+      locked={false}
+      onBusy={() => undefined}
+      onServed={() => undefined}
+    />,
+  );
+  expect(html).toContain('value="2"');
+  expect(html).toContain("I confirm 2 × Meal delivered to table T1");
+});
+
 it("never offers serving for a closed order even if stale item data remains Ready", () => {
   const current = { ...view(), closureStatus: "Closed" as const, closureVersion: 1 };
   const item = current.items[0];

@@ -1,4 +1,5 @@
 import { createMerchantServicePauseProof } from "./merchant-service-pause-proof.js";
+import { storeConfigurationProofHashing } from "./merchant-store-configuration-proof-hash.js";
 import {
   appendAuditRecordInTransaction,
   canonicalizeRfc8785,
@@ -78,7 +79,7 @@ export function createMerchantServiceControl(options: {
               storeReference: store.storeReference,
               configurationReference: reference,
               authorize: allowed,
-              hashContent: digest,
+              ...storeConfigurationProofHashing,
             })(transaction, at)
           ).configuration,
         hashIntent: (command) =>
@@ -142,7 +143,7 @@ export function createMerchantServiceControl(options: {
             storeReference: store.storeReference,
             configurationReference: candidate.configurationReference,
             authorize: allowed,
-            hashContent: (value) => "sha256:" + sha256Hex(canonicalizeRfc8785(value)),
+            ...storeConfigurationProofHashing,
           })(transaction, observedAt);
           return {
             contentDigest: published.contentDigest,

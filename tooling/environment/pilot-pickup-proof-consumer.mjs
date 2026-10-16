@@ -75,6 +75,8 @@ export function createInternalPickupProofConsumer(
       // stays ready for the Store to resolve.
       if (Date.parse(resources.now()) >= Date.parse(event.payload.readyAt) + pickupWindowMs)
         return { status: "completed" };
+      // WP-2423: the owner issues no guest code for an order staff took at the counter
+      // (NotApplicable); that is a finished outcome, so the event completes and is never retried.
       await proof.issuer.ensureIssued({
         transaction,
         orderReference,

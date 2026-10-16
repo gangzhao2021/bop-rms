@@ -1,4 +1,5 @@
 import { StoreConfigurationOrdinaryPanel } from "./StoreConfigurationOrdinaryPanel.js";
+import type { StoreConfigurationSnapshot } from "./store-configuration-client.js";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
 import { FULL_SIGN_IN_REQUIRED_TEXT } from "./full-sign-in.js";
 import { ReceiptTemplateStoreSelection } from "./ReceiptTemplateStoreSelection.js";
@@ -28,7 +29,7 @@ import {
 } from "./store-setup-reference-pending-journal.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useParams } from "react-router";
+import { Link, useParams } from "react-router";
 import {
   createStoreSetupClient,
   createUnconfiguredStoreSetupContent,
@@ -311,6 +312,7 @@ export function StoreSetupDraftPage({
   client: injected,
   journalFactory = createStoreSetupPendingJournal,
   children,
+  taxClassificationsHref,
 }: {
   readonly storeReference: string;
   readonly csrf: string;
@@ -318,6 +320,8 @@ export function StoreSetupDraftPage({
   readonly journalFactory?: (scope: StoreSetupScope) => StoreSetupPendingJournal;
   /** Store-level sections shown above the setup steps (WP-2423 Q15/Q16 receipts and privacy). */
   readonly children?: ReactNode;
+  /** Where the Brand Owner manages tax classifications (only for people who can). */
+  readonly taxClassificationsHref?: string;
 }) {
   const { id } = useParams(),
     client = useMemo(() => injected ?? createStoreSetupClient(), [injected]),
@@ -335,7 +339,8 @@ export function StoreSetupDraftPage({
     [error, setError] = useState<StoreSetupClientError["code"] | null>(null),
     [notice, setNotice] = useState(""),
     [online, setOnline] = useState(() => typeof navigator === "undefined" || navigator.onLine),
-    [ready, setReady] = useState(false);
+    [ready, setReady] = useState(false),
+    [live, setLive] = useState<StoreSetupLiveConfiguration | null>(null);
   const running = useRef(false),
     epoch = useRef(0),
     controller = useRef<AbortController | null>(null),
@@ -990,6 +995,7 @@ export function StoreSetupDraftPage({
                   value={content.feeContexts ?? { state: "Unconfigured" }}
                   disabled={disabled}
                   onChange={(feeContexts) => changeContent({ feeContexts })}
+                  {...(taxClassificationsHref === undefined ? {} : { taxClassificationsHref })}
                 />
                 <h4>Tax settings</h4>
                 <SavedReference value={content.taxConfigurationReference} />
@@ -1140,12 +1146,27 @@ export function StoreSetupDraftPage({
             {step === 7 && (
               <>
                 <StoreSetupDraftReview content={parsed} />
+                <StoreSetupLiveSettings
+                  content={parsed ?? content}
+                  live={live}
+                  disabled={disabled}
+                  onUse={(change) => {
+                    const next = parseStoreSetupContent({ ...content, ...change });
+                    setContent(next);
+                    // Opening hours are edited through the step 4 inputs; keep them in step.
+                    if (change.weeklySchedule !== undefined)
+                      setInputs((old) => ({ ...old, hours: editInputs(next).hours }));
+                    setDirty(true);
+                    setError(null);
+                  }}
+                />
                 <StoreConfigurationOrdinaryPanel
                   key={JSON.stringify(workspace.scope)}
                   scope={workspace.scope}
                   csrf={csrf}
                   saved={workspace.setup.snapshot}
                   freshDisabled={disabled || dirty}
+                  onLiveConfiguration={setLive}
                 />
               </>
             )}
@@ -2054,6 +2075,7 @@ export function StoreSetupFeeContextEditor({
   disabled,
   onChange,
   client: injected,
+  taxClassificationsHref,
 }: {
   readonly scope: StoreSetupScope;
   readonly csrf: string;
@@ -2061,6 +2083,8 @@ export function StoreSetupFeeContextEditor({
   readonly disabled: boolean;
   readonly onChange: (value: NonNullable<StoreSetupContent["feeContexts"]>) => void;
   readonly client?: ReturnType<typeof createStoreSetupClient>;
+  /** WP-2423: where the Brand Owner adds tax classifications (only for people who can). */
+  readonly taxClassificationsHref?: string;
 }) {
   const client = useMemo(() => injected ?? createStoreSetupClient(), [injected]);
   const [choices, setChoices] = useState<Awaited<ReturnType<typeof client.classifications>> | null>(
@@ -2122,6 +2146,14 @@ export function StoreSetupFeeContextEditor({
           here. Leave each fee as Not set or Off; you can still save the rest of this setup.
         </p>
       )}
+      {taxClassificationsHref !== undefined &&
+        (error === "NotRegistered" ||
+          (choices !== null && !choices.choices.some((v) => v.lifecycle === "Active"))) && (
+          <p>
+            <Link to={taxClassificationsHref}>Set up the Brand&rsquo;s tax classifications</Link>,
+            then come back and choose Refresh fee classification choices.
+          </p>
+        )}
       {error === "Denied" && (
         <p role="status">
           Choosing a tax classification needs permission to read Products and tax settings. Leave
@@ -2241,6 +2273,112 @@ export function StoreSetupFeeContextEditor({
         classification is the Brand&rsquo;s own choice; it has not been checked by a tax
         professional.
       </p>
+    </section>
+  );
+}
+
+/** The setup change "Use the live Store's settings" makes: tax and Brand settings of the live Store,
+ * its holidays when the setup has none, and a start as soon as it is published (server time). */
+export function liveStoreSettingsChange(
+  content: StoreSetupContent,
+  live: StoreSetupLiveConfiguration & { readonly current: StoreConfigurationSnapshot },
+): Partial<StoreSetupContent> {
+  const current = live.current;
+  return {
+    taxConfigurationReference: { state: "Configured", value: current.taxConfigurationReference },
+    brandBaseVersionReference: { state: "Configured", value: current.brandBaseVersionReference },
+    exceptions:
+      content.exceptions.state === "Configured"
+        ? content.exceptions
+        : { state: "Configured", value: current.exceptions },
+    effectiveFrom: { state: "Configured", value: live.observedAt },
+    effectiveUntil: { state: "Configured", value: null },
+  };
+}
+/** The live (published) Store configuration as the publication panel read it. */
+export interface StoreSetupLiveConfiguration {
+  readonly current: StoreConfigurationSnapshot | null;
+  readonly observedAt: string;
+}
+/**
+ * WP-2423 DEC-STORE-SETUP-PUBLICATION: settings Store setup does not edit itself — the Store's tax
+ * settings (Tax review), its Brand settings, holidays and special hours (Hours & ordering) and when
+ * it takes effect — are carried from the live Store, so a saved setup can be created and published.
+ */
+export function StoreSetupLiveSettings({
+  content,
+  live,
+  disabled,
+  onUse,
+}: {
+  readonly content: StoreSetupContent;
+  readonly live: StoreSetupLiveConfiguration | null;
+  readonly disabled: boolean;
+  onUse(change: Partial<StoreSetupContent>): void;
+}) {
+  if (live === null || live.current === null) return null;
+  const current = live.current;
+  const known = { ...live, current };
+  const same = <T,>(value: StoreSetupContent[keyof StoreSetupContent] | undefined, expected: T) =>
+    value?.state === "Configured" && JSON.stringify(value.value) === JSON.stringify(expected);
+  const tax = same(content.taxConfigurationReference, current.taxConfigurationReference),
+    brand = same(content.brandBaseVersionReference, current.brandBaseVersionReference),
+    closures = content.exceptions.state === "Configured",
+    start =
+      content.effectiveFrom.state === "Configured" &&
+      content.effectiveFrom.value <= live.observedAt &&
+      content.effectiveFrom.value >= current.effectiveFrom &&
+      content.effectiveUntil.state === "Configured" &&
+      content.effectiveUntil.value === null;
+  const hours = same(content.weeklySchedule, current.weeklySchedule);
+  const complete = tax && brand && closures && start;
+  return (
+    <section aria-label="Settings from the live Store">
+      <h4>Settings from the live Store</h4>
+      <p>
+        These are not changed in Store setup. They come from the Store as it runs today; save the
+        setup draft after using them.
+      </p>
+      <ul>
+        <li>
+          Tax settings (see Tax review):{" "}
+          {tax ? "same as the live Store" : "not the live Store's settings yet"}
+        </li>
+        <li>Brand settings: {brand ? "same as the live Store" : "not set yet"}</li>
+        <li>
+          Holidays and special hours (changed in Hours &amp; ordering):{" "}
+          {closures
+            ? content.exceptions.state === "Configured" && content.exceptions.value.length === 0
+              ? "none"
+              : "kept as saved"
+            : "not set yet"}
+        </li>
+        <li>Takes effect: {start ? "as soon as it is published" : "not set yet"}</li>
+        <li>
+          Opening hours:{" "}
+          {hours
+            ? "same as the live Store"
+            : "different from the live Store; publishing this setup changes them"}
+        </li>
+      </ul>
+      {!hours && (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() =>
+            onUse({ weeklySchedule: { state: "Configured", value: current.weeklySchedule } })
+          }
+        >
+          Use the live Store&rsquo;s opening hours
+        </button>
+      )}
+      <button
+        type="button"
+        disabled={disabled || complete}
+        onClick={() => onUse(liveStoreSettingsChange(content, known))}
+      >
+        Use the live Store&rsquo;s settings
+      </button>
     </section>
   );
 }

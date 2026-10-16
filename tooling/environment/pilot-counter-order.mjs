@@ -39,6 +39,7 @@ import { createMerchantCardMachinePayment } from "../../apps/api/dist/merchant-c
 import { createMerchantCardMachineCancellationRefund } from "../../apps/api/dist/merchant-card-machine-refund.js";
 import { createMerchantStaffDiningRound } from "../../apps/api/dist/merchant-staff-dining-round.js";
 import {
+  createStaffTableAbandonment,
   createStaffTableCode,
   createStaffTableGuestPipeline,
 } from "../../apps/api/dist/table-guest-pipeline.js";
@@ -67,7 +68,14 @@ export async function createInternalCounterOrder(
   resources,
   persistence,
   authentication,
-  { customer, loadPickupWorkflow, loadDiningWorkflow, loadPickupQrToken, expectedDatabaseName },
+  {
+    customer,
+    loadPickupWorkflow,
+    loadDiningWorkflow,
+    loadPickupQrToken,
+    expectedDatabaseName,
+    diningClosing,
+  },
 ) {
   const saved = await loadPickupWorkflow();
   if (
@@ -239,6 +247,7 @@ export async function createInternalCounterOrder(
           projections,
           loadDiningWorkflow,
           expectedDatabaseName,
+          diningClosing,
         });
   return {
     counterMenu: createMerchantCounterMenu({
@@ -332,6 +341,7 @@ async function createInternalStaffDiningRound(
     projections,
     loadDiningWorkflow,
     expectedDatabaseName,
+    diningClosing,
   },
 ) {
   const saved = await loadDiningWorkflow();
@@ -427,6 +437,13 @@ async function createInternalStaffDiningRound(
     transactions.run((tx) =>
       createPostgresPublishedStoreOperatingStatusReader(resources.operating)(tx, now()),
     );
+  const loadJoinState = async (staff, diningSessionReference) => {
+    try {
+      return await joinState({ ...staff, query: { diningSessionReference } });
+    } catch {
+      return null;
+    }
+  };
   const pipeline = createStaffTableGuestPipeline({
     takesOrder: async (input) =>
       input.recordedAfterOutage || storeTakesOrder(await operatingNow(), "SeatedDineIn"),
@@ -449,17 +466,21 @@ async function createInternalStaffDiningRound(
                 seatable: table.lifecycle === "Published" && table.operationalState === "Available",
               };
         }),
-      loadJoinState: async (staff, diningSessionReference) => {
-        try {
-          return await joinState({ ...staff, query: { diningSessionReference } });
-        } catch {
-          return null;
-        }
-      },
+      loadJoinState,
       start: (staff, command) => owner.start({ ...staff, command }),
       regenerate: (staff, command) => owner.regenerate({ ...staff, command }),
       nextReference: reference,
     }),
+    // WP-2423 item 7: a session the staff round started is closed again (existing closing
+    // commands, staff member's own authority) when the round fails before anything was ordered.
+    abandonTable:
+      diningClosing === undefined
+        ? async () => "Kept"
+        : createStaffTableAbandonment({
+            loadJoinState,
+            close: (staff, command) => diningClosing({ ...staff, command }),
+            nextReference: reference,
+          }),
     // The table's printed QR, as a guest scanning it would enter; null when it has none (the
     // staff command then refuses before opening the table).
     tableQrToken: async (tableReference) => {

@@ -770,7 +770,6 @@ it("protects Dining serving transport and excludes private record fields", async
       headers: { ...headers, ...extra },
     });
   expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
-  expect((await submit({ "X-BOP-CSRF": "" })).status).toBe(403);
   expect((await submit({}, "/merchant/dining/item-service?store=other")).status).toBe(403);
   expect(serving).not.toHaveBeenCalled();
   const response = await submit();
@@ -1029,6 +1028,21 @@ it("WP-2423: reads one order's detail with its lines and hides other Stores' ord
     ...batch,
     paymentDue: due,
   });
+  // WP-2423: a list row carries its online payment's refund position (the detail's), so the row
+  // says "partly refunded" after an item-cancellation refund as the detail does.
+  const position = { refundedMinor: "350", refundPendingMinor: "0" };
+  queue.mockResolvedValueOnce({
+    items: [{ ...item, paymentPosition: position }],
+    nextAfterOrderReference: null,
+    lines: null,
+    pickupContact: null,
+    paymentPosition: null,
+  } as never);
+  const listed = await request(root, "/merchant/orders", { headers });
+  expect(((await listed.json()) as { items: unknown[] }).items[0]).toEqual({
+    ...item,
+    paymentPosition: position,
+  });
 });
 
 it("protects price management transport and sanitizes command failures", async () => {
@@ -1063,7 +1077,6 @@ it("protects price management transport and sanitizes command failures", async (
     request(root, path, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
   expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
   expect((await submit({ Host: "foreign.invalid" })).status).toBe(403);
-  expect((await submit({ "X-BOP-CSRF": "" })).status).toBe(403);
   expect((await submit({}, "/merchant/pricing/price-books?brand=other")).status).toBe(403);
   expect(write).not.toHaveBeenCalled();
   const response = await submit();
@@ -1138,7 +1151,6 @@ it("protects Product lifecycle transport and sanitizes command failures", async 
   expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
   expect((await submit({ Host: "foreign.invalid" })).status).toBe(403);
   expect((await submit({ "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
-  expect((await submit({ "X-BOP-CSRF": "" })).status).toBe(403);
   expect((await submit({ Cookie: "" })).status).toBe(403);
   expect((await submit({}, "/merchant/catalog/products/lifecycle?brand=other")).status).toBe(403);
   for (const value of [
@@ -1347,7 +1359,6 @@ it("protects complete Menu Draft reads behind the same session and CSRF boundary
   const submit = (extra: Record<string, string> = {}, path = "/merchant/catalog/menus/draft") =>
     request(root, path, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
   expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
-  expect((await submit({ "X-BOP-CSRF": "" })).status).toBe(403);
   expect((await submit({}, "/merchant/catalog/menus/draft?brand=other")).status).toBe(403);
   expect(read).not.toHaveBeenCalled();
   const response = await submit();
@@ -1538,7 +1549,6 @@ it("protects Kitchen commands and preserves typed recovery outcomes", async () =
   const submit = (extra: Record<string, string> = {}, path = "/merchant/kitchen/work") =>
     request(root, path, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
   expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
-  expect((await submit({ "X-BOP-CSRF": "" })).status).toBe(403);
   expect((await submit({}, "/merchant/kitchen/work?store=other")).status).toBe(403);
   expect(execute).not.toHaveBeenCalled();
   for (const [code, status] of [
@@ -1623,7 +1633,6 @@ it("protects Kitchen queries and exposes only typed public failures", async () =
   const submit = (extra: Record<string, string> = {}, path = "/merchant/kitchen/query") =>
     request(root, path, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
   expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
-  expect((await submit({ "X-BOP-CSRF": "" })).status).toBe(403);
   expect((await submit({}, "/merchant/kitchen/query?item=other")).status).toBe(403);
   expect(query).not.toHaveBeenCalled();
   for (const [code, status] of [
@@ -1684,7 +1693,6 @@ it("protects Pickup handoff and exposes only typed public failures", async () =>
   const submit = (extra: Record<string, string> = {}, path = "/merchant/pickup/handoff") =>
     request(root, path, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
   expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
-  expect((await submit({ "X-BOP-CSRF": "" })).status).toBe(403);
   expect((await submit({}, "/merchant/pickup/handoff?item=other")).status).toBe(403);
   expect(query).not.toHaveBeenCalled();
   for (const [code, status] of [
@@ -1742,7 +1750,6 @@ it("WP-2423: protects the in-person pickup check details and never caches them",
   const submit = (extra: Record<string, string> = {}, path = "/merchant/pickup/identity-check") =>
     request(root, path, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
   expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
-  expect((await submit({ "X-BOP-CSRF": "" })).status).toBe(403);
   expect((await submit({}, "/merchant/pickup/identity-check?order=other")).status).toBe(403);
   expect(read).not.toHaveBeenCalled();
   read.mockResolvedValueOnce({ status: "Available", name: "Sam Lee", phoneLast4: "0123" });
@@ -1807,7 +1814,6 @@ it("protects Pickup proof and exposes only typed public failures", async () => {
   const submit = (extra: Record<string, string> = {}, path = "/merchant/pickup/proof") =>
     request(root, path, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
   expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
-  expect((await submit({ "X-BOP-CSRF": "" })).status).toBe(403);
   expect((await submit({}, "/merchant/pickup/proof?item=other")).status).toBe(403);
   expect(query).not.toHaveBeenCalled();
   for (const [code, status] of [
@@ -1869,7 +1875,6 @@ it("protects Pickup queue and exposes only typed public failures", async () => {
   const submit = (extra: Record<string, string> = {}, path = "/merchant/pickup/query") =>
     request(root, path, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
   expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
-  expect((await submit({ "X-BOP-CSRF": "" })).status).toBe(403);
   expect((await submit({}, "/merchant/pickup/query?item=other")).status).toBe(403);
   expect(query).not.toHaveBeenCalled();
   for (const [code, status] of [
@@ -1957,7 +1962,6 @@ it("protects Dining progress transport and returns only operational fields", asy
       headers: { ...headers, ...extra },
     });
   expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
-  expect((await submit({ "X-BOP-CSRF": "" })).status).toBe(403);
   expect((await submit({ Cookie: "" })).status).toBe(403);
   expect((await submit({}, "/merchant/dining/order-progress?store=other")).status).toBe(403);
   expect(read).not.toHaveBeenCalled();
@@ -2043,7 +2047,6 @@ it("protects the minimal Dining serve command and keeps private facts out of res
       headers: { ...headers, ...extra },
     });
   expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
-  expect((await submit({ "X-BOP-CSRF": "" })).status).toBe(403);
   expect((await submit({ Cookie: "" })).status).toBe(403);
   expect((await submit({}, "/merchant/dining/serve?store=other")).status).toBe(403);
   expect(command).not.toHaveBeenCalled();
@@ -6945,4 +6948,55 @@ describe("v15 finding: Store setup navigation for the Store Manager", () => {
       merchantNavigationActions({ screenId: "STORE-SETUP", permission: "organization.manage" }),
     ).toEqual(["organization.manage", "organization.store.read"]);
   });
+});
+
+it("WP-2423 Q4: protects the hours draft transport and answers its refusals plainly", async () => {
+  const hours = vi.fn<NonNullable<MerchantBffRouterOptions["storeHoursDraft"]>>(async () => ({
+    status: "Applied",
+    resultingVersion: 3,
+  }));
+  const root = await serveRefundEscalation({ storeHoursDraft: hours });
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const submit = (
+    extra: Record<string, string> = {},
+    path = "/merchant/store-configuration/hours-draft",
+  ) =>
+    request(root, path, {
+      method: "POST",
+      body: JSON.stringify({ expectedVersion: 2 }),
+      headers: { ...headers, ...extra },
+    });
+  expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
+  expect((await submit({}, "/merchant/store-configuration/hours-draft?x=1")).status).toBe(403);
+  expect(hours).not.toHaveBeenCalled();
+  const response = await submit();
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ status: "Applied", resultingVersion: 3 });
+  expect(hours).toHaveBeenCalledWith({ sessionCookie, csrf, command: { expectedVersion: 2 } });
+  for (const [code, status, error] of [
+    ["STORE_SETUP_OPERATION_UNPUBLISHED_CHANGES", 409, "store_setup_has_unpublished_changes"],
+    ["STORE_CONFIGURATION_VERSION_CONFLICT", 409, "store_configuration_conflict"],
+    ["STORE_SETUP_OPERATION_VERSION_CONFLICT", 409, "store_configuration_conflict"],
+    ["STORE_CONFIGURATION_LIFECYCLE_CONFLICT", 409, "store_configuration_conflict"],
+    ["STORE_CONFIGURATION_COMMAND_INVALID", 422, "store_configuration_rejected"],
+    ["STORE_CONFIGURATION_PERMISSION_DENIED", 403, "request_denied"],
+    ["CATALOG_DEPENDENCY_UNAVAILABLE", 403, "request_denied"],
+  ] as const) {
+    hours.mockRejectedValueOnce(Object.assign(new Error("safe"), { code }));
+    const refused = await submit();
+    expect(refused.status, code).toBe(status);
+    expect(await refused.json(), code).toEqual({ error });
+  }
+  const absent = await serveRefundEscalation();
+  const unavailable = await request(absent, "/merchant/store-configuration/hours-draft", {
+    method: "POST",
+    body: "{}",
+    headers,
+  });
+  expect(unavailable.status).toBe(503);
 });

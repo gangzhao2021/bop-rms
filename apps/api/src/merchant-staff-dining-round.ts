@@ -108,9 +108,28 @@ export interface StaffTableGuestPipeline extends Pick<
         readonly status: "Opened";
         readonly diningSessionReference: string;
         readonly joinCredential: string;
+        /** True when this call started the table's dining session (the table was free). */
+        readonly started: boolean;
+        /** The issued code's generation (a later code for the table has a higher one). */
+        readonly generation: number | null;
       }
     | { readonly status: "TableUnavailable" }
   >;
+  /**
+   * WP-2423 item 7: closes a dining session this request started when the round failed before
+   * anything was ordered, with the existing Dining closing commands (Begin, then Finalize, which
+   * releases the table) under the staff member's own authority. `Kept`: the session changed since
+   * (another code was issued for the table) or the staff member can't close sessions; it stays
+   * open and the next round sent for the table uses it.
+   */
+  abandonTable(
+    staff: { readonly sessionCookie: unknown; readonly csrf: unknown },
+    input: {
+      readonly tableReference: string;
+      readonly diningSessionReference: string;
+      readonly generation: number | null;
+    },
+  ): Promise<"Closed" | "Kept">;
   /**
    * Enters with the table's printed QR, as a guest scanning it would. `NoTableQr`: the table has
    * no current code (never created, or turned off), so no guest can join it this way.
@@ -392,6 +411,29 @@ export function createMerchantStaffDiningRound(options: {
         throw error;
       }
     };
+    // WP-2423 item 7: a session this request started is closed again if the round fails before
+    // its checkout starts (nothing ordered, nothing charged), so no empty session is left seated.
+    let startedTable: {
+      readonly diningSessionReference: string;
+      readonly generation: number | null;
+    } | null = null;
+    const abandonStartedTable = async () => {
+      const started = startedTable;
+      startedTable = null;
+      if (started === null) return;
+      try {
+        await options.pipeline.abandonTable(
+          { sessionCookie: input.sessionCookie, csrf: input.csrf },
+          { tableReference: command.tableReference, ...started },
+        );
+      } catch (error) {
+        try {
+          options.onUnexpected?.(error);
+        } catch {
+          // Reporting never changes the answer.
+        }
+      }
+    };
     try {
       // A retry of the same staff command returns the round it created, never a second one.
       const prior = await inScope(async (tx, scope, allowed) => {
@@ -422,6 +464,11 @@ export function createMerchantStaffDiningRound(options: {
         { tableReference: command.tableReference },
       );
       if (table.status !== "Opened") return fail("STAFF_ROUND_TABLE_UNAVAILABLE");
+      if (table.started)
+        startedTable = {
+          diningSessionReference: table.diningSessionReference,
+          generation: table.generation,
+        };
       const joined = await options.pipeline.join(entered.credentials, {
         joinCredential: table.joinCredential,
         operationReference: options.nextReference(),
@@ -448,8 +495,12 @@ export function createMerchantStaffDiningRound(options: {
           auditReference: parseOrderingReference(options.nextReference()),
         }),
       );
-      // A concurrent retry recorded the same command first: it owns its own table guest.
-      if (entry.status === "AlreadyRecorded") return await earlier(entry.record);
+      // A concurrent retry recorded the same command first: it owns its own table guest (and
+      // the table session, which this attempt then never closes).
+      if (entry.status === "AlreadyRecorded") {
+        startedTable = null;
+        return await earlier(entry.record);
+      }
       const cart = await options.pipeline.selectCart(credentials, {
         operationReference: options.nextReference(),
         requestedAt: now(),
@@ -491,6 +542,8 @@ export function createMerchantStaffDiningRound(options: {
         cartVersion,
         quoteReference: quoted.quoteReference,
       });
+      // From here the round may exist (checkout, submission): the session is never closed for it.
+      startedTable = null;
       const checkout = await options.pipeline.startCheckout(credentials, {
         createOperationReference: options.nextReference(),
         cartReference: cart.cartReference,
@@ -507,6 +560,7 @@ export function createMerchantStaffDiningRound(options: {
       if (preparation.tip.amountMinor !== tip) return fail("STAFF_ROUND_UNAVAILABLE");
       return await finished("Placed", entry.record);
     } catch (error) {
+      await abandonStartedTable();
       if (error instanceof StaffDiningRoundError) throw error;
       if (
         error instanceof StaffDiningRoundEntryError &&

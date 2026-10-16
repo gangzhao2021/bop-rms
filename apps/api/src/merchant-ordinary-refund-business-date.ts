@@ -1,4 +1,4 @@
-import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
+import { storeConfigurationProofHashing } from "./merchant-store-configuration-proof-hash.js";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { parseOpaqueUuidV7, parseCanonicalInstant, readClosedRecord } from "@bop/identity";
 import {
@@ -32,7 +32,7 @@ export function createMerchantOrdinaryRefundBusinessDate(
         ...options,
         ...scope,
         configurationReference: candidate.configurationReference,
-        hashContent: (value) => "sha256:" + sha256Hex(canonicalizeRfc8785(value)),
+        ...storeConfigurationProofHashing,
       })(tx, at);
       return {
         contentDigest: proof.contentDigest,

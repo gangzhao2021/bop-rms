@@ -55,6 +55,7 @@ export interface MerchantNavigationItem {
     | "PRICE-OPTION-LIST"
     | "RECIPE-OPTION-LIST"
     | "TAX-STORE-REVIEW"
+    | "CAT-TAX-CLASSIFICATION-LIST"
     | "CMP-ALLERGEN-REVIEW"
     | "INV-COUNT-LIST"
     | "INV-WASTE-RECORD";
@@ -114,6 +115,11 @@ const NAVIGATION = Object.freeze({
   "PRICE-OPTION-LIST": ["/app/commerce/option-prices", "pricing.price_book.read"],
   "RECIPE-OPTION-LIST": ["/app/commerce/option-recipes", "recipe.read"],
   "TAX-STORE-REVIEW": ["/app/commerce/tax-review", "pricing.tax_config.read"],
+  // WP-2423 Store setup: the Brand Owner's tax classifications.
+  "CAT-TAX-CLASSIFICATION-LIST": [
+    "/app/commerce/tax-classifications",
+    "catalog.tax-classification.manage",
+  ],
   "CMP-ALLERGEN-REVIEW": ["/app/compliance/allergens", "catalog.allergen.read"],
   "INV-COUNT-LIST": ["/operations/inventory/counts", "inventory.count.read"],
   "INV-WASTE-RECORD": ["/operations/inventory/waste", "inventory.waste.record"],

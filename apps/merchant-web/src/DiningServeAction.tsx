@@ -18,7 +18,9 @@ export function DiningServeAction({
   readonly onBusy: (busy: boolean) => void;
   readonly onServed: () => void;
 }) {
-  const [quantity, setQuantity] = useState("1"),
+  // WP-2423 item 7: staff usually serve everything that is ready; they can lower it. Each
+  // progress refresh remounts this, so a partial serve offers what is left.
+  const [quantity, setQuantity] = useState(() => String(Math.max(item.remainingQuantity, 1))),
     [confirmed, setConfirmed] = useState(false),
     [state, setState] = useState<"Idle" | "Submitting" | "Unknown" | "Denied">("Idle");
   const operation = useRef<Operation | null>(null),

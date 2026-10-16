@@ -85,6 +85,7 @@ function placeErrorText(
   error: CounterOrderClientError,
   lines: readonly Line[],
   table: string | null = null,
+  canCreateTableCode = false,
 ) {
   switch (error.code) {
     case "TableCartHasItems":
@@ -98,7 +99,11 @@ function placeErrorText(
     case "TableUnavailable":
       return `${table ?? "This table"} can't take an order now (marked unavailable, or its session is closing). Check the table on the Tables page.`;
     case "TableHasNoQr":
-      return `${table ?? "This table"} has no table QR code, so orders can't be taken for it yet. Nothing was sent or charged. Ask a manager to create one on the Table QR codes page, then send the order again.`;
+      return `${table ?? "This table"} has no table QR code, so orders can't be taken for it yet. Nothing was sent or charged. ${
+        canCreateTableCode
+          ? "Create one on Table QR codes (it can be printed later), then send the order again."
+          : "Ask a manager to create one on the Table QR codes page, then send the order again."
+      }`;
     case "ItemUnavailable": {
       const line = error.lineIndex === null ? undefined : lines[error.lineIndex];
       return line
@@ -216,11 +221,14 @@ export function StaffOrderEntryPage({
   storeLabel,
   csrf,
   timeZone,
+  tableQrHref,
   fetcher,
 }: {
   readonly storeLabel: string;
   readonly csrf: string;
   readonly timeZone?: string | undefined;
+  /** Where staff who can create table QR codes do so (same rule as the Tables page), if allowed. */
+  readonly tableQrHref?: string | undefined;
   readonly fetcher?: typeof fetch | undefined;
 }) {
   const client = useMemo(() => createCounterOrderClient(csrf, fetcher), [csrf, fetcher]);
@@ -255,6 +263,7 @@ export function StaffOrderEntryPage({
     "Building" | "Sending" | "Charge" | "Recording" | "Paid" | "Accepted"
   >("Building");
   const [problem, setProblem] = useState<string | null>(null);
+  const [problemNeedsTableCode, setProblemNeedsTableCode] = useState(false);
   const [paidNote, setPaidNote] = useState<string | null>(null);
   const placeOperation = useRef<string | null>(null);
   const payOperation = useRef<string | null>(null);
@@ -322,6 +331,7 @@ export function StaffOrderEntryPage({
   const changeLines = (next: readonly Line[]) => {
     placeOperation.current = null;
     setProblem(null);
+    setProblemNeedsTableCode(false);
     setLines(next);
   };
   const tipChoice = (): CounterTip | null => {
@@ -351,6 +361,7 @@ export function StaffOrderEntryPage({
     placeOperation.current ??= serviceOperationReference();
     setPhase("Sending");
     setProblem(null);
+    setProblemNeedsTableCode(false);
     try {
       const chosen = lines.map((line) => ({
         sellableReference: line.item.sellableReference,
@@ -388,8 +399,14 @@ export function StaffOrderEntryPage({
       if (failure.code !== "OutcomeUnknown" && failure.code !== "InProgress")
         placeOperation.current = null;
       setProblem(
-        placeErrorText(failure, lines, tableLabel === null ? null : `Table ${tableLabel}`),
+        placeErrorText(
+          failure,
+          lines,
+          tableLabel === null ? null : `Table ${tableLabel}`,
+          tableQrHref !== undefined,
+        ),
       );
+      setProblemNeedsTableCode(failure.code === "TableHasNoQr");
       setPhase("Building");
     }
   };
@@ -400,6 +417,7 @@ export function StaffOrderEntryPage({
     payOperation.current ??= serviceOperationReference();
     setPhase("Recording");
     setProblem(null);
+    setProblemNeedsTableCode(false);
     let recorded;
     try {
       recorded = await client.recordPayment({
@@ -454,6 +472,7 @@ export function StaffOrderEntryPage({
     setPaidAt("");
     setSlip("");
     setProblem(null);
+    setProblemNeedsTableCode(false);
     setPaidNote(null);
     placeOperation.current = null;
     payOperation.current = null;
@@ -475,10 +494,20 @@ export function StaffOrderEntryPage({
     );
   if (menu.kind === "Error") {
     const [heading, text] = menuError[menu.code] ?? (menuError.Unavailable as [string, string]);
+    const createCode = menu.code === "TableHasNoQr" && tableQrHref !== undefined;
     return (
       <WorkspacePage title={pageTitle} meta={storeLabel}>
         <StatePanel heading={heading} tone="error" status>
-          <p>{text}</p>
+          {createCode ? (
+            // Same rule as the Tables page: staff who can create codes get the link.
+            <p>
+              Orders for a table use its code. Create one on{" "}
+              <a href={tableQrHref}>Table QR codes</a> (it can be printed later), then take the
+              order.
+            </p>
+          ) : (
+            <p>{text}</p>
+          )}
           {menu.code === "Unavailable" ? (
             <button type="button" onClick={() => setReload((value) => value + 1)}>
               Try again
@@ -782,6 +811,11 @@ export function StaffOrderEntryPage({
             </p>
           ) : null}
           {problem !== null && ordering ? <p role="alert">{problem}</p> : null}
+          {problem !== null && ordering && problemNeedsTableCode && tableQrHref !== undefined ? (
+            <p>
+              <a href={tableQrHref}>Table QR codes</a>
+            </p>
+          ) : null}
           {ordering ? (
             <div className="card-actions">
               <button

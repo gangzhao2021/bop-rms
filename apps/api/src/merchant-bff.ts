@@ -47,6 +47,7 @@ import type { createMerchantStoreSetup } from "./merchant-store-setup.js";
 import {
   StoreConfigurationOriginalError,
   StoreConfigurationAdministrationError,
+  StoreConfigurationAdministrationServiceError,
   parseStoreConfigurationOrdinaryCommand,
   parseStoreConfigurationOrdinaryResolve,
   parseStoreConfigurationOrdinaryReceipt,
@@ -267,6 +268,10 @@ import { MerchantRecipeError, type createMerchantRecipes } from "./merchant-reci
 import { MerchantProductError, type createMerchantProducts } from "./merchant-products.js";
 import { MerchantPriceError, type createMerchantPrices } from "./merchant-prices.js";
 import { MerchantAllergenError, type createMerchantAllergens } from "./merchant-allergens.js";
+import {
+  MerchantTaxClassificationError,
+  type createMerchantTaxClassifications,
+} from "./merchant-tax-classifications.js";
 import { MerchantMenuError, type createMerchantMenus } from "./merchant-menus.js";
 import {
   MerchantAvailabilityError,
@@ -334,6 +339,7 @@ import {
 } from "./merchant-order-acceptance-command.js";
 import type { createMerchantDiningItemService } from "./merchant-dining-item-service.js";
 import type { createMerchantStoreConfiguration } from "./merchant-store-configuration.js";
+import type { createMerchantStoreHoursSetupDraft } from "./merchant-store-hours-setup-draft.js";
 import type { createMerchantServiceControl } from "./merchant-service-control.js";
 import type { createMerchantOrderExceptionRead } from "./merchant-order-exception-read.js";
 import type { createMerchantSettlementRead } from "./merchant-settlement-read.js";
@@ -414,6 +420,11 @@ const merchantNavigation = Object.freeze({
   "PRICE-OPTION-LIST": ["/app/commerce/option-prices", "pricing.price_book.read"],
   "RECIPE-OPTION-LIST": ["/app/commerce/option-recipes", "recipe.read"],
   "TAX-STORE-REVIEW": ["/app/commerce/tax-review", "pricing.tax_config.read"],
+  // WP-2423 Store setup: the Brand Owner adds, renames and retires the Brand's tax classifications.
+  "CAT-TAX-CLASSIFICATION-LIST": [
+    "/app/commerce/tax-classifications",
+    "catalog.tax-classification.manage",
+  ],
   "CMP-ALLERGEN-REVIEW": ["/app/compliance/allergens", "catalog.allergen.read"],
   "INV-COUNT-LIST": ["/operations/inventory/counts", "inventory.count.read"],
   "INV-WASTE-RECORD": ["/operations/inventory/waste", "inventory.waste.record"],
@@ -667,6 +678,7 @@ export interface MerchantBffRouterOptions {
   readonly optionPrices?: ReturnType<typeof createMerchantOptionPrices>;
   readonly optionRecipes?: ReturnType<typeof createMerchantOptionRecipes>;
   readonly storeTax?: ReturnType<typeof createMerchantStoreTax>;
+  readonly taxClassifications?: ReturnType<typeof createMerchantTaxClassifications>;
   readonly stockCounts?: ReturnType<typeof createMerchantStockCounts>;
   readonly storeWaste?: ReturnType<typeof createMerchantStoreWaste>;
   readonly ordinaryRefund?: ReturnType<typeof createMerchantOrdinaryRefundCommand>;
@@ -724,6 +736,8 @@ export interface MerchantBffRouterOptions {
     input: Parameters<ReturnType<typeof createMerchantStoreConfiguration>>[0],
   ) => ReturnType<ReturnType<typeof createMerchantStoreConfiguration>>;
   readonly storeConfigurationState?: ReturnType<typeof createMerchantStoreConfiguration>["read"];
+  /** WP-2423 Q4: an hours change on a Store whose configuration came from Store setup. */
+  readonly storeHoursDraft?: ReturnType<typeof createMerchantStoreHoursSetupDraft>;
   readonly serviceControlState?: ReturnType<typeof createMerchantServiceControl>["read"];
   /** WP-2423 Q21: the selected Store's current business day (date, start, end). */
   readonly businessDay?: ReturnType<typeof createMerchantServiceControl>["businessDay"];
@@ -1889,6 +1903,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             counter: item.counter,
             // WP-2423: what the Order was paid online (null for counter or unpaid orders).
             paidOnline: item.paidOnline,
+            // WP-2423: refunds of that online payment (the detail's position) when it has any.
+            paymentPosition: item.paymentPosition,
             batches: item.batches.map((batch) => ({
               orderBatchReference: batch.orderBatchReference,
               sequence: batch.sequence,
@@ -2371,7 +2387,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
     const code =
       error instanceof StoreConfigurationOriginalError ||
       error instanceof StoreConfigurationAdministrationError ||
-      error instanceof StoreSetupOperationError
+      error instanceof StoreSetupOperationError ||
+      error instanceof StoreConfigurationAdministrationServiceError
         ? error.code
         : undefined;
     const invalid =
@@ -2384,7 +2401,12 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       code === "STORE_CONFIGURATION_ORIGINAL_IDEMPOTENCY_CONFLICT" ||
       code === "STORE_CONFIGURATION_STATE_INVALID" ||
       code === "STORE_CONFIGURATION_OVERLAP" ||
-      code === "STORE_CONFIGURATION_GATE_REQUIRED";
+      code === "STORE_CONFIGURATION_GATE_REQUIRED" ||
+      // WP-2423 DEC-STORE-SETUP-PUBLICATION: a publication check or a newer recorded state
+      // refused the step; the screen re-reads the checks instead of reporting an outage.
+      code === "STORE_CONFIGURATION_REFERENCE_INVALID" ||
+      code === "STORE_CONFIGURATION_VERSION_CONFLICT" ||
+      code === "STORE_CONFIGURATION_LIFECYCLE_CONFLICT";
     response
       .status(invalid ? 400 : forbidden ? 403 : conflict ? 409 : 503)
       .set("Cache-Control", NO_STORE)
@@ -7204,6 +7226,61 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       });
   });
 
+  // WP-2423 Store setup: CAT-TAX-CLASSIFICATION-LIST for the selected Store's Brand.
+  const taxClassificationStatus = {
+    PermissionDenied: 403,
+    Invalid: 400,
+    NotFound: 404,
+    NameTaken: 409,
+    Retired: 409,
+    Conflict: 409,
+    Unavailable: 503,
+  } as const;
+  const taxClassificationFailure = (response: express.Response, error: unknown) => {
+    if (transactionConflictRetryLater(response, error)) return;
+    if (!(error instanceof MerchantTaxClassificationError)) {
+      response.status(503).set("Cache-Control", NO_STORE).json({ error: "Unavailable" });
+      return;
+    }
+    response
+      .status(taxClassificationStatus[error.code])
+      .set("Cache-Control", NO_STORE)
+      .json({ error: error.code });
+  };
+  for (const [path, method] of [
+    ["/commerce/tax-classifications/query", "query"],
+    ["/commerce/tax-classifications/command", "command"],
+  ] as const)
+    router.post(path, sameOriginMutation(options), (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant");
+      const csrf = exactHeader(request, "x-bop-csrf");
+      const body = request.body as Record<string, unknown> | undefined;
+      if (
+        sessionCookie === null ||
+        csrf === null ||
+        csrf.length === 0 ||
+        Object.keys(request.query).length !== 0 ||
+        body === undefined ||
+        body === null ||
+        (method === "query" && Object.keys(body).length !== 0)
+      ) {
+        denied(response);
+        return;
+      }
+      const port = options.taxClassifications;
+      if (!port) {
+        response.status(503).set("Cache-Control", NO_STORE).json({ error: "Unavailable" });
+        return;
+      }
+      void (
+        method === "query"
+          ? port.query({ sessionCookie, csrf })
+          : port.command({ sessionCookie, csrf, body })
+      )
+        .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+        .catch((error: unknown) => taxClassificationFailure(response, error));
+    });
+
   // WP-2423 slice 4.4: RECIPE-OPTION-LIST for the selected Store's Brand.
   const optionRecipeStatus = {
     PermissionDenied: 403,
@@ -11148,6 +11225,51 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         else denied(response);
       });
   });
+
+  // WP-2423 Q4: the Store Manager's hours change when the configuration came from Store setup.
+  router.post(
+    "/store-configuration/hours-draft",
+    sameOriginMutation(options),
+    (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant");
+      const csrf = exactHeader(request, "x-bop-csrf");
+      if (sessionCookie === null || csrf === null || Object.keys(request.query).length !== 0) {
+        denied(response);
+        return;
+      }
+      if (!options.storeHoursDraft) {
+        response.status(503).json({ error: "store_configuration_unavailable" });
+        return;
+      }
+      void options
+        .storeHoursDraft({ sessionCookie, csrf, command: request.body })
+        .then((result) =>
+          response.json({ status: result.status, resultingVersion: result.resultingVersion }),
+        )
+        .catch((error: unknown) => {
+          const code: unknown =
+            error instanceof Error
+              ? Object.getOwnPropertyDescriptor(error, "code")?.value
+              : undefined;
+          if (code === "STORE_SETUP_OPERATION_UNPUBLISHED_CHANGES")
+            response.status(409).json({ error: "store_setup_has_unpublished_changes" });
+          else if (
+            code === "STORE_CONFIGURATION_VERSION_CONFLICT" ||
+            code === "STORE_CONFIGURATION_IDEMPOTENCY_CONFLICT" ||
+            code === "STORE_CONFIGURATION_LIFECYCLE_CONFLICT" ||
+            code === "STORE_SETUP_OPERATION_VERSION_CONFLICT" ||
+            code === "STORE_SETUP_OPERATION_IDEMPOTENCY_CONFLICT"
+          )
+            response.status(409).json({ error: "store_configuration_conflict" });
+          else if (
+            code === "STORE_CONFIGURATION_COMMAND_INVALID" ||
+            code === "STORE_CONFIGURATION_REFERENCE_INVALID"
+          )
+            response.status(422).json({ error: "store_configuration_rejected" });
+          else denied(response);
+        });
+    },
+  );
 
   router.post("/store-context", sameOriginMutation(options), (request, response) => {
     let target: unknown;

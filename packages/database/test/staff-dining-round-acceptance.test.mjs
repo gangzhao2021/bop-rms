@@ -84,6 +84,7 @@ import { createMerchantDiningClosingCommand } from "../../../apps/api/src/mercha
 import { createPaymentCompensationComposition } from "../../../apps/api/src/payment-compensation-composition.ts";
 import { createInternalCompensationIdentity } from "../../../tooling/environment/pilot-compensation-identity.mjs";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
+import { createTransactionStatementMemo } from "../src/transaction-statement-memo.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { seedAcceptanceOrderHistory } from "../test-support/acceptance-order-history.mjs";
 import { seedAdditionalDiningGuest } from "../test-support/additional-dining-guest.mjs";
@@ -144,12 +145,15 @@ const now = () => new Date().toISOString();
  */
 const restricted = { statements: 0 };
 // Before (e597b252) → now, statements: card-machine payment 594 → 134, its replay 60 → 60, order
-// accept 639 → 271 (its replay 133 → 110), refund request 852 → 150.
+// accept 639 → 271 (its replay 133 → 110), refund request 852 → 150. Answering repeated scope
+// settings and already-held locks inside the transaction (transaction-statement-memo.ts, as the
+// pilot runner does): card-machine payment 134 → 92, its replay 60 → 42, order accept 271 → 171
+// (its replay 110 → 74), refund request 150 → 81.
 const commandBudgets = {
-  "card-machine payment": 200,
-  "card-machine payment replay": 90,
-  "order accept": 330,
-  "refund request": 220,
+  "card-machine payment": 130,
+  "card-machine payment replay": 60,
+  "order accept": 230,
+  "refund request": 120,
 };
 async function withinBudget(label, work) {
   const before = restricted.statements,
@@ -240,10 +244,35 @@ it("enters a dine-in round by staff, takes its card-machine payment and marks it
                 "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
                 [tenant, scope.brandReference, scope.storeReference],
               );
+            // As the pilot's runner: repeats of scope settings and of locks this transaction
+            // already holds are answered without a round trip (and are not counted).
+            const memo = createTransactionStatementMemo(
+              guc
+                ? {
+                    "bop.tenant_id": tenant,
+                    "bop.brand_id": scope.brandReference,
+                    "bop.store_id": scope.storeReference,
+                  }
+                : {},
+            );
+            let pending = 0;
             const result = await work({
-              query: (sql, values) => {
+              query: async (sql, values) => {
+                const list = values === undefined ? [] : [...values];
+                const answered = pending === 0 ? memo.answer(sql, list) : null;
+                if (answered !== null) return answered;
                 restricted.statements += 1;
-                return client.query(sql, values === undefined ? [] : [...values]);
+                pending += 1;
+                try {
+                  const answer = await client.query(sql, list);
+                  memo.observe(sql, list);
+                  return answer;
+                } catch (error) {
+                  memo.forget();
+                  throw error;
+                } finally {
+                  pending -= 1;
+                }
               },
             });
             await client.query("COMMIT");

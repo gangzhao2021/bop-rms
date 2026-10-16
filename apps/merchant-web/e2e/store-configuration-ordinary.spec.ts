@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
 import {
@@ -152,6 +153,8 @@ interface OrdinaryFixtureControl {
   wrongWorkspace: boolean;
   denyHistory: boolean;
   wrongHistory: boolean;
+  /** WP-2423 DEC-STORE-SETUP-PUBLICATION: publication checks the fixture reports as failing. */
+  failing: string[] | null;
   writes: string[];
   reads: string[];
   errors: string[];
@@ -168,6 +171,7 @@ async function install(page: Page) {
     wrongWorkspace: false,
     denyHistory: false,
     wrongHistory: false,
+    failing: null as string[] | null,
     writes: [] as string[],
     reads: [] as string[],
     errors: [] as string[],
@@ -196,6 +200,30 @@ async function install(page: Page) {
         observedAt,
         validUntil: new Date(Date.parse(observedAt) + 5000).toISOString(),
         businessReferenceValidation: "NotEvaluated",
+        ...(control.failing !== null &&
+        latest !== null &&
+        ["Draft", "PendingApproval", "Approved"].includes(latest.lifecycle)
+          ? {
+              publicationChecks: {
+                profile: "StoreConfigurationPublicationChecksV1",
+                configurationReference: latest.configurationReference,
+                checkedAt: observedAt,
+                checks: [
+                  "Tax",
+                  "BrandSettings",
+                  "TimeZone",
+                  "BusinessDayStart",
+                  "Hours",
+                  "EffectiveDate",
+                  "Fees",
+                  "GoLive",
+                ].map((code) => ({
+                  code,
+                  outcome: control.failing?.includes(code) ? "Fail" : "Pass",
+                })),
+              },
+            }
+          : {}),
       },
       actualScope(),
     );
@@ -693,5 +721,53 @@ test("a deployment without configuration publication hides the panel instead of 
   await expect(page.getByRole("heading", { name: "Review", exact: true })).toBeVisible();
   await expect(panel(page)).toHaveCount(0);
   await expect(page.getByRole("alert")).toHaveCount(0);
+  expect(state.errors).toEqual([]);
+});
+
+test("publication checks say what blocks publication and who must approve, at 1440, 1024 and 390 @production", async ({
+  page,
+}) => {
+  const state = await install(page);
+  state.failing = ["Tax", "GoLive"];
+  await enter(page);
+  await panel(page).getByRole("button", { name: "Create configuration from saved setup" }).click();
+  const checks = panel(page).getByRole("region", { name: "Publication checks" });
+  await expect(checks).toContainText("2 checks need attention");
+  await expect(checks).toContainText("Needs attention: Tax settings are not the ones in force");
+  await expect(checks).toContainText("Ready: Opening hours are complete.");
+  await expect(panel(page)).toContainText("It must be approved and published by");
+  await expect(
+    panel(page).getByRole("button", { name: "Submit configuration for review" }),
+  ).toBeDisabled();
+  state.failing = [];
+  await reloadReview(page);
+  await expect(checks).toContainText("Every check passed.");
+  await panel(page).getByRole("button", { name: "Submit configuration for review" }).click();
+  await expect(panel(page)).toContainText(
+    "Another person with Owner access must approve this configuration.",
+  );
+  await expect(
+    panel(page).getByRole("button", { name: "Approve configuration independently" }),
+  ).toBeDisabled();
+  state.failing = ["GoLive"];
+  for (const [width, height] of [
+    [1440, 900],
+    [1024, 768],
+    [390, 844],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    await reloadReview(page);
+    await expect(checks).toContainText("This Store's go-live check is not approved");
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      `no horizontal overflow at ${width}`,
+    ).toBe(true);
+    const axe = await new AxeBuilder({ page }).include(".store-setup-draft-page").analyze();
+    expect(
+      axe.violations.filter((v) => v.impact === "critical" || v.impact === "serious"),
+      `axe at ${width}`,
+    ).toEqual([]);
+    await expectNoInternalText(page);
+  }
   expect(state.errors).toEqual([]);
 });

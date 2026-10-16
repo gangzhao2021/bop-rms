@@ -113,3 +113,23 @@ it("flags Provider and internal record references such as the v15 settlement sta
     ]),
   ).toEqual([]);
 });
+
+it("WP-2423 item 7: flags amounts written with a currency code, as on the v15 refund pages", () => {
+  for (const text of [
+    "Refund CAD 27.40",
+    "Requested CAD 11.30; confirmed CAD 0.00",
+    "CAD $1,284.60",
+  ])
+    expect(
+      findInternalText([text]).map((finding) => finding.rule),
+      text,
+    ).toContain("currency code amount");
+  expect(
+    findInternalText([
+      "Refund $27.40 on the store's card machine",
+      "Unit cost (CAD)",
+      "Standard cost (CAD per kg)",
+      "Refunds above $100 for an order",
+    ]),
+  ).toEqual([]);
+});

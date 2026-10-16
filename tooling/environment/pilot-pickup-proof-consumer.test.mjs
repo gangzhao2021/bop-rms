@@ -71,3 +71,11 @@ it("WP-2423: does not issue again once issued, nor after an in-person handoff or
     other.consumer.registration.handler({ transaction: {}, envelope: other.event }),
   ).rejects.toThrow("INTERNAL_PICKUP_PROOF_SOURCE_CONFLICT");
 });
+it("WP-2423: a counter order the owner issues no code for completes without a retry", async () => {
+  const f = setup(ready());
+  f.ensureIssued.mockResolvedValueOnce({ status: "NotApplicable", reason: "CounterOrder" });
+  expect(await f.consumer.registration.handler({ transaction: {}, envelope: f.event })).toEqual({
+    status: "completed",
+  });
+  expect(f.ensureIssued).toHaveBeenCalledTimes(1);
+});

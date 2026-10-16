@@ -6,6 +6,8 @@ import {
   type StoreConfigurationView,
   type StoreConfigurationSnapshot,
   type StoreConfigurationCommand,
+  type StoreHoursDraftCommand,
+  STORE_SETUP_UNPUBLISHED_MESSAGE,
 } from "./store-configuration-client.js";
 import {
   serviceOperationReference,
@@ -54,7 +56,7 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
     [uncertain, setUncertain] = useState(false);
   const [online, setOnline] = useState(navigator.onLine);
   const controller = useRef<AbortController | null>(null);
-  const pending = useRef<StoreConfigurationCommand | null>(null);
+  const pending = useRef<StoreConfigurationCommand | StoreHoursDraftCommand | null>(null);
   const running = useRef(false);
   useEffect(() => {
     const update = () => setOnline(navigator.onLine);
@@ -92,12 +94,6 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
     command: "SaveDraft" | "Validate" | "Submit" | "Approve" | "Publish" = "SaveDraft",
   ) {
     if (running.current || !online || !view || !draft) return;
-    if (!pending.current && command === "SaveDraft" && draft.setupBasis) {
-      setMessage(
-        "Edit this recorded configuration in Store Setup, then materialize a new saved configuration.",
-      );
-      return;
-    }
     if (
       !pending.current &&
       command !== "SaveDraft" &&
@@ -112,6 +108,25 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
       setMessage("Reload the saved configuration before reviewing this action.");
       return;
     }
+    // WP-2423 Q4: hours of a configuration from Store setup are saved as an hours-only Store setup
+    // change; the server makes the draft configuration from it.
+    const setupBasis = (view.latest ?? view.current)?.setupBasis;
+    if (!pending.current && command === "SaveDraft" && setupBasis)
+      pending.current = {
+        expectedSetup: {
+          setupDraftReference: setupBasis.setupDraftReference,
+          sourceRevision: setupBasis.sourceRevision,
+          sourceSnapshotDigest: setupBasis.sourceSnapshotDigest,
+        },
+        setupOperationReference: serviceOperationReference(),
+        operationReference: serviceOperationReference(),
+        auditReference: serviceOperationReference(),
+        configurationReference: serviceOperationReference(),
+        expectedVersion: view.expectedVersion,
+        weeklySchedule: draft.weeklySchedule,
+        exceptions: draft.exceptions,
+        effectiveFrom: view.observedAt,
+      };
     if (!pending.current)
       pending.current = {
         command,
@@ -155,8 +170,10 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
     const active = new AbortController();
     controller.current = active;
     try {
-      const completedCommand = pending.current.command;
-      await client.execute(pending.current, csrf, active.signal);
+      const sent = pending.current;
+      const completedCommand = "command" in sent ? sent.command : "SaveDraft";
+      if ("command" in sent) await client.execute(sent, csrf, active.signal);
+      else await client.saveHoursDraft(sent, csrf, active.signal);
       pending.current = null;
       setUncertain(false);
       const next = await client.load(store, active.signal);
@@ -182,7 +199,10 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
         setUncertain(false);
         setView(null);
         setDraft(null);
-      } else if (text.startsWith("Change not accepted")) {
+      } else if (
+        text.startsWith("Change not accepted") ||
+        text === STORE_SETUP_UNPUBLISHED_MESSAGE
+      ) {
         // WP-2423 Q4: a definite rejection; keep the form so staff can correct and save again.
         pending.current = null;
         setUncertain(false);
@@ -447,9 +467,7 @@ export function StoreHoursDraftForm({
             </button>
           </fieldset>
         </StoreConfigurationEditingBoundary>
-        <button type="submit" disabled={draft.setupBasis !== undefined}>
-          Save hours draft
-        </button>
+        <button type="submit">Save hours draft</button>
         <button
           type="button"
           disabled={view.latest?.lifecycle !== "Draft" || !saved}
@@ -662,7 +680,11 @@ export function StoreConfigurationFeeBasisView({
   );
 }
 
-/** Basis-bound full content is immutable here; lifecycle actions remain outside this boundary. */
+/**
+ * WP-2423 Q4: only hours and dated exceptions are edited here, also for a configuration from Store
+ * setup (saved as an hours-only Store setup change); its other settings, fees included, stay in
+ * Store setup. Lifecycle actions remain outside this boundary.
+ */
 export function StoreConfigurationEditingBoundary({
   configuration,
   children,
@@ -671,8 +693,13 @@ export function StoreConfigurationEditingBoundary({
   readonly children: ReactNode;
 }) {
   return (
-    <fieldset disabled={configuration.setupBasis !== undefined}>
+    <fieldset>
       <legend>Hours and service timing</legend>
+      {configuration.setupBasis !== undefined && (
+        <p>
+          These hours are also the hours in Store setup. Saving them changes nothing else there.
+        </p>
+      )}
       {children}
     </fieldset>
   );

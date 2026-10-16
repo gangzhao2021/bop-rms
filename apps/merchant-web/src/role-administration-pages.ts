@@ -55,6 +55,28 @@ export interface RoleAdministrationItemView {
   /** Operations the current viewer may perform now; the server re-authorizes every command. */
   readonly operations: readonly RoleAdministrationOperation[];
 }
+/** WP-2423: role values as staff read them, never the stored codes ("InReview"). */
+export const roleStatusLabels: Readonly<Record<RoleAdministrationItemView["status"], string>> =
+  Object.freeze({
+    Draft: "Draft",
+    InReview: "Waiting for approval",
+    Approved: "Approved, not yet active",
+    Active: "Active",
+    Rejected: "Rejected",
+    Deactivated: "Deactivated",
+  });
+export const roleScopeLabels: Readonly<Record<RoleAdministrationItemView["scope"], string>> =
+  Object.freeze({ Brand: "All stores in the brand", Store: "This store" });
+export const roleTypeLabels: Readonly<Record<RoleAdministrationItemView["type"], string>> =
+  Object.freeze({ System: "Built-in role", Custom: "Custom role" });
+/** A permission as staff read it: the catalog's description, else its group. */
+export function rolePermissionLabel(
+  action: string,
+  catalog: readonly RoleCatalogEntryView[],
+  group: string,
+): string {
+  return catalog.find((entry) => entry.action === action)?.description ?? group;
+}
 export interface RoleAdministrationPageView {
   readonly screenId: "IAM-ROLE-LIST" | "IAM-ROLE-EDITOR";
   readonly sourceAsOf: string;

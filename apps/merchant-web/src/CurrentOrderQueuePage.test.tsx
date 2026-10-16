@@ -1258,3 +1258,82 @@ it("WP-2423: an opened order stays open and in place when the page refreshes aft
   });
   expect(calls).toEqual(["list:cursor", "detail:" + first.orderReference]);
 });
+
+it("WP-2423: a list row reads its refund position with the list, so it agrees with the detail", () => {
+  const id = (n: number) => `01909968-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
+  const order = (extra: object = {}) => ({
+    orderReference: id(1),
+    orderNumber: "9",
+    orderType: "Pickup",
+    sourceChannel: "Qr",
+    submittedAt: "2026-10-15T02:08:00.000Z",
+    observedAt: "2026-10-15T02:09:00.000Z",
+    initialBatchReference: id(91),
+    batches: [
+      {
+        orderBatchReference: id(91),
+        sequence: 1,
+        acceptanceStatus: "Accepted",
+        canRequestAcceptance: false,
+        canCancel: false,
+        staffCancellation: null,
+        canCancelItems: false,
+      },
+    ],
+    canRequestAcceptance: false,
+    unfulfillable: null,
+    pickupNotCollected: false,
+    acceptBy: null,
+    awaitingPayment: false,
+    paidOnline: { amountMinor: "1130", currencyCode: "CAD" },
+    currentPhase: "Accepted",
+    currentVersion: 2,
+    ...extra,
+  });
+  const parse = (value: object) =>
+    parseCurrentOrderQueue({ items: [value], nextAfterOrderReference: null });
+  // An item cancelled and refunded online: no batch was cancelled, only Payment knows the refund.
+  const view = parse(order({ paymentPosition: { refundedMinor: "350", refundPendingMinor: "0" } }));
+  expect(view.items[0]?.paymentPosition).toEqual({ refundedMinor: "350", refundPendingMinor: "0" });
+  const rows = renderToStaticMarkup(<CurrentOrderQueueRows view={view} timeZone="UTC" />);
+  expect(rows).toContain("Paid online $11.30 · partly refunded");
+  // The same row before the refund, and from an older server without the field.
+  expect(parse(order({ paymentPosition: null })).items[0]?.paymentPosition).toBeNull();
+  expect(parse(order()).items[0]?.paymentPosition).toBeNull();
+  expect(
+    renderToStaticMarkup(<CurrentOrderQueueRows view={parse(order())} timeZone="UTC" />),
+  ).not.toContain("refunded");
+  // The detail's own read wins on the order's page; an opened row's read fills a row without one.
+  const single = renderToStaticMarkup(
+    <CurrentOrderQueueRows
+      single
+      view={parse(order())}
+      timeZone="UTC"
+      paymentPosition={{ refundedMinor: "1130", refundPendingMinor: "0" }}
+    />,
+  );
+  expect(single).toContain("Paid online $11.30 · refunded in full");
+  const opened = renderToStaticMarkup(
+    <CurrentOrderQueueRows
+      view={parse(order())}
+      timeZone="UTC"
+      paymentPositions={new Map([[id(1), { refundedMinor: "0", refundPendingMinor: "350" }]])}
+    />,
+  );
+  expect(opened).toContain("Paid online $11.30 · refund in progress");
+  // A position needs an online payment and never exceeds it.
+  expect(() =>
+    parse(
+      order({
+        paidOnline: null,
+        paymentPosition: { refundedMinor: "1", refundPendingMinor: "0" },
+      }),
+    ),
+  ).toThrow();
+  expect(() =>
+    parse(order({ paymentPosition: { refundedMinor: "1000", refundPendingMinor: "131" } })),
+  ).toThrow();
+  expect(() =>
+    parse(order({ paymentPosition: { refundedMinor: "1.5", refundPendingMinor: "0" } })),
+  ).toThrow();
+});

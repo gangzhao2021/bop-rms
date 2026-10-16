@@ -34,7 +34,10 @@ describe("WP-2212 pooled transaction runner", () => {
         return 42;
       }),
     ).toBe(42);
-    expect(f.query.mock.calls.map(([sql]) => sql)).toContain("SET LOCAL lock_timeout = '2s'");
+    expect(f.query.mock.calls.map(([sql]) => sql)).toContain(
+      "SET LOCAL statement_timeout = '5s'; SET LOCAL lock_timeout = '2s'; " +
+        "SET LOCAL idle_in_transaction_session_timeout = '5s'",
+    );
     expect(f.query.mock.calls.at(-1)?.[0]).toBe("COMMIT");
     expect(f.release).toHaveBeenCalledWith(false);
     await expect(escaped?.query("SELECT 1", [])).rejects.toMatchObject({
@@ -58,23 +61,26 @@ describe("WP-2212 pooled transaction runner", () => {
     ).toThrow();
     expect(f.connect).not.toHaveBeenCalled();
   });
-  it.each(["SELECT secret", "COMMIT", "SET LOCAL statement_timeout = '5s'", "release"])(
-    "bounds %s failure without retry",
-    async (failure) => {
-      const f = fixture(failure);
-      const error = await f.runner
-        .run(async (t) => {
-          await t.query("SELECT secret", []);
-        })
-        .catch((e: unknown) => e);
-      expect(error).toMatchObject({ code: "TENANT_DATABASE_TRANSACTION_FAILED" });
-      expect(error).not.toHaveProperty("cause");
-      expect(String(error)).not.toContain("private");
-      expect(f.connect).toHaveBeenCalledTimes(1);
-      expect(f.release).toHaveBeenCalledTimes(1);
-      if (failure !== "release") expect(f.release).toHaveBeenCalledWith(true);
-    },
-  );
+  it.each([
+    "SELECT secret",
+    "COMMIT",
+    "SET LOCAL statement_timeout = '5s'; SET LOCAL lock_timeout = '2s'; " +
+      "SET LOCAL idle_in_transaction_session_timeout = '5s'",
+    "release",
+  ])("bounds %s failure without retry", async (failure) => {
+    const f = fixture(failure);
+    const error = await f.runner
+      .run(async (t) => {
+        await t.query("SELECT secret", []);
+      })
+      .catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: "TENANT_DATABASE_TRANSACTION_FAILED" });
+    expect(error).not.toHaveProperty("cause");
+    expect(String(error)).not.toContain("private");
+    expect(f.connect).toHaveBeenCalledTimes(1);
+    expect(f.release).toHaveBeenCalledTimes(1);
+    if (failure !== "release") expect(f.release).toHaveBeenCalledWith(true);
+  });
   it("does not commit a caught query failure", async () => {
     const f = fixture("SELECT secret");
     await expect(
@@ -214,5 +220,33 @@ describe("WP-2212 pooled transaction runner", () => {
     finish();
     expect(f.query.mock.calls.some(([sql]) => sql === "COMMIT")).toBe(false);
     expect(f.release).toHaveBeenCalledWith(true);
+  });
+});
+describe("WP-2423 repeated scope settings and held locks", () => {
+  it("answers repeats inside one transaction without a round trip, never across transactions", async () => {
+    const f = fixture();
+    const scopeSql = "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)";
+    const lockSql = "SELECT pg_advisory_xact_lock(hashtextextended($1,0))";
+    const store = "018f3f7a-8b1c-7a11-8d01-000000000042";
+    const ran = () =>
+      f.query.mock.calls.filter(([sql]) => sql === scopeSql || sql === lockSql).length;
+    await f.runner.run(async (transaction) => {
+      // The runner installed the brand and an empty Store before the callback.
+      await transaction.query(scopeSql, [scope.brandId, ""]);
+      expect(ran()).toBe(0);
+      await transaction.query(scopeSql, [scope.brandId, store]);
+      await transaction.query(scopeSql, [scope.brandId, store]);
+      await transaction.query(lockSql, ["k"]);
+      await transaction.query(lockSql, ["k"]);
+      expect(ran()).toBe(2);
+      await transaction.query("ROLLBACK TO SAVEPOINT s", []);
+      await transaction.query(lockSql, ["k"]);
+      await transaction.query(scopeSql, [scope.brandId, store]);
+      expect(ran()).toBe(4);
+    });
+    await f.runner.run(async (transaction) => {
+      await transaction.query(lockSql, ["k"]);
+    });
+    expect(ran()).toBe(5);
   });
 });

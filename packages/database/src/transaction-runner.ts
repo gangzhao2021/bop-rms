@@ -5,6 +5,7 @@ import {
   withTenantContextTransaction,
   type TenantDatabaseScope,
 } from "./tenant-context.js";
+import { createTransactionStatementMemo } from "./transaction-statement-memo.js";
 
 const retryableSqlStates: ReadonlySet<string> = new Set(["55P03", "40001", "40P01"]);
 function sqlState(error: unknown): string {
@@ -31,6 +32,10 @@ export function isRetryableTransactionConflict(error: unknown): boolean {
 function refuseConcurrentQueries(): boolean {
   return process.env.NODE_ENV !== "production";
 }
+
+const transactionLimits =
+  "SET LOCAL statement_timeout = '5s'; SET LOCAL lock_timeout = '2s'; " +
+  "SET LOCAL idle_in_transaction_session_timeout = '5s'";
 
 export interface DatabaseTransaction {
   query(sql: string, values: readonly unknown[]): Promise<unknown>;
@@ -62,9 +67,8 @@ export function createTenantTransactionRunner(
     run: (action) =>
       withTenantContextTransaction(pool, fixedScope, async (client) => {
         try {
-          await client.query("SET LOCAL statement_timeout = '5s'");
-          await client.query("SET LOCAL lock_timeout = '2s'");
-          await client.query("SET LOCAL idle_in_transaction_session_timeout = '5s'");
+          // One round trip for the three limits (a parameterless multi-statement simple query).
+          await client.query(transactionLimits);
         } catch {
           throw new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_FAILED");
         }
@@ -74,6 +78,12 @@ export function createTenantTransactionRunner(
         let conflictDiagnostic: ReturnType<typeof tenantContextDatabaseDiagnostic> | null = null;
         let concurrent = false;
         let pending = 0;
+        // The scope settings withTenantContextTransaction installed before this callback; repeats
+        // of them, and of locks this transaction already holds, are answered without a round trip.
+        const memo = createTransactionStatementMemo({
+          "bop.brand_id": fixedScope.brandId,
+          "bop.store_id": typeof fixedScope.storeId === "string" ? fixedScope.storeId : "",
+        });
         try {
           const result = await action(
             Object.freeze({
@@ -90,10 +100,17 @@ export function createTenantTransactionRunner(
                     "TENANT_DATABASE_TRANSACTION_CONCURRENT_QUERY",
                   );
                 }
+                if (pending === 0) {
+                  const answered = memo.answer(sql, values);
+                  if (answered !== null) return answered;
+                }
                 pending += 1;
                 try {
-                  return await client.query(sql, [...values]);
+                  const result = await client.query(sql, [...values]);
+                  memo.observe(sql, values);
+                  return result;
                 } catch (error) {
+                  memo.forget();
                   failed = true;
                   // Lock timeout, serialization failure and deadlock leave nothing committed; the
                   // caller may rerun the whole idempotent transaction. No SQL detail is exposed.

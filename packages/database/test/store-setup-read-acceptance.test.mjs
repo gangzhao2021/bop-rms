@@ -17,7 +17,7 @@ import {
   createUnconfiguredStoreSetupDraftContent,
 } from "../../rms/store/src/index.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
-import { createInternalStoreSetupBff } from "../../../tooling/environment/pilot-store-setup.mjs";
+import { createInternalStoreSetupDraftBff } from "../../../tooling/environment/pilot-store-setup.mjs";
 import { createMerchantBffRouter } from "../../../apps/api/dist/merchant-bff.js";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { seedMerchantAcceptanceSession } from "../test-support/merchant-acceptance-session.mjs";
@@ -189,6 +189,8 @@ it("WP-2423: the Owner reads Store setup under the pilot API grants", async () =
 
       // The same reads through the pilot merchant BFF composition. On v15 both answered 503: the
       // pilot composed no storeSetupClock (step 5) and no Store configuration publication (step 8).
+      // Without publication composed (this Store has no published configuration), step 8 answers
+      // 404; publication itself is covered by store-setup-publication-acceptance.
       {
         const app = express();
         app.use(
@@ -197,7 +199,7 @@ it("WP-2423: the Owner reads Store setup under the pilot API grants", async () =
             service: owner.authentication,
             exactOrigin: "https://merchant.invalid",
             acceptedHost: "merchant.invalid",
-            ...createInternalStoreSetupBff({
+            ...createInternalStoreSetupDraftBff({
               persistence: owner.persistence,
               authentication: owner.authentication,
               nextReference: () => id(next++),

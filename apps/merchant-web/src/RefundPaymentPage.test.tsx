@@ -54,7 +54,7 @@ it("WP-2423 item 4: a recorded card-machine refund shows its slip reference in s
       </StoreTimeZoneContext.Provider>,
     );
   const html = render("RF4821");
-  expect(html).toContain("Refunded CAD 5.93 on the store&#x27;s card machine");
+  expect(html).toContain("Refunded $5.93 on the store&#x27;s card machine");
   expect(html).toContain("Oct 15, 2026, 1:52 PM");
   expect(html).toContain("Slip reference: RF4821.");
   expect(html).not.toContain(id(1));
@@ -66,21 +66,21 @@ it("WP-2423 item 4: recording the machine refund confirms it plainly, with the c
   expect(
     cardMachineRefundRecordedText(
       { ...result, receipt: "NoDigitalReceipt" },
-      "CAD 5.93",
+      "$5.93",
       "593",
       "America/Toronto",
     ),
   ).toBe(
-    "Card-machine refund recorded: CAD 5.93 refunded on the card machine at Oct 15, 2026, 1:52 PM. The card machine's refund slip is the customer's receipt.",
+    "Card-machine refund recorded: $5.93 refunded on the card machine at Oct 15, 2026, 1:52 PM. The card machine's refund slip is the customer's receipt.",
   );
   expect(
-    cardMachineRefundRecordedText({ ...result, receipt: "Issued" }, "CAD 5.93", "593", "UTC"),
-  ).toMatch(/^Card-machine refund recorded: CAD 5\.93 .* digital receipt now shows the refund\.$/u);
+    cardMachineRefundRecordedText({ ...result, receipt: "Issued" }, "$5.93", "593", "UTC"),
+  ).toMatch(/^Card-machine refund recorded: \$5\.93 .* digital receipt now shows the refund\.$/u);
   // The server's amount wins over the request's when they differ.
   expect(
     cardMachineRefundRecordedText(
       { amountMinor: "500", refundedAt: result.refundedAt, receipt: "NotIssued" },
-      "CAD 5.93",
+      "$5.93",
       "593",
       "UTC",
     ),

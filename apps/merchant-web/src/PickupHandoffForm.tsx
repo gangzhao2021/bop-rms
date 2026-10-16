@@ -99,6 +99,9 @@ export function PickupHandoffForm({
     "Idle" | "Pending" | "Unknown" | "Rejected" | "Completed" | "InProgress"
   >("Idle");
   const inPerson = verification === null;
+  // WP-2423: taken at the counter: no pickup code was ever sent and the walk-up customer left no
+  // contact, so staff call the order number (or the name they gave) and hand it over.
+  const counter = inPerson && item.takenAtCounter === true && item.proofReadiness === "NotIssued";
   const [identityCheck, setIdentityCheck] = useState<
     "" | "OrderNumberAndName" | "OrderNumberAndPhoneLast4"
   >("");
@@ -111,7 +114,7 @@ export function PickupHandoffForm({
   const [details, setDetails] = useState<PickupIdentityOutcome | "Loading" | null>(null);
   const detailsRequest = useRef<AbortController | null>(null);
   const loadDetails = () => {
-    if (!inPerson || browserOffline()) return;
+    if (!inPerson || counter || browserOffline()) return;
     detailsRequest.current?.abort();
     const active = new AbortController();
     detailsRequest.current = active;
@@ -124,11 +127,12 @@ export function PickupHandoffForm({
   };
   // No phone on the order to compare: only the name check can be chosen.
   const phoneUnavailable =
-    details !== null &&
-    details !== "Loading" &&
-    (details.status === "Removed" ||
-      details.status === "NotGiven" ||
-      (details.status === "Available" && details.phoneLast4 === null));
+    counter ||
+    (details !== null &&
+      details !== "Loading" &&
+      (details.status === "Removed" ||
+        details.status === "NotGiven" ||
+        (details.status === "Available" && details.phoneLast4 === null)));
   useEffect(
     () => () => {
       controller.current?.abort();
@@ -210,7 +214,11 @@ export function PickupHandoffForm({
           loadDetails();
         }}
       >
-        {inPerson ? "Hand over after checking in person" : "Review pickup handoff"}
+        {counter
+          ? "Hand over"
+          : inPerson
+            ? "Hand over after checking in person"
+            : "Review pickup handoff"}
       </button>
       {status === "Completed" || status === "InProgress" ? (
         <p ref={resultAnnouncement} role="status" tabIndex={-1}>
@@ -250,7 +258,12 @@ export function PickupHandoffForm({
           ))}
         </ul>
         <p>Match every item to the order ticket before handing it over.</p>
-        {inPerson ? (
+        {counter ? (
+          <p>
+            This order was taken at the counter, so no pickup code was sent. Call the order number
+            or the name the customer gave, and hand it over to the customer who answers.
+          </p>
+        ) : inPerson ? (
           <p>
             {item.proofReadiness === "Expired"
               ? "The customer's pickup code has expired."
@@ -280,7 +293,11 @@ export function PickupHandoffForm({
                   }
                 >
                   <option value="">Select what you checked</option>
-                  <option value="OrderNumberAndName">Order number and name on the order</option>
+                  <option value="OrderNumberAndName">
+                    {counter
+                      ? "Order number or the name they gave at the counter"
+                      : "Order number and name on the order"}
+                  </option>
                   <option value="OrderNumberAndPhoneLast4" disabled={phoneUnavailable}>
                     Order number and last four digits of the phone
                   </option>

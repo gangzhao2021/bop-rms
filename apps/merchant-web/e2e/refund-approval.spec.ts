@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 // WP-2423 Q5: an owner approves an escalated refund in person (APPROVAL-INBOX /app/approvals).
-test("@production owner verifies and approves a refund above CAD 100 once", async ({ page }) => {
+test("@production owner verifies and approves a refund above $100 once", async ({ page }) => {
   const id = (n: number) => "01909968-0000-7000-8000-" + n.toString(16).padStart(12, "0");
   const scope = {
     brandLabel: "Synthetic Brand",
@@ -141,13 +141,13 @@ test("@production owner verifies and approves a refund above CAD 100 once", asyn
   await page.goto("/app/approvals");
   await expect(page.getByRole("link", { name: "Approvals" }).first()).toBeVisible();
   const card = page.getByRole("listitem").filter({ hasText: "Order A-0042" });
-  await expect(card).toContainText("CAD 125.00");
+  await expect(card).toContainText("$125.00");
   await expect(card).toContainText("Wrong item");
   await expect(card).toContainText("Mia");
-  await expect(card).toContainText("Refunds on this order would total more than CAD 100");
+  await expect(card).toContainText("Refunds on this order would total more than $100");
   await expect(card).toContainText("Waiting for approval");
   await expect(page.getByRole("heading", { name: "Sole operator" })).toHaveCount(0);
-  const approve = card.getByRole("button", { name: "Approve and refund CAD 125.00" });
+  const approve = card.getByRole("button", { name: "Approve and refund $125.00" });
   await expect(approve).toBeDisabled();
 
   for (const width of [1440, 1024, 390]) {
@@ -176,7 +176,7 @@ test("@production owner verifies and approves a refund above CAD 100 once", asyn
   const secondCard = page.getByRole("listitem").filter({ hasText: "Order A-0044" });
   await expect(secondCard.getByRole("button", { name: "Verify to approve" })).toHaveCount(0);
   await expect(
-    secondCard.getByRole("button", { name: "Approve and refund CAD 125.00" }),
+    secondCard.getByRole("button", { name: "Approve and refund $125.00" }),
   ).toBeEnabled();
   // Each card's code field has its own id (labels stay associated).
   const ids = await page
@@ -432,7 +432,7 @@ for (const pending of [false, true])
       await expect(
         page.getByText(
           pending
-            ? "A refund of CAD 11.30 is pending; nothing more can be requested until it finishes."
+            ? "A refund of $11.30 is pending; nothing more can be requested until it finishes."
             : "Nothing is left to refund on this payment.",
         ),
       ).toBeVisible();

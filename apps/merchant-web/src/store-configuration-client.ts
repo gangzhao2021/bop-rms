@@ -348,33 +348,76 @@ export interface StoreConfigurationCommand {
   readonly expectedVersion: number;
   readonly configuration: StoreConfigurationSnapshot;
 }
+/**
+ * WP-2423 Q4: an hours change once the configuration came from Store setup. The browser sends only
+ * the hours, dated exceptions and the Store setup version it edited; the server makes the Store
+ * setup revision and the draft configuration from them.
+ */
+export interface StoreHoursDraftCommand {
+  readonly expectedSetup: {
+    readonly setupDraftReference: string;
+    readonly sourceRevision: number;
+    readonly sourceSnapshotDigest: string;
+  };
+  readonly setupOperationReference: string;
+  readonly operationReference: string;
+  readonly auditReference: string;
+  readonly configurationReference: string;
+  readonly expectedVersion: number;
+  readonly weeklySchedule: StoreConfigurationSnapshot["weeklySchedule"];
+  readonly exceptions: StoreConfigurationSnapshot["exceptions"];
+  /** The server time of the read the change was made from; it applies from then. */
+  readonly effectiveFrom: string;
+}
+/** WP-2423 Q4: Store setup holds saved changes the latest configuration does not include. */
+export const STORE_SETUP_UNPUBLISHED_MESSAGE =
+  "Store setup has changes that are not published yet. Ask the Owner to publish or finish them in Store setup first.";
 export function createStoreConfigurationClient(fetcher: typeof fetch = fetch) {
-  async function request(signal: AbortSignal, command?: StoreConfigurationCommand, csrf?: string) {
+  async function request(
+    signal: AbortSignal,
+    command?: StoreConfigurationCommand | StoreHoursDraftCommand,
+    csrf?: string,
+  ) {
+    const hours = command !== undefined && "expectedSetup" in command;
     const controller = new AbortController();
     const abort = () => controller.abort();
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     const timer = setTimeout(abort, 15000);
     try {
-      const response = await fetcher("/merchant/store-configuration", {
-        method: command ? "POST" : "GET",
-        credentials: "same-origin",
-        cache: "no-store",
-        redirect: "error",
-        signal: controller.signal,
-        headers: {
-          Accept: "application/json",
-          ...(command ? { "Content-Type": "application/json", "X-BOP-CSRF": csrf ?? "" } : {}),
+      const response = await fetcher(
+        hours ? "/merchant/store-configuration/hours-draft" : "/merchant/store-configuration",
+        {
+          method: command ? "POST" : "GET",
+          credentials: "same-origin",
+          cache: "no-store",
+          redirect: "error",
+          signal: controller.signal,
+          headers: {
+            Accept: "application/json",
+            ...(command ? { "Content-Type": "application/json", "X-BOP-CSRF": csrf ?? "" } : {}),
+          },
+          ...(command ? { body: JSON.stringify(command) } : {}),
         },
-        ...(command ? { body: JSON.stringify(command) } : {}),
-      });
+      );
       if (response.status === 403)
         throw new Error(
-          command?.command === "Approve"
+          command && "command" in command && command.command === "Approve"
             ? "Permission denied. Someone other than the person who made this change, with approval access, must approve it."
             : "Permission denied. Check your session and Store access.",
         );
-      if (response.status === 409) throw new Error("Source changed. Refresh before trying again.");
+      if (response.status === 409) {
+        const answer: unknown = await response.json().catch(() => null);
+        if (
+          hours &&
+          answer !== null &&
+          typeof answer === "object" &&
+          Object.getOwnPropertyDescriptor(answer, "error")?.value ===
+            "store_setup_has_unpublished_changes"
+        )
+          throw new Error(STORE_SETUP_UNPUBLISHED_MESSAGE);
+        throw new Error("Source changed. Refresh before trying again.");
+      }
       // WP-2423 Q4: the change itself was not accepted; keep the form so staff can correct it.
       if (response.status === 422)
         throw new Error(
@@ -405,6 +448,14 @@ export function createStoreConfigurationClient(fetcher: typeof fetch = fetch) {
         !["Applied", "AlreadyApplied"].includes(String(result.status)) ||
         result.resultingVersion !==
           command.expectedVersion + (command.command === "SaveDraft" ? 1 : 0)
+      )
+        throw new Error("Configuration request unavailable.");
+    },
+    async saveHoursDraft(command: StoreHoursDraftCommand, csrf: string, signal: AbortSignal) {
+      const result = exact(await request(signal, command, csrf), ["status", "resultingVersion"]);
+      if (
+        !["Applied", "AlreadyApplied"].includes(String(result.status)) ||
+        result.resultingVersion !== command.expectedVersion + 1
       )
         throw new Error("Configuration request unavailable.");
     },

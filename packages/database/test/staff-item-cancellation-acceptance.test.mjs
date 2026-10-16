@@ -17,11 +17,16 @@ import {
   createKitchenWorkLifecycleService,
   createPostgresKitchenWorkLifecycleStore,
 } from "../../rms/kitchen/src/index.ts";
-import { createPostgresStaffOrderCancellationReader } from "../../rms/ordering/src/index.ts";
+import {
+  createPostgresOrderKitchenSourceStore,
+  createPostgresStaffOrderCancellationReader,
+} from "../../rms/ordering/src/index.ts";
 import {
   createPaymentProviderSnapshot,
   createPostgresOrdinaryRefundRequestRuntime,
 } from "../../rms/payment/src/index.ts";
+import { readOrderCreationHistory } from "../../rms/ordering/src/infrastructure/persistence/order-creation-query-store.ts";
+import { orderCreatedSourceInput } from "../../rms/ordering/src/application/order-created-source.ts";
 import { createPostgresOrdinaryRefundEscalationSource } from "../../rms/payment/src/infrastructure/persistence/ordinary-refund-request-store.ts";
 import { createPostgresOrdinaryRefundCaptureSource } from "../../rms/payment/src/infrastructure/persistence/ordinary-refund-capture-source.ts";
 import { createPostgresOrdinaryRefundPricingSource } from "../../rms/payment/src/infrastructure/ordinary-refund-pricing-source.ts";
@@ -486,6 +491,15 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
         acceptedAt = time(-minutes(38)),
         kitchenAt = time(-minutes(37));
       const businessDate = businessDateOf(submittedAt);
+      // The local midnight that starts the business date (America/Toronto, day start 00:00).
+      const businessDayBoundary = [4, 5]
+        .map((hour) => new Date(businessDate + "T0" + hour + ":00:00.000Z"))
+        .find(
+          (at) =>
+            businessDateOf(at) === businessDate &&
+            businessDateOf(new Date(at.getTime() - 1)) !== businessDate,
+        )
+        .toISOString();
 
       /**
        * One paid pickup Order with one Batch of two lines: the persisted Pricing quote and the
@@ -530,7 +544,7 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
             "(order_id,brand_id,store_id,business_date,sequence,order_number,allocated_at," +
             "business_date_configuration_id,business_date_configuration_version,business_date_content_digest," +
             "time_zone,business_day_start,business_date_boundary_at,boundary_disambiguation) " +
-            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,$9,'America/Toronto','00:00',$7,'Exact')",
+            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,$9,'America/Toronto','00:00',$10,'Exact')",
           [
             order.order,
             brand,
@@ -541,6 +555,7 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
             submittedAt,
             id(50),
             hash("bd"),
+            businessDayBoundary,
           ],
         );
         await admin.query(
@@ -561,7 +576,7 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
           cartVersion: 1,
           inputDigest,
           quotedAt: time(-minutes(42)),
-          capturedAt: time(-minutes(41)),
+          capturedAt: submittedAt,
           addedAt: time(-minutes(45)),
           actorReference: order.guest,
           nextReference: fresh,
@@ -624,10 +639,10 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
               refs.batch,
               refs.cartLines[j],
               LINES[j].quantity,
-              hash(["catalog", b, j]),
-              inputDigest,
+              JSON.parse(snapshots[j]).catalog.snapshotDigest,
+              JSON.parse(snapshots[j]).pricing.quoteInputDigest,
               snapshots[j],
-              time(-minutes(41)),
+              submittedAt,
               j + 1,
             ],
           );
@@ -728,6 +743,18 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
           ],
         );
 
+        // The confirmed snapshot digest is Ordering's own digest of the Order's creation history.
+        const creation = await scoped((tx) =>
+          readOrderCreationHistory(
+            tx,
+            { brandReference: brand, storeReference: store },
+            refs.submission,
+            1,
+          ),
+        );
+        refs.snapshotDigest = sha(
+          orderCreatedSourceInput(creation, creation.orderNumberAllocation.businessDateResolution),
+        );
         // Ordering: the store accepted the Batch, then recorded the paid outcome Confirmed.
         await admin.query(
           "INSERT INTO rms_ordering.order_acceptance_record (acceptance_id,operation_id,brand_id,store_id,order_id,order_batch_id,expected_order_version,accepted_order_version,actor_type,actor_id,purpose_code,permission_code,reason_code,workflow_version_id,transition_id,source_digest,accepted_at) VALUES ($1,$2,$3,$4,$5,$6,1,2,'User',$7,'OrderAcceptance','order.accept','SYNTHETIC_TEST',$8,$9,$10,$11)",
@@ -768,12 +795,32 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
             hash(["disposition", b]),
             acceptedAt,
             refs.confirmation,
-            hash(["snapshot", b]),
+            refs.snapshotDigest,
             refs.confirmedEvent,
           ],
         );
 
-        // Kitchen: the ticket created from the confirmed Batch, one queued work item per line.
+        // Kitchen: the ticket created from the confirmed Batch, one queued work item per line. Its
+        // source evidence is the real Ordering kitchen source of the accepted, confirmed Batch, so
+        // the kitchen commands below run the real current-source check against it.
+        refs.sourceQuery = {
+          brandReference: brand,
+          storeReference: store,
+          orderReference: order.order,
+          orderBatchReference: refs.batch,
+          confirmationReference: refs.confirmation,
+          sourceEventReference: refs.confirmedEvent,
+          sourceAggregateVersion: 2n,
+          sourceSnapshotDigest: refs.snapshotDigest,
+        };
+        refs.sourceEvidenceDigest = (
+          await scoped((tx) =>
+            kitchenSource.resolve({
+              transaction: tx,
+              query: { ...refs.sourceQuery, observedAt: new Date().toISOString() },
+            }),
+          )
+        ).evidenceDigest;
         await admin.query(
           "INSERT INTO rms_kitchen.kitchen_ticket (kitchen_ticket_id,brand_id,store_id,order_id,order_batch_id,confirmation_id,consumer_name,consumer_version,source_event_id,source_aggregate_version,source_snapshot_digest,confirmed_at,correlation_id,semantic_event_binding_digest,source_evidence_id,source_evidence_version,source_evidence_digest,source_evidence_captured_at,work_plan_id,work_plan_version,work_plan_digest,work_plan_generated_at,aggregate_version,status,created_by_actor_type,updated_by_actor_type,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,'kitchen.confirmed-order:v1',1,$7,2,$8,$9,$10,$11,$12,1,$13,$9,$15,1,$16,$14,1,'Open','System','System',$14,$14)",
           [
@@ -784,12 +831,12 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
             refs.batch,
             refs.confirmation,
             refs.confirmedEvent,
-            hash(["snapshot", b]),
+            refs.snapshotDigest,
             acceptedAt,
             refs.correlation,
             hash(["binding", b]),
             id(b + 10),
-            hash(["evidence", b]),
+            refs.sourceEvidenceDigest,
             kitchenAt,
             id(b + 11),
             hash(["plan", b]),
@@ -829,7 +876,28 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
         return order;
       }
 
-      /** The kitchen's own lifecycle owner path (KDS): accept and start one work item. */
+      /**
+       * The Ordering owner's kitchen source for the pilot kitchen command (pilot-kitchen-command.mjs):
+       * issued kitchen work stays current while later revisions only cancelled item lines.
+       */
+      const kitchenSource = createPostgresOrderKitchenSourceStore({
+        brandReference: brand,
+        storeReference: store,
+        // The seeded lines carry quote version 1 snapshots (staff-item-cancellation-pricing.mjs);
+        // the pilot reads version 2. The revision rule under test does not depend on it.
+        quoteVersion: 1,
+        sha256: sha,
+        authorize: async () => true,
+      });
+      const issuedSourceIsCurrent = async (transaction, order) =>
+        (
+          await kitchenSource.resolveIssued({
+            transaction,
+            query: { ...order.batch.sourceQuery, observedAt: new Date().toISOString() },
+          })
+        ).evidenceDigest === order.batch.sourceEvidenceDigest;
+
+      /** The kitchen's own lifecycle owner path (KDS): accept, start and complete one work item. */
       function kitchen(order, { beforeCommit = null } = {}) {
         const refs = order.batch;
         let active = null;
@@ -859,7 +927,7 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
           references: kitchenReferences,
           digests: { sha256: sha },
           authorize: async () => true,
-          validateCurrentSource: async () => true,
+          validateCurrentSource: (transaction) => issuedSourceIsCurrent(transaction, order),
         });
         const service = createKitchenWorkLifecycleService({
           trustedContext: {
@@ -921,7 +989,7 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
             }),
           },
         });
-        async function command(action, j) {
+        async function command(action, j, extra = {}) {
           const versions = (
             await admin.query(
               "SELECT t.aggregate_version::text AS ticket,w.version::text AS item FROM rms_kitchen.kitchen_ticket t JOIN rms_kitchen.kitchen_work_item w ON w.kitchen_ticket_id=t.kitchen_ticket_id WHERE w.kitchen_work_item_id=$1",
@@ -940,12 +1008,15 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
             expectedTicketVersion: versions.ticket,
             expectedWorkItemVersion: versions.item,
             correlationReference: refs.correlation,
+            ...extra,
           };
           return service.execute(active);
         }
         return {
           accept: (j) => command("AcceptKitchenWorkItem", j),
           start: (j) => command("StartKitchenWorkItem", j),
+          complete: (j) =>
+            command("CompleteKitchenWorkItem", j, { quantityDelta: LINES[j].quantity }),
         };
       }
 
@@ -1412,6 +1483,26 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
         assert.equal(escalation.claimVersion, 2);
         assert.equal(escalation.decision.cumulativeOrdinaryAmountMinor, ordinaryMinor);
         assert.ok(!escalation.decision.reasons.includes("OrderOrdinaryTotalAboveCad100"));
+
+        // WP-2423 (v15 order 10): after the item cancellation advanced the Order to version 3,
+        // the kitchen still accepts, starts and completes the remaining line through the real
+        // Ordering current-source check; the issued ticket (source version 2) stays current.
+        assert.deepEqual(await itemStatuses(threshold.batch.ticket), ["Cancelled", "Queued"]);
+        const lane = kitchen(threshold);
+        assert.equal((await lane.accept(1)).outcome, "Accepted");
+        assert.equal((await lane.start(1)).outcome, "Started");
+        assert.equal((await lane.complete(1)).outcome, "CompletedAndOrderItemReady");
+        assert.deepEqual(await itemStatuses(threshold.batch.ticket), ["Cancelled", "Completed"]);
+        // Creating kitchen work still requires the exact current revision: version 2 is no longer it.
+        await assert.rejects(
+          scoped((tx) =>
+            kitchenSource.resolve({
+              transaction: tx,
+              query: { ...threshold.batch.sourceQuery, observedAt: new Date().toISOString() },
+            }),
+          ),
+          { code: "ORDER_KITCHEN_SOURCE_DEPENDENCY_UNAVAILABLE" },
+        );
       }
 
       // ── Scenario 3: the selected line already started (In Progress): refused, nothing written.
@@ -1437,6 +1528,9 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
         assert.equal(other.refund.amountMinor, String(LINE_B_MINOR));
         assert.equal(other.refund.status, "Refunded");
         assert.deepEqual(await itemStatuses(started.batch.ticket), ["In Progress", "Cancelled"]);
+        // The started line is finished after the other line's cancellation (real source check).
+        assert.equal((await lane.complete(0)).outcome, "CompletedAndOrderItemReady");
+        assert.deepEqual(await itemStatuses(started.batch.ticket), ["Completed", "Cancelled"]);
         assert.deepEqual(await reservations(started.batch.reservations), {
           [started.batch.reservations[0]]: "2",
           [started.batch.reservations[1]]: "0",
@@ -1571,6 +1665,13 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
           [{ phase: "Cancelled", previous_phase: "Accepted", terminated_order_version: 4 }],
         );
         assert.deepEqual(await itemStatuses(pickup.batch.ticket), ["Cancelled", "Cancelled"]);
+        // A whole cancellation (termination) ends the issued kitchen work: no longer current.
+        await assert.rejects(
+          scoped((tx) => issuedSourceIsCurrent(tx, pickup)),
+          {
+            code: "ORDER_KITCHEN_SOURCE_DEPENDENCY_UNAVAILABLE",
+          },
+        );
         // The remaining line's stock is released per line (line A's was already released).
         assert.deepEqual(await reservations(pickup.batch.reservations), {
           [pickup.batch.reservations[0]]: "0",

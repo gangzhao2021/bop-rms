@@ -40,8 +40,16 @@
  * shared Store tablets. identity.store_device.manage registers and removes the Store's shared
  * tablets; identity.staff_pin.reset resets a staff member's PIN. Owner and Store Manager hold both;
  * every staff member sets their own PIN with merchant.access after a full sign-in.
+ * v16 (2026-10-15, WP-2423 Store setup in product): catalog.tax_classification.manage adds, renames
+ * and retires the Brand's tax classifications (legacy name `catalog.tax-classification.manage`,
+ * still checked by the registry). The Brand Owner holds it; the Menu Manager does not (the
+ * classifications pair with the rates in Tax review, which it only reads), nor does any Store
+ * template but the Owner's "every code" template. The Store Manager template also holds
+ * publishing.draft.create and publishing.review.submit: it submits hours changes for review when the
+ * Store's configuration came from Store setup (a Publishing review); it holds no catalog/pricing
+ * permission, so it cannot submit menus or prices, and approving and publishing stay the Owner's.
  */
-export const storePermissionCatalogVersion = 15 as const;
+export const storePermissionCatalogVersion = 16 as const;
 export type PermissionRisk = "Low" | "Medium" | "High";
 export interface StorePermissionDefinition {
   readonly code: string;
@@ -190,6 +198,12 @@ const catalog: readonly StorePermissionDefinition[] = Object.freeze([
     ["catalog.allergen_registry.manage", "Approve the Brand allergen registry", "High"],
     ["catalog.content_registry.read", "Read registered product content", "Low"],
     ["catalog.content_registry.manage", "Register product content", "Medium"],
+    // v16 (WP-2423 Store setup): the Brand's own tax classification labels, never rates.
+    [
+      "catalog.tax_classification.manage",
+      "Add, rename and retire the Brand's tax classifications",
+      "High",
+    ],
   ]),
   ...define("pricing", [
     ["pricing.price_book.read", "Read price books", "Low"],
@@ -437,6 +451,8 @@ export const legacyPermissionReplacements: Readonly<Record<string, readonly stri
     "integration.manage": ["integration.receipt_template.manage"],
     // v14 (WP-2423 Q15/Q16): read by the tax classification registry (Store setup fee choices).
     "catalog.tax-classification.read": ["catalog.product.read", "pricing.tax_config.read"],
+    // v16 (WP-2423 Store setup): checked by the tax classification registry when it records a version.
+    "catalog.tax-classification.manage": ["catalog.tax_classification.manage"],
   });
 
 export type StoreRoleTemplateCode =
@@ -457,6 +473,10 @@ export const storeRoleTemplates: Readonly<Record<StoreRoleTemplateCode, readonly
       "organization.store.read",
       // v8: drafts and submits Store hours; the Owner approves and publishes them.
       "organization.store.update",
+      // v16: submits hours changes for review when the configuration came from Store setup; it
+      // holds no catalog/pricing permission, so it cannot submit menus or prices.
+      "publishing.draft.create",
+      "publishing.review.submit",
       "organization.staff.read",
       "identity.role.read",
       "identity.role.approve",
@@ -602,6 +622,14 @@ export function withLegacyEquivalents(catalogCodes: readonly string[]): readonly
 
 const pickBrand = (prefixes: readonly string[]) =>
   pick(prefixes).filter((code) => !storeFloorOnly.has(code));
+const pickBrandExcept = (excluded: ReadonlySet<string>, prefixes: readonly string[]) =>
+  pickBrand(prefixes).filter((code) => !excluded.has(code));
+/**
+ * v16: catalog codes the Menu Manager does not take despite its `catalog.` prefix. Tax
+ * classifications are tax-facing facts paired with the rates in Tax review, which the Menu Manager
+ * only reads; it still assigns existing classifications to products.
+ */
+const menuManagerExcluded: ReadonlySet<string> = new Set(["catalog.tax_classification.manage"]);
 export type BrandRoleTemplateCode =
   "brand-owner" | "recipe-developer" | "recipe-reviewer" | "menu-manager";
 /**
@@ -644,7 +672,7 @@ export const brandRoleTemplates: Readonly<Record<BrandRoleTemplateCode, readonly
       "catalog.allergen.read",
     ]),
     "menu-manager": Object.freeze(
-      pickBrand([
+      pickBrandExcept(menuManagerExcluded, [
         "merchant.access",
         "catalog.",
         "pricing.price_book.",

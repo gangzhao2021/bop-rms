@@ -370,8 +370,14 @@ export function replaceStoreSetupDraftContent(
   actualScope: StoreSetupActualScope,
   serverMetadata: Readonly<{ expectedRevision: number; observedAt: string }>,
 ): StoreSetupDraft {
-  const draft = parseStoreSetupDraft(value),
-    actual = scope(actualScope),
+  const actual = scope(actualScope),
+    // WP-2423 DEC-STORE-SETUP-PUBLICATION: the next revision builds on the Store's latest recorded
+    // configuration, so a draft stays usable after a configuration is published (from Store setup
+    // or an hours change); every other scope fact must stay the draft's.
+    draft = parseStoreSetupDraft({
+      ...parseStoreSetupDraft(value),
+      baseConfigurationReference: actual.baseConfigurationReference,
+    }),
     metadata = closed(copy(serverMetadata), ["expectedRevision", "observedAt"]);
   assertScope(draft, actual);
   if (positive(metadata.expectedRevision) !== draft.revision)
@@ -390,6 +396,47 @@ export function replaceStoreSetupDraftContent(
     content: parsedContent,
     updatedAt: observedAt,
   });
+}
+/** WP-2423 Q4: the only content an hours change (by a Store Manager) may replace. */
+export const storeSetupHoursFields = Object.freeze([
+  "weeklySchedule",
+  "exceptions",
+  "effectiveFrom",
+  "effectiveUntil",
+] as const);
+/**
+ * WP-2423 Q4: the next revision of a V2 setup draft whose content differs from it only in opening
+ * hours, dated exceptions and the effective window. The revision is based on the Store's latest
+ * recorded configuration (`actualScope.baseConfigurationReference`), so the configuration made from
+ * it supersedes that one; every other scope fact must stay the draft's.
+ */
+export function replaceStoreSetupDraftHours(
+  value: unknown,
+  content: unknown,
+  actualScope: StoreSetupActualScope,
+  serverMetadata: Readonly<{ expectedRevision: number; observedAt: string }>,
+): StoreSetupDraft {
+  const draft = parseStoreSetupDraft(value),
+    actual = scope(actualScope);
+  if (draft.profile !== "StoreSetupDraftV2") return fail("STORE_SETUP_STATE_INVALID");
+  const parsedContent = parseStoreSetupDraftContent(content);
+  if (
+    parsedContent.feeContexts === undefined ||
+    JSON.stringify(parsedContent.feeContexts) !== JSON.stringify(draft.content.feeContexts) ||
+    storeSetupDraftContentFields.some(
+      (field) =>
+        !(storeSetupHoursFields as readonly string[]).includes(field) &&
+        JSON.stringify(parsedContent[field]) !== JSON.stringify(draft.content[field]),
+    ) ||
+    storeSetupHoursFields.some((field) => parsedContent[field].state !== "Configured")
+  )
+    return fail("STORE_SETUP_STATE_INVALID");
+  // Same Store and Actor facts; only the configuration it is based on moves to the latest one.
+  const rebased = parseStoreSetupDraft({
+    ...draft,
+    baseConfigurationReference: actual.baseConfigurationReference,
+  });
+  return replaceStoreSetupDraftContent(rebased, parsedContent, actual, serverMetadata);
 }
 export function assessStoreSetupDraftCompleteness(
   value: unknown,

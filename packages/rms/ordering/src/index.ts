@@ -305,6 +305,7 @@ export {
   createPostgresMerchantOrderIndex,
   listStoreOrderNumbers,
   listStoreOrderBusinessDates,
+  listStoreCounterOrders,
   listStoreOrderRoundSubmissions,
   listStoreOrdersWithRoundsSince,
   type StoreOrderRoundSubmission,

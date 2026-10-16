@@ -167,3 +167,19 @@ it("WP-2423: a still-valid code locked after five wrong codes reads as Locked (c
   // Once the code has expired anyway, it reads as expired.
   expect(parsePickupQueueView(await f.client.loadQueue()).items[0]?.proofReadiness).toBe("Expired");
 });
+it("WP-2423: carries the counter order mark so the card offers the in-person handover", async () => {
+  const f = setup();
+  f.fetcher.mockResolvedValue(
+    response({
+      ...page(),
+      items: [
+        { ...item(), proof: null, takenAtCounter: true },
+        { ...item(), fulfillmentReference: id(4), orderReference: id(5), takenAtCounter: false },
+      ],
+    }),
+  );
+  const view = parsePickupQueueView(await f.client.loadQueue());
+  expect(view.items[0]).toMatchObject({ proofReadiness: "NotIssued", takenAtCounter: true });
+  expect(view.items[1]).toMatchObject({ proofReadiness: "Ready" });
+  expect(view.items[1]).not.toHaveProperty("takenAtCounter");
+});

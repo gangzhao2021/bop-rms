@@ -150,3 +150,53 @@ export async function loadStoreTaxConfigurationSummary(
     ]);
   }
 }
+
+/**
+ * WP-2423 DEC-STORE-SETUP-PUBLICATION: which tax configuration currently governs the selected Store
+ * (exactly one Published configuration in effect at `observedAt`) and until when its registration
+ * and professional evidence hold, or null. Store setup publication checks a configuration's tax
+ * reference against it. Caller authorizes and owns the transaction; the Store scope stays selected.
+ */
+export interface CurrentStoreTaxConfigurationReference {
+  readonly configurationReference: string;
+  readonly currencyCode: string;
+  readonly evidenceValidUntil: string;
+}
+export async function currentStoreTaxConfigurationReference(
+  tx: {
+    query(
+      sql: string,
+      values: readonly unknown[],
+    ): Promise<{ readonly rows: readonly Record<string, unknown>[] }>;
+  },
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  observedAt: string,
+): Promise<CurrentStoreTaxConfigurationReference | null> {
+  const brand = parsePricingReference(scope.brandReference);
+  const store = parsePricingReference(scope.storeReference);
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  const rows = (
+    await tx.query(
+      `SELECT b.tax_configuration_id::text configuration_reference,v.currency_code,
+         to_char(LEAST(v.registration_evidence_valid_until,v.professional_evidence_valid_until) AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') evidence_valid_until
+       FROM rms_pricing.tax_configuration b
+       JOIN rms_pricing.tax_configuration_version v ON v.tax_configuration_version_id=b.current_version_id
+        AND v.tax_configuration_id=b.tax_configuration_id AND v.brand_id=b.brand_id AND v.store_id=b.store_id
+       WHERE b.brand_id=$1 AND b.store_id=$2 AND v.lifecycle='Published'
+        AND v.effective_from<=$3::timestamptz AND (v.effective_until IS NULL OR v.effective_until>$3::timestamptz)
+       ORDER BY b.tax_configuration_id LIMIT 2`,
+      [brand, store, observedAt],
+    )
+  ).rows;
+  // One configuration governs a Store; more than one in effect is not a usable state.
+  if (rows.length !== 1) return null;
+  const row = rows[0] as Record<string, unknown>;
+  return Object.freeze({
+    configurationReference: parsePricingReference(row.configuration_reference),
+    currencyCode: String(row.currency_code),
+    evidenceValidUntil: String(row.evidence_valid_until),
+  });
+}

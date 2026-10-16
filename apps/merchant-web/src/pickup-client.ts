@@ -127,6 +127,8 @@ export function createPickupClient(options: {
                 ? { remakeQuantity: Number(raw.remakeInProgress) }
                 : {}),
               ...(typeof raw.businessDate === "string" ? { businessDate: raw.businessDate } : {}),
+              // WP-2423: taken at the counter; no pickup code, handed over in person.
+              ...(raw.takenAtCounter === true ? { takenAtCounter: true } : {}),
               execution,
             };
           }),

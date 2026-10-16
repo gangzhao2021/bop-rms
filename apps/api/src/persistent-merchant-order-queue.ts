@@ -25,6 +25,7 @@ import {
   listStoreOrderBatchPaymentOutcomes,
   listStoreOrderBatchesWithOnlinePayment,
   listStoreOrderOnlinePaidTotals,
+  listStoreOrdersWithOnlineRefunds,
 } from "@rms/payment";
 import { createPostgresCurrentBrowserSessionSource } from "@bop/identity";
 import { randomBytes } from "node:crypto";
@@ -621,37 +622,69 @@ export function createPersistentMerchantOrderQueue(options: {
             ownerScope === null
               ? null
               : await loadOrderPickupContact(businessTransaction, ownerScope, only.orderReference);
-          // WP-2423: on one order's detail only, how much of its online payment Payment has refunded
-          // or is refunding (ordinary, cancellation and automatic refunds), as the receipt reads it.
-          // Optional evidence: when it cannot be read the detail shows the payment without it.
-          const onlineFinancial =
-            input.orderReference === undefined ||
-            only === undefined ||
-            !paidOnline.has(only.orderReference) ||
-            counter.has(only.orderReference) ||
+          // WP-2423: how much of an order's online payment Payment has refunded or is refunding
+          // (ordinary, item-cancellation, cancellation and automatic refunds), as the receipt reads
+          // it. The one-order detail always reads it; the list reads the same position for orders
+          // with a recorded refund, so a list row says "partly refunded" exactly when the detail
+          // does. Optional evidence: when it cannot be read the payment is shown without it.
+          const positionOrders =
             ownerScope === null ||
             tenantReference === null ||
             options.resolveRefundConfiguration === undefined
-              ? null
-              : await readCustomerReceiptFinancial(
-                  businessTransaction,
-                  {
-                    scope: { tenantReference, ...ownerScope },
-                    ...(await options.resolveRefundConfiguration(businessTransaction, {
-                      tenantReference,
-                      ...ownerScope,
-                    })),
-                  },
-                  { orderReference: only.orderReference, observedAt: String(source.now()) },
-                  stillAllowed,
+              ? []
+              : input.orderReference !== undefined
+                ? only !== undefined &&
+                  paidOnline.has(only.orderReference) &&
+                  !counter.has(only.orderReference)
+                  ? [only.orderReference]
+                  : []
+                : await (async () => {
+                    const online = result.items
+                      .map((item) => item.orderReference)
+                      .filter((order) => paidOnline.has(order) && !counter.has(order));
+                    if (online.length === 0) return [];
+                    // Read like the paid totals above (a failed statement ends the transaction).
+                    const refunded = await listStoreOrdersWithOnlineRefunds(
+                      businessTransaction,
+                      ownerScope,
+                      online,
+                    );
+                    // A bounded number per list read; a row beyond it is exact once opened.
+                    return online.filter((order) => refunded.has(order)).slice(0, 25);
+                  })();
+          const paymentPositions = new Map<
+            string,
+            { readonly refundedMinor: string; readonly refundPendingMinor: string }
+          >();
+          if (
+            positionOrders.length > 0 &&
+            ownerScope !== null &&
+            tenantReference !== null &&
+            options.resolveRefundConfiguration !== undefined
+          ) {
+            const refundConfiguration = await options.resolveRefundConfiguration(
+              businessTransaction,
+              { tenantReference, ...ownerScope },
+            );
+            for (const orderReference of positionOrders) {
+              const onlineFinancial = await readCustomerReceiptFinancial(
+                businessTransaction,
+                { scope: { tenantReference, ...ownerScope }, ...refundConfiguration },
+                { orderReference, observedAt: String(source.now()) },
+                stillAllowed,
+              );
+              if (onlineFinancial !== null && onlineFinancial.currencyCode === "CAD")
+                paymentPositions.set(
+                  orderReference,
+                  Object.freeze({
+                    refundedMinor: onlineFinancial.confirmedRefundMinor.toString(),
+                    refundPendingMinor: onlineFinancial.pendingRefundMinor.toString(),
+                  }),
                 );
+            }
+          }
           const paymentPosition =
-            onlineFinancial === null || onlineFinancial.currencyCode !== "CAD"
-              ? null
-              : Object.freeze({
-                  refundedMinor: onlineFinancial.confirmedRefundMinor.toString(),
-                  refundPendingMinor: onlineFinancial.pendingRefundMinor.toString(),
-                });
+            only === undefined ? null : (paymentPositions.get(only.orderReference) ?? null);
           return Object.freeze({
             ...result,
             lines: detailLines,
@@ -682,6 +715,8 @@ export function createPersistentMerchantOrderQueue(options: {
                   paidOnline: counter.has(item.orderReference)
                     ? null
                     : (paidOnline.get(item.orderReference) ?? null),
+                  // WP-2423: the refunds of that online payment, when read (see above).
+                  paymentPosition: paymentPositions.get(item.orderReference) ?? null,
                   // A held order's deadline is the decision deadline once staff are back (none while
                   // it is held); otherwise Fulfillment's capacity expiry.
                   acceptBy: hold === null ? (deadlines.get(item.orderReference) ?? null) : decideBy,

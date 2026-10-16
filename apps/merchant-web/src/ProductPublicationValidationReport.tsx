@@ -7,6 +7,7 @@ import {
   type ProductPublicationValidationReportViewV2,
 } from "./product-publication-validation-report-client-v2.js";
 import type { ProductPublicationManagementViewV2 } from "./product-publication-management-client-v2.js";
+import { timeZoneLabel } from "./time-zone-names.js";
 export interface ProductPublicationWarningConfirmation {
   readonly report: ProductPublicationValidationReportViewV2;
   readonly reasonCode: string;
@@ -239,7 +240,7 @@ export function ProductPublicationValidationReport({
                 ))}
               </ul>
               <p>
-                {publication.effectivePeriod.timeZone} · from{" "}
+                {timeZoneLabel(publication.effectivePeriod.timeZone)} · from{" "}
                 {publication.effectivePeriod.effectiveFrom.instant}
                 {publication.effectivePeriod.effectiveUntil
                   ? ` until ${publication.effectivePeriod.effectiveUntil.instant}`

@@ -28,7 +28,7 @@ describe("WP-2423 P1 settlement report", () => {
     expect(formatSettlementMoney("123450")).toBe("$1,234.50");
     expect(formatSettlementMoney("5")).toBe("$0.05");
     expect(formatSettlementMoney("0")).toBe("$0.00");
-    expect(formatSettlementMoney("-1130")).toBe("-$11.30");
+    expect(formatSettlementMoney("-1130")).toBe("−$11.30");
   });
   it("summarises outcomes with matched first and zeros left out", () => {
     expect(

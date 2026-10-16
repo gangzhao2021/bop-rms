@@ -1,4 +1,4 @@
-import { beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import { createMerchantStoreConfiguration } from "./merchant-store-configuration.js";
 import type {
@@ -378,4 +378,161 @@ it("WP-2423: reads with two full resolutions; owner reads take the run's guard",
   expect(await scope.allowed()).toBe(false);
   f.scope.allowed.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
   await expect(service.read("synthetic")).rejects.toThrow("STORE_CONFIGURATION_PERMISSION_DENIED");
+});
+
+describe("WP-2423 Q4: Publishing decisions of a configuration from Store setup", () => {
+  const basis = {
+    profile: "StoreSetupConfigurationBasisV2",
+    tenantReference: id(40),
+    setupDraftReference: id(41),
+    sourceRevision: 1,
+    sourceSnapshotDigest: "sha256:" + "a".repeat(64),
+    feeContexts: ["ServiceCharge", "DeliveryFee", "Tip"].map((chargeType) => ({
+      chargeType,
+      state: "Disabled",
+    })),
+  };
+  it.each([
+    ["Submit", "submit", "Draft", ["publishing.draft.create", "publishing.review.submit"]],
+    ["Approve", "approve", "PendingApproval", ["publishing.review.approve"]],
+    ["Publish", "publish", "Approved", ["publishing.release.publish"]],
+  ] as const)(
+    "%s resolves only its own Publishing decisions once and hands them to owner configuration",
+    async (command, method, lifecycle, publishing) => {
+      const f = setup();
+      const configure = vi.fn(
+        (
+          _tx: unknown,
+          _scope: unknown,
+          access: { authorize(request: unknown): Promise<unknown> },
+        ) => {
+          void access;
+          return {
+            publication: { authorize: async () => true, hashContent: f.legacyHash },
+            ports: () => ({}),
+          };
+        },
+      );
+      const step = vi.fn(async () => {
+        const access = configure.mock.calls[0]?.[2];
+        if (!access) throw new Error("Missing Publishing access");
+        // Every decision of the step is answered from the start of the run; others are refused.
+        for (const action of publishing)
+          expect(await access.authorize({ action } as never)).toMatchObject({
+            effect: "Allow",
+            action,
+          });
+        await expect(
+          access.authorize({ action: "publishing.release.rollback" } as never),
+        ).rejects.toThrow("STORE_CONFIGURATION_PERMISSION_DENIED");
+        return { status: "Applied", operation: { resultingVersion: 1 } };
+      });
+      mocks.administration.mockReturnValue({ [method]: step });
+      const service = createMerchantStoreConfiguration({
+        persistence: {
+          now: () => at,
+          transactions: { run: async (work: (tx: object) => Promise<unknown>) => work({}) },
+        },
+        authentication: { authorize: async () => ({ sessionReference: id(30) }) },
+        actionPermissions: {
+          saveDraft: "store.service.save-draft",
+          validate: "store.service.validate",
+          submit: "store.service.submit",
+          approve: "store.service.approve",
+          publish: "store.service.publish",
+        },
+        configure,
+        review: { validate: async () => undefined, snapshotAudit: async () => undefined },
+      } as unknown as Parameters<typeof createMerchantStoreConfiguration>[0]);
+      await expect(
+        service({
+          ...f.request,
+          command: {
+            ...f.request.command,
+            command,
+            configuration: { ...configuration(lifecycle), setupBasis: basis },
+          },
+        }),
+      ).resolves.toEqual({ status: "Applied", resultingVersion: 1 });
+      expect(step).toHaveBeenCalledOnce();
+      expect(f.scope.authorizeActions.mock.calls[0]?.[0]).toEqual([
+        "store.service." + method,
+        ...publishing,
+      ]);
+      // The used decisions are re-checked in full before the commit.
+      expect(f.scope.authorizeActions.mock.calls[1]?.[0]).toEqual([
+        "store.service." + method,
+        ...publishing,
+      ]);
+      expect(mocks.resolve).toHaveBeenCalledOnce();
+      expect(f.prepare).not.toHaveBeenCalled();
+    },
+  );
+  it("refuses a Publishing decision withdrawn during the run before the commit", async () => {
+    const f = setup();
+    const start = f.scope.authorizeActions.getMockImplementation();
+    if (!start) throw new Error("Synthetic permission packet is missing");
+    f.scope.authorizeActions.mockImplementationOnce(start).mockImplementation(async (actions) => {
+      const decisions = await start(actions);
+      decisions.set("publishing.release.publish", null);
+      return decisions;
+    });
+    let access: { authorize(request: unknown): Promise<unknown> } | undefined;
+    mocks.administration.mockReturnValue({
+      publish: async () => {
+        await access?.authorize({ action: "publishing.release.publish" });
+        return { status: "Applied", operation: { resultingVersion: 1 } };
+      },
+    });
+    const service = createMerchantStoreConfiguration({
+      persistence: {
+        now: () => at,
+        transactions: { run: async (work: (tx: object) => Promise<unknown>) => work({}) },
+      },
+      authentication: { authorize: async () => ({ sessionReference: id(30) }) },
+      actionPermissions: {
+        saveDraft: "store.service.save-draft",
+        validate: "store.service.validate",
+        submit: "store.service.submit",
+        approve: "store.service.approve",
+        publish: "store.service.publish",
+      },
+      configure: (_tx: unknown, _scope: unknown, publishing: typeof access) => {
+        access = publishing;
+        return { publication: { authorize: async () => true, hashContent: f.legacyHash } };
+      },
+    } as unknown as Parameters<typeof createMerchantStoreConfiguration>[0]);
+    await expect(
+      service({
+        ...f.request,
+        command: {
+          ...f.request.command,
+          command: "Publish",
+          configuration: { ...configuration("Approved"), setupBasis: basis },
+        },
+      }),
+    ).rejects.toThrow("STORE_CONFIGURATION_PERMISSION_DENIED");
+  });
+  it("refuses a whole configuration from the browser for a configuration from Store setup", async () => {
+    const f = setup();
+    await expect(
+      f.service({
+        ...f.request,
+        command: {
+          ...f.request.command,
+          command: "SaveDraft",
+          expectedVersion: 1,
+          configuration: {
+            ...configuration("Draft"),
+            configurationReference: id(50),
+            configurationVersion: 2,
+            supersedesConfigurationReference: id(1),
+            setupBasis: basis,
+          },
+        },
+      }),
+    ).rejects.toMatchObject({ code: "STORE_CONFIGURATION_COMMAND_INVALID" });
+    expect(f.scope.authorizeActions).not.toHaveBeenCalled();
+    expect(mocks.administration).not.toHaveBeenCalled();
+  });
 });

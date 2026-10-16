@@ -141,6 +141,8 @@ function PickupCard({
     (item.proofReadiness === "Expired" ||
       item.proofReadiness === "NotIssued" ||
       item.proofReadiness === "Locked");
+  // WP-2423: taken at the counter: no pickup code is sent; staff hand it over in person.
+  const counter = item.takenAtCounter === true && item.proofReadiness === "NotIssued";
   const orderLabel =
     item.publicOrderNumber ?? item.execution?.publicOrderReference ?? "number unavailable";
   const recorded = onHandedOver ? () => onHandedOver(orderLabel) : undefined;
@@ -179,15 +181,17 @@ function PickupCard({
         <div>
           <dt>Pickup code</dt>
           <dd>
-            {item.proofReadiness === "Expired"
-              ? "Code expired · check in person"
-              : item.proofReadiness === "Locked"
-                ? "Too many wrong codes · check in person"
-                : item.proofReadiness === "NotIssued"
-                  ? "No code sent · check in person"
-                  : item.proofReadiness === "Ready"
-                    ? "Sent to customer"
-                    : "Not known yet · check in person"}
+            {counter
+              ? "Not needed · taken at the counter"
+              : item.proofReadiness === "Expired"
+                ? "Code expired · check in person"
+                : item.proofReadiness === "Locked"
+                  ? "Too many wrong codes · check in person"
+                  : item.proofReadiness === "NotIssued"
+                    ? "No code sent · check in person"
+                    : item.proofReadiness === "Ready"
+                      ? "Sent to customer"
+                      : "Not known yet · check in person"}
           </dd>
         </div>
         <div>
@@ -211,6 +215,11 @@ function PickupCard({
           </div>
         ) : null}
       </dl>
+      {!completed && counter ? (
+        <p className="pickup-queue__counter" role="note">
+          Taken at the counter — hand over to the customer by name or order number.
+        </p>
+      ) : null}
       {!completed && item.proofReadiness === "Locked" ? (
         // WP-2423: the check that locked the code re-reads the queue; the reason stays said here.
         <p className="pickup-queue__locked" role="status">

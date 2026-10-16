@@ -761,3 +761,179 @@ test("@production Pickup accepts the typed six-digit code, explains wrong codes 
     await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length })),
   ).toEqual({ local: 0, session: 0 });
 });
+
+// WP-2423: an order staff took at the counter gets no guest pickup code. Its card says so and
+// offers the in-person handover at once (by name or order number); a guest's QR order on the same
+// queue keeps the pickup code check.
+test("@production Pickup hands a counter order over in person at once while a guest order keeps its code check", async ({
+  page,
+}) => {
+  const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const scope = {
+    brandLabel: "Training Brand",
+    storeLabel: "Training Store",
+    storeReference: id(99),
+    timeZone: "America/Toronto",
+  };
+  const headers = { "cache-control": "no-store" };
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-09-19",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "FUL-PICKUP-QUEUE",
+              label: "Pickup",
+              href: "/operations/pickup",
+              permission: "fulfillment.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  let counterHandedOver = false;
+  const line = (n: number) => ({
+    fulfillmentItemReference: id(n),
+    orderedQuantity: 1,
+    readyQuantity: 1,
+    handedOverQuantity: 0,
+  });
+  await page.route("**/merchant/pickup/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        source: "CurrentFulfillment",
+        workstation: { deviceReference: id(10), pickupLocationReference: id(11) },
+        storeReference: scope.storeReference,
+        observedAt: new Date().toISOString(),
+        nextAfterFulfillmentReference: null,
+        items: [
+          ...(counterHandedOver
+            ? []
+            : [
+                {
+                  fulfillmentReference: id(1),
+                  orderReference: id(3),
+                  orderNumber: "7",
+                  phase: "Ready",
+                  aggregateVersion: "3",
+                  readyAt: new Date(Date.now() - 60_000).toISOString(),
+                  publicOrderReference: null,
+                  proof: null,
+                  takenAtCounter: true,
+                  items: [line(4)],
+                },
+              ]),
+          {
+            fulfillmentReference: id(5),
+            orderReference: id(6),
+            orderNumber: "8",
+            phase: "Ready",
+            aggregateVersion: "3",
+            readyAt: new Date(Date.now() - 60_000).toISOString(),
+            publicOrderReference: "A".repeat(22),
+            proof: {
+              kind: "Opaque",
+              generation: 1,
+              expiresAt: new Date(Date.now() + 50 * 60_000).toISOString(),
+            },
+            takenAtCounter: false,
+            items: [line(7)],
+          },
+        ],
+      },
+    }),
+  );
+  const identityReads: unknown[] = [];
+  await page.route("**/merchant/pickup/identity-check", (route) => {
+    identityReads.push(route.request().postDataJSON());
+    return route.fulfill({ headers, json: { status: "NotGiven" } });
+  });
+  const handoffs: Record<string, unknown>[] = [];
+  await page.route("**/merchant/pickup/handoff", (route) => {
+    const request = route.request().postDataJSON();
+    handoffs.push(request);
+    counterHandedOver = true;
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Applied",
+        handoffReference: id(12),
+        fulfillmentReference: request.fulfillmentReference,
+        nextAggregateVersion: "4",
+        nextPhase: "Completed",
+      },
+    });
+  });
+  await page.goto("/operations/pickup");
+  const counterCard = page
+    .locator(".pickup-queue__card")
+    .filter({ has: page.getByRole("heading", { name: "Order 7", exact: true }) });
+  const guestCard = page
+    .locator(".pickup-queue__card")
+    .filter({ has: page.getByRole("heading", { name: "Order 8", exact: true }) });
+  await expect(counterCard).toBeVisible();
+  await expect(
+    counterCard.getByText(
+      "Taken at the counter — hand over to the customer by name or order number.",
+    ),
+  ).toBeVisible();
+  await expect(counterCard.getByText("Not needed · taken at the counter")).toBeVisible();
+  await expect(counterCard.getByRole("button", { name: "Check pickup code" })).toHaveCount(0);
+  await expect(counterCard.getByRole("button", { name: "Hand over", exact: true })).toBeEnabled();
+  // The guest's order keeps its pickup code check.
+  await expect(guestCard.getByRole("button", { name: "Check pickup code" })).toBeVisible();
+  await expect(guestCard.getByText("Taken at the counter", { exact: false })).toHaveCount(0);
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      `no horizontal overflow at ${width}`,
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/pickup-counter-order-${width}.png`,
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expectNoInternalText(page);
+
+  await counterCard.getByRole("button", { name: "Hand over", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Confirm pickup handoff" });
+  await expect(
+    dialog.getByText("This order was taken at the counter, so no pickup code was sent.", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  // A walk-up guest left no contact: nothing is looked up for them.
+  expect(identityReads).toEqual([]);
+  await dialog
+    .getByLabel("Checked in person")
+    .selectOption({ label: "Order number or the name they gave at the counter" });
+  await dialog.getByLabel("Collected by").selectOption("Customer");
+  await dialog.getByLabel("Collector’s initial").fill("S***");
+  await dialog.getByLabel("I matched this order", { exact: false }).check();
+  await dialog.getByRole("button", { name: "Confirm and record handoff" }).click();
+  await expect(page.getByText("Order 7 handed over.", { exact: false })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Order 7", exact: true })).toHaveCount(0);
+  expect(handoffs).toHaveLength(1);
+  expect(handoffs[0]).toMatchObject({
+    orderReference: id(3),
+    fulfillmentReference: id(1),
+    identityCheck: "OrderNumberAndName",
+    recipientType: "Customer",
+  });
+  expect(handoffs[0]).not.toHaveProperty("verificationReference");
+  await expectNoInternalText(page);
+});

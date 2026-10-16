@@ -6,9 +6,9 @@ import {
 } from "./UnmatchedCaptureRefundAction.js";
 
 it("WP-2423 P6: formats integer minor units without floating point", () => {
-  expect(formatMinorCad("2260")).toBe("CAD 22.60");
-  expect(formatMinorCad("5")).toBe("CAD 0.05");
-  expect(formatMinorCad("-1")).toBe("CAD amount unavailable");
+  expect(formatMinorCad("2260")).toBe("$22.60");
+  expect(formatMinorCad("5")).toBe("$0.05");
+  expect(formatMinorCad("-1")).toBe("Amount unavailable");
 });
 
 it("WP-2423 P6: a requester waits for another manager; an approved refund can be resent", () => {

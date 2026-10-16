@@ -36,6 +36,7 @@ export function FullSignInPrompt({
           onVerified?.(until);
         }}
         label="Verify it's you"
+        hint={false}
         fetcher={fetcher}
         loadServerStatus={false}
         explanation={PIN_ELEVATION_EXPLANATION}

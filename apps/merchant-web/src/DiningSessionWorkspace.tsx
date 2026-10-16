@@ -651,50 +651,69 @@ export function DiningSessionWorkspace({
                     )}
                   </section>
                 ) : null}
-                <section aria-label="Dining session action">
-                  <p>
-                    {selected.currentDiningSessionReference
-                      ? "Replacing the entry code invalidates the previous code. Existing participants remain joined."
-                      : "Start a new dining session for this party."}
-                  </p>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={confirmed}
-                      disabled={locked || paused}
-                      onChange={(event) => setConfirmed(event.target.checked)}
-                    />
-                    I confirm the selected table and session action
-                  </label>
-                  <button
-                    disabled={
-                      paused ||
-                      hostLocked ||
-                      state === "Loading" ||
-                      state === "Submitting" ||
-                      (state === "Unknown" && unknownAction !== "Session") ||
-                      (state !== "Unknown" && (!confirmed || !eligible))
-                    }
-                    onClick={() => void execute()}
-                  >
-                    {state === "Unknown" && unknownAction === "Session"
-                      ? "Retry same session request"
-                      : state === "Submitting"
-                        ? "Submitting…"
-                        : selected.currentDiningSessionReference
-                          ? "Replace entry code"
-                          : "Start dining session"}
-                  </button>
-                  {selected.currentDiningSessionReference ? (
-                    <DiningHostTransferAction
-                      key={selected.currentDiningSessionReference}
-                      diningSessionReference={selected.currentDiningSessionReference}
-                      csrf={csrf}
-                      disabled={state !== "Idle" || paused}
-                      onLocked={setHostLocked}
-                    />
-                  ) : null}
-                </section>
+                {selected.currentDiningSessionReference === null &&
+                selected.qrCodeValidUntil === null ? (
+                  // WP-2423 item 7: guests join a session by scanning the table's QR code and
+                  // then entering its code, so a session for a table without one can't be used.
+                  <section aria-label="Dining session action">
+                    <p role="note">
+                      A dining session can&apos;t be started for table {selected.stableLabel} yet:
+                      it has no table QR code, so guests can&apos;t join.{" "}
+                      {tableQrHref !== undefined ? (
+                        <>
+                          Create one on <a href={tableQrHref}>Table QR codes</a> first.
+                        </>
+                      ) : (
+                        "Ask a manager to create one on the Table QR codes page."
+                      )}
+                    </p>
+                  </section>
+                ) : (
+                  <section aria-label="Dining session action">
+                    <p>
+                      {selected.currentDiningSessionReference
+                        ? "Replacing the entry code invalidates the previous code. Existing participants remain joined."
+                        : "Start a new dining session for this party."}
+                    </p>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={confirmed}
+                        disabled={locked || paused}
+                        onChange={(event) => setConfirmed(event.target.checked)}
+                      />
+                      I confirm the selected table and session action
+                    </label>
+                    <button
+                      disabled={
+                        paused ||
+                        hostLocked ||
+                        state === "Loading" ||
+                        state === "Submitting" ||
+                        (state === "Unknown" && unknownAction !== "Session") ||
+                        (state !== "Unknown" && (!confirmed || !eligible))
+                      }
+                      onClick={() => void execute()}
+                    >
+                      {state === "Unknown" && unknownAction === "Session"
+                        ? "Retry same session request"
+                        : state === "Submitting"
+                          ? "Submitting…"
+                          : selected.currentDiningSessionReference
+                            ? "Replace entry code"
+                            : "Start dining session"}
+                    </button>
+                    {selected.currentDiningSessionReference ? (
+                      <DiningHostTransferAction
+                        key={selected.currentDiningSessionReference}
+                        diningSessionReference={selected.currentDiningSessionReference}
+                        csrf={csrf}
+                        disabled={state !== "Idle" || paused}
+                        onLocked={setHostLocked}
+                      />
+                    ) : null}
+                  </section>
+                )}
                 {canOperateTables ? (
                   <section aria-label="Table availability action">
                     <p>Mark a table unavailable while it can&apos;t be seated.</p>

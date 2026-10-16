@@ -60,6 +60,7 @@ import { logUnexpected, reportUnexpected } from "./pilot-merchant-pickup.mjs";
 import { createMerchantOptionPrices } from "../../apps/api/dist/merchant-option-prices.js";
 import { createMerchantOptionRecipes } from "../../apps/api/dist/merchant-option-recipes.js";
 import { createMerchantStoreTax } from "../../apps/api/dist/merchant-store-tax.js";
+import { createMerchantTaxClassifications } from "../../apps/api/dist/merchant-tax-classifications.js";
 import { createMerchantStockCounts } from "../../apps/api/dist/merchant-stock-counts.js";
 import { createMerchantStoreWaste } from "../../apps/api/dist/merchant-store-waste.js";
 import { createPersistentMerchantBffService } from "../../apps/api/dist/persistent-merchant-bff.js";
@@ -149,6 +150,9 @@ export async function createInternalMerchant(
       purposeCode: "STORE_CONFIGURATION",
       // WP-2423 StoreOperatingSource: the same gate codes the resources were verified against.
       requiredLiveGateRequirementCodes: resources.operating.requiredLiveGateRequirementCodes,
+      // WP-2423 DEC-STORE-SETUP-PUBLICATION: the check inventory of a configuration published from
+      // Store setup.
+      requiredValidationCheckCodes: resources.operating.requiredValidationCheckCodes,
     },
     initialScope: targetScope,
     targetScope,
@@ -345,6 +349,13 @@ export async function createInternalMerchant(
           label: "Tax review",
           href: "/app/commerce/tax-review",
           permission: "pricing.tax_config.read",
+        },
+        // WP-2423 Store setup: the Brand Owner's tax classifications (fees and products name one).
+        {
+          screenId: "CAT-TAX-CLASSIFICATION-LIST",
+          label: "Tax classifications",
+          href: "/app/commerce/tax-classifications",
+          permission: "catalog.tax-classification.manage",
         },
         {
           screenId: "CMP-ALLERGEN-REVIEW",
@@ -1141,6 +1152,10 @@ export async function createInternalMerchant(
     authentication: service,
     locale: "en-CA",
   });
+  const taxClassifications = createMerchantTaxClassifications({
+    persistence,
+    authentication: service,
+  });
   const allergens = createMerchantAllergens({
     persistence,
     authentication: service,
@@ -1239,6 +1254,11 @@ export async function createInternalMerchant(
         "INTERNAL_STORE_CONFIGURATION_READ_UNAVAILABLE",
         storeConfiguration.read,
       ),
+      // WP-2423 Q4: an hours change once the configuration came from Store setup.
+      storeHoursDraft: logUnexpected(
+        "INTERNAL_STORE_HOURS_DRAFT_UNAVAILABLE",
+        storeConfiguration.hoursDraft,
+      ),
       taxConfigAuthoring: createMerchantTaxConfigAuthoring({
         persistence,
         authentication: service,
@@ -1248,11 +1268,11 @@ export async function createInternalMerchant(
           : { currencyMetadata: taxConfigCurrencyMetadata }),
       }),
       // WP-2423 Q15/Q16: Store setup reads and saves, including the step 5 fee classification read.
-      ...createInternalStoreSetupBff({
+      ...(await createInternalStoreSetupBff(resources, {
         persistence,
         authentication: service,
         nextReference: () => resources.credentials.reference(),
-      }),
+      })),
       ...product,
       reconciliationEvidenceQuery,
       reconciliationFollowUp,
@@ -1270,7 +1290,9 @@ export async function createInternalMerchant(
       ...(createInternalCounterOrder === undefined
         ? {}
         : await (async () => {
-            const counter = await createInternalCounterOrder(resources, persistence, service);
+            const counter = await createInternalCounterOrder(resources, persistence, service, {
+              diningClosing,
+            });
             return {
               ...counter,
               ...(counter.counterMenu === undefined
@@ -1399,6 +1421,7 @@ export async function createInternalMerchant(
       optionPrices,
       optionRecipes,
       storeTax,
+      taxClassifications,
       stockCounts,
       storeWaste,
       pickupQuery,

@@ -8,6 +8,7 @@ import {
   createPostgresStoreConfigurationAuthoringSource,
   createStoreConfigurationVersion,
   createStoreConfigurationPublicationHash,
+  StoreConfigurationAdministrationServiceError,
 } from "@rms/store";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
@@ -21,6 +22,81 @@ type Scope = Awaited<ReturnType<ReturnType<typeof createMerchantStoreScope>>>;
 type Method = ReturnType<typeof bindMerchantStoreConfigurationCommand>["method"];
 type ReviewOptions = Parameters<typeof createPersistentStoreConfigurationReview>[0];
 type Decision = Awaited<ReturnType<Scope["authorizeAction"]>>;
+/**
+ * WP-2423 Q4: the Publishing decisions of this run, for a configuration that came from Store setup
+ * (its Submit, Approve and Publish are Publishing review steps). Only the decisions resolved at the
+ * start of the run for the command's own step are answered; any other request is refused.
+ */
+export type StoreConfigurationPublishingAccess = ReturnType<
+  ReviewOptions["publishingAuthorization"]
+> & {
+  /** When this run bound its command (its Publishing steps are recorded at this instant). */
+  readonly observedAt: string;
+};
+/** The Publishing decisions each step of a setup-based configuration needs (WP-2423 Q4). */
+export const setupBasedPublishingActions: Readonly<Record<Method, readonly string[]>> =
+  Object.freeze({
+    saveDraft: [],
+    validate: [],
+    submit: ["publishing.draft.create", "publishing.review.submit"],
+    approve: ["publishing.review.approve"],
+    publish: ["publishing.release.publish"],
+  });
+export type MerchantStoreConfigurationOptions = Parameters<
+  typeof createMerchantStoreConfiguration
+>[0];
+type Configured = ReturnType<MerchantStoreConfigurationOptions["configure"]>;
+/**
+ * The Store administration options of one authorized run: owner configuration with this run's
+ * guard on every authority callback (WP-2423: no caller re-resolution inside the run).
+ */
+export function storeConfigurationAdministrationOptions(input: {
+  readonly configured: Configured;
+  readonly scope: Scope;
+  readonly transaction: Tx;
+  readonly now: () => string;
+  readonly guard: () => Promise<boolean>;
+}): AdministrationOptions {
+  const { configured, scope, transaction: tx, guard } = input;
+  const setupSnapshotReferences = {
+    canonicalize: canonicalizeRfc8785,
+    hashIntent: (canonical: string) => "sha256:" + sha256Hex(canonical),
+  };
+  const v2PublicationHash = createStoreConfigurationPublicationHash(setupSnapshotReferences);
+  return {
+    ...configured,
+    brandReference: scope.context.brand.brandReference,
+    storeReference: scope.store.storeReference,
+    run: async (work) => work(tx),
+    now: input.now,
+    publication: {
+      ...configured.publication,
+      tenantReference: scope.selected.tenantReference,
+      setupSnapshotReferences,
+      // The materializer also digests interval content, which is not a configuration:
+      // only a configuration carrying a Setup basis uses the V2 publication hash
+      // (WP-2423 Q4).
+      hashContent: (value) =>
+        isSetupBasedConfiguration(value)
+          ? v2PublicationHash(value)
+          : configured.publication.hashContent(value),
+      authorize: async (transaction, at) =>
+        (await guard()) && (await configured.publication.authorize(transaction, at)),
+    },
+    ports: (transaction) => {
+      const ports = configured.ports(transaction);
+      return {
+        ...ports,
+        authorization: {
+          authorize: async (command) =>
+            String(command.actorReference) === String(scope.actorReference) &&
+            (await guard()) &&
+            (await ports.authorization.authorize(command)),
+        },
+      };
+    },
+  };
+}
 const denied = (): never => {
   throw new Error("STORE_CONFIGURATION_PERMISSION_DENIED");
 };
@@ -57,9 +133,14 @@ export function createMerchantStoreConfiguration(options: {
     ): ReturnType<Parameters<typeof createPersistentStoreApprovalPreparation>[0]["validate"]>;
     snapshotAudit: ReviewOptions["snapshotAudit"];
   };
+  /**
+   * `publishing` answers the Publishing decisions this run resolved for its command (WP-2423 Q4:
+   * Submit, Approve and Publish of a configuration from Store setup); it refuses anything else.
+   */
   configure(
     tx: Tx,
     scope: Scope,
+    publishing: StoreConfigurationPublishingAccess,
   ): Omit<AdministrationOptions, "brandReference" | "storeReference" | "run" | "now">;
 }) {
   const source = options.persistence;
@@ -102,14 +183,22 @@ export function createMerchantStoreConfiguration(options: {
               observedAt: source.now(),
             });
             const action = actions[bound.method];
+            // WP-2423 Q4: a configuration from Store setup is changed only through the hours draft
+            // (an hours-only Store setup revision), never as a whole configuration from the browser.
+            if (bound.method === "saveDraft" && bound.input.configuration.setupBasis !== undefined)
+              throw new StoreConfigurationAdministrationServiceError(
+                "STORE_CONFIGURATION_COMMAND_INVALID",
+              );
             const publishing: readonly string[] =
-              bound.input.configuration.setupBasis !== undefined || !options.review
-                ? []
-                : bound.method === "publish"
-                  ? ["publishing.release.publish"]
-                  : bound.method === "approve"
-                    ? approvalPublishingActions
-                    : [];
+              bound.input.configuration.setupBasis !== undefined
+                ? setupBasedPublishingActions[bound.method]
+                : !options.review
+                  ? []
+                  : bound.method === "publish"
+                    ? ["publishing.release.publish"]
+                    : bound.method === "approve"
+                      ? approvalPublishingActions
+                      : [];
             const decisions = await scope.authorizeActions([action, ...publishing]);
             if (
               (bound.input.configuration.setupBasis !== undefined &&
@@ -121,7 +210,7 @@ export function createMerchantStoreConfiguration(options: {
               decisions.get(action)?.effect !== "Allow"
             )
               return denied();
-            return { scope, bound, action, decisions };
+            return { scope, bound, action, decisions, publishing };
           },
           recheck: async ({ scope, action, decisions }) => {
             const rechecked = [action, ...usedPublishing];
@@ -138,7 +227,7 @@ export function createMerchantStoreConfiguration(options: {
           denied,
         },
         async (authority) => {
-          const { scope: resolved, bound, decisions } = authority.scope;
+          const { scope: resolved, bound, decisions, publishing } = authority.scope;
           const guard = () => authority.guard();
           const scope = runScope(resolved, guard);
           /** A Publishing decision taken at the start of this run (no query). */
@@ -152,46 +241,17 @@ export function createMerchantStoreConfiguration(options: {
             usedPublishing.add(action);
             return decision;
           };
-          const configured = options.configure(tx, scope);
-          const setupSnapshotReferences = {
-            canonicalize: canonicalizeRfc8785,
-            hashIntent: (canonical: string) => "sha256:" + sha256Hex(canonical),
-          };
-          const v2PublicationHash =
-            createStoreConfigurationPublicationHash(setupSnapshotReferences);
-          const administrationOptions: AdministrationOptions = {
-            ...configured,
-            brandReference: scope.context.brand.brandReference,
-            storeReference: scope.store.storeReference,
-            run: async (work) => work(tx),
+          const configured = options.configure(tx, scope, {
+            authorize: (request) => publishingDecision(request.action, publishing),
+            observedAt: bound.input.occurredAt,
+          });
+          const administrationOptions = storeConfigurationAdministrationOptions({
+            configured,
+            scope,
+            transaction: tx,
             now: source.now,
-            publication: {
-              ...configured.publication,
-              tenantReference: scope.selected.tenantReference,
-              setupSnapshotReferences,
-              // The materializer also digests interval content, which is not a configuration:
-              // only a configuration carrying a Setup basis uses the V2 publication hash
-              // (WP-2423 Q4).
-              hashContent: (value) =>
-                isSetupBasedConfiguration(value)
-                  ? v2PublicationHash(value)
-                  : configured.publication.hashContent(value),
-              authorize: async (transaction, at) =>
-                (await guard()) && (await configured.publication.authorize(transaction, at)),
-            },
-            ports: (transaction) => {
-              const ports = configured.ports(transaction);
-              return {
-                ...ports,
-                authorization: {
-                  authorize: async (command) =>
-                    String(command.actorReference) === String(scope.actorReference) &&
-                    (await guard()) &&
-                    (await ports.authorization.authorize(command)),
-                },
-              };
-            },
-          };
+            guard,
+          });
           let result;
           if (
             bound.input.configuration.setupBasis !== undefined &&
@@ -277,6 +337,11 @@ export function createMerchantStoreConfiguration(options: {
       ),
     );
   };
+  /** Reads never take a Publishing decision. */
+  const refusePublishing = (): StoreConfigurationPublishingAccess => ({
+    authorize: async () => denied(),
+    observedAt: source.now(),
+  });
   const read = async (sessionCookie: unknown) =>
     source.transactions.run((tx) =>
       withMerchantTransactionAuthorization(
@@ -298,7 +363,7 @@ export function createMerchantStoreConfiguration(options: {
             storeReference: scope.store.storeReference,
             authorize: () => authority.guard(),
           })(tx, observedAt);
-          const configured = options.configure(tx, scope);
+          const configured = options.configure(tx, scope, refusePublishing());
           const baseline = await configured.publishedBaseline(tx);
           const current = baseline === null ? null : createStoreConfigurationVersion(baseline);
           if (

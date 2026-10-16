@@ -593,11 +593,79 @@ test("@production a table without a QR code can't take a staff order; staff are 
     "Orders can't be taken for table T5 yet: it has no table QR code. Ask a manager to create one on the Table QR codes page, then take the order.",
   );
   await expect(section.getByRole("link", { name: /Take order for table/u })).toHaveCount(0);
+  // WP-2423 item 7: no dining session is offered either: guests join by scanning the table's QR.
+  await expect(page.getByRole("button", { name: "Start dining session", exact: true })).toHaveCount(
+    0,
+  );
+  await expect(page.getByRole("region", { name: "Dining session action" })).toContainText(
+    "A dining session can't be started for table T5 yet: it has no table QR code, so guests can't join. Ask a manager to create one on the Table QR codes page.",
+  );
   await expectNoInternalText(page);
   // Opened directly (old bookmark): the order page says the same before anything is sent.
   await page.goto(`/operations/order-entry?table=${id(77)}`);
   await expect(
     page.getByText("This table has no table QR code yet", { exact: true }),
   ).toBeVisible();
+  await expect(page.getByRole("link", { name: "Table QR codes", exact: true })).toHaveCount(0);
+  expect(rounds).toHaveLength(0);
+
+  // WP-2423 item 7: staff who can create codes (the Owner) get the link on both pages, the same
+  // rule as the Tables panel.
+  await page.unroute("**/merchant/session");
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-10-15",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "OPS-ORDER-ENTRY",
+              label: "Counter order",
+              href: "/operations/order-entry",
+              permission: "ordering.order.create_staff",
+            },
+            {
+              screenId: "DIN-FLOOR-BOARD",
+              label: "Tables",
+              href: "/operations/dining",
+              permission: "dining.operate",
+            },
+            {
+              screenId: "DIN-TABLE-LIST",
+              label: "Table QR codes",
+              href: "/app/operations/tables",
+              permission: "dining.table.qr.manage",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  await page.goto(`/operations/order-entry?table=${id(77)}`);
+  const panel = page.getByRole("status").filter({ hasText: "This table has no table QR code yet" });
+  await expect(panel).toContainText(
+    "Orders for a table use its code. Create one on Table QR codes (it can be printed later), then take the order.",
+  );
+  await expect(panel.getByRole("link", { name: "Table QR codes", exact: true })).toHaveAttribute(
+    "href",
+    "/app/operations/tables",
+  );
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T5", exact: true }).click();
+  await expect(
+    page
+      .getByRole("region", { name: "Dining session action" })
+      .getByRole("link", { name: "Table QR codes", exact: true }),
+  ).toBeVisible();
+  await expectNoInternalText(page);
   expect(rounds).toHaveLength(0);
 });

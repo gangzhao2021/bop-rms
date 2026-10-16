@@ -47,7 +47,10 @@ export function createStaffTableCode(options: {
   nextReference(): string;
 }): StaffTableGuestPipeline["openTable"] {
   const issued = (value: unknown, diningSessionReference: string | null) => {
-    const result = value as Issued & { session?: { diningSessionReference?: unknown } };
+    const result = value as Issued & {
+      session?: { diningSessionReference?: unknown };
+      capability?: { generation?: unknown };
+    };
     if (
       result?.status !== "Issued" ||
       !("joinCredential" in result) ||
@@ -56,10 +59,14 @@ export function createStaffTableCode(options: {
       return null;
     const session = diningSessionReference ?? result.session?.diningSessionReference;
     if (typeof session !== "string") return null;
+    const generation = result.capability?.generation;
     return Object.freeze({
       status: "Opened" as const,
       diningSessionReference: session,
       joinCredential: result.joinCredential,
+      // A session this call started (no session reference was passed in for it).
+      started: diningSessionReference === null,
+      generation: Number.isSafeInteger(generation) ? (generation as number) : null,
     });
   };
   return async (staff, input) => {
@@ -105,6 +112,61 @@ export function createStaffTableCode(options: {
 }
 
 /**
+ * WP-2423 item 7: closes again a dining session a staff round started when the round failed before
+ * anything was ordered, with the existing Dining closing commands under the staff member's own
+ * authority (Begin, then Finalize, which releases the table), as a manager closes a table on the
+ * Tables page. Only while the session still holds the code issued for that round: a newer code
+ * means someone else is seating the table, so it is kept. A refusal (no permission to close
+ * sessions, the session changed) keeps it open; the next round sent for the table uses it.
+ */
+export function createStaffTableAbandonment(options: {
+  loadJoinState: Parameters<typeof createStaffTableCode>[0]["loadJoinState"];
+  close(
+    staff: Staff,
+    command: {
+      readonly action: "Begin" | "Finalize";
+      readonly diningSessionReference: string;
+      readonly operationReference: string;
+      readonly expectedSessionVersion: number;
+    },
+  ): Promise<{ readonly phase: string; readonly sessionVersion: number }>;
+  nextReference(): string;
+}): StaffTableGuestPipeline["abandonTable"] {
+  return async (staff, input) => {
+    if (input.generation === null) return "Kept";
+    const state = await options.loadJoinState(staff, input.diningSessionReference);
+    if (
+      state === null ||
+      state.tableReference !== input.tableReference ||
+      state.generation !== input.generation
+    )
+      return "Kept";
+    let closing: Awaited<ReturnType<typeof options.close>>;
+    try {
+      closing = await options.close(staff, {
+        action: "Begin",
+        diningSessionReference: input.diningSessionReference,
+        operationReference: options.nextReference(),
+        expectedSessionVersion: state.sessionVersion,
+      });
+    } catch (error) {
+      // Front of House can't close sessions (no new permission for it): the session is kept.
+      if ((error as { code?: unknown } | null)?.code === "DINING_CLOSING_PERMISSION_DENIED")
+        return "Kept";
+      throw error;
+    }
+    if (closing.phase !== "Closing") return "Kept";
+    const closed = await options.close(staff, {
+      action: "Finalize",
+      diningSessionReference: input.diningSessionReference,
+      operationReference: options.nextReference(),
+      expectedSessionVersion: closing.sessionVersion,
+    });
+    return closed.phase === "Closed" ? "Closed" : "Kept";
+  };
+}
+
+/**
  * WP-2423 Q7 slice 2 (DEC-STAFF-DINE-IN-ROUND): the table guest a staff-entered round runs
  * through, composed from exactly the ports the customer app's HTTP handlers call (table QR entry,
  * dining join with a one-time table code, dining binding, the table's shared Cart, items, quote,
@@ -114,6 +176,7 @@ export function createStaffTableCode(options: {
 export function createStaffTableGuestPipeline(options: {
   takesOrder(input: { readonly recordedAfterOutage: boolean }): Promise<boolean>;
   openTable: StaffTableGuestPipeline["openTable"];
+  abandonTable: StaffTableGuestPipeline["abandonTable"];
   /** The table's current printed QR token (as a guest scans it); null when it has none. */
   tableQrToken(tableReference: string): Promise<string | null>;
   entry: CustomerEntryPort;
@@ -146,6 +209,7 @@ export function createStaffTableGuestPipeline(options: {
     ...steps,
     takesOrder: (input) => options.takesOrder(input),
     openTable: (staff, input) => options.openTable(staff, input),
+    abandonTable: (staff, input) => options.abandonTable(staff, input),
     async enter(input) {
       const qrToken = await options.tableQrToken(input.tableReference);
       if (qrToken === null) return Object.freeze({ status: "NoTableQr" as const });

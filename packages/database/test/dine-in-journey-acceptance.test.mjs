@@ -2322,6 +2322,21 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         refundedMinor: String(roundTotal),
         refundPendingMinor: "0",
       });
+      // The Orders list row reads the same position (its order has a refund), so the row and the
+      // detail agree without the row being opened.
+      const refundedList = await createPersistentMerchantOrderQueue({
+        persistence: { ...queueSession.persistence, now },
+        quoteVersion: 1,
+        acceptanceConfigured: true,
+        resolveRefundConfiguration: async () => ({
+          providerAccountReference: provider,
+          environment: "Test",
+        }),
+      })({ sessionCookie: queueSession.sessionCookie, afterOrderReference: null });
+      assert.deepEqual(
+        refundedList.items.find((item) => item.orderReference === orderReference)?.paymentPosition,
+        { refundedMinor: String(roundTotal), refundPendingMinor: "0" },
+      );
       // A guest who has left the table no longer reads it; the Host still does.
       await admin.query(
         "UPDATE rms_dining.dining_participant SET status='Left',version=2,participant_snapshot=participant_snapshot||jsonb_build_object('status','Left','version',2,'leftAt',$2::text) WHERE participant_id=$1",

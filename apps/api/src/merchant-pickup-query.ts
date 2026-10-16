@@ -7,6 +7,7 @@ import {
 } from "@rms/fulfillment";
 import {
   createPostgresStaffOrderCancellationReader,
+  listStoreCounterOrders,
   listStoreOrderBusinessDates,
   listStoreOrderNumbers,
 } from "@rms/ordering";
@@ -163,6 +164,13 @@ export function createMerchantPickupQuery(options: {
         selected,
         result.items.map((item) => String(item.orderReference)),
       );
+      // WP-2423: orders staff took at the counter get no guest pickup code; staff hand them over
+      // in person by name or order number as soon as they are ready (Ordering's own read).
+      const counterOrders = await listStoreCounterOrders(
+        tx,
+        selected,
+        result.items.map((item) => String(item.orderReference)),
+      );
       // WP-2423 Q6: an order the Store cancelled before the kitchen started is never handed over.
       const cancelled = new Set(
         result.items.length === 0
@@ -203,6 +211,7 @@ export function createMerchantPickupQuery(options: {
               orderNumber: numbers.get(String(item.orderReference)) ?? null,
               businessDate: businessDates.get(String(item.orderReference)) ?? null,
               remakeInProgress: remakeQuantity(item),
+              takenAtCounter: counterOrders.has(String(item.orderReference)),
               // Order items are only for matching remakes; the pickup screen's contract omits them.
               items: item.items.map((line) =>
                 Object.freeze({

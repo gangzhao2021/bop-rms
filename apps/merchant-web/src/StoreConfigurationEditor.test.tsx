@@ -131,7 +131,7 @@ it("distinguishes actual Published content from a legacy record lacking fee fact
   expect(legacy).not.toContain("Disabled");
 });
 
-it("locks basis-bound content editing while keeping the authorized Setup route and legacy editing", () => {
+it("edits hours of a configuration from Store setup while fees stay in Store setup", () => {
   const full = parseStoreConfigurationSnapshot(
     { ...configuration("Draft"), setupBasis: basis },
     id(3),
@@ -146,11 +146,13 @@ it("locks basis-bound content editing while keeping the authorized Setup route a
       <button type="button">Validate saved draft</button>
     </MemoryRouter>,
   );
-  expect(html).toContain('<fieldset disabled="">');
+  expect(html).not.toContain('disabled=""');
+  expect(html).toContain("These hours are also the hours in Store setup.");
   expect(html).toContain("Change them in");
   expect(html).toContain(`href="/app/organization/stores/${id(3)}/setup"`);
   expect(html).toContain("Edit in Store Setup");
   expect(html).toContain('</fieldset><button type="button">Validate saved draft</button>');
+  expect(findInternalText([staticText(html)])).toEqual([]);
   const legacy = renderToStaticMarkup(
     <StoreConfigurationEditingBoundary
       configuration={parseStoreConfigurationSnapshot(configuration("Draft"), id(3))}
@@ -244,4 +246,24 @@ it("describes lifecycle states in staff language", () => {
     "Latest change: Draft, not yet sent for approval",
   );
   expect(storeConfigurationStateLabel("Superseded")).toBe("Replaced by a newer version");
+});
+
+it("WP-2423 Q4: offers the hours draft for a configuration from Store setup", () => {
+  const view = parseStoreConfigurationView(
+    {
+      screenId: "STORE-HOURS-SERVICE",
+      storeReference: id(3),
+      current: { ...configuration("Published"), setupBasis: basis },
+      latest: null,
+      expectedVersion: 1,
+      observedAt: at,
+    },
+    id(3),
+  );
+  const html = renderForm(view);
+  expect(html).toContain('<button type="submit">Save hours draft</button>');
+  expect(html).toContain("Add dated exception");
+  expect(html).toContain("Fees in the published settings");
+  expect(html).not.toContain('disabled=""><legend>Hours');
+  expect(findInternalText([staticText(html)])).toEqual([]);
 });

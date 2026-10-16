@@ -9,6 +9,7 @@ import {
   type CompliancePolicyPageErrorCode,
   type CompliancePolicyView,
 } from "./compliance-policy-page.js";
+import { timeZoneLabel } from "./time-zone-names.js";
 
 type PageState =
   | { readonly kind: "Loading" | CompliancePolicyPageErrorCode }
@@ -106,7 +107,8 @@ export function CompliancePolicies({ view }: { readonly view: CompliancePolicyVi
                   {item.authorityReference ?? "Internal policy"}
                 </p>
                 <p>
-                  Effective {item.effectiveFrom} → {item.effectiveTo ?? "Open"} · {item.timeZone}
+                  Effective {item.effectiveFrom} → {item.effectiveTo ?? "Open"} ·{" "}
+                  {timeZoneLabel(item.timeZone)}
                 </p>
                 <p>
                   Monitoring every {item.monitoringFrequencyHours}h · retention {item.retentionDays}{" "}

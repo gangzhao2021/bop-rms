@@ -64,7 +64,7 @@ export function ShowcaseOverview() {
         </article>
         <article>
           <span>Net sales</span>
-          <strong>CAD $1,284.60</strong>
+          <strong>$1,284.60</strong>
           <small>Training data only</small>
         </article>
         <article>

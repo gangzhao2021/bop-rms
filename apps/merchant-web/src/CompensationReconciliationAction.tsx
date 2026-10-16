@@ -1,3 +1,4 @@
+import { orderMoney } from "./order-money.js";
 import { useEffect, useRef, useState } from "react";
 import {
   createCompensationReconciliationClient,
@@ -109,10 +110,7 @@ export function CompensationReconciliationAction({
     }
   }
   const amount = view
-    ? "CAD " +
-      (BigInt(view.refund.amountMinor) / 100n).toString() +
-      "." +
-      (BigInt(view.refund.amountMinor) % 100n).toString().padStart(2, "0")
+    ? orderMoney({ amountMinor: view.refund.amountMinor, currencyCode: "CAD" })
     : "";
   return (
     <section aria-label="Compensation reconciliation">
