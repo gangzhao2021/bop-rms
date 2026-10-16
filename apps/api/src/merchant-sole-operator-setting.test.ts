@@ -123,7 +123,8 @@ beforeEach(() => vi.resetAllMocks());
 it("WP-2423: the read resolves the Owner in full once at the start and once before the reply", async () => {
   const f = setup();
   const result = await f.soleOperator.read({ sessionCookie: "synthetic-cookie" });
-  expect(result).toMatchObject({ state: "On", version: 2 });
+  // WP-2423 v15: the change count is the record's, not the length of the capped history.
+  expect(result).toMatchObject({ state: "On", version: 2, changeCount: 2, history: [] });
   // Setting source (this run, other), configuration, MFA, latest step-up (this run, other).
   expect(f.during).toEqual([true, false, true, true, true, false]);
   expect(doubles.storeScope).toHaveBeenCalledOnce();

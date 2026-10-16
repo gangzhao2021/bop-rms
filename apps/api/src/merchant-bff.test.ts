@@ -62,6 +62,7 @@ import {
 } from "@bop/identity";
 import express from "express";
 import { MerchantStoreConfigurationWithdrawalError } from "./merchant-store-configuration-withdrawal.js";
+import { MerchantStoreHoursNoChangeError } from "./merchant-store-configuration.js";
 import { createApp } from "./app.js";
 import { request as httpRequest } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -702,6 +703,11 @@ it("protects store-configuration transport and exposes only bounded results", as
   }
   control.mockRejectedValueOnce(new Error("STORE_CONFIGURATION_COMMAND_INVALID"));
   expect((await submit()).status).toBe(403);
+  // WP-2423 (2026-10-16 v15): the hours already saved; nothing written.
+  control.mockRejectedValueOnce(new MerchantStoreHoursNoChangeError());
+  const unchanged = await submit();
+  expect(unchanged.status).toBe(409);
+  expect(await unchanged.json()).toEqual({ error: "no_change" });
   // WP-2423 (v15): refusals of another person's step or of one's own approval, said plainly.
   for (const [rejected, status, error] of [
     [
@@ -6329,6 +6335,7 @@ it("WP-2423 Q19: the Brand Owner reads and changes the sole-operator setting", a
     observedAt: "2026-10-13T12:00:00.000Z",
     state: "On" as const,
     version: 1,
+    changeCount: 1,
     history: [],
     refundApproval: {
       status: "OtherApprovers" as const,
@@ -7048,6 +7055,11 @@ it("WP-2423 Q4: protects the hours draft transport and answers its refusals plai
     expect(refused.status, code).toBe(status);
     expect(await refused.json(), code).toEqual({ error });
   }
+  // WP-2423 (2026-10-16 v15): the hours already saved; nothing written.
+  hours.mockRejectedValueOnce(new MerchantStoreHoursNoChangeError());
+  const unchanged = await submit();
+  expect(unchanged.status).toBe(409);
+  expect(await unchanged.json()).toEqual({ error: "no_change" });
   const absent = await serveRefundEscalation();
   const unavailable = await request(absent, "/merchant/store-configuration/hours-draft", {
     method: "POST",

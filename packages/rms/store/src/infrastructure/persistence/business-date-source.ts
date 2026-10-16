@@ -27,6 +27,8 @@ export interface PublishedBusinessDateCandidate {
   readonly publicationReference: string;
   readonly liveGateEvidenceReference: string;
 }
+/** Change points read per query when resolving a closed day (paged, never a ceiling). */
+const CHANGE_POINT_PAGE_SIZE = 64;
 const denied = (): never => {
   throw new Error("STORE_BUSINESS_DATE_UNAVAILABLE");
 };
@@ -200,29 +202,51 @@ export function createPostgresStoreClosedBusinessDateWindowSource(
       if (endsAt > observedAt) return denied();
       if ((await options.authorize(tx, observedAt)) !== true) return denied();
       // The source read already holds SHARE locks on these Store tables in this tx.
-      const result = await tx.query(
-        "SELECT DISTINCT t FROM (SELECT v.effective_from AS t FROM rms_store.store_configuration_version v WHERE v.brand_id=$1 AND v.store_id=$2 AND v.lifecycle='Published' UNION ALL SELECT v.effective_until FROM rms_store.store_configuration_version v WHERE v.brand_id=$1 AND v.store_id=$2 AND v.lifecycle='Published' UNION ALL SELECT v.created_at FROM rms_store.store_configuration_version v WHERE v.brand_id=$1 AND v.store_id=$2 AND v.lifecycle='Published' UNION ALL SELECT v.updated_at FROM rms_store.store_configuration_version v WHERE v.brand_id=$1 AND v.store_id=$2 AND v.lifecycle='Published' UNION ALL SELECT c.recorded_at FROM rms_store.store_configuration_publication_content c WHERE c.brand_id=$1 AND c.store_id=$2 UNION ALL SELECT o.occurred_at FROM rms_store.store_configuration_authoring_operation o WHERE o.brand_id=$1 AND o.store_id=$2) points WHERE t > $3 AND t < $4 ORDER BY t LIMIT 64",
-        [brandReference, storeReference, startsAt, endsAt],
-      );
-      if (!result || typeof result !== "object") return denied();
-      const descriptor = Object.getOwnPropertyDescriptor(result, "rows");
-      if (
-        !descriptor ||
-        !("value" in descriptor) ||
-        !Array.isArray(descriptor.value) ||
-        descriptor.value.length > 63
-      )
-        return denied();
-      const instants = [
-        startsAt,
-        ...(descriptor.value as Record<string, unknown>[]).map((row) => instant(row.t)),
-      ];
+      // Every change point inside the day is read, page by page (keyset on the instant): a
+      // real Store may edit its hours or configuration many times in one day, and the day's
+      // window must still be resolved from every version that governed it.
       const configurations: StoreBusinessDateConfiguration[] = [];
-      for (const at of instants) {
+      const consider = async (at: string) => {
         const configuration = await read(tx, at);
         const previous = configurations[configurations.length - 1];
         if (!previous || JSON.stringify(previous) !== JSON.stringify(configuration))
           configurations.push(configuration);
+      };
+      await consider(startsAt);
+      // The cursor keeps the database's microsecond precision so paging never repeats or skips
+      // a point; each point is read at its first whole millisecond (instants are milliseconds).
+      let cursor: string | null = null;
+      for (;;) {
+        const result = await tx.query(
+          "SELECT to_char(t AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS cursor,date_trunc('milliseconds',t)+CASE WHEN t>date_trunc('milliseconds',t) THEN interval '1 millisecond' ELSE interval '0' END AS read_at FROM (SELECT DISTINCT t FROM (SELECT v.effective_from AS t FROM rms_store.store_configuration_version v WHERE v.brand_id=$1 AND v.store_id=$2 AND v.lifecycle='Published' UNION ALL SELECT v.effective_until FROM rms_store.store_configuration_version v WHERE v.brand_id=$1 AND v.store_id=$2 AND v.lifecycle='Published' UNION ALL SELECT v.created_at FROM rms_store.store_configuration_version v WHERE v.brand_id=$1 AND v.store_id=$2 AND v.lifecycle='Published' UNION ALL SELECT v.updated_at FROM rms_store.store_configuration_version v WHERE v.brand_id=$1 AND v.store_id=$2 AND v.lifecycle='Published' UNION ALL SELECT c.recorded_at FROM rms_store.store_configuration_publication_content c WHERE c.brand_id=$1 AND c.store_id=$2 UNION ALL SELECT o.occurred_at FROM rms_store.store_configuration_authoring_operation o WHERE o.brand_id=$1 AND o.store_id=$2) points WHERE t > COALESCE($3::timestamptz,$4::timestamptz) AND t < $5) page ORDER BY t LIMIT $6",
+          [brandReference, storeReference, cursor, startsAt, endsAt, CHANGE_POINT_PAGE_SIZE],
+        );
+        if (!result || typeof result !== "object") return denied();
+        const descriptor = Object.getOwnPropertyDescriptor(result, "rows");
+        if (
+          !descriptor ||
+          !("value" in descriptor) ||
+          !Array.isArray(descriptor.value) ||
+          descriptor.value.length > CHANGE_POINT_PAGE_SIZE
+        )
+          return denied();
+        const rows = descriptor.value as Record<string, unknown>[];
+        for (const row of rows) {
+          const next = row.cursor;
+          // Strictly increasing (fixed-width UTC text): the cursor always advances.
+          if (
+            typeof next !== "string" ||
+            !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/u.test(next) ||
+            (cursor !== null && next <= cursor)
+          )
+            return denied();
+          cursor = next;
+          const at = instant(row.read_at);
+          if (at <= startsAt || at > endsAt) return denied();
+          // A change in the day's last millisecond governs from the next day's start.
+          if (at < endsAt) await consider(at);
+        }
+        if (rows.length < CHANGE_POINT_PAGE_SIZE) break;
       }
       const window = resolveClosedStoreBusinessDateWindowAcross({
         businessDate: input.businessDate,

@@ -59,7 +59,8 @@ for (const [name, start] of [
     expect(close).toHaveBeenCalledOnce();
     expect(process.exitCode ?? 0).toBe(0);
   });
-  it(name + " exhausts three retries with bounded backoff", async () => {
+  // WP-2423 v15: supervised — retries keep going with capped backoff; the worker never fails.
+  it(name + " keeps retrying with capped backoff and never fails the worker", async () => {
     vi.useFakeTimers();
     const close = vi.fn(),
       recover = vi.fn().mockRejectedValue(unavailable());
@@ -75,12 +76,17 @@ for (const [name, start] of [
         expect(recover).toHaveBeenCalledTimes(3);
         await vi.advanceTimersByTimeAsync(20000);
         expect(recover).toHaveBeenCalledTimes(4);
-        expect(await workload.completion).toBe("failed");
-        await vi.advanceTimersByTimeAsync(60000);
-        expect(recover).toHaveBeenCalledTimes(4);
+        await vi.advanceTimersByTimeAsync(30000);
+        expect(recover).toHaveBeenCalledTimes(5);
+        await vi.advanceTimersByTimeAsync(30000);
+        expect(recover).toHaveBeenCalledTimes(6);
         await workload.stop();
+        expect(await workload.completion).toBe("stopped");
+        await vi.advanceTimersByTimeAsync(60000);
+        expect(recover).toHaveBeenCalledTimes(6);
       },
     });
     expect(close).toHaveBeenCalledOnce();
+    expect(process.exitCode ?? 0).toBe(0);
   });
 }

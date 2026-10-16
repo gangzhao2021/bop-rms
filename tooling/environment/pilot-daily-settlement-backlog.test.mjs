@@ -16,8 +16,10 @@ function fixture() {
     prepare = vi.fn();
   let latest = windows[2],
     failed = false;
+  let at = Date.parse("2026-09-24T12:00:00.000Z");
   const ports = {
     scope,
+    now: () => new Date(at).toISOString(),
     coverage: {
       firstWindow: Object.fromEntries(
         Object.entries(windows[0]).filter(([k]) => !Object.hasOwn(scope, k)),
@@ -52,6 +54,9 @@ function fixture() {
     },
     setLatest: (w) => {
       latest = w;
+    },
+    advance: (ms) => {
+      at += ms;
     },
   };
 }
@@ -104,4 +109,67 @@ it("advances from completed boundary when a new day closes", async () => {
   f.setLatest(f.windows[1]);
   expect((await tick()).status).toBe("Created");
   expect(f.calls).toEqual(["2026-09-20", "2026-09-21"]);
+});
+
+// WP-2423 v15: one day that cannot be settled (its window refused) must not stop the others.
+it("lets later days settle while a failing day is retried on its own", async () => {
+  const f = fixture();
+  let broken = true;
+  const failures = [];
+  const readWindow = f.ports.readWindow;
+  f.ports.readBounds = vi.fn(async (input) => readWindow(input));
+  f.ports.readWindow = vi.fn(async (input) => {
+    if (broken && input?.endingAt === f.windows[1].endsAt)
+      throw Error("STORE_BUSINESS_DATE_UNAVAILABLE");
+    return readWindow(input);
+  });
+  f.ports.onDayFailure = (entry) => failures.push([entry.businessDate, entry.failures]);
+  const tick = f.make();
+  await tick();
+  await tick();
+  expect((await tick()).status).toBe("Created"); // 2026-09-20
+  // In place first (a passing outage), then the day steps aside.
+  await expect(tick()).rejects.toThrow("STORE_BUSINESS_DATE_UNAVAILABLE");
+  await expect(tick()).rejects.toThrow("STORE_BUSINESS_DATE_UNAVAILABLE");
+  const aside = await tick();
+  expect(aside).toMatchObject({ status: "Idle", checkCount: 0 });
+  expect(aside.failure.message).toBe("STORE_BUSINESS_DATE_UNAVAILABLE");
+  // The next day still settles; the failure stays reported.
+  const next = await tick();
+  expect(next).toEqual({ status: "Created", checkCount: 1 });
+  expect([...f.persisted]).toEqual(["2026-09-20", "2026-09-22"]);
+  // Not due yet: still reported, nothing retried.
+  expect((await tick()).failure.message).toBe("STORE_BUSINESS_DATE_UNAVAILABLE");
+  // Due but still failing: retried, delay grows.
+  f.advance(60_000);
+  expect((await tick()).failure).toBeDefined();
+  expect(failures).toEqual([
+    ["2026-09-21", 1],
+    ["2026-09-21", 2],
+    ["2026-09-21", 3],
+    ["2026-09-21", 4],
+  ]);
+  f.advance(60_000);
+  expect((await tick()).failure).toBeDefined(); // next retry after 2 minutes
+  expect(failures).toHaveLength(4);
+  // Repaired: the day settles on its next retry and the failure clears.
+  broken = false;
+  f.advance(60_000);
+  const repaired = await tick();
+  expect(repaired.status).toBe("Created");
+  expect(repaired.failure).toBeUndefined();
+  expect([...f.persisted].sort()).toEqual(["2026-09-20", "2026-09-21", "2026-09-22"]);
+  expect(await tick()).toEqual({ status: "Idle", checkCount: 0 });
+});
+it("finds days before and after a day whose window is refused", async () => {
+  const f = fixture();
+  const readWindow = f.ports.readWindow;
+  f.ports.readBounds = vi.fn(async (input) => readWindow(input));
+  f.ports.readWindow = vi.fn(async (input) => {
+    if (input?.endingAt === f.windows[1].endsAt) throw Error("STORE_BUSINESS_DATE_UNAVAILABLE");
+    return readWindow(input);
+  });
+  const tick = f.make();
+  for (let n = 0; n < 8; n++) await tick().catch(() => undefined);
+  expect([...f.persisted]).toEqual(["2026-09-20", "2026-09-22"]);
 });

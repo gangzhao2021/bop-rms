@@ -7,6 +7,7 @@ import { serviceOperationReference } from "./service-control-client.js";
 import {
   createSoleOperatorClient,
   SoleOperatorClientError,
+  soleOperatorEarlierChangeCount,
   soleOperatorReasonLabel,
   soleOperatorReasons,
   type SoleOperatorReason,
@@ -116,6 +117,8 @@ export function SoleOperatorSection({
       </section>
     );
   const target = view.state === "On" ? "Off" : "On";
+  const shownChanges = 5;
+  const earlierChanges = soleOperatorEarlierChangeCount(view, shownChanges);
   const verified = verifiedUntil !== null && Date.parse(verifiedUntil) > Date.now();
   const submit = async () => {
     if (busy || reason === "" || !verified) return;
@@ -196,16 +199,16 @@ export function SoleOperatorSection({
         <section aria-labelledby="sole-operator-history-heading" className="sole-operator-history">
           <h3 id="sole-operator-history-heading">Recent changes</h3>
           <ol>
-            {view.history.slice(0, 5).map((entry) => (
+            {view.history.slice(0, shownChanges).map((entry) => (
               <li key={entry.version}>
                 Change {entry.version}: {soleOperatorChangeText(entry)}
               </li>
             ))}
           </ol>
-          {view.history.length > 5 ? (
+          {earlierChanges > 0 ? (
             <p>
-              {view.history.length - 5} earlier{" "}
-              {view.history.length - 5 === 1 ? "change is" : "changes are"} kept in the record.
+              {earlierChanges} earlier {earlierChanges === 1 ? "change is" : "changes are"} kept in
+              the record.
             </p>
           ) : null}
         </section>

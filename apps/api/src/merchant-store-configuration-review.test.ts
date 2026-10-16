@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
-import { createMerchantStoreConfiguration } from "./merchant-store-configuration.js";
+import {
+  createMerchantStoreConfiguration,
+  MerchantStoreHoursNoChangeError,
+} from "./merchant-store-configuration.js";
 import type {
   createPersistentStoreConfigurationReview,
   createPersistentStoreApprovalPreparation,
@@ -584,5 +587,80 @@ describe("WP-2423 DEC-SOLE-OPERATOR-APPROVAL: approving your own hours change", 
     await expect(
       f.service({ ...f.request, command: { ...f.request.command, approvalMode: "SoleOperator" } }),
     ).rejects.toMatchObject({ code: "STORE_CONFIGURATION_COMMAND_INVALID" });
+  });
+});
+
+describe("WP-2423 (2026-10-16 v15): an hours save identical to the saved hours", () => {
+  const ordinary = (latest: unknown) => {
+    const f = setup();
+    mocks.authoring.mockReturnValue(async () => latest);
+    const saveDraft = vi.fn(async () => ({
+      status: "Applied",
+      operation: { resultingVersion: 2 },
+    }));
+    mocks.administration.mockReturnValue({ saveDraft });
+    const service = createMerchantStoreConfiguration({
+      persistence: {
+        now: () => at,
+        transactions: {
+          run: async (work: (tx: object) => Promise<unknown>) => work(noSoleOperatorMark),
+        },
+      },
+      authentication: { authorize: async () => ({ sessionReference: id(30) }) },
+      actionPermissions: {
+        saveDraft: "store.service.save-draft",
+        validate: "store.service.validate",
+        submit: "store.service.submit",
+        approve: "store.service.approve",
+        publish: "store.service.publish",
+      },
+      configure: () => ({
+        publication: { authorize: async () => true, hashContent: f.legacyHash },
+        ports: () => ({}),
+        publishedBaseline: async () => configuration("Published"),
+      }),
+    } as unknown as Parameters<typeof createMerchantStoreConfiguration>[0]);
+    const draft = (change: Record<string, unknown> = {}) => ({
+      ...f.request,
+      command: {
+        ...f.request.command,
+        command: "SaveDraft",
+        expectedVersion: 1,
+        configuration: {
+          ...configuration("Draft"),
+          configurationReference: id(50),
+          configurationVersion: 2,
+          supersedesConfigurationReference: id(1),
+          approvedByReference: null,
+          approvalEvidenceReference: null,
+          publicationReference: null,
+          liveGateEvidenceReference: null,
+          authoredByReference: id(11),
+          reasonCode: "STORE_HOURS_UPDATE",
+          effectiveFrom: "2026-08-15T14:30:00.000Z",
+          ...change,
+        },
+      },
+    });
+    return { service, saveDraft, draft };
+  };
+  it("refuses the published hours unchanged and writes nothing", async () => {
+    const { service, saveDraft, draft } = ordinary(null);
+    const error = await service(draft()).catch((reason: unknown) => reason);
+    expect(error).toBeInstanceOf(MerchantStoreHoursNoChangeError);
+    expect(saveDraft).not.toHaveBeenCalled();
+  });
+  it("saves a changed hour, and returns a retried change already recorded", async () => {
+    const changed = { exceptions: [{ localDate: "2026-12-25", kind: "Holiday", intervals: [] }] };
+    const first = ordinary(null);
+    await expect(first.service(first.draft(changed))).resolves.toEqual({
+      status: "Applied",
+      resultingVersion: 2,
+    });
+    expect(first.saveDraft).toHaveBeenCalledOnce();
+    // The retry finds its own configuration recorded: not "nothing changed".
+    const retry = ordinary({ ...configuration("Draft"), configurationReference: id(50) });
+    await expect(retry.service(retry.draft())).resolves.toMatchObject({ status: "Applied" });
+    expect(retry.saveDraft).toHaveBeenCalledOnce();
   });
 });

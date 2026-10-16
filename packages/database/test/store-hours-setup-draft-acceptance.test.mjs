@@ -257,6 +257,16 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
         assert.deepEqual(await counts(), before);
       };
       const isCode = (code) => (error) => error?.code === code || error?.message === code;
+      // WP-2423 (2026-10-16 v15): the hours already saved are refused (HTTP 409 no_change).
+      const isNoChange = (error) =>
+        error?.name === "MerchantStoreHoursNoChangeError" && error.code === "NoChange";
+      const setupRevisionCount = async () =>
+        (
+          await admin.query(
+            "SELECT count(*)::int n FROM rms_store.store_setup_draft_revision WHERE store_id=$1",
+            [scope.storeReference],
+          )
+        ).rows[0].n;
       const isSole = (code, reason) => (error) =>
         error?.name === "MerchantSoleOperatorGateError" &&
         error.code === code &&
@@ -762,10 +772,39 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
             ),
           isCode("STORE_CONFIGURATION_LIFECYCLE_CONFLICT"),
         );
+        // WP-2423 (2026-10-16 v15): the published hours unchanged (the withdrawn change decides
+        // nothing) write nothing.
+        await refusedUnchanged(() => ordinaryHours(people.manager, 1200), isNoChange);
         // The Store Manager's ordinary change: saved, checked and sent; the Owner approves and
         // publishes it (two people).
         assert.equal((await ordinaryHours(people.manager, 600)).status, "Applied");
         read = await (await hoursFor(people.manager)).read(people.manager.sessionCookie);
+        // The same hours as the Store Manager's own open change again: nothing written.
+        await refusedUnchanged(
+          () =>
+            hoursFor(people.manager).then((composition) =>
+              composition({
+                sessionCookie: people.manager.sessionCookie,
+                csrf: people.manager.csrf,
+                command: {
+                  command: "SaveDraft",
+                  operationReference: reference(),
+                  auditReference: reference(),
+                  expectedVersion: read.expectedVersion,
+                  configuration: {
+                    ...read.latest,
+                    configurationReference: reference(),
+                    configurationVersion: read.expectedVersion + 1,
+                    supersedesConfigurationReference: read.latest.configurationReference,
+                    effectiveFrom: read.observedAt,
+                    createdAt: read.observedAt,
+                    updatedAt: read.observedAt,
+                  },
+                },
+              }),
+            ),
+          isNoChange,
+        );
         assert.equal(read.latest.supersedesConfigurationReference, created.configurationReference);
         assert.equal(read.latest.setupBasis, undefined);
         assert.equal(read.latestWithdrawal, null);
@@ -928,6 +967,23 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
                 command,
               }),
             );
+      // WP-2423 (2026-10-16 v15): the published hours unchanged write nothing (no Store setup
+      // revision, no configuration, no audit).
+      const revisionsBefore = await setupRevisionCount();
+      await refusedUnchanged(
+        () =>
+          saveHours(people.manager, {
+            ...hoursCommand,
+            setupOperationReference: reference(),
+            operationReference: reference(),
+            auditReference: reference(),
+            configurationReference: reference(),
+            weeklySchedule: publishedX.weeklySchedule,
+            exceptions: publishedX.exceptions,
+          }),
+        isNoChange,
+      );
+      assert.equal(await setupRevisionCount(), revisionsBefore);
       const saved = await saveHours(people.manager, hoursCommand);
       assert.deepEqual(saved, { status: "Applied", resultingVersion: view.expectedVersion + 1 });
       const revisions = await admin.query(
@@ -982,6 +1038,27 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
         ).rows[0].n,
         revision1.revision + 1,
       );
+
+      // The same hours as the Store Manager's own open change, sent again as a new change:
+      // nothing written.
+      await refusedUnchanged(
+        () =>
+          saveHours(people.manager, {
+            ...hoursCommand,
+            expectedSetup: {
+              setupDraftReference: afterSave.latest.setupBasis.setupDraftReference,
+              sourceRevision: afterSave.latest.setupBasis.sourceRevision,
+              sourceSnapshotDigest: afterSave.latest.setupBasis.sourceSnapshotDigest,
+            },
+            setupOperationReference: reference(),
+            operationReference: reference(),
+            auditReference: reference(),
+            configurationReference: reference(),
+            expectedVersion: afterSave.expectedVersion,
+          }),
+        isNoChange,
+      );
+      assert.equal(await setupRevisionCount(), revision1.revision + 1);
 
       // Front of House cannot change hours.
       await assert.rejects(

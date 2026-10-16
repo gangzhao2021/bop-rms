@@ -193,8 +193,18 @@ export async function verifyMerchantConfigurationCommand({
     }),
   };
   const command = createMerchantStoreConfiguration(commandOptions);
+  // WP-2423 (2026-10-16 v15): each saved draft changes the hours (an identical save writes
+  // nothing and is refused as "no change").
+  const withCutoff = (configuration, orderCutoffSeconds) => {
+    assert.ok(configuration.weeklySchedule.some((day) => day.intervals.length > 0));
+    return configuration.weeklySchedule.map((day) => ({
+      ...day,
+      intervals: day.intervals.map((interval) => ({ ...interval, orderCutoffSeconds })),
+    }));
+  };
   const draft = createStoreConfigurationVersion({
     ...baseline,
+    weeklySchedule: withCutoff(baseline, 300),
     configurationReference: f.uuid("4010"),
     configurationVersion: 2,
     supersedesConfigurationReference: baseline.configurationReference,
@@ -295,8 +305,37 @@ export async function verifyMerchantConfigurationCommand({
     }),
     { code: "STORE_CONFIGURATION_IDEMPOTENCY_CONFLICT" },
   );
+  // The same hours as the draft just saved: refused, nothing written.
+  await assert.rejects(
+    command({
+      ...input,
+      command: {
+        ...input.command,
+        operationReference: f.uuid("4013"),
+        auditReference: f.uuid("4014"),
+        expectedVersion: 2,
+        configuration: createStoreConfigurationVersion({
+          ...draft,
+          configurationReference: f.uuid("4015"),
+          configurationVersion: 3,
+          supersedesConfigurationReference: draft.configurationReference,
+        }),
+      },
+    }),
+    { name: "MerchantStoreHoursNoChangeError", code: "NoChange" },
+  );
+  assert.equal(
+    (
+      await admin.query(
+        "SELECT * FROM rms_store.store_configuration_authoring_operation WHERE operation_id=$1",
+        [f.uuid("4013")],
+      )
+    ).rowCount,
+    0,
+  );
   const httpConfiguration = createStoreConfigurationVersion({
     ...draft,
+    weeklySchedule: withCutoff(draft, 600),
     configurationReference: f.uuid("4020"),
     configurationVersion: 3,
     supersedesConfigurationReference: draft.configurationReference,

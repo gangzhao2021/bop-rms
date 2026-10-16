@@ -1,4 +1,4 @@
-import { beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import {
   materializeStoreSetupConfigurationVersionV2,
@@ -11,13 +11,17 @@ import {
   createMerchantStoreHoursSetupDraft,
   parseStoreHoursSetupDraftCommand,
 } from "./merchant-store-hours-setup-draft.js";
-import type { MerchantStoreConfigurationOptions } from "./merchant-store-configuration.js";
+import {
+  MerchantStoreHoursNoChangeError,
+  type MerchantStoreConfigurationOptions,
+} from "./merchant-store-configuration.js";
 
 const mocks = vi.hoisted(() => ({
   resolve: vi.fn(),
   setupStore: vi.fn(),
   authoring: vi.fn(),
   administration: vi.fn(),
+  withdrawal: vi.fn(),
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => mocks.resolve }));
 vi.mock("@rms/store", async (original) => ({
@@ -25,6 +29,7 @@ vi.mock("@rms/store", async (original) => ({
   createPostgresStoreSetupDraftStore: mocks.setupStore,
   createPostgresStoreConfigurationAuthoringSource: mocks.authoring,
   createPersistentStoreConfigurationAdministration: mocks.administration,
+  readStoreConfigurationWithdrawal: mocks.withdrawal,
 }));
 
 const id = (n: number) => `018f9f40-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -160,6 +165,7 @@ function setup(options: { head?: StoreSetupDraft | null; decision?: "Allow" | "D
   };
   mocks.resolve.mockResolvedValue(scope);
   mocks.authoring.mockReturnValue(async () => null);
+  mocks.withdrawal.mockResolvedValue(null);
   let saved: StoreSetupDraft | undefined;
   const setupStore = {
     readCurrent: vi.fn(async () => ({
@@ -362,4 +368,57 @@ it.each([
     code: "STORE_CONFIGURATION_COMMAND_INVALID",
   });
   expect(mocks.resolve).not.toHaveBeenCalled();
+});
+
+describe("WP-2423 (2026-10-16 v15): saving the hours already saved writes nothing", () => {
+  const holiday = [{ localDate: "2026-12-25", kind: "Holiday", intervals: [] }];
+  /** The Store Manager's own open change (hours 10:00 and a holiday), on revision 1. */
+  const openChange = {
+    ...published,
+    configurationReference: id(80),
+    configurationVersion: 3,
+    lifecycle: "Draft" as const,
+    supersedesConfigurationReference: id(61),
+    weeklySchedule: week("10:00:00"),
+    exceptions: holiday,
+    authoredByReference: manager,
+    approvedByReference: null,
+    approvalEvidenceReference: null,
+    publicationReference: null,
+    liveGateEvidenceReference: null,
+  };
+  it("refuses the published hours unchanged, after re-checking the caller, and saves nothing", async () => {
+    const f = setup();
+    const error = await f
+      .service(request({ weeklySchedule: week("11:00:00"), exceptions: [] }))
+      .catch((reason: unknown) => reason);
+    expect(error).toBeInstanceOf(MerchantStoreHoursNoChangeError);
+    expect(error).toMatchObject({ code: "NoChange", message: "Nothing changed" });
+    expect(f.setupStore.save).not.toHaveBeenCalled();
+    expect(f.saveDraft).not.toHaveBeenCalled();
+    expect(f.scope.authorizeActions).toHaveBeenCalledTimes(2);
+  });
+  it("refuses the hours of your own open change again; a different hour is a change", async () => {
+    const f = setup();
+    mocks.authoring.mockReturnValue(async () => openChange);
+    await expect(
+      f.service(request({ expectedVersion: 3, exceptions: holiday })),
+    ).rejects.toBeInstanceOf(MerchantStoreHoursNoChangeError);
+    expect(f.setupStore.save).not.toHaveBeenCalled();
+    await expect(f.service(request({ expectedVersion: 3, exceptions: [] }))).resolves.toMatchObject(
+      { status: "Applied" },
+    );
+  });
+  it("compares with the published hours once the open change was withdrawn", async () => {
+    const f = setup();
+    mocks.authoring.mockReturnValue(async () => openChange);
+    mocks.withdrawal.mockResolvedValue({ kind: "Withdrawn" });
+    await expect(
+      f.service(request({ expectedVersion: 3, weeklySchedule: week("11:00:00"), exceptions: [] })),
+    ).rejects.toBeInstanceOf(MerchantStoreHoursNoChangeError);
+    // The withdrawn hours again are a new change from the published hours.
+    await expect(
+      f.service(request({ expectedVersion: 3, exceptions: holiday })),
+    ).resolves.toMatchObject({ status: "Applied" });
+  });
 });

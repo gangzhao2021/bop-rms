@@ -203,7 +203,10 @@ export function withDailySettlementRecheck({
       const result = await recheck();
       // Another re-check may be due right away (several days changed): look again next poll.
       if (result.status !== "Idle") last = null;
-      return { status: result.status, checkCount: result.checkCount };
+      // A day that still fails to settle stays reported (WP-2423 v15 isolation).
+      return Object.hasOwn(progress, "failure")
+        ? { status: result.status, checkCount: result.checkCount, failure: progress.failure }
+        : { status: result.status, checkCount: result.checkCount };
     } catch {
       return progress;
     }

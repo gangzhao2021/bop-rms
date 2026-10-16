@@ -1,15 +1,16 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import process from "node:process";
+const health = vi.hoisted(() => ({ snapshots: [] }));
 vi.mock("./pilot-workload-health.mjs", () => ({
-  createPilotWorkloadHealthObserver: () => vi.fn(),
+  createPilotWorkloadHealthObserver: () => (snapshot) => health.snapshots.push(snapshot),
 }));
 import {
   startPilotDailySettlementWorker,
-  isRetryableDailySettlementFailure,
   parseDailySettlementWorkerArguments,
 } from "./pilot-daily-settlement-worker.mjs";
 beforeEach(() => {
   process.exitCode = 0;
+  health.snapshots.length = 0;
 });
 afterEach(() => {
   process.exitCode = 0;
@@ -35,56 +36,75 @@ it("runs an isolated daily cycle and drains before closing both resources once",
   expect(providerClose).toHaveBeenCalledOnce();
   expect(process.exitCode).toBe(0);
 });
-it.each(["throw", "bad-result"])("closes and reports daily failure for %s", async (mode) => {
+// WP-2423 v15: a failing cycle (a data-shape error included) never stops the worker; it is
+// reported (health and alert) and retried while the process keeps running.
+it.each(["throw", "bad-result"])(
+  "keeps running and reports a daily failure for %s",
+  async (mode) => {
+    const close = vi.fn(),
+      providerClose = vi.fn();
+    await startPilotDailySettlementWorker({
+      directory: "unused",
+      createResources: async () => ({ close }),
+      createExecution: async () => ({
+        runOnce: async () => {
+          if (mode === "throw") throw Error("STORE_BUSINESS_DATE_UNAVAILABLE");
+          return { status: "Created", checkCount: 2 };
+        },
+        close: providerClose,
+      }),
+      startRuntime: async ({ workload }) => {
+        await workload.start();
+        const snapshot = health.snapshots.at(-1);
+        expect(snapshot.state === "running" || snapshot.state === "attention_required").toBe(true);
+        expect(snapshot.consecutiveFailures).toBe(1);
+        expect(snapshot.lastCycleFailure.code).toBe(
+          mode === "throw"
+            ? "STORE_BUSINESS_DATE_UNAVAILABLE"
+            : "DAILY_SETTLEMENT_EXECUTION_RESULT_INVALID",
+        );
+        await workload.stop();
+        expect(await workload.completion).toBe("stopped");
+      },
+    });
+    expect(close).toHaveBeenCalledOnce();
+    expect(providerClose).toHaveBeenCalledOnce();
+    expect(process.exitCode).toBe(0);
+  },
+);
+it("reports a day that still fails after other days progressed", async () => {
   const close = vi.fn(),
-    providerClose = vi.fn();
+    dayFailure = Error("STORE_BUSINESS_DATE_UNAVAILABLE");
   await startPilotDailySettlementWorker({
     directory: "unused",
     createResources: async () => ({ close }),
     createExecution: async () => ({
-      runOnce: async () => {
-        if (mode === "throw") throw Error("private");
-        return { status: "Created", checkCount: 2 };
-      },
-      close: providerClose,
+      runOnce: async () => ({ status: "Created", checkCount: 1, failure: dayFailure }),
+      close: vi.fn(),
     }),
     startRuntime: async ({ workload }) => {
-      try {
-        await workload.start();
-      } finally {
-        await workload.stop();
-      }
+      await workload.start();
+      expect(health.snapshots.at(-1).lastCycleFailure.code).toBe("STORE_BUSINESS_DATE_UNAVAILABLE");
+      await workload.stop();
     },
   });
+  expect(process.exitCode).toBe(0);
+});
+it("reports a failed start when resources cannot be created into an execution", async () => {
+  const close = vi.fn();
+  await startPilotDailySettlementWorker({
+    directory: "unused",
+    createResources: async () => ({ close }),
+    createExecution: async () => {
+      throw Error("private");
+    },
+    startRuntime: async () => undefined,
+  });
   expect(close).toHaveBeenCalledOnce();
-  expect(providerClose).toHaveBeenCalledOnce();
   expect(process.exitCode).toBe(1);
 });
 it("requires an explicit valid installation", () => {
   expect(parseDailySettlementWorkerArguments([".local/pilot-v13"])).toBe(".local/pilot-v13");
   for (const args of [[], ["../bad"], [".local/pilot-v13", "extra"]])
     expect(() => parseDailySettlementWorkerArguments(args)).toThrow();
-});
-
-it("only retries explicit dependency messages without invoking error getters", () => {
-  expect(
-    isRetryableDailySettlementFailure({ code: "PAYMENT_RECONCILIATION_DEPENDENCY_UNAVAILABLE" }),
-  ).toBe(true);
-  expect(
-    isRetryableDailySettlementFailure({ code: "PAYMENT_RECONCILIATION_PERMISSION_DENIED" }),
-  ).toBe(false);
-  expect(isRetryableDailySettlementFailure(Error("DAILY_SETTLEMENT_SOURCE_UNAVAILABLE"))).toBe(
-    true,
-  );
-  for (const value of [
-    Error("permission denied"),
-    Error("DAILY_SETTLEMENT_EXECUTION_RESULT_INVALID"),
-    null,
-    {
-      get message() {
-        throw Error("private");
-      },
-    },
-  ])
-    expect(isRetryableDailySettlementFailure(value)).toBe(false);
 });

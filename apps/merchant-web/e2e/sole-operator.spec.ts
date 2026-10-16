@@ -59,6 +59,7 @@ test("@production a sole operator turns it on and approves their own refund afte
     observedAt: new Date(now).toISOString(),
     state: "Off",
     version: 2,
+    changeCount: 2,
     history: earlier as unknown[],
     refundApproval: { status: "NotSet", youHoldApproval: true, otherApprovers: [] as unknown[] },
     verifiedUntil: null,
@@ -122,6 +123,7 @@ test("@production a sole operator turns it on and approves their own refund afte
       ...setting,
       state: "On",
       version: 3,
+      changeCount: 3,
       history: [
         {
           version: 3,
@@ -299,6 +301,7 @@ test("@production sole operator not in effect names the other approver", async (
         observedAt: new Date().toISOString(),
         state: "On",
         version: 1,
+        changeCount: 1,
         history: [],
         refundApproval: {
           status: "OtherApprovers",

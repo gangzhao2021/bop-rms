@@ -29,7 +29,9 @@ import { createMerchantCategoryTransactions } from "./merchant-category-transact
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import {
+  MerchantStoreHoursNoChangeError,
   storeConfigurationAdministrationOptions,
+  storeConfigurationChangesNothing,
   type MerchantStoreConfigurationOptions,
   type StoreConfigurationPublishingAccess,
 } from "./merchant-store-configuration.js";
@@ -420,7 +422,7 @@ export function createMerchantStoreHoursSetupDraft(options: MerchantStoreConfigu
   const run = createStoreHoursSetupRun(options, [action]);
   return async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
     const command = parseStoreHoursSetupDraftCommand(input.command);
-    return run(
+    const result = await run(
       input,
       { reasonCode: "AUTHORIZED_OPERATION" },
       async ({ tx, fixed, scope, configured, published, recorded, setup, plan, check, guard }) => {
@@ -520,6 +522,24 @@ export function createMerchantStoreHoursSetupDraft(options: MerchantStoreConfigu
         }
         if (command.effectiveFrom > check() || command.effectiveFrom < published.effectiveFrom)
           return rejected();
+        // WP-2423 (2026-10-16 v15): the same hours and closures as the change already saved (or as
+        // the published hours when there is none, or it was withdrawn or declined) write nothing:
+        // no Store setup revision, no configuration. A retry of a recorded change is not one.
+        if (
+          recorded === null ||
+          recorded.configurationReference !== command.configurationReference
+        ) {
+          const base = withdrawn ? published : latest;
+          if (
+            storeConfigurationChangesNothing(base, {
+              ...base,
+              weeklySchedule: command.weeklySchedule,
+              exceptions: command.exceptions,
+              effectiveUntil: null,
+            })
+          )
+            return Object.freeze({ status: "NoChange" as const });
+        }
         const setupCommand = parseStoreSetupSaveCommand({
           profile: "StoreSetupSaveV2",
           ...fixed,
@@ -584,6 +604,9 @@ export function createMerchantStoreHoursSetupDraft(options: MerchantStoreConfigu
         });
       },
     );
+    // Nothing was written; the run still re-checked the caller's authority before it answered.
+    if (result.status === "NoChange") throw new MerchantStoreHoursNoChangeError();
+    return result;
   };
 }
 

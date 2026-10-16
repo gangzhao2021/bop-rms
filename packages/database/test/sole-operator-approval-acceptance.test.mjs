@@ -670,6 +670,7 @@ it("sole operator: set by the Brand Owner, self-approval with MFA, lapse on a se
         otherApprovers: [],
       });
       assert.equal(initial.verifiedUntil, null);
+      assert.equal(initial.changeCount, 0);
       let before = await counts();
       await assert.rejects(
         soleOperator({
@@ -1011,6 +1012,9 @@ it("sole operator: set by the Brand Owner, self-approval with MFA, lapse on a se
         longOff.history.map((entry) => entry.version),
         [12, 11, 10, 9, 8, 7, 6, 5, 4, 3],
       );
+      // WP-2423 v15 (2026-10-16): 12 changes, 10 listed — the count is the record's (the page
+      // says 7 earlier changes beyond the 5 it shows, not 5).
+      assert.equal(longOff.changeCount, 12);
       assert.equal(longOff.refundApproval.status, "NotSet");
       // Turning it on and off again names the real latest version.
       await assert.rejects(
@@ -1035,6 +1039,7 @@ it("sole operator: set by the Brand Owner, self-approval with MFA, lapse on a se
       const finalOff = await soleOperator.read({ sessionCookie: "owner" });
       assert.deepEqual([finalOff.state, finalOff.version], ["Off", 14]);
       assert.equal(finalOff.history[0].version, 14);
+      assert.equal(finalOff.changeCount, 14);
 
       // ── 11. History is immutable; the database refuses an unmarked one-person approval and a
       // SoleOperator mark on two people.

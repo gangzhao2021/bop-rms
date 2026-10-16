@@ -5,6 +5,7 @@ import {
   createSoleOperatorClient,
   parseSoleOperatorView,
   SoleOperatorClientError,
+  soleOperatorEarlierChangeCount,
 } from "./sole-operator-client.js";
 import { SoleOperatorSection } from "./SoleOperatorSection.js";
 
@@ -19,6 +20,7 @@ const view = {
   observedAt: "2026-10-13T12:00:00.000Z",
   state: "On",
   version: 1,
+  changeCount: 1,
   history: [
     {
       version: 1,
@@ -56,6 +58,26 @@ it("WP-2423 Q19: reads the setting strictly and hides it from anyone but the Bra
   await expect(client.read()).rejects.toMatchObject({ code: "Denied" });
   await expect(client.read()).resolves.toBeNull();
   await expect(client.read()).rejects.toMatchObject({ code: "Unavailable" });
+});
+
+it("WP-2423 v15: the earlier-changes count comes from the record, not the capped list", () => {
+  const entry = view.history[0];
+  const ten = Array.from({ length: 10 }, (_, i) => ({ ...entry, version: 12 - i }));
+  const twelve = parseSoleOperatorView({ ...view, version: 12, changeCount: 12, history: ten });
+  // 12 changes, 10 returned, 5 listed: 7 earlier changes are kept (not 5).
+  expect(soleOperatorEarlierChangeCount(twelve, 5)).toBe(7);
+  expect(soleOperatorEarlierChangeCount(parseSoleOperatorView(view), 5)).toBe(0);
+  expect(
+    soleOperatorEarlierChangeCount({ changeCount: 6, history: twelve.history.slice(0, 6) }, 5),
+  ).toBe(1);
+  // The count is required and can never be smaller than the changes returned.
+  const withoutCount: Record<string, unknown> = { ...view };
+  delete withoutCount.changeCount;
+  expect(() => parseSoleOperatorView(withoutCount)).toThrow(SoleOperatorClientError);
+  expect(() => parseSoleOperatorView({ ...view, changeCount: 0 })).toThrow(SoleOperatorClientError);
+  expect(() => parseSoleOperatorView({ ...view, changeCount: 1.5 })).toThrow(
+    SoleOperatorClientError,
+  );
 });
 
 it("WP-2423 Q19: changes the setting with a reason for the target state and names refusals", async () => {

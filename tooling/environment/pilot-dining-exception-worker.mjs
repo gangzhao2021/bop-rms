@@ -1,4 +1,3 @@
-import { isRetryablePilotDatabaseAcquisition } from "./pilot-database-retry.mjs";
 import console from "node:console";
 import { URL, fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
@@ -7,7 +6,10 @@ import { loadPilotInstallation } from "./pilot-installation.mjs";
 import { createConfiguredPilotResources } from "./pilot-configured-resources.mjs";
 import process from "node:process";
 import { startWorkerRuntime } from "../../apps/worker/dist/index.js";
-import { createOutboxWorkload } from "../../apps/worker/dist/outbox-workload.js";
+import {
+  createOutboxWorkload,
+  supervisedCycleFailures,
+} from "../../apps/worker/dist/outbox-workload.js";
 import { createInternalDiningProjection } from "./pilot-dining-projection.mjs";
 import { createPilotWorkloadHealthObserver } from "./pilot-workload-health.mjs";
 export async function startPilotDiningExceptionWorker({
@@ -25,7 +27,9 @@ export async function startPilotDiningExceptionWorker({
     const loop = createOutboxWorkload({
       pollIntervalMs: 5000,
       drainDeadlineMs: 25000,
-      retry: { maxRetries: 3, shouldRetry: isRetryablePilotDatabaseAcquisition },
+      // WP-2423 v15: supervised like the other pilot workloads — a failing cycle is retried
+      // with backoff (attention when it persists), never stops the worker.
+      supervision: supervisedCycleFailures,
       onSnapshot: createPilotWorkloadHealthObserver(directory, "dining-exception-worker"),
       dispatcher: {
         runOnce: async () => {

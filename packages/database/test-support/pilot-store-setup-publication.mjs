@@ -1075,9 +1075,19 @@ export async function exercisePilotStoreSetupPublication(input) {
       const auditReference = next();
       const withdrawn = await withdraw(send, ownOpen, auditReference);
       assert.equal(withdrawn.status, 200, JSON.stringify(withdrawn.body));
-      assert.deepEqual(withdrawn.body, { status: "Applied", kind: "Withdrawn" });
+      // 08cb8e8b: the answer says whether Store setup's hours went back to the published hours
+      // (not here: this change carried more than hours).
+      assert.deepEqual(withdrawn.body, {
+        status: "Applied",
+        kind: "Withdrawn",
+        setupHoursRestored: false,
+      });
       const again = await withdraw(send, ownOpen, auditReference);
-      assert.deepEqual(again.body, { status: "AlreadyApplied", kind: "Withdrawn" });
+      assert.deepEqual(again.body, {
+        status: "AlreadyApplied",
+        kind: "Withdrawn",
+        setupHoursRestored: false,
+      });
       const workspace = await workspaceOf(send);
       assert.equal(workspace.body.latestWithdrawal.kind, "Withdrawn");
       assert.equal(workspace.body.latestWithdrawal.byYou, true);
@@ -1136,7 +1146,11 @@ export async function exercisePilotStoreSetupPublication(input) {
         "store_configuration_withdrawal_invalid",
       );
       const declined = await withdraw(send, managerOpen, next(), "NotRight");
-      assert.deepEqual(declined.body, { status: "Applied", kind: "Declined" });
+      assert.deepEqual(declined.body, {
+        status: "Applied",
+        kind: "Declined",
+        setupHoursRestored: false,
+      });
       workspace = await workspaceOf(send);
       assert.deepEqual(
         {

@@ -452,12 +452,8 @@ export function resolveClosedStoreBusinessDateWindowAcross(input: {
   readonly observedAt: unknown;
   readonly configurations: readonly unknown[];
 }): ClosedStoreBusinessDateWindow {
-  if (
-    !Array.isArray(input.configurations) ||
-    input.configurations.length < 1 ||
-    input.configurations.length > 64
-  )
-    return fail();
+  // No ceiling on the chain: a Store may publish many versions within one day.
+  if (!Array.isArray(input.configurations) || input.configurations.length < 1) return fail();
   const configurations = input.configurations.map(parseStoreBusinessDateConfiguration);
   const first = configurations[0];
   const last = configurations[configurations.length - 1];

@@ -50,3 +50,20 @@ it("rejects invalid limit, future or wrong-store windows and malformed results",
   h.readRun.mockResolvedValue({ checks: [] });
   await expect(readPilotDailySettlementStatus(h)).rejects.toThrow();
 });
+// WP-2423 v15: a day whose window is refused is still listed (missing), with the days around it.
+it("lists a day whose window is refused by its bounds", async () => {
+  const f = fixture();
+  const readWindow = f.readWindow;
+  f.readBounds = vi.fn(async (q) => readWindow(q));
+  f.readWindow = vi.fn(async (q) => {
+    if (q?.endingAt !== f.coverage.firstWindow.endsAt)
+      throw Error("STORE_BUSINESS_DATE_UNAVAILABLE");
+    return readWindow(q);
+  });
+  const result = await readPilotDailySettlementStatus(f);
+  expect(result.days.map((d) => [d.businessDate, d.state])).toEqual([
+    ["2026-09-21", "Missing"],
+    ["2026-09-20", "Missing"],
+  ]);
+  expect(result.coverageScanComplete).toBe(true);
+});

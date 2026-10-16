@@ -23,6 +23,8 @@ export interface SoleOperatorView {
   readonly observedAt: string;
   readonly state: SoleOperatorState;
   readonly version: number;
+  /** Every change in the record, including those not listed in `history` (which is capped). */
+  readonly changeCount: number;
   readonly history: readonly {
     readonly version: number;
     readonly state: SoleOperatorState;
@@ -105,11 +107,19 @@ const errorCode = (value: unknown) =>
   value && typeof value === "object" && "error" in value && typeof value.error === "string"
     ? value.error
     : null;
+/** Changes kept in the record beyond the `shown` most recent ones listed on the page. */
+export function soleOperatorEarlierChangeCount(
+  view: Pick<SoleOperatorView, "changeCount" | "history">,
+  shown: number,
+): number {
+  return Math.max(0, view.changeCount - Math.min(shown, view.history.length));
+}
 export function parseSoleOperatorView(value: unknown): SoleOperatorView {
   const raw = record(value, [
     "observedAt",
     "state",
     "version",
+    "changeCount",
     "history",
     "refundApproval",
     "verifiedUntil",
@@ -127,10 +137,13 @@ export function parseSoleOperatorView(value: unknown): SoleOperatorView {
     raw.history.length > 50
   )
     return invalid();
+  const changeCount = version(raw.changeCount);
+  if (changeCount < raw.history.length) return invalid();
   return Object.freeze({
     observedAt: instant(raw.observedAt),
     state: state(raw.state),
     version: version(raw.version),
+    changeCount,
     history: Object.freeze(
       raw.history.map((value) => {
         const entry = record(value, [

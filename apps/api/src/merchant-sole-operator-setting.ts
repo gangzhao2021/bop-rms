@@ -199,6 +199,10 @@ export function createMerchantSoleOperator(options: {
           observedAt,
           state: setting.state ?? "Off",
           version: setting.version,
+          // WP-2423 v15: how many changes the record holds as of now, not how many are listed
+          // (history is capped). Versions run 1..version without gaps — the Organization owner's
+          // sequence trigger refuses any other insert — so the current version is the count.
+          changeCount: setting.version,
           history: setting.history.map((entry) =>
             Object.freeze({
               version: entry.version,

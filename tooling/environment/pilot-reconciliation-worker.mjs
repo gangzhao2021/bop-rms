@@ -1,4 +1,3 @@
-import { isRetryablePilotDatabaseAcquisition } from "./pilot-database-retry.mjs";
 import { createConfiguredReconciliationExecution } from "./pilot-reconciliation-execution.mjs";
 import console from "node:console";
 import { URL, fileURLToPath, pathToFileURL } from "node:url";
@@ -7,7 +6,10 @@ import { parsePilotRuntimeDirectory } from "./pilot-service.mjs";
 import { createConfiguredPilotResources } from "./pilot-configured-resources.mjs";
 import process from "node:process";
 import { startWorkerRuntime } from "../../apps/worker/dist/index.js";
-import { createOutboxWorkload } from "../../apps/worker/dist/outbox-workload.js";
+import {
+  createOutboxWorkload,
+  supervisedCycleFailures,
+} from "../../apps/worker/dist/outbox-workload.js";
 import { createInternalReconciliationProjection } from "./pilot-reconciliation-projection.mjs";
 import { createPilotWorkloadHealthObserver } from "./pilot-workload-health.mjs";
 export async function startPilotReconciliationWorker({
@@ -38,7 +40,9 @@ export async function startPilotReconciliationWorker({
     const loop = createOutboxWorkload({
       pollIntervalMs: 5000,
       drainDeadlineMs: 25000,
-      retry: { maxRetries: 3, shouldRetry: isRetryablePilotDatabaseAcquisition },
+      // WP-2423 v15: supervised like the other pilot workloads — a failing cycle is retried
+      // with backoff (attention when it persists), never stops the worker.
+      supervision: supervisedCycleFailures,
       onSnapshot: createPilotWorkloadHealthObserver(directory, "reconciliation-worker"),
       dispatcher: {
         runOnce: async () => {

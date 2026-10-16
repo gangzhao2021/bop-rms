@@ -3,7 +3,7 @@ import process from "node:process";
 import path from "node:path";
 import { createConfiguredPilotResources } from "./pilot-configured-resources.mjs";
 import { loadPilotInstallation } from "./pilot-installation.mjs";
-import { createInternalClosedSettlementWindow } from "./pilot-settlement-window.mjs";
+import { createInternalSettlementDays } from "./pilot-settlement-window.mjs";
 import { createPostgresPaymentReconciliationRunSource } from "../../packages/rms/payment/src/index.ts";
 import { parsePilotRuntimeDirectory } from "./pilot-service.mjs";
 import { readPilotDailySettlementStatus } from "./pilot-daily-settlement-status.mjs";
@@ -28,11 +28,13 @@ try {
     scope: resources.scope,
     authorize: active,
   });
+  const days = createInternalSettlementDays({ resources, active });
   const result = await readPilotDailySettlementStatus({
     coverage: await installation.loadDailySettlementCoverage(),
     scope: resources.scope,
     now: resources.now,
-    readWindow: createInternalClosedSettlementWindow({ resources, active }),
+    readWindow: days.window,
+    readBounds: days.bounds,
     readRun: (q) => resources.transactions.run((tx) => read(tx, q)),
   });
   console.log(JSON.stringify(result));

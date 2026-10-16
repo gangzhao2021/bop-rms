@@ -54,6 +54,82 @@ export type StoreConfigurationPublishingAccess = ReturnType<
     input: { readonly occurredAt: string },
   ) => Promise<{ readonly actorMfaAt: string }>;
 };
+/**
+ * WP-2423 (2026-10-16 v15): an hours save identical to what the Store already has saved (its open
+ * change, or the published configuration when there is none or the latest was withdrawn or
+ * declined) is refused and writes nothing: no configuration version, no Store setup revision.
+ */
+export class MerchantStoreHoursNoChangeError extends Error {
+  readonly code = "NoChange" as const;
+  constructor() {
+    super("Nothing changed");
+    this.name = "MerchantStoreHoursNoChangeError";
+  }
+}
+type StoreConfigurationValue = ReturnType<typeof createStoreConfigurationVersion>;
+/** Identity, lifecycle, provenance and approval fields: never what a person changes. */
+const changeMetadata: ReadonlySet<string> = new Set([
+  "setupBasis",
+  "configurationReference",
+  "configurationVersion",
+  "lifecycle",
+  "effectiveFrom",
+  "supersedesConfigurationReference",
+  "reasonCode",
+  "authoredByReference",
+  "approvedByReference",
+  "approvalEvidenceReference",
+  "publicationReference",
+  "liveGateEvidenceReference",
+  "createdAt",
+  "updatedAt",
+]);
+const changeContent = (value: StoreConfigurationValue) =>
+  canonicalizeRfc8785(
+    Object.fromEntries(
+      Object.entries(value).filter(([key, item]) => !changeMetadata.has(key) && item !== undefined),
+    ),
+  );
+/** Whether `next` changes nothing a person edits (hours, closures, end date, services...). */
+export function storeConfigurationChangesNothing(
+  base: StoreConfigurationValue,
+  next: StoreConfigurationValue,
+): boolean {
+  return changeContent(base) === changeContent(next);
+}
+/**
+ * The configuration an hours change is compared with: the Store's latest recorded one, or the
+ * published one when the latest is an open change that was withdrawn or declined (it decides
+ * nothing) or nothing was recorded since publication.
+ */
+export async function storeHoursChangeBase(
+  tx: Parameters<typeof readStoreConfigurationWithdrawal>[0],
+  input: {
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly published: StoreConfigurationValue | null;
+    readonly recorded: StoreConfigurationValue | null;
+  },
+): Promise<StoreConfigurationValue | null> {
+  const { published, recorded } = input;
+  if (recorded === null) return published;
+  const open =
+    published !== null &&
+    recorded.configurationReference !== published.configurationReference &&
+    (recorded.lifecycle === "Draft" ||
+      recorded.lifecycle === "PendingApproval" ||
+      recorded.lifecycle === "Approved");
+  if (
+    open &&
+    (await readStoreConfigurationWithdrawal(tx, {
+      brandReference: input.brandReference,
+      storeReference: input.storeReference,
+      configurationReference: recorded.configurationReference,
+    })) !== null
+  )
+    return published;
+  return recorded;
+}
 /** The permission whose holders decide whether sole operator is in effect at the Store. */
 const soleOperatorPermission = "store.service.approve";
 /** WP-2423: the optional "approve alone as sole operator" request beside a configuration command. */
@@ -214,6 +290,7 @@ export function createMerchantStoreConfiguration(options: {
     const sole = approvalMode === "SoleOperator";
     let soleRefusal: MerchantSoleOperatorGateError | undefined;
     let basisRefusal: MerchantSoleOperatorBasisError | undefined;
+    let noChange: MerchantStoreHoursNoChangeError | undefined;
     // WP-2423: one authorized run. The caller, the command's permission and the Publishing
     // decisions the command may need are resolved in full once at the start (one permission
     // packet) and re-checked in full once more inside the transaction before it commits; owner
@@ -385,14 +462,35 @@ export function createMerchantStoreConfiguration(options: {
             // change; an ordinary change never follows a published configuration from Store setup
             // (whatever the latest, possibly withdrawn, change is).
             if (bound.method === "saveDraft") {
-              const published = await configured.publishedBaseline(tx);
-              if (
-                published !== null &&
-                createStoreConfigurationVersion(published).setupBasis !== undefined
-              )
+              const publishedValue = await configured.publishedBaseline(tx);
+              const published =
+                publishedValue === null ? null : createStoreConfigurationVersion(publishedValue);
+              if (published?.setupBasis !== undefined)
                 throw new StoreConfigurationAdministrationServiceError(
                   "STORE_CONFIGURATION_LIFECYCLE_CONFLICT",
                 );
+              // WP-2423 (2026-10-16 v15): saving the hours already saved writes nothing. A retry
+              // of a change already recorded (same configuration) still returns its result.
+              const candidate = bound.input.configuration;
+              const recorded =
+                (await createPostgresStoreConfigurationAuthoringSource({
+                  brandReference: scope.context.brand.brandReference,
+                  storeReference: scope.store.storeReference,
+                  mode: "Write",
+                  authorize: async (actual) => actual === tx && (await guard()),
+                })(tx, source.now())) ?? null;
+              if (recorded?.configurationReference !== candidate.configurationReference) {
+                const base = await storeHoursChangeBase(tx, {
+                  brandReference: scope.context.brand.brandReference,
+                  storeReference: scope.store.storeReference,
+                  published,
+                  recorded,
+                });
+                if (base !== null && storeConfigurationChangesNothing(base, candidate)) {
+                  noChange = new MerchantStoreHoursNoChangeError();
+                  throw noChange;
+                }
+              }
             }
             const baseOptions = storeConfigurationAdministrationOptions({
               configured,
@@ -522,6 +620,7 @@ export function createMerchantStoreConfiguration(options: {
         // this run says why (turned off, someone else also approves, verify again).
         if (soleRefusal !== undefined) throw soleRefusal;
         if (basisRefusal !== undefined) throw basisRefusal;
+        if (noChange !== undefined) throw noChange;
         throw error;
       });
   };

@@ -493,8 +493,12 @@ export const SOLE_OPERATOR_OTHERS_MESSAGE =
   "Someone else also holds Owner access at this Store, so they must approve this change.";
 export const SOLE_OPERATOR_VERIFY_MESSAGE =
   "Your verification is more than 15 minutes old, so the approval was not recorded. Verify again, then approve.";
+/** WP-2423 (2026-10-16 v15): the hours saved are the hours already saved; nothing was written. */
+export const STORE_HOURS_NO_CHANGE_MESSAGE =
+  "Nothing changed — these opening hours and closures are already saved.";
 /** Refusals after which the form and the open change stay on screen as they were. */
 export const storeConfigurationKeptRefusals: ReadonlySet<string> = new Set([
+  STORE_HOURS_NO_CHANGE_MESSAGE,
   NOT_YOUR_CHANGE_MESSAGE,
   APPROVAL_NEEDS_ANOTHER_PERSON_MESSAGE,
   SOLE_OPERATOR_OFF_MESSAGE,
@@ -611,6 +615,7 @@ export function createStoreConfigurationClient(fetcher: typeof fetch = fetch) {
         );
       }
       if (response.status === 409) {
+        if (error === "no_change") throw new Error(STORE_HOURS_NO_CHANGE_MESSAGE);
         if (hours && error === "store_setup_has_unpublished_changes")
           throw new Error(STORE_SETUP_UNPUBLISHED_MESSAGE);
         if (error === "open_change_by_another") throw new Error(OPEN_CHANGE_BY_ANOTHER_MESSAGE);

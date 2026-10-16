@@ -338,7 +338,10 @@ import {
   type createMerchantOrderAcceptanceCommand,
 } from "./merchant-order-acceptance-command.js";
 import type { createMerchantDiningItemService } from "./merchant-dining-item-service.js";
-import type { createMerchantStoreConfiguration } from "./merchant-store-configuration.js";
+import {
+  MerchantStoreHoursNoChangeError,
+  type createMerchantStoreConfiguration,
+} from "./merchant-store-configuration.js";
 import type {
   createMerchantStoreHoursSetupDraft,
   createMerchantStoreHoursSetupRestore,
@@ -11472,8 +11475,11 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           error instanceof Error
             ? Object.getOwnPropertyDescriptor(error, "code")?.value
             : undefined;
+        // WP-2423 (2026-10-16 v15): the hours saved are the hours already saved; nothing written.
+        if (error instanceof MerchantStoreHoursNoChangeError)
+          response.status(409).json({ error: "no_change" });
         // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: why the Owner's own approval was not accepted.
-        if (error instanceof MerchantSoleOperatorGateError)
+        else if (error instanceof MerchantSoleOperatorGateError)
           response.status(403).json({
             error:
               error.code !== "NotInEffect"
@@ -11596,7 +11602,10 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             error instanceof Error
               ? Object.getOwnPropertyDescriptor(error, "code")?.value
               : undefined;
-          if (code === "STORE_SETUP_OPERATION_UNPUBLISHED_CHANGES")
+          // WP-2423 (2026-10-16 v15): the hours already saved; nothing written.
+          if (error instanceof MerchantStoreHoursNoChangeError)
+            response.status(409).json({ error: "no_change" });
+          else if (code === "STORE_SETUP_OPERATION_UNPUBLISHED_CHANGES")
             response.status(409).json({ error: "store_setup_has_unpublished_changes" });
           else if (code === "STORE_CONFIGURATION_OPEN_CHANGE_BY_ANOTHER")
             response.status(409).json({ error: "open_change_by_another" });

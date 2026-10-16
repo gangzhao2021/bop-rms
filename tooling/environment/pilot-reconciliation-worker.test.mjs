@@ -1,14 +1,18 @@
 import { afterEach, expect, it, vi } from "vitest";
 import process from "node:process";
+const health = vi.hoisted(() => ({ snapshots: [] }));
 vi.mock("./pilot-workload-health.mjs", () => ({
-  createPilotWorkloadHealthObserver: () => vi.fn(),
+  createPilotWorkloadHealthObserver: () => (snapshot) => health.snapshots.push(snapshot),
 }));
+// WP-2423 v15: a failed cycle is reported in health and retried; the worker keeps running.
+const cycleFailed = () => health.snapshots.some((snapshot) => snapshot.lastCycleFailure !== null);
 import {
   startPilotReconciliationWorker,
   parseReconciliationWorkerArguments,
 } from "./pilot-reconciliation-worker.mjs";
 afterEach(() => {
   process.exitCode = 0;
+  health.snapshots.length = 0;
 });
 it("constructs without scanning and runs only projection recovery with graceful resource cleanup", async () => {
   const recover = vi.fn(async () => ({ projectedCount: 0, scanComplete: true })),
@@ -28,7 +32,7 @@ it("constructs without scanning and runs only projection recovery with graceful 
   });
   expect(close).toHaveBeenCalledOnce();
 });
-it("reports failed isolated process and closes resources when owner scan fails", async () => {
+it("keeps running, reports the failed cycle and closes resources when owner scan fails", async () => {
   const close = vi.fn(async () => undefined),
     recover = vi.fn(async () => {
       throw Error("owner unavailable");
@@ -45,7 +49,8 @@ it("reports failed isolated process and closes resources when owner scan fails",
       }
     },
   });
-  expect(process.exitCode).toBe(1);
+  expect(process.exitCode).toBe(0);
+  expect(cycleFailed()).toBe(true);
   expect(close).toHaveBeenCalledOnce();
 });
 it("rejects malformed recovery progress", async () => {
@@ -62,7 +67,8 @@ it("rejects malformed recovery progress", async () => {
       }
     },
   });
-  expect(process.exitCode).toBe(1);
+  expect(process.exitCode).toBe(0);
+  expect(cycleFailed()).toBe(true);
   expect(close).toHaveBeenCalledOnce();
 });
 
@@ -108,7 +114,7 @@ it("runs explicitly enabled reconciliation before projection and closes its Prov
   expect(providerClose).toHaveBeenCalledOnce();
   expect(close).toHaveBeenCalledOnce();
 });
-it("fails and closes both resources when explicit execution fails", async () => {
+it("reports a failed execution cycle and closes both resources", async () => {
   const close = vi.fn(async () => undefined),
     providerClose = vi.fn(async () => undefined),
     recover = vi.fn(async () => ({ projectedCount: 0, scanComplete: true }));
@@ -134,7 +140,8 @@ it("fails and closes both resources when explicit execution fails", async () => 
   expect(recover).not.toHaveBeenCalled();
   expect(providerClose).toHaveBeenCalledOnce();
   expect(close).toHaveBeenCalledOnce();
-  expect(process.exitCode).toBe(1);
+  expect(process.exitCode).toBe(0);
+  expect(cycleFailed()).toBe(true);
 });
 
 it.each([false, true])(
@@ -181,7 +188,8 @@ it.each([false, true])(
       },
     });
     expect(events).toEqual(malformed ? ["capture"] : ["capture", "execute", "project"]);
-    expect(process.exitCode).toBe(malformed ? 1 : 0);
+    expect(process.exitCode).toBe(0);
+    expect(cycleFailed()).toBe(malformed);
     expect(providerClose).toHaveBeenCalledOnce();
     expect(close).toHaveBeenCalledOnce();
   },

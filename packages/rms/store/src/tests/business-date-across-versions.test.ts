@@ -75,6 +75,23 @@ describe("closed business day across configuration versions", () => {
       expect.objectContaining({ code: "STORE_BUSINESS_DATE_CONFIGURATION_NOT_EFFECTIVE" }),
     );
   });
+  it("settles a day with 80 hours edits published inside it (no chain ceiling)", () => {
+    const chain = [
+      v1,
+      ...Array.from({ length: 80 }, (_, n) => ({
+        ...v1,
+        configurationReference: id(100 + n),
+        configurationVersion: 2 + n,
+        contentDigest: `sha256:${(n % 16).toString(16).repeat(64)}`,
+        effectiveFrom: new Date(Date.parse("2026-10-10T09:00:00.000Z") + n * 600_000).toISOString(),
+      })),
+    ];
+    const window = across(chain);
+    expect(window.startsAt).toBe("2026-10-10T08:00:00.000Z");
+    expect(window.endsAt).toBe("2026-10-11T08:00:00.000Z");
+    expect(window.configurationVersion).toBe(81);
+    expect(window.configurationReference).toBe(id(179));
+  });
   it("still requires the chain to cover the whole day", () => {
     expect(() => across([v2])).toThrow(
       expect.objectContaining({ code: "STORE_BUSINESS_DATE_CONFIGURATION_NOT_EFFECTIVE" }),
@@ -83,12 +100,8 @@ describe("closed business day across configuration versions", () => {
       expect.objectContaining({ code: "STORE_BUSINESS_DATE_CONFIGURATION_NOT_EFFECTIVE" }),
     );
   });
-  it("refuses another Store, an empty or oversized chain and an open day", () => {
-    for (const input of [
-      [v1, { ...v2, storeReference: id(9) }],
-      [],
-      Array.from({ length: 65 }, () => v1),
-    ])
+  it("refuses another Store, an empty chain and an open day", () => {
+    for (const input of [[v1, { ...v2, storeReference: id(9) }], []])
       expect(() => across(input)).toThrow(
         expect.objectContaining({ code: "STORE_BUSINESS_DATE_INPUT_INVALID" }),
       );

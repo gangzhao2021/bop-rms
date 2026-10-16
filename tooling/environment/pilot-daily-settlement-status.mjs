@@ -6,6 +6,8 @@ export async function readPilotDailySettlementStatus({
   scope,
   now,
   readWindow,
+  // WP-2423 v15: days are listed by their bounds, so a day whose window is refused still shows.
+  readBounds = readWindow,
   readRun,
   limit = 31,
 }) {
@@ -16,7 +18,7 @@ export async function readPilotDailySettlementStatus({
   const first = coverage.firstWindow;
   const verified = await readWindow({ endingAt: first.endsAt });
   if (Object.keys(first).some((k) => verified[k] !== first[k])) return fail();
-  let window = await readWindow();
+  let window = await readBounds();
   const days = [];
   let coverageScanComplete = false;
   for (let n = 0; n < limit; n++) {
@@ -67,7 +69,7 @@ export async function readPilotDailySettlementStatus({
       coverageScanComplete = true;
       break;
     }
-    const previous = await readWindow({ endingAt: window.startsAt });
+    const previous = await readBounds({ endingAt: window.startsAt });
     if (previous.endsAt !== window.startsAt || previous.startsAt >= previous.endsAt) return fail();
     window = previous;
   }

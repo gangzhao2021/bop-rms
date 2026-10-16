@@ -6,7 +6,10 @@ import { parsePilotRuntimeDirectory } from "./pilot-service.mjs";
 import { createConfiguredPilotResources } from "./pilot-configured-resources.mjs";
 import process from "node:process";
 import { startWorkerRuntime } from "../../apps/worker/dist/index.js";
-import { createOutboxWorkload } from "../../apps/worker/dist/outbox-workload.js";
+import {
+  createOutboxWorkload,
+  supervisedCycleFailures,
+} from "../../apps/worker/dist/outbox-workload.js";
 import { createPilotWorkloadHealthObserver } from "./pilot-workload-health.mjs";
 export async function startPilotDailySettlementWorker({
   directory,
@@ -29,7 +32,9 @@ export async function startPilotDailySettlementWorker({
     const loop = createOutboxWorkload({
       pollIntervalMs: 5000,
       drainDeadlineMs: 25000,
-      retry: { maxRetries: 3, shouldRetry: isRetryableDailySettlementFailure },
+      // WP-2423 v15: supervised like the other pilot workloads — a failing cycle is retried
+      // with backoff (attention when it persists), never stops the worker.
+      supervision: supervisedCycleFailures,
       onSnapshot: createPilotWorkloadHealthObserver(directory, "daily-settlement-worker"),
       dispatcher: {
         runOnce: async () => {
@@ -43,6 +48,8 @@ export async function startPilotDailySettlementWorker({
               progress.checkCount > 1
             )
               throw Error("DAILY_SETTLEMENT_EXECUTION_RESULT_INVALID");
+            // Other days progressed; a day still failing keeps the cycle reported as failed.
+            if (Object.hasOwn(progress, "failure")) throw progress.failure;
           }
           return 0;
         },
@@ -85,21 +92,5 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   } catch {
     console.error("DAILY_SETTLEMENT_WORKER_START_UNAVAILABLE");
     process.exitCode = 1;
-  }
-}
-
-export function isRetryableDailySettlementFailure(error) {
-  try {
-    if (!error || typeof error !== "object") return false;
-    const code = Object.getOwnPropertyDescriptor(error, "code")?.value;
-    if (code === "PAYMENT_RECONCILIATION_DEPENDENCY_UNAVAILABLE") return true;
-    const message = Object.getOwnPropertyDescriptor(error, "message")?.value;
-    return [
-      "DAILY_SETTLEMENT_SOURCE_UNAVAILABLE",
-      "SIMULATION_SETTLEMENT_WINDOW_UNAVAILABLE",
-      "tenant database connection is unavailable",
-    ].includes(message);
-  } catch {
-    return false;
   }
 }

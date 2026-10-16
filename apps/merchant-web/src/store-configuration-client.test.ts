@@ -4,6 +4,7 @@ import {
   parseStoreConfigurationView,
   parseStoreConfigurationSnapshot,
   SOLE_OPERATOR_APPROVAL_INVALID_MESSAGE,
+  STORE_HOURS_NO_CHANGE_MESSAGE,
   storeConfigurationKeptRefusals,
   withdrawStoreConfiguration,
 } from "./store-configuration-client.js";
@@ -324,6 +325,8 @@ describe("WP-2423 Q4 hours draft of a configuration from Store setup", () => {
       { error: "sole_operator_approval_invalid" },
       "This change was approved by you alone while Sole operator was off, so it cannot be published. Withdraw it",
     ],
+    // WP-2423 (2026-10-16 v15): the same hours as already saved; nothing was written.
+    [409, { error: "no_change" }, "Nothing changed — these opening hours and closures"],
     [422, { error: "store_configuration_rejected" }, "Change not accepted."],
     [403, { error: "request_denied" }, "Permission denied."],
     [200, { status: "Applied", resultingVersion: 2 }, "Configuration request unavailable."],
@@ -335,6 +338,32 @@ describe("WP-2423 Q4 hours draft of a configuration from Store setup", () => {
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message.startsWith(message)).toBe(true);
   });
+});
+
+it("WP-2423 (2026-10-16 v15): an ordinary hours save of the hours already saved says nothing changed and keeps the form", async () => {
+  const fetcher = vi.fn<typeof fetch>(
+    async () =>
+      new Response(JSON.stringify({ error: "no_change" }), {
+        status: 409,
+        headers: { "content-type": "application/json", "cache-control": "no-store" },
+      }),
+  );
+  const error = await createStoreConfigurationClient(fetcher)
+    .execute(
+      {
+        command: "SaveDraft",
+        operationReference: id(20),
+        auditReference: id(21),
+        expectedVersion: 1,
+        configuration: parseStoreConfigurationSnapshot(configuration("Draft"), id(3)),
+      },
+      "synthetic-csrf",
+      new AbortController().signal,
+    )
+    .catch((reason: unknown) => reason);
+  expect((error as Error).message).toBe(STORE_HOURS_NO_CHANGE_MESSAGE);
+  expect(STORE_HOURS_NO_CHANGE_MESSAGE.startsWith("Nothing changed")).toBe(true);
+  expect(storeConfigurationKeptRefusals.has(STORE_HOURS_NO_CHANGE_MESSAGE)).toBe(true);
 });
 
 describe("WP-2423 (2026-10-16 v15) withdrawal answers", () => {

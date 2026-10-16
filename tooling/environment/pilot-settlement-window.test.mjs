@@ -29,7 +29,10 @@ vi.mock("../../packages/rms/store/src/index.ts", async (original) => {
       }),
   };
 });
-import { createInternalClosedSettlementWindow } from "./pilot-settlement-window.mjs";
+import {
+  createInternalClosedSettlementWindow,
+  createInternalSettlementDays,
+} from "./pilot-settlement-window.mjs";
 const id = (n) => "018f5000-0000-7000-8000-" + String(n).padStart(12, "0");
 function fixture() {
   const configuration = {
@@ -157,4 +160,35 @@ it.each([
   { endingAt: "2026-09-20T08:00:00.000Z", extra: true },
 ])("rejects unsafe or non-boundary historical cursors %j", async (input) => {
   await expect(fixture().run(input)).rejects.toThrow("SIMULATION_SETTLEMENT_WINDOW_UNAVAILABLE");
+});
+
+// WP-2423 v15: discovery finds a day by its bounds even when its window is refused.
+it("gives a day's bounds without verifying every version that governed it", async () => {
+  const f = fixture();
+  const v2 = {
+    ...f.configuration,
+    configurationVersion: 2,
+    businessDayStartLocalTime: "05:00:00",
+    businessDayStartSource: "StoreOverride",
+    effectiveFrom: "2026-09-20T18:00:00.000Z",
+  };
+  mocks.read.mockImplementation(async (_tx, at) => (at >= v2.effectiveFrom ? v2 : f.configuration));
+  const days = createInternalSettlementDays({ resources: f.resources, active: f.active });
+  await expect(days.window()).rejects.toMatchObject({
+    code: "STORE_BUSINESS_DATE_CONFIGURATION_NOT_EFFECTIVE",
+  });
+  mocks.read.mockImplementation(async () => f.configuration);
+  expect(await days.bounds()).toEqual({
+    brandReference: f.resources.scope.brandReference,
+    storeReference: f.resources.scope.storeReference,
+    businessDate: "2026-09-20",
+    startsAt: "2026-09-20T08:00:00.000Z",
+    endsAt: "2026-09-21T08:00:00.000Z",
+  });
+  expect(await days.bounds({ endingAt: "2026-09-20T08:00:00.000Z" })).toMatchObject({
+    businessDate: "2026-09-19",
+    endsAt: "2026-09-20T08:00:00.000Z",
+  });
+  f.active.mockResolvedValue(false);
+  await expect(days.bounds()).rejects.toThrow("SIMULATION_SETTLEMENT_WINDOW_UNAVAILABLE");
 });

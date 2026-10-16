@@ -3,7 +3,7 @@
 import { createPostgresPaymentReconciliationRunSource } from "../../packages/rms/payment/src/index.ts";
 import { readPilotDailySettlementStatus } from "./pilot-daily-settlement-status.mjs";
 import { matchesPilotEnvironment } from "./pilot-environment.mjs";
-import { createInternalClosedSettlementWindow } from "./pilot-settlement-window.mjs";
+import { createInternalSettlementDays } from "./pilot-settlement-window.mjs";
 
 export async function readPilotSettlementProblems({ resources, installation }) {
   const active = async () => {
@@ -20,11 +20,14 @@ export async function readPilotSettlementProblems({ resources, installation }) {
     scope: resources.scope,
     authorize: active,
   });
+  const days = createInternalSettlementDays({ resources, active });
   return readPilotDailySettlementStatus({
     coverage: await installation.loadDailySettlementCoverage(),
     scope: resources.scope,
     now: resources.now,
-    readWindow: createInternalClosedSettlementWindow({ resources, active }),
+    readWindow: days.window,
+    // A day whose window is refused is listed (missing) instead of hiding every day.
+    readBounds: days.bounds,
     readRun: (q) => resources.transactions.run((tx) => read(tx, q)),
   });
 }

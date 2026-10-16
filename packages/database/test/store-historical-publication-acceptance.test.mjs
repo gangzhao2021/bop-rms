@@ -13,7 +13,11 @@ import {
   createStoreConfigurationVersion,
 } from "../../rms/store/src/index.ts";
 import { createMerchantOrdinaryRefundBusinessDate } from "../../../apps/api/src/merchant-ordinary-refund-business-date.ts";
-import { createInternalClosedSettlementWindow } from "../../../tooling/environment/pilot-settlement-window.mjs";
+import {
+  createInternalClosedSettlementWindow,
+  createInternalSettlementDays,
+} from "../../../tooling/environment/pilot-settlement-window.mjs";
+import { createDailySettlementBacklog } from "../../../tooling/environment/pilot-daily-settlement-backlog.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 
 // Synthetic Store/Live Gate facts written as owner; actual Publishing writer and the
@@ -538,3 +542,200 @@ async function prove(context) {
 it("verifies a superseded Store configuration as published for historical settlement while current reads use the newest release", async () => {
   await withIsolatedDatabase({ caseId: "store_historical_pub", root }, prove);
 }, 120_000);
+
+// WP-2423 v15 (2026-10-16): a real Store may edit its hours many times in one business day.
+// 80 published hours edits inside 2026-10-09 (160 change points, several pages) must still
+// resolve that closed day for settlement, read by the actual pilot composition under a
+// NOBYPASSRLS role (the earlier 63-point ceiling refused such a day).
+async function proveManyEdits(context) {
+  const admin = new Client(context.clientConfig),
+    role = `wp2423m_${context.runId}`,
+    edits = 80,
+    ref = (k, slot) => id(0x100000 + k * 0x100 + slot);
+  await admin.connect();
+  try {
+    const v1 = configuration(1);
+    await insertStoreVersion(admin, v1);
+    await publish(admin, v1, {
+      sequence: 1,
+      previous: null,
+      savedAt: v1At,
+      approvedAt: v1At,
+      publishedAt: v1At,
+    });
+    await admin.query(
+      "INSERT INTO bop_publishing.live_gate_version VALUES ($1,'SYNTHETIC-STORE-LIVE-GATE',$2,$3,$4,1,'Production','Approved',$5,$6,$5,$7,$8,$8,'ConfigurationMetadata')",
+      [id(80), tenant, brand, store, id(11), id(10), id(14), v1At],
+    );
+    await admin.query(
+      "INSERT INTO bop_publishing.live_gate_requirement VALUES ($1,$2,$3,$4,1,'SYNTHETIC_TEST','SYNTHETIC_STORE_READY',$5,true,'Accepted',$6,1,$7,NULL,'ConfigurationMetadata')",
+      [id(82), brand, store, id(80), id(11), id(83), validUntil],
+    );
+    const base = configuration(2);
+    let previous = v1;
+    for (let n = 0; n < edits; n++) {
+      const version = n + 2,
+        savedAt = new Date(Date.parse("2026-10-09T12:00:00.000Z") + n * 300_000).toISOString(),
+        approvedAt = new Date(Date.parse(savedAt) + 60_000).toISOString(),
+        publishedAt = new Date(Date.parse(savedAt) + 120_000).toISOString();
+      const edit = createStoreConfigurationVersion({
+        ...base,
+        configurationReference: ref(version, 1),
+        configurationVersion: version,
+        weeklySchedule: base.weeklySchedule.map((day) => ({
+          ...day,
+          intervals: day.intervals.map((interval) => ({
+            ...interval,
+            endLocalTime: `${String(20 + (n % 3)).padStart(2, "0")}:${String(n % 60).padStart(2, "0")}:00`,
+          })),
+        })),
+        effectiveFrom: savedAt,
+        supersedesConfigurationReference: previous.configurationReference,
+        approvalEvidenceReference: ref(version, 12),
+        publicationReference: ref(version, 13),
+        createdAt: savedAt,
+        updatedAt: publishedAt,
+      });
+      await insertStoreVersion(admin, edit);
+      await publish(admin, edit, {
+        sequence: version,
+        previous: previous.publicationReference,
+        savedAt,
+        approvedAt,
+        publishedAt,
+      });
+      previous = edit;
+    }
+    const points = await admin.query(
+      "SELECT count(DISTINCT t)::int AS n FROM (SELECT effective_from AS t FROM rms_store.store_configuration_version UNION ALL SELECT created_at FROM rms_store.store_configuration_version UNION ALL SELECT updated_at FROM rms_store.store_configuration_version UNION ALL SELECT recorded_at FROM rms_store.store_configuration_publication_content) p WHERE t > '2026-10-09T08:00:00Z' AND t < '2026-10-10T08:00:00Z'",
+    );
+    assert.equal(points.rows[0].n, 2 * edits);
+
+    await admin.query(
+      `CREATE ROLE ${role} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS`,
+    );
+    await admin.query(`GRANT USAGE ON SCHEMA rms_store,bop_publishing,platform_helpers TO ${role}`);
+    await admin.query(
+      `GRANT EXECUTE ON FUNCTION platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO ${role}`,
+    );
+    await admin.query(`GRANT SELECT ON ALL TABLES IN SCHEMA rms_store TO ${role}`);
+    await admin.query(
+      `GRANT UPDATE ON rms_store.store_configuration_authoring_operation,rms_store.store_configuration_version,rms_store.store_configuration_publication_content,rms_store.store_configuration_operation,rms_store.store_service_pause_content,rms_store.store_service_resume_content,rms_store.store_weekly_service_period,rms_store.store_service_exception,rms_store.store_service_exception_content,rms_store.store_service_exception_interval TO ${role}`,
+    );
+    await admin.query(
+      `GRANT SELECT,UPDATE ON bop_publishing.publishing_mutation_record,bop_publishing.live_gate_version,bop_publishing.live_gate_requirement TO ${role}`,
+    );
+    const transactions = {
+      async run(work) {
+        await admin.query("BEGIN");
+        try {
+          await admin.query("SET LOCAL ROLE " + role);
+          return await work({ query: (sql, values) => admin.query(sql, [...values]) });
+        } finally {
+          await admin.query("ROLLBACK");
+        }
+      },
+    };
+    const operating = {
+      tenantReference: tenant,
+      brandReference: brand,
+      storeReference: store,
+      configurationType: "STORE_CONFIGURATION",
+      purposeCode: "STORE_CONFIGURATION",
+      requiredLiveGateRequirementCodes: ["SYNTHETIC_STORE_READY"],
+      timeZone: "America/Toronto",
+      hashContent,
+      authorize: async () => true,
+    };
+    const window = createInternalClosedSettlementWindow({
+      resources: {
+        scope: { brandReference: brand, storeReference: store },
+        operating,
+        transactions,
+        now: () => now,
+      },
+      active: async () => true,
+    });
+    // The busy day closes on the last edit's identity with the locked 04:00 boundaries.
+    const busy = await window({ endingAt: "2026-10-10T08:00:00.000Z" });
+    assert.equal(busy.businessDate, "2026-10-09");
+    assert.equal(busy.startsAt, "2026-10-09T08:00:00.000Z");
+    assert.equal(busy.endsAt, "2026-10-10T08:00:00.000Z");
+    assert.equal(busy.configurationVersion, edits + 1);
+    assert.equal(busy.configurationReference, previous.configurationReference);
+    assert.equal(busy.contentDigest, hashContent(previous));
+    // The day before (wholly v1) and the day after (wholly the last edit) are unaffected.
+    const before = await window({ endingAt: "2026-10-09T08:00:00.000Z" });
+    assert.equal(before.businessDate, "2026-10-08");
+    assert.equal(before.configurationReference, v1.configurationReference);
+    const latest = await window();
+    assert.equal(latest.businessDate, "2026-10-10");
+    assert.equal(latest.configurationReference, previous.configurationReference);
+
+    // Day-end backlog over these actual days (settlement execution stubbed at the scheduler):
+    // a day that keeps failing (forced) steps aside; the busy day and the others still settle,
+    // the failure stays reported, and the day settles once its cause is gone.
+    const days = createInternalSettlementDays({
+      resources: {
+        scope: { brandReference: brand, storeReference: store },
+        operating,
+        transactions,
+        now: () => now,
+      },
+      active: async () => true,
+    });
+    const first = await days.window({ endingAt: "2026-09-21T08:00:00.000Z" });
+    let clock = Date.parse(now),
+      forced = true;
+    const settled = [],
+      reported = [];
+    const backlog = createDailySettlementBacklog({
+      coverage: {
+        firstWindow: Object.fromEntries(
+          Object.entries(first).filter(([k]) => !["brandReference", "storeReference"].includes(k)),
+        ),
+      },
+      scope: { brandReference: brand, storeReference: store },
+      now: () => new Date(clock).toISOString(),
+      readWindow: days.window,
+      readBounds: days.bounds,
+      prepare: async () => assert.fail("not prepared in this acceptance"),
+      readRun: async () => null,
+      execute: async () => assert.fail("not executed in this acceptance"),
+      onDayFailure: ({ businessDate }) => reported.push(businessDate),
+      createScheduler:
+        ({ readWindow }) =>
+        async () => {
+          const day = await readWindow();
+          if (forced && day.businessDate === "2026-10-08")
+            throw Error("FORCED_DAY_SETTLEMENT_UNAVAILABLE");
+          settled.push(`${day.businessDate}:${day.configurationVersion}`);
+          return { status: "Created", checkCount: 1 };
+        },
+    });
+    let last;
+    for (let n = 0; n < 60; n++) {
+      last = await backlog().catch((error) => ({ thrown: error }));
+      if (last.status === "Idle" && settled.includes("2026-10-10:" + (edits + 1))) break;
+    }
+    assert.equal(settled.length, 20); // 2026-09-20 … 2026-10-10 (21 days) except the forced day
+    assert.ok(!settled.some((entry) => entry.startsWith("2026-10-08:")));
+    assert.ok(settled.includes("2026-10-09:" + (edits + 1)));
+    assert.equal(last.failure.message, "FORCED_DAY_SETTLEMENT_UNAVAILABLE");
+    assert.deepEqual(reported, ["2026-10-08", "2026-10-08", "2026-10-08"]);
+    forced = false;
+    clock += 60_000;
+    const repaired = await backlog();
+    assert.equal(repaired.status, "Created");
+    assert.equal(repaired.failure, undefined);
+    assert.ok(settled.includes("2026-10-08:1"));
+  } finally {
+    await admin.query("RESET ROLE").catch(() => undefined);
+    await admin.query(`DROP ROLE IF EXISTS ${role}`).catch(() => undefined);
+    await admin.end();
+  }
+}
+
+it("settles a business day with 80 published hours edits (more than 63 change points)", async () => {
+  await withIsolatedDatabase({ caseId: "store_many_edits", root }, proveManyEdits);
+}, 300_000);
