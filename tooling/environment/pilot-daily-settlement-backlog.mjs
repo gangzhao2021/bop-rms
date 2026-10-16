@@ -1,5 +1,11 @@
 import { createDailySettlementScheduler } from "./pilot-daily-settlement-scheduler.mjs";
 
+/**
+ * Bounded work per cycle: day discoveries plus days already recorded (Duplicate), so a restart
+ * catches up in a few cycles instead of two 5-second cycles per covered day. A new record
+ * (Created) or a failure always ends the cycle.
+ */
+export const DAILY_SETTLEMENT_STEPS_PER_CYCLE = 32;
 /** Failed attempts in a row after which a day steps aside so later days still settle. */
 export const DAILY_SETTLEMENT_DAY_ATTEMPTS_IN_PLACE = 3;
 /** Retry delay for a day that stepped aside after `failures` attempts: 1 minute after stepping
@@ -26,6 +32,9 @@ const dayOf = (window) =>
  * later days settle, and the day is retried on its own with growing delay until it settles.
  * While any day is unsettled an idle result carries `failure` (the day's own error) so the worker
  * reports it and the operations alert stays raised; `onDayFailure` records each failed attempt.
+ * Coverage is the whole window from the first covered day: a new process walks every day again
+ * (days already recorded pass as Duplicate, many per cycle), so a day that failed or stepped aside
+ * before a restart is settled after it.
  */
 export function createDailySettlementBacklog({
   coverage,
@@ -120,59 +129,73 @@ export function createDailySettlementBacklog({
           record(due.day, due.failures, error);
         }
       }
-      if (!scan && queue.length === 0) {
-        const latest = await readBounds();
-        if (latest.endsAt < first.endsAt) return fail();
-        if (latest.endsAt === completedThrough)
-          return withFailure({ status: "Idle", checkCount: 0 });
-        if (completedThrough !== null && latest.endsAt < completedThrough) return fail();
-        scan = dayOf(latest);
-        discovered = 0;
-      }
-      if (scan) {
-        const floor = completedThrough ?? first.startsAt;
-        if (scan.startsAt < floor || scan.startsAt >= scan.endsAt || ++discovered > 3660)
-          return fail();
-        if (scan.startsAt === floor) {
-          queue.unshift(scan);
-          scan = null;
-        } else {
-          const previous = await readBounds({ endingAt: scan.startsAt });
-          if (previous.endsAt !== scan.startsAt || previous.startsAt >= previous.endsAt)
+      let steps = 0;
+      for (;;) {
+        if (!scan && queue.length === 0) {
+          const latest = await readBounds();
+          steps += 1;
+          if (latest.endsAt < first.endsAt) return fail();
+          if (latest.endsAt === completedThrough)
+            return withFailure({ status: "Idle", checkCount: 0 });
+          if (completedThrough !== null && latest.endsAt < completedThrough) return fail();
+          scan = dayOf(latest);
+          discovered = 0;
+        }
+        while (scan) {
+          const floor = completedThrough ?? first.startsAt;
+          if (scan.startsAt < floor || scan.startsAt >= scan.endsAt || ++discovered > 3660)
             return fail();
-          queue.unshift(scan);
-          scan = dayOf(previous);
+          if (scan.startsAt === floor) {
+            queue.unshift(scan);
+            scan = null;
+          } else {
+            if (steps >= DAILY_SETTLEMENT_STEPS_PER_CYCLE)
+              return withFailure({ status: "Idle", checkCount: 0 });
+            const previous = await readBounds({ endingAt: scan.startsAt });
+            steps += 1;
+            if (previous.endsAt !== scan.startsAt || previous.startsAt >= previous.endsAt)
+              return fail();
+            queue.unshift(scan);
+            scan = dayOf(previous);
+          }
+        }
+        const day = queue[0];
+        if (!day) return fail();
+        current ??= schedulerFor(day);
+        try {
+          const result = await settle(current);
+          steps += 1;
+          inPlaceFailures = 0;
+          completedThrough = day.endsAt;
+          queue.shift();
+          current = null;
+          // An already recorded day wrote nothing: move on to the next one in this cycle.
+          if (
+            result.status === "Duplicate" &&
+            queue.length > 0 &&
+            steps < DAILY_SETTLEMENT_STEPS_PER_CYCLE
+          )
+            continue;
+          return withFailure(result);
+        } catch (error) {
+          inPlaceFailures += 1;
+          record(day, inPlaceFailures, error);
+          if (inPlaceFailures < DAILY_SETTLEMENT_DAY_ATTEMPTS_IN_PLACE) throw error;
+          // Step aside: later days settle; this day keeps being retried on its own.
+          deferred.set(day.endsAt, {
+            day,
+            scheduler: current,
+            failures: inPlaceFailures,
+            error,
+            failedAt: at,
+            retryAt: at + dailySettlementDayRetryDelayMs(inPlaceFailures),
+          });
+          inPlaceFailures = 0;
+          completedThrough = day.endsAt;
+          queue.shift();
+          current = null;
           return withFailure({ status: "Idle", checkCount: 0 });
         }
-      }
-      const day = queue[0];
-      if (!day) return fail();
-      current ??= schedulerFor(day);
-      try {
-        const result = await settle(current);
-        inPlaceFailures = 0;
-        completedThrough = day.endsAt;
-        queue.shift();
-        current = null;
-        return withFailure(result);
-      } catch (error) {
-        inPlaceFailures += 1;
-        record(day, inPlaceFailures, error);
-        if (inPlaceFailures < DAILY_SETTLEMENT_DAY_ATTEMPTS_IN_PLACE) throw error;
-        // Step aside: later days settle; this day keeps being retried on its own.
-        deferred.set(day.endsAt, {
-          day,
-          scheduler: current,
-          failures: inPlaceFailures,
-          error,
-          failedAt: at,
-          retryAt: at + dailySettlementDayRetryDelayMs(inPlaceFailures),
-        });
-        inPlaceFailures = 0;
-        completedThrough = day.endsAt;
-        queue.shift();
-        current = null;
-        return withFailure({ status: "Idle", checkCount: 0 });
       }
     } finally {
       running = false;

@@ -1,12 +1,16 @@
 import { expect, it, vi } from "vitest";
-import { createDailySettlementBacklog } from "./pilot-daily-settlement-backlog.mjs";
-function fixture() {
+import {
+  DAILY_SETTLEMENT_STEPS_PER_CYCLE,
+  createDailySettlementBacklog,
+} from "./pilot-daily-settlement-backlog.mjs";
+function fixture(count = 3) {
   const scope = { brandReference: "brand", storeReference: "store" };
-  const windows = [0, 1, 2].map((n) => ({
+  const instant = (n) => new Date(Date.UTC(2026, 8, 20 + n, 8)).toISOString();
+  const windows = Array.from({ length: count }, (_, n) => ({
     ...scope,
-    businessDate: "2026-09-" + (20 + n),
-    startsAt: "2026-09-" + (20 + n) + "T08:00:00.000Z",
-    endsAt: "2026-09-" + (21 + n) + "T08:00:00.000Z",
+    businessDate: instant(n).slice(0, 10),
+    startsAt: instant(n),
+    endsAt: instant(n + 1),
     configurationReference: "config",
     configurationVersion: 1,
     contentDigest: "digest",
@@ -14,9 +18,9 @@ function fixture() {
   const persisted = new Set(),
     calls = [],
     prepare = vi.fn();
-  let latest = windows[2],
+  let latest = windows[count - 1],
     failed = false;
-  let at = Date.parse("2026-09-24T12:00:00.000Z");
+  let at = Date.parse(windows[count - 1].endsAt) + 4 * 3_600_000;
   const ports = {
     scope,
     now: () => new Date(at).toISOString(),
@@ -60,11 +64,9 @@ function fixture() {
     },
   };
 }
-it("discovers one historical window per tick then fills oldest first", async () => {
+it("discovers the covered days in one cycle then records one day per cycle, oldest first", async () => {
   const f = fixture(),
     tick = f.make();
-  expect((await tick()).status).toBe("Idle");
-  expect((await tick()).status).toBe("Idle");
   for (let i = 0; i < 3; i++) expect((await tick()).status).toBe("Created");
   expect(f.calls).toEqual(["2026-09-20", "2026-09-21", "2026-09-22"]);
   expect((await tick()).status).toBe("Idle");
@@ -72,22 +74,18 @@ it("discovers one historical window per tick then fills oldest first", async () 
 it("restarts across a partially finished backlog without preparing completed days", async () => {
   const f = fixture(),
     tick = f.make();
-  await tick();
-  await tick();
-  await tick();
+  expect((await tick()).status).toBe("Created");
   const resumed = f.make();
-  await resumed();
-  await resumed();
-  expect((await resumed()).status).toBe("Duplicate");
+  // 2026-09-20 passes as Duplicate; the same cycle records 2026-09-21.
   expect((await resumed()).status).toBe("Created");
   expect((await resumed()).status).toBe("Created");
+  expect((await resumed()).status).toBe("Idle");
+  expect(f.calls).toEqual(["2026-09-20", "2026-09-20", "2026-09-21", "2026-09-22"]);
   expect(f.prepare).toHaveBeenCalledTimes(3);
 });
 it("retains the oldest pending day through a failure", async () => {
   const f = fixture(),
     tick = f.make();
-  await tick();
-  await tick();
   f.fail();
   await expect(tick()).rejects.toThrow();
   expect((await tick()).status).toBe("Created");
@@ -125,8 +123,6 @@ it("lets later days settle while a failing day is retried on its own", async () 
   });
   f.ports.onDayFailure = (entry) => failures.push([entry.businessDate, entry.failures]);
   const tick = f.make();
-  await tick();
-  await tick();
   expect((await tick()).status).toBe("Created"); // 2026-09-20
   // In place first (a passing outage), then the day steps aside.
   await expect(tick()).rejects.toThrow("STORE_BUSINESS_DATE_UNAVAILABLE");
@@ -172,4 +168,44 @@ it("finds days before and after a day whose window is refused", async () => {
   const tick = f.make();
   for (let n = 0; n < 8; n++) await tick().catch(() => undefined);
   expect([...f.persisted]).toEqual(["2026-09-20", "2026-09-22"]);
+});
+
+// WP-2423 v15 (2026-10-16): a restart loses the in-process cursor and the stepped-aside list; the
+// whole coverage window is walked again, so the missed day is settled and nothing is skipped.
+it("settles after a restart a day that failed and stepped aside before it", async () => {
+  const f = fixture();
+  let broken = true;
+  const readWindow = f.ports.readWindow;
+  f.ports.readBounds = vi.fn(async (input) => readWindow(input));
+  f.ports.readWindow = vi.fn(async (input) => {
+    if (broken && input?.endingAt === f.windows[1].endsAt)
+      throw Error("STORE_BUSINESS_DATE_UNAVAILABLE");
+    return readWindow(input);
+  });
+  const before = f.make();
+  for (let n = 0; n < 6; n++) await before().catch(() => undefined);
+  expect([...f.persisted]).toEqual(["2026-09-20", "2026-09-22"]);
+  expect((await before()).failure.message).toBe("STORE_BUSINESS_DATE_UNAVAILABLE");
+  // Fixed and restarted before the stepped-aside retry was due.
+  broken = false;
+  const after = f.make();
+  expect(await after()).toEqual({ status: "Created", checkCount: 1 });
+  expect([...f.persisted].sort()).toEqual(["2026-09-20", "2026-09-21", "2026-09-22"]);
+  expect(await after()).toEqual({ status: "Duplicate", checkCount: 1 }); // 2026-09-22
+  expect(await after()).toEqual({ status: "Idle", checkCount: 0 });
+  expect(f.prepare).toHaveBeenCalledTimes(3);
+});
+it("catches up after a restart in a few cycles however many days are already recorded", async () => {
+  const days = 2 * DAILY_SETTLEMENT_STEPS_PER_CYCLE + 5,
+    f = fixture(days);
+  for (const w of f.windows.slice(0, -1)) f.persisted.add(w.businessDate);
+  const tick = f.make();
+  let cycles = 0,
+    result;
+  do result = await tick();
+  while (result.status !== "Created" && ++cycles < days);
+  expect(cycles).toBeLessThanOrEqual(5);
+  expect(f.persisted.has(f.windows[days - 1].businessDate)).toBe(true);
+  expect(f.prepare).toHaveBeenCalledTimes(1);
+  expect(await tick()).toEqual({ status: "Idle", checkCount: 0 });
 });
