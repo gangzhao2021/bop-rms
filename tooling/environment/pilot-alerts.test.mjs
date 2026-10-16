@@ -328,6 +328,25 @@ describe("WP-2423 Q13 messages are plain language and carry no private data", ()
     expect(done.subject).toBe("Main St: Resolved - No recent backup");
     expect(done.severity).toBe("resolved");
   });
+  it("WP-2423: warns when orders from earlier days still hold stock, in staff words", () => {
+    const o = healthy();
+    o.business.heldStock = { count: 0, openCount: 0, oldestAgeMs: 0 };
+    expect(keys(evaluateAlertConditions(o))).toEqual([]);
+    o.business.heldStock = { count: 11, openCount: 10, oldestAgeMs: 6 * 24 * 60 * MIN };
+    const c = evaluateAlertConditions(o);
+    expect(keys(c)).toEqual(["orders.held_stock"]);
+    expect(c.get("orders.held_stock").severity).toBe("warning");
+    const text = renderAlert("orders.held_stock", c.get("orders.held_stock").params);
+    expect(text.title).toBe("Orders from earlier days are still holding stock");
+    expect(text.summary).toContain("11 orders from earlier days still have ingredients set aside");
+    expect(text.action).toContain("cancel it");
+    expect(text.runbook).toBe("alert-orders-held-stock");
+    expect(text.summary.length).toBeLessThanOrEqual(600);
+    expect(text.action.length).toBeLessThanOrEqual(400);
+    expect(`${text.title} ${text.summary} ${text.action}`).not.toMatch(/[A-Z]{2,}_[A-Z]/u);
+    o.business.heldStock = "unreadable";
+    expect(keys(evaluateAlertConditions(o))).toEqual(["monitor.source"]);
+  });
   it("uses the same closed key list as the merchant Home read", () => {
     const api = readFileSync(
       new URL("../../apps/api/src/merchant-operations-alerts.ts", import.meta.url),

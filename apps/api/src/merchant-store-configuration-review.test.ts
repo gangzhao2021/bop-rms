@@ -380,6 +380,9 @@ it("WP-2423: reads with two full resolutions; owner reads take the run's guard",
   await expect(service.read("synthetic")).rejects.toThrow("STORE_CONFIGURATION_PERMISSION_DENIED");
 });
 
+/** WP-2423 (v15 2026-10-16): a publication reads its sole-operator mark; none is recorded here. */
+const noSoleOperatorMark = { query: async () => ({ rows: [], rowCount: 0 }) };
+
 describe("WP-2423 Q4: Publishing decisions of a configuration from Store setup", () => {
   const basis = {
     profile: "StoreSetupConfigurationBasisV2",
@@ -431,7 +434,9 @@ describe("WP-2423 Q4: Publishing decisions of a configuration from Store setup",
       const service = createMerchantStoreConfiguration({
         persistence: {
           now: () => at,
-          transactions: { run: async (work: (tx: object) => Promise<unknown>) => work({}) },
+          transactions: {
+            run: async (work: (tx: object) => Promise<unknown>) => work(noSoleOperatorMark),
+          },
         },
         authentication: { authorize: async () => ({ sessionReference: id(30) }) },
         actionPermissions: {
@@ -487,7 +492,9 @@ describe("WP-2423 Q4: Publishing decisions of a configuration from Store setup",
     const service = createMerchantStoreConfiguration({
       persistence: {
         now: () => at,
-        transactions: { run: async (work: (tx: object) => Promise<unknown>) => work({}) },
+        transactions: {
+          run: async (work: (tx: object) => Promise<unknown>) => work(noSoleOperatorMark),
+        },
       },
       authentication: { authorize: async () => ({ sessionReference: id(30) }) },
       actionPermissions: {

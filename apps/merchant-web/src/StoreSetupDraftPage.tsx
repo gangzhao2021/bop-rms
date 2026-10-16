@@ -261,6 +261,8 @@ const messages: Record<StoreSetupClientError["code"], string> = {
   OpenChangeByAnother:
     "Someone else's configuration change is still waiting. It must be approved and published, or declined, before a new configuration can be created.",
   Withdrawn: "This configuration was withdrawn or declined. Create a new one from the saved setup.",
+  SoleOperatorApprovalInvalid:
+    "This configuration was approved by you alone while Sole operator was off, so it cannot be published. Withdraw it, then send a new change for approval.",
 };
 const root = (view: StoreSetupWorkspace) => ({
   reference: view.setup.snapshot?.setupDraftReference ?? null,
@@ -2381,9 +2383,11 @@ const liveOperatingFields = [
   "receiptReference",
 ] as const;
 /** The setup change "Use the live Store's settings" makes: tax and Brand settings of the live Store,
- * its holidays when the setup has none, a start as soon as it is published (server time), and the
- * live Store's time zone, business day start, service modes, opening hours and order limits where
- * the setup has none yet. Settings already in the setup are kept. */
+ * its opening hours (DEC-STORE-SETUP-PUBLICATION 13: using the live settings carries what the live
+ * Store runs with, so publishing does not silently change its hours; the screen says so before the
+ * button is used), its holidays when the setup has none, a start as soon as it is published (server
+ * time), and the live Store's time zone, business day start, service modes, order limits and receipt
+ * template where the setup has none yet. Those other settings already in the setup are kept. */
 export function liveStoreSettingsChange(
   content: StoreSetupContent,
   live: StoreSetupLiveConfiguration & { readonly current: StoreConfigurationSnapshot },
@@ -2396,6 +2400,7 @@ export function liveStoreSettingsChange(
   ) as Partial<StoreSetupContent>;
   return {
     ...operating,
+    weeklySchedule: { state: "Configured", value: current.weeklySchedule },
     taxConfigurationReference: { state: "Configured", value: liveStoreTaxReference(live) },
     brandBaseVersionReference: { state: "Configured", value: current.brandBaseVersionReference },
     exceptions:
@@ -2405,6 +2410,45 @@ export function liveStoreSettingsChange(
     effectiveFrom: { state: "Configured", value: live.observedAt },
     effectiveUntil: { state: "Configured", value: null },
   };
+}
+type WeeklySchedule = StoreConfigurationSnapshot["weeklySchedule"];
+type ScheduleInterval = WeeklySchedule[number]["intervals"][number];
+const clock = (value: string) => value.slice(0, 5);
+function intervalText(interval: ScheduleInterval, detailed: boolean): string {
+  const times = `${clock(interval.startLocalTime)}\u2013${clock(interval.endLocalTime)}${
+    interval.endsNextDay ? " (next day)" : ""
+  }`;
+  if (!detailed) return times;
+  const services = interval.serviceModes
+    .map((mode) => (mode === "DineIn" ? "Dine in" : mode))
+    .join(", ");
+  return `${times} (${services}; last orders ${waitMinutesText(interval.orderCutoffSeconds)} min before closing; preparation ${waitMinutesText(interval.leadTimeSeconds)} min)`;
+}
+function dayText(intervals: readonly ScheduleInterval[] | undefined, detailed: boolean): string {
+  return intervals === undefined || intervals.length === 0
+    ? "closed"
+    : intervals.map((interval) => intervalText(interval, detailed)).join(", ");
+}
+/**
+ * WP-2423 (v15): how publishing this setup changes the live Store's opening hours, one line per
+ * day that changes ("Sunday: 10:00–20:00 becomes 10:00–15:00"); times alone when they differ,
+ * otherwise the service modes and wait times that do. Empty when the hours are the same.
+ */
+export function openingHoursChanges(
+  live: WeeklySchedule,
+  setup: WeeklySchedule,
+): readonly string[] {
+  const byDay = (schedule: WeeklySchedule) =>
+    new Map(schedule.map((day) => [day.isoWeekday, day.intervals] as const));
+  const from = byDay(live),
+    to = byDay(setup);
+  return days.flatMap((name, i) => {
+    const before = from.get(i + 1),
+      after = to.get(i + 1);
+    if (JSON.stringify(before ?? []) === JSON.stringify(after ?? [])) return [];
+    const detailed = dayText(before, false) === dayText(after, false);
+    return [`${name}: ${dayText(before, detailed)} becomes ${dayText(after, detailed)}`];
+  });
 }
 /** The live (published) Store configuration as the publication panel read it. */
 export interface StoreSetupLiveConfiguration {
@@ -2456,7 +2500,11 @@ export function StoreSetupLiveSettings({
   const missingOperating = liveOperatingFields.filter(
     (field) => content[field].state !== "Configured",
   );
-  const complete = tax && brand && closures && start && missingOperating.length === 0;
+  const complete = tax && brand && closures && start && hours && missingOperating.length === 0;
+  const hourChanges =
+    content.weeklySchedule.state === "Configured"
+      ? openingHoursChanges(current.weeklySchedule, content.weeklySchedule.value)
+      : [];
   return (
     <section aria-label="Settings from the live Store">
       <h4>Settings from the live Store</h4>
@@ -2501,9 +2549,27 @@ export function StoreSetupLiveSettings({
           Opening hours:{" "}
           {hours
             ? "same as the live Store"
-            : "different from the live Store; publishing this setup changes them"}
+            : content.weeklySchedule.state !== "Configured"
+              ? "not set yet"
+              : hourChanges.length === 0
+                ? "different from the live Store"
+                : "different from the live Store (see below)"}
         </li>
       </ul>
+      {!hours && hourChanges.length > 0 && (
+        <div role="note" aria-label="Opening hours change">
+          <p>Publishing this setup changes the Store&rsquo;s opening hours:</p>
+          <ul>
+            {hourChanges.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+          <p>
+            To keep the hours the Store opens with today, choose &ldquo;Use the live Store&rsquo;s
+            opening hours&rdquo; and save the setup draft before sending or publishing it.
+          </p>
+        </div>
+      )}
       {!hours && (
         <button
           type="button"
@@ -2522,6 +2588,12 @@ export function StoreSetupLiveSettings({
       >
         Use the live Store&rsquo;s settings
       </button>
+      {!hours && content.weeklySchedule.state === "Configured" && (
+        <p>
+          &ldquo;Use the live Store&rsquo;s settings&rdquo; also replaces the opening hours in this
+          setup with the live Store&rsquo;s.
+        </p>
+      )}
     </section>
   );
 }

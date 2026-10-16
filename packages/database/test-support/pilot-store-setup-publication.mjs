@@ -28,7 +28,7 @@ import {
 import { seedJourneyStorePublication } from "./dine-in-journey-seed.mjs";
 import { seedMerchantAcceptanceSession } from "./merchant-acceptance-session.mjs";
 import { seedTaxConfiguration } from "./tax-configuration-seed.mjs";
-import { seedSoleOperatorSetting, seedStepUp } from "./sole-operator-brand-gate.mjs";
+import { seedSoleOperatorHistory, seedStepUp } from "./sole-operator-brand-gate.mjs";
 import { digitalReceiptRequiredFields } from "../../rms/printing-device/src/index.ts";
 import { prepareReceiptTemplatePublication } from "./receipt-template-publication.mjs";
 
@@ -762,15 +762,25 @@ export async function exercisePilotStoreSetupPublication(input) {
     });
     // Setting on (owner-seeded Organization fact), but the second Owner still holds approval.
     const sid = (n) => id(0x9c000 + n);
-    await seedSoleOperatorSetting(admin, {
+    // WP-2423 v15 defect (2026-10-16): with the setting history past version 10 and the latest
+    // version Off, sole operator is off (a text sort read version 9 "On" as the latest).
+    const history = {
       id: sid,
-      n: 0,
+      n: 0x100,
       tenantReference: scope.tenantReference,
       brandReference: scope.brandReference,
       actorReference: owner,
-      state: "On",
-      version: 1,
+    };
+    assert.equal(
+      await seedSoleOperatorHistory(admin, { ...history, atLeast: 11, latest: "Off" }),
+      12,
+    );
+    await listen(session, async (send, selected) => {
+      const workspace = await workspaceOf(send);
+      assert.equal(workspace.body.soleOperator.status, "NotSet");
+      await refusedUnchanged(() => ownApproval(send, selected, ownHead), 403, "sole_operator_off");
     });
+    await seedSoleOperatorHistory(admin, { ...history, atLeast: 13, latest: "On" });
     await listen(session, async (send, selected) => {
       const workspace = await workspaceOf(send);
       assert.equal(workspace.body.soleOperator.status, "OtherApprovers");

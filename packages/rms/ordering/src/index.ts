@@ -308,6 +308,8 @@ export {
   listStoreCounterOrders,
   listStoreOrderRoundSubmissions,
   listStoreOrdersWithRoundsSince,
+  listStoreOrdersOfSubmissions,
+  type StoreSubmissionOrder,
   type StoreOrderRoundSubmission,
   listStoreUnfulfillablePaidOrders,
   loadOrderNotAcceptedClosure,

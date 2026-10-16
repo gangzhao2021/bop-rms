@@ -315,6 +315,12 @@ describe("WP-2423 Q4 hours draft of a configuration from Store setup", () => {
       { error: "store_configuration_conflict" },
       "Source changed. Refresh before trying again.",
     ],
+    // WP-2423 (v15 2026-10-16): approved alone while sole operator was off; withdraw it.
+    [
+      409,
+      { error: "sole_operator_approval_invalid" },
+      "This change was approved by you alone while Sole operator was off, so it cannot be published. Withdraw it",
+    ],
     [422, { error: "store_configuration_rejected" }, "Change not accepted."],
     [403, { error: "request_denied" }, "Permission denied."],
     [200, { status: "Applied", resultingVersion: 2 }, "Configuration request unavailable."],

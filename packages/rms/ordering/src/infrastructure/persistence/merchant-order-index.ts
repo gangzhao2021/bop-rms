@@ -735,3 +735,80 @@ export async function listStoreOrderBatchPayments(
     }),
   );
 }
+
+/** The Order round (submission) of this Store and what Ordering knows about whether it ended. */
+export interface StoreSubmissionOrder {
+  readonly submissionReference: string;
+  readonly orderReference: string;
+  readonly orderBatchReference: string;
+  readonly orderNumber: string;
+  readonly orderType: "Pickup" | "DineIn";
+  readonly businessDate: string;
+  /**
+   * Ordering's own end facts: the Order was terminated (cancelled or closed by the System), handed
+   * over (fulfilment completed) or its table closed, or this round was cancelled. Not-collected
+   * pickup closure is Fulfillment's fact, so callers combine it themselves.
+   */
+  readonly ended: boolean;
+}
+
+/**
+ * WP-2423 (2026-10-16 v15 stock leak): the Store's Orders for the given rounds (submissions), with
+ * their business day and whether Ordering recorded that they ended. Rounds of other Stores are not
+ * returned. Caller authorizes and owns the transaction.
+ */
+export async function listStoreOrdersOfSubmissions(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  submissionReferences: readonly string[],
+): Promise<readonly StoreSubmissionOrder[]> {
+  if (submissionReferences.length === 0) return Object.freeze([]);
+  if (submissionReferences.length > 500) throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+  const submissions = submissionReferences.map((reference) => parseOrderingReference(reference));
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [scope.brandReference, scope.storeReference],
+  );
+  const rows = (
+    await transaction.query(
+      `SELECT b.submission_id::text submission_id,b.order_id::text order_id,b.order_batch_id::text batch_id,
+          h.order_number,h.order_type,h.business_date::text business_date,
+          (EXISTS (SELECT 1 FROM rms_ordering.order_termination_record t
+              WHERE t.brand_id=h.brand_id AND t.store_id=h.store_id AND t.order_id=h.order_id)
+            OR EXISTS (SELECT 1 FROM rms_ordering.order_fulfillment_completion_record c
+              WHERE c.brand_id=h.brand_id AND c.store_id=h.store_id AND c.order_id=h.order_id)
+            OR EXISTS (SELECT 1 FROM rms_ordering.order_closure_version z
+              WHERE z.brand_id=h.brand_id AND z.store_id=h.store_id AND z.order_id=h.order_id AND z.status='Closed')
+            OR EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation s
+              WHERE s.brand_id=b.brand_id AND s.store_id=b.store_id AND s.order_batch_id=b.order_batch_id)
+            OR EXISTS (SELECT 1 FROM rms_ordering.order_batch_checkout_cancellation x
+              WHERE x.brand_id=b.brand_id AND x.store_id=b.store_id AND x.order_batch_id=b.order_batch_id)) AS ended
+        FROM rms_ordering.order_batch b JOIN rms_ordering.order_header h ON h.order_id=b.order_id
+          AND h.brand_id=b.brand_id AND h.store_id=b.store_id
+        WHERE b.brand_id=$1 AND b.store_id=$2 AND b.submission_id=ANY($3::uuid[])
+        ORDER BY h.business_date,h.order_id,b.order_batch_id`,
+      [scope.brandReference, scope.storeReference, submissions],
+    )
+  ).rows as readonly Record<string, unknown>[];
+  return Object.freeze(
+    rows.map((row) => {
+      if (
+        typeof row.order_number !== "string" ||
+        (row.order_type !== "Pickup" && row.order_type !== "DineIn") ||
+        typeof row.business_date !== "string" ||
+        !/^\d{4}-\d{2}-\d{2}$/u.test(row.business_date) ||
+        typeof row.ended !== "boolean"
+      )
+        throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+      return Object.freeze({
+        submissionReference: parseOrderingReference(row.submission_id),
+        orderReference: parseOrderingReference(row.order_id),
+        orderBatchReference: parseOrderingReference(row.batch_id),
+        orderNumber: row.order_number,
+        orderType: row.order_type,
+        businessDate: row.business_date,
+        ended: row.ended,
+      });
+    }),
+  );
+}

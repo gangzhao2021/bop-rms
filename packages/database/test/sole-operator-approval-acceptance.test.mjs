@@ -984,6 +984,58 @@ it("sole operator: set by the Brand Owner, self-approval with MFA, lapse on a se
       // Independent approvals are not counted as self-approved.
       assert.equal((await summary()).count, 1);
 
+      // ── 10b. WP-2423 v15 defect (2026-10-16): past version 10 the latest version still decides.
+      // Owner-seeded history (test-controlled) to version 12, Off. A text sort read version 9
+      // ("On") as the latest, so the page failed (403) and approving alone was offered.
+      for (let version = 3; version <= 12; version++) {
+        const at = new Date(await dbNow()).toISOString();
+        await admin.query(
+          "INSERT INTO bop_tenant.brand_sole_operator_setting (tenant_id,brand_id,setting_id,version,state,reason_code,actor_id,actor_mfa_at,recorded_at,operation_id,audit_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8,$9,$10)",
+          [
+            tenant,
+            brand,
+            id(0x7000 + version * 4),
+            version,
+            version % 2 === 1 ? "On" : "Off",
+            version % 2 === 1 ? "OWNER_RUNS_STORE_ALONE" : "OWNER_CHOICE",
+            owner,
+            at,
+            id(0x7001 + version * 4),
+            id(0x7002 + version * 4),
+          ],
+        );
+      }
+      const longOff = await soleOperator.read({ sessionCookie: "owner" });
+      assert.deepEqual([longOff.state, longOff.version], ["Off", 12]);
+      assert.deepEqual(
+        longOff.history.map((entry) => entry.version),
+        [12, 11, 10, 9, 8, 7, 6, 5, 4, 3],
+      );
+      assert.equal(longOff.refundApproval.status, "NotSet");
+      // Turning it on and off again names the real latest version.
+      await assert.rejects(
+        soleOperator({
+          ...session("owner"),
+          command: settingCommand("On", "OWNER_RUNS_STORE_ALONE", 9),
+        }),
+        refusedWith("VersionConflict"),
+      );
+      await verify("owner", "SoleOperatorSetting");
+      const onAgain = await soleOperator({
+        ...session("owner"),
+        command: settingCommand("On", "OWNER_RUNS_STORE_ALONE", 12),
+      });
+      assert.deepEqual([onAgain.state, onAgain.version], ["On", 13]);
+      assert.equal((await soleOperator.read({ sessionCookie: "owner" })).state, "On");
+      const offAgain = await soleOperator({
+        ...session("owner"),
+        command: settingCommand("Off", "SECOND_APPROVER_AVAILABLE", 13),
+      });
+      assert.deepEqual([offAgain.state, offAgain.version], ["Off", 14]);
+      const finalOff = await soleOperator.read({ sessionCookie: "owner" });
+      assert.deepEqual([finalOff.state, finalOff.version], ["Off", 14]);
+      assert.equal(finalOff.history[0].version, 14);
+
       // ── 11. History is immutable; the database refuses an unmarked one-person approval and a
       // SoleOperator mark on two people.
       await assert.rejects(

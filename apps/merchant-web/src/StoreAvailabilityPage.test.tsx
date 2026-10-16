@@ -9,6 +9,9 @@ import {
   kitchenDisplayPermissions,
   parseStoreAvailabilityView,
   soldOutText,
+  stockAmount,
+  stockHeldByOrders,
+  stockSoldOutText,
 } from "./store-availability-page.js";
 
 describe("WP-2423 item availability page helpers", () => {
@@ -121,5 +124,64 @@ describe("WP-2423 item availability page helpers", () => {
     // Never more than the server reported.
     const none = { mayOffer: false, mayMarkSoldOut: false, mayMarkUntilBack: false };
     expect(kitchenDisplayPermissions(none, "Named")).toEqual(none);
+  });
+});
+
+describe("WP-2423 (2026-10-16) why guests see an offered item sold out from stock", () => {
+  const milk = {
+    name: "Whole milk 3.25%",
+    unitCode: "L",
+    displayPrecision: 3,
+    required: "0.24",
+    onHand: "2.8",
+    reserved: "2.8",
+    available: "0",
+    openOrderCount: 11,
+  };
+  it("names the ingredient, the amounts and the open orders in staff words", () => {
+    expect(stockSoldOutText({ ingredients: [milk] })).toBe(
+      "All 2.8 L of Whole milk 3.25% is set aside for 11 open orders.",
+    );
+    expect(stockHeldByOrders({ ingredients: [milk] })).toBe(true);
+    expect(
+      stockSoldOutText({
+        ingredients: [{ ...milk, reserved: "2.7", available: "0.1", openOrderCount: 1 }],
+      }),
+    ).toBe(
+      "2.8 L of Whole milk 3.25% is in stock, but 2.7 L is set aside for 1 open order and one needs 0.24 L.",
+    );
+    expect(
+      stockSoldOutText({ ingredients: [{ ...milk, onHand: "0", reserved: "0", available: "0" }] }),
+    ).toBe("No Whole milk 3.25% is in stock.");
+    expect(stockSoldOutText({ ingredients: [] })).toContain("on hold or past their use-by date");
+    expect(stockAmount("0.018", "KG", 3)).toBe("0.018 kg");
+    expect(stockAmount("12", "EA", 0)).toBe("12");
+  });
+  it("shows the reason and a way to Orders on the page, and rejects malformed stock reasons", () => {
+    const view = {
+      screenId: "CAT-AVAILABILITY",
+      sourceAsOf: "2026-10-16T05:00:00.000Z",
+      viewer: "0190a7c4-0000-7000-8000-000000000001",
+      timeZone: "America/Toronto",
+      permissions: { mayOffer: true, mayMarkSoldOut: true, mayMarkUntilBack: true },
+      items: [
+        {
+          skuReference: "0190a7c4-0000-7000-8000-000000000002",
+          skuCode: "LATTE-M",
+          productName: "Latte",
+          sizeName: "Latte",
+          status: "Available",
+          soldOutUntil: null,
+          stockSoldOut: { ingredients: [milk] },
+        },
+      ],
+    };
+    expect(parseStoreAvailabilityView(view).items[0]?.stockSoldOut?.ingredients).toHaveLength(1);
+    expect(() =>
+      parseStoreAvailabilityView({
+        ...view,
+        items: [{ ...view.items[0], stockSoldOut: { ingredients: [{ ...milk, onHand: 2.8 }] } }],
+      }),
+    ).toThrow();
   });
 });

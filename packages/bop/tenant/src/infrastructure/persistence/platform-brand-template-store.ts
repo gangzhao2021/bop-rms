@@ -292,7 +292,7 @@ export function createPostgresPlatformBrandTemplateStore(
     await restore();
     const found = rows(
       await query(
-        `SELECT ${columns} FROM bop_tenant.platform_brand_template_revision WHERE template_id=$1 ORDER BY revision DESC LIMIT 1`,
+        `SELECT ${columns} FROM bop_tenant.platform_brand_template_revision WHERE template_id=$1 ORDER BY platform_brand_template_revision.revision DESC LIMIT 1`,
         [template],
       ),
     );
@@ -312,7 +312,7 @@ export function createPostgresPlatformBrandTemplateStore(
     await restore();
     const found = rows(
         await query(
-          `SELECT ${columns} FROM bop_tenant.platform_brand_template_revision WHERE template_id=$1 AND ($2::integer IS NULL OR revision<$2) ORDER BY revision DESC LIMIT 3`,
+          `SELECT ${columns} FROM bop_tenant.platform_brand_template_revision WHERE template_id=$1 AND ($2::integer IS NULL OR revision<$2) ORDER BY platform_brand_template_revision.revision DESC LIMIT 3`,
           [template, before],
         ),
         3,

@@ -259,12 +259,28 @@ export async function readBusinessSignals({
       receiptTemplate = "unreadable";
     }
 
+  // WP-2423 (2026-10-16 v15 stock leak): Orders of earlier business days still holding stock.
+  // null when not composed; "unreadable" when the check itself failed.
+  let heldStock = null;
+  if (typeof dependencies.readHeldStockOrders === "function")
+    try {
+      const held = await dependencies.readHeldStockOrders(resources);
+      heldStock = {
+        count: Number(held.openCount) + Number(held.endedCount),
+        openCount: Number(held.openCount),
+        oldestAgeMs: age(held.oldestAt ?? null),
+      };
+    } catch {
+      heldStock = "unreadable";
+    }
+
   // WP-2423: a recent clean settlement answer may be reused (see createBusinessObserver).
   if (settlementExceptions !== null)
     return {
       stuckUpdates,
       retryingUpdates,
       receiptTemplate,
+      heldStock,
       reconciliationDifferences: { count: open, oldestAgeMs: age(oldest) },
       settlementExceptions,
     };
@@ -279,6 +295,7 @@ export async function readBusinessSignals({
     stuckUpdates,
     retryingUpdates,
     receiptTemplate,
+    heldStock,
     reconciliationDifferences: { count: open, oldestAgeMs: age(oldest) },
     settlementExceptions: { count: problems.length, oldestAgeMs: age(settlementOldest) },
   };

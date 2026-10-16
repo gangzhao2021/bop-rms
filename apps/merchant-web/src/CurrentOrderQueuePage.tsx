@@ -12,6 +12,7 @@ import {
   staffCancellationReasonLabel,
   staffCancellationSummary,
 } from "./StaffOrderCancelAction.js";
+import { HeldStockNotice, HeldStockReleaseAction } from "./HeldStockNotice.js";
 import {
   ItemRefundCheck,
   StaffItemCancelAction,
@@ -767,9 +768,16 @@ export function CurrentOrderQueueRows({
         (visibleOrderReferences !== undefined && !visibleOrderReferences.has(order.orderReference))
       )
         continue;
-      if (listed !== previous)
-        dayHeadings.set(order.orderReference, businessDateLabel(listed, today));
-      previous = listed;
+      // WP-2423 (2026-10-16): earlier-day orders still holding stock lead the list as one group.
+      const group = order.heldStock !== null ? "held" : listed;
+      if (group !== previous)
+        dayHeadings.set(
+          order.orderReference,
+          order.heldStock !== null
+            ? "Earlier days · still holding stock"
+            : businessDateLabel(listed, today),
+        );
+      previous = group;
     }
   }
   return view.items.length === 0 ? (
@@ -866,6 +874,14 @@ export function CurrentOrderQueueRows({
                       ).length
                     } cancelled`
                   : ""}
+                {order.heldStock !== null && order.businessDate !== null ? (
+                  <span className="order-held-stock-tag">
+                    {businessDateLabel(order.businessDate, today)} ·{" "}
+                    {order.heldStock.state === "Open"
+                      ? "still open, holding stock"
+                      : "finished, stock still set aside"}
+                  </span>
+                ) : null}
                 {order.orderType === "Pickup" && order.batches[0]?.staffCancellation ? (
                   <span className="order-staff-cancelled">
                     {staffCancellationSummary(order, order.batches[0])}
@@ -953,7 +969,8 @@ export function CurrentOrderQueueRows({
                   <div>
                     <dt>Business day</dt>
                     <dd>
-                      {order.listedBusinessDate !== null &&
+                      {order.heldStock === null &&
+                      order.listedBusinessDate !== null &&
                       order.listedBusinessDate !== order.businessDate
                         ? openedEarlierText(order.businessDate, order.listedBusinessDate, today)
                         : businessDateLabel(order.businessDate, today)}
@@ -969,6 +986,7 @@ export function CurrentOrderQueueRows({
                   </dd>
                 </div>
               </dl>
+              <HeldStockNotice order={order} />
               {order.counter !== null ? (
                 <p className="order-counter-note" role="note">
                   Taken at the counter.{" "}
@@ -1532,15 +1550,29 @@ export function CurrentOrderQueuePage({
                 />
               )}
               action={(order, batch) =>
-                // WP-2423 D5: an unpaid round staff entered is recorded as paid here too. The list
+                // WP-2423 (2026-10-16): an ended earlier-day Order still holding stock.
+                order.heldStock !== null &&
+                order.heldStock.state === "Ended" &&
+                !order.heldStock.productionStarted &&
+                order.heldStock.orderBatchReference === batch.orderBatchReference ? (
+                  <fieldset disabled={servingBusy}>
+                    <HeldStockReleaseAction
+                      key={"held-" + batch.orderBatchReference}
+                      order={order}
+                      csrf={csrf}
+                      fetcher={fetcher}
+                      onSettled={() => reload(after)}
+                    />
+                  </fieldset>
+                ) : // WP-2423 D5: an unpaid round staff entered is recorded as paid here too. The list
                 // leaves its amount out (the one-order read builds it when the form is opened).
                 batch.staffRound != null &&
-                batch.staffRound.paidOnCardMachine === null &&
-                batch.acceptanceStatus === "NotAccepted" &&
-                batch.paymentDue !== null &&
-                batch.paymentDue.status === "Awaiting" &&
-                (batch.paymentDue.cancelsAt === null ||
-                  Date.parse(batch.paymentDue.cancelsAt) > Date.now()) ? (
+                  batch.staffRound.paidOnCardMachine === null &&
+                  batch.acceptanceStatus === "NotAccepted" &&
+                  batch.paymentDue !== null &&
+                  batch.paymentDue.status === "Awaiting" &&
+                  (batch.paymentDue.cancelsAt === null ||
+                    Date.parse(batch.paymentDue.cancelsAt) > Date.now()) ? (
                   <fieldset disabled={servingBusy}>
                     <StaffRoundPaymentAction
                       key={"round-pay-" + batch.orderBatchReference}

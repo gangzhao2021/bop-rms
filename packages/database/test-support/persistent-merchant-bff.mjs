@@ -62,6 +62,11 @@ export async function verifyPersistentMerchantBff({
     "GRANT SELECT,UPDATE ON rms_store.store_configuration_authoring_operation,rms_store.store_configuration_version TO " +
       role,
   );
+  // WP-2423 (v15 2026-10-16), as the pilot API grant: a publication reads the Store's sole-operator
+  // approval mark (an approval given alone is published only if sole operator was on).
+  await admin.query(
+    "GRANT SELECT ON rms_store.store_configuration_sole_operator_approval TO " + role,
+  );
   for (const [configurationId, storeId, start] of [
     [f.uuid("910"), f.STORE, "04:00:00"],
     [f.uuid("920"), f.uuid("610"), "09:00:00"],

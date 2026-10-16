@@ -21,7 +21,9 @@ import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js"
 import type { MerchantBffService } from "./merchant-bff.js";
 import {
   merchantStoreSoleOperatorGate,
+  MerchantSoleOperatorBasisError,
   MerchantSoleOperatorGateError,
+  requireMerchantStoreConfigurationSoleOperatorBasis,
   requireMerchantStoreSoleOperator,
   type ResolveContext,
 } from "./merchant-sole-operator.js";
@@ -211,6 +213,7 @@ export function createMerchantStoreConfiguration(options: {
     const { command: rawCommand, approvalMode } = splitApprovalMode(input.command);
     const sole = approvalMode === "SoleOperator";
     let soleRefusal: MerchantSoleOperatorGateError | undefined;
+    let basisRefusal: MerchantSoleOperatorBasisError | undefined;
     // WP-2423: one authorized run. The caller, the command's permission and the Publishing
     // decisions the command may need are resolved in full once at the start (one permission
     // packet) and re-checked in full once more inside the transaction before it commits; owner
@@ -324,6 +327,27 @@ export function createMerchantStoreConfiguration(options: {
                     ? "STORE_CONFIGURATION_COMMAND_INVALID"
                     : "STORE_CONFIGURATION_SELF_APPROVAL",
                 );
+            }
+            // WP-2423 (v15 2026-10-16): a configuration approved alone is published only if sole
+            // operator was On when that approval was given.
+            // Checked once the caller may publish (an unauthorized publish is refused as before).
+            if (
+              bound.method === "publish" &&
+              publishing.every((item) => decisions.get(item)?.effect === "Allow")
+            ) {
+              if (!(await guard())) return denied();
+              try {
+                await requireMerchantStoreConfigurationSoleOperatorBasis(tx as never, {
+                  tenantReference: scope.selected.tenantReference,
+                  brandReference: scope.context.brand.brandReference,
+                  storeReference: scope.store.storeReference,
+                  configurationReference: bound.input.configuration.configurationReference,
+                  allowed: guard,
+                });
+              } catch (error) {
+                if (error instanceof MerchantSoleOperatorBasisError) basisRefusal = error;
+                throw error;
+              }
             }
             const soleOperator = options.soleOperator;
             /** Sole operator in effect for the caller now, with a second factor ≤ 15 minutes old. */
@@ -497,6 +521,7 @@ export function createMerchantStoreConfiguration(options: {
         // The transaction host reports owner failures generically; the sole-operator refusal of
         // this run says why (turned off, someone else also approves, verify again).
         if (soleRefusal !== undefined) throw soleRefusal;
+        if (basisRefusal !== undefined) throw basisRefusal;
         throw error;
       });
   };
@@ -612,6 +637,12 @@ export function createMerchantStoreConfiguration(options: {
               (await scope.authorizeActions(["store.service.approve"])).get("store.service.approve")
                 ?.effect === "Allow";
           }
+          // WP-2423 (v15 2026-10-16): whether the viewer may approve an open change at all, so a
+          // Store Manager who sent one reads that an Owner approves it (not sole-operator advice).
+          const viewerMayApprove =
+            open &&
+            (await scope.authorizeActions(["store.service.approve"])).get("store.service.approve")
+              ?.effect === "Allow";
           // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: the Owner who made or sent the change awaiting
           // approval sees whether they may approve it alone, and why not.
           let soleOperator: Awaited<ReturnType<typeof merchantStoreSoleOperatorGate>> | null = null;
@@ -656,6 +687,7 @@ export function createMerchantStoreConfiguration(options: {
             observedAt,
             latestAuthorName,
             viewerMayDecline,
+            viewerMayApprove,
             soleOperator:
               soleOperator === null
                 ? null

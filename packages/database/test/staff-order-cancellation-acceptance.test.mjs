@@ -28,6 +28,10 @@ import {
   createPostgresCardMachinePaymentStore,
 } from "../../rms/payment/src/index.ts";
 import { createMerchantOrderStaffCancellation } from "../../../apps/api/src/merchant-order-staff-cancellation.ts";
+import {
+  createMerchantEndedOrderStockRelease,
+  readEarlierOrdersHoldingStock,
+} from "../../../apps/api/src/merchant-stock-holding-orders.ts";
 import { createMerchantDiningTableClosePlan } from "../../../apps/api/src/merchant-dining-table-close-plan.ts";
 import { createPaymentCompensationComposition } from "../../../apps/api/src/payment-compensation-composition.ts";
 import { createMerchantCardMachineCancellationRefund } from "../../../apps/api/src/merchant-card-machine-refund.ts";
@@ -1194,6 +1198,124 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
         awaiting: true,
         shift: minutes(15),
       });
+      // ── WP-2423 (2026-10-16 v15 stock leak): Orders of earlier business days still holding
+      // stock are found from Inventory's reservations, as the api role, the next business day.
+      // TEST-ONLY legacy fixture: an Order that ended (System termination written by the database
+      // owner) while its stock stayed reserved — the v15 orders that ended before consumption.
+      // After the last seeded round (stock ledger movements stay in time order).
+      const legacy = await seedOrder(15000, { batches: [1], quantity: "1", shift: minutes(26) });
+      await admin.query(
+        "INSERT INTO rms_ordering.order_termination_record (termination_id,operation_id,brand_id,store_id,order_id,order_batch_id,expected_order_version,terminated_order_version,expected_source_checkpoint,previous_phase,phase,actor_type,actor_id,purpose_code,permission_code,reason_code,workflow_version_id,transition_id,source_digest,terminated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'Accepted','Cancelled','System',NULL,'SyntheticLegacy','order.synthetic','SYNTHETIC_TEST',$10,$11,$12,$13)",
+        [
+          id(15901),
+          id(15902),
+          brand,
+          store,
+          legacy.order,
+          legacy.batches[0].batch,
+          legacy.version,
+          legacy.version + 1,
+          legacy.batches[0].submission,
+          id(15903),
+          id(15904),
+          hash(["legacy-termination"]),
+          time(-minutes(5)),
+        ],
+      );
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "16" });
+      const nextDay = new Date(Date.parse(businessDate + "T12:00:00.000Z") + minutes(24 * 60))
+        .toISOString()
+        .slice(0, 10);
+      const tomorrow = () => ({
+        businessDate: nextDay,
+        startsAt: new Date(Date.now() + minutes(1)).toISOString(),
+      });
+      const holding = async () =>
+        new Map(
+          (await scoped((tx) => readEarlierOrdersHoldingStock(tx, scope, tomorrow()))).map(
+            (entry) => [entry.orderBatchReference, entry],
+          ),
+        );
+      let held = await holding();
+      assert.equal(held.get(pickup.batches[0].batch)?.state, "Open");
+      assert.equal(held.get(pickup.batches[0].batch)?.productionStarted, false);
+      assert.equal(held.get(legacy.batches[0].batch)?.state, "Ended");
+      assert.equal(held.get(legacy.batches[0].batch)?.orderNumber, "15");
+      // Today (its own business day) nothing is "from an earlier day".
+      assert.equal(
+        (
+          await scoped((tx) =>
+            readEarlierOrdersHoldingStock(tx, scope, {
+              businessDate,
+              startsAt: time(-minutes(60)),
+            }),
+          )
+        ).length,
+        0,
+      );
+      const stockRelease = createMerchantEndedOrderStockRelease({
+        persistence: {
+          transactions: transactions({ guc: false }),
+          now: () => new Date(Math.floor(Date.now())).toISOString(),
+        },
+        authentication: { authorize: async () => ({ sessionReference: id(12) }) },
+        installContext: async (tx, selected) => {
+          await tx.query(
+            "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+            [selected.tenantReference, selected.brandReference, selected.storeReference],
+          );
+        },
+        today: async () => tomorrow(),
+        nextReference: fresh,
+      });
+      const releaseStock = (order, operationReference = fresh()) =>
+        stockRelease({
+          sessionCookie: "synthetic-session",
+          csrf: "synthetic-csrf",
+          command: {
+            orderReference: order.order,
+            orderBatchReference: order.batches[0].batch,
+            operationReference,
+          },
+        });
+      let heldCounts = await counts();
+      // A live Order is never released here (staff cancel it, which refunds the guest).
+      await assert.rejects(releaseStock(pickup), { code: "ENDED_ORDER_STOCK_NOT_RELEASABLE" });
+      merchant.allowed = () => false;
+      await assert.rejects(releaseStock(legacy), { code: "ENDED_ORDER_STOCK_PERMISSION_DENIED" });
+      merchant.allowed = () => true;
+      assert.deepEqual(await counts(), heldCounts);
+      const releaseOperation = fresh();
+      assert.deepEqual(await releaseStock(legacy, releaseOperation), {
+        status: "Released",
+        entryCount: 1,
+      });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "15" });
+      const releaseAudit = (
+        await admin.query(
+          "SELECT action_code,actor_type,actor_reference AS actor,reason_code,target_id::text AS target FROM platform_audit.audit_record WHERE audit_id=$1",
+          [releaseOperation],
+        )
+      ).rows;
+      assert.equal(releaseAudit.length, 1);
+      assert.equal(releaseAudit[0].action_code, "ENDED_ORDER_STOCK_RELEASED");
+      assert.equal(releaseAudit[0].reason_code, "ORDER_ENDED_STOCK_LEFT");
+      assert.equal(releaseAudit[0].target, legacy.order);
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM platform_audit.audit_record WHERE action_code='INVENTORY_RESERVATION_RELEASE' AND reason_code='ORDER_ENDED_STOCK_LEFT'",
+          )
+        ).rows[0].n,
+        1,
+      );
+      // Replay of the same staff request: nothing written again.
+      heldCounts = await counts();
+      assert.equal((await releaseStock(legacy, releaseOperation)).status, "AlreadyReleased");
+      assert.deepEqual(await counts(), heldCounts);
+      held = await holding();
+      assert.equal(held.has(legacy.batches[0].batch), false);
+      assert.equal(held.get(pickup.batches[0].batch)?.state, "Open");
       assert.deepEqual(await stock(), { onHand: "20", reserved: "15" });
 
       // The kitchen accepted the first item of the pickup Order (still Queued, not started).
@@ -1361,7 +1483,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       ]);
       const releases = (
         await admin.query(
-          "SELECT record_json FROM rms_inventory.stock_movement WHERE movement_type='Release'",
+          "SELECT record_json FROM rms_inventory.stock_movement WHERE movement_type='Release' AND record_json->>'reasonCode'<>'ORDER_ENDED_STOCK_LEFT'",
         )
       ).rows.map((row) => row.record_json);
       assert.equal(releases.length, 1);
@@ -2158,6 +2280,10 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
           .rows[0].n,
         requestsBefore,
       );
+
+      // WP-2423 (2026-10-16): a staff cancellation of an earlier day's live Order returns its
+      // stock, so it is no longer listed as holding stock.
+      assert.equal((await holding()).has(pickup.batches[0].batch), false);
 
       // History stays append-only for the API role.
       await scoped(async (tx) => {

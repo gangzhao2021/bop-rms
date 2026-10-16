@@ -62,17 +62,54 @@ export function storeHoursSetupBasis(
   if (view.current?.setupBasis === undefined) return undefined;
   return (view.latest ?? view.current).setupBasis;
 }
+/** WP-2423 (v15): whether you hold Store configuration approval. The server says so for every
+ * viewer (`viewerMayApprove`); an older one only for someone else's open change (`viewerMayDecline`,
+ * the same permission). Undefined when not known. */
+export function storeConfigurationViewerMayApprove(
+  view: StoreConfigurationView,
+): boolean | undefined {
+  if (view.viewerMayApprove !== undefined) return view.viewerMayApprove;
+  if (storeConfigurationOpenChange(view) === "SomeoneElse") return view.viewerMayDecline;
+  return undefined;
+}
+/** Shown to a sender who cannot approve (or whose approval access is not known). */
+export const STORE_HOURS_SENT_TO_OWNER =
+  "Sent for approval. An Owner will review and approve it; you\u2019ll see it here once it is published.";
 /** WP-2423 (v15 `8bd902e3` D4): what happens next once a change is sent for approval — the
- * Owner with sole operator in effect approves it alone; otherwise someone else approves it. */
+ * Owner with sole operator in effect approves it alone; another sender with approval access is told
+ * someone else approves it (and, when sole operator is off, where to turn it on); a sender without
+ * approval access (a Store Manager) is told an Owner reviews it. Sole operator hints are only for
+ * people who hold approval access. */
 export function storeHoursSubmittedMessage(view: StoreConfigurationView): string {
   const gate = view.soleOperator;
-  if (gate === undefined || gate === null)
-    return "Sent for approval. An Owner approves it; customers see the new hours once it is published.";
-  if (gate.status === "Effective")
+  if (gate?.status === "Effective")
     return "Sent for approval. You are the sole operator: you can approve it yourself below, then publish it.";
-  if (gate.status === "NotSet")
+  if (storeConfigurationViewerMayApprove(view) !== true) return STORE_HOURS_SENT_TO_OWNER;
+  if (gate?.status === "NotSet")
     return "Sent for approval. Another person with approval access must approve it. If you run the Store alone, turn on sole operator in Approvals to approve it yourself.";
   return "Sent for approval. Another person with approval access must approve it before it is published.";
+}
+/** WP-2423 (v15): what someone else's open change allows you to do, from its current state (never
+ * draft-only wording once it has been sent or approved). */
+export function storeConfigurationOthersChangeText(
+  view: StoreConfigurationView,
+  author: string | null,
+): string {
+  const lifecycle = view.latest?.lifecycle,
+    mayApprove = storeConfigurationViewerMayApprove(view) === true,
+    who = author ?? "the person who made it";
+  if (lifecycle === "PendingApproval")
+    return mayApprove
+      ? "It has been sent for approval. You can approve or decline it."
+      : "It has been sent for approval and is waiting for an Owner to approve it.";
+  if (lifecycle === "Approved")
+    return "It has been approved and can now be published. Customers see the new hours once it is published.";
+  return (
+    `Only ${who} can check it or send it for approval. ` +
+    (mayApprove
+      ? "You can approve it once it is sent, or decline it here."
+      : "Ask an Owner to approve or decline it.")
+  );
 }
 /** WP-2423 (v15 D2/D3): whose change is open (not published, not withdrawn), if any. */
 export function storeConfigurationOpenChange(
@@ -440,12 +477,9 @@ export function StoreHoursDraftForm({
             {Author === null ? "Someone else" : Author}&rsquo;s change (version{" "}
             {view.latest.configurationVersion},{" "}
             {storeConfigurationStateLabel(view.latest.lifecycle).toLowerCase()}) is still open. It
-            is shown below. A new change cannot be saved until it is approved and published, or
-            declined. Only {author === null ? "the person who made it" : author} can check it or
-            send it for approval.{" "}
-            {view.viewerMayDecline === true
-              ? "You can approve it once it is sent, or decline it here."
-              : "Ask an Owner to approve or decline it."}
+            is shown below. A new change cannot be saved until it is{" "}
+            {view.latest.lifecycle === "Approved" ? "published" : "approved and published"}, or
+            declined. {storeConfigurationOthersChangeText(view, author)}
           </p>
           {onWithdraw && view.viewerMayDecline === true && !declining && (
             <button type="button" disabled={disabled} onClick={() => setDeclining(true)}>
@@ -716,16 +750,19 @@ export function StoreHoursDraftForm({
             Publish approved configuration
           </button>
         )}
-        {!stepsClosed && view.latest?.lifecycle === "PendingApproval" && !ownWaiting && (
-          <>
-            <p>
-              Approval requires an authorized reviewer other than the person who made the change.
-            </p>
-            <button type="button" disabled={!saved} onClick={() => onCommand("Approve")}>
-              Approve reviewed configuration
-            </button>
-          </>
-        )}
+        {!stepsClosed &&
+          view.latest?.lifecycle === "PendingApproval" &&
+          !ownWaiting &&
+          storeConfigurationViewerMayApprove(view) !== false && (
+            <>
+              <p>
+                Approval requires an authorized reviewer other than the person who made the change.
+              </p>
+              <button type="button" disabled={!saved} onClick={() => onCommand("Approve")}>
+                Approve reviewed configuration
+              </button>
+            </>
+          )}
       </fieldset>
     </form>
   );
@@ -756,6 +793,21 @@ export function StoreHoursOwnApproval({
   )
     return null;
   const yours = storeConfigurationOpenChange(view) === "Yours";
+  // WP-2423 (v15): sole operator applies only to people who hold approval access; a sender
+  // without it (or not known to hold it) is told an Owner reviews the change.
+  if (
+    view.soleOperator?.status !== "Effective" &&
+    storeConfigurationViewerMayApprove(view) !== true
+  )
+    return yours || view.soleOperator !== null ? (
+      <section aria-label="Approve your own change">
+        <h3>Approval</h3>
+        <p>
+          An Owner will review and approve this change; you&rsquo;ll see it here once it is
+          published.
+        </p>
+      </section>
+    ) : null;
   if (view.soleOperator === null)
     return yours ? (
       <section aria-label="Approve your own change">

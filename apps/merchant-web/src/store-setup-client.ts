@@ -40,7 +40,9 @@ export class StoreSetupClientError extends Error {
       | "SetupIncomplete"
       | "SetupOutdated"
       | "OpenChangeByAnother"
-      | "Withdrawn",
+      | "Withdrawn"
+      // WP-2423 (v15 2026-10-16): approved alone while sole operator was off; cannot be published.
+      | "SoleOperatorApprovalInvalid",
   ) {
     super("Store setup could not be confirmed");
     this.name = "StoreSetupClientError";

@@ -20,7 +20,7 @@ import {
   seedBrand,
   seedBrandMember,
   seedBrandRole,
-  seedSoleOperatorSetting,
+  seedSoleOperatorHistory,
   seedStepUp,
 } from "../test-support/sole-operator-brand-gate.mjs";
 
@@ -261,16 +261,21 @@ it("menu review: submitter ≠ approver on the server; the sole operator approve
         return true;
       });
 
-      // ── 2. On and in effect, but the second factor is two hours old: verify again.
-      await seedSoleOperatorSetting(admin, {
-        id,
-        n: 500,
-        tenantReference,
-        brandReference,
-        actorReference: owner,
-        state: "On",
-        version: 1,
+      // WP-2423 v15 defect (2026-10-16): past version 10 the latest version still decides: with
+      // version 12 Off it is not in effect, and says it is off (a text sort read version 9 "On").
+      const history = { id, n: 800, tenantReference, brandReference, actorReference: owner };
+      assert.equal(
+        await seedSoleOperatorHistory(admin, { ...history, atLeast: 11, latest: "Off" }),
+        12,
+      );
+      await assert.rejects(approve(first, owner, true), (error) => {
+        assert.ok(error instanceof MerchantSoleOperatorGateError);
+        assert.deepEqual([error.code, error.reason], ["NotInEffect", "Off"]);
+        return true;
       });
+
+      // ── 2. On and in effect, but the second factor is two hours old: verify again.
+      await seedSoleOperatorHistory(admin, { ...history, atLeast: 13, latest: "On" });
       await assert.rejects(approve(first, owner, true), refused("NeedsReverification"));
       await assert.rejects(
         approve(first, owner, false),

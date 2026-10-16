@@ -296,7 +296,11 @@ it("shows another person's open change, blocks saving over it and offers to decl
   expect(html).toContain("Someone else’s change (version 2, waiting for approval) is still open");
   // v15 D9: no decline offered unless the server says you may decline.
   expect(html).not.toContain("Decline this change");
-  expect(html).toContain("Ask an Owner to approve or decline it.");
+  // v15: sent for approval, so no draft-only wording.
+  expect(html).toContain(
+    "It has been sent for approval and is waiting for an Owner to approve it.",
+  );
+  expect(html).not.toContain("can check it or send it");
   expect(html).toMatch(/<button type="submit" disabled="">Save hours draft<\/button>/u);
   expect(findInternalText([staticText(html)])).toEqual([]);
   // Your own open change: editing continues from it, and you may withdraw it.
@@ -412,6 +416,7 @@ it("WP-2423 v15: names who made the open change, and declining it is confirmed w
 
 it("WP-2423 DEC-SOLE-OPERATOR-APPROVAL: your own hours change is approved alone, or says why not", () => {
   const base = hoursView({ ...configuration("PendingApproval"), authoredByReference: id(10) });
+  // The Owner: holds Store configuration approval.
   const view = (soleOperator: unknown) =>
     parseStoreConfigurationView(
       {
@@ -420,6 +425,8 @@ it("WP-2423 DEC-SOLE-OPERATOR-APPROVAL: your own hours change is approved alone,
         latestWithdrawal: null,
         latestAuthorName: null,
         soleOperator,
+        viewerMayDecline: false,
+        viewerMayApprove: true,
       },
       id(3),
     );
@@ -558,7 +565,7 @@ it("v15: an Owner without a Store name is named by role; only people who may dec
 
 it("v15: after sending, the Owner with sole operator in effect is told they may approve alone", () => {
   const base = hoursView({ ...configuration("PendingApproval"), authoredByReference: id(10) });
-  const view = (soleOperator: unknown) =>
+  const view = (soleOperator: unknown, viewerMayApprove?: boolean) =>
     parseStoreConfigurationView(
       {
         ...base,
@@ -566,16 +573,134 @@ it("v15: after sending, the Owner with sole operator in effect is told they may 
         latestWithdrawal: null,
         latestAuthorName: null,
         soleOperator,
+        ...(viewerMayApprove === undefined ? {} : { viewerMayDecline: false, viewerMayApprove }),
       },
       id(3),
     );
+  const notSet = { status: "NotSet", otherApprovers: [], verifiedUntil: null };
   const effective = storeHoursSubmittedMessage(
     view({ status: "Effective", otherApprovers: [], verifiedUntil: null }),
   );
   expect(effective).toContain("you can approve it yourself");
   expect(effective).not.toContain("independent");
+  // An Owner (holds approval) with sole operator off is told where to turn it on.
+  expect(storeHoursSubmittedMessage(view(notSet, true))).toBe(
+    "Sent for approval. Another person with approval access must approve it. If you run the Store alone, turn on sole operator in Approvals to approve it yourself.",
+  );
   expect(
-    storeHoursSubmittedMessage(view({ status: "NotSet", otherApprovers: [], verifiedUntil: null })),
-  ).toContain("turn on sole operator in Approvals");
-  expect(storeHoursSubmittedMessage(view(null))).toContain("An Owner approves it");
+    storeHoursSubmittedMessage(
+      view(
+        { status: "OtherApprovers", otherApprovers: [{ displayName: "Mia" }], verifiedUntil: null },
+        true,
+      ),
+    ),
+  ).toBe(
+    "Sent for approval. Another person with approval access must approve it before it is published.",
+  );
+  // A Store Manager (no approval access) never sees sole operator hints.
+  const manager =
+    "Sent for approval. An Owner will review and approve it; you\u2019ll see it here once it is published.";
+  expect(storeHoursSubmittedMessage(view(notSet, false))).toBe(manager);
+  expect(
+    storeHoursSubmittedMessage(
+      view(
+        { status: "OtherApprovers", otherApprovers: [{ displayName: null }], verifiedUntil: null },
+        false,
+      ),
+    ),
+  ).toBe(manager);
+  // Approval access not known (older server): no sole operator hint either.
+  expect(storeHoursSubmittedMessage(view(notSet))).toBe(manager);
+  expect(storeHoursSubmittedMessage(view(null))).toBe(manager);
+  // The approval panel tells a Manager an Owner reviews it, with no sole operator wording.
+  const panel = renderToStaticMarkup(
+    <StoreHoursOwnApproval
+      view={view(notSet, false)}
+      csrf="c"
+      busy={false}
+      onApprove={() => undefined}
+    />,
+  );
+  expect(panel).toContain("An Owner will review and approve this change");
+  expect(panel).not.toMatch(/sole operator/iu);
+  expect(
+    renderToStaticMarkup(
+      <StoreHoursOwnApproval
+        view={view(notSet, true)}
+        csrf="c"
+        busy={false}
+        onApprove={() => undefined}
+      />,
+    ),
+  ).toMatch(/Sole operator is off/u);
+  // A malformed approval flag is refused.
+  expect(() =>
+    parseStoreConfigurationView(
+      {
+        ...base,
+        viewerActorReference: id(10),
+        latestWithdrawal: null,
+        latestAuthorName: null,
+        soleOperator: null,
+        viewerMayDecline: false,
+        viewerMayApprove: "yes",
+      },
+      id(3),
+    ),
+  ).toThrow();
+});
+
+it("v15: someone else's change is described from its current state", () => {
+  const render = (lifecycle: "Draft" | "PendingApproval" | "Approved", mayApprove: boolean) => {
+    const view = parseStoreConfigurationView(
+      {
+        ...hoursView({ ...configuration(lifecycle), authoredByReference: id(40) }),
+        viewerActorReference: id(10),
+        latestWithdrawal: null,
+        latestAuthorName: "Mia",
+        soleOperator: null,
+        viewerMayDecline: mayApprove,
+        viewerMayApprove: mayApprove,
+      },
+      id(3),
+    );
+    return staticText(
+      renderToStaticMarkup(
+        <MemoryRouter>
+          <StoreHoursDraftForm
+            view={view}
+            draft={storeConfigurationEditBase(view) as NonNullable<typeof view.current>}
+            disabled={false}
+            onDraftChange={() => undefined}
+            onCommand={() => undefined}
+            onWithdraw={() => undefined}
+          />
+        </MemoryRouter>,
+      ),
+    ).replace(/\s+/gu, " ");
+  };
+  const draftOwner = render("Draft", true);
+  expect(draftOwner).toContain(
+    "Only Mia can check it or send it for approval. You can approve it once it is sent, or decline it here.",
+  );
+  expect(render("Draft", false)).toContain(
+    "Only Mia can check it or send it for approval. Ask an Owner to approve or decline it.",
+  );
+  const pendingOwner = render("PendingApproval", true);
+  expect(pendingOwner).toContain("It has been sent for approval. You can approve or decline it.");
+  expect(pendingOwner).toContain("Approve reviewed configuration");
+  expect(pendingOwner).not.toContain("Only Mia can check it");
+  const pendingManager = render("PendingApproval", false);
+  expect(pendingManager).toContain(
+    "It has been sent for approval and is waiting for an Owner to approve it.",
+  );
+  expect(pendingManager).not.toContain("Approve reviewed configuration");
+  const approved = render("Approved", true);
+  expect(approved).toContain(
+    "A new change cannot be saved until it is published, or declined. It has been approved and can now be published. Customers see the new hours once it is published.",
+  );
+  expect(approved).not.toContain("Only Mia can check it");
+  expect(approved).not.toContain("once it is sent");
+  for (const text of [draftOwner, pendingOwner, pendingManager, approved])
+    expect(findInternalText([text])).toEqual([]);
 });

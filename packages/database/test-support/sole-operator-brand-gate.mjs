@@ -127,6 +127,40 @@ export async function seedSoleOperatorSetting(
   );
 }
 
+/**
+ * WP-2423 v15 defect (2026-10-16): owner-seeded setting history (test-controlled) continuing the
+ * Brand's versions, alternating, until at least `atLeast` versions exist and the latest is
+ * `latest`. From version 10 on, a text sort ("9" > "10") read version 9 as the latest. Returns
+ * the latest version number. `n` reserves three references per version.
+ */
+export async function seedSoleOperatorHistory(
+  admin,
+  { id, n, tenantReference, brandReference, actorReference, atLeast, latest },
+) {
+  const head = (
+    await admin.query(
+      "SELECT s.version::int AS version,s.state FROM bop_tenant.brand_sole_operator_setting s WHERE s.brand_id=$1 ORDER BY s.version DESC LIMIT 1",
+      [brandReference],
+    )
+  ).rows[0];
+  let version = head?.version ?? 0,
+    state = head?.state ?? "Off";
+  while (version < atLeast || state !== latest) {
+    version += 1;
+    state = state === "On" ? "Off" : "On";
+    await seedSoleOperatorSetting(admin, {
+      id,
+      n: n + version * 3,
+      tenantReference,
+      brandReference,
+      actorReference,
+      state,
+      version,
+    });
+  }
+  return version;
+}
+
 let timeStep = 100;
 /** A verified second-factor step-up at the Store, `ageMs` old (owner-seeded evidence). */
 export async function seedStepUp(

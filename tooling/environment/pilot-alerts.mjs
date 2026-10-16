@@ -151,6 +151,18 @@ export const ALERT_CATALOG = Object.freeze({
       'Hand over ready orders in person: check the order number plus the guest\'s name or phone number. Compare the kitchen board with Orders. Ask the pilot operator to read the order processing log now; if it is not fixed, this becomes "Order or payment updates are stuck".',
     runbook: "alert-updates-retrying",
   },
+  // WP-2423 (2026-10-16 v15 stock leak): an Order of an earlier business day still holds stock,
+  // so items made from it show sold out to guests although the stock is on the shelf.
+  "orders.held_stock": {
+    severity: "warning",
+    raiseAfterMs: 0,
+    title: () => "Orders from earlier days are still holding stock",
+    summary: (p) =>
+      `${count(p.count, "order from an earlier day still has", "orders from earlier days still have")} ingredients set aside (the oldest for ${formatDuration(p.oldestAgeMs)}). Items made from them can show as sold out to guests although the stock is on the shelf.`,
+    action: () =>
+      'Open Orders: these orders are listed first with today\'s. Make and hand over one the guest still wants, or cancel it (the guest is refunded and the ingredients go back into stock). For an order that is already finished, choose "Release held ingredients".',
+    runbook: "alert-orders-held-stock",
+  },
   // WP-2423 DEC-STORE-SETUP-PUBLICATION: the receipt template the Store's published settings
   // name cannot be used (receipts are money documents: none is issued with a guessed template).
   "receipts.template": {
@@ -280,6 +292,7 @@ const SOURCE_NAMES = Object.freeze({
   certificate: "the certificate",
   disk: "disk space",
   receipts: "the receipt template check",
+  heldStock: "the check for orders holding stock",
 });
 
 const PROBE_KEYS = Object.freeze({
@@ -351,6 +364,12 @@ export function evaluateAlertConditions(observations, thresholds = DEFAULT_THRES
           business.receiptTemplate.reason === "StoreConfigurationUnavailable"
             ? "StoreConfigurationUnavailable"
             : "TemplateNotProven",
+      });
+    if (business.heldStock === "unreadable") unreadable.push("heldStock");
+    else if (pick(business.heldStock))
+      raise("orders.held_stock", {
+        count: business.heldStock.count,
+        oldestAgeMs: business.heldStock.oldestAgeMs,
       });
     if (pick(business.reconciliationDifferences))
       raise(

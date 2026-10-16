@@ -74,7 +74,7 @@ const readState = async (tx: ConsumerTransaction, c: ReadScope) => {
   const original = await source(tx, c);
   const result = await tx.query(
     select +
-      "WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND reconciliation_exception_id=$4 ORDER BY version DESC LIMIT 1",
+      "WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND reconciliation_exception_id=$4 ORDER BY reconciliation_follow_up_history.version DESC LIMIT 1",
     [c.tenantReference, c.brandReference, c.storeReference, c.exceptionReference],
   );
   if (result.rows.length > 1) return fail();

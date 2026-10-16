@@ -356,7 +356,14 @@ import type {
 } from "@bop/identity";
 import express, { type Request, type RequestHandler, type Router } from "express";
 import { httpRequestLimits } from "./http-security.js";
-import { MerchantSoleOperatorGateError } from "./merchant-sole-operator.js";
+import {
+  MerchantSoleOperatorBasisError,
+  MerchantSoleOperatorGateError,
+} from "./merchant-sole-operator.js";
+import {
+  EndedOrderStockReleaseError,
+  type createMerchantEndedOrderStockRelease,
+} from "./merchant-stock-holding-orders.js";
 import {
   createMerchantStoreConfigurationWithdrawal,
   MerchantStoreConfigurationWithdrawalError,
@@ -626,6 +633,8 @@ export interface MerchantBffRouterOptions {
   readonly pickupIdentityCheck?: ReturnType<typeof createMerchantPickupIdentityCheck>;
   /** WP-2423 Q6: staff cancel a paid order or batch before the kitchen starts it. */
   readonly orderStaffCancellation?: ReturnType<typeof createMerchantOrderStaffCancellation>;
+  /** WP-2423 (2026-10-16): return stock still set aside for an earlier-day Order that ended. */
+  readonly endedOrderStockRelease?: ReturnType<typeof createMerchantEndedOrderStockRelease>;
   /** WP-2423 Q9-G1: a manager refunds an order paid while the Store was offline. */
   readonly orderAcceptanceHoldRefund?: ReturnType<typeof createMerchantOrderAcceptanceHoldRefund>;
   /** WP-2423 Q6 step 2a: staff cancel item lines before the kitchen starts them. */
@@ -1804,6 +1813,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             businessDate: item.businessDate,
             // WP-2423 D4: the day it is listed under (today when an older table ordered today).
             listedBusinessDate: item.listedBusinessDate,
+            // WP-2423 (2026-10-16): stock still set aside for an Order of an earlier day.
+            heldStock: item.heldStock,
             submittedAt: item.submittedAt,
             initialBatchReference: item.initialBatchReference,
             canRequestAcceptance: item.canRequestAcceptance,
@@ -1906,6 +1917,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             businessDate: item.businessDate,
             // WP-2423 D4: the day it is listed under (today when an older table ordered today).
             listedBusinessDate: item.listedBusinessDate,
+            // WP-2423 (2026-10-16): stock still set aside for an Order of an earlier day.
+            heldStock: item.heldStock,
             submittedAt: item.submittedAt,
             initialBatchReference: item.initialBatchReference,
             canRequestAcceptance: item.canRequestAcceptance,
@@ -2400,6 +2413,14 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
   });
 
   const ordinaryFailure = (response: express.Response, error: unknown): void => {
+    // WP-2423 (v15 2026-10-16): approved alone while sole operator was off; withdraw it instead.
+    if (error instanceof MerchantSoleOperatorBasisError) {
+      response
+        .status(409)
+        .set("Cache-Control", NO_STORE)
+        .json({ error: "sole_operator_approval_invalid" });
+      return;
+    }
     // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: why the Owner's own approval was not accepted.
     if (error instanceof MerchantSoleOperatorGateError) {
       response
@@ -11178,6 +11199,47 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         response.status(status).set("Cache-Control", NO_STORE).json({ error: code });
       });
   });
+  // WP-2423 (2026-10-16 v15 stock leak): return stock still set aside for an Order of an earlier
+  // day that already ended. Same managers who may cancel orders.
+  router.post("/orders/release-stock", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.endedOrderStockRelease) {
+      response.status(503).json({ error: "stock_release_unavailable" });
+      return;
+    }
+    void options
+      .endedOrderStockRelease({ sessionCookie, csrf, command: request.body })
+      .then((result) => {
+        response.set("Cache-Control", NO_STORE);
+        response.json({ status: result.status });
+      })
+      .catch((error: unknown) => {
+        if (!(error instanceof EndedOrderStockReleaseError)) {
+          denied(response);
+          return;
+        }
+        const [status, code] = (
+          {
+            ENDED_ORDER_STOCK_INPUT_INVALID: [400, "stock_release_input_invalid"],
+            ENDED_ORDER_STOCK_PERMISSION_DENIED: [403, "stock_release_permission_denied"],
+            ENDED_ORDER_STOCK_NOT_RELEASABLE: [409, "stock_not_releasable"],
+            ENDED_ORDER_STOCK_PRODUCTION_STARTED: [409, "order_preparation_started"],
+            ENDED_ORDER_STOCK_UNAVAILABLE: [503, "stock_release_unavailable"],
+          } as const
+        )[error.code];
+        response.status(status).set("Cache-Control", NO_STORE).json({ error: code });
+      });
+  });
   // WP-2423 Q6 step 2a: staff cancel item lines before the kitchen starts them; those items'
   // net and tax are refunded (the last remaining lines cancel the whole order or batch).
   const itemCancellationError = (response: express.Response, error: unknown) => {
@@ -11408,6 +11470,9 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
                   ? "sole_operator_off"
                   : "sole_operator_not_in_effect",
           });
+        // WP-2423 (v15 2026-10-16): approved alone while sole operator was off; withdraw it.
+        else if (error instanceof MerchantSoleOperatorBasisError)
+          response.status(409).json({ error: "sole_operator_approval_invalid" });
         // WP-2423 (v15 D2/D3): another person's open change, or a withdrawn one, said plainly.
         else if (code === "STORE_CONFIGURATION_OPEN_CHANGE_BY_ANOTHER")
           response.status(409).json({ error: "open_change_by_another" });

@@ -218,7 +218,7 @@ export function createPostgresLotHoldStore(
       await tx.query(
         "SELECT " +
           columns +
-          " FROM rms_inventory.stock_lot_hold_version WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND account_id=$4 ORDER BY version DESC LIMIT 1",
+          " FROM rms_inventory.stock_lot_hold_version WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND account_id=$4 ORDER BY stock_lot_hold_version.version DESC LIMIT 1",
         [tenant, brand, store, accountId],
       ),
     );

@@ -1,5 +1,5 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
-import { SourceTime } from "./StoreTime.js";
+import { SourceTime, StaffTime } from "./StoreTime.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./RoleAdministrationPages.js";
@@ -112,7 +112,7 @@ export function StoreReceiptListPage({
               <tr key={receipt.receiptReference}>
                 <td>
                   <Link to={`/operations/receiving/${receipt.receiptReference}`}>
-                    {receipt.receivedAt}
+                    <StaffTime instant={receipt.receivedAt} />
                   </Link>
                 </td>
                 <td>{receipt.supplierName}</td>
@@ -477,7 +477,7 @@ export function StoreReceiptDetailPage({
             {receipt.supplierName} {receipt.supplierDocument ? `· ${receipt.supplierDocument}` : ""}
           </h2>
           <p>
-            Received {receipt.receivedAt} ·{" "}
+            Received <StaffTime instant={receipt.receivedAt} /> ·{" "}
             {receipt.voided ? `Voided (${reasonLabel(receipt.voided.reasonCode)})` : "Posted"} ·
             accepted value CAD {centsToDollars(totalCents(receipt.lines))}
           </p>

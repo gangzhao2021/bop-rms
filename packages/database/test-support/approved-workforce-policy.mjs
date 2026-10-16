@@ -168,7 +168,7 @@ async function verifyPolicyForActualPending({
       ],
       [
         "audits",
-        "SELECT audit_id::text,actor_reference::text,action_code,target_id::text,chain_sequence::text,encode(record_hash,'hex') record_hash,encode(previous_record_hash,'hex') previous_record_hash FROM platform_audit.audit_record WHERE brand_id=$1 ORDER BY chain_sequence",
+        "SELECT audit_id::text,actor_reference::text,action_code,target_id::text,chain_sequence::text,encode(record_hash,'hex') record_hash,encode(previous_record_hash,'hex') previous_record_hash FROM platform_audit.audit_record WHERE brand_id=$1 ORDER BY audit_record.chain_sequence",
       ],
       [
         "heads",

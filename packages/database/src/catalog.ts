@@ -466,6 +466,21 @@ function validateSql(
         /^\s*\(/u.test(body.slice(match.index + match[0].length))
       ) &&
       !(
+        // WP-2423 (v15 2026-10-16): the sole-operator approval guards call the Organization
+        // owner's database read of the Brand's sole-operator setting (2000_066), never its table.
+        ((file ===
+          "migrations/2000-release-001/2000_067_alter_store_configuration_sole_operator_setting_guard.sql" &&
+          metadata.owner === "@rms/store" &&
+          metadata.schema === "rms_store") ||
+          (file ===
+            "migrations/2000-release-001/2000_068_alter_receipt_template_sole_operator_setting_guard.sql" &&
+            metadata.owner === "@rms/printing-device" &&
+            metadata.schema === "rms_device")) &&
+        match[1] === "bop_tenant" &&
+        (match[2] === "hold_brand_sole_operator_on" || match[2] === "brand_sole_operator_was_on") &&
+        /^\s*\(/u.test(body.slice(match.index + match[0].length))
+      ) &&
+      !(
         file === "migrations/0300-bop-governance/0300_010_create_platform_permission.sql" &&
         metadata.owner === "@bop/permission" &&
         metadata.schema === "bop_permission" &&

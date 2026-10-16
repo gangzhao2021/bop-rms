@@ -250,6 +250,8 @@ describe("WP-2423 Q13 observations", () => {
       retryingUpdates: { count: 2, oldestAgeMs: 20 * 60_000 },
       // No receipt template check composed: not checked (never reported as fine or failing).
       receiptTemplate: null,
+      // No held-stock check composed: not checked.
+      heldStock: null,
       reconciliationDifferences: { count: 2, oldestAgeMs: 24 * 3600_000 },
       settlementExceptions: { count: 2, oldestAgeMs: 32 * 3600_000 },
     });
@@ -302,6 +304,48 @@ describe("WP-2423 Q13 observations", () => {
           throw Error("DIGITAL_RECEIPT_PERMISSION_DENIED");
         })
       ).receiptTemplate,
+    ).toBe("unreadable");
+  });
+  it("WP-2423: reports orders of earlier days still holding stock (counts and age only)", async () => {
+    const now = Date.parse("2026-10-16T06:00:00.000Z");
+    const resources = {
+      scope: { brandReference: "b", storeReference: "s" },
+      transactions: { run: async (work) => work({ query: async () => ({ rows: [] }) }) },
+      database: {
+        transactions: () => ({
+          run: async (work) => work({ query: async () => ({ rows: [] }) }),
+        }),
+      },
+    };
+    const read = (readHeldStockOrders) =>
+      readBusinessSignals({
+        resources,
+        installation: {},
+        now,
+        settlementExceptions: { count: 0, oldestAgeMs: 0 },
+        dependencies: {
+          createReconciliationExceptions: () => async () => ({
+            items: [],
+            nextAfterExceptionReference: null,
+          }),
+          readHeldStockOrders,
+        },
+      });
+    expect(
+      (
+        await read(async () => ({
+          openCount: 10,
+          endedCount: 1,
+          oldestAt: "2026-10-15T06:00:00.000Z",
+        }))
+      ).heldStock,
+    ).toEqual({ count: 11, openCount: 10, oldestAgeMs: 24 * 3600_000 });
+    expect(
+      (
+        await read(async () => {
+          throw Error("MERCHANT_BUSINESS_DAY_WINDOW_UNAVAILABLE");
+        })
+      ).heldStock,
     ).toBe("unreadable");
   });
   it("reports business signals as unreadable when the database cannot be reached, and retries", async () => {

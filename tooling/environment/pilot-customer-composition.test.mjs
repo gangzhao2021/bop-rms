@@ -34,6 +34,8 @@ it("passes all existing customer routes and configured resources to the API runt
             "createInternalCheckoutDetails",
             "createInternalTestItems",
             "createInternalMenuStoreFacts",
+            // WP-2423 (2026-10-16): the item availability stock reason (lazy; merchant uses it).
+            "createInternalStaffStockShortage",
             "createInternalTestCart",
             "createInternalTestResources",
             "createInternalCustomerEntry",

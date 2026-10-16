@@ -402,7 +402,7 @@ export async function listOrderPaymentTerminalOutcomes(
         "WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 AND provider_account_id=$4 AND provider_environment=$5 " +
         // WP-2423 Q20: a retry after a decline is a later outcome of the same intent.
         "ORDER BY payment_intent_id,occurred_at DESC,recorded_at DESC) latest " +
-        "ORDER BY occurred_at,payment_intent_id LIMIT 101",
+        "ORDER BY latest.occurred_at,latest.payment_intent_id LIMIT 101",
       [brand, store, order, account, scope.environment],
     );
     const found: unknown =

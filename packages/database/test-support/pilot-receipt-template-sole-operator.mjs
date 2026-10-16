@@ -14,7 +14,7 @@ import { createMerchantStoreConfigurationReferenceSources } from "../../../apps/
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { createInternalStoreSetupDraftBff } from "../../../tooling/environment/pilot-store-setup.mjs";
 import { prepareReceiptTemplatePublication } from "./receipt-template-publication.mjs";
-import { seedSoleOperatorSetting, seedStepUp } from "./sole-operator-brand-gate.mjs";
+import { seedSoleOperatorHistory, seedStepUp } from "./sole-operator-brand-gate.mjs";
 
 const require = createRequire(new URL("../../../apps/api/package.json", import.meta.url));
 const express = require("express");
@@ -409,15 +409,33 @@ export async function exercisePilotReceiptTemplateSoleOperator(input) {
     });
     // Setting on (owner-seeded Organization fact), but the second person also holds Owner access.
     const sid = (n) => id(0x9e800 + n);
-    await seedSoleOperatorSetting(admin, {
+    // WP-2423 v15 defect (2026-10-16): with the setting history past version 10 and the latest
+    // version Off, sole operator is off (a text sort read version 9 "On" as the latest).
+    const history = {
       id: sid,
-      n: 0,
+      n: 0x100,
       tenantReference: scope.tenantReference,
       brandReference: scope.brandReference,
       actorReference: owner,
-      state: "On",
-      version: 1,
+    };
+    assert.ok(
+      (await seedSoleOperatorHistory(admin, { ...history, atLeast: 11, latest: "Off" })) >= 11,
+    );
+    await listen(session, async (send) => {
+      const review = (await send(reviewPath())).body;
+      const gate = await send(gatePath);
+      assert.equal(gate.body.soleOperator.status, "NotSet");
+      await refusedUnchanged(
+        () =>
+          send(
+            "store-setup/receipt-template-lifecycle",
+            approve(review, { approvalMode: "SoleOperator" }),
+          ),
+        403,
+        "sole_operator_off",
+      );
     });
+    await seedSoleOperatorHistory(admin, { ...history, atLeast: 13, latest: "On" });
     await listen(session, async (send) => {
       const review = (await send(reviewPath())).body;
       const gate = await send(gatePath);

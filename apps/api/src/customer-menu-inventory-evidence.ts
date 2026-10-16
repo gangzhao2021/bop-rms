@@ -226,3 +226,112 @@ export function createCustomerCatalogInventoryPort(options: {
     },
   });
 }
+
+/** Staff-facing reason one item shows sold out to guests from stock (WP-2423, 2026-10-16). */
+export interface StaffStockShortage {
+  readonly status: "Available" | "Unavailable" | "Indeterminate";
+  /** The stocked ingredients one item as normally ordered needs that the Store cannot cover. */
+  readonly shortages: readonly RecipeStockShortageView[];
+}
+export type RecipeStockShortageView = Awaited<
+  ReturnType<ReturnType<typeof createCustomerRecipeInventoryObservation>["observe"]>
+>["shortages"][number];
+
+/**
+ * WP-2423 (2026-10-16 v15 stock leak): the item availability page shows staff what guests see
+ * from stock — the same observation as the menu (published item, default choices, the Store's
+ * current stock with lot expiry and holds), plus, for an item guests see as sold out, which
+ * ingredients are short and how much is on hand, set aside for open orders and available.
+ * Read only, in the caller's authorized transaction.
+ */
+export function createStaffStockShortageSource(options: {
+  readonly scope: {
+    readonly tenantReference: string;
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly stockSiteReference: string;
+  };
+  readonly resolveExpiryCutoff: SubmissionExpiryCutoff;
+  readonly menuReference: string;
+  readonly maximumItems?: number;
+}) {
+  const scope = Object.freeze({
+    tenantReference: String(parseCatalogReference(options.scope.tenantReference)),
+    brandReference: String(parseCatalogReference(options.scope.brandReference)),
+    storeReference: String(parseCatalogReference(options.scope.storeReference)),
+    stockSiteReference: String(parseCatalogReference(options.scope.stockSiteReference)),
+  });
+  const maximum = options.maximumItems ?? customerMenuInventoryMaximumItems;
+  return Object.freeze({
+    async explain(
+      transaction: InventoryItemTransaction,
+      input: {
+        readonly brandReference: string;
+        readonly storeReference: string;
+        readonly observedAt: string;
+        readonly sellableReferences: readonly string[];
+      },
+    ): Promise<ReadonlyMap<string, StaffStockShortage>> {
+      const result = new Map<string, StaffStockShortage>();
+      if (
+        input.brandReference !== scope.brandReference ||
+        input.storeReference !== scope.storeReference
+      )
+        return result;
+      const observedAt = String(parseCatalogInstant(input.observedAt));
+      const joined = {
+        run: async <T>(work: (tx: never) => Promise<T>) => work(transaction as never),
+      };
+      const observation = createCustomerRecipeInventoryObservation({
+        scope,
+        transactions: { run: async (work) => work(transaction) },
+        authorize: async () => true,
+        resolveExpiryCutoff: options.resolveExpiryCutoff,
+        explainShortage: true,
+      });
+      for (const sellableReference of input.sellableReferences.slice(0, maximum)) {
+        try {
+          const facts = await createPostgresCurrentSelectionFactsStore(joined, {
+            brandReference: scope.brandReference,
+            storeReference: scope.storeReference,
+          }).load({
+            brandReference: parseCatalogReference(scope.brandReference),
+            storeReference: parseCatalogReference(scope.storeReference),
+            sourceChannel: "Qr",
+            orderType: "Pickup",
+            sellableReference: parseCatalogReference(sellableReference),
+            observedAt: parseCatalogInstant(observedAt),
+            menuReference: options.menuReference,
+            channelCode: "CUSTOMER_PWA",
+            orderTypeCode: "PICKUP",
+          });
+          if (facts === null) continue;
+          const found = await observation.observe({
+            sellableReference,
+            productVersionReference: facts.published.productVersionReference,
+            quantity: 1,
+            selections: publishedDefaultOptionSelections(
+              facts.published.optionRules ?? [],
+              "CUSTOMER_PWA",
+            ).map((selection) =>
+              parseRecipeOptionSelection({
+                bindingReference: selection.bindingReference,
+                optionReference: selection.optionReference,
+                quantity: selection.quantity,
+              }),
+            ),
+            observedAt,
+          });
+          result.set(
+            sellableReference,
+            Object.freeze({ status: found.status, shortages: found.shortages }),
+          );
+        } catch {
+          // Unknown stock: no reason is shown (the menu never sells out an item from it either).
+          result.set(sellableReference, Object.freeze({ status: "Indeterminate", shortages: [] }));
+        }
+      }
+      return result;
+    },
+  });
+}

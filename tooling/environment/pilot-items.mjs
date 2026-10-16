@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import {
   createCustomerCatalogInventoryPort,
   createCustomerInventoryEvidence,
+  createStaffStockShortageSource,
 } from "../../apps/api/dist/customer-menu-inventory-evidence.js";
 function checkedInventory(resources, { saved, expectedDatabaseName }) {
   if (
@@ -21,6 +22,18 @@ export function createInternalInventoryEvidence(resources, installed) {
   return createCustomerInventoryEvidence({
     scope: saved.scope,
     resolveExpiryCutoff: createInternalExpiryCutoff(resources),
+  });
+}
+/**
+ * WP-2423 (2026-10-16): the same stock observation for staff, with the reason an item shows sold
+ * out to guests (short ingredients, on hand / set aside / available).
+ */
+export function createInternalStaffStockShortage(resources, installed) {
+  const saved = checkedInventory(resources, installed);
+  return createStaffStockShortageSource({
+    scope: saved.scope,
+    resolveExpiryCutoff: createInternalExpiryCutoff(resources),
+    menuReference: resources.menu.menuReference,
   });
 }
 /** sourceChannel: "Qr" for the customer app; "Pos" for a counter order staff take (WP-2423 Q7). */

@@ -125,7 +125,7 @@ it("enforces Inventory identity, contiguous immutable versions and Tenant/Brand 
       );
       const versions = await scoped((client) =>
         client.query(
-          "SELECT version::text FROM rms_inventory.inventory_item_version ORDER BY version",
+          "SELECT version::text FROM rms_inventory.inventory_item_version ORDER BY inventory_item_version.version",
         ),
       );
       assert.deepEqual(versions.rows, [{ version: "1" }, { version: "2" }]);

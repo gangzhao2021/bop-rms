@@ -262,6 +262,24 @@ function parseAcceptanceHold(
     canRefund: raw.canRefund,
   });
 }
+export interface HeldStock {
+  readonly since: string;
+  readonly state: "Open" | "Ended";
+  readonly orderBatchReference: string;
+  readonly productionStarted: boolean;
+}
+function parseHeldStock(value: unknown): HeldStock | null {
+  if (value === null) return null;
+  const raw = exact(value, ["since", "state", "orderBatchReference", "productionStarted"]);
+  if ((raw.state !== "Open" && raw.state !== "Ended") || typeof raw.productionStarted !== "boolean")
+    return fail();
+  return Object.freeze({
+    since: instant(raw.since),
+    state: raw.state,
+    orderBatchReference: reference(raw.orderBatchReference),
+    productionStarted: raw.productionStarted,
+  });
+}
 export function parseCurrentOrderQueue(value: unknown, after: string | null = null) {
   const raw = exact(value, ["items", "nextAfterOrderReference"]);
   // WP-2423 D4: up to 50 Orders of the page, plus (first page) older tables' Orders with a round today.
@@ -287,7 +305,11 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
     // WP-2423: the refunds of that online payment on a list row (absent from an older server).
     const withPosition =
       value !== null && typeof value === "object" && Object.hasOwn(value, "paymentPosition");
+    // WP-2423 (2026-10-16): stock still set aside for an earlier-day Order (absent from an older server).
+    const withHeldStock =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "heldStock");
     const item = exact(value, [
+      ...(withHeldStock ? ["heldStock"] : []),
       ...(withCounter ? ["counter"] : []),
       ...(withPaidOnline ? ["paidOnline"] : []),
       ...(withPosition ? ["paymentPosition"] : []),
@@ -356,6 +378,7 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       return fail();
     const submittedAt = instant(item.submittedAt),
       observedAt = instant(item.observedAt);
+    const heldStock = withHeldStock ? parseHeldStock(item.heldStock) : null;
     if (observedAt < submittedAt) return fail();
     // WP-2423 Q1: only a paid pickup still awaiting acceptance has a deadline.
     const acceptBy = item.acceptBy === null ? null : instant(item.acceptBy);
@@ -518,6 +541,11 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
        * earlier day that had a round today; otherwise its own business date.
        */
       listedBusinessDate,
+      /**
+       * WP-2423 (2026-10-16): this Order is from an earlier business day and still has stock set
+       * aside — Open (still to make and hand over, or cancel) or Ended (only the stock is left).
+       */
+      heldStock,
       submittedAt,
       observedAt,
       initialBatchReference: reference(item.initialBatchReference),

@@ -250,6 +250,8 @@ const messages: Record<StoreSetupClientError["code"], string> = {
     "Someone else's configuration change is still waiting, so nothing was created. Recover the request; then it must be approved and published, or declined, first.",
   Withdrawn:
     "This configuration was withdrawn or declined, so this step was not recorded. Recover the request, then create a new configuration from the saved setup.",
+  SoleOperatorApprovalInvalid:
+    "This configuration was approved by you alone while Sole operator was off, so it cannot be published. Recover the request, withdraw it, then send a new change for approval.",
   OutcomeUnknown:
     "The result is unknown. Recover the original request before sending another command.",
 };

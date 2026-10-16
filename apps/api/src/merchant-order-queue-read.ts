@@ -3,6 +3,10 @@ import { createHash } from "node:crypto";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { withOptionalRead } from "./merchant-round-business-date.js";
 import {
+  readEarlierOrdersHoldingStock,
+  type EarlierOrderHoldingStock,
+} from "./merchant-stock-holding-orders.js";
+import {
   createPostgresMerchantOrderIndex,
   createPostgresOrderAcceptanceReader,
   createPostgresOrderCreationQueryStore,
@@ -101,10 +105,42 @@ export function createMerchantOrderQueueRead(options: {
               businessDate: today.businessDate,
               limit: 100,
             });
-      const carriedOrders = new Set(carried.map((order) => order.orderReference));
+      // WP-2423 (2026-10-16 v15 stock leak): an Order of an earlier day that still has stock set
+      // aside is listed first with today's orders too (oldest first, after the tables above), so it
+      // is never left holding stock unseen: staff make and hand it over, cancel it, or release the
+      // stock of one that already ended. An unreadable answer never blanks the Orders page.
+      const holding =
+        today === null
+          ? []
+          : await withOptionalRead(
+              transaction,
+              () => readEarlierOrdersHoldingStock(transaction, scope, today),
+              [] as readonly EarlierOrderHoldingStock[],
+            );
+      const heldByOrder = new Map<string, EarlierOrderHoldingStock>();
+      for (const entry of holding) {
+        // One row per Order: a live round wins over an ended one, the oldest hold is shown.
+        const prior = heldByOrder.get(entry.orderReference);
+        if (
+          prior === undefined ||
+          (prior.state === "Ended" && entry.state === "Open") ||
+          (prior.state === entry.state && entry.heldSince < prior.heldSince)
+        )
+          heldByOrder.set(entry.orderReference, entry);
+      }
+      const carriedOrders = new Set([
+        ...carried.map((order) => order.orderReference),
+        ...heldByOrder.keys(),
+      ]);
+      const carriedList = [
+        ...carried.map((order) => order.orderReference),
+        ...[...heldByOrder.keys()].filter(
+          (reference) => !carried.some((order) => order.orderReference === reference),
+        ),
+      ];
       const carriedItems = [];
       if (input.afterOrderReference === null && input.onlyOrderReference === undefined)
-        for (const order of carried.slice(0, input.limit))
+        for (const orderReference of carriedList.slice(0, input.limit))
           carriedItems.push(
             ...(
               await orderIndex.list({
@@ -112,7 +148,7 @@ export function createMerchantOrderQueueRead(options: {
                 afterOrderReference: null,
                 limit: 1,
                 newestFirst: true,
-                onlyOrderReference: order.orderReference,
+                onlyOrderReference: orderReference,
               })
             ).items,
           );
@@ -283,6 +319,16 @@ export function createMerchantOrderQueueRead(options: {
                 : item.businessDate,
             submittedAt: item.submittedAt,
             initialBatchReference: item.initialBatchReference,
+            /** WP-2423 (2026-10-16): stock still set aside for this earlier-day Order, else null. */
+            heldStock: ((held) =>
+              held === undefined
+                ? null
+                : Object.freeze({
+                    since: held.heldSince,
+                    state: held.state,
+                    orderBatchReference: held.orderBatchReference,
+                    productionStarted: held.productionStarted,
+                  }))(heldByOrder.get(item.orderReference)),
             batches: Object.freeze(current.batches.map((batch) => Object.freeze(batch))),
             currentPhase: current.phase,
             currentVersion: current.version,

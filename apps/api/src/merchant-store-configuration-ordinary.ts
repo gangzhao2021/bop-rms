@@ -48,7 +48,9 @@ import type { createMerchantStoreConfiguration } from "./merchant-store-configur
 import type { StoreConfigurationPublicationChecks } from "./merchant-store-configuration-publication-checks.js";
 import {
   merchantStoreSoleOperatorGate,
+  MerchantSoleOperatorBasisError,
   MerchantSoleOperatorGateError,
+  requireMerchantStoreConfigurationSoleOperatorBasis,
   requireMerchantStoreSoleOperator,
   type ResolveContext,
 } from "./merchant-sole-operator.js";
@@ -291,6 +293,7 @@ export function createMerchantStoreConfigurationOrdinary(
     )
       fail("STORE_CONFIGURATION_ORIGINAL_INPUT_INVALID");
     let soleRefusal: MerchantSoleOperatorGateError | undefined;
+    let basisRefusal: MerchantSoleOperatorBasisError | undefined;
     const session =
       write || input.original !== undefined || historyRequest !== undefined
         ? await authorize
@@ -383,6 +386,7 @@ export function createMerchantStoreConfigurationOrdinary(
         // WP-2423: the transaction host reports owner failures generically; the sole-operator
         // refusal of this run says why (not in effect, verify again).
         if (soleRefusal !== undefined) throw soleRefusal;
+        if (basisRefusal !== undefined) throw basisRefusal;
         throw error;
       })
       .finally(() => {
@@ -816,6 +820,25 @@ export function createMerchantStoreConfigurationOrdinary(
           if (!state || state.setupBasis === undefined)
             fail("STORE_CONFIGURATION_ORIGINAL_VERSION_CONFLICT");
           candidate = state;
+          // WP-2423 (v15 2026-10-16): a configuration approved alone is published only if sole
+          // operator was On when that approval was given.
+          if (command.action === "Publish") {
+            await fresh();
+            try {
+              await requireMerchantStoreConfigurationSoleOperatorBasis(tx as never, {
+                tenantReference: fixed.tenantReference,
+                brandReference: fixed.brandReference,
+                storeReference: fixed.storeReference,
+                configurationReference: candidate.configurationReference,
+                allowed: authorized,
+              });
+            } catch (error) {
+              if (error instanceof MerchantSoleOperatorBasisError) basisRefusal = error;
+              throw error;
+            } finally {
+              check();
+            }
+          }
         }
         const audit = next.call(options),
           committed: { input: Commit | undefined } = { input: undefined };

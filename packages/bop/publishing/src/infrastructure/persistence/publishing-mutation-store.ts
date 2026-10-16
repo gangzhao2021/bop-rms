@@ -1970,7 +1970,8 @@ export function createPostgresPublishingMutationStore(
         };
         const familyRows = statusRows(
           await query(
-            select + " ORDER BY changed_at DESC,lifecycle_version DESC,operation_id DESC LIMIT 1",
+            select +
+              " ORDER BY publishing_mutation_record.changed_at DESC,publishing_mutation_record.lifecycle_version DESC,operation_id DESC LIMIT 1",
             [tenant, scope.brandReference, family],
           ),
         );
@@ -1978,7 +1979,8 @@ export function createPostgresPublishingMutationStore(
         const latestFamily = familyRows[0] ? decode(familyRows[0]) : null;
         const releaseRows = statusRows(
           await query(
-            select + " AND release_id IS NOT NULL ORDER BY release_sequence DESC LIMIT 1",
+            select +
+              " AND release_id IS NOT NULL ORDER BY publishing_mutation_record.release_sequence DESC LIMIT 1",
             [tenant, scope.brandReference, family],
           ),
         );

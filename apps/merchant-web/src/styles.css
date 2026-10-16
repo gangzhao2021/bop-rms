@@ -7649,6 +7649,22 @@ body:has(.product-complete-draft) .bop-shell__header,
   margin: 0 0 var(--bop-space-3);
   font-weight: 600;
 }
+/* WP-2423 (2026-10-16): an earlier-day order still holding ingredients. */
+.order-held-stock {
+  margin: 0 0 var(--bop-space-3);
+  padding-inline-start: var(--bop-space-3);
+  border-inline-start: 3px solid currentColor;
+  font-weight: 600;
+}
+.order-held-stock-tag {
+  display: block;
+  font-weight: 600;
+}
+.order-held-stock-action {
+  display: grid;
+  gap: var(--bop-space-2);
+  justify-items: start;
+}
 .settlement__card-machine {
   display: grid;
   gap: var(--bop-space-3);

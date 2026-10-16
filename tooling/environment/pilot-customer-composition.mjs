@@ -14,7 +14,11 @@ import { createInternalSimulatedProvider } from "./pilot-payment-provider.mjs";
 import { createInternalOrder } from "./pilot-order.mjs";
 import { createInternalCheckout } from "./pilot-checkout.mjs";
 import { createInternalCheckoutDetails } from "./pilot-checkout-details.mjs";
-import { createInternalInventoryEvidence, createInternalTestItems } from "./pilot-items.mjs";
+import {
+  createInternalInventoryEvidence,
+  createInternalStaffStockShortage,
+  createInternalTestItems,
+} from "./pilot-items.mjs";
 import { createInternalTestCart } from "./pilot-cart.mjs";
 import { createInternalCustomerEntry } from "./pilot-customer-entry.mjs";
 import { createInternalPickupEntry } from "./pilot-entry.mjs";
@@ -142,6 +146,12 @@ export function composeCustomerDependencies(directory, installation, config) {
           saved: await installation.loadCustomerData("internal-test-inventory.json"),
           expectedDatabaseName,
         }),
+      }),
+    // WP-2423 (2026-10-16): staff see why an item shows sold out to guests from stock.
+    createInternalStaffStockShortage: async (r) =>
+      createInternalStaffStockShortage(r, {
+        saved: await installation.loadCustomerData("internal-test-inventory.json"),
+        expectedDatabaseName,
       }),
     createInternalChannelQuote: (r, e, c, i) =>
       createInternalChannelQuote(r, e, c, i, {

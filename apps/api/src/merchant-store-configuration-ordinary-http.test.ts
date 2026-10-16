@@ -13,7 +13,10 @@ import {
 } from "@rms/store";
 import { createApp } from "./app.js";
 import { parseMerchantStoreConfigurationOrdinaryWorkspace } from "./merchant-store-configuration-ordinary-values.js";
-import { MerchantSoleOperatorGateError } from "./merchant-sole-operator.js";
+import {
+  MerchantSoleOperatorBasisError,
+  MerchantSoleOperatorGateError,
+} from "./merchant-sole-operator.js";
 import type { MerchantBffService, MerchantStoreConfigurationOrdinaryPort } from "./merchant-bff.js";
 // Actual App/listener/middleware; controlled public host outputs are transport
 // evidence only, not native Session/IAM/Store/Core/Publishing qualification.
@@ -529,6 +532,8 @@ it("names the refusals an Owner can act on (WP-2423 v15 D2/D3)", async () => {
       new StoreConfigurationAdministrationServiceError("STORE_CONFIGURATION_NOT_YOUR_CHANGE"),
       "not_your_change",
     ],
+    // WP-2423 (v15 2026-10-16): approved alone while sole operator was off; not publishable.
+    [new MerchantSoleOperatorBasisError(), "sole_operator_approval_invalid"],
   ] as const) {
     endpoint.write.mockRejectedValueOnce(error);
     const reply = await send(h.root);

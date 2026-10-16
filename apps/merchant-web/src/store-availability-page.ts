@@ -18,6 +18,109 @@ export interface AvailabilityItem {
   readonly sizeName: string;
   readonly status: ItemAvailabilityStatus;
   readonly soldOutUntil: string | null;
+  /**
+   * WP-2423 (2026-10-16): offered, but guests see it sold out because stock cannot cover one
+   * (absent from an older server, null when stock covers it or is unknown).
+   */
+  readonly stockSoldOut?: StockSoldOut | null;
+}
+export interface StockShortIngredient {
+  readonly name: string;
+  readonly unitCode: string;
+  readonly displayPrecision: number;
+  readonly required: string;
+  readonly onHand: string;
+  readonly reserved: string;
+  readonly available: string;
+  readonly openOrderCount: number;
+}
+export interface StockSoldOut {
+  readonly ingredients: readonly StockShortIngredient[];
+}
+const decimal = /^-?(0|[1-9][0-9]*)([.][0-9]{1,6})?$/u;
+function validStockSoldOut(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  const raw = value as { ingredients?: unknown };
+  return (
+    typeof value === "object" &&
+    Array.isArray(raw.ingredients) &&
+    raw.ingredients.length <= 50 &&
+    raw.ingredients.every((entry: unknown) => {
+      const e = entry as Record<string, unknown> | null;
+      return (
+        e !== null &&
+        typeof e === "object" &&
+        typeof e.name === "string" &&
+        typeof e.unitCode === "string" &&
+        Number.isInteger(e.displayPrecision) &&
+        ["required", "onHand", "reserved", "available"].every(
+          (key) => typeof e[key] === "string" && decimal.test(e[key] as string),
+        ) &&
+        Number.isInteger(e.openOrderCount) &&
+        (e.openOrderCount as number) >= 0
+      );
+    })
+  );
+}
+const micro = (value: string) => {
+  const negative = value.startsWith("-");
+  const [whole = "0", fraction = ""] = (negative ? value.slice(1) : value).split(".");
+  const magnitude = BigInt(whole + fraction.padEnd(6, "0").slice(0, 6));
+  return negative ? -magnitude : magnitude;
+};
+const unitLabel: Readonly<Record<string, string>> = {
+  KG: "kg",
+  G: "g",
+  L: "L",
+  ML: "mL",
+  EA: "",
+  EACH: "",
+  PCS: "",
+};
+/** "2.8 L", "0.5 kg", "12" — the ingredient's own display precision, trailing zeros dropped. */
+export function stockAmount(value: string, unitCode: string, displayPrecision: number): string {
+  const m = micro(value);
+  const negative = m < 0n;
+  const abs = negative ? -m : m;
+  const precision = Math.max(0, Math.min(6, displayPrecision));
+  const step = 10n ** BigInt(6 - precision);
+  const rounded = (abs + step / 2n) / step;
+  const scale = 10n ** BigInt(precision);
+  const whole = (rounded / scale).toString();
+  const fraction =
+    precision === 0
+      ? ""
+      : (rounded % scale).toString().padStart(precision, "0").replace(/0+$/u, "");
+  const unit = unitLabel[unitCode] ?? unitCode.toLowerCase();
+  return (
+    (negative ? "-" : "") + whole + (fraction ? "." + fraction : "") + (unit ? " " + unit : "")
+  );
+}
+const orders = (n: number) => (n === 1 ? "1 open order" : `${n} open orders`);
+/**
+ * WP-2423 (2026-10-16): why guests see an offered item as sold out, in staff words: "All 2.8 L of
+ * Whole milk is set aside for 11 open orders." The page links to Orders (or Inventory).
+ */
+export function stockSoldOutText(stock: StockSoldOut): string {
+  const reasons = stock.ingredients.map((entry) => {
+    const amount = (value: string) => stockAmount(value, entry.unitCode, entry.displayPrecision);
+    const onHand = micro(entry.onHand),
+      reserved = micro(entry.reserved);
+    if (onHand <= 0n) return `no ${entry.name} is in stock`;
+    if (reserved > 0n && reserved >= onHand)
+      return `all ${amount(entry.onHand)} of ${entry.name} is set aside for ${orders(entry.openOrderCount)}`;
+    if (reserved > 0n)
+      return `${amount(entry.onHand)} of ${entry.name} is in stock, but ${amount(entry.reserved)} is set aside for ${orders(entry.openOrderCount)} and one needs ${amount(entry.required)}`;
+    return `only ${amount(entry.available)} of ${entry.name} can be used and one needs ${amount(entry.required)}`;
+  });
+  if (reasons.length === 0)
+    return "The ingredients in stock are on hold or past their use-by date.";
+  const text = reasons.join("; ");
+  return text.charAt(0).toUpperCase() + text.slice(1) + ".";
+}
+/** Whether the reason names stock set aside for open orders (the page then links to Orders). */
+export function stockHeldByOrders(stock: StockSoldOut): boolean {
+  return stock.ingredients.some((entry) => micro(entry.reserved) > 0n && entry.openOrderCount > 0);
 }
 export interface StoreAvailabilityView {
   readonly screenId: "CAT-AVAILABILITY";
@@ -60,7 +163,8 @@ export function parseStoreAvailabilityView(value: unknown): StoreAvailabilityVie
       (item: unknown) =>
         item !== null &&
         typeof item === "object" &&
-        statuses.has(String((item as { status?: unknown }).status)),
+        statuses.has(String((item as { status?: unknown }).status)) &&
+        validStockSoldOut((item as { stockSoldOut?: unknown }).stockSoldOut),
     )
   )
     throw new Error("AVAILABILITY_PAGE_INVALID");

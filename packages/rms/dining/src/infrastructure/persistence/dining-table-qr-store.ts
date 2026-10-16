@@ -192,12 +192,12 @@ export function createPostgresDiningTableQrStore(
       one("qr_id=$4", [String(parseDiningReference(qrReference))]),
     /** The newest code issued for a public table reference. */
     loadLatestByPublicTable: (publicTableReference: string) =>
-      one("public_table_id=$4 ORDER BY qr_version DESC LIMIT 1", [
+      one("public_table_id=$4 ORDER BY dining_table_qr_issue.qr_version DESC LIMIT 1", [
         String(parseDiningReference(publicTableReference)),
       ]),
     /** The newest code of a table (its public reference is reused on replacement). */
     loadLatestForTable: (tableReference: string) =>
-      one("table_id=$4 ORDER BY qr_version DESC LIMIT 1", [
+      one("table_id=$4 ORDER BY dining_table_qr_issue.qr_version DESC LIMIT 1", [
         String(parseDiningReference(tableReference)),
       ]),
     /** The newest code of each listed table; tables never issued a code are absent. */
@@ -211,7 +211,7 @@ export function createPostgresDiningTableQrStore(
         await transaction.query(
           "SELECT DISTINCT ON (table_id) " +
             columns +
-            " FROM rms_dining.dining_table_qr_issue WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND table_id=ANY($4::uuid[]) ORDER BY table_id, qr_version DESC",
+            " FROM rms_dining.dining_table_qr_issue WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND table_id=ANY($4::uuid[]) ORDER BY table_id, dining_table_qr_issue.qr_version DESC",
           [tenant, brand, store, tables],
         ),
         tables.length,

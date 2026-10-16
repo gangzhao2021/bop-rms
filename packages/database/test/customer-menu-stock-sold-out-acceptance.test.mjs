@@ -13,6 +13,7 @@ import { createCustomerMenuStoreFacts } from "../../../apps/api/src/customer-men
 import {
   createCustomerCatalogInventoryPort,
   createCustomerInventoryEvidence,
+  createStaffStockShortageSource,
 } from "../../../apps/api/src/customer-menu-inventory-evidence.ts";
 const { Client } = pg;
 const id = (n) => "01902402-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -194,6 +195,26 @@ it("shows an item sold out while its ingredient stock cannot make one, and avail
           })
         ).status;
 
+      // WP-2423 (2026-10-16): staff see the same stock answer as guests, with the reason.
+      const staffStock = createStaffStockShortageSource({
+        scope: inventoryScope,
+        resolveExpiryCutoff: async () => {
+          throw new Error("NoLot fixture");
+        },
+        menuReference: id(1),
+      });
+      const explained = async () =>
+        (
+          await readRunner.run((tx) =>
+            staffStock.explain(tx, {
+              ...scope,
+              observedAt: now,
+              sellableReferences: [id(13)],
+            }),
+          )
+        ).get(id(13));
+      assert.deepEqual(await explained(), { status: "Available", shortages: [] });
+
       assert.equal(await shown(), "Available");
       assert.equal(await cart(), "Accepted");
 
@@ -202,6 +223,22 @@ it("shows an item sold out while its ingredient stock cannot make one, and avail
       await ledger.move("Reserve", 100, minute(11));
       now = minute(12);
       assert.equal(await shown(), "SoldOut");
+      {
+        const reason = await explained();
+        assert.equal(reason.status, "Unavailable");
+        assert.equal(reason.shortages.length, 1);
+        assert.deepEqual(
+          {
+            onHand: reason.shortages[0].onHand,
+            reserved: reason.shortages[0].reserved,
+            available: reason.shortages[0].available,
+            required: reason.shortages[0].required,
+            unitCode: reason.shortages[0].unitCode,
+          },
+          { onHand: "100", reserved: "100", available: "0", required: "2", unitCode: "KG" },
+        );
+        assert.ok(reason.shortages[0].name.length > 0);
+      }
       assert.equal(await cart(), "Rejected");
       assert.deepEqual(
         await port.loadEvidence({
@@ -230,6 +267,13 @@ it("shows an item sold out while its ingredient stock cannot make one, and avail
       await ledger.move("Waste", -99, minute(15));
       now = minute(16);
       assert.equal(await shown(), "SoldOut");
+      {
+        const reason = await explained();
+        assert.equal(reason.status, "Unavailable");
+        assert.equal(reason.shortages[0].onHand, "1");
+        assert.equal(reason.shortages[0].reserved, "0");
+        assert.equal(reason.shortages[0].available, "1");
+      }
       assert.equal(await cart(), "Rejected");
       // A delivery is received: available again.
       await ledger.move("Receive", 5, minute(17));

@@ -104,7 +104,7 @@ export function createPostgresSoleOperatorSettingSource(options: {
       await tx.query(
         "SELECT " +
           selectColumns +
-          " FROM bop_tenant.brand_sole_operator_setting WHERE brand_id=$1 AND recorded_at<=$2 ORDER BY version DESC LIMIT $3",
+          " FROM bop_tenant.brand_sole_operator_setting WHERE brand_id=$1 AND recorded_at<=$2 ORDER BY brand_sole_operator_setting.version DESC LIMIT $3",
         [query.brandReference, query.observedAt, limit],
       ),
       limit,
@@ -305,7 +305,7 @@ export function createPostgresSoleOperatorSettingStore(options: {
       await tx.query(
         "SELECT " +
           selectColumns +
-          " FROM bop_tenant.brand_sole_operator_setting WHERE brand_id=$1 ORDER BY version DESC LIMIT 1",
+          " FROM bop_tenant.brand_sole_operator_setting WHERE brand_id=$1 ORDER BY brand_sole_operator_setting.version DESC LIMIT 1",
         [input.brandReference],
       ),
       1,

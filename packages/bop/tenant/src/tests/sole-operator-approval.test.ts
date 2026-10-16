@@ -67,7 +67,8 @@ function scripted(latest: Record<string, unknown> | null, now: string) {
         statements.push(sql);
         if (sql.includes("clock_timestamp")) return { rows: [{ now }], rowCount: 1 };
         if (sql.includes("operation_id=$2")) return { rows: [], rowCount: 0 };
-        if (sql.includes("ORDER BY version DESC"))
+        // WP-2423 v15: the latest version is ordered by the table column, never the text output.
+        if (sql.includes("ORDER BY brand_sole_operator_setting.version DESC"))
           return { rows: latest === null ? [] : [latest], rowCount: latest === null ? 0 : 1 };
         if (sql.startsWith("INSERT")) return { rows: [], rowCount: 1 };
         return { rows: [], rowCount: null };

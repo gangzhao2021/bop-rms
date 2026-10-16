@@ -1,4 +1,7 @@
-import { MerchantSoleOperatorGateError } from "./merchant-sole-operator.js";
+import {
+  MerchantSoleOperatorBasisError,
+  MerchantSoleOperatorGateError,
+} from "./merchant-sole-operator.js";
 import { MerchantStepUpError } from "./merchant-mfa-step-up.js";
 import { MerchantRefundApprovalError } from "./merchant-ordinary-refund-approval.js";
 import { MerchantSoleOperatorError } from "./merchant-sole-operator-setting.js";
@@ -721,6 +724,8 @@ it("protects store-configuration transport and exposes only bounded results", as
       403,
       "sole_operator_needs_verification",
     ],
+    // WP-2423 (v15 2026-10-16): approved alone while sole operator was off; not publishable.
+    [new MerchantSoleOperatorBasisError(), 409, "sole_operator_approval_invalid"],
   ] as const) {
     control.mockRejectedValueOnce(rejected);
     const response = await submit();

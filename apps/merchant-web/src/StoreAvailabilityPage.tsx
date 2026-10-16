@@ -1,4 +1,5 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
+import { Link } from "react-router";
 import { CheckedTime } from "./StoreTime.js";
 import {
   KitchenDisplayHeaderControls,
@@ -18,6 +19,8 @@ import {
   kitchenDisplayPermissions,
   parseStoreAvailabilityView,
   soldOutText,
+  stockHeldByOrders,
+  stockSoldOutText,
   unavailableAvailabilityClient,
   type AvailabilityClient,
   type AvailabilityCommand,
@@ -306,7 +309,21 @@ export function StoreAvailabilityPage({
                 <td data-label="Status">
                   {item.status === "SoldOut"
                     ? soldOutText(item.soldOutUntil, view.timeZone)
-                    : statusText[item.status]}
+                    : item.stockSoldOut != null &&
+                        (item.status === "Available" || item.status === "Varies")
+                      ? "Sold out to guests (stock)"
+                      : statusText[item.status]}
+                  {item.stockSoldOut != null &&
+                  (item.status === "Available" || item.status === "Varies") ? (
+                    <p className="availability-note">
+                      {stockSoldOutText(item.stockSoldOut)}{" "}
+                      {stockHeldByOrders(item.stockSoldOut) ? (
+                        <Link to="/operations/orders">See Orders</Link>
+                      ) : (
+                        <Link to="/operations/inventory">See Inventory</Link>
+                      )}
+                    </p>
+                  ) : null}
                 </td>
                 <td>{actions(item)}</td>
               </tr>

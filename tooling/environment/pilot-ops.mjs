@@ -173,12 +173,14 @@ async function loadBusiness(runtimeDirectory) {
     reconciliation,
     status,
     receipt,
+    heldStock,
   ] = await Promise.all([
     import("./pilot-installation.mjs"),
     import("./pilot-configured-resources.mjs"),
     import("./pilot-reconciliation-exceptions.mjs"),
     import("./pilot-ops-settlement.mjs"),
     import("./pilot-receipt.mjs"),
+    import("./pilot-held-stock.mjs"),
   ]);
   const directory = path.resolve(runtimeDirectory);
   const installation = await loadPilotInstallation(directory);
@@ -190,6 +192,7 @@ async function loadBusiness(runtimeDirectory) {
       createReconciliationExceptions: reconciliation.createInternalReconciliationExceptions,
       readSettlementStatus: status.readPilotSettlementProblems,
       readReceiptTemplate: receipt.readInternalReceiptTemplateReadiness,
+      readHeldStockOrders: heldStock.readInternalHeldStockOrders,
     },
   };
 }

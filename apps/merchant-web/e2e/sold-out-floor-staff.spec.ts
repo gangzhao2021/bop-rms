@@ -303,3 +303,70 @@ test("@production the kitchen display marks an item sold out for today in its ow
   await expect(page).toHaveURL(/\/operations\/kitchen$/u);
   await expect(page.getByRole("heading", { name: "Kitchen", exact: true })).toBeVisible();
 });
+
+test("@production WP-2423 v15: an offered item guests see sold out from stock says why, with a way to Orders", async ({
+  page,
+}) => {
+  await session(page, [
+    nav("OPS-ORDER-QUEUE", "Orders", "/operations/orders", "ordering.operate"),
+    availability,
+  ]);
+  await page.route("**/merchant/commerce/availability/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "CAT-AVAILABILITY",
+        sourceAsOf: "2026-10-16T05:40:00.000Z",
+        viewer: id(50),
+        timeZone: "America/Toronto",
+        permissions: { mayOffer: true, mayMarkSoldOut: true, mayMarkUntilBack: true },
+        items: [
+          {
+            skuReference: id(1),
+            skuCode: "OAT-LATTE-1",
+            productName: "Oat latte",
+            sizeName: "Regular (12 oz)",
+            status: "Available",
+            soldOutUntil: null,
+            stockSoldOut: {
+              ingredients: [
+                {
+                  name: "Whole milk 3.25%",
+                  unitCode: "L",
+                  displayPrecision: 3,
+                  required: "0.24",
+                  onHand: "2.8",
+                  reserved: "2.8",
+                  available: "0",
+                  openOrderCount: 11,
+                },
+              ],
+            },
+          },
+          {
+            skuReference: id(2),
+            skuCode: "BANANA-BREAD-2",
+            productName: "Banana bread",
+            sizeName: "Banana bread",
+            status: "Available",
+            soldOutUntil: null,
+            stockSoldOut: null,
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto("/app/commerce/availability");
+  const latte = page.getByRole("row", { name: /Oat latte/u });
+  await expect(latte).toContainText("Sold out to guests (stock)");
+  await expect(latte).toContainText(
+    "All 2.8 L of Whole milk 3.25% is set aside for 11 open orders.",
+  );
+  await expect(latte.getByRole("link", { name: "See Orders" })).toHaveAttribute(
+    "href",
+    /\/operations\/orders$/u,
+  );
+  await expect(page.getByRole("row", { name: /Banana bread/u })).toContainText("Available");
+  await expectNoInternalText(page);
+  await expectLayout(page, "availability-stock-reason");
+});

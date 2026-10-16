@@ -312,7 +312,7 @@ export function createPostgresDigitalReceiptTemplateSubmissionStore(
     await restore();
     const row = rows(
       await query(
-        `SELECT ${draftColumns} FROM rms_device.digital_receipt_template_draft_revision WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND template_id=$4 ${exact ? "AND version_id=$5" : "ORDER BY revision DESC"} LIMIT 1`,
+        `SELECT ${draftColumns} FROM rms_device.digital_receipt_template_draft_revision WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND template_id=$4 ${exact ? "AND version_id=$5" : "ORDER BY digital_receipt_template_draft_revision.revision DESC"} LIMIT 1`,
         exact
           ? [
               fixed.tenantReference,

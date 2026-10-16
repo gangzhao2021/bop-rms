@@ -179,7 +179,7 @@ export function createPostgresInventoryItemStore(
       await tx.query(
         `SELECT snapshot_json AS snapshot,version::text AS version,
        to_char(recorded_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "recordedAt"
-       FROM rms_inventory.inventory_item_version WHERE tenant_id=$1 AND brand_id=$2 AND item_id=$3 ORDER BY version DESC LIMIT 1`,
+       FROM rms_inventory.inventory_item_version WHERE tenant_id=$1 AND brand_id=$2 AND item_id=$3 ORDER BY inventory_item_version.version DESC LIMIT 1`,
         [tenant, brand, reference],
       ),
     );

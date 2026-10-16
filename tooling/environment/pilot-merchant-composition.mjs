@@ -140,6 +140,10 @@ export function composeMerchantDependencies(
         simulator.close();
       }
     },
+    // WP-2423 (2026-10-16): item availability shows staff why guests see an item sold out.
+    ...(typeof customer.createInternalStaffStockShortage === "function"
+      ? { createInternalStaffStockShortage: customer.createInternalStaffStockShortage }
+      : {}),
     // WP-2423 Q7: staff take counter pickup orders paid on the Store's own card machine; the walk-up
     // guest enters through the Store's pickup QR like a customer scanning it at the counter.
     createInternalCounterOrder: (resources, persistence, authentication, extra = {}) => {

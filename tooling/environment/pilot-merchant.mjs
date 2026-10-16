@@ -67,6 +67,8 @@ import { createPersistentMerchantBffService } from "../../apps/api/dist/persiste
 import { createMerchantServiceControl } from "../../apps/api/dist/merchant-service-control.js";
 import { createMerchantUnmatchedCaptureRefund } from "../../apps/api/dist/merchant-unmatched-capture-refund.js";
 import { createMerchantOrderStaffCancellation } from "../../apps/api/dist/merchant-order-staff-cancellation.js";
+import { createMerchantEndedOrderStockRelease } from "../../apps/api/dist/merchant-stock-holding-orders.js";
+import { createMerchantBusinessDayWindows } from "../../apps/api/dist/merchant-business-day-window.js";
 import { createMerchantOrderItemStaffCancellation } from "../../apps/api/dist/merchant-order-item-staff-cancellation.js";
 import { createMerchantOrdinaryRefundBusinessDate } from "../../apps/api/dist/merchant-ordinary-refund-business-date.js";
 import { createPersistentMerchantOrderQueue } from "../../apps/api/dist/persistent-merchant-order-queue.js";
@@ -120,6 +122,7 @@ export async function createInternalMerchant(
     cancellationRefundProvider,
     staffTotpVerifier,
     createInternalCounterOrder,
+    createInternalStaffStockShortage,
     createInternalTableQr,
     createInternalStaffPinCredentials,
     readOperationsAlertBoard,
@@ -532,6 +535,29 @@ export async function createInternalMerchant(
         [scope.tenantReference, scope.brandReference, scope.storeReference],
       );
     },
+  });
+  // WP-2423 (2026-10-16 v15 stock leak): a manager returns stock still set aside for an Order of
+  // an earlier day that already ended (handed over, not collected, closed or cancelled).
+  const installSelectedContext = async (tx, scope) => {
+    for (const key of ["tenantReference", "brandReference", "storeReference"])
+      if (scope[key] !== selected[key]) throw new Error("INTERNAL_STOCK_RELEASE_SCOPE_DENIED");
+    await tx.query(
+      "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+      [scope.tenantReference, scope.brandReference, scope.storeReference],
+    );
+  };
+  const endedOrderStockRelease = createMerchantEndedOrderStockRelease({
+    persistence,
+    authentication: service,
+    nextReference: () => resources.credentials.reference(),
+    installContext: installSelectedContext,
+    today: (tx) =>
+      createMerchantBusinessDayWindows({
+        persistence,
+        scope: selected,
+        timeZone: resources.operating.timeZone,
+        authorize: async () => true,
+      }).today(tx, resources.now()),
   });
   // WP-2423 Q9-G1 (DEC-OUTAGE-ACCEPTANCE-HOLD): signed-in staff using the Orders page, kitchen
   // board or counter order mark the Store online (at most one write a minute); a manager may refund
@@ -1136,6 +1162,10 @@ export async function createInternalMerchant(
     authentication: service,
     references: { next: () => resources.credentials.reference() },
     locale: "en-CA",
+    // WP-2423 (2026-10-16): what guests see from stock, and why (short ingredients).
+    ...(createInternalStaffStockShortage === undefined
+      ? {}
+      : { stock: await createInternalStaffStockShortage(resources) }),
   });
   const storeTax = createMerchantStoreTax({
     persistence,
@@ -1285,6 +1315,7 @@ export async function createInternalMerchant(
       compensationQuery,
       ...(unmatchedCaptureRefund === undefined ? {} : { unmatchedCaptureRefund }),
       orderStaffCancellation,
+      endedOrderStockRelease,
       ...(orderItemStaffCancellation === undefined ? {} : { orderItemStaffCancellation }),
       // WP-2423 Q7: counter pickup orders and card-machine payments and refunds.
       ...(createInternalCounterOrder === undefined

@@ -340,7 +340,13 @@ async function soleOperatorRefusal(
 async function ordinaryConflictReason(
   response: Response,
 ): Promise<
-  "SetupIncomplete" | "SetupOutdated" | "OpenChangeByAnother" | "Withdrawn" | "NotYourChange" | null
+  | "SetupIncomplete"
+  | "SetupOutdated"
+  | "OpenChangeByAnother"
+  | "Withdrawn"
+  | "NotYourChange"
+  | "SoleOperatorApprovalInvalid"
+  | null
 > {
   try {
     const text = await response.text();
@@ -356,7 +362,9 @@ async function ordinaryConflictReason(
             ? "Withdrawn"
             : error === "not_your_change"
               ? "NotYourChange"
-              : null;
+              : error === "sole_operator_approval_invalid"
+                ? "SoleOperatorApprovalInvalid"
+                : null;
   } catch {
     return null;
   }

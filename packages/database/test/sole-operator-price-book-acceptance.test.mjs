@@ -12,6 +12,7 @@ import {
   seedBrand,
   seedBrandMember,
   seedBrandRole,
+  seedSoleOperatorHistory,
   seedSoleOperatorSetting,
   seedStepUp,
 } from "../test-support/sole-operator-brand-gate.mjs";
@@ -335,6 +336,25 @@ it("price book: the author publishes alone only as an in-effect, re-verified sol
         state: "Off",
         version: 2,
       });
+      await rejects(command(publish(bookC, "SoleOperator")), "SoleOperatorNotInEffect");
+      // WP-2423 v15 defect (2026-10-16): past version 10 the latest version still decides (a text
+      // sort read version 9 "On" as the latest and let the author publish alone).
+      assert.equal(
+        await seedSoleOperatorHistory(admin, {
+          id,
+          n: 800,
+          tenantReference,
+          brandReference,
+          actorReference: owner,
+          atLeast: 11,
+          latest: "Off",
+        }),
+        12,
+      );
+      assert.equal(
+        (await prices.query({ ...session, priceBookReference: bookC })).soleOperator.status,
+        "NotSet",
+      );
       await rejects(command(publish(bookC, "SoleOperator")), "SoleOperatorNotInEffect");
 
       // ── 6. The mark is append-only and only marks a publication.

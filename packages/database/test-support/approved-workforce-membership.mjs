@@ -161,7 +161,7 @@ export async function verifyApprovedWorkforceMembership(context, extension) {
     audits: (
       await query(
         admin,
-        "SELECT audit_id::text,action_code,actor_reference::text,chain_sequence::text FROM platform_audit.audit_record WHERE brand_id=$1 ORDER BY chain_sequence",
+        "SELECT audit_id::text,action_code,actor_reference::text,chain_sequence::text FROM platform_audit.audit_record WHERE brand_id=$1 ORDER BY audit_record.chain_sequence",
         [approval.brandReference],
       )
     ).rows,

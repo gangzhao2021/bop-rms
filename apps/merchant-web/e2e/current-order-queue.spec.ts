@@ -632,3 +632,134 @@ test("@production WP-2423 Q1: new orders and acceptance deadlines surface withou
     "false",
   );
 });
+
+test("@production WP-2423 v15: earlier-day orders still holding stock are listed first, with what to do, and an ended one's stock is released", async ({
+  page,
+}) => {
+  const id = (n: number) => "01909968-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const scope = {
+    brandLabel: "Synthetic Brand",
+    storeLabel: "Synthetic Store",
+    storeReference: id(99),
+  };
+  const headers = { "cache-control": "no-store" };
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: { ...scope, timeZone: "America/Toronto" },
+          authorizedStores: [scope],
+          businessDate: "2026-10-16",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "OPS-ORDER-QUEUE",
+              label: "Orders",
+              href: "/operations/orders",
+              permission: "ordering.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  const order = (n: number, number: string, state: "Open" | "Ended", phase: string) => ({
+    orderReference: id(n),
+    orderNumber: number,
+    orderType: "Pickup",
+    sourceChannel: "Qr",
+    businessDate: "2026-10-10",
+    listedBusinessDate: "2026-10-16",
+    heldStock: {
+      since: "2026-10-10T21:33:01.258Z",
+      state,
+      orderBatchReference: id(n + 100),
+      productionStarted: false,
+    },
+    submittedAt: "2026-10-10T21:33:01.000Z",
+    observedAt: "2026-10-16T06:00:00.000Z",
+    initialBatchReference: id(n + 100),
+    batches: [
+      {
+        orderBatchReference: id(n + 100),
+        sequence: 1,
+        acceptanceStatus: "Accepted",
+        canRequestAcceptance: false,
+        canCancel: state === "Open",
+        staffCancellation: null,
+        canCancelItems: false,
+      },
+    ],
+    canRequestAcceptance: false,
+    currentPhase: phase,
+    currentVersion: 2,
+    unfulfillable: null,
+    pickupNotCollected: false,
+    acceptBy: null,
+    awaitingPayment: false,
+  });
+  let ended = true;
+  const releases: unknown[] = [];
+  await page.route("**/merchant/orders?*", (route) => route.fallback());
+  await page.route("**/merchant/orders", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        items: [
+          order(1, "2", "Open", "Accepted"),
+          ...(ended ? [order(2, "7", "Ended", "Cancelled")] : []),
+        ],
+        nextAfterOrderReference: null,
+      },
+    }),
+  );
+  await page.route("**/merchant/orders/release-stock", (route) => {
+    expect(route.request().headers()["x-bop-csrf"]).toBe("a".repeat(43));
+    releases.push(route.request().postDataJSON());
+    ended = false;
+    return route.fulfill({ headers, json: { status: "Released" } });
+  });
+  await page.goto("/operations/orders");
+  await expect(
+    page.getByRole("heading", { name: "Earlier days · still holding stock" }),
+  ).toBeVisible();
+  await expect(page.getByText("Sat, Oct 10 · still open, holding stock")).toBeVisible();
+  await expect(page.getByText("Sat, Oct 10 · finished, stock still set aside")).toBeVisible();
+  await page.getByRole("heading", { name: "2", exact: true }).click();
+  await page.getByRole("heading", { name: "7", exact: true }).click();
+  await expect(
+    page.getByText("Still open from an earlier day and holding ingredients"),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Cancel order" })).toBeVisible();
+  await expect(
+    page.getByText(
+      "This order from an earlier day is finished, but ingredients are still set aside",
+    ),
+  ).toBeVisible();
+  await expectNoInternalText(page);
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/orders-held-stock-${width}.png`, fullPage: true });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole("button", { name: "Release held ingredients" }).click();
+  await expect(
+    page.getByText("This order from an earlier day is finished, but ingredients"),
+  ).toHaveCount(0);
+  expect(releases).toEqual([
+    {
+      orderReference: id(2),
+      orderBatchReference: id(102),
+      operationReference: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+    },
+  ]);
+});

@@ -184,6 +184,11 @@ export const systemReservationReleaseReasonCodes = Object.freeze([
   "PAYMENT_WINDOW_EXPIRED",
   /** WP-2423 Q6: staff cancelled a paid order or batch before the kitchen started it. */
   "STAFF_CANCELLED_BEFORE_PREPARATION",
+  /**
+   * WP-2423 (2026-10-16): staff released stock still set aside for an Order that already ended
+   * (handed over, not collected, closed or cancelled) — nothing will use it any more.
+   */
+  "ORDER_ENDED_STOCK_LEFT",
 ] as const);
 export type SystemReservationReleaseReasonCode =
   (typeof systemReservationReleaseReasonCodes)[number];
@@ -782,7 +787,7 @@ export function createPostgresStockReservationStore(
           await tx.query(
             "SELECT DISTINCT ON (reservation_id) " +
               columns +
-              " FROM rms_inventory.stock_reservation_version WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND submission_id=$4 AND snapshot_json->'binding'->>'cartItemReference'=$5 ORDER BY reservation_id, version DESC",
+              " FROM rms_inventory.stock_reservation_version WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND submission_id=$4 AND snapshot_json->'binding'->>'cartItemReference'=$5 ORDER BY reservation_id, stock_reservation_version.version DESC",
             [tenant, brand, store, submissionReference, cartItemReference],
           ),
         );
@@ -815,7 +820,7 @@ export function createPostgresStockReservationStore(
           await tx.query(
             "SELECT " +
               columns +
-              " FROM rms_inventory.stock_reservation_version WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND reservation_id=$4 ORDER BY version DESC LIMIT 1",
+              " FROM rms_inventory.stock_reservation_version WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND reservation_id=$4 ORDER BY stock_reservation_version.version DESC LIMIT 1",
             [tenant, brand, store, reservationReference],
           ),
         );
@@ -1057,7 +1062,7 @@ export function createPostgresStockReservationStore(
             `SELECT snapshot_json AS snapshot,version::text AS version,
           to_char(recorded_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "recordedAt"
           FROM rms_inventory.inventory_item_version WHERE tenant_id=$1 AND brand_id=$2 AND item_id=$3
-          ORDER BY version DESC LIMIT 1`,
+          ORDER BY inventory_item_version.version DESC LIMIT 1`,
             [tenant, brand, next.binding.itemReference],
           ),
         );
@@ -1128,7 +1133,7 @@ export function createPostgresStockReservationStore(
               `SELECT record_json->'hold' AS hold,version::text AS version,
             to_char(occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "occurredAt"
             FROM rms_inventory.stock_lot_hold_version WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND account_id=$4
-            ORDER BY version DESC LIMIT 1`,
+            ORDER BY stock_lot_hold_version.version DESC LIMIT 1`,
               [tenant, brand, store, accountReference],
             ),
           );
@@ -1154,7 +1159,7 @@ export function createPostgresStockReservationStore(
           await tx.query(
             "SELECT " +
               columns +
-              " FROM rms_inventory.stock_reservation_version WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND reservation_id=$4 ORDER BY version DESC LIMIT 1",
+              " FROM rms_inventory.stock_reservation_version WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND reservation_id=$4 ORDER BY stock_reservation_version.version DESC LIMIT 1",
             [tenant, brand, store, next.reservationReference],
           ),
         );
@@ -1754,4 +1759,196 @@ export function createPostgresSubmissionStockPlanSource(
       });
     },
   });
+}
+
+/** Six-decimal fixed point of a non-negative inventory decimal string (display reads only). */
+function stockMicro(value: unknown): bigint {
+  const text = typeof value === "number" ? String(value) : value;
+  if (typeof text !== "string" || !/^(0|[1-9][0-9]*)([.][0-9]{1,6})?$/u.test(text)) return fail();
+  const [whole = "0", fraction = ""] = text.split(".");
+  return BigInt(whole + fraction.padEnd(6, "0"));
+}
+function stockDecimal(value: bigint): string {
+  const negative = value < 0n,
+    magnitude = negative ? -value : value;
+  const fraction = (magnitude % 1_000_000n).toString().padStart(6, "0").replace(/0+$/u, "");
+  return (
+    (negative ? "-" : "") + (magnitude / 1_000_000n).toString() + (fraction ? "." + fraction : "")
+  );
+}
+
+/** One submission (an Order round) that still has stock set aside at the Store. */
+export interface StoreSubmissionHoldingStock {
+  readonly submissionReference: string;
+  /** When the first still-open reservation of the submission was made. */
+  readonly heldSince: string;
+  /** Reservations of the submission with a remaining quantity. */
+  readonly reservationCount: number;
+  /** Whether production already started on one of them (the kitchen settles those). */
+  readonly productionStarted: boolean;
+}
+
+/**
+ * WP-2423 (2026-10-16 v15 stock leak): the submissions (Order rounds) that still hold reserved
+ * stock at the Store — the current version of each reservation with a remaining quantity — oldest
+ * first. Inventory owns only the reservation fact; the caller maps submissions to Orders through
+ * Ordering and decides what staff see. Caller authorizes and owns the (read-only) transaction.
+ */
+export async function listStoreSubmissionsHoldingStock(
+  transaction: InventoryItemTransaction,
+  scopeInput: Readonly<{ tenantReference: string; brandReference: string; storeReference: string }>,
+  input: Readonly<{
+    limit: number;
+    /** Only submissions whose stock was first set aside before this instant (e.g. today's start). */
+    heldBefore: string | null;
+  }>,
+): Promise<readonly StoreSubmissionHoldingStock[]> {
+  const raw = closed(scopeInput, ["tenantReference", "brandReference", "storeReference"]);
+  const tenant = parseInventoryReference(raw.tenantReference),
+    brand = parseInventoryReference(raw.brandReference),
+    store = parseInventoryReference(raw.storeReference);
+  const heldBefore = input.heldBefore === null ? null : parseInventoryInstant(input.heldBefore);
+  if (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 500) return fail();
+  await transaction.query(
+    "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+    [tenant, brand, store],
+  );
+  // The current version of each reservation is the one no later version follows (primary key
+  // lookups); a Reserve is always version 1, so the reservation's start is its version 1.
+  const rows = (
+    (await transaction.query(
+      `SELECT v.submission_id::text AS submission,min(f.occurred_at) AS held_since,count(*)::int AS n,
+          bool_or(EXISTS (SELECT 1 FROM rms_inventory.stock_reservation_version p
+            WHERE p.tenant_id=v.tenant_id AND p.brand_id=v.brand_id AND p.store_id=v.store_id
+              AND p.reservation_id=v.reservation_id AND p.action='StartProduction')) AS started
+        FROM rms_inventory.stock_reservation_version v
+        JOIN rms_inventory.stock_reservation_version f ON f.tenant_id=v.tenant_id AND f.brand_id=v.brand_id
+          AND f.store_id=v.store_id AND f.reservation_id=v.reservation_id AND f.version=1
+        WHERE v.tenant_id=$1 AND v.brand_id=$2 AND v.store_id=$3
+          AND (v.snapshot_json->>'remainingQuantity')::numeric>0
+          AND NOT EXISTS (SELECT 1 FROM rms_inventory.stock_reservation_version n
+            WHERE n.tenant_id=v.tenant_id AND n.brand_id=v.brand_id AND n.store_id=v.store_id
+              AND n.reservation_id=v.reservation_id AND n.version>v.version)
+        GROUP BY v.submission_id
+        HAVING $5::timestamptz IS NULL OR min(f.occurred_at)<$5::timestamptz
+        ORDER BY min(f.occurred_at),v.submission_id LIMIT $4`,
+      [tenant, brand, store, input.limit, heldBefore],
+    )) as { rows: readonly Record<string, unknown>[] }
+  ).rows;
+  return Object.freeze(
+    rows.map((row) => {
+      const at = row.held_since instanceof Date ? row.held_since.toISOString() : row.held_since;
+      if (typeof row.n !== "number" || row.n < 1 || typeof row.started !== "boolean") return fail();
+      return Object.freeze({
+        submissionReference: parseInventoryReference(row.submission),
+        heldSince: parseInventoryInstant(at),
+        reservationCount: row.n,
+        productionStarted: row.started,
+      });
+    }),
+  );
+}
+
+/** What one stocked ingredient of an item needs, and why the Store cannot make one now. */
+export interface RecipeStockShortage {
+  readonly itemReference: string;
+  /** The ingredient's staff-facing name (English name, else its internal code). */
+  readonly name: string;
+  readonly unitCode: string;
+  readonly displayPrecision: number;
+  /** Needed for one of the item as normally ordered (base unit). */
+  readonly required: string;
+  readonly onHand: string;
+  readonly reserved: string;
+  readonly available: string;
+  /** Order rounds (submissions) still holding some of this ingredient. */
+  readonly holdingSubmissionCount: number;
+}
+
+/**
+ * WP-2423 (2026-10-16): the staff-facing reason an item cannot be made from current stock — for
+ * each stock-tracked ingredient of the recipe demand, what one needs and the Store's on-hand,
+ * reserved and available totals at the stock site, and how many Order rounds hold some of it.
+ * Read only; the sold-out decision itself stays with the stock plan (lot expiry and holds included).
+ * Caller authorizes and owns the (read-only) transaction.
+ */
+export async function readRecipeStockShortage(
+  transaction: InventoryItemTransaction,
+  demandInput: RecipeStockDemand,
+  at: string,
+): Promise<readonly RecipeStockShortage[]> {
+  const captured = closed(demandInput, [
+    "tenantReference",
+    "brandReference",
+    "storeReference",
+    "stockSiteReference",
+    "contributions",
+  ]);
+  const tenant = parseInventoryReference(captured.tenantReference),
+    brand = parseInventoryReference(captured.brandReference),
+    store = parseInventoryReference(captured.storeReference),
+    site = parseInventoryReference(captured.stockSiteReference);
+  const observedAt = parseInventoryInstant(at);
+  const contributions = captureStockContributions(captured.contributions);
+  const bound = {
+    run: async <T>(work: (tx: InventoryItemTransaction) => Promise<T>) => work(transaction),
+  };
+  const itemStore = createPostgresInventoryItemStore(bound, {
+    tenantReference: tenant,
+    brandReference: brand,
+  });
+  const requirements = await createInventoryRecipeDemandSource(itemStore, {
+    tenantReference: tenant,
+    brandReference: brand,
+  }).resolve(contributions as readonly RecipeItemDemandContribution[], observedAt);
+  await transaction.query(
+    "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+    [tenant, brand, store],
+  );
+  const result: RecipeStockShortage[] = [];
+  for (const requirement of requirements) {
+    if (requirement.quantity === "0" || !requirement.trackingPolicy.stockTrackingEnabled) continue;
+    const totals = (
+      (await transaction.query(
+        `SELECT coalesce(sum(b.on_hand),0)::text AS on_hand,coalesce(sum(b.reserved),0)::text AS reserved,
+            coalesce(sum(b.available),0)::text AS available,
+            (SELECT count(DISTINCT v.submission_id)::int
+              FROM rms_inventory.stock_reservation_version v JOIN rms_inventory.stock_account r
+                ON r.tenant_id=v.tenant_id AND r.brand_id=v.brand_id AND r.store_id=v.store_id
+                AND r.account_id=v.account_id
+              WHERE v.tenant_id=$1 AND v.brand_id=$2 AND v.store_id=$3 AND r.item_id=$4 AND r.stock_site_id=$5
+                AND (v.snapshot_json->>'remainingQuantity')::numeric>0
+                AND NOT EXISTS (SELECT 1 FROM rms_inventory.stock_reservation_version n
+                  WHERE n.tenant_id=v.tenant_id AND n.brand_id=v.brand_id AND n.store_id=v.store_id
+                    AND n.reservation_id=v.reservation_id AND n.version>v.version)) AS holding
+          FROM rms_inventory.stock_account a JOIN rms_inventory.stock_balance b
+            ON b.tenant_id=a.tenant_id AND b.brand_id=a.brand_id AND b.store_id=a.store_id AND b.account_id=a.account_id
+          WHERE a.tenant_id=$1 AND a.brand_id=$2 AND a.store_id=$3 AND a.item_id=$4 AND a.stock_site_id=$5`,
+        [tenant, brand, store, requirement.itemReference, site],
+      )) as { rows: readonly (Record<string, unknown> | undefined)[] }
+    ).rows[0];
+    if (totals === undefined || typeof totals.holding !== "number") return fail();
+    const snapshot = await itemStore.load(parseInventoryReference(requirement.itemReference));
+    const names = (snapshot?.localizedNames ?? {}) as Readonly<Record<string, string>>;
+    const name = names.en ?? Object.values(names)[0] ?? snapshot?.internalCode ?? "";
+    const signed = (value: unknown) => {
+      const text = String(value);
+      return text.startsWith("-") ? -stockMicro(text.slice(1)) : stockMicro(text);
+    };
+    const trim = (value: unknown) => stockDecimal(signed(value));
+    result.push(
+      Object.freeze({
+        itemReference: requirement.itemReference,
+        name: name.slice(0, 120),
+        unitCode: requirement.unit.unitCode,
+        displayPrecision: requirement.unit.displayPrecision,
+        required: stockDecimal(stockMicro(requirement.quantity)),
+        onHand: trim(totals.on_hand),
+        reserved: trim(totals.reserved),
+        available: trim(totals.available),
+        holdingSubmissionCount: totals.holding,
+      }),
+    );
+  }
+  return Object.freeze(result);
 }

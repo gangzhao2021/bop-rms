@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseAvailabilityRule } from "@rms/catalog";
 import { merchantNavigationActions } from "./merchant-bff.js";
 import {
+  stockSoldOutView,
   itemAvailability,
   MerchantAvailabilityError,
   parseAvailabilityCommandBody,
@@ -82,5 +83,39 @@ describe("WP-2423 item availability", () => {
     expect(
       merchantNavigationActions({ screenId: "CAT-MENU-LIST", permission: "catalog.menu.read" }),
     ).toEqual(["catalog.menu.read"]);
+  });
+});
+
+describe("WP-2423 (2026-10-16) stock reason on the item availability page", () => {
+  const milk = {
+    itemReference: "0190a7c4-0000-7000-8000-000000000011",
+    name: "Whole milk 3.25%",
+    unitCode: "L",
+    displayPrecision: 3,
+    required: "0.24",
+    onHand: "2.8",
+    reserved: "2.8",
+    available: "0",
+    holdingSubmissionCount: 11,
+  };
+  it("lists only the short ingredients of an item guests see sold out from stock", () => {
+    const sugar = { ...milk, name: "Sugar", available: "4.8", reserved: "0" };
+    expect(stockSoldOutView({ status: "Unavailable", shortages: [milk, sugar] })).toEqual({
+      ingredients: [
+        {
+          name: "Whole milk 3.25%",
+          unitCode: "L",
+          displayPrecision: 3,
+          required: "0.24",
+          onHand: "2.8",
+          reserved: "2.8",
+          available: "0",
+          openOrderCount: 11,
+        },
+      ],
+    });
+    expect(stockSoldOutView({ status: "Available", shortages: [] })).toBeNull();
+    expect(stockSoldOutView({ status: "Indeterminate", shortages: [] })).toBeNull();
+    expect(stockSoldOutView(undefined)).toBeNull();
   });
 });

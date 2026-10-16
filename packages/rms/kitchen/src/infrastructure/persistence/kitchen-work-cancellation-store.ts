@@ -101,7 +101,7 @@ export async function loadKitchenWorkCancellations(
     "SELECT " +
       kitchenWorkCancellationColumns +
       " FROM rms_kitchen.kitchen_work_cancellation WHERE brand_id=$1 AND store_id=$2 AND kitchen_ticket_id=$3 " +
-      "ORDER BY result_ticket_version LIMIT 101",
+      "ORDER BY kitchen_work_cancellation.result_ticket_version LIMIT 101",
     [scope.brandReference, scope.storeReference, ticketReference],
   );
   if (result.rows.length > 100) return unavailable();

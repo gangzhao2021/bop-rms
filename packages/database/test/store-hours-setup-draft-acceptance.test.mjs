@@ -1106,6 +1106,39 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
         () => act(people.owner, "Approve"),
         isCode("STORE_CONFIGURATION_SELF_APPROVAL"),
       );
+      // WP-2423 v15 defect (2026-10-16): the setting history passes version 10 and its latest
+      // version is Off. The Owner is the only approver and verified, yet sole operator is off: the
+      // hours view does not offer approving alone, the command is refused, and the database
+      // refuses a sole-operator mark itself (a text sort read version 9 "On" as the latest).
+      {
+        const revokedLong = await revokeSecondOwnerApproval();
+        await verifyOwner();
+        do await soleOperator(settingVersion % 2 === 0 ? "On" : "Off");
+        while (settingVersion < 11 || settingVersion % 2 !== 0);
+        const offView = await (await hoursFor(people.owner)).read(people.owner.sessionCookie);
+        assert.equal(offView.latest.lifecycle, "PendingApproval");
+        assert.equal(offView.soleOperator.status, "NotSet");
+        await refusedUnchanged(
+          () => act(people.owner, "Approve", "SoleOperator"),
+          isSole("NotInEffect", "Off"),
+        );
+        await assert.rejects(
+          admin.query(
+            "INSERT INTO rms_store.store_configuration_sole_operator_approval VALUES ($1,$2,$3,$4,$5,'SoleOperator',$6,date_trunc('milliseconds',now()),date_trunc('milliseconds',now()),$7,'ConfigurationMetadata')",
+            [
+              scope.brandReference,
+              scope.storeReference,
+              offView.latest.configurationReference,
+              reference(),
+              reference(),
+              people.owner.actor,
+              reference(),
+            ],
+          ),
+          /needs sole operator on/u,
+        );
+        await restoreSecondOwnerApproval(revokedLong);
+      }
       await soleOperator("On");
       const revokedAgain = await revokeSecondOwnerApproval();
       await verifyOwner();
@@ -1189,6 +1222,64 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
         for (const field of ["taxConfigurationReference", "addressReference", "receiptReference"])
           assert.equal(v.latest[field], v.current[field], field);
         assert.equal((await withdrawFor(people.manager, v.latest)).status, "Applied");
+        // WP-2423 v15 cleanup (2026-10-16): an hours change approved alone although the setting
+        // history says sole operator was off at that moment (test-controlled: the Off version is
+        // recorded at the approval instant minus 1 ms, as on v15 where the Off preceded the
+        // approval) cannot be published, even once sole operator is On again; its author
+        // withdraws it (the product path) and nothing is published.
+        v = await managerHours.read(people.manager.sessionCookie);
+        assert.equal((await saveHours(people.owner, hoursOn(v, "20:00:00"))).status, "Applied");
+        await act(people.owner, "Validate");
+        await act(people.owner, "Submit");
+        await soleOperator("On");
+        const revokedBasis = await revokeSecondOwnerApproval();
+        await verifyOwner();
+        assert.equal((await act(people.owner, "Approve", "SoleOperator")).status, "Applied");
+        const approvedAlone = (
+          await (await hoursFor(people.owner)).read(people.owner.sessionCookie)
+        ).latest;
+        assert.equal(approvedAlone.lifecycle, "Approved");
+        const markedAt = (
+          await admin.query(
+            "SELECT approved_at FROM rms_store.store_configuration_sole_operator_approval WHERE configuration_id=$1",
+            [approvedAlone.configurationReference],
+          )
+        ).rows[0].approved_at;
+        const offBefore = new Date(markedAt.getTime() - 1).toISOString();
+        const offN = 0x100 + settingVersion * 0x10;
+        await admin.query(
+          "INSERT INTO bop_tenant.brand_sole_operator_setting (tenant_id,brand_id,setting_id,version,state,reason_code,actor_id,actor_mfa_at,recorded_at,operation_id,audit_id) VALUES ($1,$2,$3,$4,'Off','SECOND_APPROVER_AVAILABLE',$5,$6,$6,$7,$8)",
+          [
+            scope.tenantReference,
+            scope.brandReference,
+            sid(offN),
+            ++settingVersion,
+            people.owner.actor,
+            offBefore,
+            sid(offN + 1),
+            sid(offN + 2),
+          ],
+        );
+        await soleOperator("On");
+        await refusedUnchanged(
+          () => act(people.owner, "Publish"),
+          (error) => error?.name === "MerchantSoleOperatorBasisError",
+        );
+        v = await managerHours.read(people.manager.sessionCookie);
+        assert.equal(v.current.configurationReference, afterOwn.current.configurationReference);
+        assert.deepEqual(await withdrawFor(people.owner, approvedAlone), {
+          status: "Applied",
+          kind: "Withdrawn",
+        });
+        const withdrawnView = await (await hoursFor(people.owner)).read(people.owner.sessionCookie);
+        assert.equal(withdrawnView.latestWithdrawal.kind, "Withdrawn");
+        assert.equal(withdrawnView.latestWithdrawal.byYou, true);
+        await refusedUnchanged(
+          () => act(people.owner, "Publish"),
+          (error) => error !== undefined,
+        );
+        await soleOperator("Off");
+        await restoreSecondOwnerApproval(revokedBasis);
       }
       const latestRevision = (
         await admin.query(

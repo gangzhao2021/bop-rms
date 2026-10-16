@@ -23,6 +23,11 @@ import { createMerchantStoreBusinessDay } from "./merchant-store-business-day.js
 import { derivedReference } from "./merchant-products.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
+import { withOptionalRead } from "./merchant-round-business-date.js";
+import type {
+  createStaffStockShortageSource,
+  StaffStockShortage,
+} from "./customer-menu-inventory-evidence.js";
 
 /**
  * WP-2423 8.5: CAT-AVAILABILITY for the selected Store — which items this Store sells now. Offering
@@ -154,6 +159,39 @@ const catalogErrors: Partial<Record<CatalogError["code"], MerchantAvailabilityEr
   CATALOG_CODE_CONFLICT: "Invalid",
 };
 
+/**
+ * WP-2423 (2026-10-16): an item guests see as sold out because stock cannot cover one: each short
+ * ingredient with what one needs and the Store's on-hand, set-aside and available amounts, and how
+ * many open order rounds hold some of it. Null when guests can order it from stock (or unknown).
+ */
+export function stockSoldOutView(found: StaffStockShortage | undefined) {
+  if (found === undefined || found.status !== "Unavailable") return null;
+  const micro = (value: string) => {
+    const negative = value.startsWith("-");
+    const [whole = "0", fraction = ""] = (negative ? value.slice(1) : value).split(".");
+    const magnitude = BigInt(whole + fraction.padEnd(6, "0").slice(0, 6));
+    return negative ? -magnitude : magnitude;
+  };
+  return Object.freeze({
+    ingredients: Object.freeze(
+      found.shortages
+        .filter((entry) => micro(entry.available) < micro(entry.required))
+        .map((entry) =>
+          Object.freeze({
+            name: entry.name,
+            unitCode: entry.unitCode,
+            displayPrecision: entry.displayPrecision,
+            required: entry.required,
+            onHand: entry.onHand,
+            reserved: entry.reserved,
+            available: entry.available,
+            openOrderCount: entry.holdingSubmissionCount,
+          }),
+        ),
+    ),
+  });
+}
+
 export function createMerchantAvailability(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
@@ -161,6 +199,11 @@ export function createMerchantAvailability(options: {
   locale: string;
   /** Test seam: the Brand scope resolver (defaults to the current session's Brand scope). */
   resolveScope?: ReturnType<typeof createMerchantBrandScope>;
+  /**
+   * WP-2423 (2026-10-16): what guests see from stock for the selected Store, and why. Without it
+   * the page shows the availability rules only.
+   */
+  stock?: Pick<ReturnType<typeof createStaffStockShortageSource>, "explain">;
 }) {
   const resolveScope = options.resolveScope ?? createMerchantBrandScope(options.persistence);
   type Tx = Parameters<Parameters<typeof options.persistence.transactions.run>[0]>[0];
@@ -219,6 +262,34 @@ export function createMerchantAvailability(options: {
         const at = options.persistence.now();
         const skus = (await listBrandSkuChoices(ptx(tx), s.owner)).filter((sku) => sku.active);
         const rules = await listStoreAvailabilityRules(ptx(tx), s.owner);
+        const statuses = new Map(
+          skus.map((sku) => [
+            sku.skuReference,
+            itemAvailability(rules, s.owner, sku.skuReference, at),
+          ]),
+        );
+        // WP-2423 (2026-10-16): items the rules offer but guests see as sold out from stock. Read
+        // last in a savepoint, so an unreadable stock answer never blanks the page.
+        const stockSource = options.stock;
+        const stock =
+          stockSource === undefined
+            ? new Map<string, StaffStockShortage>()
+            : await withOptionalRead(
+                tx as never,
+                () =>
+                  stockSource.explain(tx as never, {
+                    brandReference: s.owner.brandReference,
+                    storeReference: s.owner.storeReference,
+                    observedAt: at,
+                    sellableReferences: skus
+                      .filter((sku) => {
+                        const status = statuses.get(sku.skuReference)?.status;
+                        return status === "Available" || status === "Varies";
+                      })
+                      .map((sku) => String(sku.skuReference)),
+                  }),
+                new Map<string, StaffStockShortage>() as ReadonlyMap<string, StaffStockShortage>,
+              );
         return {
           screenId: "CAT-AVAILABILITY" as const,
           sourceAsOf: at,
@@ -231,7 +302,9 @@ export function createMerchantAvailability(options: {
               skuCode: sku.skuCode,
               productName: name(sku.productLocalizedNames, sku.skuCode),
               sizeName: name(sku.localizedNames, sku.skuCode),
-              ...itemAvailability(rules, s.owner, sku.skuReference, at),
+              ...(statuses.get(sku.skuReference) ??
+                itemAvailability(rules, s.owner, sku.skuReference, at)),
+              stockSoldOut: stockSoldOutView(stock.get(String(sku.skuReference))),
             }))
             .sort(
               (a, b) =>

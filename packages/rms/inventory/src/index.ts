@@ -94,8 +94,12 @@ export * from "./infrastructure/persistence/submission-final-validation-store.js
 export {
   createPostgresSubmissionStockPlanSource,
   createPostgresRecipeStockPlanSource,
+  listStoreSubmissionsHoldingStock,
+  readRecipeStockShortage,
 } from "./infrastructure/persistence/stock-reservation-store.js";
 export type {
+  StoreSubmissionHoldingStock,
+  RecipeStockShortage,
   RecipeStockDemand,
   SubmissionStockAllocation,
   SubmissionExpiryCutoff,

@@ -11,7 +11,9 @@ import {
 } from "@rms/recipe";
 import {
   createPostgresRecipeStockPlanSource,
+  readRecipeStockShortage,
   StockReservationStoreError,
+  type RecipeStockShortage,
   type InventoryItemTransaction,
   type InventoryItemTransactionRunner,
   type SubmissionExpiryCutoff,
@@ -48,6 +50,11 @@ export function createCustomerRecipeInventoryObservation(options: {
     input: CustomerRecipeInventoryObservationInput,
   ): Promise<boolean>;
   resolveExpiryCutoff: SubmissionExpiryCutoff;
+  /**
+   * WP-2423 (2026-10-16): staff reads only — when one cannot be made, also say which stocked
+   * ingredients are short and how much is on hand, reserved and available. Never for customers.
+   */
+  explainShortage?: boolean;
 }) {
   const scope = Object.freeze({
     tenantReference: String(parseCatalogReference(options.scope.tenantReference)),
@@ -132,9 +139,18 @@ export function createCustomerRecipeInventoryObservation(options: {
               throw error;
             status = "Unavailable";
           }
+          const shortages: readonly RecipeStockShortage[] =
+            status === "Unavailable" && options.explainShortage === true
+              ? await readRecipeStockShortage(
+                  tx,
+                  { ...scope, stockSiteReference, contributions },
+                  input.observedAt,
+                )
+              : [];
           if ((await options.authorize(tx, input)) !== true) throw new Error("authority withdrawn");
           return Object.freeze({
             status,
+            shortages,
             ...scope,
             stockSiteReference,
             sellableReference: input.sellableReference,

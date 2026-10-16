@@ -17,6 +17,7 @@ import {
   SoleOperatorApprovalError,
   type SoleOperatorSettingTransaction,
 } from "@bop/tenant";
+import { readStoreConfigurationSoleOperatorApproval } from "@rms/store";
 import { createMerchantWorkforcePermissionSource } from "./merchant-workforce-authority-source.js";
 
 export type ResolveContext = Parameters<
@@ -367,4 +368,46 @@ export async function requireMerchantStoreSoleOperator(
   if (gate.actorMfaAt === null || !soleOperatorMfaRecent(gate.actorMfaAt, input.observedAt))
     throw new MerchantSoleOperatorGateError("NeedsReverification");
   return Object.freeze({ actorMfaAt: gate.actorMfaAt });
+}
+
+/**
+ * WP-2423 (v15 2026-10-16): an approval given alone stands only if sole operator was On for the
+ * Brand when it was given. A defect let the Owner approve their own hours change alone after
+ * turning sole operator off; such an approval cannot be published (its author withdraws it and
+ * sends it again).
+ */
+export class MerchantSoleOperatorBasisError extends Error {
+  constructor() {
+    super("An approval given alone while sole operator was off cannot be published");
+    this.name = "MerchantSoleOperatorBasisError";
+  }
+}
+/**
+ * Before a Store configuration is published: when its approval was given alone (the Store's
+ * sole-operator mark for it exists), the Brand's sole-operator setting in force at the marked
+ * approval time must be On (Organization read in this transaction). `allowed` must hold the
+ * caller's current access.
+ */
+export async function requireMerchantStoreConfigurationSoleOperatorBasis(
+  tx: ConsumerTransaction,
+  input: StoreScope & {
+    readonly configurationReference: string;
+    allowed(): Promise<boolean>;
+  },
+): Promise<void> {
+  const mark = await readStoreConfigurationSoleOperatorApproval(tx as never, {
+    brandReference: input.brandReference,
+    storeReference: input.storeReference,
+    configurationReference: input.configurationReference,
+  });
+  if (mark === null) return;
+  const setting = await createPostgresSoleOperatorSettingSource({
+    authorize: async (_tx, query) =>
+      query.brandReference === input.brandReference && (await input.allowed()),
+  })(tx as unknown as SoleOperatorSettingTransaction, {
+    tenantReference: input.tenantReference,
+    brandReference: input.brandReference,
+    observedAt: mark.approvedAt,
+  });
+  if (setting.state !== "On") throw new MerchantSoleOperatorBasisError();
 }

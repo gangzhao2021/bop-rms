@@ -3,7 +3,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { findInternalText, staticText } from "../e2e/internal-text-patterns.js";
 import { StoreConfigurationPublicationChecklist } from "./StoreConfigurationOrdinaryPanel.js";
-import { StoreSetupLiveSettings, liveStoreSettingsChange } from "./StoreSetupDraftPage.js";
+import {
+  StoreSetupLiveSettings,
+  liveStoreSettingsChange,
+  openingHoursChanges,
+} from "./StoreSetupDraftPage.js";
 import {
   parseStoreConfigurationOrdinaryWorkspace,
   storeConfigurationPublicationCheckCodes,
@@ -125,6 +129,71 @@ describe("WP-2423 DEC-STORE-SETUP-PUBLICATION Store setup publication screens", 
         />,
       ),
     ).toBe("");
+  });
+  it("says which days publishing changes and carries the live opening hours", () => {
+    const sunday = (end: string, cutoffMinutes: number) =>
+      Array.from({ length: 7 }, (_, i) => ({
+        isoWeekday: i + 1,
+        intervals:
+          i === 6
+            ? [
+                {
+                  startLocalTime: "10:00:00",
+                  endLocalTime: end,
+                  endsNextDay: false,
+                  serviceModes: ["Pickup"],
+                  orderCutoffSeconds: cutoffMinutes * 60,
+                  leadTimeSeconds: 900,
+                },
+              ]
+            : [],
+      }));
+    const running = {
+      ...live,
+      current: { ...live.current, weeklySchedule: sunday("20:00:00", 35) },
+    } as typeof live;
+    // Times differ: only the times are shown.
+    expect(
+      openingHoursChanges(running.current.weeklySchedule, sunday("15:00:00", 35) as never),
+    ).toEqual(["Sunday: 10:00\u201320:00 becomes 10:00\u201315:00"]);
+    // Same times, different last orders: the details that differ are shown.
+    expect(
+      openingHoursChanges(running.current.weeklySchedule, sunday("20:00:00", 20) as never),
+    ).toEqual([
+      "Sunday: 10:00\u201320:00 (Pickup; last orders 35 min before closing; preparation 15 min) becomes 10:00\u201320:00 (Pickup; last orders 20 min before closing; preparation 15 min)",
+    ]);
+    expect(
+      openingHoursChanges(running.current.weeklySchedule, running.current.weeklySchedule),
+    ).toEqual([]);
+    const content = {
+      ...createUnconfiguredStoreSetupContentV2(),
+      weeklySchedule: { state: "Configured" as const, value: sunday("15:00:00", 35) as never },
+    };
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <StoreSetupLiveSettings
+          content={content}
+          live={running}
+          disabled={false}
+          onUse={() => undefined}
+        />
+      </MemoryRouter>,
+    );
+    const text = staticText(html);
+    expect(text).toContain("Publishing this setup changes the Store\u2019s opening hours:");
+    expect(text).toContain("Sunday: 10:00\u201320:00 becomes 10:00\u201315:00");
+    expect(text.indexOf("Sunday: 10:00")).toBeLessThan(
+      text.indexOf("\nUse the live Store\u2019s settings\n"),
+    );
+    expect(text).toContain(
+      "\u201cUse the live Store\u2019s settings\u201d also replaces the opening hours in this setup with the live Store\u2019s.",
+    );
+    expect(findInternalText([text])).toEqual([]);
+    // DEC-STORE-SETUP-PUBLICATION 13: using the live settings carries its opening hours too.
+    expect(liveStoreSettingsChange(content, running).weeklySchedule).toEqual({
+      state: "Configured",
+      value: running.current.weeklySchedule,
+    });
   });
   it("refuses checks that do not belong to the latest configuration", async () => {
     await expect(

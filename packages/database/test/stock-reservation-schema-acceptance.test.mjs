@@ -312,7 +312,7 @@ it("binds reservation ownership to movements and rolls back attempts to spend an
       assert.deepEqual(state.rows, [{ on_hand: "6", reserved: "2", ledger_version: "6" }]);
       const history = await scoped((client) =>
         client.query(
-          "SELECT reservation_id,version::text,snapshot_json->>'remainingQuantity' AS remaining FROM rms_inventory.stock_reservation_version ORDER BY reservation_id,version",
+          "SELECT reservation_id,version::text,snapshot_json->>'remainingQuantity' AS remaining FROM rms_inventory.stock_reservation_version ORDER BY reservation_id,stock_reservation_version.version",
         ),
       );
       assert.equal(history.rows.length, 5);

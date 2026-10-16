@@ -321,6 +321,9 @@ export interface StoreConfigurationView {
   /** WP-2423 (v15 `8bd902e3` D9): you may decline someone else's open change (Store configuration
    * approval). Absent from older servers: treated as not allowed. */
   readonly viewerMayDecline?: boolean;
+  /** WP-2423 (v15): you hold Store configuration approval (`store.service.approve`), whoever made
+   * the open change; decides what the screen tells a sender. Absent from older servers: unknown. */
+  readonly viewerMayApprove?: boolean;
 }
 /** WP-2423 (v15): why an Owner declined someone else's change (optional). */
 export type StoreConfigurationDeclineReason = "NotRight" | "NotNeeded" | "TalkFirst";
@@ -336,6 +339,7 @@ export function parseStoreConfigurationView(raw: unknown, store: string): StoreC
     raw !== null && typeof raw === "object" && Object.hasOwn(raw, "viewerActorReference");
   const named = extended && Object.hasOwn(raw, "latestAuthorName");
   const declinable = named && Object.hasOwn(raw, "viewerMayDecline");
+  const approvable = declinable && Object.hasOwn(raw, "viewerMayApprove");
   const v = exact(raw, [
     "screenId",
     "storeReference",
@@ -346,8 +350,10 @@ export function parseStoreConfigurationView(raw: unknown, store: string): StoreC
     ...(extended ? ["viewerActorReference", "latestWithdrawal"] : []),
     ...(named ? ["latestAuthorName", "soleOperator"] : []),
     ...(declinable ? ["viewerMayDecline"] : []),
+    ...(approvable ? ["viewerMayApprove"] : []),
   ]);
   if (declinable && typeof v.viewerMayDecline !== "boolean") return invalid();
+  if (approvable && typeof v.viewerMayApprove !== "boolean") return invalid();
   if (v.screenId !== "STORE-HOURS-SERVICE" || !reference(store) || v.storeReference !== store)
     return invalid();
   const current = v.current === null ? null : parseStoreConfigurationSnapshot(v.current, store);
@@ -434,6 +440,7 @@ export function parseStoreConfigurationView(raw: unknown, store: string): StoreC
         }
       : {}),
     ...(declinable ? { viewerMayDecline: v.viewerMayDecline as boolean } : {}),
+    ...(approvable ? { viewerMayApprove: v.viewerMayApprove as boolean } : {}),
   });
 }
 
@@ -477,6 +484,9 @@ export const NOT_YOUR_CHANGE_MESSAGE =
 /** WP-2423 DEC-SOLE-OPERATOR-APPROVAL: refusals of an approval, each with what to do next. */
 export const APPROVAL_NEEDS_ANOTHER_PERSON_MESSAGE =
   "You made or sent this change, so someone else with Owner access must approve it, or approve it on your own as sole operator.";
+/** WP-2423 (v15 2026-10-16): an approval given alone while sole operator was off. */
+export const SOLE_OPERATOR_APPROVAL_INVALID_MESSAGE =
+  "This change was approved by you alone while Sole operator was off, so it cannot be published. Withdraw it, then send a new change for approval.";
 export const SOLE_OPERATOR_OFF_MESSAGE =
   "Sole operator is off, so another person with Owner access must approve this. If you run this business on your own, turn on Sole operator on the Approvals page, then approve again.";
 export const SOLE_OPERATOR_OTHERS_MESSAGE =
@@ -590,6 +600,8 @@ export function createStoreConfigurationClient(fetcher: typeof fetch = fetch) {
         if (hours && error === "store_setup_has_unpublished_changes")
           throw new Error(STORE_SETUP_UNPUBLISHED_MESSAGE);
         if (error === "open_change_by_another") throw new Error(OPEN_CHANGE_BY_ANOTHER_MESSAGE);
+        if (error === "sole_operator_approval_invalid")
+          throw new Error(SOLE_OPERATOR_APPROVAL_INVALID_MESSAGE);
         if (error === "store_configuration_withdrawn")
           throw new Error(STORE_CONFIGURATION_WITHDRAWN_MESSAGE);
         if (error === "not_your_change") throw new Error(NOT_YOUR_CHANGE_MESSAGE);
