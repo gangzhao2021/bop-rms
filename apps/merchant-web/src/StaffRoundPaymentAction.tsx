@@ -3,7 +3,7 @@ import { validSlipReference } from "./CardMachineRefundAction.js";
 import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { CounterOrderClientError, createCounterOrderClient } from "./staff-order-entry.js";
-import { paidAtInstant, payErrorText } from "./StaffOrderEntryPage.js";
+import { paidAtInstant, payErrorText } from "./counter-payment.js";
 
 const cad = (amountMinor: string) => orderMoney({ amountMinor, currencyCode: "CAD" });
 

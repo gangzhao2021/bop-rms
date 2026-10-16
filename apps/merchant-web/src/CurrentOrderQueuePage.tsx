@@ -5,7 +5,7 @@ import {
   acceptanceHoldTier,
 } from "./AcceptanceHoldActions.js";
 import { paidRoundWait, paidRoundWaitText } from "./paid-round-wait.js";
-import { OrderPaymentLinks } from "./RefundPaymentPage.js";
+import { OrderPaymentLinks } from "./OrderPaymentLinks.js";
 import { DiningOrderProgress } from "./DiningOrderProgress.js";
 import { OrderAcceptanceAction } from "./OrderAcceptanceAction.js";
 import {

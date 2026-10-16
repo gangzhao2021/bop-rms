@@ -5,7 +5,7 @@ import { needsFullSignIn } from "./full-sign-in.js";
 import { createOrdinaryRefundClient, OrdinaryRefundClientError } from "./ordinary-refund-client.js";
 import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
-import { paidAtInstant } from "./StaffOrderEntryPage.js";
+import { paidAtInstant } from "./counter-payment.js";
 import { StoreTimeZoneContext, storeTime } from "./StoreTime.js";
 
 const defaultClient = createOrdinaryRefundClient();

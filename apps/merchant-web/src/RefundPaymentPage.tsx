@@ -1,4 +1,5 @@
 import { orderMoney } from "./order-money.js";
+import { refundErrorText as errorMessage } from "./OrderPaymentLinks.js";
 import {
   RefundExecutionAction,
   RefundSendAction,
@@ -15,7 +16,7 @@ import {
   type RefundRun,
   type RefundRunStep,
 } from "./ordinary-refund-run.js";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation, useParams } from "react-router";
 import { SourceTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
@@ -27,7 +28,7 @@ import {
 import { serviceOperationReference } from "./service-control-client.js";
 import { StepUpVerification } from "./StepUpVerification.js";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
-import { FULL_SIGN_IN_REQUIRED_TEXT, needsFullSignIn } from "./full-sign-in.js";
+import { needsFullSignIn } from "./full-sign-in.js";
 import { createRefundApprovalClient, type RefundApprovalEntry } from "./refund-approval-client.js";
 import {
   declineReasonLabel,
@@ -45,14 +46,6 @@ type Preview = Awaited<ReturnType<Intent["preview"]>>;
 type Submitted = Awaited<ReturnType<Intent["submit"]>>;
 const amount = (value: string | null) =>
   value === null ? "Unavailable" : orderMoney({ amountMinor: value, currencyCode: "CAD" });
-const errorMessage = (error: unknown) =>
-  needsFullSignIn(error)
-    ? FULL_SIGN_IN_REQUIRED_TEXT
-    : error instanceof OrdinaryRefundClientError && error.code === "Denied"
-      ? "Your current permissions do not allow this refund workflow."
-      : error instanceof OrdinaryRefundClientError && error.code === "Conflict"
-        ? "The payment or refund selection changed. Refresh before trying again."
-        : "Unable to refresh this information. Check your connection and try again.";
 /** WP-2423 Q5: what is left of the captured amount after confirmed and pending refunds. */
 function refundableMinor(context: Context): bigint {
   if (
@@ -105,67 +98,6 @@ export function paymentStateLabel(context: Context): string {
   if (confirmed > 0n) return pending > 0n ? "Partly refunded, refund pending" : "Partly refunded";
   if (pending > 0n) return "Paid, refund pending";
   return "Paid";
-}
-export function OrderPaymentLinks({
-  orderReference,
-  csrf,
-  fetcher,
-}: {
-  readonly orderReference: string;
-  readonly csrf: string;
-  /** WP-2423 P5: an injected transport (the local demo); the shared client otherwise. */
-  readonly fetcher?: typeof fetch | undefined;
-}) {
-  const paymentClient = useMemo(
-    () => (fetcher === undefined ? client : createOrdinaryRefundClient(fetcher)),
-    [fetcher],
-  );
-  const [links, setLinks] = useState<readonly string[]>([]),
-    [message, setMessage] = useState(""),
-    [busy, setBusy] = useState(false);
-  const pending = useRef<AbortController | null>(null);
-  useEffect(() => () => pending.current?.abort(), []);
-  const load = async () => {
-    if (pending.current) return;
-    const controller = new AbortController();
-    pending.current = controller;
-    setBusy(true);
-    setMessage("");
-    try {
-      const result = await paymentClient.items(orderReference, csrf, controller.signal);
-      if (!controller.signal.aborted) {
-        const ids = [
-          ...new Set(
-            result.items.flatMap((item) =>
-              item.paymentIntentReference === null ? [] : [item.paymentIntentReference],
-            ),
-          ),
-        ];
-        setLinks(ids);
-        if (!ids.length) setMessage("This order has no paid payment yet.");
-      }
-    } catch (error) {
-      if (!controller.signal.aborted) setMessage(errorMessage(error));
-    } finally {
-      pending.current = null;
-      if (!controller.signal.aborted) setBusy(false);
-    }
-  };
-  return (
-    <section aria-label="Order payments">
-      <button disabled={busy} onClick={() => void load()}>
-        Payments and refunds
-      </button>
-      <p role="status">{message}</p>
-      {links.map((reference, index) => (
-        <p key={reference}>
-          <Link to={"/app/operations/payments/" + reference}>
-            Payment {index + 1} · refunds and details
-          </Link>
-        </p>
-      ))}
-    </section>
-  );
 }
 /**
  * WP-2423 item 6: where one recorded request stands, in staff language. A refund is called sent

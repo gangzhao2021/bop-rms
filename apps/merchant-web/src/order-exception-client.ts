@@ -1,4 +1,4 @@
-import type { OrderExceptionClient } from "./OrderExceptionPage.js";
+import type { OrderExceptionClient } from "./order-exception-view.js";
 
 export function createOrderExceptionClient(fetcher: typeof fetch = fetch): OrderExceptionClient {
   return Object.freeze({

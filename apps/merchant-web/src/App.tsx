@@ -1,61 +1,32 @@
-import { StoreReceiptPrivacyPanel } from "./StoreReceiptPrivacyPanel.js";
-import { StorePublicProfilePanel } from "./StorePublicProfilePanel.js";
-import { createOptionSetClient } from "./store-option-set-page.js";
-import { createOptionPriceClient } from "./store-option-prices-page.js";
-import { createTaxReviewClient } from "./StoreTaxReviewPage.js";
-import { createTaxClassificationClient } from "./tax-classification-page.js";
-import { createOptionRecipeClient } from "./store-option-recipes-page.js";
-import { RefundPaymentPage } from "./RefundPaymentPage.js";
-import { DiningSessionWorkspace } from "./DiningSessionWorkspace.js";
 import { CurrentOrderDetailRoute, CurrentOrderQueuePage } from "./CurrentOrderQueuePage.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import {
-  lazy,
   Suspense,
   useEffect,
   useMemo,
   useRef,
   useState,
   type ComponentType,
-  type LazyExoticComponent,
   type ReactNode,
 } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router";
 import { usesWorkspaceLayout, WorkspaceLayout } from "./WorkspaceLayout.js";
 import { StaffSessionGuard, StaffSignedOutPanel, StaffSwitchButton } from "./StaffSession.js";
 import { StaffPinControls } from "./StaffPinControls.js";
+import { StaffSwitchPage } from "./StaffSwitchPage.js";
 import { isOperationalScreen } from "./staff-session.js";
 import { StoreTimeZoneContext } from "./StoreTime.js";
 import { StoreBusinessDayProvider } from "./StoreBusinessDay.js";
 import { MerchantShell } from "./MerchantShell.js";
 import { StoreOverview } from "./StoreOverview.js";
-import { SettlementPage } from "./SettlementPage.js";
-import { StoreReportsPage } from "./StoreReportsPage.js";
-import { RefundApprovalsPage } from "./RefundApprovalsPage.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { KitchenBoardPage, KitchenWorkItemPage } from "./KitchenBoardPages.js";
 import { createKitchenBoardClient } from "./kitchen-board-client.js";
 import { parseKitchenBoardView } from "./kitchen-board.js";
-import { PickupQueuePage } from "./PickupPages.js";
-import { OrderExceptionPage } from "./OrderExceptionPage.js";
-import { StoreMenuBuilderPage, StoreMenuListPage } from "./StoreMenuPages.js";
-import { createMenuClient } from "./store-menu-pages.js";
-import { createAvailabilityClient } from "./store-availability-page.js";
-import { createPriceClient } from "./store-price-pages.js";
-import { createAllergenClient } from "./allergen-declaration-pages.js";
 import type { MerchantDemoClients } from "./merchant-demo.js";
 import type { MerchantBrandWorkspaceClient } from "./merchant-brand-workspace.js";
-import { createRoleAdministrationPageClient } from "./role-administration-pages.js";
-import { createSupplyItemClient } from "./supply-item-pages.js";
-import { createStockLocationClient } from "./stock-location-pages.js";
-import { createOpeningCountClient } from "./opening-count-pages.js";
-import { createStoreReceiptClient } from "./store-receipt-pages.js";
-import { createRecipeClient } from "./recipe-pages.js";
-import { createProductClient } from "./product-pages.js";
-import { createStockCountClient } from "./stock-count-pages.js";
-import { createStoreWasteClient } from "./store-waste-pages.js";
-import { createStaffPageClient } from "./staff-administration-pages.js";
 import { FULL_SIGN_IN_REQUIRED, needsFullSignIn } from "./full-sign-in.js";
+import { lazyModule, lazyPage, PageChunkBoundary, WithModule } from "./route-chunks.js";
 import {
   createMerchantWorkspaceClient,
   type MerchantWorkspaceClient,
@@ -63,19 +34,34 @@ import {
 } from "./merchant-workspace.js";
 
 /**
- * WP-2423 C2: pages outside the pilot path load on first use instead of shipping in one chunk.
- * The pilot pages (home, orders, kitchen, pickup, exceptions, settlement, menus, payments) stay
- * in the entry so the first screen after sign-in needs no second request.
+ * WP-2423 C2: only the shell, sign-in, Home, Orders and Kitchen are in the first download; every
+ * other screen loads on first use (route-chunks.tsx). The other pilot screens are fetched in the
+ * background once the workspace is ready, so they still open if the Wi-Fi drops later.
  */
-// React's lazy() is typed over ComponentType<any>; the page's own props type is preserved.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnyPage = ComponentType<any>;
-function lazyPage<M extends Record<string, unknown>, K extends keyof M & string>(
-  load: () => Promise<M>,
-  name: K,
-): LazyExoticComponent<Extract<M[K], AnyPage>> {
-  return lazy(async () => ({ default: (await load())[name] as Extract<M[K], AnyPage> }));
-}
+const routeClients = lazyModule(() => import("./route-clients.js"));
+const StoreReceiptPrivacyPanel = lazyPage(
+  () => import("./StoreReceiptPrivacyPanel.js"),
+  "StoreReceiptPrivacyPanel",
+);
+const StorePublicProfilePanel = lazyPage(
+  () => import("./StorePublicProfilePanel.js"),
+  "StorePublicProfilePanel",
+);
+const RefundPaymentPage = lazyPage(() => import("./RefundPaymentPage.js"), "RefundPaymentPage");
+const DiningSessionWorkspace = lazyPage(
+  () => import("./DiningSessionWorkspace.js"),
+  "DiningSessionWorkspace",
+);
+const SettlementPage = lazyPage(() => import("./SettlementPage.js"), "SettlementPage");
+const StoreReportsPage = lazyPage(() => import("./StoreReportsPage.js"), "StoreReportsPage");
+const RefundApprovalsPage = lazyPage(
+  () => import("./RefundApprovalsPage.js"),
+  "RefundApprovalsPage",
+);
+const PickupQueuePage = lazyPage(() => import("./PickupPages.js"), "PickupQueuePage");
+const OrderExceptionPage = lazyPage(() => import("./OrderExceptionPage.js"), "OrderExceptionPage");
+const StoreMenuBuilderPage = lazyPage(() => import("./StoreMenuPages.js"), "StoreMenuBuilderPage");
+const StoreMenuListPage = lazyPage(() => import("./StoreMenuPages.js"), "StoreMenuListPage");
 const TaxConfigDraftPage = lazyPage(() => import("./TaxConfigDraftPage.js"), "TaxConfigDraftPage");
 const StoreSetupDraftPage = lazyPage(
   () => import("./StoreSetupDraftPage.js"),
@@ -392,12 +378,37 @@ const PlatformTemplateWorkspace = lazyPage(
 );
 const SupportCasePage = lazyPage(() => import("./SupportCasePages.js"), "SupportCasePage");
 // WP-2423 (design "A"): staff PIN quick switch on a shared tablet, and its management page.
-const StaffSwitchPage = lazyPage(() => import("./StaffSwitchPage.js"), "StaffSwitchPage");
 const StoreDevicesPage = lazyPage(() => import("./StoreDevicesPage.js"), "StoreDevicesPage");
 const MetricCatalogPage = lazyPage(() => import("./MetricPages.js"), "MetricCatalogPage");
 const MetricDetailPage = lazyPage(() => import("./MetricPages.js"), "MetricDetailPage");
 const DataQualityPage = lazyPage(() => import("./DataQualityPages.js"), "DataQualityPage");
 const ReconciliationPage = lazyPage(() => import("./DataQualityPages.js"), "ReconciliationPage");
+
+/** The other pilot screens staff move to from Orders and Kitchen, fetched once the workspace is ready. */
+const pilotScreens: readonly { readonly prefetch: () => void }[] = [
+  PickupQueuePage,
+  OrderExceptionPage,
+  StaffOrderEntryPage,
+  DiningSessionWorkspace,
+  RefundPaymentPage,
+  RefundApprovalsPage,
+  SettlementPage,
+  StoreAvailabilityPage,
+  StoreMenuListPage,
+  StoreMenuBuilderPage,
+  routeClients,
+];
+function prefetchPilotScreens(): () => void {
+  const start = () => {
+    for (const screen of pilotScreens) screen.prefetch();
+  };
+  if (typeof globalThis.requestIdleCallback === "function") {
+    const handle = globalThis.requestIdleCallback(start, { timeout: 5_000 });
+    return () => globalThis.cancelIdleCallback(handle);
+  }
+  const handle = setTimeout(start, 2_000);
+  return () => clearTimeout(handle);
+}
 
 type WorkspaceState =
   | { readonly kind: "Loading" }
@@ -502,6 +513,9 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
     };
   }, [client]);
 
+  const ready = state.kind === "Ready";
+  useEffect(() => (ready ? prefetchPilotScreens() : undefined), [ready]);
+
   const switchStore = async (targetStoreReference: string) => {
     if (state.kind !== "Ready" || state.switching || switching.current) return;
     switching.current = true;
@@ -527,7 +541,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
     }
   };
 
-  const routes = (
+  const routeTree = (
     <Suspense
       fallback={
         <StatePanel heading="Loading" tone="neutral" status>
@@ -680,11 +694,15 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <StaffListPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createStaffPageClient(state.csrf)}
-                  csrf={state.csrf}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <StaffListPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createStaffPageClient(state.csrf)}
+                      csrf={state.csrf}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <StaffListPage />
               )}
@@ -696,11 +714,15 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <StaffDetailPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createStaffPageClient(state.csrf)}
-                  csrf={state.csrf}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <StaffDetailPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createStaffPageClient(state.csrf)}
+                      csrf={state.csrf}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <StaffDetailPage />
               )}
@@ -712,11 +734,15 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <RoleListPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createRoleAdministrationPageClient(state.csrf)}
-                  csrf={state.csrf}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <RoleListPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createRoleAdministrationPageClient(state.csrf)}
+                      csrf={state.csrf}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <RoleListPage />
               )}
@@ -728,11 +754,15 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <RoleEditorPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createRoleAdministrationPageClient(state.csrf)}
-                  csrf={state.csrf}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <RoleEditorPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createRoleAdministrationPageClient(state.csrf)}
+                      csrf={state.csrf}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <RoleEditorPage />
               )}
@@ -756,10 +786,14 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <StoreOptionSetListPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createOptionSetClient(state.csrf)}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <StoreOptionSetListPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createOptionSetClient(state.csrf)}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <StoreOptionSetListPage />
               )}
@@ -771,10 +805,14 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <StoreOptionSetEditPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createOptionSetClient(state.csrf)}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <StoreOptionSetEditPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createOptionSetClient(state.csrf)}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <StoreOptionSetEditPage />
               )}
@@ -786,10 +824,14 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <ProductListPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createProductClient(state.csrf)}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <ProductListPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createProductClient(state.csrf)}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <ProductListPage />
               )}
@@ -803,10 +845,14 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
             element={
               <SessionPending pending={sessionPending}>
                 {state.kind === "Ready" && !state.switching ? (
-                  <ProductEditorPage
-                    key={state.workspace.selectedScope.storeReference + state.csrf}
-                    client={createProductClient(state.csrf)}
-                  />
+                  <WithModule module={routeClients}>
+                    {(clients) => (
+                      <ProductEditorPage
+                        key={state.workspace.selectedScope.storeReference + state.csrf}
+                        client={clients.createProductClient(state.csrf)}
+                      />
+                    )}
+                  </WithModule>
                 ) : (
                   <ProductEditorPage />
                 )}
@@ -820,10 +866,14 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
             <SessionPending pending={sessionPending}>
               <LocalDemoRoute notice={demo?.Notice ?? null}>
                 {!demo && state.kind === "Ready" && !state.switching ? (
-                  <StoreMenuListPage
-                    key={state.workspace.selectedScope.storeReference + state.csrf}
-                    client={createMenuClient(state.csrf)}
-                  />
+                  <WithModule module={routeClients}>
+                    {(clients) => (
+                      <StoreMenuListPage
+                        key={state.workspace.selectedScope.storeReference + state.csrf}
+                        client={clients.createMenuClient(state.csrf)}
+                      />
+                    )}
+                  </WithModule>
                 ) : (
                   // The local demo has no menu source; it fails closed without application requests.
                   <StoreMenuListPage />
@@ -837,12 +887,16 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <StoreMenuBuilderPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createMenuClient(state.csrf)}
-                  csrf={state.csrf}
-                  availability={createAvailabilityClient(state.csrf)}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <StoreMenuBuilderPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createMenuClient(state.csrf)}
+                      csrf={state.csrf}
+                      availability={clients.createAvailabilityClient(state.csrf)}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <StoreMenuBuilderPage />
               )}
@@ -856,29 +910,33 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <StoreAvailabilityPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createAvailabilityClient(state.csrf)}
-                  {...(soldOutFromKitchen
-                    ? {
-                        kitchenDisplay: {
-                          storeLabel: state.workspace.selectedScope.storeLabel,
-                          csrf: state.csrf,
-                          soldOutHref: pathname,
-                          // The kitchen board's own read says whether this is a kitchen display
-                          // sign-in (presentation only; the server checks every request).
-                          loadOperatorStatus: () =>
-                            createKitchenBoardClient({
-                              csrf: state.csrf,
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <StoreAvailabilityPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createAvailabilityClient(state.csrf)}
+                      {...(soldOutFromKitchen
+                        ? {
+                            kitchenDisplay: {
                               storeLabel: state.workspace.selectedScope.storeLabel,
-                              storeReference: state.workspace.selectedScope.storeReference,
-                            })
-                              .loadQueue()
-                              .then((value) => parseKitchenBoardView(value).operatorStatus),
-                        },
-                      }
-                    : {})}
-                />
+                              csrf: state.csrf,
+                              soldOutHref: pathname,
+                              // The kitchen board's own read says whether this is a kitchen display
+                              // sign-in (presentation only; the server checks every request).
+                              loadOperatorStatus: () =>
+                                createKitchenBoardClient({
+                                  csrf: state.csrf,
+                                  storeLabel: state.workspace.selectedScope.storeLabel,
+                                  storeReference: state.workspace.selectedScope.storeReference,
+                                })
+                                  .loadQueue()
+                                  .then((value) => parseKitchenBoardView(value).operatorStatus),
+                            },
+                          }
+                        : {})}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <StoreAvailabilityPage />
               )}
@@ -890,11 +948,15 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <StoreTaxReviewPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createTaxReviewClient(state.csrf)}
-                  storeSetupHref={`/app/organization/stores/${state.workspace.selectedScope.storeReference}/setup#receipts-and-privacy`}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <StoreTaxReviewPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createTaxReviewClient(state.csrf)}
+                      storeSetupHref={`/app/organization/stores/${state.workspace.selectedScope.storeReference}/setup#receipts-and-privacy`}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <StoreTaxReviewPage />
               )}
@@ -906,11 +968,15 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <TaxClassificationsPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createTaxClassificationClient(state.csrf)}
-                  csrf={state.csrf}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <TaxClassificationsPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createTaxClassificationClient(state.csrf)}
+                      csrf={state.csrf}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <TaxClassificationsPage />
               )}
@@ -922,11 +988,15 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <StoreOptionRecipesPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createOptionRecipeClient(state.csrf)}
-                  csrf={state.csrf}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <StoreOptionRecipesPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createOptionRecipeClient(state.csrf)}
+                      csrf={state.csrf}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <StoreOptionRecipesPage />
               )}
@@ -938,11 +1008,15 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <StoreOptionPricesPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createOptionPriceClient(state.csrf)}
-                  csrf={state.csrf}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <StoreOptionPricesPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createOptionPriceClient(state.csrf)}
+                      csrf={state.csrf}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <StoreOptionPricesPage />
               )}
@@ -954,11 +1028,15 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <StorePriceListPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createPriceClient(state.csrf)}
-                  csrf={state.csrf}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <StorePriceListPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createPriceClient(state.csrf)}
+                      csrf={state.csrf}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <StorePriceListPage />
               )}
@@ -970,11 +1048,15 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <StorePriceEditorPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createPriceClient(state.csrf)}
-                  csrf={state.csrf}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <StorePriceEditorPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createPriceClient(state.csrf)}
+                      csrf={state.csrf}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <StorePriceEditorPage />
               )}
@@ -1008,10 +1090,14 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <RecipeListPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createRecipeClient(state.csrf)}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <RecipeListPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createRecipeClient(state.csrf)}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <RecipeListPage />
               )}
@@ -1023,11 +1109,15 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <RecipeEditorPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createRecipeClient(state.csrf)}
-                  csrf={state.csrf}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <RecipeEditorPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createRecipeClient(state.csrf)}
+                      csrf={state.csrf}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <RecipeEditorPage />
               )}
@@ -1095,10 +1185,14 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <StockCountListPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createStockCountClient(state.csrf)}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <StockCountListPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createStockCountClient(state.csrf)}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <StockCountListPage />
               )}
@@ -1110,10 +1204,14 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <StockCountWorkbenchPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createStockCountClient(state.csrf)}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <StockCountWorkbenchPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createStockCountClient(state.csrf)}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <StockCountWorkbenchPage />
               )}
@@ -1125,10 +1223,14 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <StoreWasteListPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createStoreWasteClient(state.csrf)}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <StoreWasteListPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createStoreWasteClient(state.csrf)}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <StoreWasteListPage />
               )}
@@ -1140,10 +1242,14 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <StoreWasteFormPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createStoreWasteClient(state.csrf)}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <StoreWasteFormPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createStoreWasteClient(state.csrf)}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <StoreWasteFormPage />
               )}
@@ -1155,10 +1261,14 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <StoreWasteDetailPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createStoreWasteClient(state.csrf)}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <StoreWasteDetailPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createStoreWasteClient(state.csrf)}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <StoreWasteDetailPage />
               )}
@@ -1176,10 +1286,14 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <StoreReceiptListPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createStoreReceiptClient(state.csrf)}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <StoreReceiptListPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createStoreReceiptClient(state.csrf)}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <StoreReceiptListPage />
               )}
@@ -1191,10 +1305,14 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <StoreReceiptFormPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createStoreReceiptClient(state.csrf)}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <StoreReceiptFormPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createStoreReceiptClient(state.csrf)}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <StoreReceiptFormPage />
               )}
@@ -1206,10 +1324,14 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <StoreReceiptDetailPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createStoreReceiptClient(state.csrf)}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <StoreReceiptDetailPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createStoreReceiptClient(state.csrf)}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <StoreReceiptDetailPage />
               )}
@@ -1221,10 +1343,14 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <OpeningCountPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createOpeningCountClient(state.csrf)}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <OpeningCountPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createOpeningCountClient(state.csrf)}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <OpeningCountPage />
               )}
@@ -1236,10 +1362,14 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <OpeningCountPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createOpeningCountClient(state.csrf)}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <OpeningCountPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createOpeningCountClient(state.csrf)}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <OpeningCountPage />
               )}
@@ -1251,10 +1381,14 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <StockLocationListPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createStockLocationClient(state.csrf)}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <StockLocationListPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createStockLocationClient(state.csrf)}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <StockLocationListPage />
               )}
@@ -1266,10 +1400,14 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <SupplyItemListPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createSupplyItemClient(state.csrf)}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <SupplyItemListPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createSupplyItemClient(state.csrf)}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <SupplyItemListPage />
               )}
@@ -1281,11 +1419,15 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <SupplyItemFormPage
-                  mode="Create"
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createSupplyItemClient(state.csrf)}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <SupplyItemFormPage
+                      mode="Create"
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createSupplyItemClient(state.csrf)}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <SupplyItemFormPage mode="Create" />
               )}
@@ -1297,11 +1439,15 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <SupplyItemFormPage
-                  mode="Edit"
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createSupplyItemClient(state.csrf)}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <SupplyItemFormPage
+                      mode="Edit"
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createSupplyItemClient(state.csrf)}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <SupplyItemFormPage mode="Edit" />
               )}
@@ -1314,10 +1460,14 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <SupplyItemDetailPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createSupplyItemClient(state.csrf)}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <SupplyItemDetailPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createSupplyItemClient(state.csrf)}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <SupplyItemDetailPage />
               )}
@@ -1335,7 +1485,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         <Route path="/app/supply/discrepancies" element={<DiscrepancyPage />} />
         <Route path="/app/supply/performance" element={<SupplierPerformancePage />} />
         {/* WP-2423 Q14: the Store's sales reports for a signed-in Owner or Store Manager; the
-            Phase 3 dashboard contract stays for the local demo only. */}
+          Phase 3 dashboard contract stays for the local demo only. */}
         <Route
           path="/app/reports/operations"
           element={
@@ -1385,11 +1535,15 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <AllergenListPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createAllergenClient(state.csrf)}
-                  csrf={state.csrf}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <AllergenListPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createAllergenClient(state.csrf)}
+                      csrf={state.csrf}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <AllergenListPage />
               )}
@@ -1401,10 +1555,14 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <SessionPending pending={sessionPending}>
               {state.kind === "Ready" && !state.switching ? (
-                <AllergenItemPage
-                  key={state.workspace.selectedScope.storeReference + state.csrf}
-                  client={createAllergenClient(state.csrf)}
-                />
+                <WithModule module={routeClients}>
+                  {(clients) => (
+                    <AllergenItemPage
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      client={clients.createAllergenClient(state.csrf)}
+                    />
+                  )}
+                </WithModule>
               ) : (
                 <AllergenItemPage />
               )}
@@ -1743,6 +1901,8 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
       </Routes>
     </Suspense>
   );
+  // A screen whose code did not arrive offers "Try again" in place of the page.
+  const routes = <PageChunkBoundary resetKey={pathname}>{routeTree}</PageChunkBoundary>;
   // WP-2423 Q18: a staff page opened without a Session offers the sign-in that works here.
   const staffPage = isOperationalScreen(pathname) || pathname.startsWith("/app/operations/");
   return (
