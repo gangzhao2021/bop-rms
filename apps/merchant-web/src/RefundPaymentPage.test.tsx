@@ -3,6 +3,7 @@ import { expect, it, vi } from "vitest";
 import { cardMachineRefundRecordedText } from "./CardMachineRequestRefund.js";
 import {
   CardMachineRefundDone,
+  nextFinancialSummary,
   PaymentFinancialSummary,
   paymentRefundStateLabel,
   paymentStateLabel,
@@ -143,4 +144,23 @@ it("WP-2423 item 6: a refund is called sent only once it was really sent", () =>
     "Sent — waiting for the card provider's answer",
   );
   expect(paymentRefundStateLabel("Confirmed")).toBe("Refunded");
+});
+
+it("WP-2423: after a refund is recorded the amounts stay shown while they are reread", () => {
+  const shown = { context, busy: false, message: "" };
+  // The refund result triggers a reread: staff keep seeing the last amounts, calmly updating.
+  const rereading = nextFinancialSummary(shown, { kind: "Rereading" });
+  expect(rereading).toEqual({ context, busy: true, message: "Updating payment amounts…" });
+  // A second reread superseding the first (status and request list both refresh) changes nothing.
+  expect(nextFinancialSummary(rereading, { kind: "Rereading" })).toEqual(rereading);
+  const refunded = { ...context, confirmedRefundMinor: "593", pendingRefundMinor: "0" };
+  expect(nextFinancialSummary(rereading, { kind: "Read", context: refunded })).toEqual({
+    context: refunded,
+    busy: false,
+    message: "",
+  });
+  // Only a reread that actually failed withdraws the amounts; the refresh button retries.
+  expect(
+    nextFinancialSummary(rereading, { kind: "Failed", message: "Unable to refresh." }),
+  ).toEqual({ context: null, busy: false, message: "Unable to refresh." });
 });

@@ -1086,6 +1086,29 @@ function RefundWizard({
     </section>
   );
 }
+/** What the payment summary shows: the amounts last read, whether a reread runs, and its result. */
+export interface FinancialSummaryState {
+  readonly context: Context | null;
+  readonly busy: boolean;
+  readonly message: string;
+}
+/**
+ * WP-2423: one step of the payment summary. While amounts are reread (after a refund is recorded
+ * or on request) the last amounts stay on screen with a calm "updating" note; they are withdrawn
+ * only when the reread actually fails, and the refresh button then retries.
+ */
+export function nextFinancialSummary(
+  state: FinancialSummaryState,
+  event:
+    | { readonly kind: "Rereading" }
+    | { readonly kind: "Read"; readonly context: Context }
+    | { readonly kind: "Failed"; readonly message: string },
+): FinancialSummaryState {
+  if (event.kind === "Rereading")
+    return { context: state.context, busy: true, message: "Updating payment amounts…" };
+  if (event.kind === "Read") return { context: event.context, busy: false, message: "" };
+  return { context: null, busy: false, message: event.message };
+}
 export function PaymentFinancialSummary({
   initial,
   csrf,
@@ -1098,30 +1121,29 @@ export function PaymentFinancialSummary({
   /** The reread payment, so what the page offers next follows the current amounts. */
   onContext: (context: Context) => void;
 }) {
-  const [context, setContext] = useState<Context | null>(initial);
+  const [{ context, busy, message }, setSummary] = useState<FinancialSummaryState>({
+    context: initial,
+    busy: false,
+    message: "",
+  });
   const [refresh, setRefresh] = useState(0);
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
   useEffect(() => {
     if (revision === 0 && refresh === 0) return;
     const controller = new AbortController();
-    setBusy(true);
-    setContext(null);
-    setMessage("Refreshing payment amounts…");
+    setSummary((state) => nextFinancialSummary(state, { kind: "Rereading" }));
     void client
       .context(initial.paymentIntentReference, csrf, controller.signal)
       .then((value) => {
         if (!controller.signal.aborted) {
-          setContext(value);
-          setMessage("");
+          setSummary((state) => nextFinancialSummary(state, { kind: "Read", context: value }));
           onContext(value);
         }
       })
       .catch((error) => {
-        if (!controller.signal.aborted) setMessage(errorMessage(error));
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setBusy(false);
+        if (!controller.signal.aborted)
+          setSummary((state) =>
+            nextFinancialSummary(state, { kind: "Failed", message: errorMessage(error) }),
+          );
       });
     return () => controller.abort();
     // onContext is the page's state setter (stable); a new initial value never rereads.
@@ -1133,7 +1155,11 @@ export function PaymentFinancialSummary({
       </button>
       <p role="status">{message}</p>
       {context ? (
-        <section aria-label="Payment financial summary" data-screen-id="PAY-PAYMENT-DETAIL">
+        <section
+          aria-label="Payment financial summary"
+          aria-busy={busy}
+          data-screen-id="PAY-PAYMENT-DETAIL"
+        >
           <h2>Payment financial summary</h2>
           <p>Payment state: {paymentStateLabel(context)}</p>
           {context.paymentMethod === "CardMachine" ? (

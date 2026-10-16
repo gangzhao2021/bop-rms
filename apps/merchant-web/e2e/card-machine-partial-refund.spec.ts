@@ -277,7 +277,9 @@ test("@production a manager refunds an item of a card-machine payment and record
   await expect(
     page.getByText(/^Card-machine refund recorded: \$6\.21 refunded on the card machine/u),
   ).toBeVisible();
-  // Without a reload: the request, its status and the payment amounts are reread from the server.
+  // Without a reload: the request, its status and the payment amounts are reread from the server,
+  // and the last amounts stay shown while they update (never "unavailable" unless a read failed).
+  await expect(page.getByText("Payment amounts are unavailable until refreshed.")).toHaveCount(0);
   await expect(requests).toContainText("Refunded on the card machine");
   await expect(page.getByText(/Slip reference: REF 5521\./u)).toBeVisible();
   await expect(summary).toContainText("Payment state: Partly refunded");
