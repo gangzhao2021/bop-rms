@@ -692,10 +692,6 @@ export function createPersistentMerchantOrderQueue(options: {
             paymentPosition,
             items: Object.freeze(
               result.items.map((item) => {
-                const latestBatchSequence = item.batches.reduce(
-                  (latest, batch) => Math.max(latest, batch.sequence),
-                  0,
-                );
                 const closed = unfulfillable.get(item.orderReference) ?? null;
                 const hold = closed === null ? (held.get(item.orderReference) ?? null) : null;
                 const decideBy =
@@ -763,9 +759,12 @@ export function createPersistentMerchantOrderQueue(options: {
                           ["Submitted", "Accepted", "InProgress", "Ready"].includes(
                             String(item.currentPhase),
                           ) &&
+                          // WP-2423: every paid round of a table is accepted on its own, in any
+                          // order and whatever later rounds did (submitted, paid, accepted or
+                          // cancelled); the command checks the Order's current version. A pickup
+                          // order has one round, acceptable only while nothing else changed it.
                           (batch.sequence > 1 ||
-                            (item.orderType === "DineIn" &&
-                              batch.sequence === latestBatchSequence) ||
+                            item.orderType === "DineIn" ||
                             item.currentVersion === 1),
                         canCancel:
                           cancelAllowed &&

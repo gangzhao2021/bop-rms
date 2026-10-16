@@ -118,17 +118,55 @@ it("combines only pages from the same generation", async () => {
     .mockResolvedValueOnce(response({ ...metadata, items: [item()], nextCursor: cursor }))
     .mockResolvedValueOnce(response({ ...metadata, items: [item(10)], nextCursor: null }));
   expect(parseKitchenBoardView(await f.client.loadQueue()).items.length).toBe(2);
+  f.fetcher.mockReset();
+  f.fetcher.mockImplementation(async (_url, init) =>
+    JSON.parse(String(init?.body)).cursor === null
+      ? response({ ...metadata, items: [item()], nextCursor: cursor })
+      : response({
+          ...metadata,
+          projectionGenerationReference: id(99),
+          items: [item(10)],
+          nextCursor: null,
+        }),
+  );
+  await expect(f.client.loadQueue()).rejects.toMatchObject({ code: "Conflict" });
+  // Re-read from the first page a bounded number of times, never a loop.
+  expect(f.fetcher).toHaveBeenCalledTimes(6);
+});
+it("re-reads the whole queue at once when a kitchen step lands between two pages", async () => {
+  const f = setup();
+  const cursor = (generation: number) => ({
+    projectionGenerationReference: id(generation),
+    afterCreatedAt: at,
+    afterWorkItemReference: id(1),
+  });
   f.fetcher
-    .mockResolvedValueOnce(response({ ...metadata, items: [item()], nextCursor: cursor }))
+    // Page 1 of generation 6, then a step publishes generation 7: page 2 is refused (409).
+    .mockResolvedValueOnce(response({ ...metadata, items: [item()], nextCursor: cursor(6) }))
+    .mockResolvedValueOnce(response({ private: "not shown" }, 409))
+    // The fresh read starts from the first page of generation 7.
     .mockResolvedValueOnce(
       response({
         ...metadata,
-        projectionGenerationReference: id(99),
+        projectionGenerationReference: id(7),
+        items: [{ ...item(), acceptedAt: at, workItemVersion: "2" }],
+        nextCursor: cursor(7),
+      }),
+    )
+    .mockResolvedValueOnce(
+      response({
+        ...metadata,
+        projectionGenerationReference: id(7),
         items: [item(10)],
         nextCursor: null,
       }),
     );
-  await expect(f.client.loadQueue()).rejects.toMatchObject({ code: "Conflict" });
+  const view = parseKitchenBoardView(await f.client.loadQueue());
+  expect(view.items.map((entry) => entry.execution?.acceptedAt ?? null)).toEqual([at, null]);
+  expect(f.fetcher).toHaveBeenCalledTimes(4);
+  const bodies = f.fetcher.mock.calls.map((call) => JSON.parse(String(call[1]?.body)));
+  expect(bodies[2].cursor).toBeNull();
+  expect(bodies[3].cursor.projectionGenerationReference).toBe(id(7));
 });
 it.each([
   [403, "PermissionDenied"],
@@ -137,7 +175,7 @@ it.each([
   [503, "Unavailable"],
 ] as const)("maps status %s without exposing response details", async (status, code) => {
   const f = setup();
-  f.fetcher.mockResolvedValue(response({ private: "not shown" }, status));
+  f.fetcher.mockImplementation(async () => response({ private: "not shown" }, status));
   await expect(f.client.loadQueue()).rejects.toMatchObject({ code });
 });
 it("rejects unsafe versions, repeated rows, missing cache policy and incomplete coverage", async () => {

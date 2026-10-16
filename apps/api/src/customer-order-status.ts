@@ -257,6 +257,7 @@ export class CustomerOrderStatusHandler {
                         unpaidCancellations: sources.unpaidCancellations.map((cancellation) => ({
                           orderBatchReference: cancellation.orderBatchReference,
                           cancelledAt: cancellation.cancelledAt,
+                          byStore: cancellation.byStore,
                         })),
                       }),
                   // WP-2423 Q9-G1: not accepted in time and refunded, or awaiting the Store after

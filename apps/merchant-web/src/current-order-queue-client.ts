@@ -493,7 +493,10 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
             batch.acceptanceStatus !== "NotAccepted" ||
             item.currentVersion === null ||
             !["Submitted", "Accepted", "InProgress", "Ready"].includes(String(item.currentPhase)) ||
+            // WP-2423: a table's first round stays acceptable after later rounds changed the
+            // Order (any order of acceptance); a pickup order's only round only as submitted.
             (batch.sequence === 1 &&
+              item.orderType !== "DineIn" &&
               (item.currentVersion !== 1 || item.currentPhase !== "Submitted")))) ||
         typeof batch.canCancel !== "boolean" ||
         // WP-2423 Q6: only a paid, accepted batch the kitchen has not started can be cancelled.

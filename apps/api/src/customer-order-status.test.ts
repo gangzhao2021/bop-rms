@@ -263,6 +263,8 @@ it("WP-2423 Q6: serializes unpaid dine-in rounds and their automatic cancellatio
   const cancelled = {
     orderBatchReference: "0190fa01-0000-7000-8000-000000000004",
     cancelledAt: "2026-09-12T11:50:00.000Z",
+    // WP-2423: a manager cancelled it (the guest is told the store did, not a failed payment).
+    byStore: true,
   };
   f.read.mockResolvedValue({
     ...f.result,

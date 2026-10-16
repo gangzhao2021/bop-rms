@@ -129,6 +129,8 @@ function item(value: unknown) {
     },
   });
 }
+/** Whole-queue reads tried when the projection moved on between pages (see `loadQueue`). */
+const QUEUE_READ_ATTEMPTS = 3;
 /** No browser storage or query-string identifiers. Each page must share one generation. */
 export function createKitchenBoardClient(options: {
   csrf: string;
@@ -198,62 +200,79 @@ export function createKitchenBoardClient(options: {
       clearTimeout(timer);
     }
   }
+  async function readQueue(search: KitchenQueueSearch | undefined, reference: string | null) {
+    const items = [],
+      seen = new Set<string>();
+    let cursor: unknown = null,
+      first: Record<string, unknown> | undefined;
+    for (let page = 0; page < 4; page++) {
+      const result = await query({
+        kind: "List",
+        filters: {
+          orderReference: search?.kind === "Order" ? reference : null,
+          ticketReference: search?.kind === "Ticket" ? reference : null,
+          workItemReference: null,
+          stationReference: null,
+          status: null,
+        },
+        cursor,
+        limit: 50,
+      });
+      first ??= result;
+      if (result.projectionGenerationReference !== first.projectionGenerationReference)
+        throw new KitchenBoardClientError("Conflict");
+      if (!Array.isArray(result.items) || result.items.length > 50 || !("nextCursor" in result))
+        return fail();
+      for (const raw of result.items) {
+        const mapped = item(raw);
+        if (seen.has(mapped.workItemReference)) return fail();
+        seen.add(mapped.workItemReference);
+        items.push(mapped);
+      }
+      cursor = result.nextCursor;
+      if (cursor === null)
+        return parseKitchenBoardView({
+          screenId: "KIT-KITCHEN-QUEUE",
+          projectionName: "kitchen_work_queue_v1",
+          projectionVersion: 1,
+          storeLabel: options.storeLabel,
+          projectedAt: first.projectedAt,
+          freshnessStatus: first.stale ? "Stale" : first.freshnessStatus,
+          operatorStatus: first.operatorStatus,
+          items,
+          ...(typeof first.canCloseEarlierDayTickets === "boolean"
+            ? { canCloseEarlierDayTickets: first.canCloseEarlierDayTickets }
+            : {}),
+        });
+      const next = record(cursor);
+      // A page may be empty when every ticket on it was just closed (DEC-KITCHEN-STALE-TICKETS);
+      // reading stays bounded to four pages.
+      if (next.projectionGenerationReference !== first.projectionGenerationReference) return fail();
+      parseKitchenRouteReference(next.afterWorkItemReference);
+      if (typeof next.afterCreatedAt !== "string") return fail();
+    }
+    return fail();
+  }
   return {
     async loadQueue(search?: KitchenQueueSearch) {
       const reference = search ? parseKitchenRouteReference(search.reference) : null;
       if (search && search.kind !== "Order" && search.kind !== "Ticket") return fail();
-      const items = [],
-        seen = new Set<string>();
-      let cursor: unknown = null,
-        first: Record<string, unknown> | undefined;
-      for (let page = 0; page < 4; page++) {
-        const result = await query({
-          kind: "List",
-          filters: {
-            orderReference: search?.kind === "Order" ? reference : null,
-            ticketReference: search?.kind === "Ticket" ? reference : null,
-            workItemReference: null,
-            stationReference: null,
-            status: null,
-          },
-          cursor,
-          limit: 50,
-        });
-        first ??= result;
-        if (result.projectionGenerationReference !== first.projectionGenerationReference)
-          throw new KitchenBoardClientError("Conflict");
-        if (!Array.isArray(result.items) || result.items.length > 50 || !("nextCursor" in result))
-          return fail();
-        for (const raw of result.items) {
-          const mapped = item(raw);
-          if (seen.has(mapped.workItemReference)) return fail();
-          seen.add(mapped.workItemReference);
-          items.push(mapped);
+      // A queue over one page is read page by page, and every kitchen step publishes a new
+      // projection generation; a step landing between two pages makes the next page a 409
+      // (Conflict). That is not a failure of the board: read it again from the first page at once,
+      // a bounded number of times, instead of showing it read-only until the backoff retry.
+      for (let attempt = 1; ; attempt++) {
+        try {
+          return await readQueue(search, reference);
+        } catch (error) {
+          if (
+            !(error instanceof KitchenBoardClientError) ||
+            error.code !== "Conflict" ||
+            attempt >= QUEUE_READ_ATTEMPTS
+          )
+            throw error;
         }
-        cursor = result.nextCursor;
-        if (cursor === null)
-          return parseKitchenBoardView({
-            screenId: "KIT-KITCHEN-QUEUE",
-            projectionName: "kitchen_work_queue_v1",
-            projectionVersion: 1,
-            storeLabel: options.storeLabel,
-            projectedAt: first.projectedAt,
-            freshnessStatus: first.stale ? "Stale" : first.freshnessStatus,
-            operatorStatus: first.operatorStatus,
-            items,
-            ...(typeof first.canCloseEarlierDayTickets === "boolean"
-              ? { canCloseEarlierDayTickets: first.canCloseEarlierDayTickets }
-              : {}),
-          });
-        const next = record(cursor);
-        // A page may be empty when every ticket on it was just closed (DEC-KITCHEN-STALE-TICKETS);
-        // reading stays bounded to four pages.
-        if (next.projectionGenerationReference !== first.projectionGenerationReference)
-          return fail();
-        parseKitchenRouteReference(next.afterWorkItemReference);
-        if (typeof next.afterCreatedAt !== "string") return fail();
       }
-      return fail();
     },
     async loadWorkItem(reference) {
       const ref = parseKitchenRouteReference(reference);

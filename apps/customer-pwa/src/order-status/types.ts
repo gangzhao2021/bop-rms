@@ -82,6 +82,8 @@ export interface BatchPayment {
 export interface UnpaidBatchCancellation {
   readonly orderBatchReference: string;
   readonly cancelledAt: string;
+  /** The Store cancelled it before anyone paid (absent from an older server). */
+  readonly byStore?: boolean;
 }
 
 export type StaffCancellationReason =

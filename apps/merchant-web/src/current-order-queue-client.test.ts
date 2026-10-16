@@ -3,6 +3,8 @@ import {
   cancelledItemsRefund,
   createCurrentOrderQueueClient,
   CurrentOrderQueueError,
+  isAwaitingAcceptance,
+  ordersAwaitingAcceptance,
   parseCurrentOrderDetail,
   parseCurrentOrderQueue,
 } from "./current-order-queue-client.js";
@@ -270,6 +272,47 @@ it.each(["Accepted", "InProgress", "Ready"])(
     };
     expect(() =>
       parseCurrentOrderQueue({ items: [item], nextAfterOrderReference: null }),
+    ).toThrow();
+  },
+);
+
+it.each([
+  ["a later round awaiting payment", "NotAccepted", "Submitted"],
+  ["a later round cancelled", "Cancelled", "Submitted"],
+  ["a later round accepted first", "Accepted", "Accepted"],
+])(
+  "WP-2423 (v15 order 7): a table's paid first round stays acceptable with %s",
+  (_case, laterStatus, currentPhase) => {
+    const item = {
+      ...row(),
+      orderType: "DineIn",
+      currentPhase,
+      currentVersion: 3,
+      batches: [
+        { ...row().batches[0], acceptanceStatus: "NotAccepted", canRequestAcceptance: true },
+        {
+          orderBatchReference: id(91),
+          sequence: 2,
+          acceptanceStatus: laterStatus,
+          canRequestAcceptance: false,
+          canCancel: false,
+          staffCancellation: null,
+          canCancelItems: false,
+        },
+      ],
+    };
+    const parsed = parseCurrentOrderQueue({ items: [item], nextAfterOrderReference: null });
+    expect(parsed.items[0]?.batches[0]?.canRequestAcceptance).toBe(true);
+    const order = parsed.items[0];
+    if (!order) throw new Error("fixture");
+    expect(isAwaitingAcceptance(order)).toBe(true);
+    expect(ordersAwaitingAcceptance(parsed)).toBe(1);
+    // A pickup order's only round is never acceptable once something else changed the Order.
+    expect(() =>
+      parseCurrentOrderQueue({
+        items: [{ ...item, orderType: "Pickup", batches: [item.batches[0]] }],
+        nextAfterOrderReference: null,
+      }),
     ).toThrow();
   },
 );

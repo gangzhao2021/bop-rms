@@ -421,7 +421,12 @@ export function createCustomerOrderStatusRead(
           // WP-2423: a dine-in round whose payment failed is cancelled automatically when its payment
           // window ends; the customer is told when before it happens, and that it was not charged.
           let batchPayments: readonly CustomerBatchPayment[] = [];
-          const unpaidCancellations: { orderBatchReference: string; cancelledAt: string }[] = [];
+          const unpaidCancellations: {
+            orderBatchReference: string;
+            cancelledAt: string;
+            /** A manager cancelled it (nothing was charged); otherwise its payment never completed. */
+            byStore: boolean;
+          }[] = [];
           if (result.order.orderType === "DineIn" && (await stillAuthorized())) {
             for (const entry of await listStoreUnpaidBatchCancellations(
               transaction,
@@ -431,6 +436,7 @@ export function createCustomerOrderStatusRead(
               unpaidCancellations.push({
                 orderBatchReference: entry.orderBatchReference,
                 cancelledAt: entry.cancelledAt,
+                byStore: entry.reasonCode === "STAFF_CANCELLED_UNPAID",
               });
             const deadlines = new Map<string, string>();
             for (const entry of await listStoreDiningBatchPaymentDeadlines(

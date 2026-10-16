@@ -456,9 +456,17 @@ function parseSources(
     const seen = new Set<string>();
     unpaidCancellations = Object.freeze(
       raw.unpaidCancellations.map((value: unknown) => {
-        const entry = exact(value, ["orderBatchReference", "cancelledAt"]);
+        // WP-2423: `byStore` (a manager's cancellation) is absent from an older server.
+        const withByStore =
+          value !== null && typeof value === "object" && Object.hasOwn(value, "byStore");
+        const entry = exact(value, [
+          "orderBatchReference",
+          "cancelledAt",
+          ...(withByStore ? ["byStore"] : []),
+        ]);
         const orderBatchReference = parseReference(entry.orderBatchReference);
         if (
+          (withByStore && typeof entry.byStore !== "boolean") ||
           !batches.some((batch) => batch.orderBatchReference === orderBatchReference) ||
           seen.has(orderBatchReference) ||
           staffCancelled.has(orderBatchReference)
@@ -468,6 +476,7 @@ function parseSources(
         return Object.freeze({
           orderBatchReference,
           cancelledAt: sourceInstant(entry.cancelledAt),
+          ...(withByStore ? { byStore: entry.byStore === true } : {}),
         });
       }),
     );

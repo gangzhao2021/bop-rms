@@ -302,6 +302,12 @@ function StatusContent({
   const unpaidCancelled = new Set(
     view.sources?.unpaidCancellations?.map((entry) => entry.orderBatchReference) ?? [],
   );
+  // WP-2423: rounds the Store cancelled before anyone paid read as such, not as a failed payment.
+  const cancelledByStore = new Set(
+    view.sources?.unpaidCancellations
+      ?.filter((entry) => entry.byStore === true)
+      .map((entry) => entry.orderBatchReference) ?? [],
+  );
   const notPaid = unpaidRounds(view);
   const awaitingPayment = awaitingPaymentRounds(view);
   const failedPayment = (orderBatchReference: string) =>
@@ -544,9 +550,13 @@ function StatusContent({
               {multipleBatches ? <h3>Round {index + 1}</h3> : null}
               {unpaidCancelled.has(batch.orderBatchReference) ? (
                 <p className="order-status__batch-cancelled">
-                  {multipleBatches
-                    ? "This round was cancelled because its payment didn't go through. You were not charged for it."
-                    : "This order was cancelled because its payment didn't go through. You were not charged for it."}
+                  {cancelledByStore.has(batch.orderBatchReference)
+                    ? multipleBatches
+                      ? "This round was cancelled by the store. Nobody was charged for it."
+                      : "This order was cancelled by the store. Nobody was charged for it."
+                    : multipleBatches
+                      ? "This round was cancelled because its payment didn't go through. You were not charged for it."
+                      : "This order was cancelled because its payment didn't go through. You were not charged for it."}
                 </p>
               ) : failedPayment(batch.orderBatchReference) !== null ? (
                 <p className="order-status__warning" role="status">
