@@ -35,6 +35,10 @@ export interface PickupExecution {
     readonly orderedQuantity: number;
     readonly readyQuantity: number;
     readonly handedOverQuantity: number;
+    /** WP-2423: the item's name as ordered (absent when it could not be read). */
+    readonly name?: string;
+    /** WP-2423: the options chosen with it, as ordered. */
+    readonly options?: readonly { readonly name: string; readonly quantity: number }[];
   }[];
 }
 export interface PickupWorkstation {
@@ -225,6 +229,37 @@ export const unavailablePickupClient: PickupClient = Object.freeze({
   loadQueue: () => Promise.reject(new PickupClientError("Unavailable")),
 });
 
+const SAFE_NAME = /^[^\p{Cc}\p{Cf}]{1,240}$/u;
+function itemOptions(
+  value: unknown,
+): readonly { readonly name: string; readonly quantity: number }[] {
+  if (!Array.isArray(value) || value.length > 50) throw new Error("PICKUP_VIEW_INVALID");
+  return Object.freeze(
+    value.map((entry) => {
+      const option = closed(entry, ["name", "quantity"]);
+      if (
+        typeof option.name !== "string" ||
+        !SAFE_NAME.test(option.name) ||
+        !Number.isSafeInteger(option.quantity) ||
+        Number(option.quantity) < 1 ||
+        Number(option.quantity) > 999
+      )
+        throw new Error("PICKUP_VIEW_INVALID");
+      return Object.freeze({ name: option.name, quantity: Number(option.quantity) });
+    }),
+  );
+}
+/** WP-2423: how staff read an item to hand over: "Latte (Oat milk, 2 × Extra shot)". */
+export function pickupItemLabel(
+  item: Pick<PickupExecution["items"][number], "name" | "options">,
+  index: number,
+): string {
+  if (item.name === undefined) return `Item ${String(index + 1)}`;
+  const options = (item.options ?? []).map((option) =>
+    option.quantity > 1 ? `${String(option.quantity)} × ${option.name}` : option.name,
+  );
+  return options.length === 0 ? item.name : `${item.name} (${options.join(", ")})`;
+}
 export function parsePickupExecution(value: unknown): PickupExecution {
   const raw = closed(value, ["aggregateVersion", "publicOrderReference", "proof", "items"]);
   if (
@@ -255,12 +290,17 @@ export function parsePickupExecution(value: unknown): PickupExecution {
     });
   }
   const items = raw.items.map((value) => {
+    const named = !!value && typeof value === "object" && Object.hasOwn(value, "name");
     const item = closed(value, [
       "fulfillmentItemReference",
       "orderedQuantity",
       "readyQuantity",
       "handedOverQuantity",
+      ...(named ? ["name", "options"] : []),
     ]);
+    const options = named ? itemOptions(item.options) : [];
+    if (named && (typeof item.name !== "string" || !SAFE_NAME.test(item.name)))
+      throw new Error("PICKUP_VIEW_INVALID");
     if (
       ![item.orderedQuantity, item.readyQuantity, item.handedOverQuantity].every(
         (v) => Number.isSafeInteger(v) && Number(v) >= 0 && Number(v) <= 999,
@@ -275,6 +315,7 @@ export function parsePickupExecution(value: unknown): PickupExecution {
       orderedQuantity: Number(item.orderedQuantity),
       readyQuantity: Number(item.readyQuantity),
       handedOverQuantity: Number(item.handedOverQuantity),
+      ...(named ? { name: item.name as string, options } : {}),
     });
   });
   if (new Set(items.map((item) => item.fulfillmentItemReference)).size !== items.length)

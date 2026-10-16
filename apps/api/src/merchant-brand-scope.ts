@@ -13,6 +13,13 @@ import {
 } from "./merchant-store-scope.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { limitDecisionToProfile } from "./merchant-kds-operator-profile.js";
+import {
+  rememberBrandTransactionDecisions,
+  rememberBrandTransactionValue,
+  rememberedBrandTransaction,
+  restoreBrandTransactionRowSecurity,
+  sameDecision,
+} from "./merchant-brand-transaction-authorization.js";
 
 /** Selected Store access establishes navigation only. Brand actions require
  * their own current Brand-scoped policy decision; a Store grant is insufficient.
@@ -42,7 +49,22 @@ export function createMerchantBrandScope(
       null,
       selected.context.resolvedAt,
     );
-    const authorizeAction = async (action: string) => {
+    /**
+     * WP-2423: every full resolution below is remembered for this transaction (same Session,
+     * Tenant, Brand, Store and Actor) and re-checked in full once before commit; see
+     * merchant-brand-transaction-authorization.ts. Without a clock nothing is remembered.
+     */
+    const memoScope = [
+        "brand",
+        expectedSession,
+        selected.selected.tenantReference,
+        context.brand.brandReference,
+        selected.store.storeReference,
+        selected.actorReference,
+      ].join("|"),
+      memoNow = () => (batchNow ? parseCanonicalInstant(batchNow()) : ""),
+      memoTx: unknown = batchNow ? transaction : undefined;
+    const resolveAction = async (action: string) => {
       const current = await resolveStore(
         transaction,
         sessionCookie,
@@ -83,8 +105,24 @@ export function createMerchantBrandScope(
       if (decision.scopeKind !== "Brand" || decision.action !== action) return null;
       return decision;
     };
-    // One admission checkpoint only. Never retain a session or policy decision
-    // across source callbacks, writes or COMMIT guards.
+    // The row-level-security scope a Brand permission read leaves selected (and a Store one).
+    const restoreBrand = () =>
+        restoreBrandTransactionRowSecurity(transaction, context.brand.brandReference, null),
+      restoreStore = () =>
+        restoreBrandTransactionRowSecurity(
+          transaction,
+          context.brand.brandReference,
+          selected.store.storeReference,
+        );
+    /** One Brand action: answered from the transaction's Brand decisions when remembered. */
+    const authorizeAction = async (action: string) => {
+      if (!rememberedBrandTransaction(memoTx)) return resolveAction(action);
+      if (!selected.kdsOperatorProfileAllows(action)) return null;
+      const decision = (await authorizeActionsWithValidity([action]))?.decisions[0];
+      return decision?.scopeKind === "Brand" && decision.action === action ? decision : null;
+    };
+    // One full admission checkpoint per action set and transaction (WP-2423): later asks in the
+    // same transaction reuse it until its boundary, and the commit re-checks it in full.
     const authorizeActionsWithValidity = async (actions: readonly string[]) => {
       if (
         !Array.isArray(actions) ||
@@ -108,6 +146,16 @@ export function createMerchantBrandScope(
           return null;
         copied.push(d.value);
       }
+      if (!batchNow) return null;
+      return rememberBrandTransactionDecisions(memoTx, {
+        scope: memoScope,
+        actions: Object.freeze([...copied]),
+        now: memoNow,
+        resolve: resolveActionsWithValidity,
+        restore: restoreBrand,
+      });
+    };
+    const resolveActionsWithValidity = async (copied: readonly string[]) => {
       if (!batchNow) return null;
       let validUntil: string | null = null,
         latest = "";
@@ -230,6 +278,20 @@ export function createMerchantBrandScope(
         )
       )
         return null;
+      // Remembered for the transaction (WP-2423): the before-commit re-check resolves these
+      // actions again in full, so this resolution needs no second checkpoint of its own. The
+      // Permission read above already left Brand RLS selected for caller SQL.
+      if (rememberedBrandTransaction(memoTx)) {
+        check();
+        return Object.freeze({
+          decisions: Object.freeze(
+            result.decisions.map((decision) =>
+              limitDecisionToProfile(before.kdsOperatorProfileAllows, decision),
+            ),
+          ),
+          validUntil: authorizationValidUntil(),
+        });
+      }
       const after = await current();
       if (!after) return null;
       // A kitchen display sign-in holds no Brand-level authority outside its profile.
@@ -250,6 +312,15 @@ export function createMerchantBrandScope(
         validUntil: authorizationValidUntil(),
       });
     };
+    const storeAction = (action: string) =>
+      rememberBrandTransactionValue(memoTx, {
+        scope: memoScope,
+        key: "store-action:" + action,
+        now: memoNow,
+        resolve: () => selected.authorizeAction(action),
+        restore: restoreStore,
+        same: (previous, fresh) => sameDecision(previous, fresh),
+      });
     return Object.freeze({
       tenantReference: selected.selected.tenantReference,
       selectedStoreReference: selected.store.storeReference,
@@ -261,7 +332,7 @@ export function createMerchantBrandScope(
       authorizeAction,
       /** Store-scope decision for the selected Store (WP-2423 8.5: sold-out marks). */
       async authorizeStoreAction(action: string) {
-        const decision = await selected.authorizeAction(action);
+        const decision = await storeAction(action);
         return decision?.scopeKind === "Store" && decision.action === action ? decision : null;
       },
       /**
@@ -269,7 +340,7 @@ export function createMerchantBrandScope(
        * grants there (the same decision the workspace navigation uses) — for the Store's own facts.
        */
       async allowedAtSelectedStore(action: string) {
-        return (await selected.authorizeAction(action))?.effect === "Allow";
+        return (await storeAction(action))?.effect === "Allow";
       },
       authorizeActionsWithValidity,
       async authorizeActions(actions: readonly string[]) {

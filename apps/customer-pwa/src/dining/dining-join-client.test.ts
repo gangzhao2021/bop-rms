@@ -176,6 +176,17 @@ describe("browser Dining Join transport", () => {
     [503, "dining_join_unavailable", "customer.dining.join_unavailable", "unavailable"],
     [401, "dining_join_unavailable", "customer.dining.join_unavailable", "outcome-unknown"],
     [503, "dining_join_unavailable", "wrong", "outcome-unknown"],
+    [409, "dining_join_code_used", "customer.dining.join_code_used", "code-used"],
+    [
+      409,
+      "dining_join_code_not_accepted",
+      "customer.dining.join_code_not_accepted",
+      "code-not-accepted",
+    ],
+    [429, "dining_join_rate_limited", "customer.dining.join_rate_limited", "too-many-attempts"],
+    [503, "dining_join_code_used", "customer.dining.join_code_used", "outcome-unknown"],
+    [409, "dining_join_code_used", "customer.dining.join_code_not_accepted", "outcome-unknown"],
+    [409, "toString", "customer.dining.join_code_used", "outcome-unknown"],
   ] as const)(
     "bounds server status %s without retrying",
     async (status, code, messageKey, expected) => {

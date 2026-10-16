@@ -148,3 +148,54 @@ test("capture journal preserves original bindings and denies changed profile sco
   profile.binding.storeReference = id(99);
   await expect(f.p.readCaptureJournal(input)).rejects.toThrow();
 });
+test("WP-2423 abandoned payment: cancels only an unconfirmed intent, which then can't be captured", async () => {
+  const f = await fixture();
+  const context = {
+    ...f.retrieve.context,
+    paymentAttemptReference: id(9),
+    operationReference: id(10),
+  };
+  const created = await f.p.adapter.createIntent({
+    operation: "CreateIntent",
+    purpose: "CreatePaymentIntent",
+    context,
+    idempotencyKey: "create:" + id(10),
+    paymentMethod: "OnlineCard",
+    captureMode: "Automatic",
+    amount: { amountMinor: 1689n, currencyCode: "CAD" },
+  });
+  expect(created.status).toBe("RequiresCustomerAction");
+  const retrieve = {
+    ...f.retrieve,
+    context,
+    providerIntentReference: created.providerIntentReference,
+  };
+  const cancel = {
+    operation: "CancelIntent",
+    purpose: "CancelPaymentIntent",
+    context,
+    idempotencyKey: "cancel-abandoned:" + id(9),
+    providerIntentReference: created.providerIntentReference,
+  };
+  const cancelled = await f.p.adapter.cancelIntent(cancel);
+  expect(cancelled.status).toBe("Cancelled");
+  expect(cancelled.capturedAmount.amountMinor).toBe(0n);
+  // Repeating the cancellation answers the same state; capture and decline are refused after it.
+  expect((await f.p.adapter.cancelIntent(cancel)).observedAt).toBe(cancelled.observedAt);
+  await expect(f.p.simulateCapture(retrieve, "SIMULATE_CAPTURE")).rejects.toThrow();
+  await expect(f.p.simulateFailure(retrieve, "SIMULATE_FAILURE")).rejects.toThrow();
+  expect(await f.p.readTerminalOccurrence(retrieve)).toEqual({
+    status: "Cancelled",
+    occurredAt: cancelled.observedAt,
+  });
+  // A captured intent is never cancelled: the cancellation answers Captured.
+  expect(
+    (
+      await f.p.adapter.cancelIntent({
+        ...cancel,
+        context: f.retrieve.context,
+        providerIntentReference: f.retrieve.providerIntentReference,
+      })
+    ).status,
+  ).toBe("Captured");
+});

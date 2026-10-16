@@ -143,11 +143,15 @@ it("waits for committed terminal evidence even when a Provider snapshot exists",
   expect(result.status).toBe("Succeeded");
   expect(Object.keys(result).sort()).toEqual([
     "checkoutSessionReference",
+    "failure",
     "orderReference",
+    "payBy",
     "paymentIntentReference",
     "status",
     "total",
   ]);
+  expect(result.failure).toBeNull();
+  expect(result.payBy).toBe(String(f.original.record.intent.preparation.capacityExpiresAt));
   expect(JSON.stringify(result)).not.toContain("pi_");
 });
 it("never reads another operation's terminal and reauthorizes before returning", async () => {
@@ -206,5 +210,19 @@ it("reports a committed failure without implying successful payment", async () =
       fact: fact as never,
     }),
   });
-  expect(await f.service.read(f.input)).toMatchObject({ status: "Failed" });
+  expect(await f.service.read(f.input)).toMatchObject({ status: "Failed", failure: "Declined" });
+  // WP-2423 abandoned payment: an attempt cancelled because it was never finished.
+  const cancelled = { ...fact, failureReason: "Cancelled" as const };
+  f.terminal.read.mockResolvedValue({
+    ...cancelled,
+    event: createPaymentTerminalEnvelope({
+      eventReference: id(86),
+      correlationReference: refs.operation,
+      fact: cancelled as never,
+    }),
+  });
+  expect(await f.service.read(f.input)).toMatchObject({
+    status: "Failed",
+    failure: "NotCompleted",
+  });
 });

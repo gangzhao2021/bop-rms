@@ -227,6 +227,24 @@ function parse(response: Response, payload: unknown): CartView | null {
   });
 }
 
+/**
+ * The current-Cart read answers an explicit `{ cart: null }` when the guest has no active Cart
+ * (WP-2423); an older server's 404 `cart_not_found` still means the same.
+ */
+function parseCurrent(response: Response, payload: unknown): CartView | null {
+  if (
+    response.status === 200 &&
+    typeof payload === "object" &&
+    payload !== null &&
+    Object.keys(payload).length === 2 &&
+    (payload as { schemaVersion?: unknown }).schemaVersion === 1 &&
+    Object.hasOwn(payload, "cart") &&
+    (payload as { cart?: unknown }).cart === null
+  )
+    return null;
+  return parse(response, payload);
+}
+
 async function request(url: string, init: RequestInit, decode = parse): Promise<CartView | null> {
   const contextCurrent = captureCustomerCsrfContext();
   const controller = new AbortController();
@@ -382,7 +400,11 @@ export function createBrowserCustomerCartClient(): CustomerCartClient {
       }
     },
     loadCurrent: (signal?: AbortSignal) =>
-      request("/bff/customer/cart", { method: "GET", ...(signal === undefined ? {} : { signal }) }),
+      request(
+        "/bff/customer/cart",
+        { method: "GET", ...(signal === undefined ? {} : { signal }) },
+        parseCurrent,
+      ),
     async createCart(input) {
       const contextCurrent = captureCustomerCsrfContext();
       const result = await request("/api/v1/carts", {

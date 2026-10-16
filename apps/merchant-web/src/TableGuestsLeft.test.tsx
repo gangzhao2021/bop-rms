@@ -95,7 +95,15 @@ it("DEC-TABLE-CLOSE-GUESTS-LEFT: words each round for staff, with amounts and no
   );
   expect(texts[1]).toContain("refund it on the card machine");
   expect(texts[2]).toContain("already refunded in full");
-  expect(texts[3]).toContain("cancelled automatically at 15:20");
+  expect(texts[3]).toContain("It will be cancelled now (otherwise automatically at 15:20)");
+  // WP-2423 abandoned payment: a payment started and never finished is cancelled too.
+  expect(
+    guestsLeftRoundText(
+      round({ state: "PaymentInProgress", refund: null, cancelsAt: "2026-10-15T19:20:00.000Z" }),
+      "America/Toronto",
+      now,
+    ),
+  ).toContain("started paying online but hasn't finished. It will be cancelled now");
   expect(texts[4]).toContain("$4.50 refunded");
   expect(texts[5]).toContain("mark them served");
   expect(texts.join(" ")).not.toContain("CAD");

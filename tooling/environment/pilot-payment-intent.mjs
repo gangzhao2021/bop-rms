@@ -213,5 +213,9 @@ export async function createInternalPaymentIntent(
     async retry(input) {
       return (await resolveRequest(input)).service.retry(input);
     },
+    // WP-2423 abandoned payment: the same guest returns to this checkout's open payment.
+    async resume(input) {
+      return (await resolveRequest(input)).service.resume(input);
+    },
   };
 }

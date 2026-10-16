@@ -15,7 +15,10 @@ import {
   listStoreOrderBatchesWithOnlinePayment,
   readPaymentRemainingRefundable,
 } from "@rms/payment";
-import { createDiningOrderDeliveryProgress } from "./dining-order-delivery-progress.js";
+import {
+  createDiningOrderDeliveryProgress,
+  readyToServeQuantity,
+} from "./dining-order-delivery-progress.js";
 import { createDiningSettledCloseEvidence } from "./dining-settled-close-evidence.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
@@ -263,9 +266,7 @@ export function createMerchantDiningTableClosePlan(options: {
             );
             const startedItemCount = started.reduce((sum, item) => sum + item.remainingQuantity, 0);
             // Kitchen readiness: Ready items wait at the pass (a partly served item stays Ready).
-            const readyItemCount = open
-              .filter((item) => item.phase === "Ready")
-              .reduce((sum, item) => sum + item.remainingQuantity, 0);
+            const readyItemCount = readyToServeQuantity(open);
             const base = {
               orderBatchReference: reference,
               sequence: batch.sequence,
@@ -308,10 +309,9 @@ export function createMerchantDiningTableClosePlan(options: {
                 rounds.push({
                   ...base,
                   state: onlineStarted.has(reference) && !failed ? "PaymentInProgress" : "NotPaid",
-                  cancelsAt:
-                    onlineStarted.has(reference) && !failed
-                      ? null
-                      : (deadlines.get(reference) ?? null),
+                  // WP-2423 abandoned payment: a started payment never finished is cancelled
+                  // with the Provider at the deadline too, so every unpaid round has one.
+                  cancelsAt: deadlines.get(reference) ?? null,
                 });
                 continue;
               }

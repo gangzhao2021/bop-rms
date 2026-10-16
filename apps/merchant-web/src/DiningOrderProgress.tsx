@@ -32,7 +32,7 @@ export function DiningProgressView({
           <li key={item.orderItemReference}>
             <strong>{item.displayName}</strong>
             <p>
-              Batch {item.batchSequence} · Item {item.itemOrdinal}
+              Round {item.batchSequence} · Item {item.itemOrdinal}
             </p>
             <p>
               {item.phase} · Ordered {item.orderedQuantity} · Served {item.deliveredQuantity} ·

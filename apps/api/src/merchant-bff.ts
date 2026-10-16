@@ -199,6 +199,10 @@ import {
   type createMerchantOrderStaffCancellation,
 } from "./merchant-order-staff-cancellation.js";
 import {
+  UnpaidRoundCancellationError,
+  type createMerchantUnpaidRoundCancellation,
+} from "./merchant-unpaid-round-cancellation.js";
+import {
   StaffItemCancellationError,
   type createMerchantOrderItemStaffCancellation,
 } from "./merchant-order-item-staff-cancellation.js";
@@ -639,6 +643,8 @@ export interface MerchantBffRouterOptions {
   readonly pickupIdentityCheck?: ReturnType<typeof createMerchantPickupIdentityCheck>;
   /** WP-2423 Q6: staff cancel a paid order or batch before the kitchen starts it. */
   readonly orderStaffCancellation?: ReturnType<typeof createMerchantOrderStaffCancellation>;
+  /** WP-2423 abandoned payment: a manager cancels a dine-in round nobody paid for. */
+  readonly unpaidRoundCancellation?: ReturnType<typeof createMerchantUnpaidRoundCancellation>;
   /** WP-2423 (2026-10-16): return stock still set aside for an earlier-day Order that ended. */
   readonly endedOrderStockRelease?: ReturnType<typeof createMerchantEndedOrderStockRelease>;
   /** WP-2423 Q9-G1: a manager refunds an order paid while the Store was offline. */
@@ -1846,6 +1852,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
               canRequestAcceptance: batch.canRequestAcceptance,
               canCancel: batch.canCancel,
               canCancelItems: batch.canCancelItems,
+              // WP-2423 abandoned payment: a manager may cancel this unpaid round.
+              canCancelUnpaid: batch.canCancelUnpaid,
               paymentDue:
                 batch.paymentDue === null
                   ? null
@@ -1951,6 +1959,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             canRequestAcceptance: batch.canRequestAcceptance,
             canCancel: batch.canCancel,
             canCancelItems: batch.canCancelItems,
+            // WP-2423 abandoned payment: a manager may cancel this unpaid round.
+            canCancelUnpaid: batch.canCancelUnpaid,
             paymentDue:
               batch.paymentDue === null
                 ? null
@@ -1970,6 +1980,10 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           })),
           currentPhase: item.currentPhase,
           currentVersion: item.currentVersion,
+          // WP-2423: dine-in items ready at the pass and not yet served (the Home's count).
+          ...(item.readyToServeItemCount === undefined
+            ? {}
+            : { readyToServeItemCount: item.readyToServeItemCount }),
           observedAt: item.observedAt,
         });
         // WP-2423 (2026-10-16 v15): earlier-day Orders listed with today's (first page only) are
@@ -11209,6 +11223,50 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             ORDER_CANCELLATION_NOT_CANCELLABLE: [409, "order_not_cancellable"],
             ORDER_CANCELLATION_STOCK_NOT_RELEASABLE: [409, "order_stock_not_releasable"],
             ORDER_CANCELLATION_UNAVAILABLE: [503, "order_cancellation_unavailable"],
+          } as const
+        )[error.code];
+        response.status(status).set("Cache-Control", NO_STORE).json({ error: code });
+      });
+  });
+  // WP-2423 abandoned payment (DEC-DINING-ABANDONED-PAYMENT): a manager cancels a dine-in round
+  // nobody paid for, before its payment window ends. Nothing was charged, so nothing is refunded.
+  router.post("/orders/cancel-unpaid-round", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.unpaidRoundCancellation) {
+      response.status(503).json({ error: "unpaid_round_cancellation_unavailable" });
+      return;
+    }
+    void options
+      .unpaidRoundCancellation({ sessionCookie, csrf, command: request.body })
+      .then((result) => {
+        response.set("Cache-Control", NO_STORE);
+        response.json({ status: result.status, cancelledAt: result.cancelledAt });
+      })
+      .catch((error: unknown) => {
+        if (!(error instanceof UnpaidRoundCancellationError)) {
+          denied(response);
+          return;
+        }
+        const [status, code] = (
+          {
+            UNPAID_ROUND_INPUT_INVALID: [400, "unpaid_round_input_invalid"],
+            UNPAID_ROUND_PERMISSION_DENIED: [403, "order_cancellation_permission_denied"],
+            UNPAID_ROUND_NOT_FOUND: [404, "unpaid_round_not_found"],
+            UNPAID_ROUND_PAID: [409, "unpaid_round_paid"],
+            UNPAID_ROUND_PAYMENT_IN_PROGRESS: [409, "unpaid_round_payment_in_progress"],
+            UNPAID_ROUND_NOT_CANCELLABLE: [409, "unpaid_round_not_cancellable"],
+            UNPAID_ROUND_VERSION_CONFLICT: [409, "order_version_conflict"],
+            UNPAID_ROUND_UNAVAILABLE: [503, "unpaid_round_cancellation_unavailable"],
           } as const
         )[error.code];
         response.status(status).set("Cache-Control", NO_STORE).json({ error: code });

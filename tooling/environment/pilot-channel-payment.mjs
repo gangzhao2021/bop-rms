@@ -58,6 +58,10 @@ export async function createInternalChannelPayment(
     async retry(input) {
       return (await select(input)).retry(input);
     },
+    // WP-2423 abandoned payment: the same guest returns to the checkout's open payment.
+    async resume(input) {
+      return (await select(input)).resume(input);
+    },
     // WP-2423 Q7 slice 2: submit the round and start its payment clock without a Provider call.
     async prepare(input) {
       return (await select(input)).prepare(input);

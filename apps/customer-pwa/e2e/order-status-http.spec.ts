@@ -155,13 +155,17 @@ test.describe("@production order status HTTP continuity", () => {
     await expect.poll(() => firstCalls).toBe(2);
     await navigate(id(2));
     await expect(page.getByText("Payment received $12.99", { exact: true })).toBeVisible();
-    await expect(page.getByText("Ready", { exact: true })).toHaveCount(1);
+    // WP-2423: a round that has been served says so, not the kitchen's earlier "Ready".
+    await expect(page.getByText("Ready", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Served", { exact: true })).toHaveCount(1);
     await expect(page.getByText(/^Served 1 of /)).toBeVisible();
     await expect(page.getByText(/^Served 0 of /)).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "Serving your order", exact: true }),
     ).toBeVisible();
-    await expect(page.getByText("Preparing", { exact: true })).toHaveCount(1);
+    // The kitchen summary covers the round still to be made, which it hasn't started.
+    await expect(page.getByText("Preparing", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("In the queue", { exact: true })).toHaveCount(1);
     await expect(
       page
         .getByRole("region", { name: "Your items" })

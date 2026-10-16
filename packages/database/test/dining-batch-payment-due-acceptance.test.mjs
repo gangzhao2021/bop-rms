@@ -219,7 +219,13 @@ it("reads dine-in round payment deadlines, unpaid cancellations and batch paymen
 
       const cancelled = await scoped((tx) => listStoreUnpaidBatchCancellations(tx, scope, orders));
       assert.deepEqual(cancelled, [
-        { orderReference: orderA, orderBatchReference: a2, cancelledAt: time(-minutes(4)) },
+        {
+          orderReference: orderA,
+          orderBatchReference: a2,
+          cancelledAt: time(-minutes(4)),
+          // WP-2423 abandoned payment: why, so staff see a manager's cancellation differently.
+          reasonCode: "CHECKOUT_DEADLINE_REACHED",
+        },
       ]);
 
       const outcomes = await scoped((tx) => listStoreOrderBatchPaymentOutcomes(tx, scope, orders));

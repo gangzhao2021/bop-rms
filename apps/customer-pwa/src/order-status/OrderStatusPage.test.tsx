@@ -830,6 +830,96 @@ describe("WP-2423: a dine-in round whose payment didn't go through", () => {
     expect(html).not.toContain("cancelled by the store");
     expect(isOrderSettled(view)).toBe(false);
   });
+
+  it("totals every round's payment and shows served rounds as served while one awaits payment", () => {
+    const { state, view: base } = diningView({});
+    const [first, second] = base.order.batches;
+    if (!first || !second) throw new Error("fixture");
+    const third = {
+      ...second,
+      orderBatchReference: id(31),
+      items: second.items.map((item) => ({ ...item, orderItemReference: id(42) })),
+    };
+    const view = {
+      ...base,
+      order: { ...base.order, canonicalPhase: "In Progress", batches: [first, second, third] },
+      sources: {
+        ...base.sources,
+        kitchen: {
+          batches: [id(30), id(31)].map((orderBatchReference) => ({
+            orderBatchReference,
+            status: "Ready" as const,
+            updatedAt: "2026-08-11T13:57:00.000Z",
+          })),
+        },
+        // One payment per paid round (tip included); the first round's guest hasn't paid yet.
+        payments: [646n, 1689n].map((amountMinor) => ({
+          status: "Succeeded" as const,
+          occurredAt: "2026-08-11T13:56:00.000Z",
+          amount: { amountMinor, currencyCode: "CAD" },
+          freshnessStatus: "Fresh" as const,
+        })),
+        batchPayments: [
+          { orderBatchReference: id(3), status: "Awaiting", cancelsAt: null },
+          { orderBatchReference: id(30), status: "Succeeded", cancelsAt: null },
+          { orderBatchReference: id(31), status: "Succeeded", cancelsAt: null },
+        ],
+        dining: {
+          items: [
+            { orderItemReference: id(40), orderBatchReference: id(3), servedQuantity: 0 },
+            { orderItemReference: id(41), orderBatchReference: id(30), servedQuantity: 1 },
+            { orderItemReference: id(42), orderBatchReference: id(31), servedQuantity: 1 },
+          ],
+        },
+      },
+    } as OrderStatusView;
+    const html = render({ ...state, view });
+    expect(html).toContain("Payment received $23.35");
+    expect(html).not.toContain("Payment received $6.46");
+    expect(html).toContain('<h2 id="order-progress-heading">Waiting for payment</h2>');
+    expect(html).toContain("Everything paid for has been served.");
+    expect(html).toContain("<dt>Kitchen status</dt><dd>Waiting for payment</dd>");
+    expect(html).not.toContain("Preparing");
+    expect(html).toContain("<h3>Round 1</h3><p>Waiting for payment</p>");
+    expect(html).toContain("<h3>Round 2</h3><p>Served</p>");
+    expect(html).toContain("<h3>Round 3</h3><p>Served</p>");
+    expect(html).not.toContain("<p>Ready</p>");
+    expect(findInternalText([staticText(html)])).toEqual([]);
+  });
+
+  it("keeps the kitchen summary on the rounds still being made", () => {
+    const { state, view: base } = diningView({
+      batchPayments: [
+        { orderBatchReference: id(3), status: "Succeeded", cancelsAt: null },
+        { orderBatchReference: id(30), status: "Succeeded", cancelsAt: null },
+      ],
+      kitchen: {
+        batches: [
+          {
+            orderBatchReference: id(3),
+            status: "Ready" as const,
+            updatedAt: "2026-08-11T13:57:00.000Z",
+          },
+          {
+            orderBatchReference: id(30),
+            status: "InProgress" as const,
+            updatedAt: "2026-08-11T13:58:00.000Z",
+          },
+        ],
+      },
+      dining: {
+        items: [
+          { orderItemReference: id(40), orderBatchReference: id(3), servedQuantity: 1 },
+          { orderItemReference: id(41), orderBatchReference: id(30), servedQuantity: 0 },
+        ],
+      },
+    });
+    const html = render({ ...state, view: base });
+    expect(html).toContain("<dt>Kitchen status</dt><dd>Preparing</dd>");
+    expect(html).toContain("<h3>Round 1</h3><p>Served</p>");
+    expect(html).toContain("<h3>Round 2</h3><p>Preparing</p>");
+    expect(html).toContain("Serving your order");
+  });
 });
 
 describe("WP-2423 Q10 plain guidance when the visit has ended", () => {

@@ -37,6 +37,9 @@ describe("CUST-ENTRY-CONTEXT", () => {
     expect(html).not.toContain(context.publicStoreReference);
     expect(html).not.toContain(String(context.publicTableReference));
     expect(html).not.toContain(context.csrfToken);
+    // WP-2423: the entry context's own expiry is not the Store's last-order time; don't show it.
+    expect(html).not.toContain("Order by");
+    expect(html).not.toContain(context.contextExpiresAt);
   });
 
   it.each([

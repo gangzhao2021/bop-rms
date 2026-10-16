@@ -24,6 +24,7 @@ const table: StaffDiningTable = {
   elapsedMinutes: 4 * 24 * 60,
   qrCodeValidUntil: null,
   staffRoundsAwaitingPayment: [],
+  guestRoundsAwaitingPayment: [],
   session: { phase: "Active", version: 4, orderReference: id(3) },
 };
 const item = (phase: string, remainingQuantity: number, n: number) => ({
@@ -75,7 +76,7 @@ it("WP-2423 D4: explains what stops a table from closing, in staff words, with w
   );
   expect(blockers).toEqual([
     "1 round entered by staff still waits for card-machine payment. Record the payment on the Orders page, or cancel the round there.",
-    "1 item is waiting for payment or for the kitchen to accept it. Take the payment or cancel the round on the Orders page.",
+    "1 item is waiting for payment or for the kitchen to accept it. Ask the guest to finish paying on their phone, or cancel the unpaid round below (if the guests left) or on the Orders page.",
     "2 items haven't been served yet. Mark them served or cancel them on the Orders page.",
   ]);
   for (const text of blockers) expect(text).not.toMatch(/[0-9a-f]{8}-|Submitted|Accepted|Batch/u);

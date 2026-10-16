@@ -9,6 +9,7 @@ import {
 import {
   CheckoutSessionServiceError,
   createPostgresCheckoutSessionStore,
+  orderingInstantNotAfterAcrossClocks,
   parseOrderingReference,
   type CartQueryTransactionRunner,
 } from "@rms/ordering";
@@ -83,7 +84,11 @@ export function createCustomerCheckoutSessionRead(
           // Exact source Cart is learned from owner history, then authorized before returning.
           const store = createPostgresCheckoutSessionStore(runner, options.scope, {
             authorize: async (_tx, candidate, at) => {
-              if (candidate.guestSessionReference !== authority.guestSessionReference || at > now())
+              // `at` is the owning transaction's database clock, `now()` the application clock.
+              if (
+                candidate.guestSessionReference !== authority.guestSessionReference ||
+                !orderingInstantNotAfterAcrossClocks(at, now())
+              )
                 return false;
               try {
                 const current = await identity.authorize({ ...credentials, observedAt: at });

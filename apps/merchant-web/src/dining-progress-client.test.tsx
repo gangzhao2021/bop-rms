@@ -35,7 +35,7 @@ it("shows partial service honestly and excludes private response fields", () => 
   const html = renderToStaticMarkup(<DiningProgressView view={parsed} />);
   expect(html).toContain("DEMO meal");
   expect(html).toContain("Table T1");
-  expect(html).toContain("Batch 1");
+  expect(html).toContain("Round 1");
   expect(html).toContain("Served 1");
   expect(html).toContain("Remaining 2");
   expect(html).not.toContain("private");

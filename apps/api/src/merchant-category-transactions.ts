@@ -25,6 +25,10 @@ interface State {
   failed: boolean;
   pending: number;
   checks: Map<Check, FinalAssert | undefined>;
+  /** Checks that run after every other before-commit check (registered once each). */
+  lastChecks: Check[];
+  /** A session-setting statement to run before the next statement (the latest one wins). */
+  deferred?: { readonly sql: string; readonly values: readonly unknown[] } | undefined;
 }
 const unavailable = (): never => {
   throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
@@ -63,6 +67,58 @@ const liveRegistrations = new WeakMap<
     readonly register: (tx: Transaction, check: Check, finalAssert?: FinalAssert) => Promise<void>;
   }
 >();
+/**
+ * The live phase of a transaction this host runs ("work" while the action runs, "checks" while
+ * its before-commit checks run), or undefined for any other object (a driver transaction, a
+ * copied wrapper or a completed host). WP-2423: per-transaction authorization reuse keys on it.
+ */
+const livePhases = new WeakMap<object, State>();
+export function merchantTransactionPhase(actualTx: unknown): State["phase"] | undefined {
+  if (actualTx === null || typeof actualTx !== "object") return undefined;
+  return livePhases.get(actualTx)?.phase;
+}
+/**
+ * Runs `sql` (a transaction-local `set_config` statement) immediately before the next statement
+ * of this live host transaction; a later deferral replaces an earlier one that has not run yet.
+ * WP-2423: a remembered authorization answer restores the row-level-security scope its full
+ * resolution leaves selected without a statement per reuse.
+ */
+export function deferMerchantTransactionStatement(
+  actualTx: unknown,
+  sql: string,
+  values: readonly unknown[],
+): boolean {
+  if (actualTx === null || typeof actualTx !== "object") return false;
+  const state = livePhases.get(actualTx);
+  if (!state || (state.phase !== "work" && state.phase !== "checks") || state.failed) return false;
+  if (
+    !/^SELECT set_config\('bop\.[a-z_]+',\$1,true\)(?:,set_config\('bop\.[a-z_]+',(?:\$2|''),true\))*$/u.test(
+      sql,
+    )
+  )
+    return false;
+  state.deferred = Object.freeze({ sql, values: Object.freeze([...values]) });
+  return true;
+}
+/**
+ * Runs `check` after every other before-commit check of this live host transaction (so after its
+ * last statement that could change what `check` reads). WP-2423: the once-per-transaction Brand
+ * authorization re-check.
+ */
+export function registerMerchantTransactionLastCheck(actualTx: unknown, check: Check): void {
+  if (actualTx === null || typeof actualTx !== "object") return unavailable();
+  const state = livePhases.get(actualTx);
+  if (
+    !state ||
+    state.phase !== "work" ||
+    typeof check !== "function" ||
+    state.lastChecks.length >= 8
+  ) {
+    if (state) state.failed = true;
+    return unavailable();
+  }
+  if (!state.lastChecks.includes(check)) state.lastChecks.push(check);
+}
 export async function registerMerchantTransactionBeforeCommit(
   actualTx: object,
   guard: Check,
@@ -122,7 +178,13 @@ export function createMerchantCategoryTransactions(
       }
       async function attempt(): Promise<T> {
         return source.run(async (original) => {
-          const state: State = { phase: "work", failed: false, pending: 0, checks: new Map() };
+          const state: State = {
+            phase: "work",
+            failed: false,
+            pending: 0,
+            checks: new Map(),
+            lastChecks: [],
+          };
           const tx: Transaction = Object.freeze({
             async query<Row = Record<string, unknown>>(sql: string, values: readonly unknown[]) {
               if (state.phase === "closed" || state.phase === "final" || state.failed) {
@@ -131,6 +193,11 @@ export function createMerchantCategoryTransactions(
               }
               state.pending++;
               try {
+                const deferred = state.deferred;
+                if (deferred !== undefined) {
+                  state.deferred = undefined;
+                  await original.query(deferred.sql, deferred.values);
+                }
                 const result = await original.query(sql, values);
                 if (active.get(tx) !== state) return unavailable();
                 if (!result || typeof result !== "object") return unavailable();
@@ -161,12 +228,13 @@ export function createMerchantCategoryTransactions(
           });
           active.set(tx, state);
           liveRegistrations.set(tx, { transaction: tx, register: registerBeforeCommit });
+          livePhases.set(tx, state);
           try {
             const result = await work(tx);
             if (state.failed || state.pending !== 0 || state.checks.size === 0)
               return unavailable();
             state.phase = "checks";
-            for (const check of state.checks.keys()) {
+            for (const check of [...state.checks.keys(), ...state.lastChecks]) {
               await check();
               if (state.failed || state.pending !== 0) return unavailable();
             }
@@ -191,6 +259,7 @@ export function createMerchantCategoryTransactions(
             state.phase = "closed";
             active.delete(tx);
             liveRegistrations.delete(tx);
+            livePhases.delete(tx);
           }
         });
       }

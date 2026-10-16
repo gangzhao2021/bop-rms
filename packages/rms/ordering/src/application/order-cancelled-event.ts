@@ -15,6 +15,10 @@ import { parseOrderingHash, parseOrderingInstant, parseOrderingReference } from 
 export const orderCancelledReasonCodes = [
   "CHECKOUT_DEADLINE_REACHED",
   "PAYMENT_NOT_STARTED",
+  // WP-2423 abandoned payment: the online payment was never finished (cancelled at the Provider at
+  // the deadline), or a manager cancelled the unpaid round before its deadline.
+  "PAYMENT_NOT_COMPLETED",
+  "STAFF_CANCELLED_UNPAID",
 ] as const;
 export type OrderCancelledReasonCode = (typeof orderCancelledReasonCodes)[number];
 

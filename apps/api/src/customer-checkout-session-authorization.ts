@@ -9,6 +9,7 @@ import {
 } from "@bop/identity";
 import {
   createPostgresCartQueryStore,
+  orderingInstantNotAfterAcrossClocks,
   parseOrderingReference,
   type CartQueryTransaction,
   type CartQueryTransactionRunner,
@@ -51,7 +52,8 @@ export function createCustomerCheckoutSessionAuthorization(
   ): Promise<CheckoutSessionAuthority | null> {
     try {
       const observed = parseCanonicalInstant(observedAt);
-      if (observed > now()) return null;
+      // In the owning transaction `observedAt` is the database clock; allow cross-clock skew.
+      if (!orderingInstantNotAfterAcrossClocks(observed, now())) return null;
       const runner: CartQueryTransactionRunner = { run: async (work) => work(tx) };
       const identity = new GuestSessionService({
         store: createPostgresGuestSessionEntryStore(runner, scope),

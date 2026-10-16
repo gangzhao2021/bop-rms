@@ -15,19 +15,27 @@ const references = [
   "orderBatchReference",
   "submissionReference",
   "paymentOperationReference",
-  "expiryRecordReference",
   "expectedSourceCheckpoint",
   "workflowVersionReference",
   "transitionReference",
 ] as const;
 /**
- * Why the System cancelled an unpaid round when its payment window ended:
+ * Why an unpaid round was cancelled. When its payment window ended (System):
  * CHECKOUT_DEADLINE_REACHED — its payment failed; PAYMENT_NOT_STARTED — no payment was ever
  * started for it (WP-2423: a staff-entered round not paid on the card machine, or a guest round whose
- * online payment never began). Nothing was charged in either case.
+ * online payment never began); PAYMENT_NOT_COMPLETED — the guest started paying online and never
+ * finished, so Payment cancelled that attempt at the Provider (WP-2423 abandoned payment).
+ * Before the deadline: STAFF_CANCELLED_UNPAID — a manager cancelled the unpaid round (no expiry
+ * evidence exists yet). Nothing was charged in any case.
  */
+export const orderBatchCheckoutCancellationReasonCodes = [
+  "CHECKOUT_DEADLINE_REACHED",
+  "PAYMENT_NOT_STARTED",
+  "PAYMENT_NOT_COMPLETED",
+  "STAFF_CANCELLED_UNPAID",
+] as const;
 export type OrderBatchCheckoutCancellationReasonCode =
-  "CHECKOUT_DEADLINE_REACHED" | "PAYMENT_NOT_STARTED";
+  (typeof orderBatchCheckoutCancellationReasonCodes)[number];
 /** Append-only owner fact. Parsing grants no permission and releases no stock.
  * The writer must re-resolve source evidence and complete membership under fences.
  */
@@ -35,6 +43,7 @@ export function parseOrderBatchCheckoutCancellation(value: unknown) {
   try {
     const raw = readClosedRecord(value, [
       ...references,
+      "expiryRecordReference",
       "expiryEvidenceDigest",
       "expectedOrderVersion",
       "cancelledOrderVersion",
@@ -55,8 +64,10 @@ export function parseOrderBatchCheckoutCancellation(value: unknown) {
       expected >= 2147483647 ||
       next !== expected + 1 ||
       raw.phase !== "Cancelled" ||
-      (raw.reasonCode !== "CHECKOUT_DEADLINE_REACHED" &&
-        raw.reasonCode !== "PAYMENT_NOT_STARTED") ||
+      !(orderBatchCheckoutCancellationReasonCodes as readonly unknown[]).includes(raw.reasonCode) ||
+      // Staff cancel before the deadline, so only that reason has no expiry evidence.
+      (raw.reasonCode === "STAFF_CANCELLED_UNPAID") !== (raw.expiryRecordReference === null) ||
+      (raw.expiryRecordReference === null) !== (raw.expiryEvidenceDigest === null) ||
       !Array.isArray(raw.orderItemReferences) ||
       raw.orderItemReferences.length === 0
     )
@@ -69,7 +80,12 @@ export function parseOrderBatchCheckoutCancellation(value: unknown) {
       return fail();
     return Object.freeze({
       ...ids,
-      expiryEvidenceDigest: parseOrderingHash(raw.expiryEvidenceDigest),
+      expiryRecordReference:
+        raw.expiryRecordReference === null
+          ? null
+          : parseOrderingReference(raw.expiryRecordReference),
+      expiryEvidenceDigest:
+        raw.expiryEvidenceDigest === null ? null : parseOrderingHash(raw.expiryEvidenceDigest),
       expectedOrderVersion: expected,
       cancelledOrderVersion: next,
       orderItemReferences: Object.freeze(items),
@@ -88,12 +104,19 @@ export type OrderBatchCheckoutCancellation = ReturnType<typeof parseOrderBatchCh
  */
 export function createOrderBatchCheckoutCancellation(input: {
   record: unknown;
+  /** The round's latest expiry evidence; null only for a staff cancellation before the deadline. */
   expiry: unknown;
   items: readonly (OrderItemProgressFact & { readonly orderBatchReference: string })[];
 }) {
   try {
-    const record = parseOrderBatchCheckoutCancellation(input.record),
-      expiry = parseOrderBatchCheckoutExpiry(input.expiry);
+    const record = parseOrderBatchCheckoutCancellation(input.record);
+    // A staff cancellation before the deadline has no expiry evidence; the writer's source proves
+    // the round, its submission and payment operation from Ordering's own records instead.
+    if (record.reasonCode === "STAFF_CANCELLED_UNPAID") {
+      if (input.expiry !== null) return fail();
+      return resolveItems(record, input.items);
+    }
+    const expiry = parseOrderBatchCheckoutExpiry(input.expiry);
     for (const key of [
       "tenantReference",
       "brandReference",
@@ -107,7 +130,8 @@ export function createOrderBatchCheckoutCancellation(input: {
     // The reason follows the expiry evidence: a failed payment, or none recorded at the deadline
     // (the caller proves from Payment that none was ever started before it uses the latter).
     if (
-      (record.reasonCode === "CHECKOUT_DEADLINE_REACHED"
+      (record.reasonCode === "CHECKOUT_DEADLINE_REACHED" ||
+      record.reasonCode === "PAYMENT_NOT_COMPLETED"
         ? expiry.status !== "PaymentFailed"
         : expiry.status !== "AwaitingPaymentResolution") ||
       record.expiryRecordReference !== expiry.recordReference ||
@@ -115,6 +139,17 @@ export function createOrderBatchCheckoutCancellation(input: {
       record.cancelledAt < expiry.observedAt
     )
       return fail();
+    return resolveItems(record, input.items);
+  } catch {
+    return fail();
+  }
+}
+function resolveItems(
+  record: OrderBatchCheckoutCancellation,
+  inputItems: readonly (OrderItemProgressFact & { readonly orderBatchReference: string })[],
+) {
+  try {
+    const input = { items: inputItems };
     summarizeOrderItemProgress(input.items);
     const target = input.items.filter(
       (item) => parseOrderingReference(item.orderBatchReference) === record.orderBatchReference,

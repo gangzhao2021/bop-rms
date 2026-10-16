@@ -6,6 +6,7 @@ import {
   parseCatalogInstant,
   type ProductLifecycleTransaction,
 } from "@rms/catalog";
+import { withRememberedBrandAuthorization } from "./merchant-brand-transaction-authorization.js";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -50,30 +51,31 @@ export function createMerchantMenuDraftQuery(options: {
           return { rows: rows.value as readonly Row[], rowCount: count.value as number | null };
         },
       };
-
-      const scope = await resolveScope(
-        transaction,
-        request.sessionCookie,
-        session.sessionReference,
-      );
-      const allowed = async () => {
-        const decision = await scope.authorizeAction("catalog.menu.manage");
-        return (
-          decision?.effect === "Allow" &&
-          decision.scopeKind === "Brand" &&
-          decision.action === "catalog.menu.manage"
+      return withRememberedBrandAuthorization(transaction, async () => {
+        const scope = await resolveScope(
+          transaction,
+          request.sessionCookie,
+          session.sessionReference,
         );
-      };
-      if (!(await allowed())) return fail("CATALOG_PERMISSION_DENIED");
-      const source = createPostgresMenuDraftSource({
-        brandReference: scope.context.brand.brandReference,
-        transactions: { run: (work) => work(transaction) },
-        authorize: async (_tx, reference) => reference === menu && (await allowed()),
+        const allowed = async () => {
+          const decision = await scope.authorizeAction("catalog.menu.manage");
+          return (
+            decision?.effect === "Allow" &&
+            decision.scopeKind === "Brand" &&
+            decision.action === "catalog.menu.manage"
+          );
+        };
+        if (!(await allowed())) return fail("CATALOG_PERMISSION_DENIED");
+        const source = createPostgresMenuDraftSource({
+          brandReference: scope.context.brand.brandReference,
+          transactions: { run: (work) => work(transaction) },
+          authorize: async (_tx, reference) => reference === menu && (await allowed()),
+        });
+        const result = await source.load(menu, parseCatalogInstant(options.merchant.now()));
+        if (!(await allowed())) return fail("CATALOG_PERMISSION_DENIED");
+        if (!result) return fail("CATALOG_UNAVAILABLE");
+        return { status: "Found" as const, ...result };
       });
-      const result = await source.load(menu, parseCatalogInstant(options.merchant.now()));
-      if (!(await allowed())) return fail("CATALOG_PERMISSION_DENIED");
-      if (!result) return fail("CATALOG_UNAVAILABLE");
-      return { status: "Found" as const, ...result };
     });
   };
 }

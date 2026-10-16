@@ -5083,7 +5083,12 @@
               "type": "string"
             },
             "reasonCode": {
-              "enum": ["CHECKOUT_DEADLINE_REACHED", "PAYMENT_NOT_STARTED"],
+              "enum": [
+                "CHECKOUT_DEADLINE_REACHED",
+                "PAYMENT_NOT_STARTED",
+                "PAYMENT_NOT_COMPLETED",
+                "STAFF_CANCELLED_UNPAID"
+              ],
               "type": "string"
             },
             "sourceDigest": {

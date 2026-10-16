@@ -271,9 +271,10 @@ it("composes scoped persisted entry and menu through one restartable loopback ru
           },
         });
       const absentCart = await cartRequest();
-      assert.equal(absentCart.status, 404);
+      // WP-2423: no active Cart is an explicit empty answer, not a failed request.
+      assert.equal(absentCart.status, 200);
       assert.match(absentCart.headers.get("cache-control"), /no-store/u);
-      await absentCart.text();
+      assert.deepEqual(await absentCart.json(), { schemaVersion: 1, cart: null });
       assert.equal(cartReads, 1);
       assert.deepEqual(await sessionStore.resolve(pickupSelector), pickupRecord);
       cartFault = true;

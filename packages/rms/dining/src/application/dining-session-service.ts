@@ -215,7 +215,16 @@ export type JoinDiningSessionResult =
       readonly participant: ReturnType<typeof parseDiningParticipant>;
       readonly admission: ReturnType<typeof parseDiningIdentityAdmission>;
     }
-  | { readonly status: "DiningJoinUnavailable" };
+  | { readonly status: "DiningJoinUnavailable" }
+  | { readonly status: "DiningJoinRefused"; readonly reason: DiningJoinRefusalReason };
+
+/**
+ * A definitive refusal: nothing was written and repeating the same credential cannot succeed.
+ * `CodeUsed` is reported only for a credential of the Guest's own current Table whose single
+ * use already admitted another Participant (Handoff 87.4.1); every other not-current credential
+ * is the uniform `CodeNotAccepted`. Dependency or integrity failures stay `DiningJoinUnavailable`.
+ */
+export type DiningJoinRefusalReason = "CodeUsed" | "CodeNotAccepted" | "TooManyAttempts";
 
 export type RegenerateDiningJoinResult =
   | {
@@ -246,6 +255,8 @@ export function createDiningSessionService(ports: DiningSessionPorts) {
     throw new DiningSessionError("DINING_SESSION_INPUT_INVALID");
   }
   const unavailable = Object.freeze({ status: "DiningJoinUnavailable" } as const);
+  const refused = (reason: DiningJoinRefusalReason) =>
+    Object.freeze({ status: "DiningJoinRefused", reason } as const);
 
   async function join(input: unknown, currentVersions: boolean): Promise<JoinDiningSessionResult> {
     let raw;
@@ -285,6 +296,7 @@ export function createDiningSessionService(ports: DiningSessionPorts) {
         observedAt: requestedAt,
       }),
     );
+    if (abuseDecision === "Cooldown") return refused("TooManyAttempts");
     if (abuseDecision !== "Admitted") return unavailable;
     let guest;
     try {
@@ -312,7 +324,8 @@ export function createDiningSessionService(ports: DiningSessionPorts) {
       return result;
     });
     const state = await sessionAsync(() => ports.store.resolveJoinState(selectorHash));
-    if (state === null) return unavailable;
+    // No current credential of an Active, unmoved Session matches: unknown, replaced or ended.
+    if (state === null) return refused("CodeNotAccepted");
     let session;
     let capability;
     try {
@@ -324,12 +337,16 @@ export function createDiningSessionService(ports: DiningSessionPorts) {
     }
     const expectedSessionVersion = suppliedSessionVersion ?? session.version;
     const expectedCapabilityVersion = suppliedCapabilityVersion ?? capability.version;
+    // Another Table's code, an ended Session or a moved Table is the same uniform refusal.
     if (
       session.phase !== "Active" ||
-      session.startedAt > requestedAt ||
       guest.storeReference !== session.storeReference ||
       guest.tableReference !== session.tableReference ||
-      capability.assignmentVersion !== session.tableAssignmentVersion ||
+      capability.assignmentVersion !== session.tableAssignmentVersion
+    )
+      return refused("CodeNotAccepted");
+    if (
+      session.startedAt > requestedAt ||
       String(capability.issuedAt) > requestedAt ||
       capability.issuedAt < String(session.startedAt) ||
       capability.selectorHash !== selectorHash ||
@@ -386,7 +403,18 @@ export function createDiningSessionService(ports: DiningSessionPorts) {
         expectedVersion: expectedCapabilityVersion,
       }),
     );
-    if (decision.decision !== "Allowed") return unavailable;
+    if (decision.decision !== "Allowed") {
+      if (decision.reason === "Cooldown") return refused("TooManyAttempts");
+      if (decision.reason === "StatusUnavailable" && capability.status === "Consumed")
+        return refused("CodeUsed");
+      if (
+        decision.reason === "Expired" ||
+        decision.reason === "SessionUnavailable" ||
+        (decision.reason === "StatusUnavailable" && capability.status !== "Active")
+      )
+        return refused("CodeNotAccepted");
+      return unavailable;
+    }
     const participantReference = sessionPort(() =>
       parseDiningReference(ports.credentials.generateReference("Participant")),
     );

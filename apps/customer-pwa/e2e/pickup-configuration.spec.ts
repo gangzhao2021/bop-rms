@@ -21,8 +21,10 @@ for (const screen of [
             message.type() === "error" &&
             !(
               /\/bff\/customer\/cart|\/api\/v1\/carts\//u.test(message.location().url) &&
-              /404|503|ERR_FAILED/u.test(message.text())
-            )
+              /503|ERR_FAILED/u.test(message.text())
+            ) &&
+            // WP-2423: a guest without a Cart is answered explicitly, so no 404 is logged for it.
+            !(/\/api\/v1\/carts\//u.test(message.location().url) && /404/u.test(message.text()))
           )
             failures.push("unexpected console error");
         });
@@ -159,14 +161,9 @@ for (const screen of [
         );
         await page.route("**/bff/customer/cart", (route) =>
           route.fulfill({
-            status: created ? 200 : 404,
+            status: 200,
             headers: { "cache-control": "no-store" },
-            json: created
-              ? view()
-              : {
-                  schemaVersion: 1,
-                  error: { code: "cart_not_found", messageKey: "customer.cart.not_found" },
-                },
+            json: created ? view() : { schemaVersion: 1, cart: null },
           }),
         );
         await page.route("**/bff/customer/cart-binding/*", async (route) => {

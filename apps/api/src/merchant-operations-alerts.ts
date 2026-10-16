@@ -177,6 +177,14 @@ export function projectOperationsAlertBoard(value: unknown, now: string): Operat
   });
 }
 
+/** The answer for a signed-in staff member whose role does not handle store system alerts. */
+export interface OperationsAlertsNotPermitted {
+  readonly permitted: false;
+}
+export const operationsAlertsNotPermitted: OperationsAlertsNotPermitted = Object.freeze({
+  permitted: false,
+});
+
 /**
  * The persistent read: the caller's Session, selected Store and permission are resolved in one
  * transaction; only the installation's own Store is answered. The board is read after the
@@ -191,12 +199,17 @@ export function createPersistentMerchantOperationsAlerts(options: {
 }) {
   const persistence = options.persistence,
     resolve = createMerchantStoreScope(persistence);
-  return async (input: { readonly sessionCookie: unknown }): Promise<OperationsAlertView> => {
-    await persistence.transactions.run(async (tx) => {
+  return async (input: {
+    readonly sessionCookie: unknown;
+  }): Promise<OperationsAlertView | OperationsAlertsNotPermitted> => {
+    const permitted = await persistence.transactions.run(async (tx) => {
       const value = await resolve(tx, input.sessionCookie, "operations.order-exception.manage");
-      if (!(await value.allowed()) || String(value.store.storeReference) !== options.storeReference)
-        return unavailable();
+      if (String(value.store.storeReference) !== options.storeReference) return unavailable();
+      return (await value.allowed()) === true;
     });
+    // WP-2423: a role that does not handle store system alerts (Front of House, Cashier) is told
+    // so in an ordinary answer: the Home hides the card, and no refusal shows in the browser.
+    if (!permitted) return operationsAlertsNotPermitted;
     let board: unknown;
     try {
       board = await options.readBoard();

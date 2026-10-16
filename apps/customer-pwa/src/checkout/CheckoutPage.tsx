@@ -173,7 +173,8 @@ export function CheckoutPage({
     readyDetails.cartReference === detailsSelection.cartReference &&
     readyDetails.cartVersion === detailsSelection.cartVersion &&
     readyDetails.quoteReference === detailsSelection.quoteReference;
-  const canContinue =
+  // Everything payment needs apart from saved details; the details step is part of the same tap.
+  const paymentOpen =
     sessionState.status === "idle" &&
     state.status === "ready" &&
     tipAmount !== null &&
@@ -183,33 +184,39 @@ export function CheckoutPage({
     !(
       quote.priceChange?.requiresReconfirmation === true && confirmedQuote !== quote.quoteReference
     ) &&
-    !detailsLocked &&
-    detailsSelection !== null &&
-    (detailsReady || detailsSubmittable);
+    detailsSelection !== null;
+  const canContinue = paymentOpen && !detailsLocked && (detailsReady || detailsSubmittable);
   const startPayment = () => {
     if (!detailsSelection || quoteExpired || tipAmount === null) return;
     selectedTip.current ??= { selectionReference: uuidv7(), amountMinor: tipAmount };
     void sessionController.start(detailsSelection);
   };
-  useEffect(() => {
-    if (!continueRequested) return;
-    if (detailsReady && canContinue) {
-      setContinueRequested(false);
+  // The continuation after an awaited save reads the latest render, not the tap's closure.
+  const proceedAfterSave = useRef<(saved: CheckoutFormSelection) => void>(() => undefined);
+  proceedAfterSave.current = (saved) => {
+    if (
+      paymentOpen &&
+      detailsSelection.cartReference === saved.cartReference &&
+      detailsSelection.cartVersion === saved.cartVersion &&
+      detailsSelection.quoteReference === saved.quoteReference
+    )
       startPayment();
-    } else if (!detailsLocked && !detailsReady) {
-      // The save ended without a usable acknowledgement; the form shows why.
-      setContinueRequested(false);
-    }
-    // startPayment reads refs and the latest selection; the effect keys cover every input.
-  }, [canContinue, continueRequested, detailsLocked, detailsReady]);
+  };
+  // U1: one tap saves the details and then starts payment, in that order. A save that is not
+  // acknowledged stops here; the details form shows why and offers its own retry.
   const requestContinue = async () => {
-    if (!canContinue) return;
+    if (!canContinue || continueRequested) return;
     if (detailsReady) {
       startPayment();
       return;
     }
     setContinueRequested(true);
-    await detailsForm.current?.save();
+    try {
+      const saved = (await detailsForm.current?.save()) ?? null;
+      if (saved !== null) proceedAfterSave.current(saved);
+    } finally {
+      setContinueRequested(false);
+    }
   };
   const resolvedStore: CustomerStoreContext | undefined =
     store ??
@@ -499,6 +506,7 @@ export function CheckoutPage({
         </p>
       </section>
       <section className="checkout-continue" aria-label="Payment">
+        {continueRequested ? <p role="status">Saving your details…</p> : null}
         {sessionState.status === "pending" ? <p role="status">Preparing secure payment…</p> : null}
         {"canRetry" in sessionState ? (
           <p role="alert">

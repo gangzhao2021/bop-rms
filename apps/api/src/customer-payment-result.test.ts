@@ -20,6 +20,8 @@ async function setup(enabled = true) {
     orderReference: id(33),
     status: "Succeeded",
     total: { amountMinor: "238", currency: "CAD" },
+    payBy: "2026-08-03T15:30:00.000Z",
+    failure: null,
   };
   const read = vi.fn().mockResolvedValue(result);
   const server = createServer(
@@ -105,6 +107,8 @@ it("reports missing creation as pending and fails closed when unconfigured", asy
     orderReference: null,
     total: null,
     status: "Pending",
+    payBy: null,
+    failure: null,
   });
   expect((await f.send()).status).toBe(200);
   expect((await (await setup(false)).send()).status).toBe(503);
@@ -117,6 +121,8 @@ it("requires explicit same-origin JSON POST for reconciliation and rejects injec
     orderReference: null,
     status: "Pending",
     total: null,
+    payBy: null,
+    failure: null,
   });
   const app = express();
   app.use(express.json());

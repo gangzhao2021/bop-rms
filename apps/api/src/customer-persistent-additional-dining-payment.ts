@@ -207,5 +207,20 @@ export function createCustomerPersistentAdditionalDiningPayment(
         })
       ).retry(value);
     },
+    /** WP-2423 abandoned payment: the same guest comes back to this round's open payment. */
+    async resume(value: unknown) {
+      const raw = readClosedRecord(value, [
+        "sessionCredential",
+        "csrfCredential",
+        "checkoutSessionReference",
+      ]);
+      return (
+        await compose({
+          sessionCredential: raw.sessionCredential,
+          csrfCredential: raw.csrfCredential,
+          checkoutSessionReference: raw.checkoutSessionReference,
+        })
+      ).resume(value);
+    },
   });
 }

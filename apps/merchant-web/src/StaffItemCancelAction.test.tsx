@@ -118,7 +118,7 @@ it("WP-2423 Q6 step 2: offers the batch's uncancelled items with a required reas
   // Nothing can be confirmed before a selection, a reason and the server's refund preview.
   expect(html).toMatch(/<button type="submit" disabled=""[^>]*>Cancel item and refund<\/button>/u);
   expect(html).toContain("Keep items");
-  expect(render("DineIn")).toContain("Cancel items from batch 1 of order ORD-1001");
+  expect(render("DineIn")).toContain("Cancel items from round 1 of order ORD-1001");
 });
 
 it("WP-2423 Q6 step 2: explains the refund the server previewed", () => {
@@ -145,7 +145,7 @@ it("WP-2423 Q6 step 2: explains the refund the server previewed", () => {
     "These are the last items: the whole order is cancelled and the remaining payment of $13.80 is refunded, including any tip.",
   );
   expect(itemCancelPreviewText(dining, { scope: "Batch", refund: last })).toBe(
-    "These are the last items of this batch: the whole batch is cancelled and its remaining payment of $13.80 is refunded, including any tip.",
+    "These are the last items of this round: the whole round is cancelled and its remaining payment of $13.80 is refunded, including any tip.",
   );
 });
 
@@ -153,7 +153,7 @@ it("WP-2423 Q6 step 2: says what to do for every refusal", () => {
   const pickup = detail("Pickup").order;
   const dining = detail("DineIn").order;
   expect(itemCancelFailureText(pickup, "LegacyStock")).toContain("Cancel the whole order instead.");
-  expect(itemCancelFailureText(dining, "LegacyStock")).toContain("Cancel the whole batch instead.");
+  expect(itemCancelFailureText(dining, "LegacyStock")).toContain("Cancel the whole round instead.");
   expect(itemCancelFailureText(pickup, "VersionConflict")).toContain("Close to refresh it");
   expect(itemCancelFailureText(pickup, "PreparationStarted")).toContain("use a refund");
   expect(itemCancelFailureText(pickup, "NotCancellable")).toContain("can no longer be cancelled");

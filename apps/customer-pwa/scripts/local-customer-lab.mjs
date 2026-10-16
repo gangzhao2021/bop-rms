@@ -8,7 +8,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { URL, fileURLToPath } from "node:url";
 import { createServer, resolveConfig } from "vite";
-import { chromium } from "@playwright/test";
+import { chromium, expect } from "@playwright/test";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
@@ -206,28 +206,22 @@ export async function verifyCustomerLab(origin, sessionCount, stopAfter = false,
         }
         await page.getByRole("button", { name: "Continue to menu", exact: true }).click();
         await page.getByText("Latte", { exact: true }).first().waitFor();
-        await page
-          .getByText("Price confirmed in your final quote", { exact: true })
-          .first()
-          .waitFor();
+        // No Store price is published in this lab: the menu says it is priced at checkout.
+        await page.getByText("Priced at checkout", { exact: true }).first().waitFor();
         assert.equal(new URL(page.url()).pathname, "/menu");
         if (cart) {
           await page.getByRole("link", { name: "View Latte", exact: true }).click();
-          await page.getByRole("button", { name: "Add to cart", exact: true }).click();
           await page.getByLabel("Quantity", { exact: true }).fill("2");
           await page.getByRole("button", { name: "Add to cart", exact: true }).click();
-          await page
-            .getByRole("link", { name: "Review cart", exact: true })
-            .click()
-            .catch(async () => {
-              throw new Error(
-                JSON.stringify({
-                  stage: "dining-add",
-                  persisted: await cart.inspect(),
-                  alerts: await page.getByRole("alert").allTextContents(),
-                }),
-              );
-            });
+          await viewAddedCart(page).catch(async () => {
+            throw new Error(
+              JSON.stringify({
+                stage: "dining-add",
+                persisted: await cart.inspect(),
+                alerts: await page.getByRole("alert").allTextContents(),
+              }),
+            );
+          });
           await page.getByLabel("Latte quantity", { exact: true }).waitFor();
           assert.equal(await page.getByLabel("Latte quantity", { exact: true }).textContent(), "2");
           await page.getByRole("button", { name: "Increase Latte quantity", exact: true }).click();
@@ -270,6 +264,11 @@ export async function verifyCustomerLab(origin, sessionCount, stopAfter = false,
   }
 }
 
+/** The configure page confirms the add in place; its own "View cart" link opens the cart. */
+function viewAddedCart(page) {
+  return page.getByRole("status").getByRole("link", { name: "View cart", exact: true }).click();
+}
+
 async function verifySharedTable(browser, origin, dining, cart) {
   const contexts = [];
   const pages = [];
@@ -277,6 +276,8 @@ async function verifySharedTable(browser, origin, dining, cart) {
   const notes = ["Synthetic first guest note", "Synthetic second guest note"];
   const owner = (page) =>
     page.locator("article.cart-item").filter({ hasNotText: "Added by another guest." });
+  const foreignItem = (page) =>
+    page.locator("article.cart-item").filter({ hasText: "Added by another guest." });
   async function refresh(page) {
     await page.getByRole("link", { name: "Continue shopping", exact: true }).click();
     await page.getByRole("link", { name: "Cart", exact: true }).click();
@@ -305,18 +306,15 @@ async function verifySharedTable(browser, origin, dining, cart) {
       await page.getByRole("heading", { name: "You’ve joined this table", exact: true }).waitFor();
       await page.getByRole("button", { name: "Continue to menu", exact: true }).click();
       await page.getByRole("link", { name: "View Latte", exact: true }).click();
-      await page.getByRole("button", { name: "Add to cart", exact: true }).click();
       await page.getByLabel("Preparation note (optional)", { exact: true }).fill(notes[index]);
       await page.getByRole("button", { name: "Add to cart", exact: true }).click();
-      await page.getByRole("link", { name: "Review cart", exact: true }).click();
+      await viewAddedCart(page);
       await owner(page).getByRole("button", { name: "Remove", exact: true }).waitFor();
     }
     await refresh(pages[0]);
     for (const [index, page] of pages.entries()) {
-      await page.getByText("2 item lines", { exact: true }).waitFor();
-      const foreign = page
-        .locator("article.cart-item")
-        .filter({ hasText: "Added by another guest." });
+      await page.getByText("2 items", { exact: true }).waitFor();
+      const foreign = foreignItem(page);
       assert.equal(await foreign.count(), 1);
       for (const button of ["Increase Latte quantity", "Decrease Latte quantity", "Remove"])
         assert.equal(
@@ -333,16 +331,23 @@ async function verifySharedTable(browser, origin, dining, cart) {
       );
       assert.equal(new URL(page.url()).hash, "");
     }
+    // The cart shows guests their items and counts, not internal versions: each change is
+    // observed through what the other guest sees after refreshing.
+    const quantity = (page, own) =>
+      (own ? owner(page) : foreignItem(page)).getByLabel("Latte quantity", { exact: true });
     await owner(pages[0])
       .getByRole("button", { name: "Increase Latte quantity", exact: true })
       .click();
-    await pages[0].getByText("Cart version 4 · DineIn", { exact: true }).waitFor();
+    await expect(quantity(pages[0], true)).toHaveText("2");
+    await pages[0].getByText("3 items", { exact: true }).waitFor();
     await refresh(pages[1]);
-    await pages[1].getByText("Cart version 4 · DineIn", { exact: true }).waitFor();
+    await expect(quantity(pages[1], false)).toHaveText("2");
+    await pages[1].getByText("3 items", { exact: true }).waitFor();
     await owner(pages[1]).getByRole("button", { name: "Remove", exact: true }).click();
-    await pages[1].getByText("1 item lines", { exact: true }).waitFor();
+    await pages[1].getByText("2 items", { exact: true }).waitFor();
     await refresh(pages[0]);
-    await pages[0].getByText("Cart version 5 · DineIn", { exact: true }).waitFor();
+    await expect(foreignItem(pages[0])).toHaveCount(0);
+    await pages[0].getByText("2 items", { exact: true }).waitFor();
     await owner(pages[0]).getByRole("button", { name: "Remove", exact: true }).click();
     await pages[0].getByRole("heading", { name: "Your cart is empty", exact: true }).waitFor();
     await dining.verify();

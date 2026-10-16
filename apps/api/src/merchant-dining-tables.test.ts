@@ -9,6 +9,7 @@ const mock = vi.hoisted(() => ({
   awaiting: vi.fn(),
   cardPaid: vi.fn(),
   sessionOrders: vi.fn(),
+  unpaidGuestRounds: vi.fn(),
 }));
 vi.mock("@rms/ordering", async (original) => ({
   ...(await original<typeof import("@rms/ordering")>()),
@@ -16,6 +17,7 @@ vi.mock("@rms/ordering", async (original) => ({
     listAwaitingPaymentByTables: mock.awaiting,
   })),
   listStoreDiningSessionOrders: mock.sessionOrders,
+  listStoreUnpaidGuestDiningRounds: mock.unpaidGuestRounds,
 }));
 vi.mock("@rms/payment", async (original) => ({
   ...(await original<typeof import("@rms/payment")>()),
@@ -60,6 +62,7 @@ function setup() {
   mock.awaiting.mockResolvedValue([]);
   mock.cardPaid.mockResolvedValue(new Map());
   mock.sessionOrders.mockResolvedValue(new Map());
+  mock.unpaidGuestRounds.mockResolvedValue([]);
   mock.list.mockResolvedValue({
     items: [
       {
@@ -305,6 +308,60 @@ it("WP-2423 item 5: lists the party's staff rounds still awaiting card-machine p
   expect(JSON.stringify(view)).not.toContain(id(41));
 });
 
+it("WP-2423 abandoned payment: lists each party's unpaid guest rounds and who may cancel them", async () => {
+  const f = setup();
+  mock.list.mockResolvedValueOnce({
+    items: [4, 6].map((n) => ({
+      tableReference: id(n),
+      stableLabel: "T" + String(n),
+      areaCode: "MAIN",
+      capacity: 4,
+      lifecycle: "Published",
+      operationalState: "Available",
+      aggregateVersion: 3,
+      activeDiningSessionReference: id(n + 1),
+    })),
+    nextAfterTableReference: null,
+  });
+  mock.loadSessions.mockResolvedValueOnce(
+    [5, 7].map((n) => ({
+      diningSessionReference: id(n),
+      brandReference: id(2),
+      storeReference: id(3),
+      phase: "Active",
+      startedAt: "2026-09-25T11:42:00.000Z",
+    })),
+  );
+  const unpaid = {
+    diningSessionReference: id(5),
+    orderReference: id(40),
+    orderBatchReference: id(41),
+    roundNumber: 1,
+    payBy: "2026-09-25T12:10:00.000Z",
+  };
+  mock.unpaidGuestRounds.mockResolvedValueOnce([unpaid]);
+  const view = await f.read(f.input);
+  // One read for every open session on the page.
+  expect(mock.unpaidGuestRounds).toHaveBeenCalledOnce();
+  expect(mock.unpaidGuestRounds.mock.calls[0]?.[2]).toEqual([id(5), id(7)]);
+  expect(view.items.map((item) => item.guestRoundsAwaitingPayment)).toEqual([
+    [
+      {
+        orderReference: id(40),
+        orderBatchReference: id(41),
+        roundNumber: 1,
+        payBy: "2026-09-25T12:10:00.000Z",
+      },
+    ],
+    [],
+  ]);
+  expect(view.canCancelUnpaidRounds).toBe(true);
+  f.authorizeAction.mockImplementation(async (action?: string) => ({
+    effect: action === "ordering.order.cancel" ? "Deny" : "Allow",
+  }));
+  expect((await f.read(f.input)).canCancelUnpaidRounds).toBe(false);
+});
+
 it("WP-2423 D4: gives each open session's phase, version and Order to staff who may close tables", async () => {
   const f = setup();
   mock.list.mockResolvedValue({
@@ -348,4 +405,13 @@ it("WP-2423 D4: gives each open session's phase, version and Order to staff who 
   expect(denied.canCloseSessions).toBe(false);
   expect(mock.sessionOrders).not.toHaveBeenCalled();
   expect(denied.items[0]?.session).toEqual({ phase: "Active", version: 3, orderReference: null });
+});
+
+it("WP-2423: offers the Order host section only to staff who may transfer the host", async () => {
+  const f = setup();
+  expect((await f.read(f.input)).canTransferHost).toBe(true);
+  f.authorizeAction.mockImplementation(async (action?: unknown) => ({
+    effect: action === "dining.host.transfer" ? "Deny" : "Allow",
+  }));
+  expect((await f.read(f.input)).canTransferHost).toBe(false);
 });

@@ -49,6 +49,34 @@ describe("Customer Cart browser client", () => {
     );
   });
 
+  it("WP-2423: reads an explicit empty current Cart, and an older server's 404, as no Cart", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ schemaVersion: 1, cart: null }))),
+    );
+    expect(await createBrowserCustomerCartClient().loadCurrent()).toBeNull();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ schemaVersion: 1, error: { code: "cart_not_found" } }), {
+            status: 404,
+          }),
+      ),
+    );
+    expect(await createBrowserCustomerCartClient().loadCurrent()).toBeNull();
+    // Anything else with a null Cart is not the explicit empty answer.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () => new Response(JSON.stringify({ schemaVersion: 1, cart: null, extra: true })),
+      ),
+    );
+    await expect(createBrowserCustomerCartClient().loadCurrent()).rejects.toMatchObject({
+      code: "cart_service_unavailable",
+    });
+  });
+
   it("keeps CSRF and operation context in memory and sends no client money", async () => {
     const fetch = vi.fn(async () => new Response(JSON.stringify(cart()), { status: 200 }));
     vi.stubGlobal("fetch", fetch);

@@ -25,6 +25,16 @@ export interface CustomerSessionPaymentResult {
   readonly orderReference: string | null;
   readonly status: "Pending" | "Unknown" | "Succeeded" | "Failed";
   readonly total: Readonly<{ amountMinor: string; currency: "CAD" }> | null;
+  /**
+   * WP-2423 abandoned payment: until when this payment can still be finished (its payment window);
+   * null before a payment exists.
+   */
+  readonly payBy: string | null;
+  /**
+   * Why a failed payment failed: the card was declined, or the payment was never finished and was
+   * cancelled when its time ran out (`NotCompleted`). Null unless Failed.
+   */
+  readonly failure: "Declined" | "NotCompleted" | null;
 }
 const unavailable = (): never => {
   throw new CheckoutSessionServiceError("DEPENDENCY_UNAVAILABLE");
@@ -54,6 +64,8 @@ export function createCustomerSessionPaymentResult(options: CustomerSessionPayme
         orderReference: null,
         status: "Pending",
         total: null,
+        payBy: null,
+        failure: null,
       });
       if (stored !== null) {
         const record = parsePaymentIntentCreationRecord(stored);
@@ -72,6 +84,7 @@ export function createCustomerSessionPaymentResult(options: CustomerSessionPayme
           return unavailable();
         let status: CustomerSessionPaymentResult["status"] =
           record.providerOutcome?.kind === "Failure" ? "Unknown" : "Pending";
+        let failure: CustomerSessionPaymentResult["failure"] = null;
         const fact = await options.terminal.read(record.intent.paymentIntentReference);
         if (fact !== null) {
           const event = parsePaymentTerminalEnvelope(fact.event);
@@ -109,6 +122,8 @@ export function createCustomerSessionPaymentResult(options: CustomerSessionPayme
           )
             return unavailable();
           status = expectedOutcome;
+          if (expectedOutcome === "Failed")
+            failure = fact.failureReason === "Cancelled" ? "NotCompleted" : "Declined";
         }
         result = Object.freeze({
           checkoutSessionReference: session.checkoutSessionReference,
@@ -119,6 +134,8 @@ export function createCustomerSessionPaymentResult(options: CustomerSessionPayme
             amountMinor: p.total.amountMinor.toString(),
             currency: "CAD" as const,
           }),
+          payBy: String(p.capacityExpiresAt),
+          failure,
         });
       }
       if (

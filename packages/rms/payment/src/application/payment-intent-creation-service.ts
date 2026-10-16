@@ -536,6 +536,79 @@ export function createPaymentIntentCreationService(ports: PaymentIntentCreationP
       return Object.freeze({ status: "Created", record: saved });
     },
     /**
+     * WP-2423 abandoned payment (DEC-DINING-ABANDONED-PAYMENT): the customer who started paying
+     * comes back (reload, another tab) to the same payment. Returns the intent's latest attempt as
+     * stored — no new attempt, no Provider call, no tip or amount from the request — while the
+     * payment window is open and the same guest session is still authorized for it. Whether that
+     * attempt already has a terminal outcome is the caller's read (Payment's terminal facts).
+     */
+    async resume(value: unknown): Promise<CreatePaymentIntentResult> {
+      const raw = exactPaymentObject(value, [
+        "paymentOperationReference",
+        "submissionReference",
+        "requestedAt",
+      ]);
+      let operation: PaymentReference;
+      let submissionReference: PaymentReference;
+      try {
+        operation = parsePaymentReference(raw.paymentOperationReference);
+        submissionReference = parsePaymentReference(raw.submissionReference);
+        parsePaymentInstant(raw.requestedAt);
+      } catch {
+        return fail("PAYMENT_INTENT_INPUT_INVALID");
+      }
+      const authorize = async () => {
+        let at: PaymentInstant;
+        try {
+          at = parsePaymentInstant(ports.clock.now());
+        } catch {
+          return fail("PAYMENT_INTENT_DEPENDENCY_UNAVAILABLE");
+        }
+        const value = await ports.authorization
+          .authorize({
+            action: "CreatePaymentIntent",
+            paymentOperationReference: operation,
+            submissionReference,
+            observedAt: at,
+          })
+          .catch(dependency);
+        if (value === null) return fail("PAYMENT_INTENT_PERMISSION_DENIED");
+        return authorization(value);
+      };
+      const authorized = await authorize();
+      const priorValue = await ports.repository.resolveOperation(operation).catch(dependency);
+      if (priorValue === null) return fail("PAYMENT_INTENT_ORDER_NOT_READY");
+      let prior: PaymentIntentCreationRecord;
+      try {
+        prior = parsePaymentIntentCreationRecord(priorValue);
+      } catch {
+        return fail("PAYMENT_INTENT_DEPENDENCY_UNAVAILABLE");
+      }
+      const p = prior.intent.preparation;
+      if (
+        prior.intent.paymentOperationReference !== operation ||
+        String(p.submissionReference) !== submissionReference ||
+        String(p.brandReference) !== authorized.brandReference ||
+        String(p.storeReference) !== authorized.storeReference ||
+        String(p.guestSessionReference) !== authorized.guestSessionReference
+      )
+        return fail("PAYMENT_INTENT_IDEMPOTENCY_CONFLICT");
+      let evaluatedAt: PaymentInstant;
+      try {
+        evaluatedAt = parsePaymentInstant(ports.clock.now());
+      } catch {
+        return fail("PAYMENT_INTENT_DEPENDENCY_UNAVAILABLE");
+      }
+      if (Date.parse(evaluatedAt) >= Date.parse(p.capacityExpiresAt))
+        return fail("PAYMENT_INTENT_PREPARATION_EXPIRED");
+      if (JSON.stringify(await authorize()) !== JSON.stringify(authorized))
+        return fail("PAYMENT_INTENT_PERMISSION_DENIED");
+      return Object.freeze({
+        status: prior.providerOutcome === null ? "Processing" : "AlreadyCreated",
+        record: prior,
+      });
+    },
+    /**
      * WP-2423 Q20 (DEC-PAYMENT-CARD-RETRY): after the latest attempt failed (a declined card), open
      * the next attempt on the same intent: same order batch, amount and payment window. Repeating
      * the request while that attempt is open returns it; nothing is charged by opening an attempt.

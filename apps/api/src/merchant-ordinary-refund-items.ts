@@ -14,7 +14,10 @@ import { withMerchantTransactionAuthorization } from "./merchant-transaction-aut
 import { createMerchantWorkforcePermissionSource } from "./merchant-workforce-authority-source.js";
 import { refundReadAccess } from "./merchant-refund-read-authority.js";
 import type { MerchantRefundSoleOperatorResolver } from "./merchant-sole-operator.js";
-import { ordinaryRefundProgress } from "./merchant-ordinary-refund-progress.js";
+import {
+  ordinaryRefundProgress,
+  type OrdinaryRefundProgress,
+} from "./merchant-ordinary-refund-progress.js";
 import { createRoundCancellationRefundSource } from "./merchant-round-cancellation-refund.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -308,14 +311,14 @@ export function createMerchantOrdinaryRefundItems(options: {
               );
           }
           // WP-2423 Q5: each recent request's progress from committed Payment facts, so staff see
-          // Recorded / Sending / Refunded without a separate status check.
+          // Recorded / ReadyToSend / Sending / Refunded without a separate status check.
           const status = createPostgresOrdinaryRefundRequestStatusSource({
             scope,
             providerAccountReference: configuration.providerAccountReference,
             environment: configuration.environment,
             authorize: () => allowed(),
           });
-          const progress = new Map<string, "Recorded" | "Sending" | "Refunded" | "Declined">();
+          const progress = new Map<string, OrdinaryRefundProgress>();
           const methods = new Map<string, "Online" | "CardMachine">();
           for (const request of recent) {
             if (declines.has(request.requestReference)) {

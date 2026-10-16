@@ -17,6 +17,7 @@ import {
   type AvailabilityRuleAggregate,
   type ProductLifecycleTransaction,
 } from "@rms/catalog";
+import { withRememberedBrandAuthorization } from "./merchant-brand-transaction-authorization.js";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import { createMerchantStoreBusinessDay } from "./merchant-store-business-day.js";
@@ -257,61 +258,63 @@ export function createMerchantAvailability(options: {
   const query = async (input: { sessionCookie: unknown; csrf: unknown }) => {
     const current = await session(input);
     return retryTransactionConflict(() =>
-      options.persistence.transactions.run(async (tx) => {
-        const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
-        const at = options.persistence.now();
-        const skus = (await listBrandSkuChoices(ptx(tx), s.owner)).filter((sku) => sku.active);
-        const rules = await listStoreAvailabilityRules(ptx(tx), s.owner);
-        const statuses = new Map(
-          skus.map((sku) => [
-            sku.skuReference,
-            itemAvailability(rules, s.owner, sku.skuReference, at),
-          ]),
-        );
-        // WP-2423 (2026-10-16): items the rules offer but guests see as sold out from stock. Read
-        // last in a savepoint, so an unreadable stock answer never blanks the page.
-        const stockSource = options.stock;
-        const stock =
-          stockSource === undefined
-            ? new Map<string, StaffStockShortage>()
-            : await withOptionalRead(
-                tx as never,
-                () =>
-                  stockSource.explain(tx as never, {
-                    brandReference: s.owner.brandReference,
-                    storeReference: s.owner.storeReference,
-                    observedAt: at,
-                    sellableReferences: skus
-                      .filter((sku) => {
-                        const status = statuses.get(sku.skuReference)?.status;
-                        return status === "Available" || status === "Varies";
-                      })
-                      .map((sku) => String(sku.skuReference)),
-                  }),
-                new Map<string, StaffStockShortage>() as ReadonlyMap<string, StaffStockShortage>,
-              );
-        return {
-          screenId: "CAT-AVAILABILITY" as const,
-          sourceAsOf: at,
-          viewer: s.actor,
-          timeZone: s.timeZone,
-          permissions: s.permissions,
-          items: skus
-            .map((sku) => ({
-              skuReference: sku.skuReference,
-              skuCode: sku.skuCode,
-              productName: name(sku.productLocalizedNames, sku.skuCode),
-              sizeName: name(sku.localizedNames, sku.skuCode),
-              ...(statuses.get(sku.skuReference) ??
-                itemAvailability(rules, s.owner, sku.skuReference, at)),
-              stockSoldOut: stockSoldOutView(stock.get(String(sku.skuReference))),
-            }))
-            .sort(
-              (a, b) =>
-                a.productName.localeCompare(b.productName) || a.skuCode.localeCompare(b.skuCode),
-            ),
-        };
-      }),
+      options.persistence.transactions.run((tx) =>
+        withRememberedBrandAuthorization(tx, async () => {
+          const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+          const at = options.persistence.now();
+          const skus = (await listBrandSkuChoices(ptx(tx), s.owner)).filter((sku) => sku.active);
+          const rules = await listStoreAvailabilityRules(ptx(tx), s.owner);
+          const statuses = new Map(
+            skus.map((sku) => [
+              sku.skuReference,
+              itemAvailability(rules, s.owner, sku.skuReference, at),
+            ]),
+          );
+          // WP-2423 (2026-10-16): items the rules offer but guests see as sold out from stock. Read
+          // last in a savepoint, so an unreadable stock answer never blanks the page.
+          const stockSource = options.stock;
+          const stock =
+            stockSource === undefined
+              ? new Map<string, StaffStockShortage>()
+              : await withOptionalRead(
+                  tx as never,
+                  () =>
+                    stockSource.explain(tx as never, {
+                      brandReference: s.owner.brandReference,
+                      storeReference: s.owner.storeReference,
+                      observedAt: at,
+                      sellableReferences: skus
+                        .filter((sku) => {
+                          const status = statuses.get(sku.skuReference)?.status;
+                          return status === "Available" || status === "Varies";
+                        })
+                        .map((sku) => String(sku.skuReference)),
+                    }),
+                  new Map<string, StaffStockShortage>() as ReadonlyMap<string, StaffStockShortage>,
+                );
+          return {
+            screenId: "CAT-AVAILABILITY" as const,
+            sourceAsOf: at,
+            viewer: s.actor,
+            timeZone: s.timeZone,
+            permissions: s.permissions,
+            items: skus
+              .map((sku) => ({
+                skuReference: sku.skuReference,
+                skuCode: sku.skuCode,
+                productName: name(sku.productLocalizedNames, sku.skuCode),
+                sizeName: name(sku.localizedNames, sku.skuCode),
+                ...(statuses.get(sku.skuReference) ??
+                  itemAvailability(rules, s.owner, sku.skuReference, at)),
+                stockSoldOut: stockSoldOutView(stock.get(String(sku.skuReference))),
+              }))
+              .sort(
+                (a, b) =>
+                  a.productName.localeCompare(b.productName) || a.skuCode.localeCompare(b.skuCode),
+              ),
+          };
+        }),
+      ),
     );
   };
 
@@ -319,177 +322,180 @@ export function createMerchantAvailability(options: {
     const body = parseAvailabilityCommandBody(input.body);
     const current = await session(input);
     return retryTransactionConflict(() =>
-      options.persistence.transactions.run(async (tx) => {
-        const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
-        const at = options.persistence.now();
-        const brandWide = body.action === "Offer" || body.action === "StopOffering";
-        if (brandWide ? !s.permissions.mayOffer : !s.permissions.mayMarkSoldOut)
-          fail("PermissionDenied");
-        // Q17: the today-only mark never sets "until further notice".
-        if (
-          body.action === "SoldOut" &&
-          body.until === "UntilBack" &&
-          !s.permissions.mayMarkUntilBack
-        )
-          fail("PermissionDenied");
-        const sku = (await listBrandSkuChoices(ptx(tx), s.owner)).find(
-          (candidate) => candidate.skuReference === body.skuReference && candidate.active,
-        );
-        if (sku === undefined) return fail("NotFound");
-        // Q21: "today" is the Store's business day — sold out until it ends at the Store's
-        // business-day start (e.g. 04:00 after a late service), never at calendar midnight.
-        const soldOutUntil =
-          body.action === "SoldOut" && body.until === "EndOfDay"
-            ? String(
-                (
-                  await createMerchantStoreBusinessDay({
-                    publication: options.persistence.publication,
-                    tenantReference: s.owner.tenantReference,
-                    brandReference: s.owner.brandReference,
-                    storeReference: s.owner.storeReference,
-                    timeZone: s.timeZone,
-                    authorize: async () =>
-                      (await s.markDecision()) !== null ||
-                      (await s.storeDecision()) !== null ||
-                      (await s.brandDecision()) !== null,
-                  })(tx, at).catch(() => fail("Conflict"))
-                ).endsAt,
-              )
-            : null;
-        // Audit summary per rule step: what changed, for which item and Store (no personal data).
-        const steps = new Map<string, string>();
-        const summary = (operationReference: string) => ({
-          change:
-            body.action === "SoldOut"
-              ? body.until === "EndOfDay"
-                ? "SoldOutToday"
-                : "SoldOutUntilFurtherNotice"
-              : body.action === "BackInStock"
-                ? "BackInStock"
-                : body.action === "Offer"
-                  ? "OfferedAtStore"
-                  : "StoppedOfferingAtStore",
-          ruleStep: steps.get(operationReference) ?? "Unknown",
-          item: itemLabel(
-            name(sku.productLocalizedNames, sku.skuCode),
-            name(sku.localizedNames, sku.skuCode),
-          ),
-          itemReference: sku.skuReference,
-          storeReference: s.owner.storeReference,
-          ...(body.action === "SoldOut" ? { soldOutUntil } : {}),
-          authority: brandWide
-            ? "BrandAvailability"
-            : s.permissions.mayMarkUntilBack
-              ? "StoreAvailability"
-              : "SoldOutToday",
-          commandReference: body.operationReference,
-        });
-        const service = availabilityService(tx, s, body.operationReference, !brandWide, summary);
-        const rules = (await listStoreAvailabilityRules(ptx(tx), s.owner)).filter(
-          (rule) =>
-            rule.sellableReference === sku.skuReference &&
-            rule.storeReference === s.owner.storeReference,
-        );
-        const step = (purpose: string) => derivedReference(body.operationReference, purpose);
-        const setLifecycle = (rule: AvailabilityRuleAggregate, target: "Active" | "Inactive") => {
-          const operationReference = step(target + ":" + rule.ruleReference);
-          steps.set(operationReference, target === "Active" ? "RuleActivated" : "RuleEnded");
-          return service.changeLifecycle({
-            ruleReference: rule.ruleReference,
-            targetLifecycle: target,
-            expectedAggregateVersion: rule.aggregateVersion,
-            operationReference,
-            requestedAt: at,
-          });
-        };
-        const createActive = async (rule: {
-          internalCode: string;
-          decision: "Available" | "Unavailable";
-          priority: number;
-          reasonCode: string;
-          effectiveUntil: string | null;
-        }) => {
-          steps.set(step("create"), "RuleCreated");
-          const created = await service.create({
-            ...rule,
-            sellableReference: sku.skuReference,
-            sellableType: "Sku",
-            storeReference: s.owner.storeReference,
-            channelCodes: [],
-            orderTypeCodes: [],
-            effectiveFrom: at,
-            operationReference: step("create"),
-            requestedAt: at,
-          });
-          return created.aggregate.lifecycle === "Active"
-            ? created
-            : setLifecycle(created.aggregate, "Active");
-        };
-        const store8 = s.owner.storeReference.replaceAll("-", "").slice(0, 8).toUpperCase();
-        try {
-          const before = itemAvailability(rules, s.owner, sku.skuReference, at);
-          if (body.action === "Offer") {
-            const stopped = rules.find(
-              (rule) => rule.reasonCode === offeredReason && rule.lifecycle !== "Active",
-            );
-            if (before.status === "Available" || before.status === "SoldOut")
-              return { status: "Unchanged", item: before };
-            if (stopped !== undefined) await setLifecycle(stopped, "Active");
-            else
-              await createActive({
-                internalCode: ("OFFER-" + store8 + "-" + sku.skuCode).slice(0, 64),
-                decision: "Available",
-                priority: 100,
-                reasonCode: offeredReason,
-                effectiveUntil: null,
-              });
-          } else if (body.action === "StopOffering") {
-            const offers = rules.filter(
-              (rule) => rule.decision === "Available" && rule.lifecycle === "Active",
-            );
-            for (const rule of offers) await setLifecycle(rule, "Inactive");
-          } else if (body.action === "SoldOut") {
-            if (before.status === "SoldOut") return { status: "Unchanged", item: before };
-            if (before.status !== "Available" && before.status !== "Varies") fail("Conflict");
-            await createActive({
-              internalCode:
-                "SOLDOUT-" +
-                store8 +
-                "-" +
-                step("code").replaceAll("-", "").slice(-16).toUpperCase(),
-              decision: "Unavailable",
-              priority: 900,
-              reasonCode: soldOutReason,
-              effectiveUntil: soldOutUntil,
-            });
-          } else {
-            const marks = rules.filter(
-              (rule) =>
-                rule.reasonCode === soldOutReason &&
-                rule.lifecycle === "Active" &&
-                (rule.effectiveUntil === null || Date.parse(at) < Date.parse(rule.effectiveUntil)),
-            );
-            // Q17: a manager's "until further notice" mark is brought back by a manager.
-            if (
-              !s.permissions.mayMarkUntilBack &&
-              marks.some((rule) => rule.effectiveUntil === null)
-            )
-              fail("PermissionDenied");
-            for (const rule of marks) await setLifecycle(rule, "Inactive");
-          }
-          const after = (await listStoreAvailabilityRules(ptx(tx), s.owner)).filter(
-            (rule) => rule.sellableReference === sku.skuReference,
+      options.persistence.transactions.run((tx) =>
+        withRememberedBrandAuthorization(tx, async () => {
+          const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+          const at = options.persistence.now();
+          const brandWide = body.action === "Offer" || body.action === "StopOffering";
+          if (brandWide ? !s.permissions.mayOffer : !s.permissions.mayMarkSoldOut)
+            fail("PermissionDenied");
+          // Q17: the today-only mark never sets "until further notice".
+          if (
+            body.action === "SoldOut" &&
+            body.until === "UntilBack" &&
+            !s.permissions.mayMarkUntilBack
+          )
+            fail("PermissionDenied");
+          const sku = (await listBrandSkuChoices(ptx(tx), s.owner)).find(
+            (candidate) => candidate.skuReference === body.skuReference && candidate.active,
           );
-          return {
-            status: "Applied",
-            item: itemAvailability(after, s.owner, sku.skuReference, at),
+          if (sku === undefined) return fail("NotFound");
+          // Q21: "today" is the Store's business day — sold out until it ends at the Store's
+          // business-day start (e.g. 04:00 after a late service), never at calendar midnight.
+          const soldOutUntil =
+            body.action === "SoldOut" && body.until === "EndOfDay"
+              ? String(
+                  (
+                    await createMerchantStoreBusinessDay({
+                      publication: options.persistence.publication,
+                      tenantReference: s.owner.tenantReference,
+                      brandReference: s.owner.brandReference,
+                      storeReference: s.owner.storeReference,
+                      timeZone: s.timeZone,
+                      authorize: async () =>
+                        (await s.markDecision()) !== null ||
+                        (await s.storeDecision()) !== null ||
+                        (await s.brandDecision()) !== null,
+                    })(tx, at).catch(() => fail("Conflict"))
+                  ).endsAt,
+                )
+              : null;
+          // Audit summary per rule step: what changed, for which item and Store (no personal data).
+          const steps = new Map<string, string>();
+          const summary = (operationReference: string) => ({
+            change:
+              body.action === "SoldOut"
+                ? body.until === "EndOfDay"
+                  ? "SoldOutToday"
+                  : "SoldOutUntilFurtherNotice"
+                : body.action === "BackInStock"
+                  ? "BackInStock"
+                  : body.action === "Offer"
+                    ? "OfferedAtStore"
+                    : "StoppedOfferingAtStore",
+            ruleStep: steps.get(operationReference) ?? "Unknown",
+            item: itemLabel(
+              name(sku.productLocalizedNames, sku.skuCode),
+              name(sku.localizedNames, sku.skuCode),
+            ),
+            itemReference: sku.skuReference,
+            storeReference: s.owner.storeReference,
+            ...(body.action === "SoldOut" ? { soldOutUntil } : {}),
+            authority: brandWide
+              ? "BrandAvailability"
+              : s.permissions.mayMarkUntilBack
+                ? "StoreAvailability"
+                : "SoldOutToday",
+            commandReference: body.operationReference,
+          });
+          const service = availabilityService(tx, s, body.operationReference, !brandWide, summary);
+          const rules = (await listStoreAvailabilityRules(ptx(tx), s.owner)).filter(
+            (rule) =>
+              rule.sellableReference === sku.skuReference &&
+              rule.storeReference === s.owner.storeReference,
+          );
+          const step = (purpose: string) => derivedReference(body.operationReference, purpose);
+          const setLifecycle = (rule: AvailabilityRuleAggregate, target: "Active" | "Inactive") => {
+            const operationReference = step(target + ":" + rule.ruleReference);
+            steps.set(operationReference, target === "Active" ? "RuleActivated" : "RuleEnded");
+            return service.changeLifecycle({
+              ruleReference: rule.ruleReference,
+              targetLifecycle: target,
+              expectedAggregateVersion: rule.aggregateVersion,
+              operationReference,
+              requestedAt: at,
+            });
           };
-        } catch (error) {
-          const mapped = error instanceof CatalogError ? catalogErrors[error.code] : undefined;
-          if (mapped !== undefined) return fail(mapped);
-          throw error;
-        }
-      }),
+          const createActive = async (rule: {
+            internalCode: string;
+            decision: "Available" | "Unavailable";
+            priority: number;
+            reasonCode: string;
+            effectiveUntil: string | null;
+          }) => {
+            steps.set(step("create"), "RuleCreated");
+            const created = await service.create({
+              ...rule,
+              sellableReference: sku.skuReference,
+              sellableType: "Sku",
+              storeReference: s.owner.storeReference,
+              channelCodes: [],
+              orderTypeCodes: [],
+              effectiveFrom: at,
+              operationReference: step("create"),
+              requestedAt: at,
+            });
+            return created.aggregate.lifecycle === "Active"
+              ? created
+              : setLifecycle(created.aggregate, "Active");
+          };
+          const store8 = s.owner.storeReference.replaceAll("-", "").slice(0, 8).toUpperCase();
+          try {
+            const before = itemAvailability(rules, s.owner, sku.skuReference, at);
+            if (body.action === "Offer") {
+              const stopped = rules.find(
+                (rule) => rule.reasonCode === offeredReason && rule.lifecycle !== "Active",
+              );
+              if (before.status === "Available" || before.status === "SoldOut")
+                return { status: "Unchanged", item: before };
+              if (stopped !== undefined) await setLifecycle(stopped, "Active");
+              else
+                await createActive({
+                  internalCode: ("OFFER-" + store8 + "-" + sku.skuCode).slice(0, 64),
+                  decision: "Available",
+                  priority: 100,
+                  reasonCode: offeredReason,
+                  effectiveUntil: null,
+                });
+            } else if (body.action === "StopOffering") {
+              const offers = rules.filter(
+                (rule) => rule.decision === "Available" && rule.lifecycle === "Active",
+              );
+              for (const rule of offers) await setLifecycle(rule, "Inactive");
+            } else if (body.action === "SoldOut") {
+              if (before.status === "SoldOut") return { status: "Unchanged", item: before };
+              if (before.status !== "Available" && before.status !== "Varies") fail("Conflict");
+              await createActive({
+                internalCode:
+                  "SOLDOUT-" +
+                  store8 +
+                  "-" +
+                  step("code").replaceAll("-", "").slice(-16).toUpperCase(),
+                decision: "Unavailable",
+                priority: 900,
+                reasonCode: soldOutReason,
+                effectiveUntil: soldOutUntil,
+              });
+            } else {
+              const marks = rules.filter(
+                (rule) =>
+                  rule.reasonCode === soldOutReason &&
+                  rule.lifecycle === "Active" &&
+                  (rule.effectiveUntil === null ||
+                    Date.parse(at) < Date.parse(rule.effectiveUntil)),
+              );
+              // Q17: a manager's "until further notice" mark is brought back by a manager.
+              if (
+                !s.permissions.mayMarkUntilBack &&
+                marks.some((rule) => rule.effectiveUntil === null)
+              )
+                fail("PermissionDenied");
+              for (const rule of marks) await setLifecycle(rule, "Inactive");
+            }
+            const after = (await listStoreAvailabilityRules(ptx(tx), s.owner)).filter(
+              (rule) => rule.sellableReference === sku.skuReference,
+            );
+            return {
+              status: "Applied",
+              item: itemAvailability(after, s.owner, sku.skuReference, at),
+            };
+          } catch (error) {
+            const mapped = error instanceof CatalogError ? catalogErrors[error.code] : undefined;
+            if (mapped !== undefined) return fail(mapped);
+            throw error;
+          }
+        }),
+      ),
     );
   };
 

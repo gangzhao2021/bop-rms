@@ -17,6 +17,10 @@ import {
 } from "@bop/feature-control";
 import { readClosedRecord } from "@bop/identity";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import {
+  rememberBrandTransactionValue,
+  restoreBrandTransactionRowSecurity,
+} from "./merchant-brand-transaction-authorization.js";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import { parseCatalogInstant } from "@rms/catalog";
 import { createMerchantCategoryTransactions } from "./merchant-category-transactions.js";
@@ -151,6 +155,22 @@ export function createMerchantStoreCapability(options: MerchantStoreCapabilityOp
           scope.sessionReference !== session.sessionReference
         )
           return fail();
+        // WP-2423: the Store admission is remembered for this transaction and re-read in full
+        // before commit, like the Brand decisions `authorize` asks for.
+        const storeAllowed = () =>
+          rememberBrandTransactionValue(tx, {
+            scope: [
+              "store-capability",
+              session.sessionReference,
+              brandReference,
+              storeReference,
+            ].join("|"),
+            key: "store-allowed",
+            now: () => parseCatalogInstant(persistence.now()),
+            resolve: () => scope.allowed(),
+            same: (previous, fresh) => previous === fresh,
+            restore: () => restoreBrandTransactionRowSecurity(tx, brandReference, storeReference),
+          });
         current = async () => {
           check();
           const actions = pricingBinding
@@ -178,7 +198,7 @@ export function createMerchantStoreCapability(options: MerchantStoreCapabilityOp
             )
           )
             return fail();
-          if (!(await scope.allowed())) return fail();
+          if (!(await storeAllowed())) return fail();
           retain(scope.authorizationValidUntil());
           check();
         };
@@ -308,12 +328,29 @@ export function createMerchantStoreCapability(options: MerchantStoreCapabilityOp
         session = await authenticate(input);
       return await host.transactions.run(async (tx) => {
         const scope = await resolve(tx, input.sessionCookie, action, session.sessionReference);
-        if (!(await scope.allowed())) return fail();
-        await host.registerBeforeCommit(tx, async () => {
-          if (!(await scope.allowed())) return fail();
-        });
         const brandReference = scope.context.brand.brandReference,
           storeReference = scope.store.storeReference;
+        // WP-2423: resolved once for the transaction (and owner reads reuse it), re-read in full
+        // before commit.
+        const allowed = () =>
+          rememberBrandTransactionValue(tx, {
+            scope: [
+              "store-capability",
+              session.sessionReference,
+              brandReference,
+              storeReference,
+              action,
+            ].join("|"),
+            key: "store-allowed",
+            now: () => parseCatalogInstant(persistence.now()),
+            resolve: () => scope.allowed(),
+            same: (previous, fresh) => previous === fresh,
+            restore: () => restoreBrandTransactionRowSecurity(tx, brandReference, storeReference),
+          });
+        if (!(await allowed())) return fail();
+        await host.registerBeforeCommit(tx, async () => {
+          if (!(await allowed())) return fail();
+        });
         const definitions = createPostgresFeatureControlAdministrationQueryStore(
           { run: (callback) => callback(tx) },
           { brandReference, storeReference },
@@ -331,7 +368,7 @@ export function createMerchantStoreCapability(options: MerchantStoreCapabilityOp
                   request.brandReference !== brandReference ||
                   request.storeReference !== storeReference ||
                   request.capabilityKey !== key ||
-                  !(await scope.allowed())
+                  !(await allowed())
                 )
                   return fail();
                 const context = createTenantContext(
@@ -341,7 +378,7 @@ export function createMerchantStoreCapability(options: MerchantStoreCapabilityOp
                   request.observedAt,
                 );
                 const result = await callback(context);
-                if (!(await scope.allowed())) return fail();
+                if (!(await allowed())) return fail();
                 return result;
               },
             },

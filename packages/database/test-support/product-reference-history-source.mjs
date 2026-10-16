@@ -197,6 +197,11 @@ export async function exerciseProductReferenceHistoryGap({
   delete broken.draft.taxClassificationReference;
   await admin.query("BEGIN");
   try {
+    // The Product authoring fence (1100_016) admits operation history only in its Brand scope.
+    await admin.query(
+      "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)",
+      [aggregate.brandReference],
+    );
     await admin.query(
       "INSERT INTO rms_catalog.product(product_id,brand_id,internal_code,product_type,lifecycle,aggregate_version,created_at,created_by_actor_id,updated_at) SELECT $1,brand_id,'SYNTHETIC_HISTORY_GAP',product_type,lifecycle,1,created_at,created_by_actor_id,updated_at FROM rms_catalog.product WHERE product_id=$2",
       [productReference, aggregate.productReference],

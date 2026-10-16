@@ -6,6 +6,7 @@ import {
 } from "../../application/payment-provider-adapter.js";
 import {
   PaymentProviderContractError,
+  type CancelIntentRequest,
   type CreateIntentRequest,
   type RetrieveIntentRequest,
   type PaymentProviderSnapshot,
@@ -35,7 +36,7 @@ const money = (value: bigint) =>
 
 /** Project only required payment facts. Raw Stripe payload and client_secret never enter history. */
 export function normalizeStripeOnlineIntentResponse(
-  request: CreateIntentRequest | RetrieveIntentRequest,
+  request: CreateIntentRequest | RetrieveIntentRequest | CancelIntentRequest,
   payload: unknown,
   observedAt: string,
 ): PaymentProviderSnapshot {
@@ -54,7 +55,10 @@ export function normalizeStripeOnlineIntentResponse(
   )
     return invalid();
   const reference = parseProviderReference(raw.id);
-  if (request.operation === "RetrieveIntent" && reference !== request.providerIntentReference)
+  if (
+    (request.operation === "RetrieveIntent" || request.operation === "CancelIntent") &&
+    reference !== request.providerIntentReference
+  )
     return invalid();
   const requested = amount(raw.amount);
   const received = amount(raw.amount_received);

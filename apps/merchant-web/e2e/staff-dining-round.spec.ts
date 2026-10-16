@@ -480,12 +480,12 @@ test("@production the order queue marks a round entered by staff and its card-ma
   await page.goto("/operations/orders");
   const entry = page.locator("details.order-workbench-entry").first();
   await expect(entry).toContainText(
-    /Batch 3: Entered by staff · record the card-machine payment by \d\d:\d\d or it is cancelled/u,
+    /Round 3: Entered by staff · record the card-machine payment by \d\d:\d\d or it is cancelled/u,
   );
   if (!(await entry.evaluate((element) => (element as HTMLDetailsElement).open)))
     await entry.locator("summary").click();
   await expect(
-    entry.getByRole("heading", { name: "Batch 2 · Additional · Entered by staff" }),
+    entry.getByRole("heading", { name: "Round 2 · Additional · Entered by staff" }),
   ).toBeVisible();
   // WP-2423 D5: the summary shows the card-machine total apart from what was paid online.
   await expect(

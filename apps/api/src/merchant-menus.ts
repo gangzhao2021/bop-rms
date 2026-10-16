@@ -24,6 +24,7 @@ import {
   currentStorePriceBook,
   type CurrencyMetadataSnapshot,
 } from "@rms/pricing";
+import { withRememberedBrandAuthorization } from "./merchant-brand-transaction-authorization.js";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import { createMerchantMenuPublicationCommand } from "./merchant-menu-publication-command.js";
@@ -380,62 +381,65 @@ export function createMerchantMenus(options: {
   }) => {
     const current = await session(input);
     return retryTransactionConflict(() =>
-      options.persistence.transactions.run(async (tx) => {
-        const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
-        const menus = await listBrandMenus(ptx(tx) as never, s.owner);
-        const base = {
-          sourceAsOf: options.persistence.now(),
-          viewer: s.actor,
-          permissions: s.permissions,
-          menus,
-        };
-        if (input.menuReference === null) return { screenId: "CAT-MENU-LIST" as const, ...base };
-        const summary = menus.find((menu) => menu.menuReference === input.menuReference);
-        if (summary === undefined) return fail("NotFound");
-        const loaded = await draft(tx, s, input.menuReference);
-        if (loaded === null) return fail("NotFound");
-        const submitter =
-          summary.publication === null
-            ? null
-            : ((
-                await ptx(tx).query(
-                  "SELECT actor_reference::text actor FROM platform_audit.audit_record WHERE brand_id=$1 AND action_code='CATALOG_MENU_SUBMITREVIEW' AND target_id=$2 ORDER BY occurred_at DESC LIMIT 1",
-                  [s.owner.brandReference, summary.currentVersionReference],
-                )
-              ).rows[0]?.actor ?? null);
-        // WP-2423 Q19: the submitter who may approve sees whether they may approve alone and why.
-        const gate =
-          submitter === s.actor && s.permissions.mayApprove
-            ? await merchantBrandSoleOperatorGate(tx as never, {
-                tenantReference: s.owner.tenantReference,
-                brandReference: s.owner.brandReference,
-                storeReference: s.owner.storeReference,
-                actorReference: s.actor,
-                permissionCode: "catalog.menu.approve",
-                observedAt: options.persistence.now(),
-                allowed: async () => (await s.decision("catalog.menu.approve"))?.effect === "Allow",
-              })
-            : null;
-        await brandScope(tx, s.owner.brandReference);
-        return {
-          screenId: "CAT-MENU-BUILDER" as const,
-          ...base,
-          menu: menuView(loaded.aggregate),
-          publication: summary.publication,
-          latestRelease: summary.latestRelease,
-          submittedBy: typeof submitter === "string" ? submitter : null,
-          soleOperator:
-            gate === null
+      options.persistence.transactions.run((tx) =>
+        withRememberedBrandAuthorization(tx, async () => {
+          const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+          const menus = await listBrandMenus(ptx(tx) as never, s.owner);
+          const base = {
+            sourceAsOf: options.persistence.now(),
+            viewer: s.actor,
+            permissions: s.permissions,
+            menus,
+          };
+          if (input.menuReference === null) return { screenId: "CAT-MENU-LIST" as const, ...base };
+          const summary = menus.find((menu) => menu.menuReference === input.menuReference);
+          if (summary === undefined) return fail("NotFound");
+          const loaded = await draft(tx, s, input.menuReference);
+          if (loaded === null) return fail("NotFound");
+          const submitter =
+            summary.publication === null
               ? null
-              : {
-                  status: gate.status,
-                  otherApprovers: gate.otherApprovers,
-                  verifiedUntil: gate.verifiedUntil,
-                },
-          sellables: await sellables(tx, s),
-          allergenRegistry: (await currentAllergenRegistry(ptx(tx) as never, s.owner)) !== null,
-        };
-      }),
+              : ((
+                  await ptx(tx).query(
+                    "SELECT actor_reference::text actor FROM platform_audit.audit_record WHERE brand_id=$1 AND action_code='CATALOG_MENU_SUBMITREVIEW' AND target_id=$2 ORDER BY occurred_at DESC LIMIT 1",
+                    [s.owner.brandReference, summary.currentVersionReference],
+                  )
+                ).rows[0]?.actor ?? null);
+          // WP-2423 Q19: the submitter who may approve sees whether they may approve alone and why.
+          const gate =
+            submitter === s.actor && s.permissions.mayApprove
+              ? await merchantBrandSoleOperatorGate(tx as never, {
+                  tenantReference: s.owner.tenantReference,
+                  brandReference: s.owner.brandReference,
+                  storeReference: s.owner.storeReference,
+                  actorReference: s.actor,
+                  permissionCode: "catalog.menu.approve",
+                  observedAt: options.persistence.now(),
+                  allowed: async () =>
+                    (await s.decision("catalog.menu.approve"))?.effect === "Allow",
+                })
+              : null;
+          await brandScope(tx, s.owner.brandReference);
+          return {
+            screenId: "CAT-MENU-BUILDER" as const,
+            ...base,
+            menu: menuView(loaded.aggregate),
+            publication: summary.publication,
+            latestRelease: summary.latestRelease,
+            submittedBy: typeof submitter === "string" ? submitter : null,
+            soleOperator:
+              gate === null
+                ? null
+                : {
+                    status: gate.status,
+                    otherApprovers: gate.otherApprovers,
+                    verifiedUntil: gate.verifiedUntil,
+                  },
+            sellables: await sellables(tx, s),
+            allergenRegistry: (await currentAllergenRegistry(ptx(tx) as never, s.owner)) !== null,
+          };
+        }),
+      ),
     );
   };
 
@@ -482,23 +486,25 @@ export function createMerchantMenus(options: {
     publishOperation: string,
   ) =>
     retryTransactionConflict(() =>
-      options.persistence.transactions.run(async (tx) => {
-        const s = await scopeFor(tx, sessionCookie, sessionReference);
-        if (!s.permissions.mayPublish) fail("PermissionDenied");
-        await brandScope(tx, s.owner.brandReference);
-        const envelope = await loadOutboxEnvelope(
-          tx as unknown as ConsumerTransaction,
-          derivedReference(publishOperation, "publication:Event"),
-        );
-        if (envelope === null) return fail("NotFound");
-        const result = await createPostgresPublishedMenuConsumerService({
-          brandReference: s.owner.brandReference,
-          authorize: async () => true,
-          generateGeneration: () => derivedReference(publishOperation, "projection"),
-          now: () => options.persistence.now(),
-        }).consume(tx as unknown as ConsumerTransaction, envelope);
-        return result;
-      }),
+      options.persistence.transactions.run((tx) =>
+        withRememberedBrandAuthorization(tx, async () => {
+          const s = await scopeFor(tx, sessionCookie, sessionReference);
+          if (!s.permissions.mayPublish) fail("PermissionDenied");
+          await brandScope(tx, s.owner.brandReference);
+          const envelope = await loadOutboxEnvelope(
+            tx as unknown as ConsumerTransaction,
+            derivedReference(publishOperation, "publication:Event"),
+          );
+          if (envelope === null) return fail("NotFound");
+          const result = await createPostgresPublishedMenuConsumerService({
+            brandReference: s.owner.brandReference,
+            authorize: async () => true,
+            generateGeneration: () => derivedReference(publishOperation, "projection"),
+            now: () => options.persistence.now(),
+          }).consume(tx as unknown as ConsumerTransaction, envelope);
+          return result;
+        }),
+      ),
     );
 
   const command = async (input: { sessionCookie: unknown; csrf: unknown; body: unknown }) => {
@@ -508,46 +514,48 @@ export function createMerchantMenus(options: {
       if (body.action === "Submit" || body.action === "Approve" || body.action === "Publish") {
         // Facts the publication command needs that the client does not supply.
         const prepared = await retryTransactionConflict(() =>
-          options.persistence.transactions.run(async (tx) => {
-            const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
-            const allowed =
-              body.action === "Submit"
-                ? s.permissions.maySubmit
-                : body.action === "Approve"
-                  ? s.permissions.mayApprove
-                  : s.permissions.mayPublish;
-            if (!allowed) fail("PermissionDenied");
-            if (body.action !== "Submit") return { s, loaded: null, registry: null };
-            const loaded = await draft(tx, s, body.menuReference);
-            const registry = await currentAllergenRegistry(ptx(tx) as never, s.owner);
-            if (loaded === null) return fail("NotFound");
-            if (registry === null) return fail("ReviewBlocked");
-            if (
-              (
-                await menuItemsWithoutTax(ptx(tx) as never, {
-                  owner: s.owner,
-                  observedAt: options.persistence.now(),
-                  menu: loaded.aggregate.draft,
-                })
-              ).length > 0
-            )
-              fail("TaxNotCovered");
-            await brandScope(tx, s.owner.brandReference);
-            if ((await unpricedOptions(tx, s, loaded.aggregate)).length > 0)
-              fail("OptionPriceMissing");
-            if (
-              (
-                await menuOptionsWithoutRecipes(ptx(tx) as never, {
-                  owner: s.owner,
-                  observedAt: options.persistence.now(),
-                  menu: loaded.aggregate.draft,
-                })
-              ).length > 0
-            )
-              fail("OptionRecipeMissing");
-            await brandScope(tx, s.owner.brandReference);
-            return { s, loaded, registry };
-          }),
+          options.persistence.transactions.run((tx) =>
+            withRememberedBrandAuthorization(tx, async () => {
+              const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+              const allowed =
+                body.action === "Submit"
+                  ? s.permissions.maySubmit
+                  : body.action === "Approve"
+                    ? s.permissions.mayApprove
+                    : s.permissions.mayPublish;
+              if (!allowed) fail("PermissionDenied");
+              if (body.action !== "Submit") return { s, loaded: null, registry: null };
+              const loaded = await draft(tx, s, body.menuReference);
+              const registry = await currentAllergenRegistry(ptx(tx) as never, s.owner);
+              if (loaded === null) return fail("NotFound");
+              if (registry === null) return fail("ReviewBlocked");
+              if (
+                (
+                  await menuItemsWithoutTax(ptx(tx) as never, {
+                    owner: s.owner,
+                    observedAt: options.persistence.now(),
+                    menu: loaded.aggregate.draft,
+                  })
+                ).length > 0
+              )
+                fail("TaxNotCovered");
+              await brandScope(tx, s.owner.brandReference);
+              if ((await unpricedOptions(tx, s, loaded.aggregate)).length > 0)
+                fail("OptionPriceMissing");
+              if (
+                (
+                  await menuOptionsWithoutRecipes(ptx(tx) as never, {
+                    owner: s.owner,
+                    observedAt: options.persistence.now(),
+                    menu: loaded.aggregate.draft,
+                  })
+                ).length > 0
+              )
+                fail("OptionRecipeMissing");
+              await brandScope(tx, s.owner.brandReference);
+              return { s, loaded, registry };
+            }),
+          ),
         );
         const { loaded, registry } = prepared;
         const commandBody =
@@ -612,157 +620,159 @@ export function createMerchantMenus(options: {
       if (body.action !== "SaveDraft" && body.action !== "Revise") return fail("Invalid");
       const edit = body;
       return await retryTransactionConflict(() =>
-        options.persistence.transactions.run(async (tx) => {
-          const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
-          if (!s.permissions.mayEdit) fail("PermissionDenied");
-          const at = options.persistence.now();
-          const brand = s.owner.brandReference;
-          const menus = createPostgresMenuDraftStore({
-            brandReference: brand,
-            transactions: { run: (work) => work(ptx(tx)) },
-            now: () => options.persistence.now(),
-            authorize: async () => true,
-          });
-          // A retried operation returns its recorded result.
-          const recorded = await menus.resolveOperation(
-            parseCatalogReference(edit.operationReference),
-          );
-          if (recorded !== null) {
-            if (recorded.aggregate.menuReference !== edit.menuReference) fail("Conflict");
-            return { status: "AlreadyApplied", menu: menuView(recorded.aggregate) };
-          }
-          const service = createCategoryMenuService({
-            menus,
-            categories: {} as never,
-            facts: {
-              validateStores: async (value) =>
-                value.storeReferences.every((store) => store === s.owner.storeReference),
-              validateCategories: async (value) => value.categoryReferences.length === 0,
-              validateSellables: async (value) => {
-                const active = new Set(
-                  (await listBrandSkuChoices(ptx(tx) as never, s.owner))
-                    .filter((sku) => sku.active)
-                    .map((sku) => sku.skuReference),
+        options.persistence.transactions.run((tx) =>
+          withRememberedBrandAuthorization(tx, async () => {
+            const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+            if (!s.permissions.mayEdit) fail("PermissionDenied");
+            const at = options.persistence.now();
+            const brand = s.owner.brandReference;
+            const menus = createPostgresMenuDraftStore({
+              brandReference: brand,
+              transactions: { run: (work) => work(ptx(tx)) },
+              now: () => options.persistence.now(),
+              authorize: async () => true,
+            });
+            // A retried operation returns its recorded result.
+            const recorded = await menus.resolveOperation(
+              parseCatalogReference(edit.operationReference),
+            );
+            if (recorded !== null) {
+              if (recorded.aggregate.menuReference !== edit.menuReference) fail("Conflict");
+              return { status: "AlreadyApplied", menu: menuView(recorded.aggregate) };
+            }
+            const service = createCategoryMenuService({
+              menus,
+              categories: {} as never,
+              facts: {
+                validateStores: async (value) =>
+                  value.storeReferences.every((store) => store === s.owner.storeReference),
+                validateCategories: async (value) => value.categoryReferences.length === 0,
+                validateSellables: async (value) => {
+                  const active = new Set(
+                    (await listBrandSkuChoices(ptx(tx) as never, s.owner))
+                      .filter((sku) => sku.active)
+                      .map((sku) => sku.skuReference),
+                  );
+                  return value.sellableReferences.every((sku) => active.has(sku));
+                },
+              },
+              references: {
+                generate: () => options.references.next(),
+                hashIntent: (value) =>
+                  parseCatalogHash(createHash("sha256").update(value).digest("hex")),
+                equals: (a, b) => a === b,
+              },
+              authorization: {
+                authorize: async (request) => {
+                  const permission = await s.decision("catalog.menu.manage");
+                  if (permission?.effect !== "Allow") return null;
+                  await brandScope(tx, brand);
+                  return {
+                    tenantContext: s.scope.context,
+                    permission,
+                    audit: {
+                      auditId: derivedReference(edit.operationReference, "audit"),
+                      brandId: brand,
+                      actor: { type: "User", reference: s.actor },
+                      actionCode: "CATALOG_MENU_" + request.action.toUpperCase(),
+                      targetType: "CatalogMenu",
+                      targetId: request.aggregateReference,
+                      correlationId: edit.operationReference,
+                      occurredAt: request.observedAt,
+                      reasonCode: "AUTHORIZED_OPERATION",
+                      sourceChannel: "MERCHANT_WEB",
+                      dataClassification: "Internal",
+                      retentionPolicyCode: "CONFIGURATION_AUDIT",
+                      retentionPolicyVersion: 1,
+                    },
+                  };
+                },
+              },
+            });
+            if (edit.action === "Revise") {
+              const result = await service.reviseMenu({
+                menuReference: edit.menuReference,
+                expectedAggregateVersion: edit.expectedAggregateVersion,
+                operationReference: edit.operationReference,
+                requestedAt: at,
+              });
+              return { status: result.status, menu: menuView(result.aggregate) };
+            }
+            const loaded = await draft(tx, s, edit.menuReference);
+            if (loaded === null) return fail("NotFound");
+            const currentMenu = loaded.aggregate;
+            if (currentMenu.aggregateVersion !== edit.expectedAggregateVersion) fail("Conflict");
+            const locale = currentMenu.draft.defaultLocale;
+            const sections = edit.sections.map((input, sortOrder) => {
+              const existing =
+                input.sectionReference === null
+                  ? undefined
+                  : currentMenu.draft.sections.find(
+                      (section) => section.sectionReference === input.sectionReference,
+                    );
+              if (input.sectionReference !== null && existing === undefined) fail("Invalid");
+              if (existing !== undefined && existing.internalCode !== input.code) fail("Invalid");
+              const sectionReference =
+                existing?.sectionReference ??
+                parseCatalogReference(
+                  derivedReference(edit.operationReference, "section:" + input.code),
                 );
-                return value.sellableReferences.every((sku) => active.has(sku));
-              },
-            },
-            references: {
-              generate: () => options.references.next(),
-              hashIntent: (value) =>
-                parseCatalogHash(createHash("sha256").update(value).digest("hex")),
-              equals: (a, b) => a === b,
-            },
-            authorization: {
-              authorize: async (request) => {
-                const permission = await s.decision("catalog.menu.manage");
-                if (permission?.effect !== "Allow") return null;
-                await brandScope(tx, brand);
-                return {
-                  tenantContext: s.scope.context,
-                  permission,
-                  audit: {
-                    auditId: derivedReference(edit.operationReference, "audit"),
-                    brandId: brand,
-                    actor: { type: "User", reference: s.actor },
-                    actionCode: "CATALOG_MENU_" + request.action.toUpperCase(),
-                    targetType: "CatalogMenu",
-                    targetId: request.aggregateReference,
-                    correlationId: edit.operationReference,
-                    occurredAt: request.observedAt,
-                    reasonCode: "AUTHORIZED_OPERATION",
-                    sourceChannel: "MERCHANT_WEB",
-                    dataClassification: "Internal",
-                    retentionPolicyCode: "CONFIGURATION_AUDIT",
-                    retentionPolicyVersion: 1,
-                  },
-                };
-              },
-            },
-          });
-          if (edit.action === "Revise") {
-            const result = await service.reviseMenu({
-              menuReference: edit.menuReference,
-              expectedAggregateVersion: edit.expectedAggregateVersion,
+              return {
+                sectionReference,
+                menuReference: currentMenu.menuReference,
+                brandReference: currentMenu.brandReference,
+                internalCode: input.code,
+                localizedNames: { ...(existing?.localizedNames ?? {}), [locale]: input.name },
+                sortOrder,
+                categoryReferences: existing?.categoryReferences ?? [],
+                placements: input.items.map((item, itemOrder) => {
+                  const role = item.featured ? "Featured" : "Standard";
+                  const kept = existing?.placements.find(
+                    (p) => p.sellableReference === item.skuReference && p.presentationRole === role,
+                  );
+                  return {
+                    placementReference:
+                      kept?.placementReference ??
+                      parseCatalogReference(
+                        derivedReference(
+                          edit.operationReference,
+                          "placement:" + input.code + ":" + item.skuReference + ":" + role,
+                        ),
+                      ),
+                    menuReference: currentMenu.menuReference,
+                    sectionReference,
+                    brandReference: currentMenu.brandReference,
+                    sellableReference: item.skuReference,
+                    sellableType: "Sku" as const,
+                    presentationRole: role,
+                    sortOrder: itemOrder,
+                    pinned: kept?.pinned ?? false,
+                    localizedNameOverrides: kept?.localizedNameOverrides ?? {},
+                    createdAt: kept?.createdAt ?? at,
+                    createdByActorReference: kept?.createdByActorReference ?? s.actor,
+                  };
+                }),
+              };
+            });
+            const stores = [
+              ...new Set([...currentMenu.draft.storeReferences, s.owner.storeReference]),
+            ];
+            const result = await service.replaceMenuDraft({
+              menuReference: currentMenu.menuReference,
+              expectedAggregateVersion: currentMenu.aggregateVersion,
               operationReference: edit.operationReference,
               requestedAt: at,
+              draft: {
+                ...currentMenu.draft,
+                localizedNames: { ...currentMenu.draft.localizedNames, [locale]: edit.name },
+                storeReferences: stores,
+                sections,
+                updatedAt: at,
+              },
             });
             return { status: result.status, menu: menuView(result.aggregate) };
-          }
-          const loaded = await draft(tx, s, edit.menuReference);
-          if (loaded === null) return fail("NotFound");
-          const currentMenu = loaded.aggregate;
-          if (currentMenu.aggregateVersion !== edit.expectedAggregateVersion) fail("Conflict");
-          const locale = currentMenu.draft.defaultLocale;
-          const sections = edit.sections.map((input, sortOrder) => {
-            const existing =
-              input.sectionReference === null
-                ? undefined
-                : currentMenu.draft.sections.find(
-                    (section) => section.sectionReference === input.sectionReference,
-                  );
-            if (input.sectionReference !== null && existing === undefined) fail("Invalid");
-            if (existing !== undefined && existing.internalCode !== input.code) fail("Invalid");
-            const sectionReference =
-              existing?.sectionReference ??
-              parseCatalogReference(
-                derivedReference(edit.operationReference, "section:" + input.code),
-              );
-            return {
-              sectionReference,
-              menuReference: currentMenu.menuReference,
-              brandReference: currentMenu.brandReference,
-              internalCode: input.code,
-              localizedNames: { ...(existing?.localizedNames ?? {}), [locale]: input.name },
-              sortOrder,
-              categoryReferences: existing?.categoryReferences ?? [],
-              placements: input.items.map((item, itemOrder) => {
-                const role = item.featured ? "Featured" : "Standard";
-                const kept = existing?.placements.find(
-                  (p) => p.sellableReference === item.skuReference && p.presentationRole === role,
-                );
-                return {
-                  placementReference:
-                    kept?.placementReference ??
-                    parseCatalogReference(
-                      derivedReference(
-                        edit.operationReference,
-                        "placement:" + input.code + ":" + item.skuReference + ":" + role,
-                      ),
-                    ),
-                  menuReference: currentMenu.menuReference,
-                  sectionReference,
-                  brandReference: currentMenu.brandReference,
-                  sellableReference: item.skuReference,
-                  sellableType: "Sku" as const,
-                  presentationRole: role,
-                  sortOrder: itemOrder,
-                  pinned: kept?.pinned ?? false,
-                  localizedNameOverrides: kept?.localizedNameOverrides ?? {},
-                  createdAt: kept?.createdAt ?? at,
-                  createdByActorReference: kept?.createdByActorReference ?? s.actor,
-                };
-              }),
-            };
-          });
-          const stores = [
-            ...new Set([...currentMenu.draft.storeReferences, s.owner.storeReference]),
-          ];
-          const result = await service.replaceMenuDraft({
-            menuReference: currentMenu.menuReference,
-            expectedAggregateVersion: currentMenu.aggregateVersion,
-            operationReference: edit.operationReference,
-            requestedAt: at,
-            draft: {
-              ...currentMenu.draft,
-              localizedNames: { ...currentMenu.draft.localizedNames, [locale]: edit.name },
-              storeReferences: stores,
-              sections,
-              updatedAt: at,
-            },
-          });
-          return { status: result.status, menu: menuView(result.aggregate) };
-        }),
+          }),
+        ),
       );
     } catch (error) {
       if (error instanceof MerchantMenuError) throw error;

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDiningAdmissionJourney } from "./dining-admission-journey.js";
 import type { DiningBindingClient } from "./dining-binding-client.js";
-import type { DiningJoinClient } from "./dining-join-client.js";
+import { DiningJoinClientError, type DiningJoinClient } from "./dining-join-client.js";
 import {
   captureCustomerCsrfContext,
   getCustomerCsrfCredential,
@@ -118,6 +118,31 @@ describe("foreground Dining admission journey", () => {
       [{ ...input, csrfToken: source }],
       [{ ...input, csrfToken: source }],
     ]);
+  });
+  it.each(["code-used", "code-not-accepted", "too-many-attempts"] as const)(
+    "ends the intent on definitive refusal %s so a new code can be entered",
+    async (code) => {
+      const f = fixture();
+      f.join.join.mockRejectedValueOnce(new DiningJoinClientError(code));
+      await expect(f.journey.start(input)).rejects.toMatchObject({ code });
+      expect(f.binding.prepare).not.toHaveBeenCalled();
+      // Nothing to recover: the refused attempt is gone and is never resent.
+      await expect(f.journey.resume(resume)).rejects.toMatchObject({ code: "outcome-unknown" });
+      expect(f.join.join).toHaveBeenCalledOnce();
+      const next = { operationReference: id(4), joinCredential: "654321" };
+      f.join.join.mockResolvedValueOnce({ ...joined, operationReference: id(4) });
+      await expect(f.journey.start(next)).resolves.toEqual({
+        status: "Bound",
+        operationReference: id(4),
+      });
+      expect(f.join.join).toHaveBeenLastCalledWith({ ...next, csrfToken: source });
+    },
+  );
+  it("keeps an unavailable Join recoverable rather than refused", async () => {
+    const f = fixture();
+    f.join.join.mockRejectedValueOnce(new DiningJoinClientError("unavailable"));
+    await expect(f.journey.start(input)).rejects.toMatchObject({ code: "outcome-unknown" });
+    await expect(f.journey.resume(resume)).resolves.toMatchObject({ status: "Bound" });
   });
   it("recovers unknown binding without another Join or preparation", async () => {
     const f = fixture();

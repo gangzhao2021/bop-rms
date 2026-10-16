@@ -23,6 +23,7 @@ import {
   type OptionRecipeTarget,
   type RecipeAuthoringTransaction,
 } from "@rms/recipe";
+import { withRememberedBrandAuthorization } from "./merchant-brand-transaction-authorization.js";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -271,95 +272,97 @@ export function createMerchantOptionRecipes(options: {
   const query = async (input: { sessionCookie: unknown; csrf: unknown }) => {
     const current = await session(input);
     return retryTransactionConflict(() =>
-      options.persistence.transactions.run(async (tx) => {
-        const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
-        const at = options.persistence.now();
-        const rows = await targets(tx, s);
-        const scope = { brandReference: s.brandReference, storeReference: s.storeReference };
-        const changes = await listOptionRecipeChanges(
-          rtx(tx),
-          scope,
-          rows.map((row) => row.target),
-        );
-        const ingredients = await recipeIngredientItems(tx, s, at);
-        const options_ = [];
-        for (const row of rows) {
-          const change =
-            changes.get(row.target.bindingReference + ":" + row.target.optionReference) ?? null;
-          options_.push({
-            productName: row.productName,
-            setName: row.setName,
-            optionName: row.optionName,
-            offered: row.offered,
-            bindingReference: row.target.bindingReference,
-            optionReference: row.target.optionReference,
-            quantities: row.target.quantities,
-            sizes: row.sizes,
-            covered: await optionRecipeCovered(rtx(tx), scope, row.target, at),
-            change:
-              change === null
+      options.persistence.transactions.run((tx) =>
+        withRememberedBrandAuthorization(tx, async () => {
+          const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+          const at = options.persistence.now();
+          const rows = await targets(tx, s);
+          const scope = { brandReference: s.brandReference, storeReference: s.storeReference };
+          const changes = await listOptionRecipeChanges(
+            rtx(tx),
+            scope,
+            rows.map((row) => row.target),
+          );
+          const ingredients = await recipeIngredientItems(tx, s, at);
+          const options_ = [];
+          for (const row of rows) {
+            const change =
+              changes.get(row.target.bindingReference + ":" + row.target.optionReference) ?? null;
+            options_.push({
+              productName: row.productName,
+              setName: row.setName,
+              optionName: row.optionName,
+              offered: row.offered,
+              bindingReference: row.target.bindingReference,
+              optionReference: row.target.optionReference,
+              quantities: row.target.quantities,
+              sizes: row.sizes,
+              covered: await optionRecipeCovered(rtx(tx), scope, row.target, at),
+              change:
+                change === null
+                  ? null
+                  : {
+                      changeVersionReference: change.changeVersionReference,
+                      version: change.version,
+                      content: change.content,
+                      byViewer: change.authorReference === s.actor,
+                      recordedAt: change.recordedAt,
+                      published: change.publishedAt !== null,
+                      reviews: change.reviews.map((review) => ({
+                        kind: review.kind,
+                        decision: review.decision,
+                        byViewer: review.reviewerReference === s.actor,
+                        comment: review.comment,
+                        reviewedAt: review.reviewedAt,
+                      })),
+                      lines: change.expansion.map((entry) => ({
+                        skuReference: entry.skuReference,
+                        quantity: entry.quantity,
+                        changes: entry.lines,
+                      })),
+                    },
+            });
+          }
+          // WP-2423 Q19: a reviewer who would review their own change, or give the second kind,
+          // sees whether they may do it alone as sole operator and why not.
+          const gate = s.permissions.mayReview
+            ? await merchantBrandSoleOperatorGate(tx as never, {
+                tenantReference: s.tenantReference,
+                brandReference: s.brandReference,
+                storeReference: s.storeReference,
+                actorReference: s.actor,
+                permissionCode: "recipe.approve",
+                observedAt: at,
+                allowed: async () => s.permissions.mayReview,
+              })
+            : null;
+          return {
+            screenId: "RECIPE-OPTION-LIST" as const,
+            sourceAsOf: at,
+            permissions: s.permissions,
+            soleOperator:
+              gate === null
                 ? null
                 : {
-                    changeVersionReference: change.changeVersionReference,
-                    version: change.version,
-                    content: change.content,
-                    byViewer: change.authorReference === s.actor,
-                    recordedAt: change.recordedAt,
-                    published: change.publishedAt !== null,
-                    reviews: change.reviews.map((review) => ({
-                      kind: review.kind,
-                      decision: review.decision,
-                      byViewer: review.reviewerReference === s.actor,
-                      comment: review.comment,
-                      reviewedAt: review.reviewedAt,
-                    })),
-                    lines: change.expansion.map((entry) => ({
-                      skuReference: entry.skuReference,
-                      quantity: entry.quantity,
-                      changes: entry.lines,
-                    })),
+                    status: gate.status,
+                    otherApprovers: gate.otherApprovers,
+                    verifiedUntil: gate.verifiedUntil,
                   },
-          });
-        }
-        // WP-2423 Q19: a reviewer who would review their own change, or give the second kind,
-        // sees whether they may do it alone as sole operator and why not.
-        const gate = s.permissions.mayReview
-          ? await merchantBrandSoleOperatorGate(tx as never, {
-              tenantReference: s.tenantReference,
-              brandReference: s.brandReference,
-              storeReference: s.storeReference,
-              actorReference: s.actor,
-              permissionCode: "recipe.approve",
-              observedAt: at,
-              allowed: async () => s.permissions.mayReview,
-            })
-          : null;
-        return {
-          screenId: "RECIPE-OPTION-LIST" as const,
-          sourceAsOf: at,
-          permissions: s.permissions,
-          soleOperator:
-            gate === null
-              ? null
-              : {
-                  status: gate.status,
-                  otherApprovers: gate.otherApprovers,
-                  verifiedUntil: gate.verifiedUntil,
-                },
-          ingredients: ingredients.items
-            .filter((item) => item.stockTracked && item.active)
-            .map((item) => ({
-              itemReference: item.itemReference,
-              name: name(item.localizedNames, item.internalCode),
-              unitCode: item.unitCode,
-              declared: ingredients.declarationOf(item) !== null,
-              // Cents per base unit from the latest receipt, as the decimal text a change takes.
-              latestUnitCostCents:
-                item.latestUnitCostMinor === null ? null : String(item.latestUnitCostMinor),
-            })),
-          options: options_,
-        };
-      }),
+            ingredients: ingredients.items
+              .filter((item) => item.stockTracked && item.active)
+              .map((item) => ({
+                itemReference: item.itemReference,
+                name: name(item.localizedNames, item.internalCode),
+                unitCode: item.unitCode,
+                declared: ingredients.declarationOf(item) !== null,
+                // Cents per base unit from the latest receipt, as the decimal text a change takes.
+                latestUnitCostCents:
+                  item.latestUnitCostMinor === null ? null : String(item.latestUnitCostMinor),
+              })),
+            options: options_,
+          };
+        }),
+      ),
     );
   };
 
@@ -367,87 +370,89 @@ export function createMerchantOptionRecipes(options: {
     const body = parseOptionRecipeCommandBody(input.body);
     const current = await session(input);
     return retryTransactionConflict(() =>
-      options.persistence.transactions.run(async (tx) => {
-        const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
-        const at = options.persistence.now();
-        const scope = { brandReference: s.brandReference, storeReference: s.storeReference };
-        try {
-          if (body.action === "Save") {
-            if (!s.permissions.mayEdit) fail("PermissionDenied");
-            const row = (await targets(tx, s)).find(
-              (item) =>
-                item.target.bindingReference === body.bindingReference &&
-                item.target.optionReference === body.optionReference,
-            );
-            if (row === undefined) return fail("NotFound");
-            const { facts } = await recipeIngredientItems(tx, s, at);
-            return await saveOptionRecipeChange(rtx(tx), scope, {
-              operationReference: body.operationReference,
-              actorReference: s.actor,
-              at,
-              target: row.target,
-              content: body.change,
-              items: facts,
-              expectedVersion: body.expectedVersion,
+      options.persistence.transactions.run((tx) =>
+        withRememberedBrandAuthorization(tx, async () => {
+          const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+          const at = options.persistence.now();
+          const scope = { brandReference: s.brandReference, storeReference: s.storeReference };
+          try {
+            if (body.action === "Save") {
+              if (!s.permissions.mayEdit) fail("PermissionDenied");
+              const row = (await targets(tx, s)).find(
+                (item) =>
+                  item.target.bindingReference === body.bindingReference &&
+                  item.target.optionReference === body.optionReference,
+              );
+              if (row === undefined) return fail("NotFound");
+              const { facts } = await recipeIngredientItems(tx, s, at);
+              return await saveOptionRecipeChange(rtx(tx), scope, {
+                operationReference: body.operationReference,
+                actorReference: s.actor,
+                at,
+                target: row.target,
+                content: body.change,
+                items: facts,
+                expectedVersion: body.expectedVersion,
+              });
+            }
+            // WP-2423 Q19: the Brand's recipe review gate, read in this transaction.
+            const gateInput = (actor: string) => ({
+              tenantReference: s.tenantReference,
+              brandReference: s.brandReference,
+              storeReference: s.storeReference,
+              actorReference: actor,
+              permissionCode: "recipe.approve",
+              observedAt: at,
+              allowed: async () => s.permissions.mayReview || s.permissions.mayPublish,
             });
-          }
-          // WP-2423 Q19: the Brand's recipe review gate, read in this transaction.
-          const gateInput = (actor: string) => ({
-            tenantReference: s.tenantReference,
-            brandReference: s.brandReference,
-            storeReference: s.storeReference,
-            actorReference: actor,
-            permissionCode: "recipe.approve",
-            observedAt: at,
-            allowed: async () => s.permissions.mayReview || s.permissions.mayPublish,
-          });
-          if (body.action === "Review") {
-            if (!s.permissions.mayReview) fail("PermissionDenied");
-            const soleOperator =
-              body.approvalMode === "SoleOperator"
-                ? {
-                    reviewerMfaAt: (
-                      await requireMerchantBrandSoleOperator(tx as never, gateInput(s.actor))
-                    ).actorMfaAt,
-                  }
-                : undefined;
-            return await reviewOptionRecipeChange(rtx(tx), scope, {
-              ...(soleOperator === undefined ? {} : { soleOperator }),
+            if (body.action === "Review") {
+              if (!s.permissions.mayReview) fail("PermissionDenied");
+              const soleOperator =
+                body.approvalMode === "SoleOperator"
+                  ? {
+                      reviewerMfaAt: (
+                        await requireMerchantBrandSoleOperator(tx as never, gateInput(s.actor))
+                      ).actorMfaAt,
+                    }
+                  : undefined;
+              return await reviewOptionRecipeChange(rtx(tx), scope, {
+                ...(soleOperator === undefined ? {} : { soleOperator }),
+                operationReference: body.operationReference,
+                actorReference: s.actor,
+                at,
+                changeVersionReference: body.changeVersionReference,
+                kind: body.kind,
+                decision: body.decision,
+                comment: body.comment,
+              });
+            }
+            if (!s.permissions.mayPublish) fail("PermissionDenied");
+            return await publishOptionRecipeChange(rtx(tx), scope, {
               operationReference: body.operationReference,
               actorReference: s.actor,
               at,
               changeVersionReference: body.changeVersionReference,
-              kind: body.kind,
-              decision: body.decision,
-              comment: body.comment,
+              reviewersAuthorized: async (actors) =>
+                (await brandActionHeldBy(tx as unknown as RoleAssignmentTransaction, {
+                  brandReference: s.brandReference,
+                  actorReferences: actors,
+                  action: "recipe.approve",
+                  at,
+                })) &&
+                (await confirmActiveBrandMembers(tx as unknown as MemberDirectoryTransaction, {
+                  brandReference: s.brandReference,
+                  actorReferences: actors,
+                  at,
+                })),
+              soleOperatorEffective: async (actor) =>
+                (await merchantBrandSoleOperatorGate(tx as never, gateInput(actor))).status ===
+                "Effective",
             });
+          } catch (error) {
+            return mapError(error);
           }
-          if (!s.permissions.mayPublish) fail("PermissionDenied");
-          return await publishOptionRecipeChange(rtx(tx), scope, {
-            operationReference: body.operationReference,
-            actorReference: s.actor,
-            at,
-            changeVersionReference: body.changeVersionReference,
-            reviewersAuthorized: async (actors) =>
-              (await brandActionHeldBy(tx as unknown as RoleAssignmentTransaction, {
-                brandReference: s.brandReference,
-                actorReferences: actors,
-                action: "recipe.approve",
-                at,
-              })) &&
-              (await confirmActiveBrandMembers(tx as unknown as MemberDirectoryTransaction, {
-                brandReference: s.brandReference,
-                actorReferences: actors,
-                at,
-              })),
-            soleOperatorEffective: async (actor) =>
-              (await merchantBrandSoleOperatorGate(tx as never, gateInput(actor))).status ===
-              "Effective",
-          });
-        } catch (error) {
-          return mapError(error);
-        }
-      }),
+        }),
+      ),
     );
   };
   return { query, command };

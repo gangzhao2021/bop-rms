@@ -3,10 +3,15 @@ import {
   type DiningBindingCoordinatorOptions,
   type DiningBindingConfirmation,
 } from "./dining-binding-coordinator.js";
-import type { DiningJoinClient } from "./dining-join-client.js";
+import {
+  DiningJoinClientError,
+  isDiningJoinRefusal,
+  type DiningJoinClient,
+  type DiningJoinRefusalCode,
+} from "./dining-join-client.js";
 
 export class DiningAdmissionJourneyError extends Error {
-  constructor(readonly code: "request-invalid" | "outcome-unknown") {
+  constructor(readonly code: "request-invalid" | "outcome-unknown" | DiningJoinRefusalCode) {
     super("dining admission is unavailable");
     this.name = "DiningAdmissionJourneyError";
   }
@@ -150,7 +155,19 @@ export function createDiningAdmissionJourney(options: DiningAdmissionJourneyOpti
           context(current);
           return result;
         })
-        .catch(() => unknown());
+        .catch((error: unknown) => {
+          // A definitive refusal joined nothing: end this intent so a new code can be entered,
+          // instead of offering to "recover" an attempt that can never succeed.
+          if (
+            current.phase === "Join" &&
+            error instanceof DiningJoinClientError &&
+            isDiningJoinRefusal(error.code)
+          ) {
+            if (plan === current) plan = null;
+            throw new DiningAdmissionJourneyError(error.code);
+          }
+          return unknown();
+        });
       flight = pending;
       void pending.then(
         () => {

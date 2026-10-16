@@ -12,6 +12,7 @@ import {
 } from "@rms/catalog";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 
 export const merchantProductListRequiredFields = Object.freeze([
@@ -153,75 +154,97 @@ export function createMerchantProductListQuery(options: {
             locale: scope.locale,
             observedAt: options.merchant.now(),
           });
-          completedView = await options.merchant.transactions.run(async (tx) => {
-            const store = await resolveStore(
-              tx,
-              request.sessionCookie,
-              "merchant.access",
-              scope.sessionReference,
-            );
-            const brand = await resolveBrand(tx, request.sessionCookie, scope.sessionReference);
-            if (
-              store.selected.tenantReference !== scope.tenantReference ||
-              String(store.context.brand.brandReference) !== scope.brandReference ||
-              String(store.store.storeReference) !== scope.storeReference ||
-              String(store.actorReference) !== scope.actorReference ||
-              brand.tenantReference !== scope.tenantReference ||
-              String(brand.context.brand.brandReference) !== scope.brandReference ||
-              String(brand.actorReference) !== scope.actorReference
-            )
-              return fail("Denied");
-            const allowed = async () => {
-              if (!(await store.allowed())) return false;
-              for (const required of [
-                "catalog.manage",
-                "catalog.product.manage",
-                "catalog.product.read",
-                "catalog.sku.read",
-                ...(categorySource === undefined ? [] : ["catalog.category.read"]),
-              ]) {
-                const decision = await brand.authorizeAction(required);
-                if (
-                  decision?.effect !== "Allow" ||
-                  decision.scopeKind !== "Brand" ||
-                  decision.action !== required
-                )
-                  return false;
-              }
-              return true;
-            };
-            if (!(await allowed())) return fail("Denied");
-            const reader = createPostgresCatalogProductListQueryStore({
-              runner: { run: (work) => work(tx) },
-              scope: { brandReference: scope.brandReference, storeReference: scope.storeReference },
-              clock: { now: options.merchant.now },
-              cursorKey,
-              ...(categorySource === undefined
-                ? {}
-                : {
-                    categorySource: {
-                      ...categorySource,
-                      tenantReference: scope.tenantReference,
-                    },
-                  }),
-              authorization: {
-                async withAuthorizedProductList(input, work) {
+          // WP-2423: the caller is resolved in full once at the start of the read and once more
+          // before the reply; the owner read's guard costs no query.
+          completedView = await options.merchant.transactions.run((tx) => {
+            let allowed: (() => Promise<boolean>) | undefined;
+            return withMerchantTransactionAuthorization(
+              {
+                transaction: tx,
+                async resolve() {
+                  const store = await resolveStore(
+                    tx,
+                    request.sessionCookie,
+                    "merchant.access",
+                    scope.sessionReference,
+                  );
+                  const brand = await resolveBrand(
+                    tx,
+                    request.sessionCookie,
+                    scope.sessionReference,
+                  );
                   if (
-                    input.actorReference !== scope.actorReference ||
-                    input.brandReference !== scope.brandReference ||
-                    input.storeReference !== scope.storeReference ||
-                    input.purposeCode !== "CATALOG_PRODUCT_LIST" ||
-                    input.locale !== scope.locale ||
-                    !(await allowed())
+                    store.selected.tenantReference !== scope.tenantReference ||
+                    String(store.context.brand.brandReference) !== scope.brandReference ||
+                    String(store.store.storeReference) !== scope.storeReference ||
+                    String(store.actorReference) !== scope.actorReference ||
+                    brand.tenantReference !== scope.tenantReference ||
+                    String(brand.context.brand.brandReference) !== scope.brandReference ||
+                    String(brand.actorReference) !== scope.actorReference
                   )
                     return fail("Denied");
-                  const result = await work();
+                  allowed = async () => {
+                    if (!(await store.allowed())) return false;
+                    for (const required of [
+                      "catalog.manage",
+                      "catalog.product.manage",
+                      "catalog.product.read",
+                      "catalog.sku.read",
+                      ...(categorySource === undefined ? [] : ["catalog.category.read"]),
+                    ]) {
+                      const decision = await brand.authorizeAction(required);
+                      if (
+                        decision?.effect !== "Allow" ||
+                        decision.scopeKind !== "Brand" ||
+                        decision.action !== required
+                      )
+                        return false;
+                    }
+                    return true;
+                  };
                   if (!(await allowed())) return fail("Denied");
-                  return result;
+                  return scope;
                 },
+                recheck: async () => (allowed ? allowed() : false),
+                denied: () => fail("Denied"),
               },
-            });
-            return reader.load(input);
+              async (authority) => {
+                const reader = createPostgresCatalogProductListQueryStore({
+                  runner: { run: (work) => work(tx) },
+                  scope: {
+                    brandReference: scope.brandReference,
+                    storeReference: scope.storeReference,
+                  },
+                  clock: { now: options.merchant.now },
+                  cursorKey,
+                  ...(categorySource === undefined
+                    ? {}
+                    : {
+                        categorySource: {
+                          ...categorySource,
+                          tenantReference: scope.tenantReference,
+                        },
+                      }),
+                  authorization: {
+                    async withAuthorizedProductList(input, work) {
+                      if (
+                        input.actorReference !== scope.actorReference ||
+                        input.brandReference !== scope.brandReference ||
+                        input.storeReference !== scope.storeReference ||
+                        input.purposeCode !== "CATALOG_PRODUCT_LIST" ||
+                        input.locale !== scope.locale ||
+                        !(await authority.guard())
+                      )
+                        return fail("Denied");
+                      const result = await work();
+                      if (!(await authority.guard())) return fail("Denied");
+                      return result;
+                    },
+                  },
+                });
+                return reader.load(input);
+              },
+            );
           });
           return completedView;
         },

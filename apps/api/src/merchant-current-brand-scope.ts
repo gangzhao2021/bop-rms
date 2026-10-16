@@ -33,6 +33,11 @@ import {
   kdsOperatorProfileAllows,
   limitDecisionToProfile,
 } from "./merchant-kds-operator-profile.js";
+import {
+  rememberBrandTransactionValue,
+  restoreBrandTransactionRowSecurity,
+  sameDecision,
+} from "./merchant-brand-transaction-authorization.js";
 
 export type MerchantCurrentBrandOptions = Pick<
   PersistentMerchantBffOptions,
@@ -238,6 +243,9 @@ export function createMerchantCurrentBrandAdministrationScope(
   );
 }
 
+/** Distinguishes scope instances in the per-transaction authorization memo (WP-2423). */
+let currentBrandScopeInstances = 0;
+
 function currentBrandScope<
   C extends TenantContext | BrandAdministrationContext,
   P extends Policy | MerchantBrandAdministrationPolicyPort,
@@ -404,7 +412,51 @@ function currentBrandScope<
         active = false;
       }
     };
-    const initial = await assess(["organization.manage"]);
+    /**
+     * WP-2423: one full assessment per action list and transaction, re-checked in full once
+     * before commit (merchant-brand-transaction-authorization.ts); a list that is not plain
+     * strings is assessed (and refused) as before.
+     *
+     * Remembered per scope instance only: its own expected Session, original deadline, fixed
+     * Brand and Actor and query guard apply to every answer it gives, and a reused answer passes
+     * the instance's own clock/deadline check again. Brand administration (MFA-bound, a few asks
+     * per request, its own administration RLS context) is never remembered: every ask is
+     * assessed in full as before.
+     */
+    const memoScope = ["current-brand", expected, String(++currentBrandScopeInstances)].join("|");
+    const remembered = async (actions: readonly string[]) => {
+      if (
+        strategy.administrative ||
+        !Array.isArray(actions) ||
+        actions.some((action) => typeof action !== "string")
+      )
+        return assess(actions);
+      const value = await rememberBrandTransactionValue(tx, {
+        scope: memoScope,
+        key: JSON.stringify(actions),
+        now: () => parseCanonicalInstant(nowPort.call(source)),
+        resolve: () => assess(actions),
+        validUntil: (value) => value.validUntil,
+        // The row-level-security scope the Brand permission read leaves selected.
+        restore: () =>
+          restoreBrandTransactionRowSecurity(
+            tx,
+            String(fixed?.context.brand.brandReference ?? ""),
+            null,
+          ),
+        same: (previous, fresh) =>
+          String(previous.context.brand.brandReference) ===
+            String(fresh.context.brand.brandReference) &&
+          previous.decisions.length === fresh.decisions.length &&
+          previous.decisions.every((decision, index) =>
+            sameDecision(decision, fresh.decisions[index]),
+          ),
+      });
+      // The instance's own guard (clock, deadline, query identity, failure) holds for a reuse too.
+      check();
+      return Object.freeze({ ...value, validUntil: deadline });
+    };
+    const initial = await remembered(["organization.manage"]);
     const capturedActor = initial.context.actor.actorReference;
     if (capturedActor === null) return denied();
     return Object.freeze({
@@ -412,12 +464,12 @@ function currentBrandScope<
       context: initial.context,
       actorReference: capturedActor,
       sessionReference: expected,
-      authorizeActionsWithValidity: assess,
+      authorizeActionsWithValidity: remembered,
       async authorizeAction(action: string) {
-        return (await assess([action])).decisions[0] ?? denied();
+        return (await remembered([action])).decisions[0] ?? denied();
       },
       async authorizeActions(actions: readonly string[]) {
-        return (await assess(actions)).decisions;
+        return (await remembered(actions)).decisions;
       },
       authorizationValidUntil: () => deadline,
       assertCurrent() {

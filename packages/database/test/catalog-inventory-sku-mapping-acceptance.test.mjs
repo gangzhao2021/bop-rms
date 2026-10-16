@@ -217,22 +217,35 @@ it("uses real Catalog source and Inventory mapping/Audit in one PostgreSQL trans
           updatedAt: recordedAt,
           draft,
         };
-        await admin.query(
-          "INSERT INTO rms_catalog.product_operation_record(operation_id,brand_id,product_id,action_code,intent_digest,result_aggregate_version,occurred_at) VALUES($1,$2,$3,$4,$5,$6,$7)",
-          [
-            id(700 + version),
-            id(2),
-            id(8),
-            version === 1 ? "Create" : "ReplaceDraft",
-            hash,
-            version,
-            recordedAt,
-          ],
-        );
-        await admin.query(
-          "INSERT INTO rms_catalog.product_operation_snapshot(operation_id,brand_id,product_id,result_aggregate_version,occurred_at,snapshot_json) VALUES($1,$2,$3,$4,$5,$6)",
-          [id(700 + version), id(2), id(8), version, recordedAt, JSON.stringify(snapshot)],
-        );
+        // The Product authoring fence (1100_016) admits operation history only in its Brand
+        // scope (Brand selected, no Store), as the owning writer records it.
+        await admin.query("BEGIN");
+        try {
+          await admin.query(
+            "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)",
+            [id(2)],
+          );
+          await admin.query(
+            "INSERT INTO rms_catalog.product_operation_record(operation_id,brand_id,product_id,action_code,intent_digest,result_aggregate_version,occurred_at) VALUES($1,$2,$3,$4,$5,$6,$7)",
+            [
+              id(700 + version),
+              id(2),
+              id(8),
+              version === 1 ? "Create" : "ReplaceDraft",
+              hash,
+              version,
+              recordedAt,
+            ],
+          );
+          await admin.query(
+            "INSERT INTO rms_catalog.product_operation_snapshot(operation_id,brand_id,product_id,result_aggregate_version,occurred_at,snapshot_json) VALUES($1,$2,$3,$4,$5,$6)",
+            [id(700 + version), id(2), id(8), version, recordedAt, JSON.stringify(snapshot)],
+          );
+          await admin.query("COMMIT");
+        } catch (error) {
+          await admin.query("ROLLBACK");
+          throw error;
+        }
       }
       await history(1, false, past);
       const competitor = createPostgresProductCreationStore({

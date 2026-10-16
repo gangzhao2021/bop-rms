@@ -1,9 +1,11 @@
 import {
+  createCancelIntentRequest,
   createCreateIntentRequest,
   createRetrieveIntentRequest,
   createPaymentProviderFailure,
 } from "../../application/payment-provider-adapter.js";
 import type {
+  CancelIntentRequest,
   CreateIntentRequest,
   RetrieveIntentRequest,
   PaymentProviderAdapter,
@@ -20,11 +22,11 @@ export interface StripeOnlineIntentAdapterOptions extends StripeOnlineTransportO
   readonly now: () => string;
 }
 
-/** Actual create/retrieve ports. Remaining lifecycle operations require their own adapters.
+/** Actual create/retrieve/cancel ports. Remaining lifecycle operations require their own adapters.
  * No raw response/client secret escapes this normalized public boundary. */
 export function createStripeOnlineIntentAdapter(
   options: StripeOnlineIntentAdapterOptions,
-): Pick<PaymentProviderAdapter, "createIntent" | "retrieveIntent"> {
+): Pick<PaymentProviderAdapter, "createIntent" | "retrieveIntent" | "cancelIntent"> {
   const transport = createStripeOnlineTransport(options);
   const now = options.now;
   const unknown = (context: PaymentProviderContext) =>
@@ -36,7 +38,7 @@ export function createStripeOnlineIntentAdapter(
       safeReasonCode: "STRIPE_RESULT_UNRESOLVED" as never,
     });
   async function invoke(
-    request: CreateIntentRequest | RetrieveIntentRequest,
+    request: CreateIntentRequest | RetrieveIntentRequest | CancelIntentRequest,
   ): Promise<PaymentProviderOutcome> {
     try {
       const response = await transport.send(request);
@@ -54,6 +56,10 @@ export function createStripeOnlineIntentAdapter(
     },
     retrieveIntent(input) {
       return invoke(createRetrieveIntentRequest(input));
+    },
+    /** WP-2423 abandoned payment: an intent Stripe refuses to cancel answers Unknown; retrieve it. */
+    cancelIntent(input) {
+      return invoke(createCancelIntentRequest(input));
     },
   });
 }

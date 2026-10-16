@@ -138,3 +138,52 @@ it.each([false, true])(
     expect(result.record).not.toHaveProperty("client_secret");
   },
 );
+it("WP-2423 abandoned payment: cancels an unconfirmed intent idempotently and normalizes the answer", async () => {
+  const { fetch, adapter } = setup();
+  fetch.mockResolvedValueOnce(
+    Response.json({ ...raw, status: "canceled", cancellation_reason: "abandoned" }),
+  );
+  const cancelled = await adapter.cancelIntent({
+    operation: "CancelIntent",
+    purpose: "CancelPaymentIntent",
+    context: context as never,
+    idempotencyKey: "cancel-abandoned:0198a001-0000-7000-8000-000000000003" as never,
+    providerIntentReference: "pi_SYNTHETIC000001" as never,
+  });
+  expect(cancelled).toMatchObject({ kind: "Snapshot", status: "Cancelled" });
+  const [url, init] = fetch.mock.calls[0] ?? [];
+  expect(url).toBe("https://api.stripe.com/v1/payment_intents/pi_SYNTHETIC000001/cancel");
+  expect(init?.method).toBe("POST");
+  expect(String(init?.body)).toContain("cancellation_reason=abandoned");
+  expect((init?.headers as Record<string, string>)["Idempotency-Key"]).toBe(
+    "cancel-abandoned:0198a001-0000-7000-8000-000000000003",
+  );
+  // Stripe refuses to cancel a succeeded intent: the answer stays unresolved (retrieve it).
+  fetch.mockResolvedValueOnce(new Response("{}", { status: 400 }));
+  expect(
+    (
+      await adapter.cancelIntent({
+        operation: "CancelIntent",
+        purpose: "CancelPaymentIntent",
+        context: context as never,
+        idempotencyKey: "cancel-abandoned:0198a001-0000-7000-8000-000000000003" as never,
+        providerIntentReference: "pi_SYNTHETIC000001" as never,
+      })
+    ).kind,
+  ).toBe("Failure");
+  // An answer for another intent is never accepted as this one's cancellation.
+  fetch.mockResolvedValueOnce(
+    Response.json({ ...raw, id: "pi_SYNTHETICOTHER", status: "canceled" }),
+  );
+  expect(
+    (
+      await adapter.cancelIntent({
+        operation: "CancelIntent",
+        purpose: "CancelPaymentIntent",
+        context: context as never,
+        idempotencyKey: "cancel-abandoned:0198a001-0000-7000-8000-000000000003" as never,
+        providerIntentReference: "pi_SYNTHETIC000001" as never,
+      })
+    ).kind,
+  ).toBe("Failure");
+});

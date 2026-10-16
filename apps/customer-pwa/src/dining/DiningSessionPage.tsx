@@ -38,7 +38,7 @@ export const diningSessionPollIntervalMs = 15_000;
 const statusText: Readonly<Record<DiningRoundStatus, string>> = {
   AwaitingPayment: "Waiting for payment",
   PaymentFailed: "On hold until paid",
-  NotPaidCancelled: "Cancelled — not paid in time",
+  NotPaidCancelled: "Cancelled — not paid",
   StoreCancelled: "Cancelled by the store",
   Received: "Received by the store",
   Queued: "Sent to the kitchen",
@@ -99,19 +99,33 @@ function RoundNote({ round }: { readonly round: DiningRound }) {
     );
   if (round.status === "AwaitingPayment")
     return (
-      <p className={round.cancelsAt ? "order-status__warning" : undefined}>
-        {round.orderedBy === "You"
-          ? "Finish paying for this round so the kitchen can start it."
-          : round.orderedBy === "Staff"
-            ? "Staff entered this round for your table. Pay them on the card machine and the kitchen starts it."
-            : "The kitchen starts this round once it is paid."}
-        {/* WP-2423 item 5: a round nobody started paying for is cancelled when its time ends. */}
-        {round.cancelsAt
-          ? ` If it isn't paid by ${formatClockTime(round.cancelsAt)}, it is cancelled and nobody is charged.`
-          : ""}
-      </p>
+      <>
+        <AwaitingPaymentNote round={round} />
+        {/* WP-2423 abandoned payment: the guest who sent it finishes the same payment here. */}
+        {round.orderedBy === "You" ? (
+          <Link className="dining-session__pay" to="/checkout/payment">
+            Pay for round {round.roundNumber}
+          </Link>
+        ) : null}
+      </>
     );
   return null;
+}
+
+function AwaitingPaymentNote({ round }: { readonly round: DiningRound }) {
+  return (
+    <p className={round.cancelsAt ? "order-status__warning" : undefined}>
+      {round.orderedBy === "You"
+        ? "Finish paying for this round so the kitchen can start it."
+        : round.orderedBy === "Staff"
+          ? "Staff entered this round for your table. Pay them on the card machine and the kitchen starts it."
+          : "The kitchen starts this round once it is paid."}
+      {/* WP-2423 item 5: a round nobody started paying for is cancelled when its time ends. */}
+      {round.cancelsAt
+        ? ` If it isn't paid by ${formatClockTime(round.cancelsAt)}, it is cancelled and nobody is charged.`
+        : ""}
+    </p>
+  );
 }
 
 function RoundCard({ round }: { readonly round: DiningRound }) {

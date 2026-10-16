@@ -9,6 +9,7 @@ const doubles = vi.hoisted(() => ({
   days: vi.fn(),
   counter: vi.fn(),
   remakes: vi.fn(),
+  lines: vi.fn(),
 }));
 vi.mock("@rms/kitchen", async (original) => ({
   ...(await original<object>()),
@@ -21,6 +22,7 @@ vi.mock("@rms/ordering", async (original) => ({
   listStoreOrderNumbers: doubles.numbers,
   listStoreOrderBusinessDates: doubles.days,
   listStoreCounterOrders: doubles.counter,
+  loadMerchantOrderLines: doubles.lines,
 }));
 vi.mock("@rms/fulfillment", async (original) => ({
   ...(await original<object>()),
@@ -45,6 +47,7 @@ function setup(configured = true) {
   doubles.days.mockResolvedValue(new Map());
   doubles.counter.mockResolvedValue(new Set());
   doubles.remakes.mockResolvedValue([]);
+  doubles.lines.mockResolvedValue(null);
   doubles.list.mockResolvedValue({
     source: "CurrentFulfillment",
     observedAt: "2026-09-19T12:00:00.000Z",
@@ -237,4 +240,105 @@ it("WP-2423: marks the orders staff took at the counter so they are handed over 
     { brandReference: id(3), storeReference: id(4) },
     [id(51), id(52)],
   );
+});
+
+it("WP-2423: names each item to hand over from Ordering's item snapshots, only for pickups not yet completed", async () => {
+  const f = setup();
+  const line = (n: number) => ({
+    fulfillmentItemReference: id(60 + n),
+    orderItemReference: id(70 + n),
+    orderedQuantity: 2,
+    readyQuantity: 2,
+    handedOverQuantity: 0,
+  });
+  doubles.list.mockResolvedValue({
+    source: "CurrentFulfillment",
+    observedAt: "2026-09-19T12:00:00.000Z",
+    items: [
+      {
+        fulfillmentReference: id(41),
+        orderReference: id(51),
+        phase: "Ready",
+        aggregateVersion: 2n,
+        items: [line(1), line(2)],
+      },
+      {
+        fulfillmentReference: id(42),
+        orderReference: id(52),
+        phase: "Completed",
+        aggregateVersion: 3n,
+        items: [line(3)],
+      },
+    ],
+    nextAfterFulfillmentReference: null,
+  });
+  doubles.lines.mockResolvedValue({
+    items: [
+      {
+        orderItemReference: id(71),
+        name: "Latte",
+        options: [{ name: "Oat milk", quantity: 1 }],
+        quantity: 2,
+      },
+    ],
+    totals: {},
+  });
+  const result = (await f.operation(f.input)) as {
+    items: { items: Record<string, unknown>[] }[];
+  };
+  expect(result.items[0]?.items).toEqual([
+    {
+      fulfillmentItemReference: id(61),
+      orderedQuantity: 2,
+      readyQuantity: 2,
+      handedOverQuantity: 0,
+      name: "Latte",
+      options: [{ name: "Oat milk", quantity: 1 }],
+    },
+    // An item the snapshot read did not name stays unnamed.
+    {
+      fulfillmentItemReference: id(62),
+      orderedQuantity: 2,
+      readyQuantity: 2,
+      handedOverQuantity: 0,
+    },
+  ]);
+  expect(result.items[1]?.items[0]).not.toHaveProperty("name");
+  // One Ordering read, scoped to this Store, for the pickup still to be handed over.
+  expect(doubles.lines).toHaveBeenCalledTimes(1);
+  expect(doubles.lines).toHaveBeenCalledWith(
+    expect.anything(),
+    { brandReference: id(3), storeReference: id(4) },
+    id(51),
+    "en-CA",
+  );
+});
+
+it("WP-2423: keeps the queue readable when an order's item snapshots can't be read", async () => {
+  const f = setup();
+  doubles.list.mockResolvedValue({
+    source: "CurrentFulfillment",
+    observedAt: "2026-09-19T12:00:00.000Z",
+    items: [
+      {
+        fulfillmentReference: id(41),
+        orderReference: id(51),
+        phase: "Ready",
+        aggregateVersion: 2n,
+        items: [
+          {
+            fulfillmentItemReference: id(61),
+            orderItemReference: id(71),
+            orderedQuantity: 1,
+            readyQuantity: 1,
+            handedOverQuantity: 0,
+          },
+        ],
+      },
+    ],
+    nextAfterFulfillmentReference: null,
+  });
+  doubles.lines.mockRejectedValue(new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE"));
+  const result = (await f.operation(f.input)) as { items: { items: object[] }[] };
+  expect(result.items[0]?.items[0]).not.toHaveProperty("name");
 });

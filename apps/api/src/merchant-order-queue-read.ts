@@ -1,4 +1,7 @@
-import { createDiningOrderDeliveryProgress } from "./dining-order-delivery-progress.js";
+import {
+  createDiningOrderDeliveryProgress,
+  readyToServeQuantity,
+} from "./dining-order-delivery-progress.js";
 import { createHash } from "node:crypto";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { withOptionalRead } from "./merchant-round-business-date.js";
@@ -216,6 +219,8 @@ export function createMerchantOrderQueueRead(options: {
                 phase: execution.phase,
                 version: execution.version,
                 observedAt,
+                // Pickup readiness is a Fulfillment fact (the pickup queue), never served here.
+                readyToServeItemCount: 0,
                 batches: [
                   {
                     orderBatchReference: item.initialBatchReference,
@@ -283,12 +288,16 @@ export function createMerchantOrderQueueRead(options: {
                   phase: cancelled?.phase ?? null,
                   version: cancelled?.orderVersion ?? null,
                   observedAt,
+                  readyToServeItemCount: 0,
                   batches: [],
                 }
               : {
                   phase: progress?.phase ?? unavailable(),
                   version: execution.orderVersion,
                   observedAt,
+                  // WP-2423: items the kitchen marked ready that nobody served yet, in any round —
+                  // the same delivery progress and rule as the Tables page's close dialog.
+                  readyToServeItemCount: readyToServeQuantity(progress?.items ?? []),
                   batches: execution.batches.map((batch) => ({
                     orderBatchReference: batch.orderBatchReference,
                     sequence: batch.sequence,
@@ -340,6 +349,8 @@ export function createMerchantOrderQueueRead(options: {
             batches: Object.freeze(current.batches.map((batch) => Object.freeze(batch))),
             currentPhase: current.phase,
             currentVersion: current.version,
+            /** WP-2423: dine-in items ready at the pass and not yet served (0 for pickups). */
+            readyToServeItemCount: current.readyToServeItemCount,
             observedAt: current.observedAt,
           }),
         );

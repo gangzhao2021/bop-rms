@@ -138,6 +138,33 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
     expect(html).toContain("Served");
   });
 
+  // WP-2423 abandoned payment: the guest who sent a round and left the payment page pays it here.
+  it("offers the guest who ordered an unpaid round to pay for it, never another guest's", () => {
+    const html = render({
+      status: "ready",
+      refreshing: false,
+      view: view({
+        rounds: [
+          round({
+            roundNumber: 1,
+            orderedBy: "You",
+            status: "AwaitingPayment",
+            payment: "Awaiting",
+          }),
+          round({
+            roundNumber: 2,
+            orderedBy: "AnotherGuest",
+            status: "AwaitingPayment",
+            payment: "Awaiting",
+          }),
+        ],
+      }),
+    });
+    expect(html).toContain('href="/checkout/payment"');
+    expect(html).toContain("Pay for round 1");
+    expect(html).not.toContain("Pay for round 2");
+  });
+
   // WP-2423 Q7 slice 2 (DEC-STAFF-DINE-IN-ROUND): a round staff entered for the table.
   it("shows a round staff entered for the table and how it is paid", () => {
     const html = render({
@@ -331,7 +358,7 @@ describe("CUST-DINE-IN-SESSION item prices before tax (WP-2423 D5)", () => {
     expect(html).toContain(
       `If it isn&#x27;t paid by ${formatClockTime("2026-10-13T18:40:00.000Z")}, it is cancelled and nobody is charged.`,
     );
-    expect(html).toContain("Cancelled — not paid in time");
+    expect(html).toContain("Cancelled — not paid");
     expect(html).toContain("No one was charged for it.");
   });
 });

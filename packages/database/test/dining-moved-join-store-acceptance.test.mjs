@@ -482,7 +482,8 @@ it("reissues a fresh Join generation after committed Move with current Staff and
           operationReference: id(41),
           requestedAt: at(5),
         }),
-        { status: "DiningJoinUnavailable" },
+        // The pre-move code no longer belongs to the moved Table: a definitive, uniform refusal.
+        { status: "DiningJoinRefused", reason: "CodeNotAccepted" },
       );
       const secondJoin = await service().join({
         guestSessionReference: id(81),

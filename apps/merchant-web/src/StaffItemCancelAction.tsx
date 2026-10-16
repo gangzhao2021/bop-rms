@@ -37,7 +37,7 @@ export function itemCancelPreviewText(order: Order, preview: ItemCancelPreview) 
     return `Refund ${refund} (items and tax; the tip is not refunded).`;
   return order.orderType === "Pickup"
     ? `These are the last items: the whole order is cancelled and the remaining payment of ${refund} is refunded, including any tip.`
-    : `These are the last items of this batch: the whole batch is cancelled and its remaining payment of ${refund} is refunded, including any tip.`;
+    : `These are the last items of this round: the whole round is cancelled and its remaining payment of ${refund} is refunded, including any tip.`;
 }
 
 /** Why a preview or cancellation did not go through, and what to do next. */
@@ -50,7 +50,7 @@ export function itemCancelFailureText(order: Order, failure: ItemCancelFailure) 
     case "LegacyStock":
       return order.orderType === "Pickup"
         ? "This order's stock was reserved before per-item tracking, so its items cannot be cancelled one by one. Cancel the whole order instead."
-        : "This batch's stock was reserved before per-item tracking, so its items cannot be cancelled one by one. Cancel the whole batch instead.";
+        : "This round's stock was reserved before per-item tracking, so its items cannot be cancelled one by one. Cancel the whole round instead.";
     case "NotCancellable":
       return "These items can no longer be cancelled. Close to refresh the order.";
     case "Denied":
@@ -67,7 +67,7 @@ function cancelledText(order: Order, scope: ItemCancelScope) {
     ? "Items cancelled. The customer's refund has started."
     : order.orderType === "Pickup"
       ? "Order cancelled. The customer's refund has started."
-      : "Batch cancelled. The customer's refund has started.";
+      : "Round cancelled. The customer's refund has started.";
 }
 
 type PreviewState =
@@ -237,7 +237,7 @@ export function StaffItemCancelAction({
         <h2 id={titleId}>
           {pickup
             ? `Cancel items from order ${order.orderNumber}`
-            : `Cancel items from batch ${batch.sequence} of order ${order.orderNumber}`}
+            : `Cancel items from round ${batch.sequence} of order ${order.orderNumber}`}
         </h2>
         <p>
           Only items the kitchen has not started. The customer is refunded for the cancelled items
@@ -324,7 +324,7 @@ export function StaffItemCancelAction({
                   : ready?.scope === "Batch"
                     ? pickup
                       ? "Cancel order and refund"
-                      : "Cancel batch and refund"
+                      : "Cancel round and refund"
                     : count > 1
                       ? `Cancel ${count} items and refund`
                       : "Cancel item and refund"}

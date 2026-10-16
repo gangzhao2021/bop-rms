@@ -710,6 +710,7 @@ describe("migration catalog", () => {
       "2000_066_create_brand_sole_operator_state_read",
       "2000_067_alter_store_configuration_sole_operator_setting_guard",
       "2000_068_alter_receipt_template_sole_operator_setting_guard",
+      "2000_069_alter_batch_cancellation_abandoned_payment",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

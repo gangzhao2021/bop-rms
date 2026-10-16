@@ -11,7 +11,7 @@ const texts: Readonly<Record<string, string>> = {
   REFUND_ALLOCATION_RECONCILIATION_REQUIRED:
     "A refund on this order needs to be reconciled first. Check it on the Exceptions page.",
   ORDER_BALANCE_UNPAID:
-    "Part of the order hasn't been paid. Take the payment or cancel the round on the Orders page.",
+    "Part of the order hasn't been paid. Ask the guest to finish paying on their phone, or cancel the unpaid round on the Orders page.",
   ORDER_OVERPAYMENT_UNRESOLVED:
     "The guest paid more than the order now costs. Refund the difference on the Orders page.",
   ORDER_REPRICING_PENDING:

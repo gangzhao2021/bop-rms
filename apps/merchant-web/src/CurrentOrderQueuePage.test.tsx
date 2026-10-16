@@ -175,7 +175,7 @@ it("labels a cancelled additional Batch distinctly from unaccepted work", () => 
     nextAfterOrderReference: null,
   });
   const html = renderToStaticMarkup(<CurrentOrderQueueRows view={view} />);
-  expect(html).toContain("Batch cancelled");
+  expect(html).toContain("Round cancelled");
   expect(html).not.toContain("Not accepted");
 });
 
@@ -546,7 +546,7 @@ it("WP-2423 Q6: offers cancellation only where allowed and shows the Store's can
       action={(_order, row) => (row.canCancel ? `cancel:${row.sequence}` : null)}
     />,
   );
-  expect(diningHtml).toContain("Batch 2 cancelled · refunded");
+  expect(diningHtml).toContain("Round 2 cancelled · refunded");
   expect(diningHtml).toContain("Reason: Customer request");
   expect(diningHtml).toContain("was refunded in full");
   expect(diningHtml).toContain("cancel:3");
@@ -706,7 +706,7 @@ it("WP-2423: warns staff before an unpaid dine-in round is cancelled and says so
     paymentDue: { status: "Failed", cancelsAt: "2026-09-14T00:30:00.000Z" },
   });
   // In the summary row and in the round itself, as a warning, with the Store-local time.
-  expect(failed).toContain("Batch 2: Payment failed · will be cancelled automatically at 20:30");
+  expect(failed).toContain("Round 2: Payment failed · will be cancelled automatically at 20:30");
   expect(failed).toMatch(
     /<p class="order-workbench-closed" role="note"><span class="order-accept-by" data-tier="urgent">Payment failed · will be cancelled automatically at 20:30<\/span>/u,
   );
@@ -731,13 +731,13 @@ it("WP-2423: warns staff before an unpaid dine-in round is cancelled and says so
     acceptanceStatus: "NotAccepted",
     paymentDue: { status: "Awaiting", cancelsAt: null },
   });
-  expect(awaiting).toContain('data-tier="warning">Batch 2: Awaiting payment');
+  expect(awaiting).toContain('data-tier="warning">Round 2: Awaiting payment');
   expect(awaiting).toContain("the guest has not paid for this round");
   // After the System cancelled it: not paid, nothing charged; not mistaken for a store cancellation.
   const cancelled = render({ acceptanceStatus: "Cancelled" });
-  expect(cancelled).toContain("Batch cancelled · not paid.");
+  expect(cancelled).toContain("Round cancelled · not paid.");
   expect(cancelled).toContain(
-    "never went to the kitchen. Nothing was charged for it in the system.",
+    "never went to the kitchen and its items went back to stock. Nothing was charged for it in the system.",
   );
   expect(cancelled).not.toContain("Payment failed");
   expect(cancelled).toContain("1 cancelled");

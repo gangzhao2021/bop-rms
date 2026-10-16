@@ -722,7 +722,22 @@ export class CustomerCartHandler {
       responseControls(response);
       try {
         sameOriginRead(request);
-        await this.#invoke(response, this.#port.getCurrentCart(this.#context(request)));
+        const operation = this.#port.getCurrentCart(this.#context(request));
+        let result: CustomerCartPortResult;
+        try {
+          result = await operation;
+        } catch {
+          sendError(response, "cart_service_unavailable");
+          return;
+        }
+        // WP-2423: a guest with no active Cart is an ordinary state, not an error. Answer it
+        // explicitly so guest pages don't log a failed request on every visit. An expired table
+        // Cart is still replaced on the next add (DEC-DINING-CART-TIMEOUT-CONTINUATION).
+        if (result.status === "NotFound") {
+          response.status(200).json({ schemaVersion: 1, cart: null });
+          return;
+        }
+        await this.#invoke(response, Promise.resolve(result));
       } catch (error) {
         this.#requestError(response, error);
       }

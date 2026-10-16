@@ -15,9 +15,6 @@ import {
   exerciseProductReferenceHistoryGap,
 } from "../test-support/product-reference-history-source.mjs";
 import { exerciseProductPricingBindingSource } from "../test-support/product-pricing-binding-source.mjs";
-import { exerciseProductListBrowser } from "../test-support/catalog-product-list-browser.mjs";
-import { fileURLToPath, URL } from "node:url";
-import path from "node:path";
 import assert from "node:assert/strict";
 import pg from "pg";
 import { it } from "vitest";
@@ -60,7 +57,6 @@ it("persists classified Product Versions atomically with held current Category f
       revokeViewFieldsAfterSource = false,
       allowedLifecycles = ["Active"],
       counter = 1000,
-      sqlCalls = 0,
       phaseAllowed = true;
     let writeHolds = 0,
       readHolds = 0,
@@ -75,7 +71,6 @@ it("persists classified Product Versions atomically with held current Category f
           await client.query("SET LOCAL ROLE " + role);
           const tx = {
             async query(sql, values) {
-              sqlCalls++;
               const result = await client.query(sql, [...values]);
               if (
                 sql.includes("FROM rms_catalog.category WHERE") &&
@@ -995,94 +990,11 @@ it("persists classified Product Versions atomically with held current Category f
           ["CLASS_12", "Inactive"],
         ],
       );
-      await exerciseProductListBrowser({
-        root: fileURLToPath(new URL("../../../", import.meta.url)),
-        store: productListForScope,
-        request: (filters) => listRequest({ categoryReference: null, ...filters }),
-        reference: (n) => (n === 2 ? id(1) : n === 3 ? id(20) : n === 30 ? id(21) : id(n)),
-        getSqlCalls: () => sqlCalls,
-        setAllowed: (value) => {
-          policyAllowed = value;
-        },
-        setPhase: (value) => {
-          phaseAllowed = value;
-        },
-        async journey({ page, expect, directory }) {
-          const selector = page.getByLabel("Category", { exact: true });
-          const apply = page.getByRole("button", { name: "Apply filters", exact: true });
-          await expect(page.getByText("3 on this page", { exact: false })).toBeVisible();
-          await expect(selector).toBeEnabled();
-          await expect(selector.locator("option")).toHaveText([
-            "All categories",
-            "Synthetic category 10 (CLASS_10)",
-            "Synthetic category 11 (CLASS_11)",
-            "Synthetic category 12 (CLASS_12)",
-          ]);
-          await selector.selectOption(id(11));
-          await apply.click();
-          await expect(page.getByText("2 on this page", { exact: false })).toBeVisible();
-          await expect(page.getByRole("rowheader")).toHaveCount(2);
-          await expect(page.locator(".product-list-table tbody")).not.toContainText("PRODUCT_101");
-          await page.screenshot({
-            path: path.join(directory, "category-selector-filtered-1440.png"),
-            fullPage: true,
-          });
-          await selector.selectOption(id(12));
-          await apply.click();
-          await expect(page.getByText("0 on this page", { exact: false })).toBeVisible();
-          await expect(selector).toBeEnabled();
-          await expect(selector.locator("option")).toHaveCount(4);
-          await selector.selectOption(id(11));
-          await apply.click();
-          await expect(page.getByText("2 on this page", { exact: false })).toBeVisible();
-          const search = page.getByLabel("Product / code / SKU", { exact: true });
-          await search.fill("NO_SYNTHETIC_MATCH");
-          await apply.click();
-          await expect(page.getByText("0 on this page", { exact: false })).toBeVisible();
-          await expect(
-            page.getByRole("heading", { name: "No products", exact: true }),
-          ).toBeVisible();
-          await expect(selector).toHaveValue(id(11));
-          await search.fill("");
-          await apply.click();
-          await expect(page.getByText("2 on this page", { exact: false })).toBeVisible();
-          viewFieldsAllowed = false;
-          await page.getByRole("button", { name: "Refresh products" }).click();
-          await expect(
-            page.getByRole("heading", { name: "Permission denied", exact: true }),
-          ).toBeVisible();
-          await expect(page.getByRole("rowheader")).toHaveCount(0);
-          await expect(selector).toBeEnabled();
-          await expect(selector.locator("option")).toHaveText([
-            "All categories",
-            "Current category filter",
-          ]);
-          await selector.selectOption("");
-          await expect(selector).toBeDisabled();
-          viewFieldsAllowed = true;
-          await apply.click();
-          await expect(page.getByText("3 on this page", { exact: false })).toBeVisible();
-          await expect(selector).toBeEnabled();
-          for (const width of [390, 320]) {
-            await page.setViewportSize({ width, height: 900 });
-            await selector.selectOption(id(11));
-            await apply.click();
-            await expect(page.getByText("2 on this page", { exact: false })).toBeVisible();
-            const extent = await page.evaluate(() => ({
-              width: globalThis.innerWidth,
-              scroll: globalThis.document.documentElement.scrollWidth,
-            }));
-            assert.ok(extent.scroll <= extent.width, "category selector reflows at" + width);
-            await page.screenshot({
-              path: path.join(directory, "category-selector-filtered-" + width + ".png"),
-              fullPage: true,
-            });
-          }
-          const text = await page.locator("body").innerText();
-          for (const reference of [id(3), id(4), id(10), id(11), id(12), id(20)])
-            assert.equal(text.includes(reference), false);
-        },
-      });
+      // WP-2423 pilot: /app/commerce/products is served by the Store back-office ProductPages
+      // (covered by the merchant production browser suite); the WP-2407 list page the browser
+      // exercise (test-support/catalog-product-list-browser.mjs) drives is not routed during the
+      // pilot, as in catalog-product-list. The exercise returns with that page on expansion; the
+      // server-side list, Category options and filters stay asserted above.
       const legacyInput = { ...createInput(106, []) };
       delete legacyInput.categoryClassification;
       const legacy = await service.create(legacyInput);
@@ -1167,102 +1079,7 @@ it("persists classified Product Versions atomically with held current Category f
         code: "CATALOG_PERMISSION_DENIED",
       });
       policyAllowed = true;
-      await exerciseProductListBrowser({
-        root: fileURLToPath(new URL("../../../", import.meta.url)),
-        store: productListForScope,
-        request: (filters) => listRequest({ categoryReference: null, ...filters }),
-        reference: (n) => (n === 2 ? id(1) : n === 3 ? id(20) : n === 30 ? id(21) : id(n)),
-        getSqlCalls: () => sqlCalls,
-        setAllowed: (value) => {
-          policyAllowed = value;
-        },
-        setPhase: (value) => {
-          phaseAllowed = value;
-        },
-        async journey({ page, context, expect, directory, openNativeZoom }) {
-          await expect(page.getByText("4 on this page", { exact: false })).toBeVisible();
-          await expect(page.locator(".product-list-boundary")).toContainText(
-            "Primary categories are shown where available",
-          );
-          await expect(page.locator(".product-list-boundary")).not.toContainText("Category, menus");
-          await expect(page.getByLabel("Category", { exact: true })).toBeDisabled();
-          await expect(page.getByLabel("Category", { exact: true }).locator("option")).toHaveText([
-            "Unavailable",
-          ]);
-          const legacyRow = page
-            .locator(".product-list-table tbody tr")
-            .filter({ hasText: "PRODUCT_106" });
-          const clearedRow = page
-            .locator(".product-list-table tbody tr")
-            .filter({ hasText: "PRODUCT_101" });
-          const classifiedRow = page
-            .locator(".product-list-table tbody tr")
-            .filter({ hasText: "PRODUCT_107" });
-          await expect(legacyRow.locator("td").nth(1)).toHaveText("Unavailable");
-          await expect(clearedRow.locator("td").nth(1)).toContainText("Primary category not set");
-          await expect(classifiedRow.locator("td").nth(1)).toContainText("Synthetic category 11");
-          await expect(classifiedRow.locator("td").nth(1)).toContainText("Draft classification");
-          const body = await page.locator("body").innerText();
-          for (const privateReference of [id(3), id(4), id(11), id(20)])
-            assert.equal(body.includes(privateReference), false);
-          for (const width of [1440, 390, 320]) {
-            await page.setViewportSize({ width, height: 900 });
-            const extent = await page.evaluate(() => ({
-              width: globalThis.innerWidth,
-              scroll: globalThis.document.documentElement.scrollWidth,
-            }));
-            assert.ok(extent.scroll <= extent.width, "classified page reflows at" + width);
-            if (width < 1000) {
-              await expect(
-                page.locator(".product-list-card").filter({ hasText: "PRODUCT_107" }),
-              ).toContainText("Synthetic category 11");
-              await expect(
-                page.locator(".product-list-card").filter({ hasText: "PRODUCT_101" }),
-              ).toContainText("Primary category not set");
-              await expect(
-                page.locator(".product-list-card").filter({ hasText: "PRODUCT_106" }),
-              ).not.toContainText("Primary category not set");
-            }
-            await page.evaluate(() => globalThis.scrollTo(0, 0));
-            await page.screenshot({
-              path: path.join(directory, "classified-product-list-" + width + ".png"),
-              fullPage: true,
-            });
-          }
-          const { page: zoomPage, setNativeZoom, captureNativeZoom } = await openNativeZoom();
-          await expect(zoomPage.getByText("4 on this page", { exact: false })).toBeVisible();
-          assert.equal(await setNativeZoom(), 2);
-          const zoom = await zoomPage.evaluate(() => ({
-            width: globalThis.innerWidth,
-            scroll: globalThis.document.documentElement.scrollWidth,
-            dpr: globalThis.devicePixelRatio,
-          }));
-          assert.equal(zoom.width, 720);
-          assert.equal(zoom.dpr, 2);
-          assert.ok(zoom.scroll <= zoom.width);
-          await expect(
-            zoomPage.locator(".product-list-card").filter({ hasText: "PRODUCT_107" }),
-          ).toContainText("Synthetic category 11");
-          await captureNativeZoom(
-            path.join(directory, "classified-product-list-native-200percent.png"),
-          );
-          await page.setViewportSize({ width: 1440, height: 900 });
-          viewFieldsAllowed = false;
-          await page.getByRole("button", { name: "Refresh products" }).click();
-          await expect(
-            page.getByRole("heading", { name: "Permission denied", exact: true }),
-          ).toBeVisible();
-          await expect(page.getByRole("rowheader")).toHaveCount(0);
-          viewFieldsAllowed = true;
-          await page.getByRole("button", { name: "Refresh products" }).click();
-          await expect(page.getByText("4 on this page", { exact: false })).toBeVisible();
-          await context.setOffline(true);
-          await expect(page.getByRole("heading", { name: "Offline", exact: true })).toBeVisible();
-          await expect(page.getByRole("rowheader")).toHaveCount(0);
-          await context.setOffline(false);
-          await expect(page.getByText("4 on this page", { exact: false })).toBeVisible();
-        },
-      });
+      // The second WP-2407 list browser journey is retired with the first (see above).
       // Milestone61: actual current Product graph plus owning Recipe binding periods.
       await admin.query("GRANT USAGE ON SCHEMA rms_recipe TO " + role);
       const columns61 = {

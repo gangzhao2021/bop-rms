@@ -1,12 +1,39 @@
 import { useEffect, useRef, useState, type FormEvent, type RefObject } from "react";
-import type { createDiningAdmissionJourney } from "./dining-admission-journey.js";
+import {
+  DiningAdmissionJourneyError,
+  type createDiningAdmissionJourney,
+} from "./dining-admission-journey.js";
 
 export interface DiningAdmissionUi {
   readonly journey: ReturnType<typeof createDiningAdmissionJourney>;
   readonly generateOperationReference: () => string;
 }
 export type DiningAdmissionUiState =
-  "Ready" | "Invalid" | "Joining" | "Unknown" | "Bound" | "Unavailable";
+  | "Ready"
+  | "Invalid"
+  | "Joining"
+  | "Unknown"
+  | "Bound"
+  | "Unavailable"
+  | DiningAdmissionRefusedState;
+/** The server definitively refused the code: nothing to recover, a new code is needed. */
+export type DiningAdmissionRefusedState = "CodeUsed" | "CodeNotAccepted" | "TooManyAttempts";
+const refusalText: Readonly<Record<DiningAdmissionRefusedState, string>> = {
+  CodeUsed: "This code was already used. Ask staff for a new one.",
+  CodeNotAccepted: "That code didn’t work. Check it and try again, or ask staff for a new one.",
+  TooManyAttempts: "Too many tries. Wait a few minutes before trying again, or ask staff for help.",
+};
+/** Maps a failed attempt: a definitive refusal returns to entry, anything else stays recoverable. */
+export function admissionStateForFailure(error: unknown): "Unknown" | DiningAdmissionRefusedState {
+  if (!(error instanceof DiningAdmissionJourneyError)) return "Unknown";
+  if (error.code === "code-used") return "CodeUsed";
+  if (error.code === "code-not-accepted") return "CodeNotAccepted";
+  if (error.code === "too-many-attempts") return "TooManyAttempts";
+  return "Unknown";
+}
+function refused(state: DiningAdmissionUiState): state is DiningAdmissionRefusedState {
+  return Object.hasOwn(refusalText, state);
+}
 const reference = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const framing = /^(?:[0-9]{6}|[A-Za-z0-9_-]{21}[AQgw])$/u;
 
@@ -47,7 +74,7 @@ export function DiningAdmissionPanel({
     };
   }, []);
   useEffect(() => {
-    if (state === "Invalid") input.current?.focus();
+    if (state === "Invalid" || refused(state)) input.current?.focus();
     else if (state === "Bound" || state === "Unknown") status.current?.focus();
   }, [state]);
   const run = (resume: boolean) => {
@@ -107,8 +134,12 @@ export function DiningAdmissionPanel({
             setState("Unknown");
           }
         },
-        () => {
-          if (generation.current === current) setState("Unknown");
+        (error: unknown) => {
+          if (generation.current !== current) return;
+          const next = admissionStateForFailure(error);
+          // A refused attempt is finished; the next submission is a new intent with a new code.
+          if (next !== "Unknown") operation.current = null;
+          setState(next);
         },
       )
       .finally(() => {
@@ -145,7 +176,7 @@ export function DiningAdmissionView({
   readonly onSubmit?: ((event: FormEvent<HTMLFormElement>) => void) | undefined;
   readonly onResume?: (() => void) | undefined;
 }) {
-  const entry = state === "Ready" || state === "Invalid";
+  const entry = state === "Ready" || state === "Invalid" || refused(state);
   return (
     <section
       className="dining-admission"
@@ -176,16 +207,21 @@ export function DiningAdmissionView({
             spellCheck={false}
             maxLength={22}
             aria-describedby={
-              state === "Invalid"
+              state === "Invalid" || refused(state)
                 ? "dining-admission-help dining-admission-error"
                 : "dining-admission-help"
             }
-            aria-invalid={state === "Invalid"}
+            aria-invalid={state === "Invalid" || refused(state)}
             disabled={!online}
           />
           {state === "Invalid" && (
             <p id="dining-admission-error" role="alert">
               Enter the six-digit code or the invitation supplied by staff.
+            </p>
+          )}
+          {refused(state) && (
+            <p id="dining-admission-error" role="alert">
+              {refusalText[state]}
             </p>
           )}
           <button className="entry-action" type="submit" disabled={!online}>

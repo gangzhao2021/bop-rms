@@ -66,8 +66,11 @@ export async function verifyPickupQuoteLab(origin, pickup) {
         await page.getByRole("button", { name: "Continue to menu", exact: true }).click();
         await page.getByRole("link", { name: "View Latte", exact: true }).click();
         await page.getByRole("button", { name: "Add to cart", exact: true }).click();
-        await page.getByRole("button", { name: "Add to cart", exact: true }).click();
-        await expect(page.getByRole("link", { name: "Review cart", exact: true }))
+        // The configure page confirms the add in place, with its own link to the cart.
+        const added = page
+          .getByRole("status")
+          .getByRole("link", { name: "View cart", exact: true });
+        await expect(added)
           .toBeVisible()
           .catch(async () => {
             throw new Error(
@@ -80,15 +83,21 @@ export async function verifyPickupQuoteLab(origin, pickup) {
               }),
             );
           });
-        await page.getByRole("link", { name: "Review cart", exact: true }).click();
+        await added.click();
         await expect(page.getByLabel("Latte quantity", { exact: true })).toHaveText("1");
         const bound = (await context.cookies()).find((c) => c.name === "__Host-bop-guest");
         assert(bound?.secure && bound.httpOnly && bound.sameSite === "Lax");
         assert(bound.value !== before.value);
-        await page.getByRole("link", { name: "Review checkout", exact: true }).click();
-        await page.getByRole("button", { name: "Get current quote", exact: true }).click();
-        await expect(page.getByRole("heading", { name: "Quote summary", exact: true }))
-          .toBeVisible()
+        const checkout = () =>
+          page
+            .getByRole("region", { name: "Cart actions", exact: true })
+            .getByRole("link", { name: "Checkout", exact: true })
+            .click();
+        // Checkout prices the cart itself (no separate quote step).
+        await checkout();
+        const total = page.getByRole("region", { name: "Total", exact: true });
+        await expect(total)
+          .toContainText("5.65")
           .catch(async () => {
             throw new Error(
               JSON.stringify({
@@ -100,23 +109,15 @@ export async function verifyPickupQuoteLab(origin, pickup) {
               }),
             );
           });
-        const quote = page.getByRole("region", { name: "Quote summary", exact: true });
-        await expect(quote).toContainText("5.65");
-        await expect(quote).not.toContainText("Quote expired");
-        await page.getByRole("link", { name: "Back to cart", exact: true }).click();
+        await expect(total).not.toContainText("expired");
+        await page.getByRole("link", { name: "Edit cart", exact: true }).click();
         await page.getByRole("button", { name: "Increase Latte quantity", exact: true }).click();
         await expect(page.getByLabel("Latte quantity", { exact: true })).toHaveText("2");
-        await expect(
-          page.getByText("Review checkout to request a current quote before payment.", {
-            exact: true,
-          }),
-        ).toBeVisible();
-        await page.getByRole("link", { name: "Review checkout", exact: true }).click();
-        await page.getByRole("button", { name: "Get current quote", exact: true }).click();
-        await expect(
-          page.getByRole("region", { name: "Quote summary", exact: true }),
-        ).toContainText("11.30");
-        await expect(page.getByRole("heading", { name: "Contact and receipt", exact: true }))
+        await checkout();
+        await expect(page.getByRole("region", { name: "Total", exact: true })).toContainText(
+          "11.30",
+        );
+        await expect(page.getByRole("heading", { name: "Your details", exact: true }))
           .toBeVisible()
           .catch(async () => {
             throw new Error(
@@ -135,7 +136,7 @@ export async function verifyPickupQuoteLab(origin, pickup) {
         await page.getByLabel("Pickup name", { exact: true }).fill("Synthetic Guest");
         await page.getByLabel("Contact method").selectOption("Email");
         await page.getByLabel("Pickup email", { exact: true }).fill("synthetic@example.invalid");
-        await page.getByRole("button", { name: "Save checkout details", exact: true }).click();
+        await page.getByRole("button", { name: "Save details", exact: true }).click();
         await expect(page.getByText("Checkout details saved.", { exact: true })).toBeVisible();
         const detailsResponses = responses.filter((response) => response.kind === "details");
         assert(detailsResponses.length >= 3);
@@ -144,7 +145,7 @@ export async function verifyPickupQuoteLab(origin, pickup) {
             (response) => [200, 201].includes(response.status) && response.noStore,
           ),
         );
-        await page.getByLabel("Tip (CAD)", { exact: true }).fill("0");
+        await page.getByRole("button", { name: "No tip", exact: true }).click();
         let droppedFirstSessionResponse = false;
         await page.route("**/api/v1/carts/*/checkout-sessions", async (route) => {
           const request = route.request();
@@ -177,10 +178,7 @@ export async function verifyPickupQuoteLab(origin, pickup) {
           });
           await route.abort();
         });
-        const continueButton = page.getByRole("button", {
-          name: "Continue to payment",
-          exact: true,
-        });
+        const continueButton = page.getByRole("button", { name: /^Continue to payment/u });
         await expect(continueButton)
           .toBeEnabled({ timeout: 3_000 })
           .catch(async () => {

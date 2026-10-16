@@ -90,12 +90,15 @@ async function setup(enabled = true) {
   const retry = vi
     .fn<NonNullable<CustomerPaymentIntentPort["retry"]>>()
     .mockResolvedValue({ ...result, status: "Created" });
+  const resume = vi
+    .fn<NonNullable<CustomerPaymentIntentPort["resume"]>>()
+    .mockResolvedValue({ ...result, status: "AlreadyCreated" });
   const server = createServer(
     createApp(
       enabled
         ? {
             customerPaymentIntent: new CustomerPaymentIntentHandler({
-              port: { create, retry },
+              port: { create, retry, resume },
               allowedOrigin: "https://customer.example",
             }),
           }
@@ -134,7 +137,7 @@ async function setup(enabled = true) {
       headers: { ...retryHeaders, ...extra },
       body: JSON.stringify(payload),
     });
-  return { result, create, retry, body, send, sendRetry };
+  return { result, create, retry, resume, body, send, sendRetry };
 }
 it.each([
   ["Created", 201],
@@ -240,6 +243,31 @@ it("WP-2423 Q4: says the Store stopped taking orders when payment would start af
   });
 });
 
+it("WP-2423 abandoned payment: returns to the open payment for {resume:true} only", async () => {
+  const f = await setup();
+  const response = await f.sendRetry({ resume: true });
+  expect(response.status).toBe(200);
+  expect(((await response.json()) as { payment: unknown }).payment).toMatchObject({
+    paymentIntentReference: refs.intent,
+    creationStatus: "AlreadyCreated",
+  });
+  expect(f.resume).toHaveBeenCalledWith({
+    sessionCredential: "s".repeat(43),
+    csrfCredential: "c".repeat(43),
+    checkoutSessionReference: id(31),
+  });
+  expect(f.create).not.toHaveBeenCalled();
+  expect(f.retry).not.toHaveBeenCalled();
+  f.resume.mockClear();
+  for (const [payload, extra] of [
+    [{ resume: false }, {}],
+    [{ resume: true, tip: f.body.tip }, {}],
+    [{ resume: true, retry: true }, {}],
+    [{ resume: true }, { "idempotency-key": id(30) }],
+  ] as const)
+    expect((await f.sendRetry(payload, extra)).status).toBe(400);
+  expect(f.resume).not.toHaveBeenCalled();
+});
 it("WP-2423 Q20: opens another card on the existing payment for {retry:true} only", async () => {
   const f = await setup();
   const response = await f.sendRetry();

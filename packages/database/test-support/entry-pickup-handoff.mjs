@@ -286,8 +286,15 @@ export async function exerciseEntryPickupHandoff({
     );
     assert.deepEqual(httpQueue.body.items[0].proof, currentQueue.items[0].proof);
     // WP-2423 Q26: Order items only match remakes; the pickup screen contract omits them.
+    // WP-2423: each item is named (and its options listed) from Ordering's item snapshot, read
+    // under the merchant runtime's own grants, so staff match what they hand over.
     assert.deepEqual(
-      httpQueue.body.items[0].items,
+      httpQueue.body.items[0].items.map(({ name, options, ...line }) => {
+        assert.equal(typeof name, "string");
+        assert.ok(name.length > 0);
+        assert.ok(Array.isArray(options));
+        return line;
+      }),
       currentQueue.items[0].items.map((line) => {
         const { orderItemReference, ...shown } = line;
         assert.equal(typeof orderItemReference, "string");

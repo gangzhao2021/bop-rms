@@ -18,6 +18,8 @@ import { createInternalCounterOrder } from "./pilot-counter-order.mjs";
 import { createInternalQrLoaders } from "./pilot-qr.mjs";
 import { createMerchantDiningTableQr } from "../../apps/api/dist/merchant-dining-table-qr.js";
 import { createPilotAlertBoardReader } from "./pilot-ops-files.mjs";
+import { createInternalBatchCancellation } from "./pilot-batch-cancellation.mjs";
+import { createInternalOpenPaymentResolution } from "./pilot-open-payment-resolution.mjs";
 const factories = {
   createInternalRefundReconciliation,
   createInternalRefundSend,
@@ -190,6 +192,25 @@ export function composeMerchantDependencies(
         },
         customerOrigin: "https://127.0.0.1:4443",
       });
+    },
+    // WP-2423 abandoned payment: managers cancel an unpaid dine-in round before its deadline with
+    // the System's own unpaid round cancellation (same Workflow, installed for the business worker)
+    // after Payment resolved the round's online attempt with the TEST-ONLY simulated Provider.
+    createInternalUnpaidRoundCancellation: async (resources) => {
+      const worker = await installation.loadBusinessWorker();
+      if (worker.workloads?.batchCancellation !== true) return undefined;
+      return {
+        cancellation: await createInternalBatchCancellation(resources, {
+          loadWorkflow: installation.loadCancellationWorkflow,
+          expectedDatabaseName: installation.database,
+          systemActorReference: worker.actors.paidOutcome,
+          ...account,
+        }),
+        payment: createInternalOpenPaymentResolution(resources, {
+          createSimulatedProvider: provider,
+          ...account,
+        }),
+      };
     },
     createInternalDiningCredentials: dining.createInternalDiningCredentials,
     createInternalMerchantDining: f.createInternalMerchantDining,

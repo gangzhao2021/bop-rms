@@ -29,7 +29,7 @@ function acceptedWorkflow(definition) {
 /** Trusted local System composition; source facts must be read by246 under retained fences. */
 export async function createInternalBatchCancellation(
   resources,
-  { loadWorkflow, expectedDatabaseName, systemActorReference },
+  { loadWorkflow, expectedDatabaseName, systemActorReference, providerAccountReference },
 ) {
   const saved = await loadWorkflow(),
     scope = {
@@ -94,18 +94,28 @@ export async function createInternalBatchCancellation(
     authorize: async (_tx, value) => active() && (!value.tenantReference || sameScope(value)),
     authorizeKitchen: async () => active(),
     authorizeDining: async () => active(),
+    // WP-2423 abandoned payment: Payment's terminal facts for this Store's Provider account.
+    ...(providerAccountReference === undefined
+      ? {}
+      : { paymentAccount: { providerAccountReference, environment: "Test" } }),
     resolvePolicy: async (tx, evidence) => {
-      const expiry = parseOrderBatchCheckoutExpiry(evidence.expiry);
+      // WP-2423 abandoned payment: a manager's cancellation before the deadline has no expiry
+      // evidence; the service proved from Payment that nothing was charged.
+      const expiry =
+        evidence.expiry === null ? null : parseOrderBatchCheckoutExpiry(evidence.expiry);
+      const round = expiry ?? evidence.round;
       if (
         !active() ||
-        !sameScope(expiry) ||
-        // WP-2423: a failed payment, or none ever started (the service proved it from Payment).
-        (expiry.status !== "PaymentFailed" && expiry.status !== "AwaitingPaymentResolution") ||
+        (expiry !== null &&
+          (!sameScope(expiry) ||
+            // WP-2423: a failed payment, or none ever started (the service proved it from Payment).
+            (expiry.status !== "PaymentFailed" &&
+              expiry.status !== "AwaitingPaymentResolution"))) ||
         !evidence.progress.kitchenEvidenceComplete
       )
         return unavailable();
       const target = evidence.items.filter(
-        (item) => item.orderBatchReference === expiry.orderBatchReference,
+        (item) => item.orderBatchReference === round.orderBatchReference,
       );
       if (
         !target.length ||
@@ -115,7 +125,7 @@ export async function createInternalBatchCancellation(
       const before = summarizeOrderItemProgress(evidence.items),
         after = summarizeOrderItemProgress(
           evidence.items.map((item) =>
-            item.orderBatchReference === expiry.orderBatchReference
+            item.orderBatchReference === round.orderBatchReference
               ? { ...item, phase: "Cancelled" }
               : item,
           ),
@@ -139,7 +149,7 @@ export async function createInternalBatchCancellation(
         active() &&
         sameScope(request) &&
         request.actorReference === principal &&
-        request.resourceReference === expiry.orderReference &&
+        request.resourceReference === round.orderReference &&
         request.resourceVersion === evidence.orderVersion &&
         request.observedAt === evidence.observedAt &&
         request.currentState === before.phase &&
@@ -164,5 +174,9 @@ export async function createInternalBatchCancellation(
       };
     },
   });
-  return Object.freeze({ cancel: service.cancel, loadPublished });
+  return Object.freeze({
+    cancel: service.cancel,
+    cancelUnpaidForStaff: service.cancelUnpaidForStaff,
+    loadPublished,
+  });
 }

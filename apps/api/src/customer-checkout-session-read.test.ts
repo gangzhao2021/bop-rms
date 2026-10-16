@@ -28,6 +28,7 @@ function fixture() {
   let available = true,
     binding = true,
     clock = at,
+    databaseOffset = 0,
     transactions = 0;
   let afterRead: () => void = () => undefined;
   let missing = false,
@@ -47,7 +48,10 @@ function fixture() {
       if (sql.includes("set_config")) return { rows: [] };
       if (sql.includes("FROM rms_ordering.cart c"))
         return { rows: foreignCart ? [] : [{ cart: f.cart }] };
-      if (sql.includes("clock_timestamp")) return { rows: [{ observed_at: clock }] };
+      if (sql.includes("clock_timestamp"))
+        return {
+          rows: [{ observed_at: new Date(Date.parse(clock) + databaseOffset).toISOString() }],
+        };
       if (sql.includes("FROM rms_ordering.checkout_session_record")) {
         expect(values).toEqual([
           f.scope.brandReference,
@@ -117,6 +121,10 @@ function fixture() {
     stale: () => {
       binding = false;
     },
+    /** The database clock runs `milliseconds` ahead of the application clock (or behind). */
+    skew: (milliseconds: number) => {
+      databaseOffset = milliseconds;
+    },
     rewind: () => {
       clock = "2026-09-10T11:59:00.000Z";
     },
@@ -133,6 +141,24 @@ it("reads owner history with actual credential verification on one transaction w
   expect(await f.port.read(f.input)).toEqual(f.session);
   expect(f.transactions()).toBe(1);
 });
+it.each([300, -300, 1500, -1500])(
+  "reads across a database clock %i ms off the application clock (WP-2423)",
+  async (milliseconds) => {
+    // Before: either direction answered PERMISSION_DENIED (checkedAt after clock_timestamp(), or
+    // the in-transaction database instant after the application clock).
+    const f = fixture();
+    f.skew(milliseconds);
+    expect(await f.port.read(f.input)).toEqual(f.session);
+  },
+);
+it.each([2500, -2500])(
+  "refuses a database clock %i ms off the application clock, beyond the allowance",
+  async (milliseconds) => {
+    const f = fixture();
+    f.skew(milliseconds);
+    await expect(f.port.read(f.input)).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+  },
+);
 it.each(["deny", "stale", "change", "rewind", "foreignCart"] as const)(
   "rejects %s occurring after owner lookup",
   async (mode) => {

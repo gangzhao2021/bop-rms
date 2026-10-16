@@ -35,6 +35,36 @@ function error(response: Response, invalid = false) {
     },
   });
 }
+/** Definitive Dining refusals: stable public codes, never a reason the Guest could act on wrongly. */
+const refusals = {
+  CodeUsed: {
+    status: 409,
+    code: "dining_join_code_used",
+    messageKey: "customer.dining.join_code_used",
+  },
+  CodeNotAccepted: {
+    status: 409,
+    code: "dining_join_code_not_accepted",
+    messageKey: "customer.dining.join_code_not_accepted",
+  },
+  TooManyAttempts: {
+    status: 429,
+    code: "dining_join_rate_limited",
+    messageKey: "customer.dining.join_rate_limited",
+  },
+} as const;
+function refusal(value: unknown) {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Object.getOwnPropertyDescriptor(value, "status")?.value !== "Refused"
+  )
+    return null;
+  const reason = readClosedRecord(value, ["status", "reason"]).reason;
+  if (typeof reason !== "string" || !Object.hasOwn(refusals, reason))
+    throw new Error("invalid join refusal");
+  return refusals[reason as keyof typeof refusals];
+}
 function single(request: Request, name: string): string {
   const count = request.rawHeaders.filter(
     (value, index) => index % 2 === 0 && value.toLowerCase() === name,
@@ -124,13 +154,22 @@ export class CustomerDiningJoinHandler {
         const context = await this.#resolve(request);
         if (context === null || context === undefined || typeof context.abuse?.admit !== "function")
           throw new Error("missing request context");
-        const result = readClosedRecord(
-          await this.#port.join(
-            { operationReference, sessionCredential, csrfCredential, joinCredential },
-            context,
-          ),
-          ["status", "operationReference", "admissionReference"],
+        const value = await this.#port.join(
+          { operationReference, sessionCredential, csrfCredential, joinCredential },
+          context,
         );
+        const refused = refusal(value);
+        if (refused !== null) {
+          response
+            .status(refused.status)
+            .json({ error: { code: refused.code, messageKey: refused.messageKey } });
+          return;
+        }
+        const result = readClosedRecord(value, [
+          "status",
+          "operationReference",
+          "admissionReference",
+        ]);
         const admissionReference = parseGuestDiningAdmissionReference(result.admissionReference);
         if (result.status !== "Joined" || result.operationReference !== operationReference)
           throw new Error("invalid join result");

@@ -254,7 +254,7 @@ test("@production a manager refunds an item of a card-machine payment and record
   const requests = page.getByRole("region", { name: "Recorded refund requests" });
   await expect(requests).toContainText("To refund on the card machine");
   await page.getByRole("button", { name: "Check execution status for request 1" }).click();
-  await expect(page.getByRole("button", { name: "Prepare refund execution" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Send refund", exact: true })).toHaveCount(0);
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: 900 });
     expect(

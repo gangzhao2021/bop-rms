@@ -9,6 +9,7 @@ import {
   type OptionSetAggregate,
   type ProductLifecycleTransaction,
 } from "@rms/catalog";
+import { withRememberedBrandAuthorization } from "./merchant-brand-transaction-authorization.js";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import { derivedReference } from "./merchant-products.js";
@@ -242,21 +243,23 @@ export function createMerchantOptionSets(options: {
   }) => {
     const current = await session(input);
     return retryTransactionConflict(() =>
-      options.persistence.transactions.run(async (tx) => {
-        const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
-        const sets = await listBrandOptionSets(ptx(tx), { brandReference: s.brand });
-        const base = {
-          sourceAsOf: options.persistence.now(),
-          permissions: s.permissions,
-        };
-        if (input.optionSetReference === null)
-          return { screenId: "CAT-OPTIONSET-LIST" as const, ...base, optionSets: sets.map(view) };
-        const set = sets.find(
-          (candidate) => candidate.optionSetReference === input.optionSetReference,
-        );
-        if (set === undefined) return fail("NotFound");
-        return { screenId: "CAT-OPTIONSET-EDIT" as const, ...base, optionSet: view(set) };
-      }),
+      options.persistence.transactions.run((tx) =>
+        withRememberedBrandAuthorization(tx, async () => {
+          const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+          const sets = await listBrandOptionSets(ptx(tx), { brandReference: s.brand });
+          const base = {
+            sourceAsOf: options.persistence.now(),
+            permissions: s.permissions,
+          };
+          if (input.optionSetReference === null)
+            return { screenId: "CAT-OPTIONSET-LIST" as const, ...base, optionSets: sets.map(view) };
+          const set = sets.find(
+            (candidate) => candidate.optionSetReference === input.optionSetReference,
+          );
+          if (set === undefined) return fail("NotFound");
+          return { screenId: "CAT-OPTIONSET-EDIT" as const, ...base, optionSet: view(set) };
+        }),
+      ),
     );
   };
 
@@ -264,106 +267,108 @@ export function createMerchantOptionSets(options: {
     const body = parseOptionSetCommandBody(input.body);
     const current = await session(input);
     return retryTransactionConflict(() =>
-      options.persistence.transactions.run(async (tx) => {
-        const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
-        if (!s.permissions.mayEdit) fail("PermissionDenied");
-        const at = options.persistence.now();
-        const service = optionSetService(tx, s, body.operationReference);
-        // A retried submission (same operation) returns what it did the first time; the domain
-        // intent includes the request time, so it cannot be re-sent through the service.
-        const prior = await optionSetRepository(tx, s).resolveOperation(
-          parseCatalogReference(body.operationReference),
-        );
-        if (prior !== null) {
-          const record = prior as { action: string; aggregate: OptionSetAggregate };
-          const action = body.action === "Save" ? "ReplaceDraft" : body.action;
-          if (
-            record.action !== action ||
-            (body.action !== "Create" &&
-              record.aggregate.optionSetReference !== body.optionSetReference) ||
-            record.aggregate.brandReference !== s.brand
-          )
-            return fail("Conflict");
-          return { status: "AlreadyApplied" as const, optionSet: view(record.aggregate) };
-        }
-        try {
-          if (body.action === "Create") {
-            const code = codeForName(body.name, "SET");
-            const result = await service.create({
-              internalCode: code,
-              defaultLocale: options.locale,
-              localizedNames: { [options.locale]: body.name },
-              localizedDescriptions: {},
-              ...limits(body),
-              // New options: the service assigns their identity.
-              options: optionInputs(body, []).map((option) =>
-                Object.fromEntries(
-                  Object.entries(option).filter(([key]) => key !== "optionReference"),
-                ),
-              ),
-              operationReference: body.operationReference,
-              requestedAt: at,
-            });
-            return { status: result.status, optionSet: view(result.aggregate) };
+      options.persistence.transactions.run((tx) =>
+        withRememberedBrandAuthorization(tx, async () => {
+          const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+          if (!s.permissions.mayEdit) fail("PermissionDenied");
+          const at = options.persistence.now();
+          const service = optionSetService(tx, s, body.operationReference);
+          // A retried submission (same operation) returns what it did the first time; the domain
+          // intent includes the request time, so it cannot be re-sent through the service.
+          const prior = await optionSetRepository(tx, s).resolveOperation(
+            parseCatalogReference(body.operationReference),
+          );
+          if (prior !== null) {
+            const record = prior as { action: string; aggregate: OptionSetAggregate };
+            const action = body.action === "Save" ? "ReplaceDraft" : body.action;
+            if (
+              record.action !== action ||
+              (body.action !== "Create" &&
+                record.aggregate.optionSetReference !== body.optionSetReference) ||
+              record.aggregate.brandReference !== s.brand
+            )
+              return fail("Conflict");
+            return { status: "AlreadyApplied" as const, optionSet: view(record.aggregate) };
           }
-          const sets = await listBrandOptionSets(ptx(tx), { brandReference: s.brand });
-          const existing = sets.find((set) => set.optionSetReference === body.optionSetReference);
-          if (existing === undefined) return fail("NotFound");
-          if (body.action === "Archive") {
-            const result = await service.archive({
+          try {
+            if (body.action === "Create") {
+              const code = codeForName(body.name, "SET");
+              const result = await service.create({
+                internalCode: code,
+                defaultLocale: options.locale,
+                localizedNames: { [options.locale]: body.name },
+                localizedDescriptions: {},
+                ...limits(body),
+                // New options: the service assigns their identity.
+                options: optionInputs(body, []).map((option) =>
+                  Object.fromEntries(
+                    Object.entries(option).filter(([key]) => key !== "optionReference"),
+                  ),
+                ),
+                operationReference: body.operationReference,
+                requestedAt: at,
+              });
+              return { status: result.status, optionSet: view(result.aggregate) };
+            }
+            const sets = await listBrandOptionSets(ptx(tx), { brandReference: s.brand });
+            const existing = sets.find((set) => set.optionSetReference === body.optionSetReference);
+            if (existing === undefined) return fail("NotFound");
+            if (body.action === "Archive") {
+              const result = await service.archive({
+                optionSetReference: body.optionSetReference,
+                expectedAggregateVersion: body.expectedAggregateVersion,
+                operationReference: body.operationReference,
+                requestedAt: at,
+              });
+              return { status: result.status, optionSet: view(result.aggregate) };
+            }
+            const priorOptions = existing.draft.options;
+            const kept = optionInputs(body, priorOptions);
+            // Options no longer listed stay on record, not offered (orders refer to them).
+            const dropped = priorOptions.filter(
+              (option) => !body.options.some((o) => o.optionReference === option.optionReference),
+            );
+            const merged = [
+              ...kept,
+              ...dropped.map((option) => ({ ...option, lifecycle: "Inactive" as const })),
+            ].map((option, sortOrder) => ({ ...option, sortOrder }));
+            const result = await service.replaceDraft({
               optionSetReference: body.optionSetReference,
               expectedAggregateVersion: body.expectedAggregateVersion,
+              draft: {
+                ...existing.draft,
+                localizedNames: { ...existing.draft.localizedNames, [options.locale]: body.name },
+                ...limits(body),
+                options: merged.map((option) =>
+                  "optionReference" in option && option.optionReference !== null
+                    ? {
+                        ...option,
+                        conflictOptionReferences: [...option.conflictOptionReferences].sort(),
+                      }
+                    : {
+                        ...option,
+                        optionReference: parseCatalogReference(
+                          derivedReference(body.operationReference, "option:" + option.stableCode),
+                        ),
+                        optionSetReference: existing.optionSetReference,
+                        brandReference: existing.brandReference,
+                        createdAt: at,
+                        createdByActorReference: s.actor,
+                      },
+                ),
+                updatedAt: at,
+              },
               operationReference: body.operationReference,
               requestedAt: at,
             });
             return { status: result.status, optionSet: view(result.aggregate) };
+          } catch (error) {
+            const mapped = error instanceof CatalogError ? catalogErrors[error.code] : undefined;
+            if (mapped !== undefined) return fail(mapped);
+            throw error;
           }
-          const priorOptions = existing.draft.options;
-          const kept = optionInputs(body, priorOptions);
-          // Options no longer listed stay on record, not offered (orders refer to them).
-          const dropped = priorOptions.filter(
-            (option) => !body.options.some((o) => o.optionReference === option.optionReference),
-          );
-          const merged = [
-            ...kept,
-            ...dropped.map((option) => ({ ...option, lifecycle: "Inactive" as const })),
-          ].map((option, sortOrder) => ({ ...option, sortOrder }));
-          const result = await service.replaceDraft({
-            optionSetReference: body.optionSetReference,
-            expectedAggregateVersion: body.expectedAggregateVersion,
-            draft: {
-              ...existing.draft,
-              localizedNames: { ...existing.draft.localizedNames, [options.locale]: body.name },
-              ...limits(body),
-              options: merged.map((option) =>
-                "optionReference" in option && option.optionReference !== null
-                  ? {
-                      ...option,
-                      conflictOptionReferences: [...option.conflictOptionReferences].sort(),
-                    }
-                  : {
-                      ...option,
-                      optionReference: parseCatalogReference(
-                        derivedReference(body.operationReference, "option:" + option.stableCode),
-                      ),
-                      optionSetReference: existing.optionSetReference,
-                      brandReference: existing.brandReference,
-                      createdAt: at,
-                      createdByActorReference: s.actor,
-                    },
-              ),
-              updatedAt: at,
-            },
-            operationReference: body.operationReference,
-            requestedAt: at,
-          });
-          return { status: result.status, optionSet: view(result.aggregate) };
-        } catch (error) {
-          const mapped = error instanceof CatalogError ? catalogErrors[error.code] : undefined;
-          if (mapped !== undefined) return fail(mapped);
-          throw error;
-        }
-      }),
+        }),
+      ),
     );
   };
 

@@ -217,6 +217,19 @@ export function createCustomerSessionPaymentIntent(options: CustomerSessionPayme
      * Order, records a tip or starts a payment clock.
      */
     async retry(value: unknown) {
+      return existingAttempt(value, "retry");
+    },
+    /**
+     * WP-2423 abandoned payment: the guest who started paying for this checkout comes back (reload,
+     * another tab of the same guest session) to the same payment while its window is open. Returns
+     * the latest attempt as stored; never opens an attempt, records a tip or contacts the Provider.
+     */
+    async resume(value: unknown) {
+      return existingAttempt(value, "resume");
+    },
+  });
+  async function existingAttempt(value: unknown, mode: "retry" | "resume") {
+    {
       let input: {
         sessionCredential: string;
         csrfCredential: string;
@@ -264,7 +277,7 @@ export function createCustomerSessionPaymentIntent(options: CustomerSessionPayme
             throw new CheckoutSessionServiceError("INTENT_CONFLICT");
           },
         },
-      }).retry({
+      })[mode]({
         paymentOperationReference: session.paymentOperationReference,
         submissionReference: session.submissionReference,
         requestedAt: options.access.now(),
@@ -281,8 +294,8 @@ export function createCustomerSessionPaymentIntent(options: CustomerSessionPayme
       )
         throw new CheckoutSessionServiceError("INTENT_CONFLICT");
       return Object.freeze({ status: result.status, record, session });
-    },
-  });
+    }
+  }
 }
 
 /**

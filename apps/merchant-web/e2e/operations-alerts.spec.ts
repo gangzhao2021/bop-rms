@@ -3,7 +3,8 @@ import { expectNoInternalText } from "./internal-text-guard";
 
 // The real pilot navigation shape (tooling/environment/pilot-merchant.mjs), trimmed per role the
 // way the BFF trims it by permission. The card must not depend on any one of these entries: the
-// server's answer on /merchant/operations-alerts decides (200 Owner/Store Manager, 403 others).
+// server's answer on /merchant/operations-alerts decides (the board for Owner/Store Manager, an
+// ordinary "not permitted" answer for others: no refusal in the browser console).
 type PilotRole = "owner" | "store-manager" | "front-of-house";
 const pilotEntries: readonly (readonly [string, string, string, string, readonly PilotRole[]])[] = [
   [
@@ -88,7 +89,7 @@ const headers = { "cache-control": "no-store" };
 
 /**
  * Routes every read the Home makes for a pilot role. The alerts route answers as the real BFF
- * does: the board for Owner and Store Manager, 403 for everyone else. Any other merchant read is
+ * does: the board for Owner and Store Manager, "not permitted" for everyone else. Any other merchant read is
  * recorded as unexpected so a new Home dependency is noticed instead of silently failing.
  */
 async function pilotHome(page: Page, role: PilotRole, board: () => unknown) {
@@ -189,14 +190,12 @@ async function pilotHome(page: Page, role: PilotRole, board: () => unknown) {
   await page.route("**/merchant/operations-alerts", (route) => {
     alertReads.push(route.request().method());
     return role === "front-of-house"
-      ? route.fulfill({ status: 403, headers, json: { error: "request_denied" } })
+      ? route.fulfill({ headers, json: { permitted: false } })
       : route.fulfill({ headers, json: board() });
   });
   page.on("console", (message) => {
-    // The browser itself reports the expected 403 as a failed resource load; it is not an app error.
+    // WP-2423: no exemption: front of house sees no refused request in the console either.
     if (message.type() !== "error") return;
-    if (message.location().url.endsWith("/merchant/operations-alerts") && role === "front-of-house")
-      return;
     errors.push(message.text());
   });
   return { alertReads, unexpected, errors };
@@ -326,7 +325,7 @@ test("@production Home shows front of house no store system card and does not ke
   await expect(
     page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Exceptions" }),
   ).toHaveCount(0);
-  // Two refresh periods later the Home has not asked again: a 403 stops the reading.
+  // Two refresh periods later the Home has not asked again: "not permitted" stops the reading.
   await page.clock.runFor(130_000);
   await expect(page.getByRole("region", { name: "Right now" })).toBeVisible();
   expect(home.alertReads).toHaveLength(1);

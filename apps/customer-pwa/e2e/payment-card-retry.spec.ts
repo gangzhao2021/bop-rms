@@ -68,6 +68,8 @@ async function fixture(page: Page, options: { retry?: { status: number; code?: s
           orderReference: order,
           status: result,
           total: { amountMinor: "2260", currency: "CAD" },
+          payBy: "2099-01-01T12:30:00.000Z",
+          failure: result === "Failed" ? "Declined" : null,
         },
       });
     if (url.pathname === `/api/v1/checkout-sessions/${checkout}/payment-intents`) {

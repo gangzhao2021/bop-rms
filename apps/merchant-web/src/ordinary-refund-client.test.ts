@@ -431,13 +431,16 @@ it("WP-2423 Q5: reads each request's progress and who may record requests", asyn
     .mockResolvedValueOnce(items({ ...base, progress: "Refunded" }))
     .mockResolvedValueOnce(items({ ...base, progress: "Declined" }))
     .mockResolvedValueOnce(items({ ...base, progress: "Done" }))
-    .mockResolvedValueOnce(items({ ...base, progress: "Sending" }, "yes"));
+    .mockResolvedValueOnce(items({ ...base, progress: "Sending" }, "yes"))
+    // WP-2423 item 6: prepared but not sent yet is its own progress.
+    .mockResolvedValueOnce(items({ ...base, progress: "ReadyToSend" }));
   const client = createOrdinaryRefundClient(fetcher);
   const read = await client.items(id(1), csrf);
   expect(read.canRequest).toBe(false);
   expect(read.recentRequests[0]?.progress).toBe("Refunded");
   for (let i = 0; i < 3; i++)
     await expect(client.items(id(1), csrf)).rejects.toMatchObject({ code: "Unavailable" });
+  expect((await client.items(id(1), csrf)).recentRequests[0]?.progress).toBe("ReadyToSend");
 });
 it("WP-2423: a PIN sign-in refusal asks to confirm it is them; a plain 403 stays denied", async () => {
   const fetcher = vi

@@ -71,7 +71,7 @@ export function DiningServeAction({
   return (
     <div>
       <label>
-        Quantity served · {item.displayName} · batch {item.batchSequence}
+        Quantity served · {item.displayName} · round {item.batchSequence}
         <input
           type="number"
           min="1"

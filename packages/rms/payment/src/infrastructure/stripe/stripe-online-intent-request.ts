@@ -1,9 +1,11 @@
 import {
+  createCancelIntentRequest,
   createCreateIntentRequest,
   createRetrieveIntentRequest,
 } from "../../application/payment-provider-adapter.js";
 import {
   PaymentProviderContractError,
+  type CancelIntentRequest,
   type CreateIntentRequest,
   type RetrieveIntentRequest,
 } from "../../contracts/payment-provider-adapter.js";
@@ -19,8 +21,25 @@ export interface StripeOnlineIntentRequest {
 /** Credentials, API version and account binding belong to the configured transport.
  * Do not confirm here: card collection/authentication uses the Provider client SDK. */
 export function encodeStripeOnlineIntentRequest(
-  input: CreateIntentRequest | RetrieveIntentRequest,
+  input: CreateIntentRequest | RetrieveIntentRequest | CancelIntentRequest,
 ): StripeOnlineIntentRequest {
+  // WP-2423 abandoned payment: cancel an intent the customer never confirmed (Stripe refuses one
+  // that succeeded or is processing). Idempotent per attempt; answers the intent like a retrieval.
+  if (input.operation === "CancelIntent") {
+    const request = createCancelIntentRequest(input);
+    if (!/^pi_[A-Za-z0-9]+$/u.test(request.providerIntentReference))
+      throw new PaymentProviderContractError("PAYMENT_PROVIDER_INPUT_INVALID");
+    return Object.freeze({
+      method: "POST",
+      path:
+        "/v1/payment_intents/" + encodeURIComponent(request.providerIntentReference) + "/cancel",
+      body: new URLSearchParams({
+        cancellation_reason: "abandoned",
+        "expand[]": "latest_charge",
+      }).toString(),
+      idempotencyKey: request.idempotencyKey,
+    });
+  }
   if (input.operation === "RetrieveIntent") {
     const request = createRetrieveIntentRequest(input);
     if (!/^pi_[A-Za-z0-9]+$/u.test(request.providerIntentReference))

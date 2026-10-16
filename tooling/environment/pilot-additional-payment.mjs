@@ -140,6 +140,10 @@ export async function createInternalAdditionalPayment(
     async retry(input) {
       return (await resolveRequest(input)).service.retry(input);
     },
+    // WP-2423 abandoned payment: the same guest returns to this round's open payment.
+    async resume(input) {
+      return (await resolveRequest(input)).service.resume(input);
+    },
     async create(input) {
       try {
         return await (await resolveRequest(input)).service.create(input);

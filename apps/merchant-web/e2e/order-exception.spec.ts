@@ -172,7 +172,7 @@ test("@production exception filters and clear remain keyboard operable", async (
 
   const type = page.getByRole("combobox", { name: "Type", exact: true });
   await type.focus();
-  // Options carry staff wording; "U" jumps to "Unpaid dine-in batch".
+  // Options carry staff wording; "U" jumps to "Unpaid dine-in round".
   await type.press("U");
   await expect(type).toHaveValue("DiningUnpaidBatch");
   await expect(

@@ -73,3 +73,16 @@ export function createDiningOrderDeliveryProgress(
     },
   });
 }
+
+/**
+ * WP-2423: items (quantities) the kitchen marked ready and nobody has served yet — waiting at the
+ * pass. A partly served item stays Ready; cancelled items never count. The one rule the Tables
+ * page (closing a table) and the Home's "ready to serve" both use.
+ */
+export function readyToServeQuantity(
+  items: readonly { readonly phase: string; readonly remainingQuantity: number }[],
+): number {
+  return items
+    .filter((item) => item.phase === "Ready" && item.remainingQuantity > 0)
+    .reduce((sum, item) => sum + item.remainingQuantity, 0);
+}

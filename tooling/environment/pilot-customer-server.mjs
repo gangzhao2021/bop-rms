@@ -124,6 +124,10 @@ export async function startInternalCustomerServer({
           async retry(input) {
             return (await terminal.confirm(input, confirmation, { retry: true })).created;
           },
+          // WP-2423 abandoned payment: confirm the guest's open attempt after they came back.
+          async resume(input) {
+            return (await terminal.confirm(input, confirmation, { resume: true })).created;
+          },
         },
       });
       app.post(

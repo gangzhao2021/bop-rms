@@ -157,6 +157,9 @@ export function createCustomerDiningJoinComposition(options: CustomerDiningJoinC
           operationReference,
           requestedAt: now(),
         });
+        // A definitive Dining refusal wrote nothing; the Guest needs a new code, not a retry.
+        if (result.status === "DiningJoinRefused")
+          return Object.freeze({ status: "Refused" as const, reason: result.reason });
         if (result.status === "DiningJoinUnavailable") return unavailable();
         const admission = parseDiningIdentityAdmission(result.admission);
         const latest = await current(initial.sessionReference, now());

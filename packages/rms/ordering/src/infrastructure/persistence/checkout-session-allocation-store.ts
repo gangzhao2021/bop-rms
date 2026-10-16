@@ -4,7 +4,11 @@ import {
   CheckoutSessionServiceError,
   type CheckoutSessionAuthority,
 } from "../../application/checkout-session-service.js";
-import { parseOrderingInstant, parseOrderingReference } from "../../domain/cart.js";
+import {
+  orderingInstantNotAfterAcrossClocks,
+  parseOrderingInstant,
+  parseOrderingReference,
+} from "../../domain/cart.js";
 import {
   parseCheckoutSessionAllocation,
   type CheckoutSessionAllocation,
@@ -51,7 +55,8 @@ export function createPostgresCheckoutSessionAllocationStore(
     if (
       authority.brandReference !== brand ||
       authority.storeReference !== store ||
-      parseOrderingInstant(authority.checkedAt) > at ||
+      // Application-clock observation, database-clock check (see ORDERING_CLOCK_SKEW_ALLOWANCE_MS).
+      !orderingInstantNotAfterAcrossClocks(authority.checkedAt, at) ||
       parseOrderingInstant(authority.validUntil) <= at ||
       !(await gates.authorize(tx, authority, at))
     )

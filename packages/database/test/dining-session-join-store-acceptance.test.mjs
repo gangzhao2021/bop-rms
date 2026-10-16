@@ -366,6 +366,17 @@ it("consumes Join credentials and creates Participant, Host and admission atomic
         (await service().join({ ...first, operationReference: id(90) })).status,
         "DiningJoinUnavailable",
       );
+      // WP-2423: a second Guest reusing the consumed single-use code gets a definitive refusal.
+      assert.deepEqual(
+        await service().joinCurrent({
+          guestSessionReference: id(81),
+          joinCredential: started.joinCredential,
+          operationReference: id(91),
+          requestedAt: at(2),
+        }),
+        { status: "DiningJoinRefused", reason: "CodeUsed" },
+      );
+      assert.deepEqual(await counts(), equalCounts(1));
       const original = await joinReader.resolveJoinOperation(id(40));
       assert.equal(original.capability.status, "Consumed");
       assert.equal(original.admission.status, "Active");

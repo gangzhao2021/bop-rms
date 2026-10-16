@@ -173,7 +173,63 @@ export function unpaidRounds(view: OrderStatusView): ReadonlySet<string> {
   ]);
 }
 
-function kitchenStatus(view: OrderStatusView): "Ready" | "Preparing" | "Queued" | "Unknown" {
+/**
+ * WP-2423: dine-in rounds still waiting for their payment. The kitchen only receives a round once it
+ * is paid, so these are not "in the queue" (a failed or cancelled one is in unpaidRounds instead).
+ */
+export function awaitingPaymentRounds(view: OrderStatusView): ReadonlySet<string> {
+  const ticketed = new Set(
+    view.sources?.kitchen?.batches.map((batch) => batch.orderBatchReference) ?? [],
+  );
+  const notPaid = unpaidRounds(view);
+  return new Set(
+    view.sources?.batchPayments
+      ?.filter(
+        (entry) =>
+          entry.status === "Awaiting" &&
+          !notPaid.has(entry.orderBatchReference) &&
+          !ticketed.has(entry.orderBatchReference),
+      )
+      .map((entry) => entry.orderBatchReference) ?? [],
+  );
+}
+
+/**
+ * WP-2423: how far a dine-in round has been served, from Dining's current served quantities. Items
+ * the Store cancelled are not waiting to be served. Null when no serving facts are available.
+ */
+export function roundServing(
+  view: OrderStatusView,
+  batch: OrderStatusView["order"]["batches"][number],
+): "All" | "Some" | "None" | null {
+  const served = view.order.orderType === "DineIn" ? view.sources?.dining?.items : undefined;
+  if (served === undefined) return null;
+  const cancelled = new Set(
+    view.sources?.itemCancellations?.flatMap((entry) => entry.orderItemReferences) ?? [],
+  );
+  const quantities = batch.items
+    .filter((item) => !cancelled.has(item.orderItemReference))
+    .map((item) => ({
+      ordered: item.quantity,
+      served:
+        served.find(
+          (entry) =>
+            entry.orderBatchReference === batch.orderBatchReference &&
+            entry.orderItemReference === item.orderItemReference,
+        )?.servedQuantity ?? 0,
+    }));
+  if (quantities.length === 0) return null;
+  if (quantities.every((entry) => entry.served >= entry.ordered)) return "All";
+  return quantities.some((entry) => entry.served > 0) ? "Some" : "None";
+}
+
+/**
+ * The kitchen's progress over the rounds still to be made (DEC-PILOT-BATCH-PHASE-01): cancelled,
+ * unpaid and fully served rounds don't count, and a round waiting for payment hasn't reached it.
+ */
+function kitchenStatus(
+  view: OrderStatusView,
+): "Ready" | "Preparing" | "Queued" | "Unknown" | "Served" | "AwaitingPayment" {
   const kitchen = view.sources?.kitchen;
   if (!kitchen) return "Unknown";
   // WP-2423 Q6: a round the store cancelled is not waiting for the kitchen, nor is an unpaid one.
@@ -181,16 +237,42 @@ function kitchenStatus(view: OrderStatusView): "Ready" | "Preparing" | "Queued" 
     ...(view.sources?.staffCancellations?.map((entry) => entry.orderBatchReference) ?? []),
     ...unpaidRounds(view),
   ]);
-  const active = kitchen.batches.filter(
-    (batch) => batch.status !== "Cancelled" && !cancelled.has(batch.orderBatchReference),
+  const awaiting = awaitingPaymentRounds(view);
+  const open = view.order.batches.filter(
+    (batch) =>
+      !cancelled.has(batch.orderBatchReference) && !awaiting.has(batch.orderBatchReference),
   );
-  const expected = view.order.batches.filter(
-    (batch) => !cancelled.has(batch.orderBatchReference),
-  ).length;
-  if (active.length === 0) return expected === 0 ? "Unknown" : "Queued";
-  if (active.length === expected && active.every((batch) => batch.status === "Ready"))
+  const remaining = open.filter((batch) => roundServing(view, batch) !== "All");
+  if (remaining.length === 0)
+    return awaiting.size > 0 ? "AwaitingPayment" : open.length > 0 ? "Served" : "Unknown";
+  const expected = new Set(remaining.map((batch) => batch.orderBatchReference));
+  const active = kitchen.batches.filter(
+    (batch) => batch.status !== "Cancelled" && expected.has(batch.orderBatchReference),
+  );
+  if (active.length === 0) return "Queued";
+  if (active.length === expected.size && active.every((batch) => batch.status === "Ready"))
     return "Ready";
   return active.some((batch) => batch.status !== "Queued") ? "Preparing" : "Queued";
+}
+
+/**
+ * Everything paid for this order so far: every successful payment, one per round for a dine-in
+ * order shared by the table (tips included). Refunds are stated separately on the page.
+ */
+export function paidTotal(
+  view: OrderStatusView,
+): { readonly amountMinor: bigint; readonly currencyCode: string } | null {
+  const paid = (view.sources?.payments ?? []).flatMap((payment) =>
+    payment.status === "Succeeded" && payment.amount ? [payment.amount] : [],
+  );
+  const currencyCode = paid[0]?.currencyCode;
+  if (currencyCode === undefined) return null;
+  return {
+    amountMinor: paid
+      .filter((amount) => amount.currencyCode === currencyCode)
+      .reduce((sum, amount) => sum + amount.amountMinor, 0n),
+    currencyCode,
+  };
 }
 
 function StatusContent({
@@ -221,6 +303,7 @@ function StatusContent({
     view.sources?.unpaidCancellations?.map((entry) => entry.orderBatchReference) ?? [],
   );
   const notPaid = unpaidRounds(view);
+  const awaitingPayment = awaitingPaymentRounds(view);
   const failedPayment = (orderBatchReference: string) =>
     view.sources?.batchPayments?.find(
       (entry) => entry.orderBatchReference === orderBatchReference && entry.cancelsAt !== null,
@@ -297,36 +380,43 @@ function StatusContent({
                         ]
                     : allServed
                       ? ["Items served", "All listed items have been served."]
-                      : someServed
+                      : kitchenLabel === "AwaitingPayment"
                         ? [
-                            "Serving your order",
-                            "Some items have been served. Check the remaining items below.",
+                            "Waiting for payment",
+                            someServed
+                              ? "Everything paid for has been served. The kitchen starts the next round once it's paid."
+                              : "The kitchen starts your order once it's paid.",
                           ]
-                        : kitchenLabel === "Ready"
-                          ? view.order.orderType === "Pickup"
-                            ? [
-                                "Ready for pickup",
-                                "Your order is ready. Collect it at the counter.",
-                              ]
-                            : ["Kitchen preparation complete", "All listed batches are ready."]
-                          : kitchenLabel === "Preparing"
-                            ? ["Preparing your order", "The kitchen is preparing your order."]
-                            : ["Order submitted", "We have your order."];
+                        : someServed
+                          ? [
+                              "Serving your order",
+                              "Some items have been served. Check the remaining items below.",
+                            ]
+                          : kitchenLabel === "Ready"
+                            ? view.order.orderType === "Pickup"
+                              ? [
+                                  "Ready for pickup",
+                                  "Your order is ready. Collect it at the counter.",
+                                ]
+                              : ["Kitchen preparation complete", "All listed batches are ready."]
+                            : kitchenLabel === "Preparing"
+                              ? ["Preparing your order", "The kitchen is preparing your order."]
+                              : ["Order submitted", "We have your order."];
   const payments = view.sources?.payments;
-  const paid = payments?.find((payment) => payment.status === "Succeeded" && payment.amount);
+  const paid = paidTotal(view);
   const paymentLabel =
     payments == null
       ? // No payment result could be read for this order: say nothing rather than guess.
         null
-      : paid?.amount && storeCancelled
+      : paid && storeCancelled
         ? // WP-2423 Q6: a store-cancelled order says where the money is, not that it was received.
           (storeCancelled.refundStatus === "Refunded" ? "Refunded " : "Refund pending · ") +
-          formatMoney(paid.amount.amountMinor, paid.amount.currencyCode)
-        : paid?.amount && notAccepted
+          formatMoney(paid.amountMinor, paid.currencyCode)
+        : paid && notAccepted
           ? (notAccepted.refundStatus === "Refunded" ? "Refunded " : "Refund pending · ") +
-            formatMoney(paid.amount.amountMinor, paid.amount.currencyCode)
-          : paid?.amount
-            ? `Payment received ${formatMoney(paid.amount.amountMinor, paid.amount.currencyCode)}`
+            formatMoney(paid.amountMinor, paid.currencyCode)
+          : paid
+            ? `Payment received ${formatMoney(paid.amountMinor, paid.currencyCode)}`
             : unpaidPickupCancelled
               ? "Not paid"
               : payments.some((payment) => payment.status === "Failed")
@@ -357,7 +447,11 @@ function StatusContent({
                 : "Not started yet"
           : kitchenLabel === "Queued"
             ? "In the queue"
-            : kitchenLabel;
+            : kitchenLabel === "AwaitingPayment"
+              ? "Waiting for payment"
+              : kitchenLabel === "Served"
+                ? "Done"
+                : kitchenLabel;
   const multipleBatches = view.order.batches.length > 1;
   // WP-2423: a round whose payment didn't go through is never charged (cancelled, or about to be).
   const summary = orderMoneySummary(view, (reference) => !notPaid.has(reference));
@@ -471,6 +565,12 @@ function StatusContent({
                   {staffCancellationReasonText[batchCancellation.reason]}{" "}
                   {staffRefundText(batchCancellation)}
                 </p>
+              ) : multipleBatches && awaitingPayment.has(batch.orderBatchReference) ? (
+                <p>Waiting for payment</p>
+              ) : multipleBatches && roundServing(view, batch) === "All" ? (
+                <p>Served</p>
+              ) : multipleBatches && roundServing(view, batch) === "Some" ? (
+                <p>Partly served</p>
               ) : kitchen && multipleBatches ? (
                 <p>
                   {batchKitchen?.status === "Ready"

@@ -1,3 +1,4 @@
+import { UnpaidRoundCancelAction } from "./UnpaidRoundCancelAction.js";
 import { DiningHostTransferAction } from "./DiningHostTransferAction.js";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AppFrame } from "@bop-rms/ui";
@@ -117,6 +118,43 @@ export function staffRoundPaymentNotice(
       };
 }
 
+/**
+ * WP-2423 abandoned payment ("warn before timeouts"): guest rounds at this table nobody has paid
+ * for (often a guest who started paying on their phone and left). Each is cancelled automatically
+ * at its time unless paid; staff are told before it happens. Null when nothing is waiting.
+ */
+export function guestRoundPaymentNotice(
+  table: StaffDiningTable,
+  now: number,
+  timeZone: string | undefined,
+): { readonly tier: "warning" | "urgent"; readonly text: string } | null {
+  const rounds = table.guestRoundsAwaitingPayment;
+  const first = rounds[0];
+  if (first === undefined) return null;
+  const names =
+    rounds.length === 1
+      ? `Round ${String(first.roundNumber)}`
+      : `Rounds ${rounds.map((round) => String(round.roundNumber)).join(", ")}`;
+  const remainingMs = Date.parse(first.payBy) - now;
+  const at = storeTime(first.payBy, timeZone);
+  if (remainingMs <= 0)
+    return {
+      tier: "urgent",
+      text: `${names} wasn't paid by ${at} and is being cancelled; it won't go to the kitchen and nobody is charged.`,
+    };
+  const minutes = Math.max(1, Math.ceil(remainingMs / 60_000));
+  const verb = rounds.length === 1 ? "isn't" : "aren't";
+  return minutes <= staffRoundUrgentMinutes
+    ? {
+        tier: "urgent",
+        text: `${String(minutes)} min left: ${names} ${verb} paid. Ask the guest to finish paying on their phone by ${at}, or it is cancelled.`,
+      }
+    : {
+        tier: "warning",
+        text: `${names} ${verb} paid yet. The guest pays on their phone (their table page has a pay button); unpaid at ${at}, it is cancelled and nobody is charged.`,
+      };
+}
+
 export function DiningSessionWorkspace({
   csrf,
   storeLabel,
@@ -147,6 +185,10 @@ export function DiningSessionWorkspace({
     availabilityOperation = useRef<AvailabilityOperation | null>(null);
   // WP-2423 D4: the staff member may close a table's session here (Owner, Store Manager).
   const [canCloseSessions, setCanCloseSessions] = useState(false);
+  // WP-2423: only staff who may transfer the host see "Order host" (no refused reads for others).
+  const [canTransferHost, setCanTransferHost] = useState(false);
+  // WP-2423 abandoned payment: the staff member may cancel unpaid rounds from this page.
+  const [canCancelUnpaidRounds, setCanCancelUnpaidRounds] = useState(false);
   const [canOperateTables, setCanOperateTables] = useState(false),
     [blockReasonCode, setBlockReasonCode] = useState(""),
     [unknownAction, setUnknownAction] = useState<"Session" | "Availability" | null>(null);
@@ -162,7 +204,10 @@ export function DiningSessionWorkspace({
   // WP-2423 item 5: while any staff round waits for payment, the clock ticks and the tables are
   // re-read in the background, so the warning counts down and clears once the payment is recorded.
   const [now, setNow] = useState(() => Date.now());
-  const awaitingPayment = tables.some((table) => table.staffRoundsAwaitingPayment.length > 0);
+  const awaitingPayment = tables.some(
+    (table) =>
+      table.staffRoundsAwaitingPayment.length > 0 || table.guestRoundsAwaitingPayment.length > 0,
+  );
   /** `background`: an automatic retry; the selected table and any shown entry code stay. */
   const load = async (more = false, background = false) => {
     if ((pending.current && !pending.current.signal.aborted) || state === "Unknown" || hostLocked)
@@ -197,6 +242,8 @@ export function DiningSessionWorkspace({
         setNext(result.next);
         setCanOperateTables(result.canOperateTables);
         setCanCloseSessions(result.canCloseSessions);
+        setCanTransferHost(result.canTransferHost);
+        setCanCancelUnpaidRounds(result.canCancelUnpaidRounds);
         if (result.items.length === 0 && !more)
           setMessage("No tables are available in this Store.");
       }
@@ -517,18 +564,21 @@ export function DiningSessionWorkspace({
                           {tableCodeNotice(table) ? (
                             <p className="dining-table-tile__notice">{tableCodeNotice(table)}</p>
                           ) : null}
-                          {(() => {
-                            const notice = staffRoundPaymentNotice(table, now, timeZone);
-                            return notice === null ? null : (
+                          {[
+                            staffRoundPaymentNotice(table, now, timeZone),
+                            guestRoundPaymentNotice(table, now, timeZone),
+                          ].map((notice, index) =>
+                            notice === null ? null : (
                               <p
+                                key={index}
                                 className="dining-table-tile__notice order-accept-by"
                                 data-tier={notice.tier}
                                 role={notice.tier === "urgent" ? "alert" : "status"}
                               >
                                 {notice.text}
                               </p>
-                            );
-                          })()}
+                            ),
+                          )}
                           {tableFloorStatus(table).state === "LongOpen" ? (
                             <p className="dining-table-tile__notice">
                               {canCloseSessions
@@ -593,6 +643,33 @@ export function DiningSessionWorkspace({
                     <p className="order-accept-by" data-tier={notice.tier} role="note">
                       {notice.text} The table&apos;s rounds and payments are on the Orders page.
                     </p>
+                  );
+                })()}
+                {(() => {
+                  // WP-2423 abandoned payment: unpaid guest rounds, and cancelling them now.
+                  const notice = guestRoundPaymentNotice(selected, now, timeZone);
+                  return notice === null ? null : (
+                    <section aria-label="Unpaid rounds">
+                      <p className="order-accept-by" data-tier={notice.tier} role="note">
+                        {notice.text}
+                        {canCancelUnpaidRounds
+                          ? " If the guest won't pay for it, cancel it now."
+                          : " If the guest won't pay for it, a manager can cancel it here or on the Orders page."}
+                      </p>
+                      {canCancelUnpaidRounds
+                        ? selected.guestRoundsAwaitingPayment.map((round) => (
+                            <UnpaidRoundCancelAction
+                              key={round.orderBatchReference}
+                              orderReference={round.orderReference}
+                              orderBatchReference={round.orderBatchReference}
+                              roundNumber={round.roundNumber}
+                              orderLabel={"table " + selected.stableLabel}
+                              csrf={csrf}
+                              onSettled={() => void loadRef.current(false, true)}
+                            />
+                          ))
+                        : null}
+                    </section>
                   );
                 })()}
                 {selected.currentDiningSessionReference !== null &&
@@ -703,7 +780,7 @@ export function DiningSessionWorkspace({
                             ? "Replace entry code"
                             : "Start dining session"}
                     </button>
-                    {selected.currentDiningSessionReference ? (
+                    {selected.currentDiningSessionReference && canTransferHost ? (
                       <DiningHostTransferAction
                         key={selected.currentDiningSessionReference}
                         diningSessionReference={selected.currentDiningSessionReference}

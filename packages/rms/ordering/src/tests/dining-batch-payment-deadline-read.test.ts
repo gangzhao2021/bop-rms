@@ -47,6 +47,7 @@ it("WP-2423: reads unpaid round cancellations of the scoped Orders", async () =>
       orderReference: id(10),
       orderBatchReference: id(20),
       cancelledAt: new Date("2026-10-11T23:07:00.000Z"),
+      reasonCode: "STAFF_CANCELLED_UNPAID",
     },
   ]);
   expect(await listStoreUnpaidBatchCancellations(f.tx, scope, [id(10)])).toEqual([
@@ -54,6 +55,7 @@ it("WP-2423: reads unpaid round cancellations of the scoped Orders", async () =>
       orderReference: id(10),
       orderBatchReference: id(20),
       cancelledAt: "2026-10-11T23:07:00.000Z",
+      reasonCode: "STAFF_CANCELLED_UNPAID",
     },
   ]);
   expect(String(f.query.mock.calls[1]?.[0])).toContain(
@@ -80,8 +82,13 @@ it("WP-2423: refuses foreign, duplicate or malformed rows and oversized requests
     orderReference: id(10),
     orderBatchReference: id(20),
     cancelledAt: "2026-10-11T23:07:00.000Z",
+    reasonCode: "CHECKOUT_DEADLINE_REACHED",
   };
-  for (const rows of [[{ ...cancelled, orderReference: id(99) }], [cancelled, cancelled]])
+  for (const rows of [
+    [{ ...cancelled, orderReference: id(99) }],
+    [cancelled, cancelled],
+    [{ ...cancelled, reasonCode: "SOMETHING_ELSE" }],
+  ])
     await expect(
       listStoreUnpaidBatchCancellations(fixture(rows).tx, scope, [id(10)]),
     ).rejects.toThrow();

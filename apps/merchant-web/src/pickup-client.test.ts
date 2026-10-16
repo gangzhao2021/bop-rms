@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { createPickupClient } from "./pickup-client.js";
-import { parsePickupQueueView } from "./pickup.js";
+import { parsePickupQueueView, pickupItemLabel } from "./pickup.js";
 const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const at = "2026-09-19T12:00:00.000Z";
 const item = () => ({
@@ -182,4 +182,32 @@ it("WP-2423: carries the counter order mark so the card offers the in-person han
   expect(view.items[0]).toMatchObject({ proofReadiness: "NotIssued", takenAtCounter: true });
   expect(view.items[1]).toMatchObject({ proofReadiness: "Ready" });
   expect(view.items[1]).not.toHaveProperty("takenAtCounter");
+});
+it("WP-2423: keeps each item's name and options for the handoff and refuses unsafe names", async () => {
+  const named = () => ({
+    ...item(),
+    items: [
+      {
+        ...item().items[0],
+        name: "Latte",
+        options: [
+          { name: "Oat milk", quantity: 1 },
+          { name: "Extra shot", quantity: 2 },
+        ],
+      },
+    ],
+  });
+  const f = setup();
+  f.fetcher.mockResolvedValue(response({ ...page(), items: [named()] }));
+  const view = parsePickupQueueView(await f.client.loadQueue());
+  const line = view.items[0]?.execution?.items[0];
+  expect(line).toMatchObject({ name: "Latte" });
+  expect(line && pickupItemLabel(line, 0)).toBe("Latte (Oat milk, 2 × Extra shot)");
+  // Unnamed items (an older server, or a snapshot that could not be read) keep a position.
+  expect(pickupItemLabel({}, 1)).toBe("Item 2");
+  const g = setup();
+  const unsafe = named();
+  (unsafe.items[0] as { name: string }).name = "Latte\u0000";
+  g.fetcher.mockResolvedValue(response({ ...page(), items: [unsafe] }));
+  await expect(g.client.loadQueue()).rejects.toThrow();
 });

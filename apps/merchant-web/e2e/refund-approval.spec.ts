@@ -185,9 +185,12 @@ test("@production owner verifies and approves a refund above $100 once", async (
   expect(new Set(ids).size).toBe(ids.length);
   expect(ids.length).toBeGreaterThan(1);
   await approve.click();
-  await expect(card).toContainText(
-    "Approved. Refund sent to the payment provider — result pending",
-  );
+  // WP-2423 item 6: the approval starts sending; "sent" only once the progress read says so.
+  await expect(card).toContainText("Approved. Sending the refund to the card provider…");
+  await expect(card).not.toContainText("Approved — refund sent");
+  await expect(card).toContainText("Sent — waiting for the card provider's answer.", {
+    timeout: 15_000,
+  });
   refunded = true;
   await expect(card).toContainText("Refunded to the customer's original payment method.", {
     timeout: 15_000,
@@ -442,7 +445,7 @@ for (const pending of [false, true])
       );
       await expect(page.getByRole("link", { name: "Start refund request" })).toHaveCount(0);
       await expect(page.getByRole("region", { name: "Recorded refund requests" })).toContainText(
-        pending ? "Sent — result pending" : "Refunded",
+        pending ? "Sent — waiting for the card provider's answer" : "Refunded",
       );
       await expect(page.getByRole("group", { name: "Refund selection" })).toHaveCount(0);
       // Someone who cannot record a request follows refunds without request wording.
@@ -452,7 +455,7 @@ for (const pending of [false, true])
       await expect(page.getByRole("heading", { name: "Request a refund" })).toHaveCount(0);
       await expect(page.getByRole("button", { name: "Load refundable items" })).toHaveCount(0);
       await expect(
-        page.getByText("Select items from the paid batches", { exact: false }),
+        page.getByText("Select items from the paid rounds", { exact: false }),
       ).toHaveCount(0);
       // The /refund route shows the same state, never the item and reason form.
       await page.goto("/app/operations/payments/" + id(31) + "/refund");

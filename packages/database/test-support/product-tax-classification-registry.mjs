@@ -356,7 +356,8 @@ export async function exerciseProductTaxClassificationRegistry() {
             missingConsumerCalled = true;
           },
         ),
-        { code: "CATALOG_DEPENDENCY_UNAVAILABLE" },
+        // aef1f31d: no registry yet is said plainly, not reported as an outage.
+        { code: "CATALOG_TAX_CLASSIFICATION_NOT_REGISTERED" },
       );
       assert.equal(missingConsumerCalled, false);
       allowed = false;

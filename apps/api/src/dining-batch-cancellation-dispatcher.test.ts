@@ -181,3 +181,33 @@ it.each([0, 101, 1.5])("refuses invalid page bound %s", (pageSize) => {
   const f = fixture();
   expect(() => createDiningBatchCancellationDispatcher({ ...f.options, pageSize })).toThrow();
 });
+it("WP-2423 abandoned payment: asks Payment to resolve a started payment, outside any transaction", async () => {
+  const f = fixture();
+  const unresolved = { ...expiry(40), status: "AwaitingPaymentResolution", paymentEvidence: null };
+  let scanning = false;
+  const resolveStartedPayment = vi.fn(async () => {
+    expect(scanning).toBe(false);
+    throw new Error("PROVIDER_DOWN");
+  });
+  const dispatcher = createDiningBatchCancellationDispatcher({
+    ...f.options,
+    transactions: {
+      async run<T>(work: (tx: ConsumerTransaction) => Promise<T>) {
+        scanning = true;
+        try {
+          return await work({ query: async () => ({ rows: [], rowCount: 0 }) });
+        } finally {
+          scanning = false;
+        }
+      },
+    },
+    resolveStartedPayment,
+  });
+  f.discover.mockResolvedValue([unresolved]);
+  f.cancel.mockResolvedValueOnce({ status: "NotEligible", reason: "PaymentStarted" });
+  // A Provider failure leaves the round waiting for the next cycle; nothing is cancelled.
+  expect(await dispatcher.runOnce()).toBe(0);
+  expect(resolveStartedPayment).toHaveBeenCalledWith(
+    expect.objectContaining({ orderBatchReference: unresolved.orderBatchReference }),
+  );
+});

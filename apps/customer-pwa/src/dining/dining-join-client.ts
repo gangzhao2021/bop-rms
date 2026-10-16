@@ -1,5 +1,29 @@
 export type DiningJoinClientErrorCode =
-  "request-invalid" | "offline" | "unavailable" | "outcome-unknown";
+  "request-invalid" | "offline" | "unavailable" | "outcome-unknown" | DiningJoinRefusalCode;
+/** Definitive server refusals: nothing was joined, and the same code cannot succeed later. */
+export type DiningJoinRefusalCode = "code-used" | "code-not-accepted" | "too-many-attempts";
+export function isDiningJoinRefusal(code: unknown): code is DiningJoinRefusalCode {
+  return code === "code-used" || code === "code-not-accepted" || code === "too-many-attempts";
+}
+const refusals: Readonly<
+  Record<string, { status: number; messageKey: string; code: DiningJoinRefusalCode }>
+> = {
+  dining_join_code_used: {
+    status: 409,
+    messageKey: "customer.dining.join_code_used",
+    code: "code-used",
+  },
+  dining_join_code_not_accepted: {
+    status: 409,
+    messageKey: "customer.dining.join_code_not_accepted",
+    code: "code-not-accepted",
+  },
+  dining_join_rate_limited: {
+    status: 429,
+    messageKey: "customer.dining.join_rate_limited",
+    code: "too-many-attempts",
+  },
+};
 export class DiningJoinClientError extends Error {
   constructor(readonly code: DiningJoinClientErrorCode) {
     super("dining join is unavailable");
@@ -85,7 +109,7 @@ export function createBrowserDiningJoinClient(
     }
     const controller = new AbortController();
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
-    let knownFailure: "request-invalid" | "unavailable" | null = null;
+    let knownFailure: "request-invalid" | "unavailable" | DiningJoinRefusalCode | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => {
@@ -156,6 +180,16 @@ export function createBrowserDiningJoinClient(
         error.messageKey === "customer.dining.join_unavailable"
       )
         knownFailure = "unavailable";
+      const refusal =
+        typeof error.code === "string" && Object.hasOwn(refusals, error.code)
+          ? refusals[error.code]
+          : undefined;
+      if (
+        refusal !== undefined &&
+        response.status === refusal.status &&
+        error.messageKey === refusal.messageKey
+      )
+        knownFailure = refusal.code;
       throw new Error("failed response");
     };
     try {

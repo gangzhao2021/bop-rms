@@ -1,15 +1,29 @@
 import { orderMoney } from "./order-money.js";
-import { RefundExecutionAction } from "./RefundExecutionAction.js";
+import {
+  RefundExecutionAction,
+  RefundSendAction,
+  refundRunPorts,
+} from "./RefundExecutionAction.js";
 import { CardMachineRequestRefund } from "./CardMachineRequestRefund.js";
 import {
-  createOrdinaryRefundPreparationClient,
-  OrdinaryRefundPreparationClientError,
-} from "./ordinary-refund-preparation-client.js";
+  createRefundRun,
+  RefundRunError,
+  refundRunFailureText,
+  refundRunProgressText,
+  refundRunRetryLabel,
+  refundRunUncertain,
+  type RefundRun,
+  type RefundRunStep,
+} from "./ordinary-refund-run.js";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation, useParams } from "react-router";
 import { SourceTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
-import { createOrdinaryRefundClient, OrdinaryRefundClientError } from "./ordinary-refund-client.js";
+import {
+  createOrdinaryRefundClient,
+  OrdinaryRefundClientError,
+  type RefundRequestProgress,
+} from "./ordinary-refund-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { StepUpVerification } from "./StepUpVerification.js";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
@@ -28,6 +42,7 @@ type Context = Awaited<ReturnType<typeof client.context>>;
 type Items = Awaited<ReturnType<typeof client.items>>;
 type Intent = ReturnType<typeof client.prepareRequest>;
 type Preview = Awaited<ReturnType<Intent["preview"]>>;
+type Submitted = Awaited<ReturnType<Intent["submit"]>>;
 const amount = (value: string | null) =>
   value === null ? "Unavailable" : orderMoney({ amountMinor: value, currencyCode: "CAD" });
 const errorMessage = (error: unknown) =>
@@ -152,105 +167,36 @@ export function OrderPaymentLinks({
     </section>
   );
 }
-const preparationClient = createOrdinaryRefundPreparationClient();
-function RefundPreparationAction({
-  orderReference,
-  requestReference,
-  paymentAttemptReference,
-  approvalReference,
-  csrf,
-  onPending,
-}: {
-  orderReference: string;
-  requestReference: string;
-  paymentAttemptReference: string;
-  /** WP-2423 Q5: the independent approval this request carries, if one was needed. */
-  approvalReference: string | null;
-  csrf: string;
-  onPending: (pending: boolean) => void;
-}) {
-  const [state, setState] = useState<"Idle" | "Busy" | "Unknown" | "Recorded">("Idle"),
-    [message, setMessage] = useState(""),
-    [signIn, setSignIn] = useState(false);
-  const intent = useRef<ReturnType<typeof preparationClient.prepare> | null>(null),
-    pending = useRef<AbortController | null>(null);
-  useEffect(() => () => pending.current?.abort(), []);
-  useEffect(() => {
-    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
-    if (state === "Busy" || state === "Unknown") window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [state]);
-  const prepare = async () => {
-    if (pending.current || state === "Recorded") return;
-    const controller = new AbortController();
-    pending.current = controller;
-    setState("Busy");
-    setMessage("");
-    setSignIn(false);
-    onPending(true);
-    try {
-      intent.current ??= preparationClient.prepare({
-        orderReference,
-        requestReference,
-        paymentAttemptReference,
-        operationReference: serviceOperationReference(),
-        auditReference: serviceOperationReference(),
-        approvalReference,
-      });
-      const result = await intent.current.execute(csrf, controller.signal);
-      if (!controller.signal.aborted) {
-        setState("Recorded");
-        onPending(false);
-        setMessage(
-          (result.replayed ? "Original preparation recovered. " : "Preparation recorded. ") +
-            "Check execution status for updates. No completed refund is confirmed here.",
-        );
-      }
-    } catch (error) {
-      if (!controller.signal.aborted) {
-        if (needsFullSignIn(error)) {
-          // WP-2423: confirm the PIN sign-in, then retry this same preparation.
-          setState("Idle");
-          onPending(false);
-          setSignIn(true);
-        } else if (
-          error instanceof OrdinaryRefundPreparationClientError &&
-          error.code !== "OutcomeUnknown"
-        ) {
-          setState("Idle");
-          onPending(false);
-          intent.current = null;
-          setMessage(
-            error.code === "Unavailable"
-              ? "Refund preparation is not configured for this store. Contact the pilot operator."
-              : error.code === "PermissionDenied"
-                ? "Preparation was denied. Current execution permission and any required independent approval must be satisfied."
-                : "The refund changed. Check execution status before preparing again.",
-          );
-        } else {
-          setState("Unknown");
-          setMessage(
-            "Preparation result unknown. Keep this page open and retry the same preparation.",
-          );
-        }
-      }
-    } finally {
-      pending.current = null;
-    }
-  };
-  return (
-    <div>
-      <p>
-        The server rechecks execution permission, balance and any required independent approval
-        before recording preparation.
-      </p>
-      <button disabled={state === "Busy" || state === "Recorded"} onClick={() => void prepare()}>
-        {state === "Unknown" ? "Retry same refund preparation" : "Prepare refund execution"}
-      </button>
-      {message ? <p role="status">{message}</p> : null}
-      {signIn ? <FullSignInPrompt csrf={csrf} /> : null}
-    </div>
-  );
+/**
+ * WP-2423 item 6: where one recorded request stands, in staff language. A refund is called sent
+ * only once it was really sent to the card provider ("Sending"); prepared is still not sent.
+ */
+export function requestProgressLabel(
+  progress: RefundRequestProgress,
+  paymentMethod: "Online" | "CardMachine",
+  approvalState: RefundApprovalEntry["state"] | null,
+): string {
+  if (approvalState === "AwaitingApproval") return "Waiting for owner approval";
+  if (paymentMethod === "CardMachine")
+    return approvalState === "Approved"
+      ? "Approved — refund it on the card machine and record it"
+      : progress === "Refunded"
+        ? "Refunded on the card machine"
+        : "To refund on the card machine";
+  if (progress === "Refunded") return "Refunded";
+  if (progress === "Sending") return "Sent — waiting for the card provider's answer";
+  if (approvalState === "Approved") return "Approved, not sent yet";
+  return progress === "Recorded" ? "Recorded, not sent yet" : "Not sent yet";
+}
+/** WP-2423 item 6: one online payment's refund state within a request, in staff language. */
+export function paymentRefundStateLabel(
+  state: "NotDispatched" | "Prepared" | "NeedsReconciliation" | "Confirmed",
+): string {
+  return state === "Confirmed"
+    ? "Refunded"
+    : state === "NeedsReconciliation"
+      ? "Sent — waiting for the card provider's answer"
+      : "Not sent yet";
 }
 /** WP-2423 item 4: a request's refund as recorded from the store's card machine. */
 export function CardMachineRefundDone({
@@ -281,9 +227,12 @@ function RecordedRequestStatus({
   onFinancialChange,
   onRequestsChange,
   onPending,
+  held = false,
 }: {
   orderReference: string;
   entry: Items["recentRequests"][number];
+  /** WP-2423 item 6: the refund form above is still sending this request (resume it there). */
+  held?: boolean;
   /** WP-2423 Q5: this request's place in the Store's approval list (null: none needed/known). */
   approval: RefundApprovalEntry | null;
   csrf: string;
@@ -346,6 +295,15 @@ function RecordedRequestStatus({
     onRequestsChange();
     void load(true);
   };
+  const paymentPending = (paymentReference: string) => (active: boolean) => {
+    onPending(paymentReference, active);
+    setPreparing((prior) => {
+      const next = new Set(prior);
+      if (active) next.add(paymentReference);
+      else next.delete(paymentReference);
+      return next;
+    });
+  };
   return (
     <div>
       <button disabled={busy || preparing.size > 0} onClick={() => void load()}>
@@ -390,39 +348,21 @@ function RecordedRequestStatus({
                 ) : null}
                 {payment.method === "CardMachine" ? null : (
                   <>
-                    {payment.state === "Confirmed"
-                      ? "Refund confirmed"
-                      : payment.state === "Prepared"
-                        ? "Preparation recorded; awaiting dispatch"
-                        : payment.state === "NotDispatched"
-                          ? "Not dispatched"
-                          : "Needs reconciliation"}
-                    . Requested {amount(payment.amountMinor)}; confirmed{" "}
-                    {amount(payment.confirmedMinor)}; pending {amount(payment.pendingMinor)}.
+                    {paymentRefundStateLabel(payment.state)}. Requested{" "}
+                    {amount(payment.amountMinor)}; confirmed {amount(payment.confirmedMinor)};
+                    pending {amount(payment.pendingMinor)}.
                   </>
                 )}
                 {payment.method === "Online" &&
-                payment.state !== "NotDispatched" &&
+                (payment.state === "NeedsReconciliation" || payment.state === "Confirmed") &&
                 payment.executionOperationReference ? (
                   <RefundExecutionAction
                     onFinancialChange={onFinancialChange}
                     key={payment.executionOperationReference + ":" + payment.state}
                     orderReference={orderReference}
-                    requestReference={entry.requestReference}
                     operationReference={payment.executionOperationReference}
-                    approvalReference={payment.executionApprovalReference}
-                    phase={payment.state}
-                    amountLabel={amount(payment.amountMinor)}
                     csrf={csrf}
-                    onPending={(active) => {
-                      onPending(payment.paymentAttemptReference, active);
-                      setPreparing((prior) => {
-                        const next = new Set(prior);
-                        if (active) next.add(payment.paymentAttemptReference);
-                        else next.delete(payment.paymentAttemptReference);
-                        return next;
-                      });
-                    }}
+                    onPending={paymentPending(payment.paymentAttemptReference)}
                   />
                 ) : null}
                 {payment.method === "Online" &&
@@ -430,32 +370,33 @@ function RecordedRequestStatus({
                 approval !== null ? (
                   <p>
                     {approval.state === "AwaitingApproval"
-                      ? "Waiting for an owner or finance member to approve this refund in person."
-                      : "Approved; the approver finishes sending it on the Approvals page."}{" "}
+                      ? "Waiting for an owner or finance member to approve this refund in person. It is sent once approved."
+                      : "Approved, not sent yet. The approver sends it with Send approved refund on the Approvals page; it is never sent twice."}{" "}
                     <Link to="/app/approvals">Open approvals</Link>
                   </p>
                 ) : null}
                 {payment.method === "Online" &&
-                payment.state === "NotDispatched" &&
-                approval === null ? (
-                  <RefundPreparationAction
-                    // A Manager prepares only a refund that needs no approval; an approved
-                    // refund is prepared and sent by its approval (one operation, never two).
-                    approvalReference={null}
-                    orderReference={orderReference}
-                    requestReference={entry.requestReference}
-                    paymentAttemptReference={payment.paymentAttemptReference}
-                    csrf={csrf}
-                    onPending={(active) => {
-                      onPending(payment.paymentAttemptReference, active);
-                      setPreparing((prior) => {
-                        const next = new Set(prior);
-                        if (active) next.add(payment.paymentAttemptReference);
-                        else next.delete(payment.paymentAttemptReference);
-                        return next;
-                      });
-                    }}
-                  />
+                ((payment.state === "NotDispatched" && approval === null) ||
+                  (payment.state === "Prepared" && payment.executionOperationReference)) ? (
+                  held ? (
+                    <p>Continue sending this refund with the button under the refund form.</p>
+                  ) : (
+                    <RefundSendAction
+                      // A Manager sends a refund that needs no approval with one confirmation; an
+                      // approved refund is prepared by its approval and only sent from here.
+                      key={payment.paymentAttemptReference + ":" + payment.state}
+                      orderReference={orderReference}
+                      requestReference={entry.requestReference}
+                      requestOperationReference={entry.operationReference}
+                      paymentAttemptReference={payment.paymentAttemptReference}
+                      preparedOperationReference={payment.executionOperationReference}
+                      approvalReference={payment.executionApprovalReference}
+                      amountLabel={amount(payment.amountMinor)}
+                      csrf={csrf}
+                      onPending={paymentPending(payment.paymentAttemptReference)}
+                      onDone={recorded}
+                    />
+                  )
                 ) : null}
               </li>
             ))}
@@ -480,10 +421,12 @@ export function refundWizardSections(
   state: "Idle" | "Busy" | "Unknown" | "Recorded",
   hasPreview: boolean,
   requestable: boolean,
+  /** WP-2423 item 6: a send whose result is unconfirmed is retried before anything else. */
+  sendUnconfirmed = false,
 ): { readonly confirmation: boolean; readonly startAnother: boolean } {
   return {
     confirmation: hasPreview && state !== "Recorded",
-    startAnother: requestable && state === "Recorded",
+    startAnother: requestable && state === "Recorded" && !sendUnconfirmed,
   };
 }
 function RefundWizard({
@@ -511,6 +454,13 @@ function RefundWizard({
     [signIn, setSignIn] = useState(false),
     [state, setState] = useState<"Idle" | "Busy" | "Unknown" | "Recorded">("Idle");
   const [preparing, setPreparing] = useState<ReadonlySet<string>>(new Set());
+  // WP-2423 item 6: one confirmation records, prepares and sends a refund needing no approval.
+  // The run keeps every step's references, so a retry resumes where it stopped.
+  const run = useRef<RefundRun<Submitted> | null>(null),
+    [runStep, setRunStep] = useState<RefundRunStep | null>(null),
+    [runFailure, setRunFailure] = useState<RefundRunError | null>(null),
+    // The recorded request the stopped run is still sending (its list entry points back here).
+    [heldRequest, setHeldRequest] = useState<string | null>(null);
   const operationReference = useRef<string | null>(null);
   // WP-2423 Q5: one preview identity while the selection, reason and note stay the same.
   const previewIdentity = useRef<{
@@ -529,9 +479,10 @@ function RefundWizard({
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault();
     };
-    if (state === "Unknown" || state === "Busy") window.addEventListener("beforeunload", warn);
+    if (state === "Unknown" || state === "Busy" || runFailure !== null)
+      window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [state]);
+  }, [state, runFailure]);
   const locked = state !== "Idle" || preparing.size > 0;
   // WP-2423 item 4: the calculated refund is of a card-machine payment (refunded on the machine).
   const previewOnMachine =
@@ -541,7 +492,11 @@ function RefundWizard({
     ) === true;
   // WP-2423 Q5: someone who cannot record a new request here only follows recorded ones.
   const requestable = blockedMessage === null && items?.canRequest !== false;
-  const sections = refundWizardSections(state, preview !== null, requestable);
+  const sendUnconfirmed =
+    runFailure !== null && refundRunUncertain(runFailure) && run.current?.mayHaveSent === true;
+  const sections = refundWizardSections(state, preview !== null, requestable, sendUnconfirmed);
+  // WP-2423 item 6: an online refund that needs no approval is sent on the same confirmation.
+  const sendsNow = preview !== null && !previewOnMachine && preview.approvalRequired !== true;
   const verificationCurrent = () =>
     verifiedUntil !== null && Date.parse(verifiedUntil) > Date.now();
   const clearPreview = () => {
@@ -550,6 +505,8 @@ function RefundWizard({
     setConfirmed(false);
     operation.current = null;
     operationReference.current = null;
+    // A new calculation is a new request: an unstarted or refused run is not resumed.
+    run.current = null;
   };
   // WP-2423: a recorded request leaves nothing selected or confirmed behind it.
   const clearRequestForm = () => {
@@ -559,7 +516,10 @@ function RefundWizard({
     setNote("");
   };
   const startAnother = () => {
-    if (state !== "Recorded" || pending.current) return;
+    if (state !== "Recorded" || pending.current || sendUnconfirmed) return;
+    run.current = null;
+    setRunFailure(null);
+    setHeldRequest(null);
     clearRequestForm();
     previewIdentity.current = null;
     setMessage("");
@@ -597,19 +557,22 @@ function RefundWizard({
           );
           if (recovered) {
             previewIdentity.current = null;
+            run.current = null;
             clearRequestForm();
           }
           setState(recovered ? "Recorded" : "Unknown");
           setMessage(
             recovered
-              ? "Original request recovered. No completed refund is confirmed here."
+              ? "Original request recovered. See below where it stands and what to do next."
               : "The original request is not confirmed by this history. Its result remains unknown; retry the same request.",
           );
         } else if (wasRecorded) {
           setState("Recorded");
           onFinancialChange();
           setMessage(
-            "Request remains recorded. Updated records are shown below; no completed refund is confirmed here.",
+            runFailure !== null
+              ? refundRunFailureText(runFailure)
+              : "Request remains recorded. Updated records are shown below.",
           );
         } else {
           setQuantities({});
@@ -739,61 +702,98 @@ function RefundWizard({
     }
   };
   const submit = async () => {
+    const resuming = runFailure !== null;
     if (
-      !operation.current ||
-      !preview ||
-      (!confirmed && state !== "Unknown") ||
       pending.current ||
-      state === "Recorded" ||
-      (preview.approvalRequired === true && state !== "Unknown" && !verificationCurrent())
+      (!resuming &&
+        (!operation.current ||
+          !preview ||
+          (!confirmed && state !== "Unknown") ||
+          state === "Recorded" ||
+          (preview.approvalRequired === true && state !== "Unknown" && !verificationCurrent())))
     )
       return;
+    if (!run.current) {
+      const intent = operation.current;
+      if (!intent) return;
+      run.current = createRefundRun<Submitted>({
+        orderReference,
+        newReference: serviceOperationReference,
+        sendAfterRequest: !previewOnMachine,
+        ports: refundRunPorts(orderReference, csrf, (signal) => intent.submit(csrf, signal)),
+      });
+    }
+    const current = run.current;
     const controller = new AbortController();
     pending.current = controller;
     setState("Busy");
     setMessage("");
     setSignIn(false);
+    setRunFailure(null);
     try {
-      const result = await operation.current.submit(csrf, controller.signal);
+      const outcome = await current.run(controller.signal, setRunStep);
       if (!controller.signal.aborted) {
+        const result = outcome.request;
+        run.current = null;
+        setHeldRequest(null);
         previewIdentity.current = null;
         clearRequestForm();
         setState("Recorded");
         onFinancialChange();
+        const recovered = result?.replayed === true ? "Original request recovered. " : "";
+        const total = amount(result?.amountMinor ?? null);
         setMessage(
-          (result.replayed ? "Original request recovered. " : "Request recorded. ") +
-            "Refund amount: " +
-            amount(result.amountMinor) +
-            (result.approvalRequired === true && result.approveAlone
-              ? ". You run this business alone (sole operator): open Approvals and approve it yourself after confirming it is you."
-              : result.approvalRequired === true
-                ? ". Ask the owner to open Approvals on this device or theirs. If more than 15 minutes pass after your verification, you'll be asked to verify again here."
-                : previewOnMachine
-                  ? ". Now refund it on the store's card machine and record it under the request below."
-                  : ". Approval and execution are separate. No completed refund is confirmed here."),
+          outcome.kind === "Refunded"
+            ? `${recovered}Refunded ${total} to the customer's original payment method.`
+            : outcome.kind === "WaitingForAnswer"
+              ? `${recovered}Sent — waiting for the card provider's answer. ${total} stays set aside until it answers; the request below shows the result.`
+              : `${recovered || "Request recorded. "}Refund amount: ${total}` +
+                (outcome.kind === "AwaitingApproval" && result?.approveAlone
+                  ? ". Nothing is refunded yet. You run this business alone (sole operator): open Approvals and approve it yourself after confirming it is you; it is sent once approved."
+                  : outcome.kind === "AwaitingApproval"
+                    ? ". Nothing is refunded yet: it is sent once the owner approves it. Ask the owner to open Approvals on this device or theirs. If more than 15 minutes pass after your verification, you'll be asked to verify again here."
+                    : ". Now refund it on the store's card machine and record it under the request below."),
         );
-        // The new request appears in the list (and its units leave the selection) straight away.
+        // The request appears in the list (and its units leave the selection) straight away.
         void reloadRequests();
       }
     } catch (error) {
       if (!controller.signal.aborted) {
-        if (error instanceof OrdinaryRefundClientError && error.code === "OutcomeUnknown") {
+        const stopped =
+          error instanceof RefundRunError ? error : new RefundRunError("Request", error);
+        const cause = stopped.cause;
+        if (stopped.step !== "Request") {
+          // The request is recorded; the refund stopped on its way out. Say what happened and
+          // let staff continue from the step reached (same references, nothing sent twice).
+          previewIdentity.current = null;
+          clearRequestForm();
+          run.current = current;
+          setState("Recorded");
+          setRunFailure(stopped);
+          setHeldRequest(current.requestReference);
+          setSignIn(needsFullSignIn(cause));
+          setMessage(refundRunFailureText(stopped));
+          onFinancialChange();
+          void reloadRequests();
+        } else if (cause instanceof OrdinaryRefundClientError && cause.code === "OutcomeUnknown") {
           setState("Unknown");
           setMessage(
             "Request result unknown. Keep this page open and retry the same request; do not start another refund.",
           );
-        } else if (needsFullSignIn(error)) {
+        } else if (needsFullSignIn(cause)) {
           // Keep the confirmed request: once verified, the same request is recorded once.
           setState("Idle");
           setSignIn(true);
         } else {
+          run.current = null;
           setState("Idle");
           clearPreview();
-          setMessage(errorMessage(error));
+          setMessage(errorMessage(cause));
         }
       }
     } finally {
       pending.current = null;
+      if (!controller.signal.aborted) setRunStep(null);
     }
   };
   return (
@@ -801,7 +801,7 @@ function RefundWizard({
       <h2 id="refund-heading">{requestable ? "Request a refund" : "Refund requests"}</h2>
       {requestable ? (
         <p>
-          Select items from the paid batches of this order. The server checks remaining quantity and
+          Select items from the paid rounds of this order. The server checks remaining quantity and
           balance when calculating and submitting.
         </p>
       ) : null}
@@ -841,29 +841,17 @@ function RefundWizard({
                         (declineReasonLabel[entry.decline.reasonCode] ?? "Other reason") +
                         ". Nothing was refunded; you can request again."}
                     </>
-                  ) : approvals.get(entry.requestReference)?.state === "AwaitingApproval" ? (
-                    " · Waiting for owner approval"
-                  ) : approvals.get(entry.requestReference)?.state === "Approved" ? (
-                    entry.paymentMethod === "CardMachine" ? (
-                      " · Approved — refund it on the card machine and record it"
-                    ) : (
-                      " · Approved, sending not finished"
-                    )
-                  ) : entry.paymentMethod === "CardMachine" ? (
-                    entry.progress === "Refunded" ? (
-                      " · Refunded on the card machine"
-                    ) : (
-                      " · To refund on the card machine"
-                    )
-                  ) : entry.progress === "Refunded" ? (
-                    " · Refunded"
-                  ) : entry.progress === "Sending" ? (
-                    " · Sent — result pending"
                   ) : (
-                    " · Recorded, not sent yet"
+                    " · " +
+                    requestProgressLabel(
+                      entry.progress,
+                      entry.paymentMethod,
+                      approvals.get(entry.requestReference)?.state ?? null,
+                    )
                   )}
                   {entry.decline !== null ? null : (
                     <RecordedRequestStatus
+                      held={heldRequest === entry.requestReference}
                       approval={approvals.get(entry.requestReference) ?? null}
                       onFinancialChange={onFinancialChange}
                       onRequestsChange={() => void reloadRequests()}
@@ -1026,10 +1014,17 @@ function RefundWizard({
               {preview.approvalRequired === true ? " and approved" : ""}, refund this amount on that
               machine and record it under the request.
             </p>
+          ) : sendsNow ? (
+            <p>
+              Refunded to the customer&apos;s original payment method (
+              {preview.paymentAttemptReferences.length} payment(s)) as soon as you confirm: the
+              request is recorded and sent to the card provider in one step, and its answer is shown
+              here.
+            </p>
           ) : (
             <p>
-              {preview.paymentAttemptReferences.length} original payment(s). Recording a request
-              does not issue a refund.
+              {preview.paymentAttemptReferences.length} original payment(s). Recording this request
+              does not refund anything yet: it is sent once approved.
             </p>
           )}
           {preview.approvalRequired === true ? (
@@ -1061,7 +1056,8 @@ function RefundWizard({
               disabled={locked}
               onChange={(event) => setConfirmed(event.target.checked)}
             />
-            I confirm the selected quantities, reason and {amount(preview.amountMinor)} request.
+            I confirm the selected quantities, reason and {amount(preview.amountMinor)}{" "}
+            {sendsNow ? "refund" : "request"}.
           </label>
           <button
             disabled={
@@ -1071,16 +1067,21 @@ function RefundWizard({
           >
             {preview.approvalRequired === true
               ? "Record request for owner approval"
-              : "Record refund request"}
+              : sendsNow
+                ? `Send ${amount(preview.amountMinor)} refund`
+                : "Record refund request"}
           </button>
         </section>
       ) : null}
       {state === "Unknown" ? (
-        <button onClick={() => void submit()}>Retry same refund request</button>
+        <button onClick={() => void submit()}>{refundRunRetryLabel("Request")}</button>
+      ) : null}
+      {runFailure !== null && state === "Recorded" ? (
+        <button onClick={() => void submit()}>{refundRunRetryLabel(runFailure.step)}</button>
       ) : null}
       {signIn && state !== "Busy" ? <FullSignInPrompt csrf={csrf} /> : null}
       <p ref={status} tabIndex={-1} role="status">
-        {state === "Busy" ? "Working…" : message}
+        {state === "Busy" ? (runStep ? refundRunProgressText(runStep) : "Working…") : message}
       </p>
     </section>
   );

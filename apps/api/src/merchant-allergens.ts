@@ -10,6 +10,7 @@ import {
   recordIngredientAllergenDeclaration,
 } from "@rms/catalog";
 import { listInventoryRecipeIngredientFacts, storeDayEndExpiryCutoff } from "@rms/inventory";
+import { withRememberedBrandAuthorization } from "./merchant-brand-transaction-authorization.js";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import { derivedReference } from "./merchant-products.js";
@@ -251,109 +252,111 @@ export function createMerchantAllergens(options: {
   }) => {
     const current = await session(input);
     return retryTransactionConflict(() =>
-      options.persistence.transactions.run(async (tx) => {
-        const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
-        const at = options.persistence.now();
-        const items = (await listInventoryRecipeIngredientFacts(reads(tx), s.owner)).filter(
-          (item) => item.active,
-        );
-        const registry = await currentAllergenRegistry(reads(tx), s.owner);
-        const declarations = new Map(
-          (await listCurrentIngredientDeclarations(reads(tx), s.owner, at)).map((d) => [
-            d.itemReference,
-            d,
-          ]),
-        );
-        const soon = Date.parse(at) + 30 * 86_400_000;
-        const local = <T extends { readonly validUntil: string }>(d: T) => ({
-          ...d,
-          validThrough: validThroughDate(d.validUntil, s.timeZone),
-        });
-        const rows = items.map((item) => {
-          const found = declarations.get(item.itemReference);
-          const d = found === undefined ? null : local(found);
-          const status =
-            d === null
-              ? "Missing"
-              : d.registryVersionReference !== registry?.registryVersionReference
-                ? "RegistryChanged"
-                : d.itemVersionReference !== item.configurationOperationReference
-                  ? "ItemChanged"
-                  : Date.parse(d.validUntil) < soon
-                    ? "ExpiringSoon"
-                    : "Current";
-          return {
-            itemReference: item.itemReference,
-            itemVersionReference: item.configurationOperationReference,
-            internalCode: item.internalCode,
-            name: name(item.localizedNames, item.internalCode),
-            unitCode: item.unitCode,
-            status,
-            declaration: d,
+      options.persistence.transactions.run((tx) =>
+        withRememberedBrandAuthorization(tx, async () => {
+          const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+          const at = options.persistence.now();
+          const items = (await listInventoryRecipeIngredientFacts(reads(tx), s.owner)).filter(
+            (item) => item.active,
+          );
+          const registry = await currentAllergenRegistry(reads(tx), s.owner);
+          const declarations = new Map(
+            (await listCurrentIngredientDeclarations(reads(tx), s.owner, at)).map((d) => [
+              d.itemReference,
+              d,
+            ]),
+          );
+          const soon = Date.parse(at) + 30 * 86_400_000;
+          const local = <T extends { readonly validUntil: string }>(d: T) => ({
+            ...d,
+            validThrough: validThroughDate(d.validUntil, s.timeZone),
+          });
+          const rows = items.map((item) => {
+            const found = declarations.get(item.itemReference);
+            const d = found === undefined ? null : local(found);
+            const status =
+              d === null
+                ? "Missing"
+                : d.registryVersionReference !== registry?.registryVersionReference
+                  ? "RegistryChanged"
+                  : d.itemVersionReference !== item.configurationOperationReference
+                    ? "ItemChanged"
+                    : Date.parse(d.validUntil) < soon
+                      ? "ExpiringSoon"
+                      : "Current";
+            return {
+              itemReference: item.itemReference,
+              itemVersionReference: item.configurationOperationReference,
+              internalCode: item.internalCode,
+              name: name(item.localizedNames, item.internalCode),
+              unitCode: item.unitCode,
+              status,
+              declaration: d,
+            };
+          });
+          // WP-2423 Q19: a roster recorded and waiting for another person's approval; its recorder
+          // sees whether they may approve it alone as sole operator, and why not.
+          const proposal = await pendingAllergenRegistryProposal(reads(tx), s.owner);
+          const gate =
+            proposal !== null &&
+            proposal.recorderReference === s.actor &&
+            s.permissions.mayManageRegistry
+              ? await merchantBrandSoleOperatorGate(tx as never, {
+                  ...s.owner,
+                  actorReference: s.actor,
+                  permissionCode: "catalog.allergen_registry.manage",
+                  observedAt: at,
+                  allowed: async () => s.permissions.mayManageRegistry,
+                })
+              : null;
+          const base = {
+            sourceAsOf: at,
+            viewer: s.actor,
+            permissions: s.permissions,
+            locale: options.locale,
+            registryProposal:
+              proposal === null
+                ? null
+                : {
+                    proposalReference: proposal.proposalReference,
+                    recordedAt: proposal.recordedAt,
+                    recordedByYou: proposal.recorderReference === s.actor,
+                  },
+            soleOperator:
+              gate === null
+                ? null
+                : {
+                    status: gate.status,
+                    otherApprovers: gate.otherApprovers,
+                    verifiedUntil: gate.verifiedUntil,
+                  },
+            registry,
+            registryTemplate: {
+              template: "CA_PRIORITY_TEST" as const,
+              jurisdictionCode: canadaPriorityAllergensTest.jurisdictionCode,
+              policyDocument: canadaPriorityAllergensTest.policyDocument,
+              allergens: canadaPriorityAllergensTest.entries.map(([code, en]) => ({
+                code,
+                name: en,
+              })),
+            },
+            sources: allergenDeclarationSources,
           };
-        });
-        // WP-2423 Q19: a roster recorded and waiting for another person's approval; its recorder
-        // sees whether they may approve it alone as sole operator, and why not.
-        const proposal = await pendingAllergenRegistryProposal(reads(tx), s.owner);
-        const gate =
-          proposal !== null &&
-          proposal.recorderReference === s.actor &&
-          s.permissions.mayManageRegistry
-            ? await merchantBrandSoleOperatorGate(tx as never, {
-                ...s.owner,
-                actorReference: s.actor,
-                permissionCode: "catalog.allergen_registry.manage",
-                observedAt: at,
-                allowed: async () => s.permissions.mayManageRegistry,
-              })
-            : null;
-        const base = {
-          sourceAsOf: at,
-          viewer: s.actor,
-          permissions: s.permissions,
-          locale: options.locale,
-          registryProposal:
-            proposal === null
-              ? null
-              : {
-                  proposalReference: proposal.proposalReference,
-                  recordedAt: proposal.recordedAt,
-                  recordedByYou: proposal.recorderReference === s.actor,
-                },
-          soleOperator:
-            gate === null
-              ? null
-              : {
-                  status: gate.status,
-                  otherApprovers: gate.otherApprovers,
-                  verifiedUntil: gate.verifiedUntil,
-                },
-          registry,
-          registryTemplate: {
-            template: "CA_PRIORITY_TEST" as const,
-            jurisdictionCode: canadaPriorityAllergensTest.jurisdictionCode,
-            policyDocument: canadaPriorityAllergensTest.policyDocument,
-            allergens: canadaPriorityAllergensTest.entries.map(([code, en]) => ({
-              code,
-              name: en,
-            })),
-          },
-          sources: allergenDeclarationSources,
-        };
-        if (input.itemReference !== null) {
-          const row = rows.find((candidate) => candidate.itemReference === input.itemReference);
-          if (row === undefined) return fail("NotFound");
-          return {
-            screenId: "CMP-ALLERGEN-ITEM" as const,
-            ...base,
-            item: row,
-            history: (
-              await listIngredientDeclarationHistory(reads(tx), s.owner, input.itemReference)
-            ).map(local),
-          };
-        }
-        return { screenId: "CMP-ALLERGEN-REVIEW" as const, ...base, items: rows };
-      }),
+          if (input.itemReference !== null) {
+            const row = rows.find((candidate) => candidate.itemReference === input.itemReference);
+            if (row === undefined) return fail("NotFound");
+            return {
+              screenId: "CMP-ALLERGEN-ITEM" as const,
+              ...base,
+              item: row,
+              history: (
+                await listIngredientDeclarationHistory(reads(tx), s.owner, input.itemReference)
+              ).map(local),
+            };
+          }
+          return { screenId: "CMP-ALLERGEN-REVIEW" as const, ...base, items: rows };
+        }),
+      ),
     );
   };
 
@@ -361,127 +364,130 @@ export function createMerchantAllergens(options: {
     const body = parseAllergenCommandBody(input.body);
     const current = await session(input);
     return retryTransactionConflict(() =>
-      options.persistence.transactions.run(async (tx) => {
-        const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
-        const at = options.persistence.now();
-        try {
-          // The roster content for a target registry version: allergens keep their identity
-          // across registry versions; new ones derive from the target version.
-          const rosterFor = async (registryVersionReference: string) => {
-            const existing = await currentAllergenRegistry(reads(tx), s.owner);
-            const idOf = (code: string) =>
-              existing?.entries.find((entry) => entry.code === code)?.allergenReference ??
-              derivedReference(registryVersionReference, "allergen:" + code);
-            return {
-              registryVersionReference,
-              jurisdictionCode: canadaPriorityAllergensTest.jurisdictionCode,
-              policyDocument: canadaPriorityAllergensTest.policyDocument,
-              entries: canadaPriorityAllergensTest.entries.map(([code, en, fr]) => ({
-                allergenReference: idOf(code),
-                code,
-                localizedNames: { "en-CA": en, "fr-CA": fr },
-              })),
+      options.persistence.transactions.run((tx) =>
+        withRememberedBrandAuthorization(tx, async () => {
+          const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+          const at = options.persistence.now();
+          try {
+            // The roster content for a target registry version: allergens keep their identity
+            // across registry versions; new ones derive from the target version.
+            const rosterFor = async (registryVersionReference: string) => {
+              const existing = await currentAllergenRegistry(reads(tx), s.owner);
+              const idOf = (code: string) =>
+                existing?.entries.find((entry) => entry.code === code)?.allergenReference ??
+                derivedReference(registryVersionReference, "allergen:" + code);
+              return {
+                registryVersionReference,
+                jurisdictionCode: canadaPriorityAllergensTest.jurisdictionCode,
+                policyDocument: canadaPriorityAllergensTest.policyDocument,
+                entries: canadaPriorityAllergensTest.entries.map(([code, en, fr]) => ({
+                  allergenReference: idOf(code),
+                  code,
+                  localizedNames: { "en-CA": en, "fr-CA": fr },
+                })),
+              };
             };
-          };
-          if (body.action === "RecordRegistry") {
-            if (!s.permissions.mayManageRegistry) fail("PermissionDenied");
-            const result = await recordAllergenRegistryProposal(reads(tx), s.owner, {
-              ...(await rosterFor(derivedReference(body.operationReference, "registry"))),
-              proposalReference: derivedReference(body.operationReference, "proposal"),
-              actorReference: s.actor,
-              at,
-              auditReference: derivedReference(body.operationReference, "audit"),
-            });
-            return { status: result.status, proposalReference: result.proposalReference };
-          }
-          if (body.action === "ApproveRegistry") {
-            if (!s.permissions.mayManageRegistry) fail("PermissionDenied");
-            const pending = await pendingAllergenRegistryProposal(reads(tx), s.owner);
-            const replayed = (
-              await (
-                tx as unknown as {
-                  query(sql: string, values: readonly unknown[]): Promise<{ rows: unknown[] }>;
-                }
-              ).query(
-                "SELECT registry_version_id::text version FROM rms_catalog.allergen_registry_proposal WHERE brand_id=$1 AND proposal_id=$2",
-                [s.owner.brandReference, body.proposalReference],
-              )
-            ).rows[0] as { version: string } | undefined;
-            if (replayed === undefined) return fail("NotFound");
-            if (pending !== null && pending.proposalReference !== body.proposalReference)
-              return fail("Conflict");
-            // WP-2423 Q19: the recorder approves alone only as an in-effect, re-verified sole operator.
-            const soleOperator =
-              body.approvalMode === "SoleOperator" && pending !== null
-                ? {
-                    approverMfaAt: (
-                      await requireMerchantBrandSoleOperator(tx as never, {
-                        ...s.owner,
-                        actorReference: s.actor,
-                        permissionCode: "catalog.allergen_registry.manage",
-                        observedAt: at,
-                        allowed: async () => s.permissions.mayManageRegistry,
-                      })
-                    ).actorMfaAt,
+            if (body.action === "RecordRegistry") {
+              if (!s.permissions.mayManageRegistry) fail("PermissionDenied");
+              const result = await recordAllergenRegistryProposal(reads(tx), s.owner, {
+                ...(await rosterFor(derivedReference(body.operationReference, "registry"))),
+                proposalReference: derivedReference(body.operationReference, "proposal"),
+                actorReference: s.actor,
+                at,
+                auditReference: derivedReference(body.operationReference, "audit"),
+              });
+              return { status: result.status, proposalReference: result.proposalReference };
+            }
+            if (body.action === "ApproveRegistry") {
+              if (!s.permissions.mayManageRegistry) fail("PermissionDenied");
+              const pending = await pendingAllergenRegistryProposal(reads(tx), s.owner);
+              const replayed = (
+                await (
+                  tx as unknown as {
+                    query(sql: string, values: readonly unknown[]): Promise<{ rows: unknown[] }>;
                   }
-                : undefined;
-            const result = await createAllergenRegistryVersion(reads(tx), s.owner, {
-              ...(await rosterFor(replayed.version)),
-              actorReference: s.actor,
-              at,
-              auditReference: derivedReference(body.operationReference, "audit"),
-              proposal: {
-                proposalReference: body.proposalReference,
-                ...(soleOperator === undefined ? {} : { soleOperator }),
-              },
-            });
-            return {
-              status: result.status,
-              registryVersionReference: result.registry.registryVersionReference,
-            };
-          }
-          if (!s.permissions.mayDeclare) fail("PermissionDenied");
-          const item = (await listInventoryRecipeIngredientFacts(reads(tx), s.owner)).find(
-            (candidate) => candidate.itemReference === body.itemReference && candidate.active,
-          );
-          if (item === undefined) return fail("NotFound");
-          const registry = await currentAllergenRegistry(reads(tx), s.owner);
-          if (registry === null) return fail("RegistryMissing");
-          const evidence = derivedReference(body.operationReference, "declaration");
-          // A retry after the item changed still replays the recorded declaration.
-          const replay = (
-            await listIngredientDeclarationHistory(reads(tx), s.owner, item.itemReference)
-          ).find((d) => d.evidenceReference === evidence);
-          if (
-            replay === undefined &&
-            item.configurationOperationReference !== body.expectedItemVersion
-          )
-            return fail("Conflict");
-          const result = await recordIngredientAllergenDeclaration(reads(tx), s.owner, {
-            evidenceReference: evidence,
-            itemReference: item.itemReference,
-            itemVersionReference: replay?.itemVersionReference ?? body.expectedItemVersion,
-            registryVersionReference:
-              replay?.registryVersionReference ?? registry.registryVersionReference,
-            allergens: body.allergens,
-            sourceKind: body.sourceKind,
-            documentReference: body.documentReference,
-            note: body.note,
-            validUntil: storeDayEndExpiryCutoff(body.validUntilDate, s.timeZone),
-            actorReference: s.actor,
-            at: replay?.reviewedAt ?? at,
-            auditReference: derivedReference(body.operationReference, "audit"),
-          });
-          return { status: result.status, declaration: result.declaration };
-        } catch (error) {
-          if (error instanceof AllergenDeclarationError) return fail(declarationErrors[error.code]);
-          if (error instanceof MerchantSoleOperatorGateError)
-            return fail(
-              error.code === "NotInEffect" ? "SoleOperatorNotInEffect" : "NeedsReverification",
+                ).query(
+                  "SELECT registry_version_id::text version FROM rms_catalog.allergen_registry_proposal WHERE brand_id=$1 AND proposal_id=$2",
+                  [s.owner.brandReference, body.proposalReference],
+                )
+              ).rows[0] as { version: string } | undefined;
+              if (replayed === undefined) return fail("NotFound");
+              if (pending !== null && pending.proposalReference !== body.proposalReference)
+                return fail("Conflict");
+              // WP-2423 Q19: the recorder approves alone only as an in-effect, re-verified sole operator.
+              const soleOperator =
+                body.approvalMode === "SoleOperator" && pending !== null
+                  ? {
+                      approverMfaAt: (
+                        await requireMerchantBrandSoleOperator(tx as never, {
+                          ...s.owner,
+                          actorReference: s.actor,
+                          permissionCode: "catalog.allergen_registry.manage",
+                          observedAt: at,
+                          allowed: async () => s.permissions.mayManageRegistry,
+                        })
+                      ).actorMfaAt,
+                    }
+                  : undefined;
+              const result = await createAllergenRegistryVersion(reads(tx), s.owner, {
+                ...(await rosterFor(replayed.version)),
+                actorReference: s.actor,
+                at,
+                auditReference: derivedReference(body.operationReference, "audit"),
+                proposal: {
+                  proposalReference: body.proposalReference,
+                  ...(soleOperator === undefined ? {} : { soleOperator }),
+                },
+              });
+              return {
+                status: result.status,
+                registryVersionReference: result.registry.registryVersionReference,
+              };
+            }
+            if (!s.permissions.mayDeclare) fail("PermissionDenied");
+            const item = (await listInventoryRecipeIngredientFacts(reads(tx), s.owner)).find(
+              (candidate) => candidate.itemReference === body.itemReference && candidate.active,
             );
-          throw error;
-        }
-      }),
+            if (item === undefined) return fail("NotFound");
+            const registry = await currentAllergenRegistry(reads(tx), s.owner);
+            if (registry === null) return fail("RegistryMissing");
+            const evidence = derivedReference(body.operationReference, "declaration");
+            // A retry after the item changed still replays the recorded declaration.
+            const replay = (
+              await listIngredientDeclarationHistory(reads(tx), s.owner, item.itemReference)
+            ).find((d) => d.evidenceReference === evidence);
+            if (
+              replay === undefined &&
+              item.configurationOperationReference !== body.expectedItemVersion
+            )
+              return fail("Conflict");
+            const result = await recordIngredientAllergenDeclaration(reads(tx), s.owner, {
+              evidenceReference: evidence,
+              itemReference: item.itemReference,
+              itemVersionReference: replay?.itemVersionReference ?? body.expectedItemVersion,
+              registryVersionReference:
+                replay?.registryVersionReference ?? registry.registryVersionReference,
+              allergens: body.allergens,
+              sourceKind: body.sourceKind,
+              documentReference: body.documentReference,
+              note: body.note,
+              validUntil: storeDayEndExpiryCutoff(body.validUntilDate, s.timeZone),
+              actorReference: s.actor,
+              at: replay?.reviewedAt ?? at,
+              auditReference: derivedReference(body.operationReference, "audit"),
+            });
+            return { status: result.status, declaration: result.declaration };
+          } catch (error) {
+            if (error instanceof AllergenDeclarationError)
+              return fail(declarationErrors[error.code]);
+            if (error instanceof MerchantSoleOperatorGateError)
+              return fail(
+                error.code === "NotInEffect" ? "SoleOperatorNotInEffect" : "NeedsReverification",
+              );
+            throw error;
+          }
+        }),
+      ),
     );
   };
   return { query, command };

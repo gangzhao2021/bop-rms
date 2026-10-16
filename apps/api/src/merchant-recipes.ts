@@ -28,6 +28,7 @@ import {
   type RecipeAuthoringTransaction,
   type RecipeDraftFacts,
 } from "@rms/recipe";
+import { withRememberedBrandAuthorization } from "./merchant-brand-transaction-authorization.js";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import { recipeIngredientItems } from "./recipe-ingredient-items.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -293,175 +294,178 @@ export function createMerchantRecipes(options: {
   }) => {
     const current = await session(input);
     return retryTransactionConflict(() =>
-      options.persistence.transactions.run(async (tx) => {
-        const scope = await scopeFor(tx, input.sessionCookie, current.sessionReference);
-        const permissions = {
-          mayEdit: await scope.may("recipe.update"),
-          mayReview: await scope.may("recipe.approve"),
-          mayPublish: await scope.may("recipe.publish"),
-        };
-        const at = options.persistence.now();
-        const rtx = tx as unknown as RecipeAuthoringTransaction;
-        const { items, subRecipes, stations, registry, declarations, declarationOf } = await facts(
-          tx,
-          scope,
-        );
-        const allergenName = new Map(
-          (registry?.entries ?? []).map((entry) => [
-            entry.allergenReference,
-            name(entry.localizedNames, entry.code),
-          ]),
-        );
-        /** "Declared" (with allergens, possibly none), "Outdated" (older item version) or "Missing". */
-        const allergenStatus = (item: (typeof items)[number]) => {
-          const d = declarationOf(item);
-          if (d !== null)
-            return {
-              status: "Declared" as const,
-              contains: d.allergens
-                .filter((a) => a.classification === "Contains")
-                .map((a) => allergenName.get(a.allergenReference) ?? a.allergenReference),
-              mayContain: d.allergens
-                .filter((a) => a.classification === "CrossContactPossible")
-                .map((a) => allergenName.get(a.allergenReference) ?? a.allergenReference),
-            };
-          return {
-            status: declarations.has(item.itemReference)
-              ? ("Outdated" as const)
-              : ("Missing" as const),
-            contains: [],
-            mayContain: [],
+      options.persistence.transactions.run((tx) =>
+        withRememberedBrandAuthorization(tx, async () => {
+          const scope = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+          const permissions = {
+            mayEdit: await scope.may("recipe.update"),
+            mayReview: await scope.may("recipe.approve"),
+            mayPublish: await scope.may("recipe.publish"),
           };
-        };
-        const skus = await listBrandSkuChoices(tx as never, scope);
-        const members = await listStoreMembers(tx as unknown as MemberDirectoryTransaction, scope);
-        const people = new Map(
-          members.map((member) => [member.actorReference, member.displayName]),
-        );
-        const label = (actor: string) =>
-          actor === scope.actorReference
-            ? "You"
-            : (people.get(actor) ?? "Staff " + actor.slice(-4));
-        const choices = {
-          yieldUnits: Object.keys(recipeYieldUnits),
-          items: items
-            .filter(
-              (item) =>
-                item.active &&
-                item.stockTracked &&
-                ["Mass", "Volume", "Count"].includes(item.dimension),
-            )
-            .map((item) => ({
-              itemReference: item.itemReference,
-              internalCode: item.internalCode,
-              name: name(item.localizedNames, item.internalCode),
-              unitCode: item.unitCode,
-              latestUnitCostCents: item.latestUnitCostMinor,
-              allergens: allergenStatus(item),
-            })),
-          subRecipes: subRecipes.map((recipe) => ({
-            recipeReference: recipe.recipeReference,
-            name: recipe.name,
-            yieldUnit: recipe.yieldUnitCode,
-          })),
-          stations: stations
-            .filter((station) => station.stationActive)
-            .flatMap((station, index) =>
-              station.capabilityReferences.map((capability) => ({
-                capabilityReference: capability,
-                name:
-                  "Station " +
-                  (index + 1) +
-                  (station.selectorKind === "AllPreparedItems" ? " (all prepared items)" : ""),
+          const at = options.persistence.now();
+          const rtx = tx as unknown as RecipeAuthoringTransaction;
+          const { items, subRecipes, stations, registry, declarations, declarationOf } =
+            await facts(tx, scope);
+          const allergenName = new Map(
+            (registry?.entries ?? []).map((entry) => [
+              entry.allergenReference,
+              name(entry.localizedNames, entry.code),
+            ]),
+          );
+          /** "Declared" (with allergens, possibly none), "Outdated" (older item version) or "Missing". */
+          const allergenStatus = (item: (typeof items)[number]) => {
+            const d = declarationOf(item);
+            if (d !== null)
+              return {
+                status: "Declared" as const,
+                contains: d.allergens
+                  .filter((a) => a.classification === "Contains")
+                  .map((a) => allergenName.get(a.allergenReference) ?? a.allergenReference),
+                mayContain: d.allergens
+                  .filter((a) => a.classification === "CrossContactPossible")
+                  .map((a) => allergenName.get(a.allergenReference) ?? a.allergenReference),
+              };
+            return {
+              status: declarations.has(item.itemReference)
+                ? ("Outdated" as const)
+                : ("Missing" as const),
+              contains: [],
+              mayContain: [],
+            };
+          };
+          const skus = await listBrandSkuChoices(tx as never, scope);
+          const members = await listStoreMembers(
+            tx as unknown as MemberDirectoryTransaction,
+            scope,
+          );
+          const people = new Map(
+            members.map((member) => [member.actorReference, member.displayName]),
+          );
+          const label = (actor: string) =>
+            actor === scope.actorReference
+              ? "You"
+              : (people.get(actor) ?? "Staff " + actor.slice(-4));
+          const choices = {
+            yieldUnits: Object.keys(recipeYieldUnits),
+            items: items
+              .filter(
+                (item) =>
+                  item.active &&
+                  item.stockTracked &&
+                  ["Mass", "Volume", "Count"].includes(item.dimension),
+              )
+              .map((item) => ({
+                itemReference: item.itemReference,
+                internalCode: item.internalCode,
+                name: name(item.localizedNames, item.internalCode),
+                unitCode: item.unitCode,
+                latestUnitCostCents: item.latestUnitCostMinor,
+                allergens: allergenStatus(item),
               })),
-            ),
-          skus: skus
-            .filter((sku) => sku.active)
-            .map((sku) => ({
-              skuReference: sku.skuReference,
-              code: sku.skuCode,
-              // Product and size, e.g. "Flat White — Large (16 oz)".
-              name: (() => {
-                const product = name(sku.productLocalizedNames, "");
-                const size = name(sku.localizedNames, sku.skuCode);
-                return product && product !== size ? product + " — " + size : size;
-              })(),
-              unitOfSale: sku.unitOfSale,
+            subRecipes: subRecipes.map((recipe) => ({
+              recipeReference: recipe.recipeReference,
+              name: recipe.name,
+              yieldUnit: recipe.yieldUnitCode,
             })),
-        };
-        if (input.recipeReference !== null) {
-          const detail = await loadRecipe(rtx, scope, input.recipeReference, at);
-          if (detail === null) return fail("NotFound");
-          // WP-2423 Q19: a reviewer who would review their own recipe, or give the second kind,
-          // sees whether they may do it alone as sole operator and why not.
-          const gate = permissions.mayReview
-            ? await merchantBrandSoleOperatorGate(tx as never, {
-                tenantReference: scope.tenantReference,
-                brandReference: scope.brandReference,
-                storeReference: scope.storeReference,
-                actorReference: scope.actorReference,
-                permissionCode: "recipe.approve",
-                observedAt: at,
-                allowed: async () => await scope.may("recipe.approve"),
-              })
-            : null;
+            stations: stations
+              .filter((station) => station.stationActive)
+              .flatMap((station, index) =>
+                station.capabilityReferences.map((capability) => ({
+                  capabilityReference: capability,
+                  name:
+                    "Station " +
+                    (index + 1) +
+                    (station.selectorKind === "AllPreparedItems" ? " (all prepared items)" : ""),
+                })),
+              ),
+            skus: skus
+              .filter((sku) => sku.active)
+              .map((sku) => ({
+                skuReference: sku.skuReference,
+                code: sku.skuCode,
+                // Product and size, e.g. "Flat White — Large (16 oz)".
+                name: (() => {
+                  const product = name(sku.productLocalizedNames, "");
+                  const size = name(sku.localizedNames, sku.skuCode);
+                  return product && product !== size ? product + " — " + size : size;
+                })(),
+                unitOfSale: sku.unitOfSale,
+              })),
+          };
+          if (input.recipeReference !== null) {
+            const detail = await loadRecipe(rtx, scope, input.recipeReference, at);
+            if (detail === null) return fail("NotFound");
+            // WP-2423 Q19: a reviewer who would review their own recipe, or give the second kind,
+            // sees whether they may do it alone as sole operator and why not.
+            const gate = permissions.mayReview
+              ? await merchantBrandSoleOperatorGate(tx as never, {
+                  tenantReference: scope.tenantReference,
+                  brandReference: scope.brandReference,
+                  storeReference: scope.storeReference,
+                  actorReference: scope.actorReference,
+                  permissionCode: "recipe.approve",
+                  observedAt: at,
+                  allowed: async () => await scope.may("recipe.approve"),
+                })
+              : null;
+            return {
+              screenId: "RECIPE-EDITOR" as const,
+              sourceAsOf: at,
+              permissions,
+              viewer: scope.actorReference,
+              soleOperator:
+                gate === null
+                  ? null
+                  : {
+                      status: gate.status,
+                      otherApprovers: gate.otherApprovers,
+                      verifiedUntil: gate.verifiedUntil,
+                    },
+              choices,
+              recipe: {
+                ...detail,
+                snapshot: undefined,
+                presentation: undefined,
+                // DEC-ALLERGEN-DECLARATIONS: what this version declares for each ingredient line.
+                ingredientAllergens: detail.snapshot.ingredients.map((requirement, index) => {
+                  const reference = requirement.allergenDeclarationReference ?? null;
+                  const declaration = [...declarations.values()].find(
+                    (d) => d.evidenceReference === reference,
+                  );
+                  const classification = (allergen: string) =>
+                    declaration?.allergens.find((a) => a.allergenReference === allergen)
+                      ?.classification ?? "Contains";
+                  const names = (kind: "Contains" | "CrossContactPossible") =>
+                    requirement.allergens
+                      .filter((a) => classification(a.allergenReference) === kind)
+                      .map((a) => allergenName.get(a.allergenReference) ?? a.allergenReference);
+                  return {
+                    line: index + 1,
+                    kind: requirement.sourceKind,
+                    declared: reference !== null,
+                    current: declaration !== undefined,
+                    contains: names("Contains"),
+                    mayContain: names("CrossContactPossible"),
+                  };
+                }),
+                authorLabel: label(detail.authorReference),
+                reviews: detail.reviews.map((review) => ({
+                  ...review,
+                  reviewerLabel: label(review.reviewerReference),
+                })),
+              },
+            };
+          }
           return {
-            screenId: "RECIPE-EDITOR" as const,
+            screenId: "RECIPE-LIST" as const,
             sourceAsOf: at,
             permissions,
             viewer: scope.actorReference,
-            soleOperator:
-              gate === null
-                ? null
-                : {
-                    status: gate.status,
-                    otherApprovers: gate.otherApprovers,
-                    verifiedUntil: gate.verifiedUntil,
-                  },
             choices,
-            recipe: {
-              ...detail,
-              snapshot: undefined,
-              presentation: undefined,
-              // DEC-ALLERGEN-DECLARATIONS: what this version declares for each ingredient line.
-              ingredientAllergens: detail.snapshot.ingredients.map((requirement, index) => {
-                const reference = requirement.allergenDeclarationReference ?? null;
-                const declaration = [...declarations.values()].find(
-                  (d) => d.evidenceReference === reference,
-                );
-                const classification = (allergen: string) =>
-                  declaration?.allergens.find((a) => a.allergenReference === allergen)
-                    ?.classification ?? "Contains";
-                const names = (kind: "Contains" | "CrossContactPossible") =>
-                  requirement.allergens
-                    .filter((a) => classification(a.allergenReference) === kind)
-                    .map((a) => allergenName.get(a.allergenReference) ?? a.allergenReference);
-                return {
-                  line: index + 1,
-                  kind: requirement.sourceKind,
-                  declared: reference !== null,
-                  current: declaration !== undefined,
-                  contains: names("Contains"),
-                  mayContain: names("CrossContactPossible"),
-                };
-              }),
-              authorLabel: label(detail.authorReference),
-              reviews: detail.reviews.map((review) => ({
-                ...review,
-                reviewerLabel: label(review.reviewerReference),
-              })),
-            },
+            recipes: await listRecipes(rtx, scope, at),
           };
-        }
-        return {
-          screenId: "RECIPE-LIST" as const,
-          sourceAsOf: at,
-          permissions,
-          viewer: scope.actorReference,
-          choices,
-          recipes: await listRecipes(rtx, scope, at),
-        };
-      }),
+        }),
+      ),
     );
   };
 
@@ -469,160 +473,162 @@ export function createMerchantRecipes(options: {
     const body = parseRecipeCommandBody(input.body);
     const current = await session(input);
     return retryTransactionConflict(() =>
-      options.persistence.transactions.run(async (tx) => {
-        const scope = await scopeFor(tx, input.sessionCookie, current.sessionReference);
-        const action =
-          body.action === "SaveDraft"
-            ? "recipe.update"
-            : body.action === "Review"
-              ? "recipe.approve"
-              : "recipe.publish";
-        if (!(await scope.may(action))) fail("PermissionDenied");
-        const rtx = tx as unknown as RecipeAuthoringTransaction;
-        const at = options.persistence.now();
-        const writer = {
-          actorReference: scope.actorReference,
-          at,
-          nextReference: () => options.references.next(),
-        };
-        const reviewersAuthorized = async (actors: readonly string[]) =>
-          (await brandActionHeldBy(tx as unknown as RoleAssignmentTransaction, {
-            brandReference: scope.brandReference,
-            actorReferences: actors,
-            action: "recipe.approve",
+      options.persistence.transactions.run((tx) =>
+        withRememberedBrandAuthorization(tx, async () => {
+          const scope = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+          const action =
+            body.action === "SaveDraft"
+              ? "recipe.update"
+              : body.action === "Review"
+                ? "recipe.approve"
+                : "recipe.publish";
+          if (!(await scope.may(action))) fail("PermissionDenied");
+          const rtx = tx as unknown as RecipeAuthoringTransaction;
+          const at = options.persistence.now();
+          const writer = {
+            actorReference: scope.actorReference,
             at,
-          })) &&
-          (await confirmActiveBrandMembers(tx as unknown as MemberDirectoryTransaction, {
-            brandReference: scope.brandReference,
-            actorReferences: actors,
-            at,
-          }));
-        // WP-2423 Q19: is sole operator in effect for this actor now (recipe review permission)?
-        const soleGate = (actor: string) =>
-          merchantBrandSoleOperatorGate(tx as never, {
-            tenantReference: scope.tenantReference,
-            brandReference: scope.brandReference,
-            storeReference: scope.storeReference,
-            actorReference: actor,
-            permissionCode: "recipe.approve",
-            observedAt: at,
-            allowed: async () => await scope.may(action),
-          });
-        const soleOperatorEffective = async (actor: string) =>
-          (await soleGate(actor)).status === "Effective";
-        try {
-          switch (body.action) {
-            case "SaveDraft": {
-              const draft = (() => {
-                try {
-                  return parseRecipeDraft(body.draft);
-                } catch (error) {
-                  if (error instanceof RecipeAuthoringError) throw error;
-                  return fail("Invalid");
-                }
-              })();
-              return await saveRecipeDraft(rtx, scope, {
-                ...writer,
-                operationReference: body.operationReference,
-                recipeReference: body.recipeReference,
-                expectedAggregateVersion: body.expectedAggregateVersion,
-                revisionOf: body.revisionOf,
-                draft,
-                facts: (await facts(tx, scope)).recipeFacts,
-                auditReference: options.references.next(),
-              });
+            nextReference: () => options.references.next(),
+          };
+          const reviewersAuthorized = async (actors: readonly string[]) =>
+            (await brandActionHeldBy(tx as unknown as RoleAssignmentTransaction, {
+              brandReference: scope.brandReference,
+              actorReferences: actors,
+              action: "recipe.approve",
+              at,
+            })) &&
+            (await confirmActiveBrandMembers(tx as unknown as MemberDirectoryTransaction, {
+              brandReference: scope.brandReference,
+              actorReferences: actors,
+              at,
+            }));
+          // WP-2423 Q19: is sole operator in effect for this actor now (recipe review permission)?
+          const soleGate = (actor: string) =>
+            merchantBrandSoleOperatorGate(tx as never, {
+              tenantReference: scope.tenantReference,
+              brandReference: scope.brandReference,
+              storeReference: scope.storeReference,
+              actorReference: actor,
+              permissionCode: "recipe.approve",
+              observedAt: at,
+              allowed: async () => await scope.may(action),
+            });
+          const soleOperatorEffective = async (actor: string) =>
+            (await soleGate(actor)).status === "Effective";
+          try {
+            switch (body.action) {
+              case "SaveDraft": {
+                const draft = (() => {
+                  try {
+                    return parseRecipeDraft(body.draft);
+                  } catch (error) {
+                    if (error instanceof RecipeAuthoringError) throw error;
+                    return fail("Invalid");
+                  }
+                })();
+                return await saveRecipeDraft(rtx, scope, {
+                  ...writer,
+                  operationReference: body.operationReference,
+                  recipeReference: body.recipeReference,
+                  expectedAggregateVersion: body.expectedAggregateVersion,
+                  revisionOf: body.revisionOf,
+                  draft,
+                  facts: (await facts(tx, scope)).recipeFacts,
+                  auditReference: options.references.next(),
+                });
+              }
+              case "Review": {
+                const soleOperator =
+                  body.approvalMode === "SoleOperator"
+                    ? {
+                        reviewerMfaAt: (
+                          await requireMerchantBrandSoleOperator(tx as never, {
+                            tenantReference: scope.tenantReference,
+                            brandReference: scope.brandReference,
+                            storeReference: scope.storeReference,
+                            actorReference: scope.actorReference,
+                            permissionCode: "recipe.approve",
+                            observedAt: at,
+                            allowed: async () => await scope.may(action),
+                          })
+                        ).actorMfaAt,
+                      }
+                    : undefined;
+                return await recordRecipeReview(rtx, scope, {
+                  ...writer,
+                  reviewReference: body.operationReference,
+                  recipeReference: body.recipeReference,
+                  versionReference: body.versionReference,
+                  subject: body.subject,
+                  kind: body.kind,
+                  decision: body.decision,
+                  comment: body.comment,
+                  auditReference: options.references.next(),
+                  ...(soleOperator === undefined ? {} : { soleOperator }),
+                });
+              }
+              case "Publish":
+                return await publishRecipe(rtx, scope, {
+                  ...writer,
+                  operationReference: body.operationReference,
+                  recipeReference: body.recipeReference,
+                  expectedAggregateVersion: body.expectedAggregateVersion,
+                  facts: (await facts(tx, scope)).recipeFacts,
+                  reviewersAuthorized,
+                  soleOperatorEffective,
+                  auditReference: options.references.next(),
+                });
+              case "PublishKitchen":
+                return await publishRecipePreparation(rtx, scope, {
+                  ...writer,
+                  operationReference: body.operationReference,
+                  recipeReference: body.recipeReference,
+                  reviewersAuthorized,
+                  soleOperatorEffective,
+                  auditReference: options.references.next(),
+                });
+              case "BindSku": {
+                const sku = (await listBrandSkuChoices(tx as never, scope)).find(
+                  (item) => item.skuReference === body.skuReference && item.active,
+                );
+                if (sku === undefined) return fail("NotFound");
+                return await bindRecipeToSku(rtx, scope, {
+                  ...writer,
+                  operationReference: body.operationReference,
+                  recipeReference: body.recipeReference,
+                  skuReference: body.skuReference,
+                  storeReference: body.storeOnly ? scope.storeReference : null,
+                  skuUnitOfSale: sku.unitOfSale,
+                  auditReference: options.references.next(),
+                });
+              }
+              case "EndStoreBinding":
+                return await endStoreRecipeBinding(rtx, scope, {
+                  ...writer,
+                  operationReference: body.operationReference,
+                  bindingReference: body.bindingReference,
+                  auditReference: options.references.next(),
+                });
+              case "Archive":
+                return await archiveRecipe(rtx, scope, {
+                  ...writer,
+                  operationReference: body.operationReference,
+                  recipeReference: body.recipeReference,
+                  expectedAggregateVersion: body.expectedAggregateVersion,
+                  auditReference: options.references.next(),
+                });
             }
-            case "Review": {
-              const soleOperator =
-                body.approvalMode === "SoleOperator"
-                  ? {
-                      reviewerMfaAt: (
-                        await requireMerchantBrandSoleOperator(tx as never, {
-                          tenantReference: scope.tenantReference,
-                          brandReference: scope.brandReference,
-                          storeReference: scope.storeReference,
-                          actorReference: scope.actorReference,
-                          permissionCode: "recipe.approve",
-                          observedAt: at,
-                          allowed: async () => await scope.may(action),
-                        })
-                      ).actorMfaAt,
-                    }
-                  : undefined;
-              return await recordRecipeReview(rtx, scope, {
-                ...writer,
-                reviewReference: body.operationReference,
-                recipeReference: body.recipeReference,
-                versionReference: body.versionReference,
-                subject: body.subject,
-                kind: body.kind,
-                decision: body.decision,
-                comment: body.comment,
-                auditReference: options.references.next(),
-                ...(soleOperator === undefined ? {} : { soleOperator }),
-              });
-            }
-            case "Publish":
-              return await publishRecipe(rtx, scope, {
-                ...writer,
-                operationReference: body.operationReference,
-                recipeReference: body.recipeReference,
-                expectedAggregateVersion: body.expectedAggregateVersion,
-                facts: (await facts(tx, scope)).recipeFacts,
-                reviewersAuthorized,
-                soleOperatorEffective,
-                auditReference: options.references.next(),
-              });
-            case "PublishKitchen":
-              return await publishRecipePreparation(rtx, scope, {
-                ...writer,
-                operationReference: body.operationReference,
-                recipeReference: body.recipeReference,
-                reviewersAuthorized,
-                soleOperatorEffective,
-                auditReference: options.references.next(),
-              });
-            case "BindSku": {
-              const sku = (await listBrandSkuChoices(tx as never, scope)).find(
-                (item) => item.skuReference === body.skuReference && item.active,
+          } catch (error) {
+            if (error instanceof RecipeAuthoringError)
+              return fail(authoringErrors[error.code], error.line);
+            if (error instanceof MerchantSoleOperatorGateError)
+              return fail(
+                error.code === "NotInEffect" ? "SoleOperatorNotInEffect" : "NeedsReverification",
               );
-              if (sku === undefined) return fail("NotFound");
-              return await bindRecipeToSku(rtx, scope, {
-                ...writer,
-                operationReference: body.operationReference,
-                recipeReference: body.recipeReference,
-                skuReference: body.skuReference,
-                storeReference: body.storeOnly ? scope.storeReference : null,
-                skuUnitOfSale: sku.unitOfSale,
-                auditReference: options.references.next(),
-              });
-            }
-            case "EndStoreBinding":
-              return await endStoreRecipeBinding(rtx, scope, {
-                ...writer,
-                operationReference: body.operationReference,
-                bindingReference: body.bindingReference,
-                auditReference: options.references.next(),
-              });
-            case "Archive":
-              return await archiveRecipe(rtx, scope, {
-                ...writer,
-                operationReference: body.operationReference,
-                recipeReference: body.recipeReference,
-                expectedAggregateVersion: body.expectedAggregateVersion,
-                auditReference: options.references.next(),
-              });
+            throw error;
           }
-        } catch (error) {
-          if (error instanceof RecipeAuthoringError)
-            return fail(authoringErrors[error.code], error.line);
-          if (error instanceof MerchantSoleOperatorGateError)
-            return fail(
-              error.code === "NotInEffect" ? "SoleOperatorNotInEffect" : "NeedsReverification",
-            );
-          throw error;
-        }
-      }),
+        }),
+      ),
     );
   };
   return { query, command };

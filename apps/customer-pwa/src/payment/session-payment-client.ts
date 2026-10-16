@@ -192,6 +192,22 @@ export function createSessionPaymentClient() {
     async retry(session: string): Promise<SessionPaymentView> {
       return view(session, await post(session, "payment-intents", { retry: true }));
     },
+    /**
+     * WP-2423 abandoned payment: come back to this checkout's open payment (after a reload or
+     * from the table page). The server returns the same attempt; nothing new is charged or opened.
+     */
+    async resume(session: string): Promise<SessionPaymentView> {
+      return view(session, await post(session, "payment-intents", { resume: true }));
+    },
+    /** Internal testing only: finish the open simulated payment, approved or declined. */
+    async simulateResume(session: string, outcome: "approve" | "decline") {
+      return view(
+        session,
+        await post(session, outcome === "approve" ? "simulation-confirm" : "simulation-fail", {
+          resume: true,
+        }),
+      );
+    },
     /** Internal testing only: another simulated card, approved or declined. */
     async simulateRetry(session: string, outcome: "approve" | "decline") {
       return view(

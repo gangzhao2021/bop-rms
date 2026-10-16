@@ -203,14 +203,16 @@ export function createInternalPaymentTerminal(
      * the next attempt on the same intent (or returns the one already open), then the simulated
      * Provider declines or approves that attempt. Returns the attempt's creation result.
      */
-    async confirm(input, confirmation, { retry = false } = {}) {
+    async confirm(input, confirmation, { retry = false, resume = false } = {}) {
       if (!["SIMULATE_CAPTURE", "SIMULATE_FAILURE"].includes(confirmation))
         throw new Error("SIMULATION_CONFIRMATION_REQUIRED");
       const expected = confirmation === "SIMULATE_CAPTURE" ? "Captured" : "Failed";
       const prepared = await intents.resolveRequest(input);
       const created = retry
           ? await prepared.service.retry(input)
-          : await prepared.service.create(input),
+          : resume
+            ? await prepared.service.resume(input)
+            : await prepared.service.create(input),
         record = created.record;
       const prior = await terminal.read(record.intent.paymentIntentReference);
       if (prior !== null) {

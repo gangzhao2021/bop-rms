@@ -4,8 +4,10 @@ import { cardMachineRefundRecordedText } from "./CardMachineRequestRefund.js";
 import {
   CardMachineRefundDone,
   PaymentFinancialSummary,
+  paymentRefundStateLabel,
   paymentStateLabel,
   refundWizardSections,
+  requestProgressLabel,
 } from "./RefundPaymentPage.js";
 import { StoreTimeZoneContext } from "./StoreTime.js";
 
@@ -105,4 +107,40 @@ it("WP-2423 v15: a recorded refund request leaves no confirmation or record butt
     confirmation: false,
     startAnother: false,
   });
+});
+
+it("WP-2423 item 6: a send whose result is unconfirmed is retried before another request", () => {
+  expect(refundWizardSections("Recorded", false, true, true)).toEqual({
+    confirmation: false,
+    startAnother: false,
+  });
+});
+
+it("WP-2423 item 6: a refund is called sent only once it was really sent", () => {
+  // Prepared (or recorded) but not sent: never "Sent".
+  expect(requestProgressLabel("Recorded", "Online", null)).toBe("Recorded, not sent yet");
+  expect(requestProgressLabel("ReadyToSend", "Online", null)).toBe("Not sent yet");
+  expect(requestProgressLabel("ReadyToSend", "Online", "Approved")).toBe("Approved, not sent yet");
+  expect(requestProgressLabel("Sending", "Online", null)).toBe(
+    "Sent — waiting for the card provider's answer",
+  );
+  expect(requestProgressLabel("Sending", "Online", "Approved")).toBe(
+    "Sent — waiting for the card provider's answer",
+  );
+  expect(requestProgressLabel("Refunded", "Online", null)).toBe("Refunded");
+  expect(requestProgressLabel("Recorded", "Online", "AwaitingApproval")).toBe(
+    "Waiting for owner approval",
+  );
+  expect(requestProgressLabel("Recorded", "CardMachine", "Approved")).toBe(
+    "Approved — refund it on the card machine and record it",
+  );
+  expect(requestProgressLabel("Refunded", "CardMachine", null)).toBe(
+    "Refunded on the card machine",
+  );
+  expect(paymentRefundStateLabel("NotDispatched")).toBe("Not sent yet");
+  expect(paymentRefundStateLabel("Prepared")).toBe("Not sent yet");
+  expect(paymentRefundStateLabel("NeedsReconciliation")).toBe(
+    "Sent — waiting for the card provider's answer",
+  );
+  expect(paymentRefundStateLabel("Confirmed")).toBe("Refunded");
 });

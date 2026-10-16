@@ -279,7 +279,6 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
 
   it.each([
     [{ status: "SessionExpired" }, 401, "cart_session_expired"],
-    [{ status: "NotFound" }, 404, "cart_not_found"],
     [{ status: "IdempotencyConflict" }, 409, "cart_idempotency_conflict"],
     [{ status: "LifecycleExpired" }, 409, "cart_expired"],
     [{ status: "LifecycleAbandoned" }, 409, "cart_abandoned"],
@@ -313,6 +312,18 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
       expect(response.headers.get("retry-after")).toBe(
         "retryAfterSeconds" in result && result.retryAfterSeconds !== null ? "10" : null,
       );
+  });
+
+  it("WP-2423: answers a guest without an active Cart with an explicit empty Cart", async () => {
+    port.result = { status: "NotFound" };
+    const response = await request("/bff/customer/cart", { headers: headers() });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toContain("no-store");
+    expect(await response.json()).toEqual({ schemaVersion: 1, cart: null });
+    // A named Cart that doesn't exist is still not found.
+    const named = await request(`/api/v1/carts/${id(1)}`, { headers: headers() });
+    expect(named.status).toBe(404);
+    expect(await named.json()).toMatchObject({ error: { code: "cart_not_found" } });
   });
 
   it("maps a thrown or malformed dependency result to safe unavailable", async () => {

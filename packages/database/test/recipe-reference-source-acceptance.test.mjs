@@ -460,6 +460,23 @@ it("holds complete minimal Recipe references and all-Store projection through ou
         if (table !== "recipe_modifier_version")
           await admin.query(`DROP TRIGGER ${table}_reference_no_truncate ON rms_recipe.${table}`);
       }
+      // 1250_010 later attached its Recipe measurement truncate guard to the shared function;
+      // it is set aside for the replay of 1250_008/009 and restored from 1250_010 below.
+      const measurementTruncateGuard = (
+        await readFile(
+          path.join(
+            root,
+            "migrations/1250-rms-recipe/1250_010_create_recipe_measurement_content.sql",
+          ),
+          "utf8",
+        )
+      )
+        .split("\n")
+        .find((line) => line.startsWith("CREATE TRIGGER recipe_measurement_no_truncate "));
+      assert(measurementTruncateGuard);
+      await admin.query(
+        "DROP TRIGGER recipe_measurement_no_truncate ON rms_recipe.recipe_measurement_content",
+      );
       await admin.query(
         "DROP FUNCTION rms_recipe.maintain_recipe_reference_projection(); DROP FUNCTION rms_recipe.reject_recipe_reference_truncate(); DROP TABLE rms_recipe.recipe_reference_binding; DROP TABLE rms_recipe.recipe_reference_generation",
       );
@@ -481,6 +498,7 @@ it("holds complete minimal Recipe references and all-Store projection through ou
           "utf8",
         ),
       );
+      await admin.query(measurementTruncateGuard);
       assert.equal(await generation(), "0");
       assert.deepEqual(
         (
@@ -567,6 +585,13 @@ it("holds complete minimal Recipe references and all-Store projection through ou
       await admin.query(
         `GRANT SELECT,INSERT ON rms_catalog.option_set_operation_record,rms_catalog.option_set_draft_content_snapshot,platform_audit.audit_record,platform_eventing.outbox_event TO ${role}`,
       );
+      // The Option authoring fence (1102_007): operation identities and abandonment fences.
+      for (const grant of [
+        `GRANT SELECT,INSERT ON rms_catalog.option_set_authoring_identity TO ${role}`,
+        `GRANT SELECT ON rms_catalog.option_set_authoring_abandonment TO ${role}`,
+        `GRANT EXECUTE ON FUNCTION rms_catalog.option_set_authoring_operation_available(uuid) TO ${role}`,
+      ])
+        await admin.query(grant);
       await admin.query(`GRANT SELECT,INSERT,UPDATE ON platform_audit.audit_chain_head TO ${role}`);
       await admin.query(
         `GRANT SELECT ON rms_inventory.inventory_item,rms_inventory.inventory_item_version,rms_inventory.inventory_item_operation,rms_inventory.configuration_reference_generation TO ${role}`,
@@ -665,7 +690,11 @@ it("holds complete minimal Recipe references and all-Store projection through ou
         await reader.query("BEGIN");
         await reader.query(`SET LOCAL ROLE ${role}`);
         try {
-          const value = await work(reader);
+          // The owning Catalog writers hold their transaction's own `query` port (as the
+          // application runner provides it), not a driver client's inherited method.
+          const value = await work({
+            query: (sql, values) => reader.query(sql, values === undefined ? [] : [...values]),
+          });
           await reader.query("COMMIT");
           return value;
         } catch (e) {

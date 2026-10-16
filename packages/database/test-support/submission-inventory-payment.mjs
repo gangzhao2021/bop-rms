@@ -1742,6 +1742,9 @@ export async function exerciseSubmissionInventoryPayment({
             orderReference: preparation.orderReference,
             status: "Succeeded",
             total: { amountMinor: preparation.total.amountMinor.toString(), currency: "CAD" },
+            // The payment window this captured payment was made within; no failure.
+            payBy: String(record.intent.preparation.capacityExpiresAt),
+            failure: null,
           },
         });
         assert.equal((await requestResult("z".repeat(43))).status, 404);

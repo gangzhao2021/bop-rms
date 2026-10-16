@@ -154,6 +154,10 @@ export function composeConfiguredBusinessWorker({
           loadWorkflow: installation.loadCancellationWorkflow,
           expectedDatabaseName: installation.database,
           systemActorReference: config.actors.paidOutcome,
+          // WP-2423 abandoned payment: a started payment still open at the deadline is resolved
+          // with the (TEST-ONLY simulated) Provider; its failure reason names the cancellation.
+          ...account,
+          createSimulatedProvider: provider,
         }),
       createInternalPaidOutcome: paid,
       createInternalWorkerServices: (r, opts) =>

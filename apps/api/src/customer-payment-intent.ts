@@ -35,6 +35,8 @@ export interface CustomerPaymentRetryInput {
 export interface CustomerPaymentIntentPort {
   create(input: CustomerPaymentIntentInput): Promise<unknown>;
   retry?(input: CustomerPaymentRetryInput): Promise<unknown>;
+  /** WP-2423 abandoned payment: the same guest returns to the checkout's open payment. */
+  resume?(input: CustomerPaymentRetryInput): Promise<unknown>;
 }
 function protect(response: Response) {
   response.setHeader("Cache-Control", "no-store");
@@ -77,7 +79,10 @@ function readCredentials(request: Request) {
 function parse(
   request: Request,
   origin: string,
-): CustomerPaymentIntentInput | (CustomerPaymentRetryInput & { readonly retry: true }) {
+):
+  | CustomerPaymentIntentInput
+  | (CustomerPaymentRetryInput & { readonly retry: true })
+  | (CustomerPaymentRetryInput & { readonly resume: true }) {
   if (
     request.get("origin") !== origin ||
     request.get("sec-fetch-site") !== "same-origin" ||
@@ -100,6 +105,21 @@ function parse(
     if (typeof checkoutSessionReference !== "string" || !uuid.test(checkoutSessionReference))
       throw new Error("invalid reference");
     return { ...readCredentials(request), checkoutSessionReference, retry: true };
+  }
+  // WP-2423 abandoned payment: `{"resume":true}` returns to the checkout's open payment (same
+  // attempt, amount and tip); nothing about the payment comes from this request.
+  if (
+    request.body !== null &&
+    typeof request.body === "object" &&
+    Object.hasOwn(request.body as object, "resume")
+  ) {
+    const body = readClosedRecord(request.body, ["resume"]);
+    if (body.resume !== true || request.headers["idempotency-key"] !== undefined)
+      throw new Error("invalid resume");
+    const checkoutSessionReference = params.checkout_session_id;
+    if (typeof checkoutSessionReference !== "string" || !uuid.test(checkoutSessionReference))
+      throw new Error("invalid reference");
+    return { ...readCredentials(request), checkoutSessionReference, resume: true };
   }
   const body = readClosedRecord(request.body, ["tip"]);
   const tip = readClosedRecord(body.tip, ["amountMinor", "currency"]);
@@ -227,10 +247,20 @@ export class CustomerPaymentIntentHandler {
         reject(response, 400);
         return;
       }
-      const retry = "retry" in input;
+      const retry = "retry" in input || "resume" in input;
       let result: unknown;
       try {
-        if ("retry" in input) {
+        if ("resume" in input) {
+          if (this.#port.resume === undefined) {
+            reject(response, 503);
+            return;
+          }
+          result = await this.#port.resume({
+            sessionCredential: input.sessionCredential,
+            csrfCredential: input.csrfCredential,
+            checkoutSessionReference: input.checkoutSessionReference,
+          });
+        } else if ("retry" in input) {
           if (this.#port.retry === undefined) {
             reject(response, 503);
             return;

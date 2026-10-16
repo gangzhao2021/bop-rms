@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import {
   elapsedText,
+  guestRoundPaymentNotice,
   longOpenSessionMinutes,
   staffRoundPaymentNotice,
   tableCodeNotice,
@@ -21,6 +22,7 @@ const table: StaffDiningTable = {
   elapsedMinutes: null,
   qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
   staffRoundsAwaitingPayment: [],
+  guestRoundsAwaitingPayment: [],
 };
 const now = Date.parse("2027-03-01T13:00:00.000Z");
 
@@ -103,4 +105,35 @@ it("WP-2423 follow-up: a table with an open session reads as seated, never avail
   expect(pick("Available")).toEqual([table]);
   expect(pick("Seated")).toEqual([seated, longOpen]);
   expect(pick("TemporarilyBlocked")).toEqual([blocked]);
+});
+
+it("WP-2423 abandoned payment: warns staff before an unpaid guest round is cancelled", () => {
+  const payBy = "2027-03-01T13:30:00.000Z";
+  const waiting: StaffDiningTable = {
+    ...table,
+    currentDiningSessionReference: "01909988-0000-7000-8000-000000000002",
+    elapsedMinutes: 20,
+    guestRoundsAwaitingPayment: [
+      {
+        orderReference: "01909988-0000-7000-8000-000000000003",
+        orderBatchReference: "01909988-0000-7000-8000-000000000004",
+        roundNumber: 1,
+        payBy,
+      },
+    ],
+  };
+  expect(guestRoundPaymentNotice(table, now, "America/Toronto")).toBeNull();
+  expect(guestRoundPaymentNotice(waiting, now, "America/Toronto")).toEqual({
+    tier: "warning",
+    text: "Round 1 isn't paid yet. The guest pays on their phone (their table page has a pay button); unpaid at 08:30, it is cancelled and nobody is charged.",
+  });
+  expect(
+    guestRoundPaymentNotice(waiting, Date.parse(payBy) - 4 * 60_000 - 1, "America/Toronto"),
+  ).toEqual({
+    tier: "urgent",
+    text: "5 min left: Round 1 isn't paid. Ask the guest to finish paying on their phone by 08:30, or it is cancelled.",
+  });
+  const ended = guestRoundPaymentNotice(waiting, Date.parse(payBy), "America/Toronto");
+  expect(ended?.text).toContain("wasn't paid by 08:30 and is being cancelled");
+  expect(ended?.text).not.toMatch(/[0-9a-f]{8}-/u);
 });

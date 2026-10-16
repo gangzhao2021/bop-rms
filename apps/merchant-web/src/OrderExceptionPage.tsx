@@ -11,7 +11,7 @@ import { Link } from "react-router";
 
 /** Staff labels for the exception kinds and states the projection carries. */
 export const exceptionKindLabel: Record<OrderExceptionItem["kind"], string> = {
-  DiningUnpaidBatch: "Unpaid dine-in batch",
+  DiningUnpaidBatch: "Unpaid dine-in round",
   PaymentReconciliationDifference: "Payment reconciliation difference",
   CaptureDeadlineExceeded: "Capture deadline exceeded",
   PaidWithoutFulfillableOrder: "Paid without a fulfillable order",

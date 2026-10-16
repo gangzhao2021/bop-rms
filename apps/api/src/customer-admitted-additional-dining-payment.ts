@@ -96,5 +96,14 @@ export function createCustomerAdmittedAdditionalDiningPayment(options: {
       ]);
       return payment(raw).retry(value);
     },
+    /** WP-2423 abandoned payment: the same guest comes back to this round's open payment. */
+    async resume(value: unknown) {
+      const raw = readClosedRecord(value, [
+        "sessionCredential",
+        "csrfCredential",
+        "checkoutSessionReference",
+      ]);
+      return payment(raw).resume(value);
+    },
   });
 }

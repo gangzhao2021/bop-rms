@@ -63,6 +63,19 @@ const label = (value: unknown): string => {
     return fail();
   return value;
 };
+/**
+ * WP-2423 Q5 / item 6: where one refund request stands. Recorded: nothing prepared or sent;
+ * ReadyToSend: not sent yet on at least one payment (prepared or not); Sending: really sent and
+ * waiting for the card provider's answer; Refunded: confirmed; Declined: an approver declined it.
+ */
+export const refundRequestProgress = [
+  "Recorded",
+  "ReadyToSend",
+  "Sending",
+  "Refunded",
+  "Declined",
+] as const;
+export type RefundRequestProgress = (typeof refundRequestProgress)[number];
 /** WP-2423 Q5: why an Owner/Finance approval is needed (RF-D01–D03, manual allocation). */
 export const escalationReasons = [
   "DifferentBusinessDate",
@@ -462,7 +475,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
         });
       }, false);
     },
-    /** WP-2423 Q5: where one refund request stands (Recorded, Sending, Refunded, Declined). */
+    /** WP-2423 Q5: where one refund request stands (see RefundRequestProgress). */
     async progress(
       orderReference: string,
       requestReference: string,
@@ -484,10 +497,10 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
         );
         if (
           data.requestReference !== requestReference ||
-          !["Recorded", "Sending", "Refunded", "Declined"].includes(String(data.progress))
+          !refundRequestProgress.includes(data.progress as RefundRequestProgress)
         )
           return fail();
-        return data.progress as "Recorded" | "Sending" | "Refunded" | "Declined";
+        return data.progress as RefundRequestProgress;
       }, false);
     },
     async items(orderReference: string, csrf: string, signal?: AbortSignal) {
@@ -581,7 +594,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
           ]);
           if (
             (entry.paymentMethod !== "Online" && entry.paymentMethod !== "CardMachine") ||
-            !["Recorded", "Sending", "Refunded", "Declined"].includes(String(entry.progress)) ||
+            !refundRequestProgress.includes(entry.progress as RefundRequestProgress) ||
             (entry.progress === "Declined") !== (entry.decline !== null)
           )
             return fail();
@@ -631,7 +644,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
             currencyCode: "CAD" as const,
             amountMinor: money(entry.amountMinor),
             decline,
-            progress: entry.progress as "Recorded" | "Sending" | "Refunded" | "Declined",
+            progress: entry.progress as RefundRequestProgress,
             paymentMethod: entry.paymentMethod as "Online" | "CardMachine",
           });
         });

@@ -100,6 +100,16 @@ describe("WP-2423 Q13 store system alerts on the Home", () => {
     await expect(createOperationsAlertsClient(denied as never).load()).rejects.toThrow(
       OPERATIONS_ALERTS_NOT_PERMITTED,
     );
+    // WP-2423: the current server's ordinary answer for Front of House (no 403 in the browser).
+    const notPermitted = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ permitted: false }), {
+          headers: { "content-type": "application/json", "cache-control": "no-store" },
+        }),
+    );
+    await expect(createOperationsAlertsClient(notPermitted as never).load()).rejects.toThrow(
+      OPERATIONS_ALERTS_NOT_PERMITTED,
+    );
     for (const status of [401, 500, 503]) {
       const failed = vi.fn(async () => new Response("{}", { status }));
       await expect(createOperationsAlertsClient(failed as never).load()).rejects.toThrow(

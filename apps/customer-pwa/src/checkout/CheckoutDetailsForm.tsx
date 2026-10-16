@@ -27,8 +27,11 @@ export interface CheckoutFormSelection {
 }
 /** What the checkout page can ask the form to do. */
 export interface CheckoutDetailsFormHandle {
-  /** Save the current details; resolves when the save attempt has settled. */
-  save(): Promise<void>;
+  /**
+   * Save the current details. Resolves when the save attempt has settled: with the selection the
+   * Store acknowledged, or null when nothing was saved (the form shows why and how to recover).
+   */
+  save(): Promise<CheckoutFormSelection | null>;
 }
 
 /**
@@ -181,7 +184,7 @@ export function CheckoutDetailsForm({
     setDraft((value) => (value === null ? null : { ...value, ...patch }));
     setDirty(true);
   };
-  const savedRevision = () => {
+  const savedRevision = (): boolean => {
     const result = saver.getState();
     if (result.status === "saved" && context.current?.()) {
       setDraft((value) =>
@@ -190,9 +193,11 @@ export function CheckoutDetailsForm({
           : { ...value, expectedVersion: result.acknowledgement.detailsVersion },
       );
       setDirty(false);
+      return true;
     }
+    return false;
   };
-  const submit = async () => {
+  const submit = async (): Promise<CheckoutFormSelection | null> => {
     if (
       draft === null ||
       policy === null ||
@@ -202,7 +207,7 @@ export function CheckoutDetailsForm({
       busy ||
       (policy.documents.length > 0 && !confirmed)
     )
-      return;
+      return null;
     await saver.save({
       ...draft,
       pickupContact:
@@ -216,7 +221,7 @@ export function CheckoutDetailsForm({
         purposeCode: document.purposeCode,
       })),
     });
-    savedRevision();
+    return savedRevision() ? selection : null;
   };
   useImperativeHandle(ref, () => ({ save: submit }));
   if (loading)

@@ -9,9 +9,10 @@ export type BatchPaymentOutcome = "Succeeded" | "Failed";
 export type MerchantBatchPaymentDue = null | {
   readonly status: "Failed" | "Awaiting";
   /**
-   * When the round is cancelled automatically: when its payment failed, or (WP-2423 item 5) when
-   * no payment was ever started for it (a staff-entered round not yet paid on the card machine).
-   * Null while a started payment is still open.
+   * When the round is cancelled automatically unless paid: its payment window's end. WP-2423
+   * abandoned payment: this now includes a round whose online payment was started but never
+   * finished (Payment cancels that attempt with the Provider at the deadline). Null only while the
+   * payment-start evidence is unknown and nothing failed.
    */
   readonly cancelsAt: string | null;
 };
@@ -49,10 +50,7 @@ export function resolveMerchantBatchPaymentDue(input: {
     ? Object.freeze({ status: "Failed" as const, cancelsAt: deadline })
     : Object.freeze({
         status: "Awaiting" as const,
-        cancelsAt:
-          input.paymentStarted !== undefined && !input.paymentStarted.has(reference)
-            ? deadline
-            : null,
+        cancelsAt: input.paymentStarted !== undefined ? deadline : null,
       });
 }
 
@@ -86,10 +84,7 @@ export function resolveCustomerBatchPayments(input: {
           status,
           cancelsAt:
             !input.cancelled.has(orderBatchReference) &&
-            (status === "Failed" ||
-              (status === "Awaiting" &&
-                input.paymentStarted !== undefined &&
-                !input.paymentStarted.has(orderBatchReference)))
+            (status === "Failed" || (status === "Awaiting" && input.paymentStarted !== undefined))
               ? deadline
               : null,
         }),

@@ -1,6 +1,5 @@
 import { DiningAdmissionPanel, type DiningAdmissionUi } from "../dining/DiningAdmissionPanel.js";
 import { CustomerPage, type CustomerStoreContext } from "../journey/CustomerPage.js";
-import { formatClockTime } from "../journey/format.js";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import type { CustomerCurrentOrder } from "../session/session-bootstrap.js";
@@ -408,14 +407,6 @@ function EntryState({
             {context.availableServiceModes.length > 0
               ? context.availableServiceModes.map((mode) => serviceModeLabels[mode]).join(", ")
               : "None right now"}
-          </dd>
-        </div>
-        <div>
-          <dt>Order by</dt>
-          <dd>
-            <time dateTime={context.contextExpiresAt}>
-              {formatClockTime(context.contextExpiresAt)}
-            </time>
           </dd>
         </div>
       </dl>

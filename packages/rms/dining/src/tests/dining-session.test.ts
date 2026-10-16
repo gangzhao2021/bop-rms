@@ -332,8 +332,11 @@ describe("staff-started Dining Session contract", () => {
     });
   });
 
-  it("returns one bounded unavailable result for cooldown and context scope mismatch", async () => {
-    for (const options of [{ cooldown: true }, { wrongTable: true }]) {
+  it("refuses cooldown and another Table's code definitively", async () => {
+    for (const [options, reason] of [
+      [{ cooldown: true }, "TooManyAttempts"],
+      [{ wrongTable: true }, "CodeNotAccepted"],
+    ] as const) {
       const { service } = fixture(options);
       await start(service);
       await expect(
@@ -345,7 +348,7 @@ describe("staff-started Dining Session contract", () => {
           operationReference: ids.joinOperation,
           requestedAt: joinAt,
         }),
-      ).resolves.toEqual({ status: "DiningJoinUnavailable" });
+      ).resolves.toEqual({ status: "DiningJoinRefused", reason });
     }
   });
 
@@ -781,6 +784,10 @@ const joinInput = {
   requestedAt: joinAt,
 };
 const joinUnavailable = { status: "DiningJoinUnavailable" };
+const refused = (reason: "CodeUsed" | "CodeNotAccepted" | "TooManyAttempts") => ({
+  status: "DiningJoinRefused",
+  reason,
+});
 
 describe("WP-2274 current Guest and complete original Join isolation", () => {
   it.each([
@@ -792,6 +799,11 @@ describe("WP-2274 current Guest and complete original Join isolation", () => {
     ["tableReference", null],
     ["observedAt", startAt],
   ])("denies current Guest %s mismatch before history", async (path, value) => {
+    // Another Store or Table is a definitive refusal; other Guest evidence faults stay unavailable.
+    const expected =
+      path === "storeReference" || (path === "tableReference" && value !== null)
+        ? refused("CodeNotAccepted")
+        : joinUnavailable;
     const { service, ports } = fixture();
     await start(service);
     await service.join(joinInput);
@@ -803,7 +815,7 @@ describe("WP-2274 current Guest and complete original Join isolation", () => {
     const history = vi.spyOn(ports.store, "resolveJoinOperation");
     const write = vi.spyOn(ports.store, "join");
     const generate = vi.spyOn(ports.credentials, "generateReference");
-    expect(await service.join(joinInput)).toEqual(joinUnavailable);
+    expect(await service.join(joinInput)).toEqual(expected);
     expect(history).not.toHaveBeenCalled();
     expect(write).not.toHaveBeenCalled();
     expect(generate).not.toHaveBeenCalled();
@@ -818,7 +830,9 @@ describe("WP-2274 current Guest and complete original Join isolation", () => {
       if (decision === null) vi.spyOn(ports.guests, "resolve").mockResolvedValue(null);
       else vi.spyOn(ports.abuse, "admit").mockResolvedValue(decision as never);
       const history = vi.spyOn(ports.store, "resolveJoinOperation");
-      expect(await service.join(joinInput)).toEqual(joinUnavailable);
+      expect(await service.join(joinInput)).toEqual(
+        decision === "Cooldown" ? refused("TooManyAttempts") : joinUnavailable,
+      );
       expect(history).not.toHaveBeenCalled();
     },
   );
@@ -837,6 +851,14 @@ describe("WP-2274 current Guest and complete original Join isolation", () => {
     ["capability.issuedAt", regenerateAt],
     ["capability.kind", "HumanCode"],
   ])("denies current Join state %s mismatch before history", async (path, value) => {
+    // An ended Session or a moved Table no longer accepts the code; integrity faults stay unavailable.
+    const expected = [
+      "session.phase",
+      "session.tableAssignmentVersion",
+      "capability.assignmentVersion",
+    ].includes(String(path))
+      ? refused("CodeNotAccepted")
+      : joinUnavailable;
     const { service, ports } = fixture();
     await start(service);
     await service.join(joinInput);
@@ -846,7 +868,7 @@ describe("WP-2274 current Guest and complete original Join isolation", () => {
     );
     const history = vi.spyOn(ports.store, "resolveJoinOperation");
     const generate = vi.spyOn(ports.credentials, "generateReference");
-    expect(await service.join(joinInput)).toEqual(joinUnavailable);
+    expect(await service.join(joinInput)).toEqual(expected);
     expect(history).not.toHaveBeenCalled();
     expect(generate).not.toHaveBeenCalled();
   });
@@ -860,7 +882,8 @@ describe("WP-2274 current Guest and complete original Join isolation", () => {
     const replay = await service.join({ ...joinInput, requestedAt: regenerateAt });
     expect(replay).toEqual({ ...first, status: "AlreadyApplied" });
     expect(replay).not.toHaveProperty("joinCredential");
-    if (replay.status === "DiningJoinUnavailable") throw new Error("missing replay");
+    if (replay.status === "DiningJoinUnavailable" || replay.status === "DiningJoinRefused")
+      throw new Error("missing replay");
     expect(Object.isFrozen(replay.admission)).toBe(true);
     expect(write).not.toHaveBeenCalled();
     expect(generate).not.toHaveBeenCalled();
@@ -1064,7 +1087,7 @@ describe("WP-2274 current Guest and complete original Join isolation", () => {
     await start(service);
     const write = vi.spyOn(ports.store, "join");
     expect(await service.join({ ...joinInput, requestedAt: "2026-07-29T12:15:00.000Z" })).toEqual(
-      joinUnavailable,
+      refused("CodeNotAccepted"),
     );
     expect(write).not.toHaveBeenCalled();
   });
@@ -1192,7 +1215,7 @@ describe("WP-2276 sequential Guest admission", () => {
     const { service, ports } = fixture();
     await start(service);
     expect(await service.join({ ...joinInput, requestedAt: "2026-07-29T12:16:00.000Z" })).toEqual(
-      joinUnavailable,
+      refused("CodeNotAccepted"),
     );
     expect(
       await service.regenerate({ ...regenerationInput, requestedAt: "2026-07-29T12:16:00.000Z" }),
@@ -1396,7 +1419,9 @@ describe("WP-2303 owner-selected current Join versions", () => {
       }
       const read = vi.spyOn(f.ports.store, "resolveJoinState"),
         history = vi.spyOn(f.ports.store, "resolveJoinOperation");
-      expect(await f.service.joinCurrent(currentJoinInput)).toEqual(joinUnavailable);
+      expect(await f.service.joinCurrent(currentJoinInput)).toEqual(
+        mode === "cooldown" ? refused("TooManyAttempts") : joinUnavailable,
+      );
       expect(read).not.toHaveBeenCalled();
       expect(history).not.toHaveBeenCalled();
     },
@@ -1422,21 +1447,27 @@ describe("WP-2303 owner-selected current Join versions", () => {
           ...currentJoinInput,
           requestedAt: mode === "expired" ? "2026-07-29T12:16:00.000Z" : joinAt,
         }),
-      ).toEqual(joinUnavailable);
+      ).toEqual(refused("CodeNotAccepted"));
       expect(write).not.toHaveBeenCalled();
     },
   );
-  it("does not recover another Guest's consumed capability", async () => {
+  it("refuses another Guest's reuse of a consumed code as used, without a write", async () => {
     const f = fixture();
     await start(f.service);
     await f.service.joinCurrent(currentJoinInput);
+    const write = vi.spyOn(f.ports.store, "join");
     expect(
       await f.service.joinCurrent({
         ...currentJoinInput,
         guestSessionReference: ids.secondGuest,
         operationReference: ids.policy,
       }),
-    ).toEqual(joinUnavailable);
+    ).toEqual(refused("CodeUsed"));
+    expect(write).not.toHaveBeenCalled();
+    // The original Guest's exact retry still recovers its own Join.
+    expect(await f.service.joinCurrent(currentJoinInput)).toMatchObject({
+      status: "AlreadyApplied",
+    });
   });
   it("propagates the writer version fence without retrying a fresh state", async () => {
     const f = fixture();

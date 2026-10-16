@@ -385,6 +385,9 @@ export async function seedJourneyPayment(
       requestedAt,
     ],
   );
+  // WP-2423 abandoned payment: "Open" — the guest started paying (the Provider intent exists) and
+  // never confirmed it, so there is no outcome, webhook or status projection.
+  const open = outcome === "Open";
   await client.query(
     "INSERT INTO rms_payment.payment_provider_observation (provider_observation_id,brand_id,store_id,payment_intent_id,payment_attempt_id,observation_kind,normalized_status,provider_intent_reference,provider_transaction_reference,requested_minor,authorized_minor,captured_minor,refunded_minor,currency_code,evidence_digest,provider_observed_at,recorded_at) VALUES ($1,$2,$3,$4,$5,'Snapshot',$6,$7,$8,$9,$10,$10,0,'CAD',$11,$12,$12)",
     [
@@ -393,7 +396,7 @@ export async function seedJourneyPayment(
       s.storeReference,
       key,
       refs.attempt,
-      succeeded ? "Captured" : "Failed",
+      succeeded ? "Captured" : open ? "RequiresCustomerAction" : "Failed",
       refs.providerIntent,
       succeeded ? "ch_" + refs.providerIntent.slice(3) : null,
       totalMinor,
@@ -402,6 +405,7 @@ export async function seedJourneyPayment(
       occurredAt,
     ],
   );
+  if (open) return;
   await client.query(
     "INSERT INTO rms_payment.provider_webhook_record (webhook_receipt_id,brand_id,store_id,provider,provider_environment,provider_account_id,provider_event_id,provider_event_type,provider_created_at,received_at,signature_timestamp,evidence_digest,accepted_at,raw_evidence_expires_at,dedupe_expires_at) VALUES ($1,$2,$3,'Stripe','Test',$4,$5,$6,$7,$7,$7,$8,$7,$7::timestamptz+interval '30 days',$7::timestamptz+interval '90 days')",
     [

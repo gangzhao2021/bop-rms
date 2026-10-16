@@ -17,8 +17,9 @@ export interface OrdersSummary {
   readonly open: number;
   readonly awaitingAcceptance: number;
   /**
-   * Open dine-in orders whose food is all cooked but not yet all served. Pickup readiness is a
-   * Fulfillment fact (the pickup queue), never an Ordering phase, so pickups are not counted here.
+   * Open dine-in orders (tables) with food the kitchen marked ready that nobody served yet, in any
+   * round — the Tables page's rule, so a ready round counts even while another round waits for
+   * payment. Pickup readiness is a Fulfillment fact (the pickup queue), so pickups are not counted.
    */
   readonly readyToServe: number;
   /** Whether any open order is dine-in; a pickup-only Store has nothing to serve at tables. */
@@ -45,7 +46,12 @@ export function summarizeOrders(queue: CurrentOrderQueue): OrdersSummary {
   return {
     open: open.length,
     awaitingAcceptance: ordersAwaitingAcceptance(queue),
-    readyToServe: dineIn.filter((order) => order.currentPhase === "Ready").length,
+    readyToServe: dineIn.filter((order) =>
+      // An older server sends no count: then only an Order that is Ready as a whole.
+      order.readyToServeItemCount === null
+        ? order.currentPhase === "Ready"
+        : order.readyToServeItemCount > 0,
+    ).length,
     dineIn: dineIn.length > 0,
     more: queue.nextAfterOrderReference !== null,
   };
@@ -308,7 +314,7 @@ export function StoreOverview({
   return (
     <>
       {/* WP-2423 Q13: store system alerts. The server decides who may read them (Owner, Store
-          Manager); for other roles the card answers 403 and renders nothing. */}
+          Manager); for other roles it answers "not permitted" and the card renders nothing. */}
       <OperationsAlerts timeZone={timeZone} fetcher={fetcher} />
       <OverviewToday state={state} timeZone={timeZone} busy={busy} onRefresh={() => void load()} />
     </>

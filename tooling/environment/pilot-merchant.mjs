@@ -67,6 +67,7 @@ import { createPersistentMerchantBffService } from "../../apps/api/dist/persiste
 import { createMerchantServiceControl } from "../../apps/api/dist/merchant-service-control.js";
 import { createMerchantUnmatchedCaptureRefund } from "../../apps/api/dist/merchant-unmatched-capture-refund.js";
 import { createMerchantOrderStaffCancellation } from "../../apps/api/dist/merchant-order-staff-cancellation.js";
+import { createMerchantUnpaidRoundCancellation } from "../../apps/api/dist/merchant-unpaid-round-cancellation.js";
 import { createMerchantEndedOrderStockRelease } from "../../apps/api/dist/merchant-stock-holding-orders.js";
 import { createMerchantBusinessDayWindows } from "../../apps/api/dist/merchant-business-day-window.js";
 import { createMerchantOrderItemStaffCancellation } from "../../apps/api/dist/merchant-order-item-staff-cancellation.js";
@@ -128,6 +129,7 @@ export async function createInternalMerchant(
     readOperationsAlertBoard,
     loadDailySettlementCoverage,
     refreshOrderReceiptObservations,
+    createInternalUnpaidRoundCancellation,
   },
 ) {
   const session = await createInternalMerchantSession(resources);
@@ -536,6 +538,29 @@ export async function createInternalMerchant(
       );
     },
   });
+  // WP-2423 abandoned payment: a manager cancels an unpaid dine-in round before its deadline.
+  const unpaidRound =
+    createInternalUnpaidRoundCancellation === undefined
+      ? undefined
+      : await createInternalUnpaidRoundCancellation(resources);
+  const unpaidRoundCancellation =
+    unpaidRound === undefined
+      ? undefined
+      : createMerchantUnpaidRoundCancellation({
+          persistence,
+          authentication: service,
+          resolvePayment: (operation) => unpaidRound.payment.resolve(operation),
+          cancellation: unpaidRound.cancellation,
+          installContext: async (tx, scope) => {
+            for (const key of ["tenantReference", "brandReference", "storeReference"])
+              if (scope[key] !== selected[key])
+                throw new Error("INTERNAL_UNPAID_ROUND_SCOPE_DENIED");
+            await tx.query(
+              "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+              [scope.tenantReference, scope.brandReference, scope.storeReference],
+            );
+          },
+        });
   // WP-2423 (2026-10-16 v15 stock leak): a manager returns stock still set aside for an Order of
   // an earlier day that already ended (handed over, not collected, closed or cancelled).
   const installSelectedContext = async (tx, scope) => {
@@ -1320,6 +1345,7 @@ export async function createInternalMerchant(
       compensationQuery,
       ...(unmatchedCaptureRefund === undefined ? {} : { unmatchedCaptureRefund }),
       orderStaffCancellation,
+      ...(unpaidRoundCancellation === undefined ? {} : { unpaidRoundCancellation }),
       endedOrderStockRelease,
       ...(orderItemStaffCancellation === undefined ? {} : { orderItemStaffCancellation }),
       // WP-2423 Q7: counter pickup orders and card-machine payments and refunds.

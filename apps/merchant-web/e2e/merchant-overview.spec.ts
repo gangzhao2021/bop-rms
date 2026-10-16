@@ -101,7 +101,13 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
       json: {
         // Newest first, as the queue contract requires. A pickup stays Accepted in Ordering while
         // Fulfillment holds it ready for collection; only dine-in food is "ready to serve".
-        items: [order(3, "Ready", 3, "DineIn"), order(2, "Submitted", 1), order(1, "Accepted", 2)],
+        // WP-2423: the table's Order is not Ready as a whole (another round is still being made),
+        // but one item waits at the pass: the server's count, as on the Tables page, is used.
+        items: [
+          { ...order(3, "Accepted", 3, "DineIn"), readyToServeItemCount: 1 },
+          order(2, "Submitted", 1),
+          order(1, "Accepted", 2),
+        ],
         nextAfterOrderReference: null,
       },
     }),
@@ -297,22 +303,27 @@ test("@production Home reads only the summaries the staff member's screens permi
     "**/merchant/orders*",
     "**/merchant/pickup/query",
     "**/merchant/order-exceptions",
-    "**/merchant/operations-alerts",
   ])
     await page.route(path, (route) => {
       requested.push(new URL(route.request().url()).pathname);
       return route.fulfill({ status: 403, json: { error: "request_denied" } });
     });
+  // WP-2423: the BFF tells a role without store system alerts so in an ordinary answer.
+  await page.route("**/merchant/operations-alerts", (route) => {
+    requested.push(new URL(route.request().url()).pathname);
+    return route.fulfill({
+      headers: { "cache-control": "no-store" },
+      json: { permitted: false },
+    });
+  });
   const errors: string[] = [];
   page.on("console", (message) => {
-    // The store system card asks the server once; the browser reports that 403 as a failed
-    // resource load, which is expected for a role that does not handle system alerts.
-    if (message.location().url.endsWith("/merchant/operations-alerts")) return;
     if (message.type() === "error") errors.push(message.text());
   });
 
   // A cashier: no order queue, pickup or exception screen — Home reads none of them. The store
-  // system card asks once; the server answers 403 for this role, so the card stays hidden.
+  // system card asks once; the server answers "not permitted", so the card stays hidden and no
+  // refused request shows in the console.
   await page.goto("/app");
   await expect(page.getByRole("heading", { level: 1, name: "Training Store" })).toBeVisible();
   await page.waitForTimeout(500);

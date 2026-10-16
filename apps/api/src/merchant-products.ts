@@ -15,6 +15,7 @@ import {
   type ProductLifecycleTransaction,
 } from "@rms/catalog";
 import { listStoreTaxClassifications } from "@rms/pricing";
+import { withRememberedBrandAuthorization } from "./merchant-brand-transaction-authorization.js";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -332,54 +333,57 @@ export function createMerchantProducts(options: {
   }) => {
     const current = await session(input);
     return retryTransactionConflict(() =>
-      options.persistence.transactions.run(async (tx) => {
-        const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
-        const at = options.persistence.now();
-        const base = {
-          sourceAsOf: at,
-          locale: options.locale,
-          permissions: s.permissions,
-          productTypes,
-          sellingUnits: productSellingUnits,
-          taxClasses: await listStoreTaxClassifications(
-            reads(tx),
-            { brandReference: s.brand, storeReference: s.store },
-            at,
-          ),
-        };
-        if (input.productReference !== null) {
-          const product = await loadBrandProduct(
-            reads(tx),
-            { brandReference: s.brand },
-            input.productReference,
-          );
-          if (product === null) return fail("NotFound");
-          const mayReadOptions = (await s.decision("catalog.option_set.read"))?.effect === "Allow";
-          return {
-            screenId: "CAT-PRODUCT-DETAIL" as const,
-            ...base,
-            product: productView(product, options.locale),
-            optionSetChoices: mayReadOptions
-              ? optionSetChoices(
-                  await listBrandOptionSets(productTx(tx), { brandReference: s.brand }),
-                  options.locale,
-                )
-              : null,
+      options.persistence.transactions.run((tx) =>
+        withRememberedBrandAuthorization(tx, async () => {
+          const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+          const at = options.persistence.now();
+          const base = {
+            sourceAsOf: at,
+            locale: options.locale,
+            permissions: s.permissions,
+            productTypes,
+            sellingUnits: productSellingUnits,
+            taxClasses: await listStoreTaxClassifications(
+              reads(tx),
+              { brandReference: s.brand, storeReference: s.store },
+              at,
+            ),
           };
-        }
-        const products = await listBrandProducts(reads(tx), { brandReference: s.brand });
-        return {
-          screenId: "CAT-PRODUCT-LIST" as const,
-          ...base,
-          products: products.map((product) => ({
-            ...product,
-            name:
-              product.localizedNames[options.locale] ??
-              Object.values(product.localizedNames)[0] ??
-              "",
-          })),
-        };
-      }),
+          if (input.productReference !== null) {
+            const product = await loadBrandProduct(
+              reads(tx),
+              { brandReference: s.brand },
+              input.productReference,
+            );
+            if (product === null) return fail("NotFound");
+            const mayReadOptions =
+              (await s.decision("catalog.option_set.read"))?.effect === "Allow";
+            return {
+              screenId: "CAT-PRODUCT-DETAIL" as const,
+              ...base,
+              product: productView(product, options.locale),
+              optionSetChoices: mayReadOptions
+                ? optionSetChoices(
+                    await listBrandOptionSets(productTx(tx), { brandReference: s.brand }),
+                    options.locale,
+                  )
+                : null,
+            };
+          }
+          const products = await listBrandProducts(reads(tx), { brandReference: s.brand });
+          return {
+            screenId: "CAT-PRODUCT-LIST" as const,
+            ...base,
+            products: products.map((product) => ({
+              ...product,
+              name:
+                product.localizedNames[options.locale] ??
+                Object.values(product.localizedNames)[0] ??
+                "",
+            })),
+          };
+        }),
+      ),
     );
   };
 
@@ -387,191 +391,267 @@ export function createMerchantProducts(options: {
     const body = parseProductCommandBody(input.body);
     const current = await session(input);
     return retryTransactionConflict(() =>
-      options.persistence.transactions.run(async (tx) => {
-        const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
-        if (
-          (body.action === "Create" && !s.permissions.mayCreate) ||
-          (body.action === "SaveDraft" && !s.permissions.mayEdit) ||
-          (body.action === "StartSelling" && !s.permissions.mayStartSelling)
-        )
-          fail("PermissionDenied");
-        const brand = s.brand;
-        const productTx = tx as unknown as ProductLifecycleTransaction;
-        const storeOptions = {
-          brandReference: brand,
-          transactions: {
-            run: <T>(work: (t: ProductLifecycleTransaction) => Promise<T>) => work(productTx),
-          },
-          // The API admitted the Actor above; each service write re-checks the decision below.
-          authorize: async () => true,
-        };
-        const creation = createPostgresProductCreationStore(storeOptions);
-        const draftStore = createPostgresProductDraftStore(storeOptions);
-        const lifecycleStore = createPostgresProductLifecycleStore(storeOptions);
-        const actionCodes = {
-          Create: "CATALOG_PRODUCT_CREATE",
-          ReplaceDraft: "CATALOG_PRODUCT_REPLACEDRAFT",
-          ChangeLifecycle: "CATALOG_PRODUCT_CHANGELIFECYCLE",
-        } as const;
-        const service = (operation: string) => {
-          const generated: Record<string, number> = {};
-          return createCatalogProductService({
-            repository: {
-              resolveOperation: creation.resolveOperation,
-              load: creation.load,
-              codeAvailable: creation.codeAvailable,
-              create: creation.create,
-              commit: (value) =>
-                value.record.action === "ChangeLifecycle"
-                  ? lifecycleStore.commit(value)
-                  : draftStore.commit(value),
-            },
-            // The Brand's option set whose current version the binding names.
-            optionSets: {
-              resolveVersion: async (request) => {
-                if (request.brandReference !== brand) return null;
-                const sets = await listBrandOptionSets(productTx, { brandReference: brand });
-                return (
-                  sets.find(
-                    (set) =>
-                      set.optionSetReference === request.optionSetReference &&
-                      set.draft.versionReference === request.optionSetVersionReference,
-                  ) ?? null
-                );
-              },
-            },
-            references: {
-              generate: (purpose) => {
-                const index = generated[purpose] ?? 0;
-                generated[purpose] = index + 1;
-                return derivedReference(operation, purpose + ":" + index);
-              },
-              hashIntent: (value) =>
-                parseCatalogHash(createHash("sha256").update(value).digest("hex")),
-              equals: (a, b) => a === b,
-            },
-            authorization: {
-              authorize: async (request) => {
-                const permission = await s.decision("catalog.product.manage");
-                if (permission?.effect !== "Allow" || request.operationReference !== operation)
-                  return null;
-                return {
-                  tenantContext: s.scope.context,
-                  permission,
-                  audit: {
-                    auditId: derivedReference(operation, "audit"),
-                    brandId: brand,
-                    actor: { type: "User", reference: s.actor },
-                    actionCode: actionCodes[request.action],
-                    targetType: "CatalogProduct",
-                    targetId: request.productReference ?? "",
-                    correlationId: operation,
-                    occurredAt: request.observedAt,
-                    reasonCode: "AUTHORIZED_OPERATION",
-                    sourceChannel: "MERCHANT_WEB",
-                    dataClassification: "Internal",
-                    retentionPolicyCode: "CONFIGURATION_AUDIT",
-                    retentionPolicyVersion: 1,
-                  },
-                };
-              },
-            },
-          });
-        };
-        // A retried operation replays with its original time so the recorded intent matches.
-        const requestedAtFor = async (operation: string) =>
-          (await creation.resolveOperation(parseCatalogReference(operation)))?.aggregate
-            .updatedAt ?? options.persistence.now();
-        const taxClassOffered = async (classification: string) =>
-          (
-            await listStoreTaxClassifications(
-              reads(tx),
-              { brandReference: brand, storeReference: s.store },
-              options.persistence.now(),
-            )
-          ).some((choice) => choice.taxClassificationReference === classification);
-        const names = (name: string) => ({ [options.locale]: name });
-        /**
-         * The product's option sets in the order given. A set already on the product keeps its
-         * binding identity; a newly added set must be current (not archived). Enabled options are
-         * the set's non-archived options the merchant chose; the set's default choices among them
-         * that are offered are preselected (one each).
-         */
-        const bindingsFor = async (
-          product: ProductAggregate,
-          inputs: readonly ProductOptionSetInput[],
-          operation: string,
-        ) => {
-          const changed =
-            JSON.stringify(inputs) !==
-            JSON.stringify(productView(product, options.locale).optionSets);
-          if (changed && (await s.decision("catalog.option_set.read"))?.effect !== "Allow")
+      options.persistence.transactions.run((tx) =>
+        withRememberedBrandAuthorization(tx, async () => {
+          const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+          if (
+            (body.action === "Create" && !s.permissions.mayCreate) ||
+            (body.action === "SaveDraft" && !s.permissions.mayEdit) ||
+            (body.action === "StartSelling" && !s.permissions.mayStartSelling)
+          )
             fail("PermissionDenied");
-          const sets = await listBrandOptionSets(productTx, { brandReference: brand });
-          return inputs.map((input, sortOrder) => {
-            const set = sets.find((item) => item.optionSetReference === input.optionSetReference);
-            if (set === undefined) return fail("Invalid");
-            const existing = product.draft.optionBindings.find(
-              (binding) => binding.optionSetReference === input.optionSetReference,
-            );
-            if (existing === undefined && set.lifecycle === "Archived") fail("Invalid");
-            const usable = new Set(
-              set.draft.options
-                .filter((option) => option.lifecycle !== "Archived")
-                .map((option) => String(option.optionReference)),
-            );
-            if (input.enabledOptionReferences.some((reference) => !usable.has(reference)))
-              fail("Invalid");
-            const enabled = [...input.enabledOptionReferences].sort();
-            const defaults = set.draft.options
-              .filter(
-                (option) =>
-                  option.defaultEligible &&
-                  option.lifecycle === "Active" &&
-                  enabled.includes(String(option.optionReference)),
+          const brand = s.brand;
+          const productTx = tx as unknown as ProductLifecycleTransaction;
+          const storeOptions = {
+            brandReference: brand,
+            transactions: {
+              run: <T>(work: (t: ProductLifecycleTransaction) => Promise<T>) => work(productTx),
+            },
+            // The API admitted the Actor above; each service write re-checks the decision below.
+            authorize: async () => true,
+          };
+          const creation = createPostgresProductCreationStore(storeOptions);
+          const draftStore = createPostgresProductDraftStore(storeOptions);
+          const lifecycleStore = createPostgresProductLifecycleStore(storeOptions);
+          const actionCodes = {
+            Create: "CATALOG_PRODUCT_CREATE",
+            ReplaceDraft: "CATALOG_PRODUCT_REPLACEDRAFT",
+            ChangeLifecycle: "CATALOG_PRODUCT_CHANGELIFECYCLE",
+          } as const;
+          const service = (operation: string) => {
+            const generated: Record<string, number> = {};
+            return createCatalogProductService({
+              repository: {
+                resolveOperation: creation.resolveOperation,
+                load: creation.load,
+                codeAvailable: creation.codeAvailable,
+                create: creation.create,
+                commit: (value) =>
+                  value.record.action === "ChangeLifecycle"
+                    ? lifecycleStore.commit(value)
+                    : draftStore.commit(value),
+              },
+              // The Brand's option set whose current version the binding names.
+              optionSets: {
+                resolveVersion: async (request) => {
+                  if (request.brandReference !== brand) return null;
+                  const sets = await listBrandOptionSets(productTx, { brandReference: brand });
+                  return (
+                    sets.find(
+                      (set) =>
+                        set.optionSetReference === request.optionSetReference &&
+                        set.draft.versionReference === request.optionSetVersionReference,
+                    ) ?? null
+                  );
+                },
+              },
+              references: {
+                generate: (purpose) => {
+                  const index = generated[purpose] ?? 0;
+                  generated[purpose] = index + 1;
+                  return derivedReference(operation, purpose + ":" + index);
+                },
+                hashIntent: (value) =>
+                  parseCatalogHash(createHash("sha256").update(value).digest("hex")),
+                equals: (a, b) => a === b,
+              },
+              authorization: {
+                authorize: async (request) => {
+                  const permission = await s.decision("catalog.product.manage");
+                  if (permission?.effect !== "Allow" || request.operationReference !== operation)
+                    return null;
+                  return {
+                    tenantContext: s.scope.context,
+                    permission,
+                    audit: {
+                      auditId: derivedReference(operation, "audit"),
+                      brandId: brand,
+                      actor: { type: "User", reference: s.actor },
+                      actionCode: actionCodes[request.action],
+                      targetType: "CatalogProduct",
+                      targetId: request.productReference ?? "",
+                      correlationId: operation,
+                      occurredAt: request.observedAt,
+                      reasonCode: "AUTHORIZED_OPERATION",
+                      sourceChannel: "MERCHANT_WEB",
+                      dataClassification: "Internal",
+                      retentionPolicyCode: "CONFIGURATION_AUDIT",
+                      retentionPolicyVersion: 1,
+                    },
+                  };
+                },
+              },
+            });
+          };
+          // A retried operation replays with its original time so the recorded intent matches.
+          const requestedAtFor = async (operation: string) =>
+            (await creation.resolveOperation(parseCatalogReference(operation)))?.aggregate
+              .updatedAt ?? options.persistence.now();
+          const taxClassOffered = async (classification: string) =>
+            (
+              await listStoreTaxClassifications(
+                reads(tx),
+                { brandReference: brand, storeReference: s.store },
+                options.persistence.now(),
               )
-              .slice(0, set.draft.maximumSelection ?? undefined)
-              .map((option) => ({ optionReference: option.optionReference, quantity: 1 }))
-              .sort((a, b) => (a.optionReference < b.optionReference ? -1 : 1));
-            return {
-              bindingReference:
-                existing?.bindingReference ??
-                parseCatalogReference(
-                  derivedReference(operation, "binding:" + input.optionSetReference),
+            ).some((choice) => choice.taxClassificationReference === classification);
+          const names = (name: string) => ({ [options.locale]: name });
+          /**
+           * The product's option sets in the order given. A set already on the product keeps its
+           * binding identity; a newly added set must be current (not archived). Enabled options are
+           * the set's non-archived options the merchant chose; the set's default choices among them
+           * that are offered are preselected (one each).
+           */
+          const bindingsFor = async (
+            product: ProductAggregate,
+            inputs: readonly ProductOptionSetInput[],
+            operation: string,
+          ) => {
+            const changed =
+              JSON.stringify(inputs) !==
+              JSON.stringify(productView(product, options.locale).optionSets);
+            if (changed && (await s.decision("catalog.option_set.read"))?.effect !== "Allow")
+              fail("PermissionDenied");
+            const sets = await listBrandOptionSets(productTx, { brandReference: brand });
+            return inputs.map((input, sortOrder) => {
+              const set = sets.find((item) => item.optionSetReference === input.optionSetReference);
+              if (set === undefined) return fail("Invalid");
+              const existing = product.draft.optionBindings.find(
+                (binding) => binding.optionSetReference === input.optionSetReference,
+              );
+              if (existing === undefined && set.lifecycle === "Archived") fail("Invalid");
+              const usable = new Set(
+                set.draft.options
+                  .filter((option) => option.lifecycle !== "Archived")
+                  .map((option) => String(option.optionReference)),
+              );
+              if (input.enabledOptionReferences.some((reference) => !usable.has(reference)))
+                fail("Invalid");
+              const enabled = [...input.enabledOptionReferences].sort();
+              const defaults = set.draft.options
+                .filter(
+                  (option) =>
+                    option.defaultEligible &&
+                    option.lifecycle === "Active" &&
+                    enabled.includes(String(option.optionReference)),
+                )
+                .slice(0, set.draft.maximumSelection ?? undefined)
+                .map((option) => ({ optionReference: option.optionReference, quantity: 1 }))
+                .sort((a, b) => (a.optionReference < b.optionReference ? -1 : 1));
+              return {
+                bindingReference:
+                  existing?.bindingReference ??
+                  parseCatalogReference(
+                    derivedReference(operation, "binding:" + input.optionSetReference),
+                  ),
+                optionSetReference: set.optionSetReference,
+                optionSetVersionReference: set.draft.versionReference,
+                purpose: existing?.purpose ?? "CUSTOMER_CHOICE",
+                sortOrder,
+                enabledOptionReferences: enabled.map(parseCatalogReference),
+                defaultSelections: defaults,
+                minimumSelectionOverride: null,
+                maximumSelectionOverride: null,
+                includedSkuReferences: [],
+                excludedSkuReferences: [],
+                channelCodes: [],
+                storeOverrideAllowed: false,
+              };
+            });
+          };
+          try {
+            if (body.action === "Create") {
+              if (!(await taxClassOffered(body.taxClassificationReference)))
+                fail("TaxClassUnavailable");
+              if (body.sizes.length > 1 && !s.permissions.mayAddSize) fail("PermissionDenied");
+              const dimension = derivedReference(body.operationReference, "size-dimension");
+              const result = await service(body.operationReference).create({
+                internalCode: body.internalCode,
+                productType: body.productType,
+                defaultLocale: options.locale,
+                localizedNames: names(body.name),
+                taxClassificationReference: body.taxClassificationReference,
+                skus: body.sizes.map((size, index) => ({
+                  skuCode: size.skuCode,
+                  localizedNames: names(size.name),
+                  variantSelections:
+                    body.sizes.length === 1
+                      ? []
+                      : [
+                          {
+                            dimensionReference: dimension,
+                            valueReference: derivedReference(
+                              body.operationReference,
+                              "size:" + index,
+                            ),
+                          },
+                        ],
+                  unitOfSale: "EACH",
+                  unitQuantity: "1",
+                })),
+                operationReference: body.operationReference,
+                requestedAt: await requestedAtFor(body.operationReference),
+              });
+              return {
+                status: result.status,
+                product: productView(result.aggregate, options.locale),
+              };
+            }
+            const product = await loadBrandProduct(
+              reads(tx),
+              { brandReference: brand },
+              body.productReference,
+            );
+            if (product === null) return fail("NotFound");
+            if (body.action === "SaveDraft") {
+              const prior = await creation.resolveOperation(
+                parseCatalogReference(body.operationReference),
+              );
+              if (prior !== null) {
+                if (
+                  prior.action !== "ReplaceDraft" ||
+                  prior.aggregate.productReference !== product.productReference
+                )
+                  fail("Conflict");
+                return {
+                  status: "AlreadyApplied",
+                  product: productView(prior.aggregate, options.locale),
+                };
+              }
+              if (product.aggregateVersion !== body.expectedAggregateVersion) fail("Conflict");
+              if (
+                body.taxClassificationReference !== product.draft.taxClassificationReference &&
+                !(await taxClassOffered(body.taxClassificationReference))
+              )
+                fail("TaxClassUnavailable");
+              const kept = new Set(
+                body.sizes.flatMap((size) =>
+                  size.skuReference === null ? [] : [size.skuReference],
                 ),
-              optionSetReference: set.optionSetReference,
-              optionSetVersionReference: set.draft.versionReference,
-              purpose: existing?.purpose ?? "CUSTOMER_CHOICE",
-              sortOrder,
-              enabledOptionReferences: enabled.map(parseCatalogReference),
-              defaultSelections: defaults,
-              minimumSelectionOverride: null,
-              maximumSelectionOverride: null,
-              includedSkuReferences: [],
-              excludedSkuReferences: [],
-              channelCodes: [],
-              storeOverrideAllowed: false,
-            };
-          });
-        };
-        try {
-          if (body.action === "Create") {
-            if (!(await taxClassOffered(body.taxClassificationReference)))
-              fail("TaxClassUnavailable");
-            if (body.sizes.length > 1 && !s.permissions.mayAddSize) fail("PermissionDenied");
-            const dimension = derivedReference(body.operationReference, "size-dimension");
-            const result = await service(body.operationReference).create({
-              internalCode: body.internalCode,
-              productType: body.productType,
-              defaultLocale: options.locale,
-              localizedNames: names(body.name),
-              taxClassificationReference: body.taxClassificationReference,
-              skus: body.sizes.map((size, index) => ({
-                skuCode: size.skuCode,
-                localizedNames: names(size.name),
-                variantSelections:
-                  body.sizes.length === 1
-                    ? []
+              );
+              for (const reference of kept)
+                if (!product.draft.skus.some((sku) => sku.skuReference === reference))
+                  fail("Invalid");
+              // A size that has started selling stays: orders, prices and recipes refer to it.
+              for (const sku of product.draft.skus)
+                if (!kept.has(sku.skuReference) && sku.lifecycle !== "Draft") fail("SizeInUse");
+              if (
+                body.sizes.some((size) => size.skuReference === null) &&
+                !s.permissions.mayAddSize
+              )
+                fail("PermissionDenied");
+              const dimension =
+                product.draft.skus.flatMap((sku) => sku.variantSelections)[0]?.dimensionReference ??
+                derivedReference(body.operationReference, "size-dimension");
+              const at = options.persistence.now();
+              const skus = body.sizes.map((size, index) => {
+                const existing = product.draft.skus.find(
+                  (sku) => sku.skuReference === size.skuReference,
+                );
+                const existingSelection = existing?.variantSelections ?? [];
+                const selection =
+                  body.sizes.length === 1 || existingSelection.length > 0
+                    ? existingSelection
                     : [
                         {
                           dimensionReference: dimension,
@@ -580,159 +660,93 @@ export function createMerchantProducts(options: {
                             "size:" + index,
                           ),
                         },
-                      ],
-                unitOfSale: "EACH",
-                unitQuantity: "1",
-              })),
-              operationReference: body.operationReference,
-              requestedAt: await requestedAtFor(body.operationReference),
-            });
-            return {
-              status: result.status,
-              product: productView(result.aggregate, options.locale),
-            };
-          }
-          const product = await loadBrandProduct(
-            reads(tx),
-            { brandReference: brand },
-            body.productReference,
-          );
-          if (product === null) return fail("NotFound");
-          if (body.action === "SaveDraft") {
-            const prior = await creation.resolveOperation(
-              parseCatalogReference(body.operationReference),
-            );
-            if (prior !== null) {
-              if (
-                prior.action !== "ReplaceDraft" ||
-                prior.aggregate.productReference !== product.productReference
-              )
-                fail("Conflict");
+                      ];
+                if (existing !== undefined) {
+                  if (existing.skuCode !== size.skuCode) fail("Invalid");
+                  return {
+                    ...existing,
+                    localizedNames: { ...existing.localizedNames, ...names(size.name) },
+                    variantSelections: selection,
+                  };
+                }
+                return {
+                  skuReference: derivedReference(body.operationReference, "sku:" + index),
+                  productReference: product.productReference,
+                  brandReference: product.brandReference,
+                  skuCode: size.skuCode,
+                  lifecycle: "Draft" as const,
+                  localizedNames: { [product.draft.defaultLocale]: size.name, ...names(size.name) },
+                  variantSelections: selection,
+                  unitOfSale: "EACH",
+                  unitQuantity: "1",
+                  createdAt: at,
+                  createdByActorReference: parseCatalogReference(s.actor),
+                };
+              });
+              const optionBindings =
+                body.optionSets === undefined
+                  ? product.draft.optionBindings
+                  : await bindingsFor(product, body.optionSets, body.operationReference);
+              const result = await service(body.operationReference).replaceDraft({
+                productReference: product.productReference,
+                expectedAggregateVersion: body.expectedAggregateVersion,
+                operationReference: body.operationReference,
+                requestedAt: at,
+                draft: {
+                  ...product.draft,
+                  localizedNames: { ...product.draft.localizedNames, ...names(body.name) },
+                  taxClassificationReference: body.taxClassificationReference,
+                  skus,
+                  optionBindings,
+                  updatedAt: at,
+                },
+              });
               return {
-                status: "AlreadyApplied",
-                product: productView(prior.aggregate, options.locale),
+                status: result.status,
+                product: productView(result.aggregate, options.locale),
               };
             }
-            if (product.aggregateVersion !== body.expectedAggregateVersion) fail("Conflict");
-            if (
-              body.taxClassificationReference !== product.draft.taxClassificationReference &&
-              !(await taxClassOffered(body.taxClassificationReference))
-            )
-              fail("TaxClassUnavailable");
-            const kept = new Set(
-              body.sizes.flatMap((size) => (size.skuReference === null ? [] : [size.skuReference])),
-            );
-            for (const reference of kept)
-              if (!product.draft.skus.some((sku) => sku.skuReference === reference))
-                fail("Invalid");
-            // A size that has started selling stays: orders, prices and recipes refer to it.
-            for (const sku of product.draft.skus)
-              if (!kept.has(sku.skuReference) && sku.lifecycle !== "Draft") fail("SizeInUse");
-            if (body.sizes.some((size) => size.skuReference === null) && !s.permissions.mayAddSize)
-              fail("PermissionDenied");
-            const dimension =
-              product.draft.skus.flatMap((sku) => sku.variantSelections)[0]?.dimensionReference ??
-              derivedReference(body.operationReference, "size-dimension");
-            const at = options.persistence.now();
-            const skus = body.sizes.map((size, index) => {
-              const existing = product.draft.skus.find(
-                (sku) => sku.skuReference === size.skuReference,
-              );
-              const existingSelection = existing?.variantSelections ?? [];
-              const selection =
-                body.sizes.length === 1 || existingSelection.length > 0
-                  ? existingSelection
-                  : [
-                      {
-                        dimensionReference: dimension,
-                        valueReference: derivedReference(body.operationReference, "size:" + index),
-                      },
-                    ];
-              if (existing !== undefined) {
-                if (existing.skuCode !== size.skuCode) fail("Invalid");
-                return {
-                  ...existing,
-                  localizedNames: { ...existing.localizedNames, ...names(size.name) },
-                  variantSelections: selection,
-                };
-              }
-              return {
-                skuReference: derivedReference(body.operationReference, "sku:" + index),
-                productReference: product.productReference,
-                brandReference: product.brandReference,
-                skuCode: size.skuCode,
-                lifecycle: "Draft" as const,
-                localizedNames: { [product.draft.defaultLocale]: size.name, ...names(size.name) },
-                variantSelections: selection,
-                unitOfSale: "EACH",
-                unitQuantity: "1",
-                createdAt: at,
-                createdByActorReference: parseCatalogReference(s.actor),
-              };
-            });
-            const optionBindings =
-              body.optionSets === undefined
-                ? product.draft.optionBindings
-                : await bindingsFor(product, body.optionSets, body.operationReference);
-            const result = await service(body.operationReference).replaceDraft({
-              productReference: product.productReference,
-              expectedAggregateVersion: body.expectedAggregateVersion,
-              operationReference: body.operationReference,
-              requestedAt: at,
-              draft: {
-                ...product.draft,
-                localizedNames: { ...product.draft.localizedNames, ...names(body.name) },
-                taxClassificationReference: body.taxClassificationReference,
-                skus,
-                optionBindings,
-                updatedAt: at,
-              },
-            });
-            return {
-              status: result.status,
-              product: productView(result.aggregate, options.locale),
-            };
+            // StartSelling: the Product, then each size not yet selling, one recorded step each. A retry
+            // after a partial or complete earlier attempt continues from the current state.
+            let latest = product;
+            const stepOperation = (sku: string | null) =>
+              derivedReference(body.operationReference, "start:" + (sku ?? "product"));
+            if (latest.aggregateVersion !== body.expectedAggregateVersion) {
+              let started = false;
+              for (const sku of [null, ...latest.draft.skus.map((item) => item.skuReference)])
+                if (
+                  (await creation.resolveOperation(parseCatalogReference(stepOperation(sku)))) !==
+                  null
+                )
+                  started = true;
+              if (!started) fail("Conflict");
+            }
+            const steps: readonly (string | null)[] = [
+              ...(latest.lifecycle === "Draft" ? [null] : []),
+              ...latest.draft.skus
+                .filter((sku) => sku.lifecycle === "Draft")
+                .map((sku) => sku.skuReference),
+            ];
+            if (steps.length === 0 && latest.lifecycle !== "Active") fail("Lifecycle");
+            for (const sku of steps) {
+              const operation = stepOperation(sku);
+              const result = await service(operation).changeLifecycle({
+                productReference: latest.productReference,
+                skuReference: sku,
+                targetLifecycle: "Active",
+                expectedAggregateVersion: latest.aggregateVersion,
+                operationReference: operation,
+                requestedAt: options.persistence.now(),
+              });
+              latest = result.aggregate;
+            }
+            return { status: "Applied", product: productView(latest, options.locale) };
+          } catch (error) {
+            if (error instanceof CatalogError) return fail(catalogErrors[error.code] ?? "Invalid");
+            throw error;
           }
-          // StartSelling: the Product, then each size not yet selling, one recorded step each. A retry
-          // after a partial or complete earlier attempt continues from the current state.
-          let latest = product;
-          const stepOperation = (sku: string | null) =>
-            derivedReference(body.operationReference, "start:" + (sku ?? "product"));
-          if (latest.aggregateVersion !== body.expectedAggregateVersion) {
-            let started = false;
-            for (const sku of [null, ...latest.draft.skus.map((item) => item.skuReference)])
-              if (
-                (await creation.resolveOperation(parseCatalogReference(stepOperation(sku)))) !==
-                null
-              )
-                started = true;
-            if (!started) fail("Conflict");
-          }
-          const steps: readonly (string | null)[] = [
-            ...(latest.lifecycle === "Draft" ? [null] : []),
-            ...latest.draft.skus
-              .filter((sku) => sku.lifecycle === "Draft")
-              .map((sku) => sku.skuReference),
-          ];
-          if (steps.length === 0 && latest.lifecycle !== "Active") fail("Lifecycle");
-          for (const sku of steps) {
-            const operation = stepOperation(sku);
-            const result = await service(operation).changeLifecycle({
-              productReference: latest.productReference,
-              skuReference: sku,
-              targetLifecycle: "Active",
-              expectedAggregateVersion: latest.aggregateVersion,
-              operationReference: operation,
-              requestedAt: options.persistence.now(),
-            });
-            latest = result.aggregate;
-          }
-          return { status: "Applied", product: productView(latest, options.locale) };
-        } catch (error) {
-          if (error instanceof CatalogError) return fail(catalogErrors[error.code] ?? "Invalid");
-          throw error;
-        }
-      }),
+        }),
+      ),
     );
   };
   return { query, command };

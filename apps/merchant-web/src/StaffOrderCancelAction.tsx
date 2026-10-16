@@ -29,7 +29,7 @@ export function staffCancellationSummary(order: Order, batch: Batch) {
   if (batch.staffCancellation === null) return null;
   const machine = batch.staffCancellation.refundMethod === "CardMachine";
   return (
-    (order.orderType === "Pickup" ? "Cancelled by store" : `Batch ${batch.sequence} cancelled`) +
+    (order.orderType === "Pickup" ? "Cancelled by store" : `Round ${batch.sequence} cancelled`) +
     (batch.staffCancellation.refundStatus === "Refunded"
       ? machine
         ? " · refunded on card machine"
@@ -148,7 +148,7 @@ export function StaffOrderCancelAction({
   const [reason, setReason] = useState<StaffCancellationReason | "">("");
   const [outcome, setOutcome] = useState<Outcome>("Idle");
   const pickup = order.orderType === "Pickup";
-  const label = pickup ? "Cancel order" : "Cancel batch";
+  const label = pickup ? "Cancel order" : "Cancel round";
   const titleId = "staff-cancel-" + batch.orderBatchReference;
   const submit = async () => {
     if (outcome === "Pending" || order.currentVersion === null) return;
@@ -226,13 +226,13 @@ export function StaffOrderCancelAction({
         <h2 id={titleId}>
           {pickup
             ? `Cancel order ${order.orderNumber}`
-            : `Cancel batch ${batch.sequence} of order ${order.orderNumber}`}
+            : `Cancel round ${batch.sequence} of order ${order.orderNumber}`}
         </h2>
         <p>Only before the kitchen starts. The customer is refunded in full, including tip.</p>
         <p>
           {pickup
             ? "The order leaves the queue and its items return to stock."
-            : "Only this batch is cancelled; the rest of the table's order continues."}
+            : "Only this round is cancelled; the rest of the table's order continues."}
         </p>
         <form
           hidden={!formOpen}
@@ -269,14 +269,14 @@ export function StaffOrderCancelAction({
                   ? "Cancelling…"
                   : pickup
                     ? "Cancel order and refund"
-                    : "Cancel batch and refund"}
+                    : "Cancel round and refund"}
             </button>
             <button
               type="button"
               disabled={outcome === "Pending"}
               onClick={() => dialog.current?.close()}
             >
-              Keep {pickup ? "order" : "batch"}
+              Keep {pickup ? "order" : "round"}
             </button>
           </div>
         </form>

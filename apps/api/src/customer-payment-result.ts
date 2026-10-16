@@ -92,10 +92,24 @@ export class CustomerPaymentResultHandler {
           "orderReference",
           "status",
           "total",
+          "payBy",
+          "failure",
         ]);
         if (
           result.checkoutSessionReference !== input.checkoutSessionReference ||
-          !["Pending", "Unknown", "Succeeded", "Failed"].includes(String(result.status))
+          !["Pending", "Unknown", "Succeeded", "Failed"].includes(String(result.status)) ||
+          !(
+            result.failure === null ||
+            (result.status === "Failed" &&
+              ["Declined", "NotCompleted"].includes(String(result.failure)))
+          ) ||
+          (result.status === "Failed") !== (result.failure !== null) ||
+          !(
+            (result.paymentIntentReference === null && result.payBy === null) ||
+            (result.paymentIntentReference !== null &&
+              typeof result.payBy === "string" &&
+              Number.isFinite(Date.parse(result.payBy)))
+          )
         )
           throw new Error();
         if (result.paymentIntentReference === null) {

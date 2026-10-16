@@ -13,9 +13,12 @@ import { businessTransaction } from "./merchant-ordinary-refund-approval.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 
-export type OrdinaryRefundProgress = "Recorded" | "Sending" | "Refunded" | "Declined";
-/** Where one request stands, from committed Payment facts (Recorded, Sending, Refunded,
- * Declined). Shared by the request list and the Approvals page. */
+export type OrdinaryRefundProgress =
+  "Recorded" | "ReadyToSend" | "Sending" | "Refunded" | "Declined";
+/** Where one request stands, from committed Payment facts. Shared by the request list and the
+ * Approvals page. WP-2423 item 6: "Sending" means every unfinished payment refund was really
+ * sent and waits for the Provider's answer; a refund still prepared (or not prepared) on any
+ * payment is "ReadyToSend" — not yet sent — so staff are never told it was sent before it was. */
 export function ordinaryRefundProgress(
   declined: boolean,
   states: readonly string[],
@@ -23,6 +26,8 @@ export function ordinaryRefundProgress(
   if (declined) return "Declined";
   if (states.length > 0 && states.every((state) => state === "Confirmed")) return "Refunded";
   if (states.every((state) => state === "NotDispatched")) return "Recorded";
+  if (states.some((state) => state === "Prepared" || state === "NotDispatched"))
+    return "ReadyToSend";
   return "Sending";
 }
 

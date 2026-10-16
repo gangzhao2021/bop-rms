@@ -115,10 +115,10 @@ describe("WP-2423 Q13 persistent operations alerts read", () => {
       storeReference: scope.storeReference,
       readBoard,
     });
-    expect((await read({ sessionCookie: "cookie" })).active).toHaveLength(1);
+    expect(await read({ sessionCookie: "cookie" })).toMatchObject({ active: [{}] });
     expect(scope.calls.at(-1)?.slice(1)).toEqual(["cookie", "operations.order-exception.manage"]);
   });
-  it("refuses without permission or for another Store, without reading the board", async () => {
+  it("answers 'not permitted' to other roles and refuses another Store, without reading the board", async () => {
     const readBoard = vi.fn(async () => board());
     scope.allowed = false;
     const read = createPersistentMerchantOperationsAlerts({
@@ -126,9 +126,8 @@ describe("WP-2423 Q13 persistent operations alerts read", () => {
       storeReference: scope.storeReference,
       readBoard,
     });
-    await expect(read({ sessionCookie: "cookie" })).rejects.toThrow(
-      "MERCHANT_OPERATIONS_ALERTS_UNAVAILABLE",
-    );
+    // WP-2423: an ordinary answer for Front of House, not a refusal the browser logs.
+    expect(await read({ sessionCookie: "cookie" })).toEqual({ permitted: false });
     scope.allowed = true;
     const other = createPersistentMerchantOperationsAlerts({
       persistence,

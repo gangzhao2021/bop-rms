@@ -144,3 +144,44 @@ it("rejects invalid revision and duplicate membership", () => {
     parseOrderBatchCheckoutCancellation({ ...f.record, orderItemReferences: [id(18), id(18)] }),
   ).toThrow();
 });
+it("WP-2423 abandoned payment: a never-finished payment is cancelled on its failed evidence", () => {
+  const f = fixture();
+  const record = { ...f.record, reasonCode: "PAYMENT_NOT_COMPLETED" };
+  expect(createOrderBatchCheckoutCancellation({ ...f, record }).record.reasonCode).toBe(
+    "PAYMENT_NOT_COMPLETED",
+  );
+  expect(() =>
+    createOrderBatchCheckoutCancellation({
+      ...f,
+      record,
+      expiry: { ...f.expiry, status: "AwaitingPaymentResolution", paymentEvidence: null },
+    }),
+  ).toThrow();
+});
+it("WP-2423 abandoned payment: a manager's cancellation before the deadline has no expiry evidence", () => {
+  const f = fixture();
+  const record = {
+    ...f.record,
+    reasonCode: "STAFF_CANCELLED_UNPAID",
+    expiryRecordReference: null,
+    expiryEvidenceDigest: null,
+    cancelledAt: "2026-09-21T00:12:00.000Z",
+  };
+  const result = createOrderBatchCheckoutCancellation({ record, expiry: null, items: f.items });
+  expect(result.record.expiryRecordReference).toBeNull();
+  expect(result.items[1]?.phase).toBe("Cancelled");
+  // Staff never pass expiry evidence, and the System's reasons always need it.
+  expect(() => createOrderBatchCheckoutCancellation({ ...f, record })).toThrow();
+  expect(() =>
+    parseOrderBatchCheckoutCancellation({ ...f.record, expiryRecordReference: null }),
+  ).toThrow();
+  expect(() =>
+    parseOrderBatchCheckoutCancellation({ ...record, expiryRecordReference: id(9) }),
+  ).toThrow();
+  expect(() =>
+    parseOrderBatchCheckoutCancellation({
+      ...record,
+      expiryEvidenceDigest: f.record.expiryEvidenceDigest,
+    }),
+  ).toThrow();
+});

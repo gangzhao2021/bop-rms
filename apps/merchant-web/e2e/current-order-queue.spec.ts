@@ -245,7 +245,7 @@ test("@production acceptance retries the same operation after a lost response", 
     });
   });
   await page.goto("/operations/orders");
-  await page.getByRole("button", { name: "Accept ORD-1 · batch 2", exact: true }).click();
+  await page.getByRole("button", { name: "Accept ORD-1 · round 2", exact: true }).click();
   await expect(
     page.getByText("Acceptance could not be confirmed.", { exact: false }),
   ).toBeVisible();
@@ -253,33 +253,33 @@ test("@production acceptance retries the same operation after a lost response", 
   await searchOrder.fill("ORD-2");
   await expect(page.locator("details.order-workbench-entry").first()).toHaveAttribute("hidden", "");
   await expect(
-    page.getByRole("button", { name: "Retry acceptance for ORD-1 · batch 2", exact: true }),
+    page.getByRole("button", { name: "Retry acceptance for ORD-1 · round 2", exact: true }),
   ).toBeHidden();
   await page.getByRole("button", { name: "Clear order filters" }).click();
   await expect(
-    page.getByRole("button", { name: "Retry acceptance for ORD-1 · batch 2", exact: true }),
+    page.getByRole("button", { name: "Retry acceptance for ORD-1 · round 2", exact: true }),
   ).toBeVisible();
   const disclosure = page.locator("details.order-workbench-entry > summary");
   await disclosure.click();
   await expect(
-    page.getByRole("button", { name: "Retry acceptance for ORD-1 · batch 2", exact: true }),
+    page.getByRole("button", { name: "Retry acceptance for ORD-1 · round 2", exact: true }),
   ).toBeHidden();
   await disclosure.click();
   await expect(
-    page.getByRole("button", { name: "Retry acceptance for ORD-1 · batch 2", exact: true }),
+    page.getByRole("button", { name: "Retry acceptance for ORD-1 · round 2", exact: true }),
   ).toBeVisible();
   expect(bodies).toHaveLength(1);
   await expect(
     page
-      .getByRole("region", { name: "Batch 2" })
+      .getByRole("region", { name: "Round 2" })
       .getByText("Acceptance: Not accepted", { exact: true }),
   ).toBeVisible();
   await page
-    .getByRole("button", { name: "Retry acceptance for ORD-1 · batch 2", exact: true })
+    .getByRole("button", { name: "Retry acceptance for ORD-1 · round 2", exact: true })
     .click();
   await expect(
     page
-      .getByRole("region", { name: "Batch 2" })
+      .getByRole("region", { name: "Round 2" })
       .getByText("Acceptance: Accepted", { exact: true }),
   ).toBeVisible();
   expect(bodies).toHaveLength(2);
@@ -296,7 +296,7 @@ test("@production acceptance retries the same operation after a lost response", 
     "orderReference",
   ]);
   await expect(
-    page.getByRole("button", { name: "Accept ORD-1 · batch 2", exact: true }),
+    page.getByRole("button", { name: "Accept ORD-1 · round 2", exact: true }),
   ).toHaveCount(0);
 });
 
@@ -399,13 +399,13 @@ test("@production refresh after rejected acceptance uses current order version",
     return route.fulfill({ headers, json: { status: "Created", acceptedOrderVersion: 5 } });
   });
   await page.goto("/operations/orders");
-  await page.getByRole("button", { name: "Accept ORD-1 · batch 2", exact: true }).click();
+  await page.getByRole("button", { name: "Accept ORD-1 · round 2", exact: true }).click();
   await expect(page.getByText("Acceptance was not confirmed.", { exact: false })).toBeVisible();
   await page.getByRole("button", { name: "Refresh orders", exact: true }).click();
-  await page.getByRole("button", { name: "Accept ORD-1 · batch 2", exact: true }).click();
+  await page.getByRole("button", { name: "Accept ORD-1 · round 2", exact: true }).click();
   await expect(
     page
-      .getByRole("region", { name: "Batch 2" })
+      .getByRole("region", { name: "Round 2" })
       .getByText("Acceptance: Accepted", { exact: true }),
   ).toBeVisible();
   expect(bodies).toHaveLength(2);

@@ -12,6 +12,7 @@ import {
   staffCancellationReasonLabel,
   staffCancellationSummary,
 } from "./StaffOrderCancelAction.js";
+import { UnpaidRoundCancelAction } from "./UnpaidRoundCancelAction.js";
 import {
   HeldStockNotice,
   HeldStockReleaseAction,
@@ -922,7 +923,7 @@ export function CurrentOrderQueueRows({
                       className="order-accept-by"
                       data-tier={paymentDueTier(batch.paymentDue, now)}
                     >
-                      {order.batches.length > 1 ? `Batch ${batch.sequence}: ` : ""}
+                      {order.batches.length > 1 ? `Round ${batch.sequence}: ` : ""}
                       {paymentDueText(batch.paymentDue, timeZone, now, batch.staffRound !== null)}
                     </span>
                   ),
@@ -1026,9 +1027,9 @@ export function CurrentOrderQueueRows({
               ) : null}
               {detail?.(order, opened.has(order.orderReference) || view.items.length === 1)}
               {order.batches.map((batch) => (
-                <section key={batch.orderBatchReference} aria-label={"Batch " + batch.sequence}>
+                <section key={batch.orderBatchReference} aria-label={"Round " + batch.sequence}>
                   <h3>
-                    Batch {batch.sequence}
+                    Round {batch.sequence}
                     {batch.sequence === 1 ? " · Initial" : " · Additional"}
                     {batch.staffRound !== null ? " · Entered by staff" : ""}
                   </h3>
@@ -1074,9 +1075,9 @@ export function CurrentOrderQueueRows({
                   ) : batch.acceptanceStatus === "Cancelled" ? (
                     // WP-2423: cancelled automatically because its payment failed (no store refund).
                     <p className="order-workbench-closed" role="note">
-                      Batch cancelled · not paid. It wasn&apos;t paid by the end of its payment
-                      time, so it was cancelled automatically and never went to the kitchen. Nothing
-                      was charged for it in the system.
+                      Round cancelled · not paid. It wasn&apos;t paid (cancelled when its payment
+                      time ended, or by a manager), so it never went to the kitchen and its items
+                      went back to stock. Nothing was charged for it in the system.
                       {batch.staffRound !== null
                         ? " If the card machine was charged for it, refund that payment on the machine."
                         : ""}
@@ -1093,7 +1094,9 @@ export function CurrentOrderQueueRows({
                         ? " Don't prepare it; it will not be charged. If the guest still wants these items, they can order them again."
                         : batch.staffRound !== null
                           ? " Charge it on the card machine and record it below; the kitchen starts it once recorded. If it isn't recorded in time, it is cancelled and its items go back to stock."
-                          : " Not accepted yet: the guest has not paid for this round."}
+                          : batch.canCancelUnpaid
+                            ? " Not accepted yet: the guest has not paid for this round. Ask them to finish paying on their phone (their table page has a pay button), or cancel it below."
+                            : " Not accepted yet: the guest has not paid for this round. Ask them to finish paying on their phone (their table page has a pay button), or ask a manager to cancel it."}
                     </p>
                   ) : (
                     <p>
@@ -1563,132 +1566,169 @@ export function CurrentOrderQueuePage({
                   }}
                 />
               )}
-              action={(order, batch) =>
-                // WP-2423 (2026-10-16): an ended earlier-day Order still holding stock.
-                order.heldStock !== null &&
-                order.heldStock.state === "Ended" &&
-                !order.heldStock.productionStarted &&
-                order.heldStock.orderBatchReference === batch.orderBatchReference ? (
-                  <fieldset disabled={servingBusy}>
-                    <HeldStockReleaseAction
-                      key={"held-" + batch.orderBatchReference}
-                      order={order}
-                      csrf={csrf}
-                      fetcher={fetcher}
-                      onSettled={(outcome) => {
-                        // WP-2423 (2026-10-16 v15): confirm the release; the reread then drops
-                        // the order from "still holding stock".
-                        if (outcome === "Released")
-                          setReleased(
-                            heldStockReleasedText(
-                              order,
-                              order.businessDate === null
-                                ? null
-                                : businessDateLabel(order.businessDate, today),
-                            ),
-                          );
-                        reload(after);
-                      }}
-                    />
-                  </fieldset>
-                ) : // WP-2423 D5: an unpaid round staff entered is recorded as paid here too. The list
-                // leaves its amount out (the one-order read builds it when the form is opened).
-                batch.staffRound != null &&
-                  batch.staffRound.paidOnCardMachine === null &&
-                  batch.acceptanceStatus === "NotAccepted" &&
-                  batch.paymentDue !== null &&
-                  batch.paymentDue.status === "Awaiting" &&
-                  (batch.paymentDue.cancelsAt === null ||
-                    Date.parse(batch.paymentDue.cancelsAt) > Date.now()) ? (
-                  <fieldset disabled={servingBusy}>
-                    <StaffRoundPaymentAction
-                      key={"round-pay-" + batch.orderBatchReference}
-                      csrf={csrf}
-                      fetcher={fetcher}
-                      orderReference={order.orderReference}
-                      orderBatchReference={batch.orderBatchReference}
-                      amountDueMinor={batch.staffRound.amountDueMinor}
-                      loadAmountDue={(signal) =>
-                        client
-                          .loadDetail(order.orderReference, signal)
-                          .then(
-                            (detail) =>
-                              detail.order.batches.find(
-                                (entry) => entry.orderBatchReference === batch.orderBatchReference,
-                              )?.staffRound?.amountDueMinor ?? null,
-                          )
-                      }
-                      recordedAfterOutage={batch.staffRound.recordedAfterOutage}
-                      timeZone={timeZone}
-                      onRecorded={() => reload(after)}
-                    />
-                  </fieldset>
-                ) : (batch.staffCancellation?.refundMethod === "CardMachine" &&
-                    batch.staffCancellation.refundStatus === "Pending") ||
-                  (batch.sequence === 1 && cardMachineOwed(order) !== null) ? (
-                  <fieldset disabled={servingBusy}>
-                    <CardMachineRefundAction
-                      key={"card-refund-" + batch.orderBatchReference}
-                      order={order}
-                      batch={batch}
-                      owedMinor={cardMachineOwed(order)}
-                      csrf={csrf}
-                      fetcher={fetcher}
-                      onSettled={refreshInPlace}
-                    />
-                  </fieldset>
-                ) : batch.canCancel || batch.canCancelItems ? (
-                  <fieldset disabled={servingBusy} className="order-cancel-actions">
-                    {batch.canCancel ? (
-                      <StaffOrderCancelAction
-                        key={batch.orderBatchReference}
-                        order={order}
-                        batch={batch}
-                        csrf={csrf}
-                        fetcher={fetcher}
-                        onSettled={() => reload(after)}
-                      />
-                    ) : null}
-                    {/* WP-2423 Q6 step 2: items are chosen from the order's lines (order detail). */}
-                    {!batch.canCancelItems ? null : detail !== undefined ? (
-                      <StaffItemCancelAction
-                        key={"items-" + batch.orderBatchReference}
-                        order={order}
-                        batch={batch}
-                        lines={detail.lines.items}
-                        csrf={csrf}
-                        fetcher={fetcher}
-                        onSettled={() => reload(after)}
-                      />
-                    ) : (
-                      <Link
-                        className="order-cancel-items-link"
-                        to={`/operations/orders/${order.orderReference}`}
-                      >
-                        Cancel items
-                      </Link>
-                    )}
-                  </fieldset>
-                ) : batch.canRequestAcceptance ? (
-                  <fieldset disabled={servingBusy}>
-                    {order.acceptanceHold !== null &&
-                    order.acceptanceHold.orderBatchReference === batch.orderBatchReference ? (
-                      // WP-2423 Q9-G1: paid during an outage — accept or refund.
-                      <AcceptanceHoldDecision
-                        order={order}
-                        hold={order.acceptanceHold}
-                        csrf={csrf}
-                        timeZone={timeZone}
-                        fetcher={fetcher}
-                        onSettled={() => reload(after)}
-                        accept={
+              action={(order, batch) => (
+                <>
+                  {
+                    // WP-2423 (2026-10-16): an ended earlier-day Order still holding stock.
+                    order.heldStock !== null &&
+                    order.heldStock.state === "Ended" &&
+                    !order.heldStock.productionStarted &&
+                    order.heldStock.orderBatchReference === batch.orderBatchReference ? (
+                      <fieldset disabled={servingBusy}>
+                        <HeldStockReleaseAction
+                          key={"held-" + batch.orderBatchReference}
+                          order={order}
+                          csrf={csrf}
+                          fetcher={fetcher}
+                          onSettled={(outcome) => {
+                            // WP-2423 (2026-10-16 v15): confirm the release; the reread then drops
+                            // the order from "still holding stock".
+                            if (outcome === "Released")
+                              setReleased(
+                                heldStockReleasedText(
+                                  order,
+                                  order.businessDate === null
+                                    ? null
+                                    : businessDateLabel(order.businessDate, today),
+                                ),
+                              );
+                            reload(after);
+                          }}
+                        />
+                      </fieldset>
+                    ) : // WP-2423 D5: an unpaid round staff entered is recorded as paid here too. The list
+                    // leaves its amount out (the one-order read builds it when the form is opened).
+                    batch.staffRound != null &&
+                      batch.staffRound.paidOnCardMachine === null &&
+                      batch.acceptanceStatus === "NotAccepted" &&
+                      batch.paymentDue !== null &&
+                      batch.paymentDue.status === "Awaiting" &&
+                      (batch.paymentDue.cancelsAt === null ||
+                        Date.parse(batch.paymentDue.cancelsAt) > Date.now()) ? (
+                      <fieldset disabled={servingBusy}>
+                        <StaffRoundPaymentAction
+                          key={"round-pay-" + batch.orderBatchReference}
+                          csrf={csrf}
+                          fetcher={fetcher}
+                          orderReference={order.orderReference}
+                          orderBatchReference={batch.orderBatchReference}
+                          amountDueMinor={batch.staffRound.amountDueMinor}
+                          loadAmountDue={(signal) =>
+                            client
+                              .loadDetail(order.orderReference, signal)
+                              .then(
+                                (detail) =>
+                                  detail.order.batches.find(
+                                    (entry) =>
+                                      entry.orderBatchReference === batch.orderBatchReference,
+                                  )?.staffRound?.amountDueMinor ?? null,
+                              )
+                          }
+                          recordedAfterOutage={batch.staffRound.recordedAfterOutage}
+                          timeZone={timeZone}
+                          onRecorded={() => reload(after)}
+                        />
+                      </fieldset>
+                    ) : (batch.staffCancellation?.refundMethod === "CardMachine" &&
+                        batch.staffCancellation.refundStatus === "Pending") ||
+                      (batch.sequence === 1 && cardMachineOwed(order) !== null) ? (
+                      <fieldset disabled={servingBusy}>
+                        <CardMachineRefundAction
+                          key={"card-refund-" + batch.orderBatchReference}
+                          order={order}
+                          batch={batch}
+                          owedMinor={cardMachineOwed(order)}
+                          csrf={csrf}
+                          fetcher={fetcher}
+                          onSettled={refreshInPlace}
+                        />
+                      </fieldset>
+                    ) : batch.canCancel || batch.canCancelItems ? (
+                      <fieldset disabled={servingBusy} className="order-cancel-actions">
+                        {batch.canCancel ? (
+                          <StaffOrderCancelAction
+                            key={batch.orderBatchReference}
+                            order={order}
+                            batch={batch}
+                            csrf={csrf}
+                            fetcher={fetcher}
+                            onSettled={() => reload(after)}
+                          />
+                        ) : null}
+                        {/* WP-2423 Q6 step 2: items are chosen from the order's lines (order detail). */}
+                        {!batch.canCancelItems ? null : detail !== undefined ? (
+                          <StaffItemCancelAction
+                            key={"items-" + batch.orderBatchReference}
+                            order={order}
+                            batch={batch}
+                            lines={detail.lines.items}
+                            csrf={csrf}
+                            fetcher={fetcher}
+                            onSettled={() => reload(after)}
+                          />
+                        ) : (
+                          <Link
+                            className="order-cancel-items-link"
+                            to={`/operations/orders/${order.orderReference}`}
+                          >
+                            Cancel items
+                          </Link>
+                        )}
+                      </fieldset>
+                    ) : batch.canRequestAcceptance ? (
+                      <fieldset disabled={servingBusy}>
+                        {order.acceptanceHold !== null &&
+                        order.acceptanceHold.orderBatchReference === batch.orderBatchReference ? (
+                          // WP-2423 Q9-G1: paid during an outage — accept or refund.
+                          <AcceptanceHoldDecision
+                            order={order}
+                            hold={order.acceptanceHold}
+                            csrf={csrf}
+                            timeZone={timeZone}
+                            fetcher={fetcher}
+                            onSettled={() => reload(after)}
+                            accept={
+                              <OrderAcceptanceAction
+                                key={batch.orderBatchReference}
+                                csrf={csrf}
+                                orderNumber={
+                                  batch.sequence === 1
+                                    ? order.orderNumber
+                                    : order.orderNumber + " · round " + batch.sequence
+                                }
+                                operation={() => {
+                                  let operation = operations.current.get(batch.orderBatchReference);
+                                  if (!operation) {
+                                    operation = createOrderAcceptanceClient(fetcher).prepare({
+                                      acceptanceReference: serviceOperationReference(),
+                                      operationReference: serviceOperationReference(),
+                                      orderReference: order.orderReference,
+                                      orderBatchReference: batch.orderBatchReference,
+                                      expectedOrderVersion: order.currentVersion ?? 0,
+                                    });
+                                    operations.current.set(batch.orderBatchReference, operation);
+                                  }
+                                  return operation;
+                                }}
+                                onRejected={() =>
+                                  operations.current.delete(batch.orderBatchReference)
+                                }
+                                onChanged={() => reload(after)}
+                                onAccepted={() => {
+                                  operations.current.delete(batch.orderBatchReference);
+                                  reload(after);
+                                }}
+                              />
+                            }
+                          />
+                        ) : (
                           <OrderAcceptanceAction
                             key={batch.orderBatchReference}
                             csrf={csrf}
                             orderNumber={
                               batch.sequence === 1
                                 ? order.orderNumber
-                                : order.orderNumber + " · batch " + batch.sequence
+                                : order.orderNumber + " · round " + batch.sequence
                             }
                             operation={() => {
                               let operation = operations.current.get(batch.orderBatchReference);
@@ -1711,42 +1751,27 @@ export function CurrentOrderQueuePage({
                               reload(after);
                             }}
                           />
-                        }
-                      />
-                    ) : (
-                      <OrderAcceptanceAction
-                        key={batch.orderBatchReference}
+                        )}
+                      </fieldset>
+                    ) : null
+                  }
+                  {/* WP-2423 abandoned payment: a manager cancels a round nobody paid for. */}
+                  {batch.canCancelUnpaid ? (
+                    <fieldset disabled={servingBusy}>
+                      <UnpaidRoundCancelAction
+                        key={"unpaid-" + batch.orderBatchReference}
+                        orderReference={order.orderReference}
+                        orderBatchReference={batch.orderBatchReference}
+                        roundNumber={batch.sequence}
+                        orderLabel={"order " + order.orderNumber}
                         csrf={csrf}
-                        orderNumber={
-                          batch.sequence === 1
-                            ? order.orderNumber
-                            : order.orderNumber + " · batch " + batch.sequence
-                        }
-                        operation={() => {
-                          let operation = operations.current.get(batch.orderBatchReference);
-                          if (!operation) {
-                            operation = createOrderAcceptanceClient(fetcher).prepare({
-                              acceptanceReference: serviceOperationReference(),
-                              operationReference: serviceOperationReference(),
-                              orderReference: order.orderReference,
-                              orderBatchReference: batch.orderBatchReference,
-                              expectedOrderVersion: order.currentVersion ?? 0,
-                            });
-                            operations.current.set(batch.orderBatchReference, operation);
-                          }
-                          return operation;
-                        }}
-                        onRejected={() => operations.current.delete(batch.orderBatchReference)}
-                        onChanged={() => reload(after)}
-                        onAccepted={() => {
-                          operations.current.delete(batch.orderBatchReference);
-                          reload(after);
-                        }}
+                        fetcher={fetcher}
+                        onSettled={() => reload(after)}
                       />
-                    )}
-                  </fieldset>
-                ) : null
-              }
+                    </fieldset>
+                  ) : null}
+                </>
+              )}
             />
             {!single && state.view.nextAfterOrderReference !== null ? (
               <button

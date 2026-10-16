@@ -212,6 +212,34 @@ describe("same-origin Dining Join transport", () => {
     expect(response.headers.getSetCookie()).toEqual([]);
     expect(await response.text()).not.toContain(oldSession);
   });
+  it.each([
+    ["CodeUsed", 409, "dining_join_code_used", "customer.dining.join_code_used"],
+    [
+      "CodeNotAccepted",
+      409,
+      "dining_join_code_not_accepted",
+      "customer.dining.join_code_not_accepted",
+    ],
+    ["TooManyAttempts", 429, "dining_join_rate_limited", "customer.dining.join_rate_limited"],
+  ] as const)("maps definitive refusal %s to %i", async (reason, status, code, messageKey) => {
+    const service = port();
+    service.join.mockResolvedValue({ status: "Refused", reason });
+    const response = await post(await listen(service));
+    expect(response.status).toBe(status);
+    expect(await response.json()).toEqual({ error: { code, messageKey } });
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.getSetCookie()).toEqual([]);
+  });
+  it.each([
+    { status: "Refused", reason: "Private" },
+    { status: "Refused" },
+    { status: "Refused", reason: "CodeUsed", operationReference: op },
+  ])("keeps an unknown or expanded refusal %# unavailable", async (value) => {
+    const service = port();
+    service.join.mockResolvedValue(value);
+    const response = await post(await listen(service));
+    expect(response.status).toBe(503);
+  });
   it("bounds owner failure without reflecting credentials", async () => {
     const service = port();
     service.join.mockRejectedValue(new Error(oldSession));

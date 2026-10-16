@@ -11,6 +11,12 @@ import { CatalogError, parseCatalogInstant, parseCatalogReference } from "@rms/c
 import type { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import { createInitiallyAuthorizedMerchantStoreScope } from "./merchant-store-scope.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import {
+  rememberBrandTransactionValue,
+  restoreBrandTransactionRowSecurity,
+} from "./merchant-brand-transaction-authorization.js";
+
+let instances = 0;
 
 /** Private server capability. The browser cookie never leaves this closure. */
 export interface MerchantProductCurrentAuthorization {
@@ -82,6 +88,16 @@ export function createMerchantProductCurrentAuthorization(options: {
       validateAssociation: options.merchant.validateAssociation?.bind(options.merchant),
       currentActor: options.merchant.currentActor?.bind(options.merchant),
     });
+  /** WP-2423: this authorization's Store-scope admissions, remembered once per transaction. */
+  const memoScope = [
+    "product-current",
+    (instances = (instances + 1) % Number.MAX_SAFE_INTEGER),
+    sessionReference,
+    tenantReference,
+    brandReference,
+    storeReference,
+    actorReference,
+  ].join("|");
   let failed = false,
     latest = startedAt,
     deadline: string = validUntil,
@@ -287,11 +303,46 @@ export function createMerchantProductCurrentAuthorization(options: {
           typeof work !== "function"
         )
           return fail();
-        const current = await (
-          permissionPolicy === undefined
-            ? createInitiallyAuthorizedMerchantStoreScope(merchant)
-            : createInitiallyAuthorizedMerchantStoreScope(merchant, permissionPolicy)
-        )(tx, sessionCookie, sessionReference);
+        // The row-level-security scope a Store-scope admission leaves selected.
+        const restoreStore = () =>
+          restoreBrandTransactionRowSecurity(tx, brandReference, storeReference);
+        // The Store-scope admission is resolved in full once per transaction (and once more
+        // before commit); every later read in the same transaction reuses it (WP-2423).
+        const current = await rememberBrandTransactionValue(tx, {
+          scope: memoScope,
+          key: "store-scope",
+          now: () => parseCatalogInstant(now()),
+          resolve: () =>
+            (permissionPolicy === undefined
+              ? createInitiallyAuthorizedMerchantStoreScope(merchant)
+              : createInitiallyAuthorizedMerchantStoreScope(merchant, permissionPolicy))(
+              tx,
+              sessionCookie,
+              sessionReference,
+            ),
+          validUntil: (value) => value.authorizationValidUntil(),
+          restore: restoreStore,
+          same: (previous, fresh) =>
+            fresh.initialAuthorization?.effect === "Allow" &&
+            previous.initialAuthorization?.effect === "Allow" &&
+            fresh.selected.tenantReference === previous.selected.tenantReference &&
+            fresh.context.brand.brandReference === previous.context.brand.brandReference &&
+            fresh.store.storeReference === previous.store.storeReference &&
+            fresh.actorReference === previous.actorReference &&
+            fresh.sessionReference === previous.sessionReference,
+        });
+        const stillAllowed = () =>
+          rememberBrandTransactionValue(tx, {
+            scope: memoScope,
+            key: "store-allowed",
+            now: () => parseCatalogInstant(now()),
+            resolve: () => current.allowed(),
+            same: (previous, fresh) => previous === fresh,
+            restore: restoreStore,
+            // The Store-scope admission above re-reads the same Session, selection, membership,
+            // assignment and navigation permission before commit.
+            covered: true,
+          });
         const admit = async (initial: boolean) => {
           assertCurrent();
           if (
@@ -303,7 +354,7 @@ export function createMerchantProductCurrentAuthorization(options: {
             (initial
               ? current.initialAuthorization?.effect !== "Allow" ||
                 current.initialAuthorization.action !== "merchant.access"
-              : !(await current.allowed()))
+              : !(await stillAllowed()))
           )
             return fail("CATALOG_PERMISSION_DENIED");
           if (initial) {

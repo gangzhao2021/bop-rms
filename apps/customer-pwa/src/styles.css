@@ -1161,7 +1161,8 @@
 .payment-result-page__message strong {
   color: var(--bop-color-text-default);
 }
-.payment-result-page__order {
+.payment-result-page__order,
+.dining-session__pay {
   display: inline-flex;
   min-height: 44px;
   align-items: center;

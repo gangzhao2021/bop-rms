@@ -68,6 +68,32 @@ describe("WP-2423 P2 store overview", () => {
     const pickupsOnly = parseCurrentOrderQueue({ ...fixture, items: [ready, accepted] }, null);
     expect(summarizeOrders(pickupsOnly)).toMatchObject({ readyToServe: 0, dineIn: false });
   });
+  it("WP-2423: counts a table with a ready round as ready to serve even while another round waits", () => {
+    const fixture = currentOrderQueueFixture();
+    const [, , accepted] = fixture.items;
+    // The Order is not Ready as a whole (another round is still being made or paid for).
+    const table = { ...accepted, orderType: "DineIn", readyToServeItemCount: 1 };
+    const nothingReady = {
+      ...accepted,
+      orderReference: "018f0f58-767a-7f3b-a1d0-0000000009f1",
+      orderType: "DineIn",
+      currentPhase: "Ready",
+      readyToServeItemCount: 0,
+    };
+    const queue = parseCurrentOrderQueue({ ...fixture, items: [table] }, null);
+    expect(queue.items[0]?.readyToServeItemCount).toBe(1);
+    expect(summarizeOrders(queue)).toMatchObject({ readyToServe: 1, dineIn: true });
+    // The count is the source: an Order whose ready food was all served is not counted.
+    const served = parseCurrentOrderQueue({ ...fixture, items: [nothingReady] }, null);
+    expect(summarizeOrders(served)).toMatchObject({ readyToServe: 0 });
+    // A pickup never has food to serve at a table.
+    expect(() =>
+      parseCurrentOrderQueue(
+        { ...fixture, items: [{ ...accepted, readyToServeItemCount: 1 }] },
+        null,
+      ),
+    ).toThrow();
+  });
   it("counts waiting pickups and open or overdue exceptions", () => {
     expect(
       summarizePickups({

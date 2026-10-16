@@ -5,6 +5,7 @@ import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey
 import { createSessionPaymentResultClient } from "./session-payment-result-client.js";
 import { createSessionPaymentResultController } from "./session-payment-result-controller.js";
 import { RetryCardPanel } from "./RetryCardPanel.js";
+import { ResumePaymentPanel } from "./ResumePaymentPanel.js";
 import { paymentConfiguration } from "./payment-configuration.js";
 
 /** Pending and unknown results are re-checked with a growing delay, up to this many times. */
@@ -53,6 +54,14 @@ export function SessionPaymentResultPage({
   }, [controller, polls, refresh]);
   const unknown = state.status === "unknown" || result?.status === "Unknown";
   const unprepared = result?.status === "Pending" && result.paymentIntentReference === null;
+  // WP-2423 abandoned payment: a payment never finished (cancelled when its time ran out).
+  const notCompleted = result?.status === "Failed" && result.failure === "NotCompleted";
+  // The guest who started this payment can finish it here while its time is open.
+  const resumable =
+    result?.status === "Pending" &&
+    result.paymentIntentReference !== null &&
+    result.payBy !== null &&
+    Date.parse(result.payBy) > Date.now();
   const heading =
     state.status === "loading"
       ? "Verifying payment"
@@ -65,25 +74,29 @@ export function SessionPaymentResultPage({
             : unprepared
               ? "Payment not prepared"
               : result?.status === "Pending"
-                ? "Payment confirmation pending"
+                ? "Payment not confirmed yet"
                 : result?.status === "Succeeded"
                   ? "Payment confirmed"
-                  : result?.status === "Failed"
-                    ? "Payment declined"
-                    : "Payment result not found";
+                  : notCompleted
+                    ? "Payment not finished"
+                    : result?.status === "Failed"
+                      ? "Payment declined"
+                      : "Payment result not found";
   const badge = unknown
     ? "Status not confirmed"
-    : result?.status === "Failed"
-      ? "Declined"
-      : result?.status === "Succeeded"
-        ? "Paid"
-        : result?.status === "Pending"
-          ? "Pending"
-          : state.status === "loading"
-            ? "Checking"
-            : state.status === "offline"
-              ? "Offline"
-              : "Not found";
+    : notCompleted
+      ? "Not charged"
+      : result?.status === "Failed"
+        ? "Declined"
+        : result?.status === "Succeeded"
+          ? "Paid"
+          : result?.status === "Pending"
+            ? "Pending"
+            : state.status === "loading"
+              ? "Checking"
+              : state.status === "offline"
+                ? "Offline"
+                : "Not found";
   const badgeTone = unknown
     ? "warning"
     : result?.status === "Failed"
@@ -112,11 +125,13 @@ export function SessionPaymentResultPage({
         <p className="payment-result-page__intro">
           {unknown
             ? "The payment result is still being confirmed."
-            : result?.status === "Failed"
-              ? "Your card was declined. Nothing was charged."
-              : result?.status === "Succeeded"
-                ? "Thank you. Your order has been sent to the kitchen."
-                : "Payment details come from your current checkout."}
+            : notCompleted
+              ? "This payment wasn’t finished in time, so it was cancelled. Nothing was charged."
+              : result?.status === "Failed"
+                ? "Your card was declined. Nothing was charged."
+                : result?.status === "Succeeded"
+                  ? "Thank you. Your order has been sent to the kitchen."
+                  : "Payment details come from your current checkout."}
         </p>
       </PageHeading>
       <ol className="checkout-progress" aria-label="Checkout progress">
@@ -154,7 +169,14 @@ export function SessionPaymentResultPage({
           ) : null}
           {unprepared ? <p>Payment has not been prepared for this checkout.</p> : null}
           {result?.status === "Pending" && !unprepared ? (
-            <p>Payment confirmation is pending. Do not submit another payment.</p>
+            <p>
+              {resumable
+                ? "If you already entered your card, the result shows here shortly. If you left before paying, finish paying below — you won’t be charged twice."
+                : "Your payment is still being confirmed. Don’t start another payment."}
+            </p>
+          ) : null}
+          {notCompleted ? (
+            <p>It wasn’t sent to the kitchen. Ask staff if you still want it.</p>
           ) : null}
           {result?.status === "Succeeded" ? (
             <>
@@ -173,11 +195,21 @@ export function SessionPaymentResultPage({
               ) : null}
             </>
           ) : null}
-          {result?.status === "Failed" ? (
+          {result?.status === "Failed" && !notCompleted ? (
             <p>Your card was declined. Try another card or ask staff to pay at the counter.</p>
           ) : null}
         </div>
-        {result?.status === "Failed" ? (
+        {resumable && result ? (
+          <ResumePaymentPanel
+            checkoutSessionReference={result.checkoutSessionReference}
+            total={result.total}
+            payBy={result.payBy}
+            configuration={configuration}
+            online={state.status !== "offline"}
+            onSettled={() => void controller.refresh()}
+          />
+        ) : null}
+        {result?.status === "Failed" && !notCompleted ? (
           <RetryCardPanel
             checkoutSessionReference={result.checkoutSessionReference}
             total={result.total}

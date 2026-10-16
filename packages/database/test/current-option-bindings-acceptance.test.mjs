@@ -608,12 +608,16 @@ it("preserves full Option Draft history with exact operation binding and Tenant/
       },
     };
     const prepared = parseCatalogOptionSetEditorContent(source, details);
+    // The Option authoring fence (1102_007) admits operation history only in its Brand scope
+    // (Brand selected, no Store); the statement selects it, in or outside a transaction.
     const insertOperation = (tx, operation, revision = 1, action = "Create") =>
       tx.query(
-        `INSERT INTO rms_catalog.option_set_operation_record
+        `WITH brand_scope AS (
+         SELECT set_config('bop.brand_id',$8,true),set_config('bop.store_id','',true))
+       INSERT INTO rms_catalog.option_set_operation_record
        (operation_id,brand_id,option_set_id,action_code,intent_digest,result_aggregate_version,occurred_at)
-       VALUES($1,$2,$3,$4,$5,$6,$7)`,
-        [operation, brand, set, action, digest, revision, at],
+       SELECT $1,$2,$3,$4,$5,$6,$7 FROM brand_scope`,
+        [operation, brand, set, action, digest, revision, at, brand],
       );
     const insertSnapshot = (tx, operation, revision = 1, data = prepared, overrides = {}) => {
       const fields = {
@@ -1647,9 +1651,14 @@ it("creates complete Option Draft with server identities, original recovery and 
           role,
       );
       await admin.query(
-        "GRANT EXECUTE ON FUNCTION platform_helpers.is_uuid_v7(uuid),platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO " +
+        "GRANT EXECUTE ON FUNCTION platform_helpers.is_uuid_v7(uuid),platform_helpers.current_brand_id(),platform_helpers.current_store_id(),rms_catalog.option_set_authoring_operation_available(uuid) TO " +
           role,
       );
+      // The Option authoring fence (1102_007): operation identities and abandonment fences.
+      await admin.query(
+        "GRANT SELECT,INSERT ON rms_catalog.option_set_authoring_identity TO " + role,
+      );
+      await admin.query("GRANT SELECT ON rms_catalog.option_set_authoring_abandonment TO " + role);
       await admin.query(
         "GRANT SELECT,INSERT,UPDATE,DELETE ON rms_catalog.option_set,rms_catalog.option_set_version,rms_catalog.option,rms_catalog.option_conflict,rms_catalog.option_set_operation_record,rms_catalog.option_set_draft_content_snapshot TO " +
           role,
@@ -2116,8 +2125,15 @@ it("reads actual current full Option Draft with held fields, provenance and no b
       for (const role of [writerRole, readerRole]) {
         await admin.query("GRANT USAGE ON SCHEMA rms_catalog,platform_helpers TO " + role);
         await admin.query(
-          "GRANT EXECUTE ON FUNCTION platform_helpers.is_uuid_v7(uuid),platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO " +
+          "GRANT EXECUTE ON FUNCTION platform_helpers.is_uuid_v7(uuid),platform_helpers.current_brand_id(),platform_helpers.current_store_id(),rms_catalog.option_set_authoring_operation_available(uuid) TO " +
             role,
+        );
+        // The Option authoring fence (1102_007): operation identities and abandonment fences.
+        await admin.query(
+          "GRANT SELECT,INSERT ON rms_catalog.option_set_authoring_identity TO " + role,
+        );
+        await admin.query(
+          "GRANT SELECT ON rms_catalog.option_set_authoring_abandonment TO " + role,
         );
         await admin.query(
           "GRANT SELECT ON rms_catalog.option_set,rms_catalog.option_set_version,rms_catalog.option,rms_catalog.option_conflict,rms_catalog.option_set_operation_record,rms_catalog.option_set_draft_content_snapshot TO " +
@@ -2768,12 +2784,15 @@ it("preserves immutable full Option content with exact successor, deferred rollb
         ],
       );
     };
+    // The Option authoring fence (1102_007) admits operation history only in its Brand scope.
     const insertOperation = (tx, operation, action, root, instant) =>
       tx.query(
-        `INSERT INTO rms_catalog.option_set_operation_record
+        `WITH brand_scope AS (
+         SELECT set_config('bop.brand_id',$8,true),set_config('bop.store_id','',true))
+       INSERT INTO rms_catalog.option_set_operation_record
        (operation_id,brand_id,option_set_id,action_code,intent_digest,result_aggregate_version,occurred_at)
-       VALUES($1,$2,$3,$4,$5,$6,$7)`,
-        [operation, brand, set, action, digest, root, instant],
+       SELECT $1,$2,$3,$4,$5,$6,$7 FROM brand_scope`,
+        [operation, brand, set, action, digest, root, instant, brand],
       );
     const insertFull = (tx, operation, action, full, instant) => {
       const { sourceAggregate, ...additional } = full;
@@ -4191,9 +4210,14 @@ it("seals full Option content through owning writer with original recovery and a
           role,
       );
       await admin.query(
-        "GRANT EXECUTE ON FUNCTION platform_helpers.is_uuid_v7(uuid),platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO " +
+        "GRANT EXECUTE ON FUNCTION platform_helpers.is_uuid_v7(uuid),platform_helpers.current_brand_id(),platform_helpers.current_store_id(),rms_catalog.option_set_authoring_operation_available(uuid) TO " +
           role,
       );
+      // The Option authoring fence (1102_007): operation identities and abandonment fences.
+      await admin.query(
+        "GRANT SELECT,INSERT ON rms_catalog.option_set_authoring_identity TO " + role,
+      );
+      await admin.query("GRANT SELECT ON rms_catalog.option_set_authoring_abandonment TO " + role);
       await admin.query(
         "GRANT SELECT,INSERT,UPDATE ON " + tables.slice(0, 7).join(",") + " TO " + role,
       );

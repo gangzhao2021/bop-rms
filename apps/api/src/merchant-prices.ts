@@ -12,6 +12,7 @@ import {
   type PriceBookSnapshot,
   type PriceResolutionContext,
 } from "@rms/pricing";
+import { withRememberedBrandAuthorization } from "./merchant-brand-transaction-authorization.js";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import { createMerchantPriceBookCommands } from "./merchant-price-book-commands.js";
@@ -342,72 +343,76 @@ export function createMerchantPrices(options: {
   }) => {
     const current = await session(input);
     return retryTransactionConflict(() =>
-      options.persistence.transactions.run(async (tx) => {
-        const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
-        const at = options.persistence.now();
-        const assignment = await currentStorePriceBook(reads(tx), s.owner);
-        const history = await listStorePriceBookAssignments(reads(tx), s.owner, 10);
-        const menuSellables = await listStoreMenuSellables(reads(tx), s.owner);
-        const base = {
-          sourceAsOf: at,
-          viewer: s.actor,
-          permissions: s.permissions,
-          currencyCode: options.currencyMetadata.currencyCode,
-          storeAssignment: assignment,
-          assignmentHistory: history,
-          sellables: await sellables(tx, s.owner),
-          menuSellables,
-        };
-        if (input.priceBookReference !== null) {
-          const snapshot = await loadBook(tx, s.owner, input.priceBookReference);
-          if (snapshot === null) return fail("NotFound");
-          const author =
-            snapshot.lifecycle === "Draft"
-              ? await createPriceBookDraftAuthorSource({
-                  brandReference: s.owner.brandReference,
-                  repository: () => repository(tx, s.owner),
-                }).load(tx as never, snapshot.priceBookReference)
-              : null;
-          // WP-2423 Q19: the author who may approve sees whether they may publish alone and why.
-          const gate =
-            author !== null && String(author.actorReference) === s.actor && s.permissions.mayApprove
-              ? await merchantBrandSoleOperatorGate(tx as never, {
-                  tenantReference: s.owner.tenantReference,
-                  brandReference: s.owner.brandReference,
-                  storeReference: s.owner.storeReference,
-                  actorReference: s.actor,
-                  permissionCode: "pricing.price-book.approve",
-                  observedAt: at,
-                  allowed: s.mayApproveNow,
-                })
-              : null;
-          await reads(tx).query(
-            "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)",
-            [s.owner.brandReference],
-          );
-          return {
-            screenId: "PRICE-BOOK-EDITOR" as const,
-            ...base,
-            book: bookView(snapshot),
-            draftAuthor: author?.actorReference ?? null,
-            soleOperator:
-              gate === null
-                ? null
-                : {
-                    status: gate.status,
-                    otherApprovers: gate.otherApprovers,
-                    verifiedUntil: gate.verifiedUntil,
-                  },
-            uncovered:
-              snapshot.lifecycle === "Archived" ? [] : await uncovered(tx, s.owner, snapshot, at),
+      options.persistence.transactions.run((tx) =>
+        withRememberedBrandAuthorization(tx, async () => {
+          const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+          const at = options.persistence.now();
+          const assignment = await currentStorePriceBook(reads(tx), s.owner);
+          const history = await listStorePriceBookAssignments(reads(tx), s.owner, 10);
+          const menuSellables = await listStoreMenuSellables(reads(tx), s.owner);
+          const base = {
+            sourceAsOf: at,
+            viewer: s.actor,
+            permissions: s.permissions,
+            currencyCode: options.currencyMetadata.currencyCode,
+            storeAssignment: assignment,
+            assignmentHistory: history,
+            sellables: await sellables(tx, s.owner),
+            menuSellables,
           };
-        }
-        return {
-          screenId: "PRICE-BOOK-LIST" as const,
-          ...base,
-          books: await listBrandPriceBooks(reads(tx), s.owner),
-        };
-      }),
+          if (input.priceBookReference !== null) {
+            const snapshot = await loadBook(tx, s.owner, input.priceBookReference);
+            if (snapshot === null) return fail("NotFound");
+            const author =
+              snapshot.lifecycle === "Draft"
+                ? await createPriceBookDraftAuthorSource({
+                    brandReference: s.owner.brandReference,
+                    repository: () => repository(tx, s.owner),
+                  }).load(tx as never, snapshot.priceBookReference)
+                : null;
+            // WP-2423 Q19: the author who may approve sees whether they may publish alone and why.
+            const gate =
+              author !== null &&
+              String(author.actorReference) === s.actor &&
+              s.permissions.mayApprove
+                ? await merchantBrandSoleOperatorGate(tx as never, {
+                    tenantReference: s.owner.tenantReference,
+                    brandReference: s.owner.brandReference,
+                    storeReference: s.owner.storeReference,
+                    actorReference: s.actor,
+                    permissionCode: "pricing.price-book.approve",
+                    observedAt: at,
+                    allowed: s.mayApproveNow,
+                  })
+                : null;
+            await reads(tx).query(
+              "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)",
+              [s.owner.brandReference],
+            );
+            return {
+              screenId: "PRICE-BOOK-EDITOR" as const,
+              ...base,
+              book: bookView(snapshot),
+              draftAuthor: author?.actorReference ?? null,
+              soleOperator:
+                gate === null
+                  ? null
+                  : {
+                      status: gate.status,
+                      otherApprovers: gate.otherApprovers,
+                      verifiedUntil: gate.verifiedUntil,
+                    },
+              uncovered:
+                snapshot.lifecycle === "Archived" ? [] : await uncovered(tx, s.owner, snapshot, at),
+            };
+          }
+          return {
+            screenId: "PRICE-BOOK-LIST" as const,
+            ...base,
+            books: await listBrandPriceBooks(reads(tx), s.owner),
+          };
+        }),
+      ),
     );
   };
 
@@ -461,115 +466,119 @@ export function createMerchantPrices(options: {
     const current = await session(input);
     // Prepare the owner command (and refuse what the person may not do) in a read transaction.
     const prepared = await retryTransactionConflict(() =>
-      options.persistence.transactions.run(async (tx) => {
-        const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
-        if (
-          ((body.action === "CreateDraft" ||
-            body.action === "SaveDraft" ||
-            body.action === "Discard") &&
-            !s.permissions.mayEdit) ||
-          ((body.action === "Publish" || body.action === "AssignToStore") &&
-            !s.permissions.mayApprove)
-        )
-          fail("PermissionDenied");
-        if (body.action === "AssignToStore") return { s, transport: null };
-        // A retried operation returns its recorded result.
-        const prior = (
-          await reads(tx).query(
-            "SELECT price_book_id::text book FROM rms_pricing.price_book_operation_record WHERE brand_id=$1 AND operation_id=$2",
-            [s.owner.brandReference, body.operationReference],
+      options.persistence.transactions.run((tx) =>
+        withRememberedBrandAuthorization(tx, async () => {
+          const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+          if (
+            ((body.action === "CreateDraft" ||
+              body.action === "SaveDraft" ||
+              body.action === "Discard") &&
+              !s.permissions.mayEdit) ||
+            ((body.action === "Publish" || body.action === "AssignToStore") &&
+              !s.permissions.mayApprove)
           )
-        ).rows[0];
-        if (prior !== undefined) return { s, transport: null, replayed: String(prior.book) };
-        const at = options.persistence.now();
-        const from = localBoundary(at, s.timeZone);
-        const period = { timeZone: s.timeZone, effectiveFrom: from, effectiveUntil: null };
-        const entry = (
-          sellableReference: string,
-          amountMinor: string,
-          effectivePeriod = period,
-        ) => ({
-          sellableReference,
-          scopeKind: "Brand",
-          scopeReference: null,
-          channelCode: null,
-          orderType: null,
-          amountMinor,
-          effectivePeriod,
-          reasonCode: "BASE_PRICE",
-        });
-        if (body.action === "CreateDraft") {
-          const source = body.copyFrom === null ? null : await loadBook(tx, s.owner, body.copyFrom);
-          if (body.copyFrom !== null && source === null) fail("NotFound");
-          return {
-            s,
-            action: "CreateDraft" as const,
-            transport: {
-              operationReference: body.operationReference,
-              priceBookReference: derivedReference(body.operationReference, "price-book"),
-              expectedAggregateVersion: 0,
-              stableCode: body.stableCode,
-              entries: (source?.entries ?? [])
-                .filter(
-                  (e) => e.scopeKind === "Brand" && e.channelCode === null && e.orderType === null,
-                )
-                .map((e) => entry(e.sellableReference, e.amount.amountMinor.toString())),
-            },
-          };
-        }
-        const book = await loadBook(tx, s.owner, body.priceBookReference);
-        if (book === null) return fail("NotFound");
-        if (book.aggregateVersion !== body.expectedAggregateVersion) fail("Conflict");
-        if (book.lifecycle !== "Draft") fail("Lifecycle");
-        const keep = book.entries.map((e) => ({
-          sellableReference: e.sellableReference,
-          scopeKind: e.scopeKind,
-          scopeReference: e.scopeReference,
-          channelCode: e.channelCode,
-          orderType: e.orderType,
-          amountMinor: e.amount.amountMinor.toString(),
-          effectivePeriod: e.effectivePeriod,
-          reasonCode: e.reasonCode,
-        }));
-        if (body.action === "SaveDraft") {
-          // Unchanged prices keep their entry; changed and new prices start now.
-          const entries = body.prices.map((price) => {
-            const existing = keep.find(
-              (e) =>
-                e.sellableReference === price.sellableReference &&
-                e.scopeKind === "Brand" &&
-                e.channelCode === null &&
-                e.orderType === null,
-            );
-            return existing !== undefined && existing.amountMinor === price.amountMinor
-              ? existing
-              : entry(price.sellableReference, price.amountMinor);
+            fail("PermissionDenied");
+          if (body.action === "AssignToStore") return { s, transport: null };
+          // A retried operation returns its recorded result.
+          const prior = (
+            await reads(tx).query(
+              "SELECT price_book_id::text book FROM rms_pricing.price_book_operation_record WHERE brand_id=$1 AND operation_id=$2",
+              [s.owner.brandReference, body.operationReference],
+            )
+          ).rows[0];
+          if (prior !== undefined) return { s, transport: null, replayed: String(prior.book) };
+          const at = options.persistence.now();
+          const from = localBoundary(at, s.timeZone);
+          const period = { timeZone: s.timeZone, effectiveFrom: from, effectiveUntil: null };
+          const entry = (
+            sellableReference: string,
+            amountMinor: string,
+            effectivePeriod = period,
+          ) => ({
+            sellableReference,
+            scopeKind: "Brand",
+            scopeReference: null,
+            channelCode: null,
+            orderType: null,
+            amountMinor,
+            effectivePeriod,
+            reasonCode: "BASE_PRICE",
           });
+          if (body.action === "CreateDraft") {
+            const source =
+              body.copyFrom === null ? null : await loadBook(tx, s.owner, body.copyFrom);
+            if (body.copyFrom !== null && source === null) fail("NotFound");
+            return {
+              s,
+              action: "CreateDraft" as const,
+              transport: {
+                operationReference: body.operationReference,
+                priceBookReference: derivedReference(body.operationReference, "price-book"),
+                expectedAggregateVersion: 0,
+                stableCode: body.stableCode,
+                entries: (source?.entries ?? [])
+                  .filter(
+                    (e) =>
+                      e.scopeKind === "Brand" && e.channelCode === null && e.orderType === null,
+                  )
+                  .map((e) => entry(e.sellableReference, e.amount.amountMinor.toString())),
+              },
+            };
+          }
+          const book = await loadBook(tx, s.owner, body.priceBookReference);
+          if (book === null) return fail("NotFound");
+          if (book.aggregateVersion !== body.expectedAggregateVersion) fail("Conflict");
+          if (book.lifecycle !== "Draft") fail("Lifecycle");
+          const keep = book.entries.map((e) => ({
+            sellableReference: e.sellableReference,
+            scopeKind: e.scopeKind,
+            scopeReference: e.scopeReference,
+            channelCode: e.channelCode,
+            orderType: e.orderType,
+            amountMinor: e.amount.amountMinor.toString(),
+            effectivePeriod: e.effectivePeriod,
+            reasonCode: e.reasonCode,
+          }));
+          if (body.action === "SaveDraft") {
+            // Unchanged prices keep their entry; changed and new prices start now.
+            const entries = body.prices.map((price) => {
+              const existing = keep.find(
+                (e) =>
+                  e.sellableReference === price.sellableReference &&
+                  e.scopeKind === "Brand" &&
+                  e.channelCode === null &&
+                  e.orderType === null,
+              );
+              return existing !== undefined && existing.amountMinor === price.amountMinor
+                ? existing
+                : entry(price.sellableReference, price.amountMinor);
+            });
+            return {
+              s,
+              action: "ReplaceDraft" as const,
+              transport: {
+                operationReference: body.operationReference,
+                priceBookReference: book.priceBookReference,
+                expectedAggregateVersion: book.aggregateVersion,
+                stableCode: book.stableCode,
+                entries,
+              },
+            };
+          }
+          if (body.action === "Publish" && book.entries.length === 0) fail("NotCovered");
           return {
             s,
-            action: "ReplaceDraft" as const,
+            action: body.action === "Publish" ? ("Publish" as const) : ("Archive" as const),
             transport: {
               operationReference: body.operationReference,
               priceBookReference: book.priceBookReference,
               expectedAggregateVersion: book.aggregateVersion,
               stableCode: book.stableCode,
-              entries,
+              entries: keep,
             },
           };
-        }
-        if (body.action === "Publish" && book.entries.length === 0) fail("NotCovered");
-        return {
-          s,
-          action: body.action === "Publish" ? ("Publish" as const) : ("Archive" as const),
-          transport: {
-            operationReference: body.operationReference,
-            priceBookReference: book.priceBookReference,
-            expectedAggregateVersion: book.aggregateVersion,
-            stableCode: book.stableCode,
-            entries: keep,
-          },
-        };
-      }),
+        }),
+      ),
     );
     if ("replayed" in prepared && prepared.replayed !== undefined)
       return { status: "AlreadyApplied", priceBookReference: prepared.replayed };
@@ -603,29 +612,31 @@ export function createMerchantPrices(options: {
     if (body.action !== "AssignToStore") return fail("Invalid");
     // Assignment: the book must price everything the Store sells, then it replaces the current one.
     return retryTransactionConflict(() =>
-      options.persistence.transactions.run(async (tx) => {
-        const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
-        if (!s.permissions.mayApprove) fail("PermissionDenied");
-        const at = options.persistence.now();
-        const snapshot = await loadBook(tx, s.owner, body.priceBookReference);
-        if (snapshot === null) return fail("NotFound");
-        const missing = await uncovered(tx, s.owner, snapshot, at);
-        if (missing.length > 0) fail("NotCovered", missing);
-        try {
-          const result = await assignStorePriceBook(reads(tx), s.owner, {
-            operationReference: body.operationReference,
-            priceBookReference: body.priceBookReference,
-            actorReference: s.actor,
-            at,
-            auditReference: derivedReference(body.operationReference, "audit"),
-            assignmentReference: derivedReference(body.operationReference, "assignment"),
-          });
-          return { status: result.status, assignment: result.assignment };
-        } catch (error) {
-          if (error instanceof StorePriceBookError) return fail(assignmentErrors[error.code]);
-          throw error;
-        }
-      }),
+      options.persistence.transactions.run((tx) =>
+        withRememberedBrandAuthorization(tx, async () => {
+          const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+          if (!s.permissions.mayApprove) fail("PermissionDenied");
+          const at = options.persistence.now();
+          const snapshot = await loadBook(tx, s.owner, body.priceBookReference);
+          if (snapshot === null) return fail("NotFound");
+          const missing = await uncovered(tx, s.owner, snapshot, at);
+          if (missing.length > 0) fail("NotCovered", missing);
+          try {
+            const result = await assignStorePriceBook(reads(tx), s.owner, {
+              operationReference: body.operationReference,
+              priceBookReference: body.priceBookReference,
+              actorReference: s.actor,
+              at,
+              auditReference: derivedReference(body.operationReference, "audit"),
+              assignmentReference: derivedReference(body.operationReference, "assignment"),
+            });
+            return { status: result.status, assignment: result.assignment };
+          } catch (error) {
+            if (error instanceof StorePriceBookError) return fail(assignmentErrors[error.code]);
+            throw error;
+          }
+        }),
+      ),
     );
   };
   return { query, command };

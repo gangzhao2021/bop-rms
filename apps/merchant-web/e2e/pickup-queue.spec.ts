@@ -72,6 +72,8 @@ test("@production Pickup paging, current scope and permission recovery", async (
               orderedQuantity: 2,
               readyQuantity: 2,
               handedOverQuantity: query.includeCompleted ? 2 : 0,
+              name: "Latte",
+              options: [{ name: "Oat milk", quantity: 1 }],
             },
           ],
         })),
@@ -215,7 +217,7 @@ test("@production Pickup paging, current scope and permission recovery", async (
   await page.keyboard.press("Enter");
   const dialog = page.getByRole("dialog", { name: "Confirm pickup handoff" });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByText("Item 1: 2 to hand over")).toBeVisible();
+  await expect(dialog.getByText("Latte (Oat milk): 2 to hand over")).toBeVisible();
   await expectNoInternalText(page);
   const recipientType = dialog.getByLabel("Collected by");
   await expect(recipientType).toBeFocused();

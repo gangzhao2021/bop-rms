@@ -1,10 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
+  admissionStateForFailure,
   DiningAdmissionPanel,
   DiningAdmissionView,
   type DiningAdmissionUiState,
 } from "./DiningAdmissionPanel.js";
+import { DiningAdmissionJourneyError } from "./dining-admission-journey.js";
 describe("contextual Dining admission screen", () => {
   it("defaults to unavailable without runtime injection", () => {
     const html = renderToStaticMarkup(<DiningAdmissionPanel />);
@@ -33,6 +35,33 @@ describe("contextual Dining admission screen", () => {
     if (state === "Invalid") expect(html).toContain('aria-invalid="true"');
     if (state === "Joining") expect(html).toContain('aria-busy="true"');
     if (state === "Unknown") expect(html).toContain('role="alert"');
+  });
+  it.each([
+    ["CodeUsed", "This code was already used. Ask staff for a new one."],
+    ["CodeNotAccepted", "Check it and try again, or ask staff for a new one."],
+    ["TooManyAttempts", "Wait a few minutes before trying again, or ask staff for help."],
+  ] as const)("returns to code entry with plain guidance for refused %s", (state, text) => {
+    const html = renderToStaticMarkup(<DiningAdmissionView state={state} online />);
+    expect(html).toContain(text);
+    expect(html).toContain("<input");
+    expect(html).toContain('aria-invalid="true"');
+    expect(html).toContain('aria-describedby="dining-admission-help dining-admission-error"');
+    expect(html).toContain('role="alert"');
+    // A refusal is final: no recovery of the refused attempt is offered.
+    expect(html).not.toContain("Recover this attempt");
+    expect(html).not.toContain("couldn’t confirm");
+    expect(html).not.toMatch(/dining_join|customer\.dining|409|429/u);
+  });
+  it.each([
+    [new DiningAdmissionJourneyError("code-used"), "CodeUsed"],
+    [new DiningAdmissionJourneyError("code-not-accepted"), "CodeNotAccepted"],
+    [new DiningAdmissionJourneyError("too-many-attempts"), "TooManyAttempts"],
+    [new DiningAdmissionJourneyError("outcome-unknown"), "Unknown"],
+    [new DiningAdmissionJourneyError("request-invalid"), "Unknown"],
+    [new Error("code-used"), "Unknown"],
+    [{ code: "code-used" }, "Unknown"],
+  ] as const)("maps failure %# to %s", (error, state) => {
+    expect(admissionStateForFailure(error)).toBe(state);
   });
   it.each(["Ready", "Invalid", "Unknown"] as DiningAdmissionUiState[])(
     "disables %s action offline",

@@ -220,6 +220,24 @@ export function parseOrderingInstant(value: unknown): OrderingInstant {
   return value as OrderingInstant;
 }
 
+/**
+ * WP-2423: the application host and the database run on separate clocks. A Checkout authority is
+ * observed on the application clock and checked again inside the owning transaction on the
+ * database clock (`clock_timestamp()`); an ordering check between the two ("observed no later
+ * than now") allows this much skew in either direction. Expiry is never extended by it: a
+ * Session's deadlines are database facts compared with the database clock, and the in-transaction
+ * re-authorization is the authority, not the earlier observation.
+ */
+export const ORDERING_CLOCK_SKEW_ALLOWANCE_MS = 2000;
+
+/** `earlier` (one clock) is no later than `later` (the other clock), within the skew allowance. */
+export function orderingInstantNotAfterAcrossClocks(earlier: string, later: string): boolean {
+  return (
+    Date.parse(parseOrderingInstant(earlier)) <=
+    Date.parse(parseOrderingInstant(later)) + ORDERING_CLOCK_SKEW_ALLOWANCE_MS
+  );
+}
+
 export function parseOrderingHash(value: unknown): OrderingHash {
   if (typeof value !== "string" || !hashPattern.test(value)) return invalid();
   return value as OrderingHash;

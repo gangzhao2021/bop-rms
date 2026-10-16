@@ -9,6 +9,7 @@ import {
   createPostgresOrderBatchCheckoutExpiryStore,
   diningCheckoutPaymentWindowMinutes,
   loadDiningBatchPaymentWindowStart,
+  loadDiningRoundPaymentIdentity,
   parseOrderBatchCheckoutExpiry,
   parseOrderingReference,
   parseOrderingInstant,
@@ -35,6 +36,91 @@ export function createDiningBatchCancellationSource(options: {
     storeReference: parseOrderingReference(options.scope.storeReference),
   };
   return Object.freeze({
+    /**
+     * WP-2423 abandoned payment: the same evidence for a manager's cancellation of an unpaid round
+     * before its deadline. No expiry evidence exists yet: the round's submission, Dining commitment
+     * and payment operation come from Ordering's own records, under the payment operation fence.
+     * Null when the round is not a Dining-owned round of this Order.
+     */
+    async loadForStaff(
+      transaction: ConsumerTransaction,
+      identity: { orderReference: string; orderBatchReference: string },
+    ) {
+      try {
+        const at = parseOrderingInstant(options.now());
+        const allowed = async (tx: unknown) =>
+          tx === transaction && (await options.authorize(transaction, identity));
+        if (!(await allowed(transaction))) return unavailable();
+        const round = await loadDiningRoundPaymentIdentity(transaction, scope, identity);
+        if (round === null) return null;
+        await createPostgresPaymentOperationFence({
+          ...scope,
+          now: options.now,
+          authorize: async (tx, query) =>
+            query.orderReference === identity.orderReference &&
+            query.paymentOperationReference === round.paymentOperationReference &&
+            (await allowed(tx)),
+        }).acquire(transaction, {
+          orderReference: identity.orderReference,
+          paymentOperationReference: round.paymentOperationReference,
+        });
+        const clock = parseDiningCheckoutCommitment(
+          await createPostgresDiningCheckoutCommitmentStore(
+            { run: (work) => work(transaction) },
+            scope,
+            { now: options.now },
+          ).loadSubmission(round.submissionReference),
+        );
+        if (
+          String(clock.brandReference) !== scope.brandReference ||
+          String(clock.storeReference) !== scope.storeReference ||
+          String(clock.orderReference) !== identity.orderReference ||
+          String(clock.orderBatchReference) !== identity.orderBatchReference ||
+          String(clock.submissionReference) !== round.submissionReference ||
+          String(clock.paymentOperationReference) !== round.paymentOperationReference ||
+          String(clock.commitmentReference) !== round.commitmentReference
+        )
+          return unavailable();
+        const progress = await createDiningOrderDeliveryProgress({
+          ...scope,
+          diningScope: scope,
+          authorize: allowed,
+          authorizeKitchen: options.authorizeKitchen,
+          authorizeDining: options.authorizeDining,
+        }).load({
+          transaction,
+          ...scope,
+          orderReference: identity.orderReference,
+          diningSessionReference: clock.diningSessionReference,
+          guestSessionReference: clock.guestSessionReference,
+          observedAt: at,
+        });
+        if (
+          !progress ||
+          !progress.kitchenEvidenceComplete ||
+          progress.orderReference !== identity.orderReference ||
+          progress.brandReference !== scope.brandReference ||
+          progress.storeReference !== scope.storeReference ||
+          !progress.items.some(
+            (item) => item.orderBatchReference === identity.orderBatchReference,
+          ) ||
+          parseOrderingInstant(options.now()) < at ||
+          !(await allowed(transaction))
+        )
+          return unavailable();
+        return Object.freeze({
+          expiry: null,
+          round: Object.freeze({ ...identity, ...round }),
+          items: progress.items,
+          orderVersion: progress.orderVersion,
+          checkpoint: parseOrderingReference(progress.orderCheckpoint),
+          progress,
+          observedAt: at,
+        });
+      } catch {
+        return unavailable();
+      }
+    },
     async load(transaction: ConsumerTransaction, value: unknown) {
       try {
         const expiry = parseOrderBatchCheckoutExpiry(value),

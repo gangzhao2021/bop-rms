@@ -34,8 +34,12 @@ type Outcome =
   | {
       readonly kind: "Sent";
       readonly unknown: boolean;
-      /** Follows the refund after approval: sent to the Provider, then refunded. */
-      readonly progress: "Sending" | "Refunded" | "StillPending";
+      /**
+       * Follows the refund after approval (WP-2423 item 6): being sent, really sent and waiting
+       * for the card provider's answer, refunded; or, when following stops, still waiting for an
+       * answer (Sent) or still not sent (NotSent).
+       */
+      readonly progress: "Sending" | "Sent" | "Refunded" | "StillPending" | "NotSent";
     }
   /** WP-2423 item 4: approved; staff now refund it on the store's card machine and record it. */
   | { readonly kind: "OnMachine" }
@@ -98,6 +102,7 @@ function ApprovalCard({
     polling.current?.abort();
     const controller = new AbortController();
     polling.current = controller;
+    let sent = false;
     for (let attempt = 0; attempt < pollLimit; attempt++) {
       await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
       if (controller.signal.aborted) return;
@@ -112,12 +117,17 @@ function ApprovalCard({
           setOutcome({ kind: "Sent", unknown: false, progress: "Refunded" });
           return;
         }
+        // WP-2423 item 6: "Sent" only once the refund really went to the card provider.
+        if (progress === "Sending" && !sent) {
+          sent = true;
+          setOutcome({ kind: "Sent", unknown: false, progress: "Sent" });
+        }
       } catch {
         // Keep following; a read failure says nothing about the refund itself.
       }
     }
     if (!controller.signal.aborted)
-      setOutcome({ kind: "Sent", unknown: false, progress: "StillPending" });
+      setOutcome({ kind: "Sent", unknown: false, progress: sent ? "StillPending" : "NotSent" });
   };
   useEffect(() => () => pending.current?.abort(), []);
   useEffect(() => {
@@ -300,7 +310,13 @@ function ApprovalCard({
                 : outcome.kind === "Sent"
                   ? outcome.unknown
                     ? "Approved — sending result unknown"
-                    : "Approved — refund sent"
+                    : outcome.progress === "Refunded"
+                      ? "Refunded"
+                      : outcome.progress === "Sent" || outcome.progress === "StillPending"
+                        ? "Approved — sent, waiting for the card provider's answer"
+                        : outcome.progress === "NotSent"
+                          ? "Approved — not sent yet"
+                          : "Approved — sending to the card provider"
                   : entry.state === "Approved"
                     ? "Approved — sending not finished"
                     : "Waiting for approval"}
@@ -359,7 +375,7 @@ function ApprovalCard({
       {entry.canApprove &&
       !machineApproved &&
       outcome.kind !== "Declined" &&
-      !(outcome.kind === "Sent" && !outcome.unknown) ? (
+      !(outcome.kind === "Sent" && !outcome.unknown && outcome.progress !== "NotSent") ? (
         <div className="card-actions">
           <StepUpVerification
             purpose="RefundApproval"
@@ -462,9 +478,16 @@ function ApprovalCard({
               : outcome.progress === "Refunded"
                 ? "Refunded to the customer's original payment method."
                 : outcome.progress === "StillPending"
-                  ? "Approved. The payment provider has not confirmed the refund yet; its result is recorded automatically. Refresh to check again."
-                  : "Approved. Refund sent to the payment provider — result pending."}
+                  ? "Sent — the card provider has not answered yet. The amount stays set aside until it answers; open the payment to check its answer."
+                  : outcome.progress === "Sent"
+                    ? "Sent — waiting for the card provider's answer."
+                    : outcome.progress === "NotSent"
+                      ? "Approved, but the refund has not been sent yet. Retry sending: the same refund is reused and the customer is never refunded twice."
+                      : "Approved. Sending the refund to the card provider…"}
           </p>
+          {outcome.progress === "StillPending" ? (
+            <Link to={paymentPage}>Open the payment to check its answer</Link>
+          ) : null}
           <button type="button" onClick={onChanged}>
             Refresh list
           </button>

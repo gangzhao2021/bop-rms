@@ -11,6 +11,7 @@ import {
   type OptionPriceAuthoringState,
   type OptionPriceRuleSnapshot,
 } from "@rms/pricing";
+import { withRememberedBrandAuthorization } from "./merchant-brand-transaction-authorization.js";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import { localBoundary } from "./merchant-prices.js";
@@ -373,54 +374,59 @@ export function createMerchantOptionPrices(options: {
   const query = async (input: { sessionCookie: unknown; csrf: unknown }) => {
     const current = await session(input);
     return retryTransactionConflict(() =>
-      options.persistence.transactions.run(async (tx) => {
-        const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
-        const products = await productOptions(tx, s);
-        const { store, beforeCommit } = priceStore(
-          tx,
-          s,
-          derivedReference(s.actor, "read"),
-          "Read",
-        );
-        const rows = [];
-        try {
-          for (const product of products) {
-            const optionSets = [];
-            for (const set of product.optionSets) {
-              const optionRows = [];
-              for (const option of set.options) {
-                const states = await store.listForBinding({
-                  bindingReference: set.bindingReference,
-                  optionReference: option.optionReference,
-                });
-                const own = optionPriceRuleReference(set.bindingReference, option.optionReference);
-                optionRows.push({
-                  ...option,
-                  ...priceView(
-                    states.find((state) => state.ruleReference === own) ?? null,
-                    s.actor,
-                  ),
-                });
+      options.persistence.transactions.run((tx) =>
+        withRememberedBrandAuthorization(tx, async () => {
+          const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+          const products = await productOptions(tx, s);
+          const { store, beforeCommit } = priceStore(
+            tx,
+            s,
+            derivedReference(s.actor, "read"),
+            "Read",
+          );
+          const rows = [];
+          try {
+            for (const product of products) {
+              const optionSets = [];
+              for (const set of product.optionSets) {
+                const optionRows = [];
+                for (const option of set.options) {
+                  const states = await store.listForBinding({
+                    bindingReference: set.bindingReference,
+                    optionReference: option.optionReference,
+                  });
+                  const own = optionPriceRuleReference(
+                    set.bindingReference,
+                    option.optionReference,
+                  );
+                  optionRows.push({
+                    ...option,
+                    ...priceView(
+                      states.find((state) => state.ruleReference === own) ?? null,
+                      s.actor,
+                    ),
+                  });
+                }
+                optionSets.push({ ...set, options: optionRows });
               }
-              optionSets.push({ ...set, options: optionRows });
+              rows.push({ ...product, optionSets });
             }
-            rows.push({ ...product, optionSets });
+            await beforeCommit();
+          } catch (error) {
+            return mapError(error);
           }
-          await beforeCommit();
-        } catch (error) {
-          return mapError(error);
-        }
-        return {
-          screenId: "PRICE-OPTION-LIST" as const,
-          sourceAsOf: options.persistence.now(),
-          currency: {
-            code: options.currencyMetadata.currencyCode,
-            minorUnitExponent: options.currencyMetadata.minorUnitExponent,
-          },
-          permissions: { mayEdit: s.permissions.mayEdit, mayApprove: s.permissions.mayApprove },
-          products: rows,
-        };
-      }),
+          return {
+            screenId: "PRICE-OPTION-LIST" as const,
+            sourceAsOf: options.persistence.now(),
+            currency: {
+              code: options.currencyMetadata.currencyCode,
+              minorUnitExponent: options.currencyMetadata.minorUnitExponent,
+            },
+            permissions: { mayEdit: s.permissions.mayEdit, mayApprove: s.permissions.mayApprove },
+            products: rows,
+          };
+        }),
+      ),
     );
   };
 
@@ -428,97 +434,104 @@ export function createMerchantOptionPrices(options: {
     const body = parseOptionPriceCommandBody(input.body);
     const current = await session(input);
     return retryTransactionConflict(() =>
-      options.persistence.transactions.run(async (tx) => {
-        const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
-        if (body.action === "SetPrices" ? !s.permissions.mayEdit : !s.permissions.mayApprove)
-          fail("PermissionDenied");
-        const products = await productOptions(tx, s);
-        const { store, beforeCommit } = priceStore(tx, s, body.operationReference, "Write");
-        const results: { ruleReference: string; aggregateVersion: number; status: string }[] = [];
-        try {
-          if (body.action === "SetPrices") {
-            const at = options.persistence.now();
-            for (const price of body.prices) {
-              const offered = products.some((product) =>
-                product.optionSets.some(
-                  (set) =>
-                    set.bindingReference === price.bindingReference &&
-                    set.options.some((option) => option.optionReference === price.optionReference),
-                ),
-              );
-              if (!offered) fail("NotFound");
-              const rule = optionPriceRuleReference(price.bindingReference, price.optionReference);
-              const state =
-                (
-                  await store.listForBinding({
-                    bindingReference: price.bindingReference,
-                    optionReference: price.optionReference,
-                  })
-                ).find((item) => item.ruleReference === rule) ?? null;
-              const view = priceView(state, s.actor);
-              // Already this price (published with nothing pending, or pending): nothing to do.
-              // A retried request lands here too once its first attempt committed.
-              if ((view.pending?.priceMinor ?? view.priceMinor) === price.amountMinor) continue;
-              // The command is built only from what the merchant saw, so a retry is identical and
-              // the writer replays it; a change by someone else meanwhile is a version conflict.
-              const result = await store.execute({
-                action: price.replacesPending ? "ReplaceDraft" : "CreateDraft",
-                operationReference: derivedReference(
-                  body.operationReference,
-                  "price:" + price.bindingReference + ":" + price.optionReference,
-                ),
-                ruleReference: rule,
-                expectedAggregateVersion: price.expectedAggregateVersion,
-                bindingReference: price.replacesPending ? null : price.bindingReference,
-                optionReference: price.replacesPending ? null : price.optionReference,
-                content: {
-                  skuReference: null,
-                  scopeKind: "Brand",
-                  scopeReference: null,
-                  channelCode: null,
-                  orderType: null,
-                  unitAmountMinor: price.amountMinor,
-                  includedQuantity: 0,
-                  effectivePeriod: {
-                    timeZone: s.timeZone,
-                    effectiveFrom: localBoundary(at, s.timeZone),
-                    effectiveUntil: null,
+      options.persistence.transactions.run((tx) =>
+        withRememberedBrandAuthorization(tx, async () => {
+          const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+          if (body.action === "SetPrices" ? !s.permissions.mayEdit : !s.permissions.mayApprove)
+            fail("PermissionDenied");
+          const products = await productOptions(tx, s);
+          const { store, beforeCommit } = priceStore(tx, s, body.operationReference, "Write");
+          const results: { ruleReference: string; aggregateVersion: number; status: string }[] = [];
+          try {
+            if (body.action === "SetPrices") {
+              const at = options.persistence.now();
+              for (const price of body.prices) {
+                const offered = products.some((product) =>
+                  product.optionSets.some(
+                    (set) =>
+                      set.bindingReference === price.bindingReference &&
+                      set.options.some(
+                        (option) => option.optionReference === price.optionReference,
+                      ),
+                  ),
+                );
+                if (!offered) fail("NotFound");
+                const rule = optionPriceRuleReference(
+                  price.bindingReference,
+                  price.optionReference,
+                );
+                const state =
+                  (
+                    await store.listForBinding({
+                      bindingReference: price.bindingReference,
+                      optionReference: price.optionReference,
+                    })
+                  ).find((item) => item.ruleReference === rule) ?? null;
+                const view = priceView(state, s.actor);
+                // Already this price (published with nothing pending, or pending): nothing to do.
+                // A retried request lands here too once its first attempt committed.
+                if ((view.pending?.priceMinor ?? view.priceMinor) === price.amountMinor) continue;
+                // The command is built only from what the merchant saw, so a retry is identical and
+                // the writer replays it; a change by someone else meanwhile is a version conflict.
+                const result = await store.execute({
+                  action: price.replacesPending ? "ReplaceDraft" : "CreateDraft",
+                  operationReference: derivedReference(
+                    body.operationReference,
+                    "price:" + price.bindingReference + ":" + price.optionReference,
+                  ),
+                  ruleReference: rule,
+                  expectedAggregateVersion: price.expectedAggregateVersion,
+                  bindingReference: price.replacesPending ? null : price.bindingReference,
+                  optionReference: price.replacesPending ? null : price.optionReference,
+                  content: {
+                    skuReference: null,
+                    scopeKind: "Brand",
+                    scopeReference: null,
+                    channelCode: null,
+                    orderType: null,
+                    unitAmountMinor: price.amountMinor,
+                    includedQuantity: 0,
+                    effectivePeriod: {
+                      timeZone: s.timeZone,
+                      effectiveFrom: localBoundary(at, s.timeZone),
+                      effectiveUntil: null,
+                    },
                   },
-                },
-              });
-              results.push({
-                ruleReference: rule,
-                aggregateVersion: result.state?.aggregateVersion ?? 0,
-                status: result.outcome,
-              });
+                });
+                results.push({
+                  ruleReference: rule,
+                  aggregateVersion: result.state?.aggregateVersion ?? 0,
+                  status: result.outcome,
+                });
+              }
+            } else {
+              for (const rule of body.rules) {
+                const result = await store.execute({
+                  action: "Publish",
+                  operationReference: derivedReference(
+                    body.operationReference,
+                    "publish:" + rule.ruleReference,
+                  ),
+                  ruleReference: rule.ruleReference,
+                  expectedAggregateVersion: rule.expectedAggregateVersion,
+                  bindingReference: null,
+                  optionReference: null,
+                  content: null,
+                });
+                results.push({
+                  ruleReference: rule.ruleReference,
+                  aggregateVersion: result.state?.aggregateVersion ?? 0,
+                  status: result.outcome,
+                });
+              }
             }
-          } else {
-            for (const rule of body.rules) {
-              const result = await store.execute({
-                action: "Publish",
-                operationReference: derivedReference(
-                  body.operationReference,
-                  "publish:" + rule.ruleReference,
-                ),
-                ruleReference: rule.ruleReference,
-                expectedAggregateVersion: rule.expectedAggregateVersion,
-                bindingReference: null,
-                optionReference: null,
-                content: null,
-              });
-              results.push({
-                ruleReference: rule.ruleReference,
-                aggregateVersion: result.state?.aggregateVersion ?? 0,
-                status: result.outcome,
-              });
-            }
+            await beforeCommit();
+          } catch (error) {
+            return mapError(error);
           }
-          await beforeCommit();
-        } catch (error) {
-          return mapError(error);
-        }
-        return { status: "Applied" as const, results };
-      }),
+          return { status: "Applied" as const, results };
+        }),
+      ),
     );
   };
   return { query, command };

@@ -11,6 +11,10 @@ export interface SessionPaymentResult {
   readonly orderReference: string | null;
   readonly status: "Pending" | "Unknown" | "Succeeded" | "Failed";
   readonly total: Readonly<{ amountMinor: string; currency: "CAD" }> | null;
+  /** WP-2423 abandoned payment: until when this payment can still be finished. */
+  readonly payBy: string | null;
+  /** Failed only: declined, or never finished and cancelled when its time ran out. */
+  readonly failure: "Declined" | "NotCompleted" | null;
 }
 function exact(value: unknown, fields: readonly string[]) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error();
@@ -55,15 +59,26 @@ export function createSessionPaymentResultClient() {
         "orderReference",
         "status",
         "total",
+        "payBy",
+        "failure",
       ]);
+      const failure =
+        raw.failure === "Declined" || raw.failure === "NotCompleted" ? raw.failure : null;
       if (
+        (raw.failure !== null && failure === null) ||
+        (raw.status === "Failed") !== (failure !== null) ||
         root.schemaVersion !== 1 ||
         raw.checkoutSessionReference !== session ||
         !["Pending", "Unknown", "Succeeded", "Failed"].includes(String(raw.status))
       )
         throw new Error();
       if (raw.paymentIntentReference === null) {
-        if (raw.orderReference !== null || raw.total !== null || raw.status !== "Pending")
+        if (
+          raw.orderReference !== null ||
+          raw.total !== null ||
+          raw.status !== "Pending" ||
+          raw.payBy !== null
+        )
           throw new Error();
         return Object.freeze({
           checkoutSessionReference: session,
@@ -71,13 +86,17 @@ export function createSessionPaymentResultClient() {
           orderReference: null,
           status: "Pending",
           total: null,
+          payBy: null,
+          failure: null,
         });
       }
       if (
         typeof raw.paymentIntentReference !== "string" ||
         !uuid.test(raw.paymentIntentReference) ||
         typeof raw.orderReference !== "string" ||
-        !uuid.test(raw.orderReference)
+        !uuid.test(raw.orderReference) ||
+        typeof raw.payBy !== "string" ||
+        !Number.isFinite(Date.parse(raw.payBy))
       )
         throw new Error();
       const total = exact(raw.total, ["amountMinor", "currency"]);
@@ -94,6 +113,8 @@ export function createSessionPaymentResultClient() {
         orderReference: raw.orderReference,
         status: raw.status as SessionPaymentResult["status"],
         total: Object.freeze({ amountMinor: total.amountMinor, currency: "CAD" as const }),
+        payBy: raw.payBy,
+        failure,
       });
     } catch (error) {
       if (error instanceof SessionPaymentClientError) throw error;

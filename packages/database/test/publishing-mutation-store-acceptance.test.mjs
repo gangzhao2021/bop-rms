@@ -2694,7 +2694,11 @@ it("persists typed Option policy content and resolves actual current governance 
       await client.query("BEGIN");
       try {
         await client.query("SET LOCAL ROLE " + role);
-        const result = await work(client);
+        // The owning Catalog writers hold their transaction's own `query` port (as the
+        // application runner provides it), not a driver client's inherited method.
+        const result = await work({
+          query: (sql, values) => client.query(sql, values === undefined ? [] : [...values]),
+        });
         await client.query("COMMIT");
         return result;
       } catch (e) {
@@ -3324,6 +3328,15 @@ it("persists typed Option policy content and resolves actual current governance 
       );
       await admin.query(
         "GRANT SELECT,INSERT ON rms_catalog.option_set_operation_record,rms_catalog.option_set_draft_content_snapshot,platform_eventing.outbox_event TO " +
+          role,
+      );
+      // The Option authoring fence (1102_007): operation identities and abandonment fences.
+      await admin.query(
+        "GRANT SELECT,INSERT ON rms_catalog.option_set_authoring_identity TO " + role,
+      );
+      await admin.query("GRANT SELECT ON rms_catalog.option_set_authoring_abandonment TO " + role);
+      await admin.query(
+        "GRANT EXECUTE ON FUNCTION rms_catalog.option_set_authoring_operation_available(uuid) TO " +
           role,
       );
       clock = "2026-09-11T10:00:10.000Z";

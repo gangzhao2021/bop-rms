@@ -29,6 +29,9 @@ for (const status of ["Failed", "Succeeded", "Pending", "Unknown", "Unprepared"]
                 status === "Unprepared" ? null : "0190fa21-0000-7000-8000-000000000003",
               status: status === "Unprepared" ? "Pending" : status,
               total: status === "Unprepared" ? null : { amountMinor: "1130", currency: "CAD" },
+              // WP-2423 abandoned payment: this payment's time has ended (nothing to resume).
+              payBy: status === "Unprepared" ? null : "2026-01-01T12:30:00.000Z",
+              failure: status === "Failed" ? "Declined" : null,
             },
           },
           headers: { "cache-control": "no-store" },
@@ -40,7 +43,7 @@ for (const status of ["Failed", "Succeeded", "Pending", "Unknown", "Unprepared"]
       const message = {
         Failed: "Payment declined",
         Succeeded: "Payment confirmed",
-        Pending: "Payment confirmation is pending. Do not submit another payment.",
+        Pending: "Your payment is still being confirmed. Don’t start another payment.",
         Unknown: "Neither success nor failure is confirmed.",
         Unprepared: "Payment has not been prepared for this checkout.",
       }[status];
@@ -102,9 +105,8 @@ for (const status of ["Failed", "Succeeded", "Pending", "Unknown", "Unprepared"]
       await expect(
         page.getByRole("button", { name: "Check payment status", exact: true }),
       ).toBeVisible();
-      await expect(
-        page.getByText("Do not submit another payment.", { exact: false }),
-      ).toBeVisible();
+      await expect(page.getByText("Don’t start another payment.", { exact: false })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Finish paying" })).toHaveCount(0);
     } else if (status === "Failed" || status === "Succeeded") {
       await expect(
         page.getByRole("button", { name: "Check payment status", exact: true }),
@@ -210,6 +212,8 @@ test("@production explicit recovery never repeats payment creation", async ({ pa
           orderReference: "0190fa21-0000-7000-8000-000000000003",
           status: recover ? "Succeeded" : "Unknown",
           total: { amountMinor: "1130", currency: "CAD" },
+          payBy: "2026-01-01T12:30:00.000Z",
+          failure: null,
         },
       },
       headers: { "cache-control": "no-store" },

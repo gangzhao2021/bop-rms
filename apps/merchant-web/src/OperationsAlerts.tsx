@@ -129,6 +129,7 @@ export function createOperationsAlertsClient(fetcher: typeof fetch = fetch) {
           signal: controller.signal,
           headers: { Accept: "application/json" },
         });
+        // An older server refuses such a role with 403 instead.
         if (response.status === 403) return notPermitted();
         if (
           !response.ok ||
@@ -138,7 +139,16 @@ export function createOperationsAlertsClient(fetcher: typeof fetch = fetch) {
           return invalid();
         const body = await response.text();
         if (controller.signal.aborted || body.length > 262144) return invalid();
-        return parseOperationsAlertView(JSON.parse(body));
+        const parsed: unknown = JSON.parse(body);
+        // WP-2423: the server's ordinary answer for a role that does not handle these alerts.
+        if (
+          parsed !== null &&
+          typeof parsed === "object" &&
+          Object.keys(parsed).length === 1 &&
+          (parsed as { permitted?: unknown }).permitted === false
+        )
+          return notPermitted();
+        return parseOperationsAlertView(parsed);
       } catch (error) {
         if (error instanceof Error && error.message === OPERATIONS_ALERTS_NOT_PERMITTED)
           throw error;
@@ -278,8 +288,9 @@ export function OperationsAlertsCard({
 
 /**
  * Reads the alert board while the Home is open and visible. The server decides who sees it
- * (operations.order-exception.manage): a 403 hides the card and stops reading, so front-of-house
- * staff never poll a route they cannot use.
+ * (operations.order-exception.manage): its "not permitted" answer (WP-2423; a 403 from an older
+ * server) hides the card and stops reading, so front-of-house staff never poll it again and no
+ * refusal shows in their browser.
  */
 export function OperationsAlerts({
   timeZone,

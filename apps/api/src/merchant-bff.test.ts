@@ -6992,6 +6992,13 @@ describe("WP-2423 Q13 operations alerts read route", () => {
     const absent = await serve();
     expect((await request(absent, "/merchant/operations-alerts", { headers })).status).toBe(503);
   });
+  it("WP-2423: tells a role without store system alerts so in an ordinary answer", async () => {
+    const root = await serve(async () => ({ permitted: false as const }));
+    const result = await request(root, "/merchant/operations-alerts", { headers });
+    expect(result.status).toBe(200);
+    expect(result.headers.get("cache-control")).toBe("no-store");
+    expect(await result.json()).toEqual({ permitted: false });
+  });
   it("answers a refusal or unreadable board as denied without the reason", async () => {
     const root = await serve(async () => {
       throw new Error("MERCHANT_OPERATIONS_ALERTS_UNAVAILABLE");

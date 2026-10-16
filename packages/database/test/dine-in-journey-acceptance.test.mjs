@@ -40,6 +40,7 @@ import { createCustomerDiningSessionRead } from "../../../apps/api/src/customer-
 import { CustomerDiningSessionHandler } from "../../../apps/api/src/customer-dining-session.ts";
 import { parseDiningSessionView } from "../../../apps/customer-pwa/src/dining/dining-session-client.ts";
 import { createPostgresKitchenReworkStore } from "../../rms/kitchen/src/index.ts";
+import { createPaymentProviderSnapshot } from "../../rms/payment/src/index.ts";
 import { createInternalBatchCancellationDispatcher } from "../../../tooling/environment/pilot-batch-cancellation-dispatcher.mjs";
 import { applyWorkflowRelease } from "../../../tooling/environment/workflow-release-install.mjs";
 import { createPersistentMerchantOrderQueue } from "../../../apps/api/src/persistent-merchant-order-queue.ts";
@@ -581,15 +582,16 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         }).loadSubmission(submission);
       const sealed2 = await commitment(R2.batch.submissionReference);
       assert.equal(sealed2.state, "PaymentPending");
-      // Payment requested at the seal; the customer's card is declined two minutes later.
+      // WP-2423 abandoned payment (v15 DEMO-02 round 1): payment requested at the seal; the guest
+      // opened the card payment (the Provider intent exists) and left without confirming it.
       await seedJourneyPayment(admin, {
         scope,
         providerAccountReference: provider,
         round: R2,
         refs: { ...pay2, commitment: sealed2.commitmentReference },
-        outcome: "Failed",
+        outcome: "Open",
         requestedAt: sealed2.paymentRequestedAt,
-        occurredAt: new Date(Date.parse(sealed2.paymentRequestedAt) + minutes(2)).toISOString(),
+        occurredAt: sealed2.paymentRequestedAt,
         totalMinor: roundTotal,
       });
 
@@ -644,7 +646,8 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       const event2 = submittedEvents.get(R2.batch.orderBatchReference);
       assert.deepEqual(await consume(event2), { status: "processed" });
 
-      // ── 2b. After the payment window the System records the failed payment and cancels round 2
+      // ── 2b. After the payment window the System asks the Provider about the open payment, cancels
+      // the attempt the guest never confirmed, records it as not completed and cancels round 2
       // (pilot worker compositions), returning its stock in the same transaction.
       // The worker runs one minute after the window ends (journey clock: round 2 was ordered 80
       // minutes ago).
@@ -661,13 +664,56 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         pageSize: 10,
       });
       assert.equal(await expiry.runOnce(), 1);
-      const expiries = await one(
-        "SELECT order_batch_id::text AS batch,status FROM rms_ordering.order_batch_checkout_expiry WHERE order_id=$1",
-        [orderReference],
-      );
-      assert.deepEqual(expiries, [
-        { batch: R2.batch.orderBatchReference, status: "PaymentFailed" },
+      const expiries = () =>
+        one(
+          "SELECT order_batch_id::text AS batch,status FROM rms_ordering.order_batch_checkout_expiry WHERE order_id=$1 ORDER BY evidence_version",
+          [orderReference],
+        );
+      assert.deepEqual(await expiries(), [
+        { batch: R2.batch.orderBatchReference, status: "AwaitingPaymentResolution" },
       ]);
+      // Test-only Provider stand-in with the simulator's semantics: the intent the guest never
+      // confirmed answers RequiresCustomerAction until it is cancelled (idempotently).
+      const providerCalls = [];
+      let providerCancelledAt = null;
+      const providerSnapshot = (request) =>
+        createPaymentProviderSnapshot({
+          kind: "Snapshot",
+          context: request.context,
+          providerIntentReference: pay2.providerIntent,
+          providerTransactionReference: null,
+          paymentMethod: "OnlineCard",
+          captureMode: "Automatic",
+          status: providerCancelledAt === null ? "RequiresCustomerAction" : "Cancelled",
+          requestedAmount: { amountMinor: roundTotal, currencyCode: "CAD" },
+          authorizedAmount: { amountMinor: 0n, currencyCode: "CAD" },
+          capturedAmount: { amountMinor: 0n, currencyCode: "CAD" },
+          refundedAmount: { amountMinor: 0n, currencyCode: "CAD" },
+          observedAt: providerCancelledAt ?? windowClock(),
+          evidenceDigest:
+            "sha256:" +
+            createHash("sha256")
+              .update(pay2.providerIntent + ":" + String(providerCancelledAt))
+              .digest("hex"),
+        });
+      const simulatedProvider = async () => ({
+        adapter: {
+          retrieveIntent: async (request) => {
+            providerCalls.push(["retrieve", request.providerIntentReference]);
+            return providerSnapshot(request);
+          },
+          cancelIntent: async (request) => {
+            providerCalls.push(["cancel", request.idempotencyKey]);
+            providerCancelledAt ??= windowClock();
+            return providerSnapshot(request);
+          },
+        },
+        readTerminalOccurrence: async () => ({
+          status: "Cancelled",
+          occurredAt: providerCancelledAt,
+        }),
+        close: () => undefined,
+      });
       const cancellation = await createInternalBatchCancellationDispatcher(
         {
           scope,
@@ -685,8 +731,31 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
           }),
           expectedDatabaseName: context.clientConfig.database,
           systemActorReference: systemActor,
+          providerAccountReference: provider,
+          createSimulatedProvider: simulatedProvider,
         },
       );
+      // At the deadline the round has a started payment and no outcome: nothing is cancelled yet;
+      // Payment cancels the never-confirmed attempt with the Provider and records it as failed.
+      assert.equal(await cancellation.runOnce(), 0);
+      assert.deepEqual(providerCalls, [
+        ["retrieve", pay2.providerIntent],
+        ["cancel", "cancel-abandoned:" + pay2.attempt],
+      ]);
+      assert.deepEqual(
+        await one(
+          "SELECT terminal_outcome AS outcome,failure_reason AS reason,authoritative_source AS source FROM rms_payment.payment_terminal_fact WHERE payment_intent_id=$1",
+          [pay2.paymentIntent],
+        ),
+        [{ outcome: "Failed", reason: "Cancelled", source: "ProviderRetrieval" }],
+      );
+      // The next sweep records the failed payment as the round's latest expiry evidence; then the
+      // round is cancelled as "payment not completed".
+      assert.equal(await expiry.runOnce(), 1);
+      assert.deepEqual(await expiries(), [
+        { batch: R2.batch.orderBatchReference, status: "AwaitingPaymentResolution" },
+        { batch: R2.batch.orderBatchReference, status: "PaymentFailed" },
+      ]);
       assert.equal(await cancellation.runOnce(), 1);
       const cancelled = await one(
         "SELECT order_batch_id::text AS batch,cancelled_order_version AS version FROM rms_ordering.order_batch_checkout_cancellation WHERE order_id=$1",
@@ -706,7 +775,7 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       assert.equal(cancelledEvents[0].version, 4);
       assert.equal(cancelledEvents[0].actor_type, "System");
       assert.equal(cancelledEvents[0].payload.orderBatchReference, R2.batch.orderBatchReference);
-      assert.equal(cancelledEvents[0].payload.reasonCode, "CHECKOUT_DEADLINE_REACHED");
+      assert.equal(cancelledEvents[0].payload.reasonCode, "PAYMENT_NOT_COMPLETED");
       assert.equal(
         await transactions(api).run((tx) =>
           orderCancelledEventMatchesRecord(tx, ownerScope, {
@@ -802,8 +871,11 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       );
       // Round 2 is not charged and never reaches the kitchen; the customer screen's total (the PWA
       // parser and its unpaid-round rule) counts round 1 only.
+      // WP-2423 abandoned payment: the not-completed attempt's PaymentFailed event reaches the
+      // payment status projection through the worker's consumer (not run here); the round already
+      // reads as cancelled and has no cancellation time left.
       assert.deepEqual(status.sources.batchPayments, [
-        { orderBatchReference: R2.batch.orderBatchReference, status: "Failed", cancelsAt: null },
+        { orderBatchReference: R2.batch.orderBatchReference, status: "Awaiting", cancelsAt: null },
       ]);
       assert.deepEqual(
         status.sources.kitchen.batches.map((b) => b.orderBatchReference),

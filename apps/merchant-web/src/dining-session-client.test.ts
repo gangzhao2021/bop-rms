@@ -13,6 +13,7 @@ const table: StaffDiningTable = {
   elapsedMinutes: null,
   qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
   staffRoundsAwaitingPayment: [],
+  guestRoundsAwaitingPayment: [],
 };
 const response = (r: unknown) =>
   new Response(JSON.stringify(r), {
@@ -189,4 +190,22 @@ it("WP-2423 D4: reads each open session's closing facts and whether this staff m
     await expect(
       read({ canOperateTables: true, items: [item], nextAfterTableReference: null }),
     ).rejects.toThrow();
+});
+it("WP-2423: offers the Order host section only when the server says this staff member may transfer it", async () => {
+  const read = (extra: Record<string, unknown>) =>
+    createDiningSessionClient(
+      vi.fn(async () =>
+        response({
+          canOperateTables: true,
+          items: [table],
+          nextAfterTableReference: null,
+          ...extra,
+        }),
+      ),
+    ).tables("A".repeat(43));
+  expect((await read({ canTransferHost: true })).canTransferHost).toBe(true);
+  // Front of House: hidden, so "Refresh participants" never asks for a read it is refused.
+  expect((await read({ canTransferHost: false })).canTransferHost).toBe(false);
+  // An older server sends nothing: offered as before; the server decides.
+  expect((await read({})).canTransferHost).toBe(true);
 });

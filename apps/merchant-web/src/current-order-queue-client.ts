@@ -328,7 +328,10 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
     // WP-2423 (2026-10-16): stock still set aside for an earlier-day Order (absent from an older server).
     const withHeldStock =
       value !== null && typeof value === "object" && Object.hasOwn(value, "heldStock");
+    const withReady =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "readyToServeItemCount");
     const item = exact(value, [
+      ...(withReady ? ["readyToServeItemCount"] : []),
       ...(withHeldStock ? ["heldStock"] : []),
       ...(withCounter ? ["counter"] : []),
       ...(withPaidOnline ? ["paidOnline"] : []),
@@ -400,6 +403,15 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
           item.currentVersion > 2147483647))
     )
       return fail();
+    // WP-2423: dine-in items ready at the pass and not yet served (null from an older server).
+    if (
+      withReady &&
+      (!Number.isSafeInteger(item.readyToServeItemCount) ||
+        Number(item.readyToServeItemCount) < 0 ||
+        (item.orderType !== "DineIn" && item.readyToServeItemCount !== 0))
+    )
+      return fail();
+    const readyToServeItemCount = withReady ? Number(item.readyToServeItemCount) : null;
     const submittedAt = instant(item.submittedAt),
       observedAt = instant(item.observedAt);
     const heldStock = withHeldStock ? parseHeldStock(item.heldStock) : null;
@@ -436,6 +448,9 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         value !== null && typeof value === "object" && Object.hasOwn(value, "paymentDue");
       const withStaffRound =
         value !== null && typeof value === "object" && Object.hasOwn(value, "staffRound");
+      // WP-2423 abandoned payment: absent from an older server (no cancel action then).
+      const withCancelUnpaid =
+        value !== null && typeof value === "object" && Object.hasOwn(value, "canCancelUnpaid");
       const batch = exact(value, [
         "orderBatchReference",
         "sequence",
@@ -446,7 +461,9 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         "canCancelItems",
         ...(withPaymentDue ? ["paymentDue"] : []),
         ...(withStaffRound ? ["staffRound"] : []),
+        ...(withCancelUnpaid ? ["canCancelUnpaid"] : []),
       ]);
+      const canCancelUnpaid = withCancelUnpaid ? batch.canCancelUnpaid : false;
       const staffRound = parseStaffRound(batch.staffRound ?? null, item.orderType);
       const orderBatchReference = reference(batch.orderBatchReference);
       const staffCancellation = parseStaffCancellation(batch.staffCancellation, submittedAt);
@@ -462,6 +479,8 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
             batch.canCancel !== false ||
             batch.canCancelItems !== false)) ||
         (item.awaitingPayment === true && batch.canRequestAcceptance !== false) ||
+        typeof canCancelUnpaid !== "boolean" ||
+        (canCancelUnpaid && paymentDue === null) ||
         typeof batch.sequence !== "number" ||
         !Number.isSafeInteger(batch.sequence) ||
         batch.sequence <= previousSequence ||
@@ -522,6 +541,8 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         canCancelItems: batch.canCancelItems,
         /** WP-2423: this dine-in round is unpaid; when its payment failed, when it is cancelled. */
         paymentDue,
+        /** WP-2423 abandoned payment: the caller may cancel this unpaid round now. */
+        canCancelUnpaid: canCancelUnpaid as boolean,
         /** WP-2423 Q7 slice 2: staff entered this round for the table; its card-machine payment. */
         staffRound,
       });
@@ -587,6 +608,11 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       awaitingPayment: item.awaitingPayment as boolean,
       currentPhase: item.currentPhase as string | null,
       currentVersion: item.currentVersion as number | null,
+      /**
+       * WP-2423: dine-in items the kitchen marked ready that nobody served yet, in any round (the
+       * Tables close dialog's rule); null from an older server.
+       */
+      readyToServeItemCount,
     });
   };
   const earlier = withEarlier

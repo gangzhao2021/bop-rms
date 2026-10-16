@@ -6,9 +6,11 @@ const mocks = vi.hoisted(() => ({
   list: vi.fn(),
   carried: vi.fn(),
   holding: vi.fn(),
+  state: vi.fn(),
 }));
 const id = (n: number) => `0190ee39-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
-vi.mock("./dining-order-delivery-progress.js", () => ({
+vi.mock("./dining-order-delivery-progress.js", async (original) => ({
+  ...(await original<typeof import("./dining-order-delivery-progress.js")>()),
   createDiningOrderDeliveryProgress: () => ({ load: mocks.progress }),
 }));
 vi.mock("./merchant-stock-holding-orders.js", () => ({
@@ -21,7 +23,7 @@ vi.mock("@rms/ordering", () => ({
   readOrderCreationQuoteVersion: async () => 2,
   createPostgresOrderAcceptanceReader: () => ({ loadByBatch: async () => null }),
   createPostgresOrderExecutionReader: vi.fn(),
-  createPostgresDiningOrderItemStateReader: () => ({ load: async () => null }),
+  createPostgresDiningOrderItemStateReader: () => ({ load: mocks.state }),
   createPostgresDiningOrderPreparationSource: () => ({ resolveCancelled: mocks.cancelled }),
   createPostgresOrderCreationQueryStore: () => ({
     withCurrentSubmission: async (ref: string, work: (...args: unknown[]) => unknown) =>
@@ -53,6 +55,8 @@ beforeEach(() => {
   mocks.carried.mockReset();
   mocks.holding.mockReset();
   mocks.holding.mockResolvedValue([]);
+  mocks.state.mockReset();
+  mocks.state.mockResolvedValue(null);
   mocks.list.mockReset();
   mocks.list.mockResolvedValue({ items: [indexItem(4)], nextAfterOrderReference: null });
 });
@@ -260,4 +264,26 @@ it("WP-2423 (2026-10-16 v15): a full page with earlier-day Orders holding stock 
   expect(new Set([...first.items, ...second.items].map((item) => item.orderReference)).size).toBe(
     80,
   );
+});
+
+it("WP-2423: counts a table's items ready to serve in any round, as the Tables close dialog does", async () => {
+  mocks.state.mockResolvedValue({
+    orderVersion: 3,
+    batches: [
+      { orderBatchReference: id(5), sequence: 1, acceptance: null, cancellation: null },
+      { orderBatchReference: id(11), sequence: 2, acceptance: {}, cancellation: null },
+    ],
+  });
+  // Round 1 still waits for its online payment, so the Order is not "Ready" as a whole.
+  mocks.progress.mockResolvedValue({
+    orderVersion: 3,
+    phase: "Submitted",
+    items: [
+      { phase: "Submitted", remainingQuantity: 2 },
+      { phase: "Ready", remainingQuantity: 1 },
+      { phase: "Ready", remainingQuantity: 0 },
+    ],
+  });
+  const result = await read();
+  expect(result.items[0]).toMatchObject({ currentPhase: "Submitted", readyToServeItemCount: 1 });
 });

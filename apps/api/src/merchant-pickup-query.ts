@@ -10,6 +10,7 @@ import {
   listStoreCounterOrders,
   listStoreOrderBusinessDates,
   listStoreOrderNumbers,
+  loadMerchantOrderLines,
 } from "@rms/ordering";
 import { listOpenKitchenReworkItems } from "@rms/kitchen";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
@@ -27,6 +28,8 @@ export function createMerchantPickupQuery(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
   store: Pick<StoreOptions, "sha256" | "validateCurrentSource">;
+  /** The language item names are shown in (the Orders page's default when not configured). */
+  locale?: string;
   /** Configured workstation for this authenticated session; not completion authority. */
   resolveWorkstation?(
     transaction: ConsumerTransaction,
@@ -198,6 +201,41 @@ export function createMerchantPickupQuery(options: {
           )
           .reduce((sum, remake) => sum + remake.openQuantity, 0);
       };
+      // WP-2423: what staff hand over, by name: Ordering's own read of each order's immutable item
+      // snapshots (the Orders page's order detail), only for pickups still to be handed over.
+      const lineLabels = new Map<
+        string,
+        { readonly name: string; readonly options: readonly { name: string; quantity: number }[] }
+      >();
+      for (const order of new Set(
+        result.items
+          .filter(
+            (item) => item.phase !== "Completed" && !cancelled.has(String(item.orderReference)),
+          )
+          .map((item) => String(item.orderReference)),
+      )) {
+        // A snapshot that can't be read leaves that order's items unnamed ("Item 1"), never the
+        // whole queue unavailable: staff can still match the order ticket.
+        const lines = await loadMerchantOrderLines(
+          tx,
+          selected,
+          order,
+          options.locale ?? "en-CA",
+        ).catch(() => null);
+        for (const line of lines?.items ?? [])
+          if (line.name.length > 0)
+            lineLabels.set(
+              line.orderItemReference,
+              Object.freeze({
+                name: line.name,
+                options: Object.freeze(
+                  line.options.map((option) =>
+                    Object.freeze({ name: option.name, quantity: option.quantity }),
+                  ),
+                ),
+              }),
+            );
+      }
       return Object.freeze({
         ...result,
         workstation,
@@ -213,14 +251,20 @@ export function createMerchantPickupQuery(options: {
               remakeInProgress: remakeQuantity(item),
               takenAtCounter: counterOrders.has(String(item.orderReference)),
               // Order items are only for matching remakes; the pickup screen's contract omits them.
-              items: item.items.map((line) =>
-                Object.freeze({
+              items: item.items.map((line) => {
+                const label =
+                  line.orderItemReference === undefined
+                    ? undefined
+                    : lineLabels.get(String(line.orderItemReference));
+                return Object.freeze({
                   fulfillmentItemReference: line.fulfillmentItemReference,
                   orderedQuantity: line.orderedQuantity,
                   readyQuantity: line.readyQuantity,
                   handedOverQuantity: line.handedOverQuantity,
-                }),
-              ),
+                  // WP-2423: the item's name and options, so staff match what they hand over.
+                  ...(label === undefined ? {} : { name: label.name, options: label.options }),
+                });
+              }),
             }),
           ),
       });

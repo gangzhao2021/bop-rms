@@ -15,6 +15,8 @@ const success: SessionPaymentResult = {
   orderReference: id(3),
   status: "Succeeded",
   total: { amountMinor: "238", currency: "CAD" },
+  payBy: "2026-08-03T15:30:00.000Z",
+  failure: null,
 };
 beforeEach(() => {
   setCustomerCsrfCredential("c".repeat(43));
@@ -68,16 +70,37 @@ it("preserves pending/unknown/failed and rejects responses after credential repl
   for (const status of ["Pending", "Unknown", "Failed"] as const) {
     vi.stubGlobal(
       "fetch",
+      vi.fn().mockResolvedValue(
+        Response.json(
+          {
+            schemaVersion: 1,
+            payment: { ...success, status, failure: status === "Failed" ? "NotCompleted" : null },
+          },
+          { headers: { "cache-control": "no-store" } },
+        ),
+      ),
+    );
+    expect((await createSessionPaymentResultClient().read(id(1))).status).toBe(status);
+  }
+  // WP-2423 abandoned payment: a failure reason only with a failed payment, from a closed set.
+  for (const payment of [
+    { ...success, failure: "Declined" },
+    { ...success, status: "Failed", failure: null },
+    { ...success, status: "Failed", failure: "Unknown" },
+    { ...success, payBy: null },
+  ]) {
+    vi.stubGlobal(
+      "fetch",
       vi
         .fn()
         .mockResolvedValue(
           Response.json(
-            { schemaVersion: 1, payment: { ...success, status } },
+            { schemaVersion: 1, payment },
             { headers: { "cache-control": "no-store" } },
           ),
         ),
     );
-    expect((await createSessionPaymentResultClient().read(id(1))).status).toBe(status);
+    await expect(createSessionPaymentResultClient().read(id(1))).rejects.toThrow();
   }
   vi.stubGlobal(
     "fetch",

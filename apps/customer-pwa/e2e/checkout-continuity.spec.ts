@@ -410,6 +410,9 @@ for (const screen of [
                             ? "Failed"
                             : "Succeeded",
                       total: { amountMinor: "238", currency: "CAD" },
+                      payBy: "2026-01-01T12:30:00.000Z",
+                      failure:
+                        resultCalls !== 1 && terminal === "payment-failed" ? "Declined" : null,
                     },
                   },
                 });
@@ -552,9 +555,12 @@ for (const screen of [
             await pay.click();
             await expect(page).toHaveURL(/\/checkout\/result$/u);
             await expect(
-              page.getByText("Payment confirmation is pending. Do not submit another payment.", {
-                exact: true,
-              }),
+              page.getByText(
+                "Your payment is still being confirmed. Don’t start another payment.",
+                {
+                  exact: true,
+                },
+              ),
             ).toBeVisible();
             expect(resultCalls).toBe(1);
             await expect(

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPickupHandoffClient, PickupHandoffClientError } from "./pickup-handoff-client.js";
 import type { PickupVerification } from "./pickup-proof-client.js";
-import type { PickupQueueItem, PickupWorkstation } from "./pickup.js";
+import { pickupItemLabel, type PickupQueueItem, type PickupWorkstation } from "./pickup.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { browserOffline } from "./stale-read.js";
 import {
@@ -253,7 +253,8 @@ export function PickupHandoffForm({
         <ul>
           {lines.map((line, index) => (
             <li key={line.fulfillmentItemReference}>
-              Item {index + 1}: {line.readyQuantity - line.handedOverQuantity} to hand over
+              {pickupItemLabel(line, index)}: {line.readyQuantity - line.handedOverQuantity} to hand
+              over
             </li>
           ))}
         </ul>

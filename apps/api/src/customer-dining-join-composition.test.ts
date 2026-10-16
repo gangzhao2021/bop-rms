@@ -308,6 +308,22 @@ describe("current-authorized Dining Join composition", () => {
     expect(f.store.resolveJoinState).not.toHaveBeenCalled();
     expect(f.request.abuse.admit).not.toHaveBeenCalled();
   });
+  it("returns a definitive refusal for a consumed code without a second write", async () => {
+    const f = fixture();
+    expect(await f.composition.join(f.input, f.request)).toMatchObject({ status: "Joined" });
+    const reused = await f.composition.join({ ...f.input, operationReference: id(11) }, f.request);
+    expect(reused).toEqual({ status: "Refused", reason: "CodeUsed" });
+    expect(Object.isFrozen(reused)).toBe(true);
+    expect(f.store.join).toHaveBeenCalledTimes(1);
+  });
+  it("refuses an unknown or replaced code uniformly", async () => {
+    const f = fixture();
+    expect(await f.composition.join({ ...f.input, joinCredential: "123456" }, f.request)).toEqual({
+      status: "Refused",
+      reason: "CodeNotAccepted",
+    });
+    expect(f.store.join).not.toHaveBeenCalled();
+  });
   it("refreshes owner command time after initial context resolution", async () => {
     const f = fixture();
     vi.mocked(f.options.contexts.resolve).mockImplementationOnce(async () => {
@@ -330,9 +346,10 @@ describe("current-authorized Dining Join composition", () => {
     );
     expect(f.store.resolveJoinState).not.toHaveBeenCalled();
     const admit = vi.fn(async () => "Cooldown" as const);
-    await expect(f.composition.join(f.input, { abuse: { admit } })).rejects.toMatchObject(
-      unavailable,
-    );
+    expect(await f.composition.join(f.input, { abuse: { admit } })).toEqual({
+      status: "Refused",
+      reason: "TooManyAttempts",
+    });
     expect(admit).toHaveBeenCalledOnce();
     expect(f.store.resolveJoinState).not.toHaveBeenCalled();
   });
@@ -417,10 +434,9 @@ describe("current-authorized Dining Join composition", () => {
       composed.join(a.input, a.request),
       composed.join(b.input, b.request),
     ]);
-    expect(results.map((result) => result.operationReference)).toEqual([
-      a.input.operationReference,
-      b.input.operationReference,
-    ]);
+    expect(
+      results.map((result) => (result.status === "Joined" ? result.operationReference : null)),
+    ).toEqual([a.input.operationReference, b.input.operationReference]);
     expect(a.request.abuse.admit).toHaveBeenCalledExactlyOnceWith({
       guestSessionReference: id(1),
       kind: "Invitation",

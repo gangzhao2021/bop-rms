@@ -36,13 +36,12 @@ export function guestsLeftRoundText(
   const machine = round.refund?.method === "CardMachine";
   switch (round.state) {
     case "NotPaid":
-      return round.cancelsAt === null
-        ? `${name}: not paid, no money was taken. It is cancelled automatically when its payment time ends.`
-        : Date.parse(round.cancelsAt) <= now
-          ? `${name}: not paid, no money was taken. It is being cancelled automatically now; check again in a minute.`
-          : `${name}: not paid, no money was taken. It is cancelled automatically at ${storeTime(round.cancelsAt, timeZone)}; the table can be closed after that.`;
+      return round.cancelsAt !== null && Date.parse(round.cancelsAt) <= now
+        ? `${name}: not paid, no money was taken. It is being cancelled automatically now; check again in a minute.`
+        : `${name}: not paid, no money was taken. It will be cancelled now (otherwise automatically${round.cancelsAt === null ? "" : " at " + storeTime(round.cancelsAt, timeZone)}); nothing is refunded.`;
     case "PaymentInProgress":
-      return `${name}: the guest's online payment has no result yet. Check again in a few minutes.`;
+      // WP-2423 abandoned payment: the guest started paying online and didn't finish.
+      return `${name}: the guest started paying online but hasn't finished. It will be cancelled now and their unfinished payment stopped, so they can't be charged for it. If it was in fact paid, it stays open and shows here again.`;
     case "PaidNotSent":
       return machine
         ? `${name}: paid ${cad(round.refund?.amountMinor ?? "0")} on the card machine but never sent to the kitchen. It will be cancelled; then refund it on the card machine and record that on the Orders page.`

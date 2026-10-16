@@ -10,6 +10,7 @@ import {
 import {
   createPostgresStaffDiningRoundEntryStore,
   listStoreDiningSessionOrders,
+  listStoreUnpaidGuestDiningRounds,
 } from "@rms/ordering";
 import { createPostgresCardMachinePaymentStore } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
@@ -18,7 +19,14 @@ import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js"
 import type { MerchantBffService } from "./merchant-bff.js";
 /** The Tables page's own permission first, then the actions it offers. */
 const tableCloseActions = ["dining.session.close", "order.close", "dining.item.serve"] as const;
-const tablePageActions = Object.freeze(["dining.operate", ...tableCloseActions]);
+const tablePageActions = Object.freeze([
+  "dining.operate",
+  ...tableCloseActions,
+  // WP-2423: the "Order host" section is offered only to staff who may transfer the host.
+  "dining.host.transfer",
+  // WP-2423 abandoned payment: "Cancel unpaid round" is offered to staff who may cancel orders.
+  "ordering.order.cancel",
+]);
 
 export function createMerchantDiningTables(options: {
   persistence: PersistentMerchantBffOptions;
@@ -69,13 +77,21 @@ export function createMerchantDiningTables(options: {
               canCloseSessions: tableCloseActions.every(
                 (action) => decisions.get(action)?.effect === "Allow",
               ),
+              canTransferHost: decisions.get("dining.host.transfer")?.effect === "Allow",
+              canCancelUnpaidRounds: decisions.get("ordering.order.cancel")?.effect === "Allow",
             });
           },
           recheck: async ({ current }) => (await current.allowed()) === true,
           denied,
         },
         async (authority) => {
-          const { current, canOperateTables, canCloseSessions } = authority.scope;
+          const {
+            current,
+            canOperateTables,
+            canCloseSessions,
+            canTransferHost,
+            canCancelUnpaidRounds,
+          } = authority.scope;
           const authorize = () => authority.guard();
           const store = createPostgresDiningTableStore(
             { run: (work) => work(tx) },
@@ -183,6 +199,32 @@ export function createMerchantDiningTables(options: {
               round.payBy,
             ]);
           }
+          // WP-2423 abandoned payment ("warn before timeouts"): guest rounds of the party now at
+          // each table that nobody paid for yet, and when each is cancelled unless paid. One read
+          // for every open session on the page.
+          const unpaidGuestRounds = new Map<
+            string,
+            {
+              orderReference: string;
+              orderBatchReference: string;
+              roundNumber: number;
+              payBy: string;
+            }[]
+          >();
+          for (const round of await listStoreUnpaidGuestDiningRounds(
+            tx as unknown as Parameters<typeof listStoreUnpaidGuestDiningRounds>[0],
+            scoped,
+            activeReferences,
+          ))
+            unpaidGuestRounds.set(round.diningSessionReference, [
+              ...(unpaidGuestRounds.get(round.diningSessionReference) ?? []),
+              {
+                orderReference: round.orderReference,
+                orderBatchReference: round.orderBatchReference,
+                roundNumber: round.roundNumber,
+                payBy: round.payBy,
+              },
+            ]);
           // WP-2423 D4: closing a table's session from this page — offered to staff who may close
           // both the session and its Order, with the session's Order (one read for every open
           // session) so the close dialog checks its rounds when it is opened, not on every poll.
@@ -202,6 +244,8 @@ export function createMerchantDiningTables(options: {
           return Object.freeze({
             canOperateTables,
             canCloseSessions,
+            canTransferHost,
+            canCancelUnpaidRounds,
             items: Object.freeze(
               page.items.map((table) =>
                 Object.freeze({
@@ -229,6 +273,14 @@ export function createMerchantDiningTables(options: {
                           orderReference:
                             sessionOrders.get(table.activeDiningSessionReference) ?? null,
                         }),
+                  guestRoundsAwaitingPayment: Object.freeze(
+                    (table.activeDiningSessionReference === null
+                      ? []
+                      : (unpaidGuestRounds.get(table.activeDiningSessionReference) ?? [])
+                    )
+                      .slice(0, 20)
+                      .map((round) => Object.freeze({ ...round })),
+                  ),
                   staffRoundsAwaitingPayment: Object.freeze(
                     (awaiting.get(table.tableReference) ?? [])
                       .slice(0, 20)

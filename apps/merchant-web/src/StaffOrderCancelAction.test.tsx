@@ -110,8 +110,8 @@ it("WP-2423 Q6: labels the action by order type and explains the refund", () => 
       onSettled={() => undefined}
     />,
   );
-  expect(dineHtml).toContain("Cancel batch");
-  expect(dineHtml).toContain("Cancel batch 1 of order ORD-1001");
+  expect(dineHtml).toContain("Cancel round");
+  expect(dineHtml).toContain("Cancel round 1 of order ORD-1001");
 });
 
 it("WP-2423 Q6: summarises a cancelled pickup and a cancelled dine-in batch", () => {
@@ -139,7 +139,7 @@ it("WP-2423 Q6: summarises a cancelled pickup and a cancelled dine-in batch", ()
       },
     ],
   });
-  expect(staffCancellationSummary(dining.item, dining.batch)).toBe("Batch 1 cancelled · refunded");
+  expect(staffCancellationSummary(dining.item, dining.batch)).toBe("Round 1 cancelled · refunded");
 });
 
 it("WP-2423: a PIN sign-in refusal asks the person to confirm it is them, not that they lack permission", () => {

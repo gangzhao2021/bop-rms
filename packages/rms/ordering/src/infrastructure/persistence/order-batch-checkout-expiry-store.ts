@@ -1,6 +1,8 @@
 import {
   createOrderBatchCheckoutCancellation,
+  orderBatchCheckoutCancellationReasonCodes,
   parseOrderBatchCheckoutCancellation,
+  type OrderBatchCheckoutCancellationReasonCode,
 } from "../../domain/order-batch-checkout-cancellation.js";
 import type { OrderItemProgressFact } from "../../domain/order-item-progress.js";
 import { createHash } from "node:crypto";
@@ -477,14 +479,16 @@ export function createPostgresOrderBatchCheckoutCancellationStore(options: {
         if (
           audit.brandId !== scope.brandReference ||
           audit.storeId !== scope.storeReference ||
-          audit.actor.type !== "System" ||
+          // WP-2423 abandoned payment: a manager's cancellation before the deadline names them.
+          (record.reasonCode === "STAFF_CANCELLED_UNPAID"
+            ? audit.actor.type !== "User" || audit.sourceChannel !== "MERCHANT_WEB"
+            : audit.actor.type !== "System" || audit.sourceChannel !== "SYSTEM") ||
           audit.actionCode !== "ORDERING_BATCH_CHECKOUT_CANCELLED" ||
           audit.targetType !== "OrderBatch" ||
           audit.targetId !== record.orderBatchReference ||
           audit.correlationId !== record.operationReference ||
           audit.reasonCode !== record.reasonCode ||
           audit.occurredAt !== record.cancelledAt ||
-          audit.sourceChannel !== "SYSTEM" ||
           audit.dataClassification !== "Restricted" ||
           audit.beforeSummary !== undefined ||
           audit.afterSummary !== undefined
@@ -848,13 +852,15 @@ export async function listStoreUnpaidBatchCancellations(
     readonly orderReference: string;
     readonly orderBatchReference: string;
     readonly cancelledAt: string;
+    /** WP-2423 abandoned payment: why (a manager's cancellation reads differently to staff). */
+    readonly reasonCode: OrderBatchCheckoutCancellationReasonCode;
   }[]
 > {
   const orders = orderList(orderReferences);
   if (orders.length === 0) return Object.freeze([]);
   await storeContext(transaction, scope);
   const found = await transaction.query(
-    `SELECT c.order_id::text AS "orderReference",c.order_batch_id::text AS "orderBatchReference",c.cancelled_at AS "cancelledAt"
+    `SELECT c.order_id::text AS "orderReference",c.order_batch_id::text AS "orderBatchReference",c.cancelled_at AS "cancelledAt",c.reason_code AS "reasonCode"
     FROM rms_ordering.order_batch_checkout_cancellation c
     WHERE c.brand_id=$1 AND c.store_id=$2 AND c.order_id=ANY($3::uuid[])
     ORDER BY c.order_batch_id LIMIT 10001`,
@@ -868,7 +874,16 @@ export async function listStoreUnpaidBatchCancellations(
   const seen = new Set<string>();
   return Object.freeze(
     found.rows.map((value) => {
-      const row = readClosedRecord(value, ["orderReference", "orderBatchReference", "cancelledAt"]);
+      const row = readClosedRecord(value, [
+        "orderReference",
+        "orderBatchReference",
+        "cancelledAt",
+        "reasonCode",
+      ]);
+      if (
+        !(orderBatchCheckoutCancellationReasonCodes as readonly unknown[]).includes(row.reasonCode)
+      )
+        return fail();
       const orderReference = parseOrderingReference(row.orderReference),
         orderBatchReference = parseOrderingReference(row.orderBatchReference);
       if (!orders.includes(orderReference) || seen.has(orderBatchReference)) return fail();
@@ -877,6 +892,7 @@ export async function listStoreUnpaidBatchCancellations(
         orderReference,
         orderBatchReference,
         cancelledAt: instant(row.cancelledAt),
+        reasonCode: row.reasonCode as OrderBatchCheckoutCancellationReasonCode,
       });
     }),
   );
@@ -945,5 +961,143 @@ export async function orderCancelledEventMatchesRecord(
     record.orderItemReferences.length === event.payload.itemCount &&
     record.cancelledAt === event.payload.cancelledAt &&
     orderBatchCheckoutCancellationDigest(record) === event.payload.sourceDigest
+  );
+}
+
+/**
+ * WP-2423 abandoned payment: the payment identity of one Dining-owned round (its submission, Dining
+ * checkout commitment and payment operation), for a manager's cancellation of the unpaid round
+ * before its deadline. Null when the round is not Dining-owned. Read only; the caller authorizes,
+ * owns the transaction and takes the payment operation fence before acting on it.
+ */
+export async function loadDiningRoundPaymentIdentity(
+  transaction: ConsumerTransaction,
+  scope: StoreScope,
+  value: { readonly orderReference: string; readonly orderBatchReference: string },
+): Promise<null | {
+  readonly submissionReference: string;
+  readonly commitmentReference: string;
+  readonly paymentOperationReference: string;
+}> {
+  const orderReference = parseOrderingReference(value.orderReference),
+    orderBatchReference = parseOrderingReference(value.orderBatchReference);
+  await storeContext(transaction, scope);
+  const found = await transaction.query(
+    `SELECT b.submission_id::text AS "submissionReference",l.commitment_id::text AS "commitmentReference",
+      l.payment_operation_id::text AS "paymentOperationReference"
+    FROM rms_ordering.order_batch b
+    JOIN rms_ordering.order_capacity_link l ON l.brand_id=b.brand_id AND l.store_id=b.store_id
+      AND l.order_id=b.order_id AND l.order_batch_id=b.order_batch_id AND l.submission_id=b.submission_id
+    JOIN rms_ordering.order_header h ON h.brand_id=b.brand_id AND h.store_id=b.store_id
+      AND h.order_id=b.order_id AND h.order_type='DineIn'
+    WHERE b.brand_id=$1 AND b.store_id=$2 AND b.order_id=$3 AND b.order_batch_id=$4
+      AND l.link_json->>'owner'='Dining'
+    LIMIT 2`,
+    [
+      parseOrderingReference(scope.brandReference),
+      parseOrderingReference(scope.storeReference),
+      orderReference,
+      orderBatchReference,
+    ],
+  );
+  if (!Array.isArray(found.rows) || found.rows.length > 1) return fail();
+  if (found.rows.length === 0) return null;
+  const row = readClosedRecord(found.rows[0], [
+    "submissionReference",
+    "commitmentReference",
+    "paymentOperationReference",
+  ]);
+  return Object.freeze({
+    submissionReference: parseOrderingReference(row.submissionReference),
+    commitmentReference: parseOrderingReference(row.commitmentReference),
+    paymentOperationReference: parseOrderingReference(row.paymentOperationReference),
+  });
+}
+
+/**
+ * WP-2423 abandoned payment ("warn before timeouts" on Tables): the guest-ordered dine-in rounds of
+ * these dining sessions that nobody has paid for yet — not accepted, not cancelled, no payment
+ * recorded by Ordering — with when each is cancelled automatically unless paid (its capacity link
+ * plus the dining payment window). Staff-entered rounds are listed by their own read. One query for
+ * every session on the page. Read only; the caller authorizes and owns the transaction.
+ */
+export async function listStoreUnpaidGuestDiningRounds(
+  transaction: ConsumerTransaction,
+  scope: StoreScope,
+  diningSessionReferences: readonly string[],
+): Promise<
+  readonly {
+    readonly diningSessionReference: string;
+    readonly orderReference: string;
+    readonly orderBatchReference: string;
+    readonly roundNumber: number;
+    readonly payBy: string;
+  }[]
+> {
+  if (diningSessionReferences.length > 100) return fail();
+  if (diningSessionReferences.length === 0) return Object.freeze([]);
+  const sessions = diningSessionReferences.map((reference) => parseOrderingReference(reference));
+  await storeContext(transaction, scope);
+  const found = await transaction.query(
+    `SELECT r.dining_session_id::text AS "diningSessionReference",r.order_id::text AS "orderReference",
+      r.order_batch_id::text AS "orderBatchReference",r.round_number::integer AS "roundNumber",
+      to_char((l.created_at+interval '${diningCheckoutPaymentWindowMinutes} minutes') AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "payBy"
+    FROM (SELECT h.dining_session_id,b.brand_id,b.store_id,b.order_id,b.order_batch_id,b.submission_id,
+        row_number() OVER (PARTITION BY b.order_id ORDER BY b.submitted_at,b.order_batch_id) AS round_number
+      FROM rms_ordering.order_header h
+      JOIN rms_ordering.order_batch b ON b.brand_id=h.brand_id AND b.store_id=h.store_id AND b.order_id=h.order_id
+      WHERE h.brand_id=$1 AND h.store_id=$2 AND h.order_type='DineIn' AND h.dining_session_id=ANY($3::uuid[])) r
+    JOIN rms_ordering.order_capacity_link l ON l.brand_id=r.brand_id AND l.store_id=r.store_id
+      AND l.order_id=r.order_id AND l.order_batch_id=r.order_batch_id AND l.submission_id=r.submission_id
+      AND l.link_json->>'owner'='Dining'
+    WHERE NOT EXISTS (SELECT 1 FROM rms_ordering.order_acceptance_record a WHERE a.brand_id=r.brand_id
+        AND a.store_id=r.store_id AND a.order_id=r.order_id AND a.order_batch_id=r.order_batch_id)
+      AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_batch_checkout_cancellation c WHERE c.brand_id=r.brand_id
+        AND c.store_id=r.store_id AND c.order_batch_id=r.order_batch_id)
+      AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation s WHERE s.brand_id=r.brand_id
+        AND s.store_id=r.store_id AND s.order_id=r.order_id AND s.order_batch_id=r.order_batch_id)
+      AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_payment_acceptance_wait w WHERE w.brand_id=r.brand_id
+        AND w.store_id=r.store_id AND w.order_id=r.order_id AND w.order_batch_id=r.order_batch_id)
+      AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_payment_disposition_record d WHERE d.brand_id=r.brand_id
+        AND d.store_id=r.store_id AND d.order_id=r.order_id AND d.order_batch_id=r.order_batch_id)
+      AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_termination_record t WHERE t.brand_id=r.brand_id
+        AND t.store_id=r.store_id AND t.order_id=r.order_id)
+      AND NOT EXISTS (SELECT 1 FROM rms_ordering.checkout_session_allocation a
+        JOIN rms_ordering.staff_dining_round_entry e ON e.brand_id=a.brand_id AND e.store_id=a.store_id
+          AND e.guest_session_id=a.guest_session_id
+        WHERE a.brand_id=r.brand_id AND a.store_id=r.store_id AND a.submission_id=r.submission_id)
+    ORDER BY r.order_id,r.round_number LIMIT 201`,
+    [
+      parseOrderingReference(scope.brandReference),
+      parseOrderingReference(scope.storeReference),
+      sessions,
+    ],
+  );
+  if (!Array.isArray(found.rows) || found.rows.length > 200) return fail();
+  return Object.freeze(
+    found.rows.map((value) => {
+      const row = readClosedRecord(value, [
+        "diningSessionReference",
+        "orderReference",
+        "orderBatchReference",
+        "roundNumber",
+        "payBy",
+      ]);
+      const diningSessionReference = parseOrderingReference(row.diningSessionReference);
+      if (
+        !sessions.includes(diningSessionReference) ||
+        typeof row.roundNumber !== "number" ||
+        !Number.isSafeInteger(row.roundNumber) ||
+        row.roundNumber < 1
+      )
+        return fail();
+      return Object.freeze({
+        diningSessionReference,
+        orderReference: parseOrderingReference(row.orderReference),
+        orderBatchReference: parseOrderingReference(row.orderBatchReference),
+        roundNumber: row.roundNumber,
+        payBy: parseOrderingInstant(row.payBy),
+      });
+    }),
   );
 }

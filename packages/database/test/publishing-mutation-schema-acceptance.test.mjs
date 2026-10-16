@@ -10,6 +10,12 @@ it("stores exact Publishing mutation history and rejects broken chains, headers 
     const client = new Client(context.clientConfig);
     await client.connect();
     try {
+      // Publishing mutation history is written in its Tenant and Brand scope: the Option and
+      // Option price publication fences (0400_016/0400_017) refuse any other.
+      await client.query(
+        "SELECT set_config('bop.tenant_id',$1,false),set_config('bop.brand_id',$2,false)",
+        [id(1), id(2)],
+      );
       const scope = { kind: "Store", brandReference: id(2), storeReference: id(3) };
       const next = {
         lifecycleId: id(5),

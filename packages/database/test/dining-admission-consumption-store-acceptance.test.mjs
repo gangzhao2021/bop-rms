@@ -1725,8 +1725,10 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
         operationReference: id(137),
       };
       const guestJoin = createCustomerDiningJoinComposition(joinOptions);
-      await assert.rejects(guestJoin.join(joinInput, requestContext), {
-        code: "GUEST_SESSION_UNAVAILABLE",
+      // Cooldown is a definitive refusal (no write), not an unknown outcome.
+      assert.deepEqual(await guestJoin.join(joinInput, requestContext), {
+        status: "Refused",
+        reason: "TooManyAttempts",
       });
       assert.equal(await joinReader.resolveJoinOperation(id(137)), null);
       assert.equal((await reader.loadSession(rStart.session.diningSessionReference)).version, 1);

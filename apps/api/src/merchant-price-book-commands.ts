@@ -17,6 +17,7 @@ import {
   type PriceBookSnapshot,
   type PriceResolutionContext,
 } from "@rms/pricing";
+import { withRememberedBrandAuthorization } from "./merchant-brand-transaction-authorization.js";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import { createPriceBookDraftAuthorSource } from "./price-book-draft-author-source.js";
 import { requireMerchantBrandSoleOperator } from "./merchant-sole-operator.js";
@@ -125,191 +126,193 @@ export function createMerchantPriceBookCommands(options: {
           return { rows: rows.value as readonly Row[], rowCount: count.value as number | null };
         },
       };
-      const scope = await resolveScope(
-        transaction,
-        request.sessionCookie,
-        session.sessionReference,
-      );
-      const brand = parsePricingReference(scope.context.brand.brandReference);
-      // Price books, their events and audits are Brand facts: deciding a permission selects the
-      // Store again, so every write and the draft-author event read restore the Brand scope.
-      const brandScope = () =>
-        transaction.query(
-          "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)",
-          [brand],
+      return withRememberedBrandAuthorization(transaction, async () => {
+        const scope = await resolveScope(
+          transaction,
+          request.sessionCookie,
+          session.sessionReference,
         );
-      if (
-        candidate &&
-        (candidate.brandReference !== brand ||
-          (request.action !== "CreateDraft" && raw.priceBookReference !== book))
-      )
-        return fail("PRICE_BOOK_PERMISSION_DENIED");
-      const permission = async (action: string) => {
-        const decision = await scope.authorizeAction(action);
-        return decision?.effect === "Allow" &&
-          decision.scopeKind === "Brand" &&
-          decision.action === action
-          ? decision
-          : null;
-      };
-      const checkCoverage = async (snapshot: PriceBookSnapshot) => {
-        const contexts = await options.coverageContexts(transaction, snapshot);
+        const brand = parsePricingReference(scope.context.brand.brandReference);
+        // Price books, their events and audits are Brand facts: deciding a permission selects the
+        // Store again, so every write and the draft-author event read restore the Brand scope.
+        const brandScope = () =>
+          transaction.query(
+            "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)",
+            [brand],
+          );
         if (
-          contexts.length === 0 ||
-          contexts.some((item) => item.brandReference !== brand) ||
-          analyzePriceCoverage(snapshot, contexts).some((item) => item.status !== "Covered")
+          candidate &&
+          (candidate.brandReference !== brand ||
+            (request.action !== "CreateDraft" && raw.priceBookReference !== book))
         )
-          return fail("PRICE_BOOK_COVERAGE_INVALID");
-        return contexts;
-      };
-      const repository = createPostgresPriceBookRepository({
-        brandReference: brand,
-        currencyMetadata: options.currencyMetadata,
-        transactions: { run: (work) => work(transaction) },
-        authorize: async (_tx, input) => {
+          return fail("PRICE_BOOK_PERMISSION_DENIED");
+        const permission = async (action: string) => {
+          const decision = await scope.authorizeAction(action);
+          return decision?.effect === "Allow" &&
+            decision.scopeKind === "Brand" &&
+            decision.action === action
+            ? decision
+            : null;
+        };
+        const checkCoverage = async (snapshot: PriceBookSnapshot) => {
+          const contexts = await options.coverageContexts(transaction, snapshot);
           if (
-            input.brandReference !== brand ||
-            (input.priceBookReference !== null && input.priceBookReference !== book) ||
-            !(await permission("pricing.price-book.manage")) ||
-            (request.action === "Publish" && !(await permission("pricing.price-book.approve")))
+            contexts.length === 0 ||
+            contexts.some((item) => item.brandReference !== brand) ||
+            analyzePriceCoverage(snapshot, contexts).some((item) => item.status !== "Covered")
           )
-            return false;
-          if (input.record) {
-            if (
-              input.record.action !== request.action ||
-              !(await options.validateFacts(transaction, input.record.aggregate))
-            )
-              return false;
-            if (input.record.action === "Publish") await checkCoverage(input.record.aggregate);
-          }
-          await brandScope();
-          return true;
-        },
-        appendEvent: async (_tx, record) => {
-          await appendEventInTransaction(transaction, {
-            eventId: record.operationReference,
-            eventType: record.event.eventType,
-            schemaVersion: 1,
-            occurredAt: record.event.occurredAt,
-            producerModule: "@rms/pricing",
-            tenantId: brand,
-            aggregateType: "PriceBook",
-            aggregateId: record.aggregate.priceBookReference,
-            aggregateVersion: BigInt(record.aggregate.aggregateVersion),
-            correlationId: record.operationReference,
-            actor: { type: "Actor", actorId: scope.actorReference },
-            payload: { ...record.event },
-            redactionClassification: "indirect_identifier",
-            replayMetadata: {},
-          });
-        },
-      });
-      const author = createPriceBookDraftAuthorSource({
-        brandReference: brand,
-        repository: () => repository,
-      });
-      // Acquire the operation fence before any draft-author book fence.
-      // Replays do not depend on new publication coverage or mutable facts.
-      const prior = await repository.resolveOperation(operation);
-      if (decoded) {
-        raw = bindMerchantPriceBookTransport(request.action, decoded, {
+            return fail("PRICE_BOOK_COVERAGE_INVALID");
+          return contexts;
+        };
+        const repository = createPostgresPriceBookRepository({
           brandReference: brand,
           currencyMetadata: options.currencyMetadata,
-          requestedAt: prior?.aggregate.createdAt ?? options.merchant.now(),
-        });
-        candidate = createPriceBookSnapshot(raw.candidate as PriceBookSnapshot);
-      }
-      if (!candidate) return fail("PRICE_BOOK_INPUT_INVALID");
-      const contexts =
-        request.action === "Publish" && prior === null ? await checkCoverage(candidate) : [];
-      // WP-2423 Q19: the author's own publication only while sole operator is in effect for them,
-      // read in this transaction, with a second factor at most 15 minutes old.
-      let soleOperatorMfaAt: string | null = null;
-      if (sole && prior === null) {
-        const approver = await permission("pricing.price-book.approve");
-        await brandScope();
-        const provenance = await author.load(transaction, book);
-        if (
-          approver === null ||
-          provenance === null ||
-          String(provenance.actorReference) !== String(scope.actorReference)
-        )
-          return fail("PRICE_BOOK_APPROVAL_REQUIRED");
-        soleOperatorMfaAt = (
-          await requireMerchantBrandSoleOperator(transaction, {
-            tenantReference: String(scope.tenantReference),
-            brandReference: brand,
-            storeReference: String(scope.selectedStoreReference),
-            actorReference: String(scope.actorReference),
-            permissionCode: "pricing.price-book.approve",
-            observedAt: String(raw.requestedAt),
-            allowed: async () => (await permission("pricing.price-book.approve")) !== null,
-          })
-        ).actorMfaAt;
-        await brandScope();
-      }
-      const service = createPriceBookService({
-        repository,
-        references: {
-          hashIntent: (value) => "sha256:" + sha256Hex(value),
-          equals: (a, b) => a === b,
-        },
-        facts: { validate: (snapshot) => options.validateFacts(transaction, snapshot) },
-        authorization: {
-          authorize: async (input) => {
-            const manage = await permission("pricing.price-book.manage");
-            if (!manage) return null;
-            const approval =
-              input.action === "Publish" ? await permission("pricing.price-book.approve") : null;
+          transactions: { run: (work) => work(transaction) },
+          authorize: async (_tx, input) => {
+            if (
+              input.brandReference !== brand ||
+              (input.priceBookReference !== null && input.priceBookReference !== book) ||
+              !(await permission("pricing.price-book.manage")) ||
+              (request.action === "Publish" && !(await permission("pricing.price-book.approve")))
+            )
+              return false;
+            if (input.record) {
+              if (
+                input.record.action !== request.action ||
+                !(await options.validateFacts(transaction, input.record.aggregate))
+              )
+                return false;
+              if (input.record.action === "Publish") await checkCoverage(input.record.aggregate);
+            }
             await brandScope();
-            const provenance =
-              input.action === "Publish"
-                ? await author.load(transaction, input.priceBookReference)
-                : null;
-            return {
-              tenantContext: scope.context,
-              permission: manage,
-              approvalPermission: approval,
-              draftAuthorActorReference: provenance?.actorReference ?? null,
-              ...(soleOperatorMfaAt === null ? {} : { soleOperatorApproval: true }),
-              audit: {
-                auditId: parsePricingReference(options.auditReference(input.operationReference)),
-                brandId: brand,
-                actor: { type: "User", reference: scope.actorReference },
-                actionCode: "PRICING_PRICE_BOOK_" + input.action.toUpperCase(),
-                targetType: "PricingPriceBook",
-                targetId: input.priceBookReference,
-                correlationId: input.operationReference,
-                occurredAt: input.observedAt,
-                reasonCode: "AUTHORIZED_OPERATION",
-                sourceChannel: "MERCHANT_WEB",
-                dataClassification: "Internal",
-                retentionPolicyCode: "CONFIGURATION_AUDIT",
-                retentionPolicyVersion: 1,
-                ...(soleOperatorMfaAt === null
-                  ? {}
-                  : { afterSummary: { approvalMode: "SoleOperator" } }),
-              },
-            };
+            return true;
           },
-        },
-      });
-      const result = await service[methods[request.action]](
-        request.action === "Publish" ? { ...raw, coverageContexts: contexts } : raw,
-      );
-      if (soleOperatorMfaAt !== null && result.status === "Applied") {
-        await recordPriceBookSoleOperatorApproval(transaction, {
-          brandReference: brand,
-          priceBookReference: book,
-          operationReference: operation,
-          actorReference: String(scope.actorReference),
-          actorMfaAt: soleOperatorMfaAt,
-          approvedAt: String(raw.requestedAt),
-          auditReference: parsePricingReference(options.auditReference(operation)),
+          appendEvent: async (_tx, record) => {
+            await appendEventInTransaction(transaction, {
+              eventId: record.operationReference,
+              eventType: record.event.eventType,
+              schemaVersion: 1,
+              occurredAt: record.event.occurredAt,
+              producerModule: "@rms/pricing",
+              tenantId: brand,
+              aggregateType: "PriceBook",
+              aggregateId: record.aggregate.priceBookReference,
+              aggregateVersion: BigInt(record.aggregate.aggregateVersion),
+              correlationId: record.operationReference,
+              actor: { type: "Actor", actorId: scope.actorReference },
+              payload: { ...record.event },
+              redactionClassification: "indirect_identifier",
+              replayMetadata: {},
+            });
+          },
         });
-        await brandScope();
-      }
-      return result;
+        const author = createPriceBookDraftAuthorSource({
+          brandReference: brand,
+          repository: () => repository,
+        });
+        // Acquire the operation fence before any draft-author book fence.
+        // Replays do not depend on new publication coverage or mutable facts.
+        const prior = await repository.resolveOperation(operation);
+        if (decoded) {
+          raw = bindMerchantPriceBookTransport(request.action, decoded, {
+            brandReference: brand,
+            currencyMetadata: options.currencyMetadata,
+            requestedAt: prior?.aggregate.createdAt ?? options.merchant.now(),
+          });
+          candidate = createPriceBookSnapshot(raw.candidate as PriceBookSnapshot);
+        }
+        if (!candidate) return fail("PRICE_BOOK_INPUT_INVALID");
+        const contexts =
+          request.action === "Publish" && prior === null ? await checkCoverage(candidate) : [];
+        // WP-2423 Q19: the author's own publication only while sole operator is in effect for them,
+        // read in this transaction, with a second factor at most 15 minutes old.
+        let soleOperatorMfaAt: string | null = null;
+        if (sole && prior === null) {
+          const approver = await permission("pricing.price-book.approve");
+          await brandScope();
+          const provenance = await author.load(transaction, book);
+          if (
+            approver === null ||
+            provenance === null ||
+            String(provenance.actorReference) !== String(scope.actorReference)
+          )
+            return fail("PRICE_BOOK_APPROVAL_REQUIRED");
+          soleOperatorMfaAt = (
+            await requireMerchantBrandSoleOperator(transaction, {
+              tenantReference: String(scope.tenantReference),
+              brandReference: brand,
+              storeReference: String(scope.selectedStoreReference),
+              actorReference: String(scope.actorReference),
+              permissionCode: "pricing.price-book.approve",
+              observedAt: String(raw.requestedAt),
+              allowed: async () => (await permission("pricing.price-book.approve")) !== null,
+            })
+          ).actorMfaAt;
+          await brandScope();
+        }
+        const service = createPriceBookService({
+          repository,
+          references: {
+            hashIntent: (value) => "sha256:" + sha256Hex(value),
+            equals: (a, b) => a === b,
+          },
+          facts: { validate: (snapshot) => options.validateFacts(transaction, snapshot) },
+          authorization: {
+            authorize: async (input) => {
+              const manage = await permission("pricing.price-book.manage");
+              if (!manage) return null;
+              const approval =
+                input.action === "Publish" ? await permission("pricing.price-book.approve") : null;
+              await brandScope();
+              const provenance =
+                input.action === "Publish"
+                  ? await author.load(transaction, input.priceBookReference)
+                  : null;
+              return {
+                tenantContext: scope.context,
+                permission: manage,
+                approvalPermission: approval,
+                draftAuthorActorReference: provenance?.actorReference ?? null,
+                ...(soleOperatorMfaAt === null ? {} : { soleOperatorApproval: true }),
+                audit: {
+                  auditId: parsePricingReference(options.auditReference(input.operationReference)),
+                  brandId: brand,
+                  actor: { type: "User", reference: scope.actorReference },
+                  actionCode: "PRICING_PRICE_BOOK_" + input.action.toUpperCase(),
+                  targetType: "PricingPriceBook",
+                  targetId: input.priceBookReference,
+                  correlationId: input.operationReference,
+                  occurredAt: input.observedAt,
+                  reasonCode: "AUTHORIZED_OPERATION",
+                  sourceChannel: "MERCHANT_WEB",
+                  dataClassification: "Internal",
+                  retentionPolicyCode: "CONFIGURATION_AUDIT",
+                  retentionPolicyVersion: 1,
+                  ...(soleOperatorMfaAt === null
+                    ? {}
+                    : { afterSummary: { approvalMode: "SoleOperator" } }),
+                },
+              };
+            },
+          },
+        });
+        const result = await service[methods[request.action]](
+          request.action === "Publish" ? { ...raw, coverageContexts: contexts } : raw,
+        );
+        if (soleOperatorMfaAt !== null && result.status === "Applied") {
+          await recordPriceBookSoleOperatorApproval(transaction, {
+            brandReference: brand,
+            priceBookReference: book,
+            operationReference: operation,
+            actorReference: String(scope.actorReference),
+            actorMfaAt: soleOperatorMfaAt,
+            approvedAt: String(raw.requestedAt),
+            auditReference: parsePricingReference(options.auditReference(operation)),
+          });
+          await brandScope();
+        }
+        return result;
+      });
     });
   };
   return Object.freeze({

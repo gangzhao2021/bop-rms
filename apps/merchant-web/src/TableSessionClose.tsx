@@ -44,7 +44,7 @@ export function tableCloseBlockers(
   ).length;
   if (waiting > 0)
     blockers.push(
-      `${plural(waiting, "item is", "items are")} waiting for payment or for the kitchen to accept ${waiting === 1 ? "it" : "them"}. Take the payment or cancel the round on the Orders page.`,
+      `${plural(waiting, "item is", "items are")} waiting for payment or for the kitchen to accept ${waiting === 1 ? "it" : "them"}. Ask the guest to finish paying on their phone, or cancel the unpaid round below (if the guests left) or on the Orders page.`,
     );
   if (unserved > 0)
     blockers.push(

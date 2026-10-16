@@ -59,6 +59,17 @@ export interface StaffDiningTable {
    */
   staffRoundsAwaitingPayment: readonly { readonly payBy: string }[];
   /**
+   * WP-2423 abandoned payment: guest rounds of the party at this table nobody has paid for yet
+   * (for example the guest started paying and left), each cancelled automatically at `payBy`
+   * unless paid. Empty from an older server.
+   */
+  guestRoundsAwaitingPayment: readonly {
+    readonly orderReference: string;
+    readonly orderBatchReference: string;
+    readonly roundNumber: number;
+    readonly payBy: string;
+  }[];
+  /**
    * WP-2423 D4: the open session's phase and version and its Order, for closing the table's
    * session from the Tables page (absent when the staff member may not close sessions).
    */
@@ -193,6 +204,32 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
                   return Object.freeze({ payBy: round.payBy });
                 })
               : fail();
+        const guestAwaiting =
+          r.guestRoundsAwaitingPayment === undefined
+            ? []
+            : Array.isArray(r.guestRoundsAwaitingPayment) &&
+                r.guestRoundsAwaitingPayment.length <= 20 &&
+                (currentDiningSessionReference !== null ||
+                  r.guestRoundsAwaitingPayment.length === 0)
+              ? r.guestRoundsAwaitingPayment.map((entry) => {
+                  const round = obj(entry);
+                  if (
+                    Object.keys(round).length !== 4 ||
+                    typeof round.payBy !== "string" ||
+                    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(round.payBy) ||
+                    typeof round.roundNumber !== "number" ||
+                    !Number.isSafeInteger(round.roundNumber) ||
+                    round.roundNumber < 1
+                  )
+                    return fail();
+                  return Object.freeze({
+                    orderReference: ref(round.orderReference),
+                    orderBatchReference: ref(round.orderBatchReference),
+                    roundNumber: round.roundNumber,
+                    payBy: round.payBy,
+                  });
+                })
+              : fail();
         // WP-2423 D4: present only for staff who may close sessions (older servers send none).
         const sessionValue: unknown = r.session;
         let session: StaffDiningTableSession | null = null;
@@ -225,6 +262,7 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
           elapsedMinutes,
           qrCodeValidUntil,
           staffRoundsAwaitingPayment: Object.freeze(awaiting),
+          guestRoundsAwaitingPayment: Object.freeze(guestAwaiting),
           session,
         } as StaffDiningTable;
       });
@@ -236,6 +274,13 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
         canOperateTables: data.canOperateTables,
         /** WP-2423 D4: the staff member may close a table's session (and its Order) here. */
         canCloseSessions: data.canCloseSessions === true,
+        /**
+         * WP-2423: the staff member may transfer a table's order host (an older server sends
+         * nothing: the section is offered and the server decides, as before).
+         */
+        canTransferHost: data.canTransferHost !== false,
+        /** WP-2423 abandoned payment: the staff member may cancel unpaid rounds here. */
+        canCancelUnpaidRounds: data.canCancelUnpaidRounds === true,
       };
     },
     prepareAvailability(

@@ -3,6 +3,7 @@ import {
   encodeStripeOrdinaryRefundLookup,
 } from "./stripe-ordinary-refund-request.js";
 import {
+  type CancelIntentRequest,
   type CreateIntentRequest,
   type RetrieveIntentRequest,
   type RefundPaymentRequest,
@@ -55,7 +56,7 @@ export function createStripeOnlineTransport(options: StripeOnlineTransportOption
   }
   const send = options.fetch ?? globalThis.fetch;
   async function exchange(
-    input: CreateIntentRequest | RetrieveIntentRequest | RefundPaymentRequest,
+    input: CreateIntentRequest | RetrieveIntentRequest | CancelIntentRequest | RefundPaymentRequest,
     encoded: StripeOnlineIntentRequest,
   ): Promise<{ status: number; payload: unknown }> {
     if (
@@ -113,7 +114,7 @@ export function createStripeOnlineTransport(options: StripeOnlineTransportOption
     }
   }
   return Object.freeze({
-    async send(input: CreateIntentRequest | RetrieveIntentRequest) {
+    async send(input: CreateIntentRequest | RetrieveIntentRequest | CancelIntentRequest) {
       return exchange(input, encodeStripeOnlineIntentRequest(input));
     },
     async refund(input: RefundPaymentRequest) {

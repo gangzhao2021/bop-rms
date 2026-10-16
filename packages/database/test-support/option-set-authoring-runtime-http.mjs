@@ -66,6 +66,16 @@ import {
 import { tenantBrandConfigurationContentDigest } from "../../bop/tenant/src/index.ts";
 import { seedMerchantAcceptanceSession } from "./merchant-acceptance-session.mjs";
 const id = (n) => "01902421-7800-7000-8000-" + n.toString(16).padStart(12, "0");
+/**
+ * WP-2423 per-transaction statement budgets (restricted role, every transaction of the journey).
+ * Before the once-per-transaction Brand authorization one Option publication or Product command
+ * ran 3.6k–4.9k IAM and 4.1k–5.8k scope statements (503 at the five-second command clock); after
+ * it the largest transaction runs ~150–175 IAM and ~380 scope statements (review/approval
+ * ~210–227: each owner's own before-commit check resolves its answer afresh once, never from the
+ * work's memo). The budget still fails at any return of per-ask resolution (thousands).
+ */
+const TRANSACTION_IAM_BUDGET = 260,
+  TRANSACTION_SCOPE_BUDGET = 500;
 /** Actual application HTTP, encrypted persisted Session, selected Store,
  * current Membership/Permission/Feature and owning SQL/guards. Initial User/OIDC
  * origin and governance configuration are explicitly synthetic; no positive
@@ -151,6 +161,16 @@ export async function exerciseOptionSetAuthoringRuntimeHttp(context, selection =
     }
   };
   const taxSetupGuards = new WeakMap();
+  /** IAM and scope statements of each restricted-role transaction (WP-2423 query budgets). */
+  const transactionBudgets = [];
+  const assertQueryBudgets = () => {
+    assert(transactionBudgets.length > 0);
+    const iam = Math.max(...transactionBudgets.map((entry) => entry.iam)),
+      scope = Math.max(...transactionBudgets.map((entry) => entry.scope));
+    transactionQueryStats = JSON.stringify({ maxIam: iam, maxScope: scope });
+    assert(iam <= TRANSACTION_IAM_BUDGET, "IAM_QUERY_BUDGET_EXCEEDED");
+    assert(scope <= TRANSACTION_SCOPE_BUDGET, "SCOPE_QUERY_BUDGET_EXCEEDED");
+  };
   const transactions = {
     async run(work) {
       const client = new pg.Client({
@@ -362,6 +382,11 @@ export async function exerciseOptionSetAuthoringRuntimeHttp(context, selection =
         await client.query("ROLLBACK");
         throw error;
       } finally {
+        transactionBudgets.push({
+          phase,
+          iam: queryStats.IAM.count,
+          scope: queryStats.Scope.count,
+        });
         if (transactionIdentity) taxSetupGuards.delete(transactionIdentity);
         await client.end();
       }
@@ -1716,6 +1741,8 @@ export async function exerciseOptionSetAuthoringRuntimeHttp(context, selection =
           phase = "ProductCurrentPublishedPublication:" + stage;
         },
       });
+      phase = "ProductCurrentPublishedPublication:QueryBudget";
+      assertQueryBudgets();
       return;
     }
     if (optionPriceOnly) {
@@ -1741,6 +1768,8 @@ export async function exerciseOptionSetAuthoringRuntimeHttp(context, selection =
           phase = "OptionPricePublication:" + stage;
         },
       });
+      phase = "OptionPricePublication:QueryBudget";
+      assertQueryBudgets();
       return;
     }
     phase = "BrowserInitialScope";
@@ -3149,6 +3178,8 @@ export async function exerciseOptionSetAuthoringRuntimeHttp(context, selection =
     assert.equal(revokedContext.status, 403);
     assert.equal(revokedContext.body.error, "request_denied");
     assert.deepEqual(await counts(), sessionDenialBaseline);
+    phase = "QueryBudget";
+    assertQueryBudgets();
   } catch (error) {
     const productClientCode =
       error instanceof ProductCommandClientError &&

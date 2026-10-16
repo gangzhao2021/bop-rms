@@ -682,7 +682,12 @@ const orderCancelledPayload = z.strictObject({
   orderBatchReference: z.string().regex(canonicalUuidV7),
   cancellationReference: z.string().regex(canonicalUuidV7),
   cancellationScope: z.literal("Batch"),
-  reasonCode: z.enum(["CHECKOUT_DEADLINE_REACHED", "PAYMENT_NOT_STARTED"]),
+  reasonCode: z.enum([
+    "CHECKOUT_DEADLINE_REACHED",
+    "PAYMENT_NOT_STARTED",
+    "PAYMENT_NOT_COMPLETED",
+    "STAFF_CANCELLED_UNPAID",
+  ]),
   itemCount: z.int().min(1).max(100),
   cancelledAt: z.iso.datetime({ offset: false }),
   sourceDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),

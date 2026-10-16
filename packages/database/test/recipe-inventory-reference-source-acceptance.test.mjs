@@ -505,6 +505,23 @@ it("holds complete stored Recipe Inventory references through outer COMMIT", asy
         if (table !== "recipe_modifier_version")
           await admin.query(`DROP TRIGGER ${table}_reference_no_truncate ON rms_recipe.${table}`);
       }
+      // 1250_010 later attached its Recipe measurement truncate guard to the shared function;
+      // it is set aside for the replay of 1250_008/009 and restored from 1250_010 below.
+      const measurementTruncateGuard = (
+        await readFile(
+          path.join(
+            root,
+            "migrations/1250-rms-recipe/1250_010_create_recipe_measurement_content.sql",
+          ),
+          "utf8",
+        )
+      )
+        .split("\n")
+        .find((line) => line.startsWith("CREATE TRIGGER recipe_measurement_no_truncate "));
+      assert(measurementTruncateGuard);
+      await admin.query(
+        "DROP TRIGGER recipe_measurement_no_truncate ON rms_recipe.recipe_measurement_content",
+      );
       await admin.query(
         "DROP FUNCTION rms_recipe.maintain_recipe_reference_projection(); DROP FUNCTION rms_recipe.reject_recipe_reference_truncate(); DROP TABLE rms_recipe.recipe_reference_binding; DROP TABLE rms_recipe.recipe_reference_generation",
       );
@@ -526,6 +543,7 @@ it("holds complete stored Recipe Inventory references through outer COMMIT", asy
           "utf8",
         ),
       );
+      await admin.query(measurementTruncateGuard);
       assert.equal(await generation(), "0");
       assert.deepEqual(
         (

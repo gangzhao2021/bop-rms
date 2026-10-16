@@ -13,6 +13,7 @@ import {
 } from "@bop/permission";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import { kdsOperatorProfileAllows } from "./merchant-kds-operator-profile.js";
+import { createMerchantCategoryTransactions } from "./merchant-category-transactions.js";
 const ports = vi.hoisted(() => ({
   resolve: vi.fn(),
   storeFactory: vi.fn(),
@@ -597,5 +598,79 @@ describe("kitchen display sign-in at Brand level (Owner approval 2026-10-14)", (
     });
     const result = await scope.authorizeActionsWithValidity(["catalog.product.manage"]);
     expect(result?.decisions[0]).toMatchObject({ effect: "Allow" });
+  });
+});
+
+describe("WP-2423 once-per-transaction Brand authorization", () => {
+  function host(statements: string[]) {
+    return createMerchantCategoryTransactions({
+      run: (work: (tx: { query(sql: string): Promise<unknown> }) => Promise<unknown>) =>
+        work({
+          query: async (sql: string) => {
+            statements.push(sql);
+            return { rows: [], rowCount: 0 };
+          },
+        }),
+    } as never);
+  }
+
+  it("resolves Brand decisions once per host transaction and re-checks them once before commit", async () => {
+    const statements: string[] = [],
+      h = host(statements);
+    let batches = 0;
+    await h.transactions.run(async (tx) => {
+      await h.registerBeforeCommit(tx, async () => undefined);
+      const scope = await createMerchantBrandScope({ now: () => at } as never)(
+        tx as never,
+        "synthetic-cookie",
+        id(6),
+      );
+      for (let i = 0; i < 20; i++) {
+        expect(await scope.authorizeActions(["catalog.manage", "catalog.product.read"])).toEqual([
+          expect.objectContaining({ effect: "Allow", action: "catalog.manage" }),
+          expect.objectContaining({ effect: "Allow", action: "catalog.product.read" }),
+        ]);
+        expect(await scope.authorizeAction("catalog.product.read")).toMatchObject({
+          effect: "Allow",
+          action: "catalog.product.read",
+        });
+      }
+      batches = ports.batch.mock.calls.length;
+      // The reuse restores the Brand row-level-security scope before the next statement.
+      await tx.query("SELECT 1", []);
+    });
+    expect(batches).toBe(1);
+    // One more full resolution, before commit.
+    expect(ports.batch).toHaveBeenCalledTimes(2);
+    expect(statements).toEqual([
+      "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)",
+      "SELECT 1",
+    ]);
+  });
+
+  it("rolls back when a Brand grant is withdrawn while the transaction runs", async () => {
+    const h = host([]);
+    await expect(
+      h.transactions.run(async (tx) => {
+        await h.registerBeforeCommit(tx, async () => undefined);
+        const scope = await createMerchantBrandScope({ now: () => at } as never)(
+          tx as never,
+          "synthetic-cookie",
+          id(6),
+        );
+        expect(await scope.authorizeAction("catalog.option_set.publish")).toMatchObject({
+          effect: "Allow",
+        });
+        ports.authorize.mockImplementation(async (request) => ({
+          effect: "Deny",
+          scopeKind: "Brand",
+          action: request.action,
+        }));
+        expect(await scope.authorizeAction("catalog.option_set.publish")).toMatchObject({
+          effect: "Allow",
+        });
+        return "written";
+      }),
+    ).rejects.toMatchObject({ code: "CATALOG_PERMISSION_DENIED" });
   });
 });

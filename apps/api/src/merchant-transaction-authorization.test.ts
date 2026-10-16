@@ -265,3 +265,143 @@ describe("owner-read authorization static guard", () => {
     expect(regressions).toEqual([]);
   });
 });
+
+/**
+ * Static guard, Brand scope (WP-2423): Catalog, Option, Product, Menu and Price modules authorize
+ * through the Brand-scope primitives (`createMerchantBrandScope`, `createMerchantCurrentBrandScope`,
+ * `createMerchantProductCurrentAuthorization`), whose every full resolution is remembered once per
+ * transaction and re-checked once before commit (merchant-brand-transaction-authorization.ts). An
+ * owner-read callback in such a module (`authorize…`, `holdUntil…`, `withCurrent…`,
+ * `withAuthorized…`) must not resolve the caller itself, outside that memo: no new Store or Brand
+ * scope (`createMerchantStoreScope(`, `createInitiallyAuthorizedMerchantStoreScope(`,
+ * `createMerchantBrandScope(` …), no `.allowed()`, no membership or permission read of its own
+ * (`resolveActiveMembership(`, `.authorizeWithRoles(`, `.authorizeActionsWithRoles(`), directly or
+ * through a local helper. Re-resolving in owner reads ran an Option publication to ~4k IAM
+ * statements. The list below may only shrink.
+ */
+const brandScopePrimitives = new Set([
+  "merchant-brand-scope.ts",
+  "merchant-current-brand-scope.ts",
+  "merchant-product-current-authorization.ts",
+  "merchant-brand-transaction-authorization.ts",
+  "merchant-store-scope.ts",
+]);
+const knownBrandOccurrences: Readonly<Record<string, number>> = {};
+
+/** `text` without the arguments of `rememberBrandTransaction…(…)` calls (the remembered path). */
+function withoutRemembered(text: string): string {
+  let result = text;
+  for (let match = /\brememberBrandTransaction\w*\(/u.exec(result); match;) {
+    let end = match.index + match[0].length;
+    for (let depth = 0; end < result.length; end += 1) {
+      const char = result[end];
+      if (char === "(" || char === "{" || char === "[") depth += 1;
+      else if (char === ")" || char === "}" || char === "]") {
+        if (depth === 0) break;
+        depth -= 1;
+      }
+    }
+    result = result.slice(0, match.index) + result.slice(end + 1);
+    match = /\brememberBrandTransaction\w*\(/u.exec(result);
+  }
+  return result;
+}
+
+export function brandOwnerReadFullResolutions(input: string): number {
+  const source = withoutRemembered(input);
+  if (
+    !/\bcreateMerchant(?:Current)?Brand(?:Administration)?Scope\b|\bcreateMerchantProductCurrentAuthorization\b/u.test(
+      source,
+    )
+  )
+    return 0;
+  const direct =
+    /\bcreate(?:InitiallyAuthorized)?MerchantStoreScope\(|\bcreateMerchant(?:Current)?Brand(?:Administration)?Scope\(|\bcreateMerchantProductCurrentAuthorization\(|\.allowed\(\)|\bresolveActiveMembership\(|\.authorize(?:Actions)?WithRoles\(/u;
+  const helpers = new Set<string>();
+  const declaration =
+    /(?:const|let)\s+(\w+)\s*(?::[^=;]+)?=\s*(?:async\s*)?(?:\([^)]*\)|\w+)\s*(?::[^=;]+)?=>|(?:async\s+)?function\s+(\w+)\s*\(/gu;
+  const callsHelper = (text: string) =>
+    [...helpers].some((helper) => new RegExp("\\b" + escape(helper) + "\\(", "u").test(text));
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const match of source.matchAll(declaration)) {
+      const name = match[1] ?? match[2];
+      if (name === undefined || helpers.has(name)) continue;
+      const body = expressionText(source, (match.index ?? 0) + match[0].length);
+      if (direct.test(body) || callsHelper(body)) {
+        helpers.add(name);
+        changed = true;
+      }
+    }
+  }
+  const owner = /\b(?:authorize|holdUntil|withCurrent|withAuthorized)\w*/u.source;
+  let count = 0;
+  // Property callbacks (`authorize: async () => …`) and method shorthand (`async holdUntil…(…) {`).
+  for (const match of source.matchAll(
+    new RegExp(
+      owner + "\\s*:\\s*|(?:async\\s+)?" + owner + "\\s*\\([^()]*\\)\\s*(?::[^{;]+)?\\{",
+      "gu",
+    ),
+  )) {
+    const body = expressionText(source, (match.index ?? 0) + match[0].length);
+    if (direct.test(body) || callsHelper(body)) count += 1;
+  }
+  return count;
+}
+
+describe("Brand-scope owner-read authorization static guard", () => {
+  it("flags a Brand owner read that resolves the caller outside the per-transaction memo", () => {
+    const module = "const resolveScope = createMerchantBrandScope(options.merchant);\n";
+    expect(
+      brandOwnerReadFullResolutions(
+        module +
+          "const s = read({ authorize: async (tx) => (await createMerchantStoreScope(m)(tx, c, 'x')).allowed() });",
+      ),
+    ).toBe(1);
+    expect(
+      brandOwnerReadFullResolutions(
+        module +
+          "const again = async (tx) => resolveActiveMembership(await m.findMemberships(a, b), a, b, t);\n" +
+          "const port = { async holdUntilTransactionCompletes(actual, input) { await again(actual); } };",
+      ),
+    ).toBe(1);
+    expect(
+      brandOwnerReadFullResolutions(
+        module +
+          "const port = { withCurrentPolicy: async (tx, work) => { await createMerchantBrandScope(m)(tx, c, s); return work(); } };",
+      ),
+    ).toBe(1);
+    // Asking the transaction's Brand scope is the remembered path.
+    expect(
+      brandOwnerReadFullResolutions(
+        module +
+          "const port = { async holdUntilTransactionCompletes(actual, input) { await scope.authorizeActions(['catalog.manage']); } };",
+      ),
+    ).toBe(0);
+    expect(
+      brandOwnerReadFullResolutions(
+        module +
+          "const allowed = () => rememberBrandTransactionValue(tx, { resolve: () => scope.allowed(), same });\n" +
+          "const port = { async withCurrentStoreScope(request, callback) { await allowed(); return callback(); } };",
+      ),
+    ).toBe(0);
+    expect(brandOwnerReadFullResolutions("const x = { authorize: async () => p.allowed() };")).toBe(
+      0,
+    );
+  });
+
+  it("finds no new Brand owner read that resolves the caller itself in apps/api", () => {
+    const directory = new URL(".", import.meta.url);
+    const found: Record<string, number> = {};
+    for (const file of readdirSync(directory)) {
+      if (!file.endsWith(".ts") || file.endsWith(".test.ts") || brandScopePrimitives.has(file))
+        continue;
+      const count = brandOwnerReadFullResolutions(readFileSync(new URL(file, directory), "utf8"));
+      if (count > 0) found[file] = count;
+    }
+    const regressions = Object.entries(found).filter(
+      ([file, count]) => count > (knownBrandOccurrences[file] ?? 0),
+    );
+    expect(regressions).toEqual([]);
+  });
+});

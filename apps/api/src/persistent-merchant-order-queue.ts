@@ -738,8 +738,21 @@ export function createPersistentMerchantOrderQueue(options: {
                     item.currentPhase === "Submitted" &&
                     !payments.paidOrders.has(item.orderReference),
                   batches: Object.freeze(
-                    item.batches.map((batch) =>
-                      Object.freeze({
+                    item.batches.map((batch) => {
+                      const paymentDue = resolveMerchantBatchPaymentDue({
+                        orderType: item.orderType,
+                        open:
+                          closed === null &&
+                          ["Submitted", "Accepted", "InProgress", "Ready"].includes(
+                            String(item.currentPhase),
+                          ),
+                        batch,
+                        paidBatches: payments.paidBatches,
+                        deadlines: paymentDeadlines,
+                        outcomes: paymentOutcomes,
+                        paymentStarted,
+                      });
+                      return Object.freeze({
                         ...batch,
                         canRequestAcceptance:
                           closed === null &&
@@ -771,24 +784,15 @@ export function createPersistentMerchantOrderQueue(options: {
                         staffCancellation: cancellations.get(batch.orderBatchReference) ?? null,
                         // WP-2423 Q7 slice 2: a round staff entered for the table (or null).
                         staffRound: staffRounds.get(batch.orderBatchReference) ?? null,
-                        paymentDue: resolveMerchantBatchPaymentDue({
-                          orderType: item.orderType,
-                          open:
-                            closed === null &&
-                            ["Submitted", "Accepted", "InProgress", "Ready"].includes(
-                              String(item.currentPhase),
-                            ),
-                          batch,
-                          paidBatches: payments.paidBatches,
-                          deadlines: paymentDeadlines,
-                          outcomes: paymentOutcomes,
-                          paymentStarted,
-                        }),
+                        paymentDue,
+                        // WP-2423 abandoned payment: a manager may cancel a round nobody paid for
+                        // (the command proves from Payment that nothing was charged).
+                        canCancelUnpaid: cancelAllowed && paymentDue !== null,
                         canCancelItems:
                           openBatches.has(batch.orderBatchReference) &&
                           [...cancellableLines.values()].includes(batch.orderBatchReference),
-                      }),
-                    ),
+                      });
+                    }),
                   ),
                   canRequestAcceptance:
                     closed === null &&

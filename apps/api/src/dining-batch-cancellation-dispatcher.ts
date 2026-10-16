@@ -22,6 +22,14 @@ export function createDiningBatchCancellationDispatcher(options: {
     query: { after: string | null; limit: number; observedAt: string },
   ): Promise<unknown>;
   cancel(input: { operationReference: string; expiry: Expiry }): Promise<unknown>;
+  /**
+   * WP-2423 abandoned payment: an online payment started for a round past its deadline that still
+   * has no outcome is resolved with the Provider (outside any transaction): a never-confirmed
+   * attempt is cancelled and recorded as failed, a captured one recorded as paid. The round is then
+   * decided on its next expiry evidence (cancelled as PAYMENT_NOT_COMPLETED, or paid). Optional:
+   * without it such a round waits, as before.
+   */
+  resolveStartedPayment?(expiry: Expiry): Promise<unknown>;
   now(): string;
   pageSize: number;
 }) {
@@ -67,12 +75,16 @@ export function createDiningBatchCancellationDispatcher(options: {
       const operationReference = expiry.recordReference;
       const outcome = await options.cancel({ operationReference, expiry });
       // WP-2423: a round still unresolved at its deadline whose payment was started (online or on
-      // the card machine) is not cancelled; it is rechecked until Payment records its outcome.
+      // the card machine) is not cancelled here; Payment first resolves the online attempt with the
+      // Provider, then the round is decided on its next (failed or paid) expiry evidence.
       if (
         expiry.status === "AwaitingPaymentResolution" &&
         (outcome as { status?: unknown } | null)?.status === "NotEligible"
       ) {
         readClosedRecord(outcome, ["status", "reason"]);
+        // A failure here leaves the round waiting; the next cycle asks the Provider again.
+        if (options.resolveStartedPayment)
+          await options.resolveStartedPayment(expiry).catch(() => undefined);
         continue;
       }
       const result = readClosedRecord(outcome, ["status", "record"]);
