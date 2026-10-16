@@ -80,14 +80,14 @@ const view = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe("Operational Dashboard page", () => {
-  it("renders exact scope, metric versions, CAD minor units, freshness and authorized drills", () => {
+  it("renders exact scope, metric versions, money in dollars, freshness and authorized drills", () => {
     const html = renderToStaticMarkup(
       <OperationalDashboard view={parseOperationalDashboardView(view())} />,
     );
     for (const value of [
       "Operational dashboard",
       "King Store · Business Date 2026-08-14",
-      "CAD 20.00",
+      "$20.00",
       "Metric captured_sales.v1",
       "Create export job",
       "Open authorized source facts",

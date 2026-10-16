@@ -7,6 +7,7 @@ import {
 } from "./order-status-controller.js";
 import type {
   ItemCancellation,
+  OrderStatusState,
   OrderStatusView,
   StaffCancellation,
   StaffCancellationReason,
@@ -83,6 +84,144 @@ export function orderMoneySummary(
 export const orderStatusPollIntervalMs = 15_000;
 /** WP-2423: how often a just-received order checks again until its status is ready to show. */
 export const orderReceivedPollIntervalMs = 2_000;
+/**
+ * WP-2423 (v15 2026-10-16): a ready pickup order means the guest is at the counter with the code on
+ * screen; check often so the page turns to "collected" within seconds of the handoff, not ~10 s.
+ */
+export const orderAwaitingCollectionPollIntervalMs = 3_000;
+/** Longest wait between checks after repeated failures of a normally paced order. */
+export const orderStatusPollErrorCapMs = 60_000;
+
+/**
+ * How the page re-reads an order: a just-received order and a ready pickup quickly, any other
+ * open order at the normal pace, and not at all once the order is settled or live updates are on.
+ */
+export type OrderStatusPollMode = "received" | "awaiting-collection" | "active" | "stopped";
+export interface OrderStatusPoll {
+  readonly mode: OrderStatusPollMode;
+  /** Checks that failed in a row since the last successful read. */
+  readonly errors: number;
+}
+export const stoppedOrderStatusPoll: OrderStatusPoll = Object.freeze({
+  mode: "stopped",
+  errors: 0,
+});
+
+/** A pickup that is ready and not yet collected: the guest is waiting at the counter. */
+export function isAwaitingCollection(view: OrderStatusView): boolean {
+  return (
+    view.order.orderType === "Pickup" &&
+    !isOrderSettled(view) &&
+    (view.order.canonicalPhase === "Ready" || kitchenStatus(view) === "Ready")
+  );
+}
+
+/** The next polling state after the order status changed. */
+export function advanceOrderStatusPoll(
+  previous: OrderStatusPoll,
+  state: OrderStatusState,
+): OrderStatusPoll {
+  switch (state.status) {
+    case "received":
+      return { mode: "received", errors: 0 };
+    case "ready":
+      return {
+        mode:
+          state.realtime === "available" || isOrderSettled(state.view)
+            ? "stopped"
+            : isAwaitingCollection(state.view)
+              ? "awaiting-collection"
+              : "active",
+        errors: 0,
+      };
+    // A check in flight keeps the current pace.
+    case "loading":
+      return previous;
+    // A failed check while polling keeps trying, more slowly each time; a failed first load waits
+    // for the guest's tap as before.
+    case "unavailable":
+      return previous.mode === "stopped"
+        ? previous
+        : { mode: previous.mode, errors: previous.errors + 1 };
+    default:
+      return stoppedOrderStatusPoll;
+  }
+}
+
+/**
+ * Milliseconds until the next check, or null for none. Failures double the wait, up to the normal
+ * interval for the quick modes and up to a minute for the normal one; a success resets it.
+ */
+export function nextOrderStatusPollDelayMs(poll: OrderStatusPoll): number | null {
+  const base =
+    poll.mode === "received"
+      ? orderReceivedPollIntervalMs
+      : poll.mode === "awaiting-collection"
+        ? orderAwaitingCollectionPollIntervalMs
+        : poll.mode === "active"
+          ? orderStatusPollIntervalMs
+          : null;
+  if (base === null) return null;
+  const cap =
+    base < orderStatusPollIntervalMs ? orderStatusPollIntervalMs : orderStatusPollErrorCapMs;
+  return Math.min(base * 2 ** Math.min(poll.errors, 16), cap);
+}
+
+/**
+ * Re-reads the order on the pace above while the page is visible, and once more whenever it becomes
+ * visible again. Returns the stop function.
+ */
+export function startOrderStatusPolling(
+  controller: OrderStatusController,
+  environment: {
+    readonly isVisible?: () => boolean;
+    readonly onVisible?: (listener: () => void) => () => void;
+  } = browserPollingEnvironment(),
+): () => void {
+  const visible = environment.isVisible ?? (() => true);
+  let poll = advanceOrderStatusPoll(stoppedOrderStatusPoll, controller.getState());
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let timerDelay: number | null = null;
+  const schedule = () => {
+    const delay = nextOrderStatusPollDelayMs(poll);
+    // An unchanged pace keeps the running timer, like a fixed interval.
+    if (timer !== null && delay === timerDelay) return;
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+    timerDelay = delay;
+    if (delay !== null) timer = setTimeout(tick, delay);
+  };
+  const tick = () => {
+    timer = null;
+    if (visible()) void controller.refresh();
+    schedule();
+  };
+  schedule();
+  const unsubscribe = controller.subscribe(() => {
+    poll = advanceOrderStatusPoll(poll, controller.getState());
+    schedule();
+  });
+  const stopVisible = environment.onVisible?.(() => {
+    if (poll.mode !== "stopped" && visible()) void controller.refresh();
+  });
+  return () => {
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+    unsubscribe();
+    stopVisible?.();
+  };
+}
+
+function browserPollingEnvironment() {
+  if (typeof document === "undefined") return {};
+  return {
+    isVisible: () => document.visibilityState === "visible",
+    onVisible: (listener: () => void) => {
+      document.addEventListener("visibilitychange", listener);
+      return () => document.removeEventListener("visibilitychange", listener);
+    },
+  };
+}
 
 /** WP-2423 Q6: why the store cancelled, in words for the customer (never internal codes). */
 export const staffCancellationReasonText: Readonly<Record<StaffCancellationReason, string>> = {
@@ -771,25 +910,8 @@ export function OrderStatusPage({
     };
   }, [controller]);
   const view = state.status === "ready" || state.status === "offline" ? state.view : null;
-  const polling =
-    state.status === "received" ||
-    (state.status === "ready" && state.realtime !== "available" && !isOrderSettled(state.view));
-  // A just-placed order's status arrives within seconds; check it often until it does.
-  const pollInterval =
-    state.status === "received" ? orderReceivedPollIntervalMs : orderStatusPollIntervalMs;
-  useEffect(() => {
-    if (!polling) return;
-    const tick = () => {
-      if (typeof document === "undefined" || document.visibilityState === "visible")
-        void controller.refresh();
-    };
-    const timer = window.setInterval(tick, pollInterval);
-    document.addEventListener("visibilitychange", tick);
-    return () => {
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", tick);
-    };
-  }, [controller, polling, pollInterval]);
+  // Registered after the load effect so a remount's dispose doesn't drop the polling listener.
+  useEffect(() => startOrderStatusPolling(controller), [controller]);
   return (
     <CustomerPage
       step="order"

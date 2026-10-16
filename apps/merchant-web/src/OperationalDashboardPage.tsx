@@ -66,7 +66,7 @@ const money = (minor: string) => {
   const negative = minor.startsWith("-");
   const digits = negative ? minor.slice(1) : minor;
   const padded = digits.padStart(3, "0");
-  return `${negative ? "-" : ""}CAD ${padded.slice(0, -2)}.${padded.slice(-2)}`;
+  return `${negative ? "-" : ""}$${padded.slice(0, -2)}.${padded.slice(-2)}`;
 };
 
 function MetricCard({

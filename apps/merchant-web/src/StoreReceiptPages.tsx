@@ -103,7 +103,7 @@ export function StoreReceiptListPage({
               <th>Supplier</th>
               <th>Document</th>
               <th>Lines</th>
-              <th>Accepted value (CAD)</th>
+              <th>Accepted value</th>
               <th>Status</th>
             </tr>
           </thead>
@@ -118,7 +118,7 @@ export function StoreReceiptListPage({
                 <td>{receipt.supplierName}</td>
                 <td>{receipt.supplierDocument ?? ""}</td>
                 <td>{receipt.lines.length}</td>
-                <td>{centsToDollars(totalCents(receipt.lines))}</td>
+                <td>${centsToDollars(totalCents(receipt.lines))}</td>
                 <td>{receipt.voided ? "Voided" : "Posted"}</td>
               </tr>
             ))}
@@ -372,7 +372,7 @@ export function StoreReceiptFormPage({
                 </label>
               ) : null}
               <label>
-                Unit cost (CAD per {item?.unitCode})
+                Unit cost per {item?.unitCode} ($)
                 <input
                   required
                   inputMode="decimal"
@@ -479,7 +479,7 @@ export function StoreReceiptDetailPage({
           <p>
             Received <StaffTime instant={receipt.receivedAt} /> ·{" "}
             {receipt.voided ? `Voided (${reasonLabel(receipt.voided.reasonCode)})` : "Posted"} ·
-            accepted value CAD {centsToDollars(totalCents(receipt.lines))}
+            accepted value ${centsToDollars(totalCents(receipt.lines))}
           </p>
         </div>
         <Link to="/operations/receiving">Back to receiving</Link>
@@ -515,7 +515,7 @@ export function StoreReceiptDetailPage({
               <td>{line.rejectedQuantity}</td>
               <td>{line.damagedQuantity}</td>
               <td>{line.discrepancyReason ? reasonLabel(line.discrepancyReason) : ""}</td>
-              <td>{centsToDollars(line.unitCostMinor)}</td>
+              <td>${centsToDollars(line.unitCostMinor)}</td>
               <td>{line.temperatureCelsius ?? ""}</td>
             </tr>
           ))}

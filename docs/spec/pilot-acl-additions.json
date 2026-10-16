@@ -3276,6 +3276,33 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (WP-2423 sole operator): Owner decision 2026-10-10 DEC-SOLE-OPERATOR-APPROVAL covers price changes — an option price published by its author as sole operator, marked like price books (v15 run 2026-10-16)"
+    },
+    {
+      "type": "schema",
+      "schema": "bop_feature_control",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 feature control read): the api evaluates Store capability decisions (session navigation, Store capability page) with the owning Feature Control read; without the read every staff session read logged 42501 (v15 run 2026-10-16). Read only; no feature control rows are written"
+    },
+    {
+      "type": "table",
+      "schema": "bop_feature_control",
+      "object": "control_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 feature control read): the api evaluates Store capability decisions (session navigation, Store capability page) with the owning Feature Control read; without the read every staff session read logged 42501 (v15 run 2026-10-16). Read only; no feature control rows are written"
+    },
+    {
+      "type": "table",
+      "schema": "bop_feature_control",
+      "object": "control_dependency",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 feature control read): the api evaluates Store capability decisions (session navigation, Store capability page) with the owning Feature Control read; without the read every staff session read logged 42501 (v15 run 2026-10-16). Read only; no feature control rows are written"
     }
   ]
 }

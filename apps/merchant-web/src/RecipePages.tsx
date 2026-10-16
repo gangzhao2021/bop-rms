@@ -133,7 +133,7 @@ export function RecipeListPage({
               <th>Code</th>
               <th>Status</th>
               <th>Yield</th>
-              <th>Standard cost (CAD)</th>
+              <th>Standard cost</th>
               <th>Kitchen instructions</th>
               <th>Used by</th>
             </tr>
@@ -152,7 +152,7 @@ export function RecipeListPage({
                 <td>
                   {recipe.yieldQuantity} {unitText(recipe.yieldUnit)}
                 </td>
-                <td>{centsText(recipe.standardCostCents)}</td>
+                <td>${centsText(recipe.standardCostCents)}</td>
                 <td>{recipe.kitchenInstructions === "Published" ? "Published" : "—"}</td>
                 <td>
                   {recipe.bindings
@@ -494,7 +494,7 @@ function DraftForm({
             </label>
             {item.kind === "InventoryItem" ? (
               <label>
-                Standard cost (CAD per {unit})
+                Standard cost per {unit} ($)
                 <input
                   inputMode="decimal"
                   value={item.unitCost}
@@ -643,7 +643,7 @@ function ReadOnlyRecipe({
             <th>Ingredient</th>
             <th>Quantity</th>
             <th>Loss %</th>
-            <th>Standard cost (CAD per unit)</th>
+            <th>Standard cost per unit</th>
             <th>Allergens (this version)</th>
           </tr>
         </thead>
@@ -666,7 +666,7 @@ function ReadOnlyRecipe({
               <td>{item.lossPercent}</td>
               <td>
                 {item.kind === "InventoryItem"
-                  ? centsToDollarsText(item.unitCostCents ?? "0")
+                  ? "$" + centsToDollarsText(item.unitCostCents ?? "0")
                   : "—"}
               </td>
               <td>{lineAllergens(recipe, index + 1)}</td>

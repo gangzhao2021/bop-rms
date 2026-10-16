@@ -96,7 +96,7 @@ export function StoreWasteListPage({
           <p className="bop-eyebrow">Waste</p>
           <h2>Waste</h2>
           <p>
-            Record waste when it happens; it leaves stock at once. Records worth CAD{" "}
+            Record waste when it happens; it leaves stock at once. Records worth $
             {centsText(view.reviewThresholdMinor)} or more, or without a known cost, are reviewed by
             a manager. Source as of <SourceTime instant={view.sourceAsOf} />
           </p>
@@ -126,7 +126,7 @@ export function StoreWasteListPage({
                   <th>Recorded</th>
                   <th>By</th>
                   <th>What</th>
-                  <th>Value (CAD)</th>
+                  <th>Value</th>
                   <th>Status</th>
                 </tr>
               </thead>
@@ -150,7 +150,7 @@ export function StoreWasteListPage({
                         .join(", ")}
                     </td>
                     <td>
-                      {centsText(record.valueMinor)}
+                      ${centsText(record.valueMinor)}
                       {record.costUnknown ? " (cost unknown)" : ""}
                     </td>
                     <td>{statusOf(record)}</td>
@@ -471,7 +471,7 @@ export function StoreWasteDetailPage({
             Waste recorded <StaffTime instant={record.recordedAt} />
           </h2>
           <p>
-            By {person(record.recordedBy)} · value CAD {centsText(record.valueMinor)}
+            By {person(record.recordedBy)} · value ${centsText(record.valueMinor)}
             {record.costUnknown ? " (some costs unknown)" : ""}
             {record.review
               ? ` · ${record.review.decision === "Voided" ? "voided" : "reviewed"} by ${person(record.review.reviewedBy)} (${reasonText(record.review.reasonCode)})`
@@ -487,7 +487,7 @@ export function StoreWasteDetailPage({
             <th>Where</th>
             <th>Quantity</th>
             <th>Reason</th>
-            <th>Value (CAD)</th>
+            <th>Value</th>
           </tr>
         </thead>
         <tbody>
@@ -502,7 +502,7 @@ export function StoreWasteDetailPage({
                 {reasonText(line.reasonCode)}
                 {line.note ? ` — ${line.note}` : ""}
               </td>
-              <td>{line.unitCostMinor === null ? "unknown" : centsText(line.valueMinor)}</td>
+              <td>{line.unitCostMinor === null ? "unknown" : "$" + centsText(line.valueMinor)}</td>
             </tr>
           ))}
         </tbody>

@@ -166,7 +166,7 @@ function Editor({
             <th>Lot code</th>
             <th>Expiry</th>
             <th>Quantity</th>
-            <th>Unit cost (CAD)</th>
+            <th>Unit cost ($)</th>
             {draft ? <th /> : null}
           </tr>
         </thead>

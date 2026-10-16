@@ -129,6 +129,9 @@ test("@production the price book author publishes alone as sole operator after c
     page.getByText("you may publish your own draft after checking it and verifying it is you"),
   ).toBeVisible();
   await expect(page.getByText("must be done by someone other than")).toHaveCount(0);
+  // Prices in staff words: no "(CAD)" column or "prices in CAD".
+  await expect(page.getByRole("columnheader", { name: "Price", exact: true })).toBeVisible();
+  await expect(page.getByText(/prices before tax, the same for pickup and dine-in/u)).toBeVisible();
   await expectNoInternalText(page);
   await expect(publish).toBeDisabled();
   await verify(page, "Verify to approve on your own");
@@ -543,6 +546,66 @@ test("@production v15 catalog pages show staff words: recipe, option recipes, op
   await expect(page.getByText(/since Oct 16, 2026, 10:05 AM/u)).toBeVisible();
   await expect(page.getByText(/You wrote this version and you are the only person/u)).toBeVisible();
   await expect(page.getByText(/\[0\]|Staff \d{4}/u)).toHaveCount(0);
+  await expectNoInternalText(page);
+
+  // The recipe list names its cost column in staff words and shows "$" amounts, never "(CAD)".
+  await page.route("**/merchant/commerce/recipes/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "RECIPE-LIST",
+        sourceAsOf: at,
+        permissions: { mayEdit: true, mayReview: true, mayPublish: true },
+        viewer: owner,
+        choices: {
+          yieldUnits: ["EACH", "KG"],
+          items: [],
+          subRecipes: [],
+          stations: [],
+          skus: [
+            {
+              skuReference: id(44),
+              code: "FLAT-WHITE-S",
+              name: "Flat White — Small",
+              unitOfSale: "EACH",
+            },
+          ],
+        },
+        recipes: [
+          {
+            recipeReference: id(40),
+            familyReference: id(41),
+            familyRevision: 1,
+            name: "Flat White",
+            code: "FLAT-WHITE",
+            lifecycle: "Published",
+            versionReference: id(42),
+            aggregateVersion: 3,
+            yieldQuantity: "1",
+            yieldUnit: "EACH",
+            ingredientCount: 1,
+            standardCostCents: "72",
+            kitchenInstructions: "NotPublished",
+            bindings: [
+              {
+                bindingReference: id(43),
+                recipeVersionReference: id(42),
+                skuReference: id(44),
+                storeReference: null,
+                since: at,
+              },
+            ],
+            updatedAt: at,
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto("/app/commerce/recipes");
+  await expect(
+    page.getByRole("columnheader", { name: "Standard cost", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("row", { name: /Flat White/u })).toContainText("$0.72");
   await expectNoInternalText(page);
 
   await page.route("**/merchant/commerce/option-recipes/query", (route) =>

@@ -5,6 +5,7 @@ import {
   itemsNotOfferedHere,
   MenuPageError,
   orderTypeText,
+  menuRevisionAction,
   menuStage,
   parseMenuRouteReference,
   priceText,
@@ -74,6 +75,21 @@ describe("WP-2423 menu page helpers", () => {
       "0190fa20-0000-7000-8000-000000000001",
     );
     expect(parseMenuRouteReference("all-day")).toBeNull();
+  });
+  it("offers a revision only where it is the way to change the menu, in words that match the state", () => {
+    expect(menuRevisionAction("Editing", true)).toBeNull();
+    expect(menuRevisionAction("Published", true)?.label).toBe("Start a revision");
+    const inReview = menuRevisionAction("InReview", true);
+    expect(inReview?.label).toBe("Withdraw to make changes");
+    expect(inReview?.label).not.toMatch(/revision/u);
+    expect(inReview?.note).toMatch(/out of review .* submitted for review again/u);
+    expect(inReview?.note).toMatch(/Customers keep seeing the published menu/u);
+    expect(menuRevisionAction("InReview", false)?.note).not.toMatch(/published menu/u);
+    const approved = menuRevisionAction("Approved", false);
+    expect(approved?.label).toBe("Withdraw to make changes");
+    expect(approved?.note).toMatch(/submitted and approved again\.$/u);
+    expect(menuRevisionAction("Archived", false)?.label).toBe("Start a revision");
+    expect(menuRevisionAction("Archived", false)?.note).not.toMatch(/published menu/u);
   });
   it("maps server refusals and lost connections to page errors", async () => {
     const refused = createMenuClient("csrf", async () =>

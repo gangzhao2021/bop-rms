@@ -107,6 +107,8 @@ function Failure({ code }: { readonly code: PriceErrorCode | "Loading" }) {
     </StatePanel>
   );
 }
+/** The app's money prefix: "$" for the Store's CAD; any other currency shows its code. */
+const currencyPrefix = (code: string) => (code === "CAD" ? "$" : code + " ");
 const itemName = (sellable: PriceSellable | undefined, reference: string) =>
   sellable ? `${sellable.productName} — ${sellable.sizeName}` : "Item " + reference.slice(-4);
 /** A price book's state in staff words, with the Store's book named as in use here. */
@@ -523,8 +525,9 @@ function PriceBookEditor({
           <h2>{book.stableCode}</h2>
           <p>
             {lifecycleText[book.lifecycle] ?? book.lifecycle} · version {book.aggregateVersion}
-            {inUse ? " · in use at this Store" : ""} · prices in {view.currencyCode}, before tax,
-            the same for pickup and dine-in
+            {inUse ? " · in use at this Store" : ""} · prices
+            {view.currencyCode === "CAD" ? "" : ` in ${view.currencyCode},`} before tax, the same
+            for pickup and dine-in
           </p>
         </div>
         <Link to="/app/commerce/pricing">Back to prices</Link>
@@ -580,7 +583,7 @@ function PriceBookEditor({
               <th>Product</th>
               <th>Size</th>
               <th>Code</th>
-              <th>Price ({view.currencyCode})</th>
+              <th>Price</th>
               <th>On this Store's menu</th>
             </tr>
           </thead>
@@ -598,22 +601,25 @@ function PriceBookEditor({
                   <td>{item.skuCode}</td>
                   <td>
                     {editable ? (
-                      <input
-                        aria-label={`Price of ${item.productName} ${item.sizeName}`}
-                        inputMode="decimal"
-                        value={text}
-                        aria-invalid={bad ? "true" : undefined}
-                        onChange={(event) =>
-                          setAmounts((current) => ({
-                            ...current,
-                            [item.sellableReference]: event.target.value,
-                          }))
-                        }
-                      />
+                      <>
+                        <span aria-hidden="true">{currencyPrefix(view.currencyCode)}</span>
+                        <input
+                          aria-label={`Price of ${item.productName} ${item.sizeName}`}
+                          inputMode="decimal"
+                          value={text}
+                          aria-invalid={bad ? "true" : undefined}
+                          onChange={(event) =>
+                            setAmounts((current) => ({
+                              ...current,
+                              [item.sellableReference]: event.target.value,
+                            }))
+                          }
+                        />
+                      </>
                     ) : text === "" ? (
                       "—"
                     ) : (
-                      text
+                      currencyPrefix(view.currencyCode) + text
                     )}
                   </td>
                   <td>{onMenu.has(item.sellableReference) ? "Yes" : "—"}</td>
@@ -666,8 +672,9 @@ function PriceBookEditor({
               summary={
                 <p>
                   {book.stableCode}: {book.prices.length} price
-                  {book.prices.length === 1 ? "" : "s"} in {view.currencyCode}, fixed for good once
-                  published.
+                  {book.prices.length === 1 ? "" : "s"}
+                  {view.currencyCode === "CAD" ? "" : ` in ${view.currencyCode}`}, fixed for good
+                  once published.
                 </p>
               }
               onApprove={() => {

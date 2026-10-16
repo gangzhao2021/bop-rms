@@ -127,9 +127,29 @@ it("WP-2423 item 7: flags amounts written with a currency code, as on the v15 re
   expect(
     findInternalText([
       "Refund $27.40 on the store's card machine",
-      "Unit cost (CAD)",
-      "Standard cost (CAD per kg)",
+      "Unit cost ($)",
+      "Standard cost per kg ($)",
       "Refunds above $100 for an order",
+    ]),
+  ).toEqual([]);
+});
+
+it("flags the currency code staff met as a word on the v15 recipe and price book pages", () => {
+  for (const text of [
+    "Standard cost (CAD)",
+    "Standard cost (CAD per unit)",
+    "Price (CAD)",
+    "Draft · version 2 · prices in CAD, before tax, the same for pickup and dine-in",
+  ])
+    expect(
+      findInternalText([text]).map((finding) => finding.rule),
+      text,
+    ).toContain("currency code");
+  expect(
+    findInternalText([
+      "Standard cost\nStandard cost per unit\nPrice\n$4.50",
+      "Draft · version 2 · prices before tax, the same for pickup and dine-in",
+      "Cadence\nDecaf\ncadmium",
     ]),
   ).toEqual([]);
 });

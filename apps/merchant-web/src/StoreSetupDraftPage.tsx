@@ -705,7 +705,11 @@ export function StoreSetupDraftPage({
                 <dt>Language</dt>
                 <dd>{languageName(workspace.store.locale)}</dd>
                 <dt>Currency</dt>
-                <dd>{workspace.store.currencyCode}</dd>
+                <dd>
+                  {workspace.store.currencyCode === "CAD"
+                    ? "Canadian dollars ($)"
+                    : workspace.store.currencyCode}
+                </dd>
                 <dt>Current timezone</dt>
                 <dd>{timeZoneLabel(workspace.store.timeZone)}</dd>
                 <dt>Saved draft</dt>

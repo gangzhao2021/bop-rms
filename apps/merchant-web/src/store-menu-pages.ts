@@ -226,6 +226,36 @@ export function menuStage(publication: MenuPublicationStatus | null) {
   if (publication.state === "Archived") return "Archived" as const;
   return "InReview" as const;
 }
+/**
+ * How staff change a menu version that can no longer be edited (DEC-MENU-REVISION): the server
+ * copies the current version into a new draft. A published version gets a revision; a version in
+ * review or approved but not yet published is withdrawn to change it (there is no other way back
+ * to editing) and must be reviewed again. A version being edited is changed in place.
+ */
+export function menuRevisionAction(
+  stage: ReturnType<typeof menuStage>,
+  hasPublishedMenu: boolean,
+): { readonly label: string; readonly note: string; readonly done: string } | null {
+  const customers = hasPublishedMenu ? " Customers keep seeing the published menu meanwhile." : "";
+  if (stage === "Editing") return null;
+  if (stage === "InReview" || stage === "Approved")
+    return {
+      label: "Withdraw to make changes",
+      note:
+        (stage === "InReview"
+          ? "Takes this version out of review and opens a copy to edit; it must be submitted for review again."
+          : "Sets this approved version aside unpublished and opens a copy to edit; it must be submitted and approved again.") +
+        customers,
+      done: "Withdrawn. Edit the new draft and submit it for review again.",
+    };
+  return {
+    label: "Start a revision",
+    note: hasPublishedMenu
+      ? "Customers keep seeing the published menu until the revision is published."
+      : "Opens a copy to edit; it must be submitted for review and published again.",
+    done: "A new version was started from this one; edit it and submit it for review.",
+  };
+}
 export const priceText = (minor: string | null) =>
   minor === null
     ? null

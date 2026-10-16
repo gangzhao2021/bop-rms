@@ -10,6 +10,7 @@ import {
   MenuPageError,
   channelText,
   itemsNotOfferedHere,
+  menuRevisionAction,
   menuStage,
   orderTypeText,
   parseMenuBuilderView,
@@ -31,7 +32,8 @@ const copy: Record<MenuErrorCode | "Loading", string> = {
   PermissionDenied: "You do not have permission for this menu action at Brand level.",
   NotFound: "This menu does not exist for the Brand.",
   Conflict: "The menu changed since you opened it. Refresh and check again.",
-  Frozen: "This version was submitted for review and can no longer change. Start a revision.",
+  Frozen:
+    "This version was submitted for review and can no longer change. Refresh, then withdraw it or start a revision to change it.",
   NotRevisable: "Only a submitted or published version can be revised; keep editing this one.",
   ReviewBlocked:
     "The review could not be prepared. Every item needs a published recipe whose ingredients all have current allergen declarations (see Allergens and Recipes), and the Brand allergen list must be approved.",
@@ -226,6 +228,7 @@ function MenuBuilder({
   const menu = view.menu;
   const stage = menuStage(view.publication);
   const editable = stage === "Editing" && view.permissions.mayEdit;
+  const revision = menuRevisionAction(stage, view.latestRelease !== null);
   const sellables = new Map(view.sellables.map((item) => [item.skuReference, item]));
   const label = (sku: string) => {
     const item = sellables.get(sku);
@@ -703,7 +706,7 @@ function MenuBuilder({
             </button>
           </>
         ) : null}
-        {stage !== "Editing" && view.permissions.mayEdit ? (
+        {revision && view.permissions.mayEdit ? (
           <p>
             <button
               type="button"
@@ -716,13 +719,13 @@ function MenuBuilder({
                     menuReference: menu.menuReference,
                     expectedAggregateVersion: menu.aggregateVersion,
                   },
-                  "A new version was started from this one; edit it and submit it for review.",
+                  revision.done,
                 )
               }
             >
-              {pending?.action === "Revise" ? "Retry" : "Start a revision"}
+              {pending?.action === "Revise" ? "Retry" : revision.label}
             </button>{" "}
-            Customers keep seeing the published menu until the revision is published.
+            {revision.note}
           </p>
         ) : null}
       </section>
