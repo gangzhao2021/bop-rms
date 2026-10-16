@@ -208,6 +208,13 @@ export function createCustomerSessionBootstrapHandler(options?: {
           : {}),
       });
     } catch (error) {
+      // WP-2423: a visit that ended or expired (or a cookie no Session matches) has nothing to
+      // restore, exactly like a first visit: an empty 204 with no CSRF token, so the guest page
+      // does not log a failed request. Every other Session failure still says so.
+      if (error instanceof GuestSessionError && error.code === "GUEST_SESSION_UNAVAILABLE") {
+        response.status(204).end();
+        return;
+      }
       reject(error instanceof GuestSessionError ? 401 : 503);
     }
   };

@@ -1740,6 +1740,7 @@ export async function exerciseSubmissionInventoryPayment({
             checkoutSessionReference: input.checkoutSessionReference,
             paymentIntentReference: record.intent.paymentIntentReference,
             orderReference: preparation.orderReference,
+            orderBatchReference: preparation.orderBatchReference,
             status: "Succeeded",
             total: { amountMinor: preparation.total.amountMinor.toString(), currency: "CAD" },
             // The payment window this captured payment was made within; no failure.

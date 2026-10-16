@@ -10,6 +10,7 @@ const mock = vi.hoisted(() => ({
   cardPaid: vi.fn(),
   sessionOrders: vi.fn(),
   unpaidGuestRounds: vi.fn(),
+  paidAwaitingAcceptance: vi.fn(),
 }));
 vi.mock("@rms/ordering", async (original) => ({
   ...(await original<typeof import("@rms/ordering")>()),
@@ -18,6 +19,7 @@ vi.mock("@rms/ordering", async (original) => ({
   })),
   listStoreDiningSessionOrders: mock.sessionOrders,
   listStoreUnpaidGuestDiningRounds: mock.unpaidGuestRounds,
+  listStorePaidDiningRoundsAwaitingAcceptance: mock.paidAwaitingAcceptance,
 }));
 vi.mock("@rms/payment", async (original) => ({
   ...(await original<typeof import("@rms/payment")>()),
@@ -63,6 +65,7 @@ function setup() {
   mock.cardPaid.mockResolvedValue(new Map());
   mock.sessionOrders.mockResolvedValue(new Map());
   mock.unpaidGuestRounds.mockResolvedValue([]);
+  mock.paidAwaitingAcceptance.mockResolvedValue([]);
   mock.list.mockResolvedValue({
     items: [
       {
@@ -356,6 +359,7 @@ it("WP-2423 abandoned payment: lists each party's unpaid guest rounds and who ma
     [],
   ]);
   expect(view.canCancelUnpaidRounds).toBe(true);
+  expect(view.items.map((item) => item.roundsAwaitingAcceptance)).toEqual([[], []]);
   f.authorizeAction.mockImplementation(async (action?: string) => ({
     effect: action === "ordering.order.cancel" ? "Deny" : "Allow",
   }));
@@ -414,4 +418,48 @@ it("WP-2423: offers the Order host section only to staff who may transfer the ho
     effect: action === "dining.host.transfer" ? "Deny" : "Allow",
   }));
   expect((await f.read(f.input)).canTransferHost).toBe(false);
+});
+
+it("WP-2423: lists each party's paid rounds still awaiting acceptance, with when each was paid", async () => {
+  const f = setup();
+  mock.list.mockResolvedValueOnce({
+    items: [4, 6].map((n) => ({
+      tableReference: id(n),
+      stableLabel: "T" + String(n),
+      areaCode: "MAIN",
+      capacity: 4,
+      lifecycle: "Published",
+      operationalState: "Available",
+      aggregateVersion: 3,
+      activeDiningSessionReference: id(n + 1),
+    })),
+    nextAfterTableReference: null,
+  });
+  mock.loadSessions.mockResolvedValueOnce(
+    [5, 7].map((n) => ({
+      diningSessionReference: id(n),
+      brandReference: id(2),
+      storeReference: id(3),
+      phase: "Active",
+      startedAt: "2026-09-25T11:42:00.000Z",
+    })),
+  );
+  mock.paidAwaitingAcceptance.mockResolvedValueOnce([
+    {
+      diningSessionReference: id(7),
+      orderReference: id(40),
+      orderBatchReference: id(41),
+      roundNumber: 2,
+      paidAt: "2026-09-25T11:51:00.000Z",
+    },
+  ]);
+  const view = await f.read(f.input);
+  // One read for every open session on the page; no references reach the page.
+  expect(mock.paidAwaitingAcceptance).toHaveBeenCalledOnce();
+  expect(mock.paidAwaitingAcceptance.mock.calls[0]?.[2]).toEqual([id(5), id(7)]);
+  expect(view.items.map((item) => item.roundsAwaitingAcceptance)).toEqual([
+    [],
+    [{ roundNumber: 2, paidAt: "2026-09-25T11:51:00.000Z" }],
+  ]);
+  expect(JSON.stringify(view)).not.toContain(id(41));
 });

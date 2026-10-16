@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import {
   elapsedText,
   guestRoundPaymentNotice,
+  paidRoundAcceptanceNotice,
   longOpenSessionMinutes,
   staffRoundPaymentNotice,
   tableCodeNotice,
@@ -23,6 +24,7 @@ const table: StaffDiningTable = {
   qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
   staffRoundsAwaitingPayment: [],
   guestRoundsAwaitingPayment: [],
+  roundsAwaitingAcceptance: [],
 };
 const now = Date.parse("2027-03-01T13:00:00.000Z");
 
@@ -136,4 +138,30 @@ it("WP-2423 abandoned payment: warns staff before an unpaid guest round is cance
   const ended = guestRoundPaymentNotice(waiting, Date.parse(payBy), "America/Toronto");
   expect(ended?.text).toContain("wasn't paid by 08:30 and is being cancelled");
   expect(ended?.text).not.toMatch(/[0-9a-f]{8}-/u);
+});
+
+it("WP-2423: warns on the table while a paid round waits for staff to accept it", () => {
+  expect(paidRoundAcceptanceNotice(table, now)).toBeNull();
+  const waiting = {
+    ...table,
+    currentDiningSessionReference: "01909988-0000-7000-8000-000000000009",
+    elapsedMinutes: 30,
+    roundsAwaitingAcceptance: [
+      { roundNumber: 3, paidAt: "2027-03-01T12:58:00.000Z" },
+      { roundNumber: 2, paidAt: "2027-03-01T12:47:00.000Z" },
+    ],
+  };
+  expect(paidRoundAcceptanceNotice(waiting, now)).toEqual({
+    tier: "urgent",
+    text: "Round 2 paid 13 min ago and still not accepted · accept it on the Orders page now (and 1 more paid round)",
+  });
+  expect(
+    paidRoundAcceptanceNotice(
+      { ...waiting, roundsAwaitingAcceptance: waiting.roundsAwaitingAcceptance.slice(0, 1) },
+      now,
+    ),
+  ).toEqual({
+    tier: "ok",
+    text: "Round 3 paid 2 min ago · accept it on the Orders page to send it to the kitchen",
+  });
 });

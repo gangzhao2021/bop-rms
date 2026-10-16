@@ -14,6 +14,7 @@ const table: StaffDiningTable = {
   qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
   staffRoundsAwaitingPayment: [],
   guestRoundsAwaitingPayment: [],
+  roundsAwaitingAcceptance: [],
 };
 const response = (r: unknown) =>
   new Response(JSON.stringify(r), {

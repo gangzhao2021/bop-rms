@@ -23,6 +23,11 @@ export interface CustomerSessionPaymentResult {
   readonly checkoutSessionReference: string;
   readonly paymentIntentReference: string | null;
   readonly orderReference: string | null;
+  /**
+   * WP-2423: the round (order batch) this checkout paid for, so the guest's page can tell from the
+   * order status read whether staff have sent it to the kitchen yet; null before a payment exists.
+   */
+  readonly orderBatchReference: string | null;
   readonly status: "Pending" | "Unknown" | "Succeeded" | "Failed";
   readonly total: Readonly<{ amountMinor: string; currency: "CAD" }> | null;
   /**
@@ -62,6 +67,7 @@ export function createCustomerSessionPaymentResult(options: CustomerSessionPayme
         checkoutSessionReference: session.checkoutSessionReference,
         paymentIntentReference: null,
         orderReference: null,
+        orderBatchReference: null,
         status: "Pending",
         total: null,
         payBy: null,
@@ -129,6 +135,7 @@ export function createCustomerSessionPaymentResult(options: CustomerSessionPayme
           checkoutSessionReference: session.checkoutSessionReference,
           paymentIntentReference: String(record.intent.paymentIntentReference),
           orderReference: String(p.orderReference),
+          orderBatchReference: String(p.orderBatchReference),
           status,
           total: Object.freeze({
             amountMinor: p.total.amountMinor.toString(),

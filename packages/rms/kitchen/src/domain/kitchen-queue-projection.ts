@@ -2852,9 +2852,14 @@ export function createKitchenQueueItemView(value: unknown): KitchenQueueItemView
   });
 }
 
-function resultMetadata(generationValue: unknown): KitchenQueueResultMetadata {
+function resultMetadata(
+  generationValue: unknown,
+  continuation = false,
+): KitchenQueueResultMetadata {
   const generation = parseKitchenQueueGeneration(generationValue);
-  if (generation.generationStatus !== "Active") return invalid();
+  // A continuation page belongs to the generation its first page came from, which may since have
+  // been retired by a kitchen step (the board reads one consistent snapshot).
+  if (generation.generationStatus !== (continuation ? "Retired" : "Active")) return invalid();
   return Object.freeze({
     projectionName: generation.projectionName,
     projectionVersion: generation.projectionVersion,
@@ -2888,8 +2893,9 @@ export function buildKitchenQueueListResult(input: {
   readonly generation: unknown;
   readonly rows: readonly unknown[];
   readonly nextCursor: unknown | null;
+  readonly continuation?: true;
 }): KitchenQueueListResult {
-  const metadata = resultMetadata(input.generation);
+  const metadata = resultMetadata(input.generation, input.continuation === true);
   const items = exactArray(input.rows, 0, Number.MAX_SAFE_INTEGER).map(createKitchenQueueItemView);
   return Object.freeze({
     projectionName: metadata.projectionName,

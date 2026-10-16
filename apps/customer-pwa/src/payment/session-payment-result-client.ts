@@ -9,6 +9,11 @@ export interface SessionPaymentResult {
   readonly checkoutSessionReference: string;
   readonly paymentIntentReference: string | null;
   readonly orderReference: string | null;
+  /**
+   * WP-2423: the round this checkout paid for, when the server names it (absent from an older
+   * server), so the page can tell whether staff have sent it to the kitchen yet.
+   */
+  readonly orderBatchReference?: string;
   readonly status: "Pending" | "Unknown" | "Succeeded" | "Failed";
   readonly total: Readonly<{ amountMinor: string; currency: "CAD" }> | null;
   /** WP-2423 abandoned payment: until when this payment can still be finished. */
@@ -53,10 +58,16 @@ export function createSessionPaymentResultClient() {
       if (response.status !== 200 || response.headers.get("cache-control") !== "no-store")
         throw new Error();
       const root = exact(payload, ["schemaVersion", "payment"]);
+      // WP-2423: `orderBatchReference` (the paid round) is absent from an older server.
+      const withRound =
+        root.payment !== null &&
+        typeof root.payment === "object" &&
+        Object.hasOwn(root.payment, "orderBatchReference");
       const raw = exact(root.payment, [
         "checkoutSessionReference",
         "paymentIntentReference",
         "orderReference",
+        ...(withRound ? ["orderBatchReference"] : []),
         "status",
         "total",
         "payBy",
@@ -75,6 +86,7 @@ export function createSessionPaymentResultClient() {
       if (raw.paymentIntentReference === null) {
         if (
           raw.orderReference !== null ||
+          (withRound && raw.orderBatchReference !== null) ||
           raw.total !== null ||
           raw.status !== "Pending" ||
           raw.payBy !== null
@@ -95,6 +107,8 @@ export function createSessionPaymentResultClient() {
         !uuid.test(raw.paymentIntentReference) ||
         typeof raw.orderReference !== "string" ||
         !uuid.test(raw.orderReference) ||
+        (withRound &&
+          (typeof raw.orderBatchReference !== "string" || !uuid.test(raw.orderBatchReference))) ||
         typeof raw.payBy !== "string" ||
         !Number.isFinite(Date.parse(raw.payBy))
       )
@@ -111,6 +125,7 @@ export function createSessionPaymentResultClient() {
         checkoutSessionReference: session,
         paymentIntentReference: raw.paymentIntentReference,
         orderReference: raw.orderReference,
+        ...(withRound ? { orderBatchReference: raw.orderBatchReference as string } : {}),
         status: raw.status as SessionPaymentResult["status"],
         total: Object.freeze({ amountMinor: total.amountMinor, currency: "CAD" as const }),
         payBy: raw.payBy,

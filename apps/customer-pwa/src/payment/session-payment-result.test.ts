@@ -184,3 +184,42 @@ it("loads read-only and reconciles only on explicit refresh, deduplicating refre
   expect(reconcile).toHaveBeenCalledExactlyOnceWith(id(1));
   expect(c.getState()).toEqual({ status: "ready", result: success });
 });
+it("WP-2423: keeps the paid round when the server names it, and rejects a malformed one", async () => {
+  const read = (payment: unknown) => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json(
+            { schemaVersion: 1, payment },
+            { headers: { "cache-control": "no-store" } },
+          ),
+        ),
+    );
+    return createSessionPaymentResultClient().read(id(1));
+  };
+  expect(await read({ ...success, orderBatchReference: id(4) })).toEqual({
+    ...success,
+    orderBatchReference: id(4),
+  });
+  for (const orderBatchReference of [null, "round-1", 4])
+    await expect(read({ ...success, orderBatchReference })).rejects.toMatchObject({
+      code: "unknown",
+    });
+  const unprepared = {
+    checkoutSessionReference: id(1),
+    paymentIntentReference: null,
+    orderReference: null,
+    status: "Pending",
+    total: null,
+    payBy: null,
+    failure: null,
+  };
+  expect(await read({ ...unprepared, orderBatchReference: null })).toMatchObject({
+    paymentIntentReference: null,
+  });
+  await expect(read({ ...unprepared, orderBatchReference: id(4) })).rejects.toMatchObject({
+    code: "unknown",
+  });
+});

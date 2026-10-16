@@ -18,6 +18,7 @@ async function setup(enabled = true) {
     checkoutSessionReference: id(31),
     paymentIntentReference: id(32),
     orderReference: id(33),
+    orderBatchReference: id(34),
     status: "Succeeded",
     total: { amountMinor: "238", currency: "CAD" },
     payBy: "2026-08-03T15:30:00.000Z",
@@ -90,6 +91,10 @@ it("rejects malformed or cross-session owner results without leaking them", asyn
     { ...f.result, extra: "private" },
     { ...f.result, total: { amountMinor: "9223372036854775808", currency: "CAD" } },
     { ...f.result, paymentIntentReference: null },
+    // WP-2423: the paid round is always named once a payment exists, and only then.
+    { ...f.result, orderBatchReference: null },
+    { ...f.result, orderBatchReference: "round-1" },
+    Object.fromEntries(Object.entries(f.result).filter(([key]) => key !== "orderBatchReference")),
   ]) {
     f.read.mockResolvedValue(result);
     const response = await f.send();
@@ -105,6 +110,7 @@ it("reports missing creation as pending and fails closed when unconfigured", asy
     checkoutSessionReference: id(31),
     paymentIntentReference: null,
     orderReference: null,
+    orderBatchReference: null,
     total: null,
     status: "Pending",
     payBy: null,
@@ -119,6 +125,7 @@ it("requires explicit same-origin JSON POST for reconciliation and rejects injec
     checkoutSessionReference: id(31),
     paymentIntentReference: null,
     orderReference: null,
+    orderBatchReference: null,
     status: "Pending",
     total: null,
     payBy: null,

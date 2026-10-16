@@ -7,15 +7,52 @@ import { createSessionPaymentResultController } from "./session-payment-result-c
 import { RetryCardPanel } from "./RetryCardPanel.js";
 import { ResumePaymentPanel } from "./ResumePaymentPanel.js";
 import { paymentConfiguration } from "./payment-configuration.js";
+import { createHttpOrderStatusClient } from "../order-status/order-status-client.js";
+import type { CustomerOrderStatusClient } from "../order-status/order-status-controller.js";
+import {
+  createRoundKitchenWatch,
+  paidIntroText,
+  type RoundKitchenState,
+} from "./round-kitchen-state.js";
 
 /** Pending and unknown results are re-checked with a growing delay, up to this many times. */
 export const paymentResultPollDelaysMs = [3_000, 5_000, 8_000, 13_000, 21_000, 30_000] as const;
 export const paymentResultPollLimit = 12;
 
+/**
+ * WP-2423: once the payment is confirmed, whether staff have sent the paid round to the kitchen,
+ * re-checked until they have. Null when there is no confirmed payment naming its round.
+ */
+function usePaidRoundKitchenState(
+  client: CustomerOrderStatusClient,
+  orderReference: string | null,
+  orderBatchReference: string | null,
+): RoundKitchenState | null {
+  const [watched, setWatched] = useState<{ key: string; state: RoundKitchenState } | null>(null);
+  const key =
+    orderReference === null || orderBatchReference === null
+      ? null
+      : orderReference + "/" + orderBatchReference;
+  useEffect(() => {
+    if (orderReference === null || orderBatchReference === null || key === null) return;
+    return createRoundKitchenWatch({
+      client,
+      orderReference,
+      orderBatchReference,
+      onChange: (state) => setWatched({ key, state }),
+    });
+  }, [client, key, orderReference, orderBatchReference]);
+  if (key === null) return null;
+  return watched?.key === key ? watched.state : "Checking";
+}
+
 export function SessionPaymentResultPage({
   store,
+  orderStatusClient,
 }: {
   readonly store?: CustomerStoreContext | undefined;
+  /** The customer order status read used to tell whether the paid round reached the kitchen. */
+  readonly orderStatusClient?: CustomerOrderStatusClient;
 }) {
   const [controller] = useState(() =>
     createSessionPaymentResultController(createSessionPaymentResultClient()),
@@ -37,6 +74,12 @@ export function SessionPaymentResultPage({
     };
   }, [controller]);
   const result = state.status === "ready" ? state.result : null;
+  const [statusClient] = useState(() => orderStatusClient ?? createHttpOrderStatusClient());
+  const kitchen = usePaidRoundKitchenState(
+    statusClient,
+    result?.status === "Succeeded" ? result.orderReference : null,
+    result?.status === "Succeeded" ? (result.orderBatchReference ?? null) : null,
+  );
   const [configuration] = useState(paymentConfiguration);
   const refresh =
     state.status === "unknown" ||
@@ -122,7 +165,7 @@ export function SessionPaymentResultPage({
       className="payment-page payment-result-page"
     >
       <PageHeading title="Check your payment">
-        <p className="payment-result-page__intro">
+        <p className="payment-result-page__intro" aria-live="polite">
           {unknown
             ? "The payment result is still being confirmed."
             : notCompleted
@@ -130,7 +173,7 @@ export function SessionPaymentResultPage({
               : result?.status === "Failed"
                 ? "Your card was declined. Nothing was charged."
                 : result?.status === "Succeeded"
-                  ? "Thank you. Your order has been sent to the kitchen."
+                  ? paidIntroText(kitchen)
                   : "Payment details come from your current checkout."}
         </p>
       </PageHeading>

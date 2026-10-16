@@ -4,6 +4,7 @@ import {
   acceptanceHoldText,
   acceptanceHoldTier,
 } from "./AcceptanceHoldActions.js";
+import { paidRoundWait, paidRoundWaitText } from "./paid-round-wait.js";
 import { OrderPaymentLinks } from "./RefundPaymentPage.js";
 import { DiningOrderProgress } from "./DiningOrderProgress.js";
 import { OrderAcceptanceAction } from "./OrderAcceptanceAction.js";
@@ -1097,6 +1098,16 @@ export function CurrentOrderQueueRows({
                           : batch.canCancelUnpaid
                             ? " Not accepted yet: the guest has not paid for this round. Ask them to finish paying on their phone (their table page has a pay button), or cancel it below."
                             : " Not accepted yet: the guest has not paid for this round. Ask them to finish paying on their phone (their table page has a pay button), or ask a manager to cancel it."}
+                    </p>
+                  ) : batch.awaitingAcceptanceSince !== null && now !== undefined ? (
+                    // WP-2423: a paid round waits for staff, never for a timer; say how long.
+                    <p role="note">
+                      <span
+                        className="order-accept-by"
+                        data-tier={paidRoundWait(batch.awaitingAcceptanceSince, now).tier}
+                      >
+                        {paidRoundWaitText(batch.awaitingAcceptanceSince, now)}
+                      </span>
                     </p>
                   ) : (
                     <p>

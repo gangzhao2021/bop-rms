@@ -25,6 +25,7 @@ const table: StaffDiningTable = {
   qrCodeValidUntil: null,
   staffRoundsAwaitingPayment: [],
   guestRoundsAwaitingPayment: [],
+  roundsAwaitingAcceptance: [],
   session: { phase: "Active", version: 4, orderReference: id(3) },
 };
 const item = (phase: string, remainingQuantity: number, n: number) => ({

@@ -12,6 +12,7 @@ import {
   seedBrandRole,
   seedSoleOperatorSetting,
   seedStepUp,
+  assertMarkNeedsSoleOperatorOn,
 } from "../test-support/sole-operator-brand-gate.mjs";
 
 const { Client } = pg;
@@ -204,6 +205,30 @@ it("allergen roster: recorder ≠ approver; the sole operator approves alone wit
         ]),
         /append-only allergen registry proposal/u,
       );
+
+      // ── 6. Defence in depth (2000_071): the database refuses a roster approval marked
+      // SoleOperator while the Brand's sole-operator setting is Off, and accepts the same
+      // approval of the recorder's own proposal once it is On.
+      brandScope.as(owner);
+      const third = await record();
+      await assertMarkNeedsSoleOperatorOn(admin, {
+        id,
+        n: 0xf000,
+        tenantReference,
+        brandReference,
+        actorReference: owner,
+        insert: () =>
+          admin.query(
+            "INSERT INTO rms_catalog.allergen_registry_version (registry_version_id,brand_id,jurisdiction_code,policy_document_digest,reviewed_at,reviewer_actor_id,status,proposal_id,recorder_actor_id,approval_mode,approver_mfa_at) SELECT registry_version_id,brand_id,jurisdiction_code,policy_document_digest,date_trunc('milliseconds',now()),recorder_actor_id,'Approved',proposal_id,recorder_actor_id,'SoleOperator',date_trunc('milliseconds',now()) FROM rms_catalog.allergen_registry_proposal WHERE proposal_id=$1",
+            [third],
+          ),
+      });
+      assert.deepEqual((await versions()).at(-1), {
+        reviewer: owner,
+        recorder: owner,
+        approval_mode: "SoleOperator",
+        mfa: true,
+      });
     } finally {
       await admin.end();
     }

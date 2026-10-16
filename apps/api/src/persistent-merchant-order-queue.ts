@@ -247,6 +247,7 @@ export function createPersistentMerchantOrderQueue(options: {
                   paidOrders: new Set<string>(),
                   paidBatches: new Set<string>(),
                   awaitingAcceptance: new Set<string>(),
+                  awaitingSince: new Map<string, string>(),
                 }
               : await listStorePaidOrderBatches(
                   businessTransaction,
@@ -748,24 +749,32 @@ export function createPersistentMerchantOrderQueue(options: {
                         outcomes: paymentOutcomes,
                         paymentStarted,
                       });
+                      const canRequestAcceptance =
+                        closed === null &&
+                        acceptanceAllowed &&
+                        payments.awaitingAcceptance.has(batch.orderBatchReference) &&
+                        batch.acceptanceStatus === "NotAccepted" &&
+                        item.currentVersion !== null &&
+                        ["Submitted", "Accepted", "InProgress", "Ready"].includes(
+                          String(item.currentPhase),
+                        ) &&
+                        // WP-2423: every paid round of a table is accepted on its own, in any
+                        // order and whatever later rounds did (submitted, paid, accepted or
+                        // cancelled); the command checks the Order's current version. A pickup
+                        // order has one round, acceptable only while nothing else changed it.
+                        (batch.sequence > 1 ||
+                          item.orderType === "DineIn" ||
+                          item.currentVersion === 1);
                       return Object.freeze({
                         ...batch,
-                        canRequestAcceptance:
-                          closed === null &&
-                          acceptanceAllowed &&
-                          payments.awaitingAcceptance.has(batch.orderBatchReference) &&
-                          batch.acceptanceStatus === "NotAccepted" &&
-                          item.currentVersion !== null &&
-                          ["Submitted", "Accepted", "InProgress", "Ready"].includes(
-                            String(item.currentPhase),
-                          ) &&
-                          // WP-2423: every paid round of a table is accepted on its own, in any
-                          // order and whatever later rounds did (submitted, paid, accepted or
-                          // cancelled); the command checks the Order's current version. A pickup
-                          // order has one round, acceptable only while nothing else changed it.
-                          (batch.sequence > 1 ||
-                            item.orderType === "DineIn" ||
-                            item.currentVersion === 1),
+                        canRequestAcceptance,
+                        // WP-2423: when a paid dine-in round staff can accept was paid. It is never
+                        // refunded automatically, so staff are warned while it waits (pickups
+                        // have their acceptance deadline, `acceptBy`).
+                        awaitingAcceptanceSince:
+                          canRequestAcceptance && item.orderType === "DineIn"
+                            ? (payments.awaitingSince.get(batch.orderBatchReference) ?? null)
+                            : null,
                         canCancel:
                           cancelAllowed &&
                           closed === null &&

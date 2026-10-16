@@ -15,6 +15,7 @@ import {
   seedSoleOperatorHistory,
   seedSoleOperatorSetting,
   seedStepUp,
+  assertMarkNeedsSoleOperatorOn,
 } from "../test-support/sole-operator-brand-gate.mjs";
 
 const { Client } = pg;
@@ -379,6 +380,28 @@ it("price book: the author publishes alone only as an in-effect, re-verified sol
         ),
         /must mark a publication/u,
       );
+
+      // ── 7. Defence in depth (2000_070): the database refuses a mark on a publication while the
+      // Brand's sole-operator setting is Off, and accepts the same mark once it is On.
+      const publishOperation = (
+        await admin.query(
+          "SELECT operation_id::text op FROM rms_pricing.price_book_operation_record WHERE price_book_id=$1 AND action_code='Publish'",
+          [bookB],
+        )
+      ).rows[0].op;
+      await assertMarkNeedsSoleOperatorOn(admin, {
+        id,
+        n: 0xf000,
+        tenantReference,
+        brandReference,
+        actorReference: owner,
+        insert: () =>
+          admin.query(
+            "INSERT INTO rms_pricing.price_book_sole_operator_approval VALUES ($1,$2,$3,'SoleOperator',$4,date_trunc('milliseconds',now()),date_trunc('milliseconds',now()),$5)",
+            [publishOperation, brandReference, bookB, noah, id(901)],
+          ),
+      });
+      assert.equal((await marks()).length, 2);
     } finally {
       await admin.end();
     }

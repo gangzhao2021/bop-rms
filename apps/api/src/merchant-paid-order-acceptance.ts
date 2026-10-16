@@ -79,6 +79,26 @@ export function createMerchantPaidOrderAcceptance(
     );
     return "sha256:" + sha256Hex(canonicalizeRfc8785(evidence));
   };
+  /**
+   * WP-2423: the paid context `current` read, kept for the `commit` that follows it in the same
+   * transaction (nothing is written in between), so one acceptance reads it once before the
+   * Order lock and once under it (`validateEligibility`), not three times.
+   */
+  let lastRead: {
+    readonly transaction: ConsumerTransaction;
+    readonly eventReference: string;
+    readonly context: Context;
+  } | null = null;
+  const resolveOnce = async (
+    transaction: ConsumerTransaction,
+    event: ReturnType<typeof parsePaymentSucceededEnvelope>,
+  ) => {
+    const kept = lastRead;
+    lastRead = null;
+    if (kept !== null && kept.transaction === transaction && kept.eventReference === event.eventId)
+      return kept.context;
+    return options.context.resolve(transaction, event);
+  };
   return Object.freeze({
     /**
      * WP-2423 (staff card-machine rounds): the batch's current Order version and acceptance, read
@@ -91,6 +111,11 @@ export function createMerchantPaidOrderAcceptance(
       if (event.tenantId !== scope.brandReference || event.storeId !== scope.storeReference)
         return unavailable();
       const current = await options.context.resolve(input.transaction, event);
+      lastRead = {
+        transaction: input.transaction,
+        eventReference: event.eventId,
+        context: current,
+      };
       const accepted = current.acceptance;
       return Object.freeze({
         orderVersion:
@@ -154,7 +179,7 @@ export function createMerchantPaidOrderAcceptance(
         event.payload.orderReference !== identity.orderReference
       )
         return unavailable();
-      const current = await options.context.resolve(input.transaction, event);
+      const current = await resolveOnce(input.transaction, event);
       const preparation = current.payment.intent.preparation;
       if (
         preparation.orderReference !== identity.orderReference ||

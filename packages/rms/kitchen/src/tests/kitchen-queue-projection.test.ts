@@ -2788,6 +2788,83 @@ describe("Kitchen queue Inbox, rebuild and negative boundaries", () => {
     ).rejects.toMatchObject({ code: "KITCHEN_QUEUE_VERSION_CONFLICT" });
   });
 
+  it("continues a later page from the generation a kitchen step just retired", async () => {
+    // A busy board reads several pages; a step between two page reads publishes a new generation.
+    // The later page comes from the first page's (now retired) generation: one consistent board.
+    const active = bundle();
+    const retired = parseKitchenQueueStoredGeneration(
+      generationValue(active.generation, { generationStatus: "Retired" }),
+    );
+    const filters = queryInput().filters;
+    const filterSortDigest = computeKitchenQueueFilterSortDigest(
+      { brandReference: id(2), storeReference: id(3), filters },
+      sha256,
+    );
+    const cursor = {
+      projectionGenerationReference: retired.projectionGenerationReference,
+      afterCreatedAt: "2026-08-08T15:00:00.000Z",
+      afterWorkItemReference: id(1),
+      filterSortDigest,
+    };
+    const read = (supersededAt: unknown) =>
+      ({
+        status: "Continued",
+        generation: retired,
+        rows: active.rows,
+        returnedCount: active.rows.length,
+        hasMore: false,
+        supersededAt,
+      }) as const;
+    const at = (observedAt: string, supersededAt: unknown) => {
+      const { ports } = harness({
+        listRead: read(supersededAt),
+        trustedAuthority: {
+          actorReference: id(80),
+          brandReference: id(2),
+          storeReference: id(3),
+          observedAt,
+        },
+      });
+      return createKitchenQueueProjectionService(ports).list(queryInput({ observedAt, cursor }));
+    };
+    const page = await at("2026-08-08T16:00:30.000Z", projectedAt);
+    expect(page.projectionGenerationReference).toBe(retired.projectionGenerationReference);
+    expect(page.items.map((item) => item.workItemReference)).toEqual(
+      active.rows.map((row) => row.workItemReference),
+    );
+    expect(page.nextCursor).toBeNull();
+    // Superseded over a minute ago: the board reads again from its first page.
+    await expect(at("2026-08-08T16:01:02.000Z", projectedAt)).rejects.toMatchObject({
+      code: "KITCHEN_QUEUE_VERSION_CONFLICT",
+    });
+    // Superseded before it was projected is not a real succession.
+    await expect(at("2026-08-08T16:00:30.000Z", createdAt)).rejects.toMatchObject({
+      code: "KITCHEN_QUEUE_VERSION_CONFLICT",
+    });
+    await expect(at("2026-08-08T16:00:30.000Z", "not-an-instant")).rejects.toMatchObject({
+      code: "KITCHEN_QUEUE_DEPENDENCY_UNAVAILABLE",
+    });
+    // A first page is never served from a retired generation.
+    const { ports } = harness({ listRead: read(projectedAt) });
+    await expect(
+      createKitchenQueueProjectionService(ports).list(queryInput()),
+    ).rejects.toMatchObject({ code: "KITCHEN_QUEUE_VERSION_CONFLICT" });
+    // An Active generation reported as continued is refused.
+    const { ports: activePorts } = harness({
+      listRead: { ...read(projectedAt), generation: active.generation },
+    });
+    await expect(
+      createKitchenQueueProjectionService(activePorts).list(
+        queryInput({
+          cursor: {
+            ...cursor,
+            projectionGenerationReference: active.generation.projectionGenerationReference,
+          },
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "KITCHEN_QUEUE_DEPENDENCY_UNAVAILABLE" });
+  });
+
   it("rejects Get rows paired with empty, future or cross-scope Active metadata", async () => {
     const active = bundle();
     const request = rebuildRequest();

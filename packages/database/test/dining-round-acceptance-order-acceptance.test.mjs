@@ -20,6 +20,7 @@ import {
   createPostgresOrderPaymentOutcomeStore,
   createPostgresOrderSubmittedConsumer,
   createPostgresStaffDiningRoundEntryStore,
+  listStorePaidDiningRoundsAwaitingAcceptance,
   parseAdditionalDiningBatchSnapshot,
 } from "../../rms/ordering/src/index.ts";
 import { createPostgresCapturedBatchPaymentSource } from "../../rms/payment/src/index.ts";
@@ -30,13 +31,11 @@ import {
   createMerchantCardMachinePayment,
   withPaidBatchAcceptance,
 } from "../../../apps/api/src/merchant-card-machine-payment.ts";
-import { createMerchantOrderAcceptanceCommand } from "../../../apps/api/src/merchant-order-acceptance-command.ts";
-import { createMerchantAcceptanceConfigurationResolver } from "../../../apps/api/src/merchant-acceptance-configuration-resolver.ts";
 import { createPersistentMerchantOrderQueue } from "../../../apps/api/src/persistent-merchant-order-queue.ts";
 import { createOrderPaidContextSource } from "../../../apps/api/src/order-paid-context-source.ts";
 import { createOrderPaidOutcomeSource } from "../../../apps/api/src/order-paid-outcome-source.ts";
-import { createAdditionalOrderPaidContextSource } from "../../../apps/api/src/additional-order-paid-context-source.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
+import { createInternalMerchantAcceptance } from "../../../tooling/environment/pilot-merchant-acceptance.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { seedAcceptanceOrderHistory } from "../test-support/acceptance-order-history.mjs";
 import { seedAdditionalDiningGuest } from "../test-support/additional-dining-guest.mjs";
@@ -139,6 +138,8 @@ it.each(["Unpaid", "Cancelled", "PaidFirst"])(
             environment: "Test",
           };
 
+          /** Statements the restricted role ran (the acceptance query budget). */
+          const queryCount = { value: 0 };
           /** One restricted-role transaction on its own connection (the pilot's grants). */
           const transactions = (role = api) => ({
             async run(work) {
@@ -150,7 +151,10 @@ it.each(["Unpaid", "Cancelled", "PaidFirst"])(
                 await client.query("SET LOCAL lock_timeout='10s'");
                 await client.query("SET LOCAL statement_timeout='20s'");
                 const result = await work({
-                  query: (sql, values) => client.query(sql, values === undefined ? [] : values),
+                  query: (sql, values) => {
+                    queryCount.value += 1;
+                    return client.query(sql, values === undefined ? [] : values);
+                  },
                 });
                 await client.query("COMMIT");
                 return result;
@@ -718,75 +722,41 @@ it.each(["Unpaid", "Cancelled", "PaidFirst"])(
           const offered = (item) =>
             item.batches.map((b) => [b.sequence, b.acceptanceStatus, b.canRequestAcceptance]);
 
-          // ── The merchant acceptance command, configured as the pilot configures it.
-          const acceptance = {
-            action: "Accept",
-            purposeCode: inventoryWorkflow.payment.purposeCode,
-          };
-          const accept = createMerchantOrderAcceptanceCommand({
-            persistence: { ...staffSession.persistence, now },
-            authentication: staffSession.authentication,
-            generateAuditReference: fresh,
-            audit: { retentionPolicyCode: "FINANCIAL_COMPLIANCE", retentionPolicyVersion: 1 },
-            resolveConfiguration: async (tx, selected, command) => {
-              const gates = {
-                authorizeResource: async (_tx, request) =>
-                  request.actorReference === frontOfHouse &&
-                  request.resourceReference === orderReference &&
-                  request.resourceVersion === command.expectedOrderVersion,
-                authorizeAction: async () => true,
-                evaluateRule: async () => true,
-                authorizeOverride: async () => false,
-              };
-              const shared = {
-                quoteVersion: 1,
-                acceptance: { ...acceptance, permissionCode: "order.accept" },
+          // ── The merchant acceptance command as the pilot composes it (its own configuration,
+          // gates and owner checks), with the fixture's Quote v1 Orders and workflow.
+          const pilotWorkflow = {
+            environment: "InternalTest",
+            database: "isolated",
+            scope: ownerScope,
+            workflow: {
+              purposeCode: inventoryWorkflow.payment.purposeCode,
+              payment: {
                 workflowVersionReference: inventoryWorkflow.payment.workflowVersionReference,
-                reasonCode: "SYNTHETIC_TEST",
-                gates,
-              };
-              return createMerchantAcceptanceConfigurationResolver({
-                now,
-                authorize: async (_tx, value) =>
-                  value.brandReference === scope.brandReference &&
-                  value.storeReference === scope.storeReference &&
-                  value.actorReference === frontOfHouse,
-                resolvePolicy: async () => ({
-                  paymentScope,
-                  initial: {
-                    ...shared,
-                    context: createOrderPaidContextSource({
-                      currentDiningAcceptance: true,
-                      scope: paymentScope,
-                      tenantReference: tenant,
-                      quoteVersion: 1,
-                      now,
-                      authorize: async (_tx, event) =>
-                        event.payload.orderReference === command.orderReference,
-                      authorizeOrder: async (_tx, current) =>
-                        current.orderReference === command.orderReference &&
-                        current.orderBatchReference === command.orderBatchReference,
-                      authorizeInventory: async () => true,
-                    }),
-                  },
-                  additional: {
-                    ...shared,
-                    context: createAdditionalOrderPaidContextSource({
-                      scope: paymentScope,
-                      tenantReference: tenant,
-                      quoteVersion: 1,
-                      now,
-                      authorize: async (_tx, event) =>
-                        event.payload.orderReference === command.orderReference,
-                      authorizeOrder: async (_tx, current) =>
-                        current.submissionReference === R2.batch.submissionReference,
-                      authorizeInventory: async (_tx, input) => input.actorReference === staffGuest,
-                    }),
-                  },
-                }),
-              })(tx, selected, command);
+              },
             },
-          });
+          };
+          const pilotAccept = await createInternalMerchantAcceptance(
+            { scope: ownerScope, credentials: { reference: fresh }, now },
+            { ...staffSession.persistence, now },
+            staffSession.authentication,
+            {
+              loadPickupWorkflow: async () => pilotWorkflow,
+              loadDiningWorkflow: async () => pilotWorkflow,
+              expectedDatabaseName: "isolated",
+              providerAccountReference: provider,
+              quoteVersion: 1,
+            },
+          );
+          /** Statements each acceptance ran (WP-2423 query budget below). */
+          const acceptStatements = [];
+          const accept = async (input, mode) => {
+            const before = queryCount.value;
+            try {
+              return await pilotAccept(input, mode);
+            } finally {
+              acceptStatements.push(queryCount.value - before);
+            }
+          };
           const session = { sessionCookie: staffSession.sessionCookie, csrf: staffSession.csrf };
           /** Staff press Accept for `round` on the Orders page (the version they see). */
           const acceptFromOrders = async (round) => {
@@ -864,6 +834,20 @@ it.each(["Unpaid", "Cancelled", "PaidFirst"])(
             [2, "NotAccepted", false],
           ]);
           assert.notEqual(before.batches[1].paymentDue, null);
+          // The paid round says when it was paid (never refunded automatically; staff are warned
+          // as it waits), on Orders and, through Ordering's own read, on the Tables page.
+          assert.match(before.batches[0].awaitingAcceptanceSince, /^\d{4}-\d{2}-\d{2}T.*Z$/u);
+          assert.equal(before.batches[1].awaitingAcceptanceSince, null);
+          const waitingRounds = await transactions().run((tx) =>
+            listStorePaidDiningRoundsAwaitingAcceptance(tx, scope, [
+              dining.session.diningSessionReference,
+            ]),
+          );
+          assert.deepEqual(
+            waitingRounds.map((round) => [round.orderBatchReference, round.roundNumber]),
+            [[R1.batch.orderBatchReference, 1]],
+          );
+          assert.equal(waitingRounds[0].paidAt, before.batches[0].awaitingAcceptanceSince);
           // Home's count and the Orders list read the same capability.
           assert.equal((await listed()).batches[0].canRequestAcceptance, true);
 
@@ -942,6 +926,15 @@ it.each(["Unpaid", "Cancelled", "PaidFirst"])(
           assert.deepEqual(await accepted(R1.batch), { expected: version, accepted: version + 1 });
           const afterOne = await queued();
           assert.equal(afterOne.batches[0].acceptanceStatus, "Accepted");
+          assert.equal(afterOne.batches[0].awaitingAcceptanceSince, null);
+          assert.deepEqual(
+            await transactions().run((tx) =>
+              listStorePaidDiningRoundsAwaitingAcceptance(tx, scope, [
+                dining.session.diningSessionReference,
+              ]),
+            ),
+            [],
+          );
           assert.equal(afterOne.batches[0].canRequestAcceptance, false);
           // Pressing Accept again (another tablet) is told it was already accepted.
           await assert.rejects(acceptFromOrders(R1.batch), {
@@ -970,6 +963,16 @@ it.each(["Unpaid", "Cancelled", "PaidFirst"])(
           assert.equal(
             final.batches.some((b) => b.canRequestAcceptance),
             false,
+          );
+
+          // ── Query budget (WP-2423, v15 order 9: each Accept took ~2.4 s). The caller is resolved
+          // in full at the start and before the commit; the owner checks inside take the run's
+          // guard, and the paid context is read once before the Order lock and once under it.
+          // Measured 2026-10-16: 235 (round 1 from Orders) and 275 (round 2 after the card machine);
+          // re-resolving the caller in every owner check cost 1,590 and 2,554.
+          assert.ok(
+            acceptStatements.every((count) => count <= 300),
+            "acceptance statements " + JSON.stringify(acceptStatements),
           );
 
           // ── The kitchen gets round 1: Ordering confirms its payment at the acceptance version

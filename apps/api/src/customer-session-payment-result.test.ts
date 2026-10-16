@@ -144,6 +144,7 @@ it("waits for committed terminal evidence even when a Provider snapshot exists",
   expect(Object.keys(result).sort()).toEqual([
     "checkoutSessionReference",
     "failure",
+    "orderBatchReference",
     "orderReference",
     "payBy",
     "paymentIntentReference",
@@ -151,6 +152,9 @@ it("waits for committed terminal evidence even when a Provider snapshot exists",
     "total",
   ]);
   expect(result.failure).toBeNull();
+  expect(result.orderBatchReference).toBe(
+    String(f.original.record.intent.preparation.orderBatchReference),
+  );
   expect(result.payBy).toBe(String(f.original.record.intent.preparation.capacityExpiresAt));
   expect(JSON.stringify(result)).not.toContain("pi_");
 });

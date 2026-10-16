@@ -10,6 +10,7 @@ import {
 import {
   createPostgresStaffDiningRoundEntryStore,
   listStoreDiningSessionOrders,
+  listStorePaidDiningRoundsAwaitingAcceptance,
   listStoreUnpaidGuestDiningRounds,
 } from "@rms/ordering";
 import { createPostgresCardMachinePaymentStore } from "@rms/payment";
@@ -225,6 +226,22 @@ export function createMerchantDiningTables(options: {
                 payBy: round.payBy,
               },
             ]);
+          // WP-2423 (v15 2026-10-16): paid rounds staff have not accepted yet. A paid dine-in round
+          // is never refunded automatically, so the table shows how long it has waited. One read
+          // for every open session on the page.
+          const paidAwaitingAcceptance = new Map<
+            string,
+            { roundNumber: number; paidAt: string }[]
+          >();
+          for (const round of await listStorePaidDiningRoundsAwaitingAcceptance(
+            tx as unknown as Parameters<typeof listStorePaidDiningRoundsAwaitingAcceptance>[0],
+            scoped,
+            activeReferences,
+          ))
+            paidAwaitingAcceptance.set(round.diningSessionReference, [
+              ...(paidAwaitingAcceptance.get(round.diningSessionReference) ?? []),
+              { roundNumber: round.roundNumber, paidAt: round.paidAt },
+            ]);
           // WP-2423 D4: closing a table's session from this page — offered to staff who may close
           // both the session and its Order, with the session's Order (one read for every open
           // session) so the close dialog checks its rounds when it is opened, not on every poll.
@@ -277,6 +294,14 @@ export function createMerchantDiningTables(options: {
                     (table.activeDiningSessionReference === null
                       ? []
                       : (unpaidGuestRounds.get(table.activeDiningSessionReference) ?? [])
+                    )
+                      .slice(0, 20)
+                      .map((round) => Object.freeze({ ...round })),
+                  ),
+                  roundsAwaitingAcceptance: Object.freeze(
+                    (table.activeDiningSessionReference === null
+                      ? []
+                      : (paidAwaitingAcceptance.get(table.activeDiningSessionReference) ?? [])
                     )
                       .slice(0, 20)
                       .map((round) => Object.freeze({ ...round })),

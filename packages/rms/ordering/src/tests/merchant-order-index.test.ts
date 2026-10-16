@@ -313,8 +313,13 @@ it("WP-2423 Q1: reads recorded payments and batches awaiting acceptance for the 
       rows: sql.startsWith("SELECT set_config")
         ? []
         : [
-            { order_id: id(3), order_batch_id: id(13), awaiting: true },
-            { order_id: id(4), order_batch_id: id(14), awaiting: false },
+            {
+              order_id: id(3),
+              order_batch_id: id(13),
+              awaiting: true,
+              since: "2026-10-16T14:50:00.000Z",
+            },
+            { order_id: id(4), order_batch_id: id(14), awaiting: false, since: null },
           ],
       rowCount: 2,
     }),
@@ -324,6 +329,8 @@ it("WP-2423 Q1: reads recorded payments and batches awaiting acceptance for the 
   expect([...result.paidOrders]).toEqual([id(3), id(4)]);
   expect([...result.awaitingAcceptance]).toEqual([id(13)]);
   expect([...result.paidBatches]).toEqual([id(13), id(14)]);
+  // WP-2423: when each batch awaiting acceptance was recorded as paid (the staff wait warning).
+  expect([...result.awaitingSince]).toEqual([[id(13), "2026-10-16T14:50:00.000Z"]]);
   expect(query.mock.calls[1]?.[0]).toContain("order_payment_acceptance_wait");
   expect(query.mock.calls[1]?.[1]).toEqual([
     scope.brandReference,
@@ -332,7 +339,14 @@ it("WP-2423 Q1: reads recorded payments and batches awaiting acceptance for the 
   ]);
   // A row for an Order that was not asked for is a scope failure, not data.
   query.mockResolvedValueOnce({ rows: [], rowCount: 0 }).mockResolvedValueOnce({
-    rows: [{ order_id: id(9), order_batch_id: id(19), awaiting: true }],
+    rows: [
+      {
+        order_id: id(9),
+        order_batch_id: id(19),
+        awaiting: true,
+        since: "2026-10-16T14:50:00.000Z",
+      },
+    ],
     rowCount: 1,
   });
   await expect(listStorePaidOrderBatches(tx, scope, [id(3)])).rejects.toThrow(
@@ -342,7 +356,16 @@ it("WP-2423 Q1: reads recorded payments and batches awaiting acceptance for the 
     paidOrders: new Set(),
     paidBatches: new Set(),
     awaitingAcceptance: new Set(),
+    awaitingSince: new Map(),
   });
+  // An awaiting batch without its paid time is not data.
+  query.mockResolvedValueOnce({ rows: [], rowCount: 0 }).mockResolvedValueOnce({
+    rows: [{ order_id: id(3), order_batch_id: id(13), awaiting: true, since: null }],
+    rowCount: 1,
+  });
+  await expect(listStorePaidOrderBatches(tx, scope, [id(3)])).rejects.toThrow(
+    "MERCHANT_ORDER_INDEX_UNAVAILABLE",
+  );
 });
 it("WP-2423 Q2: names many Orders for the kitchen without Customer identity", async () => {
   const query = vi.fn<(sql: string, values?: readonly unknown[]) => Promise<unknown>>(

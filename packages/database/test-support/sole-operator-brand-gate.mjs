@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { URL } from "node:url";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
@@ -159,6 +160,26 @@ export async function seedSoleOperatorHistory(
     });
   }
   return version;
+}
+
+/**
+ * WP-2423 defence in depth (2000_067/068 for Store configuration and receipt template, 2000_070 to
+ * 2000_073 for price book, menu, allergen roster, recipe and option-recipe reviews and escalated
+ * ordinary refunds): the database itself refuses a sole-operator mark while the Brand's setting is
+ * Off, and accepts the same mark once it is On again. `insert` writes one otherwise valid mark
+ * (owner client, so only the guard decides) stamped with the database's current time. The setting
+ * continues the Brand's history (test-controlled, owner-seeded); `n` reserves three references per
+ * version. Ends with the setting On.
+ */
+export async function assertMarkNeedsSoleOperatorOn(
+  admin,
+  { id, n, tenantReference, brandReference, actorReference, insert },
+) {
+  const history = { id, n, tenantReference, brandReference, actorReference, atLeast: 0 };
+  await seedSoleOperatorHistory(admin, { ...history, latest: "Off" });
+  await assert.rejects(insert(), /needs sole operator on/u);
+  await seedSoleOperatorHistory(admin, { ...history, latest: "On" });
+  await insert();
 }
 
 let timeStep = 100;

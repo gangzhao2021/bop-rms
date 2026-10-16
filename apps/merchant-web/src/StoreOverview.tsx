@@ -3,8 +3,10 @@ import { Link } from "react-router";
 import {
   createCurrentOrderQueueClient,
   ordersAwaitingAcceptance,
+  roundsAwaitingAcceptance,
   type CurrentOrderQueue,
 } from "./current-order-queue-client.js";
+import { awaitingAcceptanceText, paidRoundUrgentMinutes } from "./paid-round-wait.js";
 import { createOrderExceptionClient } from "./order-exception-client.js";
 import { parseOrderExceptionView, type OrderExceptionView } from "./OrderExceptionPage.js";
 import { createPickupClient } from "./pickup-client.js";
@@ -16,6 +18,9 @@ import { OperationsAlerts } from "./OperationsAlerts.js";
 export interface OrdersSummary {
   readonly open: number;
   readonly awaitingAcceptance: number;
+  /** WP-2423: rounds awaiting acceptance (a table may have several) and paid ones waiting long. */
+  readonly awaitingRounds: number;
+  readonly urgentRounds: number;
   /**
    * Open dine-in orders (tables) with food the kitchen marked ready that nobody served yet, in any
    * round — the Tables page's rule, so a ready round counts even while another round waits for
@@ -40,12 +45,15 @@ export interface ExceptionsSummary {
 /** WP-2423 Q1: the home page re-reads its summaries this often. */
 export const OVERVIEW_REFRESH_MS = 30_000;
 const openPhases = new Set(["Submitted", "Accepted", "InProgress", "Ready"]);
-export function summarizeOrders(queue: CurrentOrderQueue): OrdersSummary {
+export function summarizeOrders(queue: CurrentOrderQueue, now = Date.now()): OrdersSummary {
   const open = queue.items.filter((order) => openPhases.has(order.currentPhase ?? ""));
   const dineIn = open.filter((order) => order.orderType === "DineIn");
+  const rounds = roundsAwaitingAcceptance(queue, now, paidRoundUrgentMinutes);
   return {
     open: open.length,
     awaitingAcceptance: ordersAwaitingAcceptance(queue),
+    awaitingRounds: rounds.rounds,
+    urgentRounds: rounds.urgentRounds,
     readyToServe: dineIn.filter((order) =>
       // An older server sends no count: then only an Order that is Ready as a whole.
       order.readyToServeItemCount === null
@@ -162,8 +170,11 @@ export function OverviewToday({
           read={state.orders}
           value={(o) => count(o.open, o.more)}
           detail={(o) =>
-            `${o.awaitingAcceptance} awaiting acceptance` +
-            (o.dineIn ? ` · ${o.readyToServe} ready to serve` : "")
+            awaitingAcceptanceText({
+              orders: o.awaitingAcceptance,
+              rounds: o.awaitingRounds,
+              urgentRounds: o.urgentRounds,
+            }) + (o.dineIn ? ` · ${o.readyToServe} ready to serve` : "")
           }
           href="/operations/orders"
           linkLabel="View orders"

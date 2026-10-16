@@ -74,7 +74,8 @@ export async function restoreCustomerSession(
       headers: { "x-bop-session-bootstrap": "1" },
       signal: AbortSignal.timeout(5000),
     });
-    // 204: this browser has no Guest Session yet (a first visit); there is nothing to restore.
+    // 204: this browser has no Guest Session yet (a first visit), or its visit ended or expired;
+    // there is nothing to restore and no token is issued.
     if (
       !current() ||
       response.status !== 200 ||

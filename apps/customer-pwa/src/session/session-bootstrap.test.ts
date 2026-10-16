@@ -181,7 +181,7 @@ it("WP-2423 Q10: restores the Session's current order and rejects malformed or p
   }
 });
 
-it("treats a first visit (204, no Guest Session yet) as nothing to restore", async () => {
+it("treats a first visit or an ended visit (204, no usable Guest Session) as nothing to restore", async () => {
   const fetcher = vi
     .fn()
     .mockResolvedValue(

@@ -46,6 +46,7 @@ import { standardRefundRoleMapping } from "../../../tooling/environment/pilot-re
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { seedOrdinaryRefundStorePublication } from "../test-support/ordinary-refund-store-publication.mjs";
 import { createPaidPickupOrderSeeder } from "../test-support/ordinary-refund-paid-pickup-order.mjs";
+import { assertMarkNeedsSoleOperatorOn } from "../test-support/sole-operator-brand-gate.mjs";
 
 // Only the browser-session lookup is a test double: the cookie names which synthetic staff member
 // is signed in at the selected Store (and, for Brand actions, the Brand). Organization, Membership,
@@ -1145,6 +1146,70 @@ it("sole operator: set by the Brand Owner, self-approval with MFA, lapse on a se
           day.refunded.amountMinor,
         ],
         [online.paymentCount, online.collectedMinor, online.refundCount, online.refundsMinor],
+      );
+
+      // ── 13. Defence in depth (2000_073), after the reports so they are unaffected: the database
+      // refuses an approval or a withdrawal marked SoleOperator while the Brand's sole-operator
+      // setting is Off (version 14 here), and accepts the same record once it is On. Owner-seeded
+      // copies (fresh references and times) of the self-approval of step 6 and of the Owner's
+      // own request and withdrawal of step 8.
+      const guard = { id, n: 0xf000, tenantReference: tenant, brandReference: brand };
+      const [guardApproval, guardApprovalOperation, guardApprovalAudit] = [
+        fresh(),
+        fresh(),
+        fresh(),
+      ];
+      await assertMarkNeedsSoleOperatorOn(admin, {
+        ...guard,
+        actorReference: owner,
+        insert: () =>
+          admin.query(
+            "INSERT INTO rms_payment.ordinary_refund_approval (tenant_id,brand_id,store_id,order_id,request_id,approval_id,operation_id,requester_id,approver_id,audit_id,claim_version,approved_at,requester_mfa_at,approver_mfa_at,claims_digest,allocation_digest,record_json,approval_mode) " +
+              "SELECT a.tenant_id,a.brand_id,a.store_id,a.order_id,a.request_id,$2::uuid,$3::uuid,a.requester_id,a.approver_id,$4::uuid,a.claim_version,t.at,t.at,t.at,a.claims_digest,a.allocation_digest," +
+              "a.record_json || jsonb_build_object('approvalReference',$2::text,'approvedAt',t.text,'requesterMfaAt',t.text,'approverMfaAt',t.text),'SoleOperator' " +
+              "FROM rms_payment.ordinary_refund_approval a CROSS JOIN (SELECT n AS at,to_char(n AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS text FROM (SELECT date_trunc('milliseconds',now()) AS n) x) t WHERE a.approval_id=$1",
+            [
+              firstApproval.approvalReference,
+              guardApproval,
+              guardApprovalOperation,
+              guardApprovalAudit,
+            ],
+          ),
+      });
+      const [guardRequest, guardRequestOperation, guardRequestAudit] = [fresh(), fresh(), fresh()];
+      await admin.query(
+        "INSERT INTO rms_payment.ordinary_refund_request (tenant_id,brand_id,store_id,order_id,request_id,operation_id,actor_id,audit_id,claim_version,amount_minor,requested_at,record_json) " +
+          "SELECT r.tenant_id,r.brand_id,r.store_id,r.order_id,$2::uuid,$3::uuid,r.actor_id,$4::uuid,c.v,r.amount_minor,r.requested_at," +
+          "r.record_json || jsonb_build_object('requestReference',$2::text,'operationReference',$3::text,'auditReference',$4::text,'expectedClaimVersion',(c.v-1)::text) " +
+          "FROM rms_payment.ordinary_refund_request r CROSS JOIN LATERAL (SELECT max(x.claim_version)+1 AS v FROM rms_payment.ordinary_refund_request x WHERE x.brand_id=r.brand_id AND x.store_id=r.store_id AND x.order_id=r.order_id) c WHERE r.request_id=$1",
+        [secondRequest.requestReference, guardRequest, guardRequestOperation, guardRequestAudit],
+      );
+      const [guardDecline, guardDeclineOperation, guardDeclineAudit] = [fresh(), fresh(), fresh()];
+      await assertMarkNeedsSoleOperatorOn(admin, {
+        ...guard,
+        actorReference: owner,
+        insert: () =>
+          admin.query(
+            "INSERT INTO rms_payment.ordinary_refund_decline (tenant_id,brand_id,store_id,order_id,request_id,decline_id,operation_id,requester_id,decliner_id,reason_code,claim_count,declined_at,decliner_mfa_at,audit_id,decline_mode) " +
+              "SELECT d.tenant_id,d.brand_id,d.store_id,d.order_id,$2::uuid,$3::uuid,$4::uuid,d.requester_id,d.decliner_id,d.reason_code,d.claim_count,t.at,t.at,$5::uuid,'SoleOperator' " +
+              "FROM rms_payment.ordinary_refund_decline d CROSS JOIN (SELECT date_trunc('milliseconds',now()) AS at) t WHERE d.request_id=$1",
+            [
+              secondRequest.requestReference,
+              guardRequest,
+              guardDecline,
+              guardDeclineOperation,
+              guardDeclineAudit,
+            ],
+          ),
+      });
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT (SELECT approval_mode FROM rms_payment.ordinary_refund_approval WHERE approval_id=$1) AS approval,(SELECT decline_mode FROM rms_payment.ordinary_refund_decline WHERE decline_id=$2) AS decline",
+            [guardApproval, guardDecline],
+          )
+        ).rows[0],
+        { approval: "SoleOperator", decline: "SoleOperator" },
       );
     } finally {
       await admin.end();

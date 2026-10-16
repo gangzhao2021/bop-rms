@@ -451,6 +451,11 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       // WP-2423 abandoned payment: absent from an older server (no cancel action then).
       const withCancelUnpaid =
         value !== null && typeof value === "object" && Object.hasOwn(value, "canCancelUnpaid");
+      // WP-2423 (v15 2026-10-16): absent from an older server (no wait warning then).
+      const withWaitingSince =
+        value !== null &&
+        typeof value === "object" &&
+        Object.hasOwn(value, "awaitingAcceptanceSince");
       const batch = exact(value, [
         "orderBatchReference",
         "sequence",
@@ -462,7 +467,9 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         ...(withPaymentDue ? ["paymentDue"] : []),
         ...(withStaffRound ? ["staffRound"] : []),
         ...(withCancelUnpaid ? ["canCancelUnpaid"] : []),
+        ...(withWaitingSince ? ["awaitingAcceptanceSince"] : []),
       ]);
+      const awaitingAcceptanceSince = withWaitingSince ? batch.awaitingAcceptanceSince : null;
       const canCancelUnpaid = withCancelUnpaid ? batch.canCancelUnpaid : false;
       const staffRound = parseStaffRound(batch.staffRound ?? null, item.orderType);
       const orderBatchReference = reference(batch.orderBatchReference);
@@ -480,6 +487,13 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
             batch.canCancelItems !== false)) ||
         (item.awaitingPayment === true && batch.canRequestAcceptance !== false) ||
         typeof canCancelUnpaid !== "boolean" ||
+        // Only a paid dine-in round staff can accept now says when it was paid.
+        (awaitingAcceptanceSince !== null &&
+          (typeof awaitingAcceptanceSince !== "string" ||
+            !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(awaitingAcceptanceSince) ||
+            !Number.isFinite(Date.parse(awaitingAcceptanceSince)) ||
+            item.orderType !== "DineIn" ||
+            batch.canRequestAcceptance !== true)) ||
         (canCancelUnpaid && paymentDue === null) ||
         typeof batch.sequence !== "number" ||
         !Number.isSafeInteger(batch.sequence) ||
@@ -548,6 +562,8 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         canCancelUnpaid: canCancelUnpaid as boolean,
         /** WP-2423 Q7 slice 2: staff entered this round for the table; its card-machine payment. */
         staffRound,
+        /** WP-2423: when this paid dine-in round, awaiting acceptance, was paid (else null). */
+        awaitingAcceptanceSince: awaitingAcceptanceSince as string | null,
       });
     });
     const counter = parseCounter(item.counter, item.sourceChannel);
@@ -648,6 +664,27 @@ export function isAwaitingAcceptance(order: CurrentOrderQueue["items"][number]):
 }
 export function ordersAwaitingAcceptance(view: Pick<CurrentOrderQueue, "items">): number {
   return view.items.filter(isAwaitingAcceptance).length;
+}
+/**
+ * WP-2423 (v15 2026-10-16): rounds awaiting acceptance across the orders, and how many of them are
+ * paid dine-in rounds that waited `urgentMinutes` or longer (Home's count).
+ */
+export function roundsAwaitingAcceptance(
+  view: Pick<CurrentOrderQueue, "items">,
+  now: number,
+  urgentMinutes: number,
+): { readonly rounds: number; readonly urgentRounds: number } {
+  const batches = view.items.flatMap((order) =>
+    order.batches.filter((batch) => batch.canRequestAcceptance),
+  );
+  return {
+    rounds: batches.length,
+    urgentRounds: batches.filter(
+      (batch) =>
+        batch.awaitingAcceptanceSince !== null &&
+        now - Date.parse(batch.awaitingAcceptanceSince) >= urgentMinutes * 60_000,
+    ).length,
+  };
 }
 const money = (value: unknown) => {
   const raw = exact(value, ["amountMinor", "currencyCode"]);

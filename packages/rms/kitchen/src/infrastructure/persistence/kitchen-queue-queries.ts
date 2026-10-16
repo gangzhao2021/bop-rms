@@ -5,6 +5,7 @@ import {
   parseKitchenQueueGetQuery,
   parseKitchenQueueRow,
   parseKitchenQueueStoredGeneration,
+  type KitchenQueueStoredGeneration,
 } from "../../domain/kitchen-queue-projection.js";
 import { parseKitchenTicketReference } from "../../domain/kitchen-ticket.js";
 import type {
@@ -144,6 +145,50 @@ export function createPostgresKitchenQueueQueries(options: {
         }
         const f = query.filters,
           cursor = query.cursor;
+        // A later page continues the generation its first page came from, so a board over one page
+        // reads as one consistent snapshot even when a kitchen step publishes a new generation
+        // between page reads. A retired generation keeps its rows (append-only); it is served only
+        // with the instant it was superseded, and the service bounds how long after that it may be.
+        let pinned: KitchenQueueStoredGeneration = active,
+          supersededAt: string | null = null;
+        if (
+          cursor !== null &&
+          cursor.projectionGenerationReference !== active.projectionGenerationReference
+        ) {
+          const retired = await tx.query(
+            "SELECT " +
+              generationSelect +
+              " FROM rms_kitchen.kitchen_work_queue_projection_generation WHERE brand_id=$1 AND store_id=$2" +
+              " AND projection_name='kitchen_work_queue_v1' AND projection_version=1 AND projection_generation_id=$3" +
+              " AND generation_status='Retired' LIMIT 2",
+            [brand, store, cursor.projectionGenerationReference],
+          );
+          if (retired.rows.length > 1) return unavailable();
+          const found = retired.rows[0];
+          // Unknown generation: read the active one; the service answers Conflict for the cursor.
+          if (found !== undefined) {
+            pinned = generationValue(found);
+            if (
+              pinned.brandReference !== brand ||
+              pinned.storeReference !== store ||
+              pinned.generationStatus !== "Retired" ||
+              pinned.projectionGenerationReference !== cursor.projectionGenerationReference
+            )
+              return unavailable();
+            const successor = await tx.query(
+              "SELECT projected_at FROM rms_kitchen.kitchen_work_queue_projection_generation" +
+                " WHERE brand_id=$1 AND store_id=$2 AND projection_name='kitchen_work_queue_v1' AND projection_version=1" +
+                " AND generation_status<>'Building' AND (projected_at,projection_generation_id)>($3::timestamptz,$4::uuid)" +
+                " ORDER BY projected_at,projection_generation_id LIMIT 1",
+              [brand, store, pinned.projectedAt, pinned.projectionGenerationReference],
+            );
+            const next = successor.rows[0]?.projected_at;
+            const at = next instanceof Date ? next.getTime() : Number.NaN;
+            if (!Number.isFinite(at)) return unavailable();
+            const instant = new Date(at).toISOString();
+            supersededAt = instant;
+          }
+        }
         const result = await tx.query(
           "SELECT " +
             rowSelect +
@@ -156,7 +201,7 @@ export function createPostgresKitchenQueueQueries(options: {
           [
             brand,
             store,
-            active.projectionGenerationReference,
+            pinned.projectionGenerationReference,
             f.orderReference,
             f.ticketReference,
             f.workItemReference,
@@ -174,12 +219,21 @@ export function createPostgresKitchenQueueQueries(options: {
             (row) =>
               row.brandReference !== brand ||
               row.storeReference !== store ||
-              row.projectionGenerationReference !== active.projectionGenerationReference,
+              row.projectionGenerationReference !== pinned.projectionGenerationReference,
           )
         )
           return unavailable();
         await authorize(tx, query);
         const rows = parsed.slice(0, query.limit);
+        if (supersededAt !== null)
+          return {
+            status: "Continued",
+            generation: pinned,
+            rows,
+            returnedCount: rows.length,
+            hasMore: parsed.length > query.limit,
+            supersededAt,
+          };
         return {
           status: "Found",
           generation: active,

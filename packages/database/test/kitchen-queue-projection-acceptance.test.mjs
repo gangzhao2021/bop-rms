@@ -10,7 +10,10 @@ import {
   generationValue,
   rowValue,
 } from "../../rms/kitchen/src/infrastructure/persistence/kitchen-queue-queries.ts";
-import { createPostgresKitchenQueueQueries } from "../../rms/kitchen/src/index.ts";
+import {
+  createKitchenQueueProjectionService,
+  createPostgresKitchenQueueQueries,
+} from "../../rms/kitchen/src/index.ts";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1165,6 +1168,39 @@ it("reads current-schema Kitchen queue through the owner adapter", async () => {
       assert.equal(missingReference.status, "Found");
       assert.equal(missingReference.returnedCount, 0);
       assert.deepEqual(missingReference.rows, []);
+      // WP-2423: a later page continues the generation its cursor came from after a kitchen step
+      // superseded it (one consistent board); the successor's projection time is reported.
+      const continuation = {
+        ...query,
+        cursor: {
+          projectionGenerationReference: id(200),
+          afterCreatedAt: "2000-01-01T00:00:00.000Z",
+          afterWorkItemReference: id(1),
+          filterSortDigest: hash("synthetic-filter"),
+        },
+      };
+      const continued = await read((transaction) =>
+        queries.list({ transaction, query: continuation }),
+      );
+      assert.equal(continued.status, "Continued");
+      assert.equal(continued.generation.projectionGenerationReference, id(200));
+      assert.equal(continued.generation.generationStatus, "Retired");
+      assert.equal(continued.supersededAt, rebuilt.generation.projectedAt);
+      assert.equal(continued.returnedCount, 1);
+      assert.equal(continued.rows[0].projectionGenerationReference, id(200));
+      assert.equal(continued.rows[0].workItemReference, source.kitchenWorkItemId);
+      // An unknown generation is read against the active one (the service answers Conflict).
+      const unknown = await read((transaction) =>
+        queries.list({
+          transaction,
+          query: {
+            ...continuation,
+            cursor: { ...continuation.cursor, projectionGenerationReference: id(999) },
+          },
+        }),
+      );
+      assert.equal(unknown.status, "Found");
+      assert.equal(unknown.generation.projectionGenerationReference, id(300));
       const hidden = await read((transaction) => queries.list({ transaction, query }), id(3));
       assert.deepEqual(hidden, { status: "NoActive" });
       allowed = false;
@@ -1172,6 +1208,186 @@ it("reads current-schema Kitchen queue through the owner adapter", async () => {
         read((transaction) => queries.list({ transaction, query })),
         { code: "KITCHEN_QUEUE_PERMISSION_DENIED" },
       );
+    } finally {
+      await client.query("ROLLBACK").catch(() => undefined);
+      await client.query("RESET ROLE").catch(() => undefined);
+      if (roleCreated) {
+        await client.query("DROP OWNED BY " + role);
+        await client.query("DROP ROLE " + role);
+      }
+      await client.end();
+    }
+  });
+}, 180_000);
+
+it("reads a board over one page as one snapshot when a kitchen step lands between page reads", async () => {
+  // WP-2423 (v15 2026-10-16): every kitchen step publishes a new queue generation, so a board of
+  // more than 50 items read page by page got a 409 on page 2 whenever a step landed in between.
+  // Under the restricted read role, through the real Kitchen query service and owner adapter: the
+  // later page continues the generation the first page came from while that is recent, and only
+  // a cursor superseded over a minute ago is a Conflict (the board reads from its first page).
+  await withIsolatedDatabase({ caseId: "wp2423_queue_pages", root }, async (context) => {
+    const client = new Client(context.clientConfig);
+    const role = "bop_wp2423_pages_" + context.runId;
+    await client.connect();
+    let roleCreated = false;
+    try {
+      const source = await seedSource(client);
+      const items = [source.kitchenWorkItemId];
+      for (let index = 2; index <= 60; index++) {
+        const workItem = id(1000 + index);
+        items.push(workItem);
+        await client.query(
+          `INSERT INTO rms_kitchen.kitchen_work_item (
+             kitchen_work_item_id,brand_id,store_id,kitchen_ticket_id,order_id,order_batch_id,
+             order_item_id,source_evidence_id,work_plan_id,source_item_ordinal,split_ordinal,
+             version,status,required_quantity,completed_quantity,product_id,product_version_id,
+             sku_id,menu_version_id,localized_display_names_json,selected_options_json,
+             source_line_digest,station_id,routing_rule_id,routing_rule_version,routing_rule_digest,
+             preparation_id,preparation_version,preparation_digest,preparation_instructions_json,
+             execution_snapshot_digest,created_by_actor_type,updated_by_actor_type,created_at,updated_at
+           ) SELECT $1,brand_id,store_id,kitchen_ticket_id,order_id,order_batch_id,$2,
+             source_evidence_id,work_plan_id,$3,split_ordinal,version,status,required_quantity,
+             completed_quantity,product_id,product_version_id,sku_id,menu_version_id,
+             localized_display_names_json,selected_options_json,source_line_digest,station_id,
+             routing_rule_id,routing_rule_version,routing_rule_digest,preparation_id,
+             preparation_version,preparation_digest,preparation_instructions_json,
+             execution_snapshot_digest,created_by_actor_type,updated_by_actor_type,created_at,updated_at
+           FROM rms_kitchen.kitchen_work_item WHERE kitchen_work_item_id=$4`,
+          [workItem, id(2000 + index), index, source.kitchenWorkItemId],
+        );
+      }
+      const publish = async (generationRow, status) => {
+        await insertRow(client, "kitchen_work_queue_projection_generation", generationRow);
+        for (const [index, workItem] of items.entries())
+          await insertRow(
+            client,
+            "kitchen_work_queue_projection",
+            queueRow(source, generationRow, {
+              kitchen_work_item_id: workItem,
+              order_item_id: index === 0 ? source.orderItemId : id(2001 + index),
+              source_item_ordinal: index + 1,
+              status: status(index),
+              accepted_at: status(index) === "Queued" ? null : generationRow.as_of_utc,
+            }),
+          );
+      };
+      const counts = { ticket_count: 1, work_item_count: 60, initialized_empty: false };
+      await publish(generation({ ...counts, projection_generation_id: id(100) }), () => "Queued");
+      await client.query(
+        "CREATE ROLE " + role + " NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT",
+      );
+      roleCreated = true;
+      await client.query("GRANT USAGE ON SCHEMA rms_kitchen,platform_helpers TO " + role);
+      await client.query(
+        "GRANT EXECUTE ON FUNCTION platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO " +
+          role,
+      );
+      await client.query(
+        "GRANT SELECT ON rms_kitchen.kitchen_work_queue_projection_generation,rms_kitchen.kitchen_work_queue_projection TO " +
+          role,
+      );
+      const hash = (value) => "sha256:" + createHash("sha256").update(value).digest("hex");
+      const unavailable = async () => {
+        throw new Error("not used by a queue read");
+      };
+      const read = async (observedAt, cursor) => {
+        const authority = {
+          actorReference: id(99),
+          brandReference: id(1),
+          storeReference: id(2),
+          observedAt,
+        };
+        await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+        try {
+          await setLockScope(client, id(1), id(2));
+          await client.query("SET LOCAL ROLE " + role);
+          const tx = { query: (sql, values) => client.query(sql, [...values]) };
+          const service = createKitchenQueueProjectionService({
+            authorization: { authorize: async () => true },
+            trustedContext: { resolveQueryAuthority: async () => authority },
+            transactions: { withTransaction: (work) => work(tx) },
+            tenantContext: { install: async () => undefined },
+            queries: createPostgresKitchenQueueQueries({
+              brandReference: id(1),
+              storeReference: id(2),
+              authorize: async () => true,
+            }),
+            locks: { acquireStoreProjection: unavailable },
+            checkpoints: {
+              compareIncremental: unavailable,
+              compareRebuild: unavailable,
+              compareLifecycleIncremental: unavailable,
+            },
+            sources: {
+              loadIncremental: unavailable,
+              loadRebuild: unavailable,
+              loadLifecycleIncremental: unavailable,
+            },
+            projections: {
+              loadActive: unavailable,
+              loadByRebuildReference: unavailable,
+              replaceActive: unavailable,
+            },
+            references: { nextGenerationReference: unavailable },
+            clock: { now: () => observedAt },
+            digests: { sha256: hash },
+          });
+          const result = await service.list({
+            ...authority,
+            filters: {
+              orderReference: null,
+              ticketReference: null,
+              workItemReference: null,
+              stationReference: null,
+              status: null,
+            },
+            cursor,
+            limit: 50,
+          });
+          await client.query("COMMIT");
+          return result;
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        }
+      };
+      const first = await read("2026-08-09T14:00:20.000Z", null);
+      assert.equal(first.projectionGenerationReference, id(100));
+      assert.equal(first.items.length, 50);
+      assert.notEqual(first.nextCursor, null);
+      // A cook starts the first item: the step retires generation 100 and activates 200.
+      await client.query("BEGIN");
+      await client.query(
+        "UPDATE rms_kitchen.kitchen_work_queue_projection_generation SET generation_status='Retired' WHERE projection_generation_id=$1",
+        [id(100)],
+      );
+      await publish(
+        generation({
+          ...counts,
+          projection_generation_id: id(200),
+          source_checkpoint_reference: id(201),
+          as_of_utc: "2026-08-09T14:00:29.000Z",
+          projected_at: "2026-08-09T14:00:30.000Z",
+        }),
+        (index) => (index === 0 ? "In Progress" : "Queued"),
+      );
+      await client.query("COMMIT");
+      const second = await read("2026-08-09T14:00:31.000Z", first.nextCursor);
+      assert.equal(second.projectionGenerationReference, id(100));
+      assert.equal(second.items.length, 10);
+      assert.equal(second.nextCursor, null);
+      assert.deepEqual(
+        [...first.items, ...second.items].map((item) => item.workItemReference),
+        [...items].sort(),
+      );
+      // The next poll reads the current generation from its first page.
+      const fresh = await read("2026-08-09T14:00:32.000Z", null);
+      assert.equal(fresh.projectionGenerationReference, id(200));
+      // A page cursor of a generation superseded over a minute ago is a Conflict.
+      await assert.rejects(read("2026-08-09T14:01:31.000Z", first.nextCursor), {
+        code: "KITCHEN_QUEUE_VERSION_CONFLICT",
+      });
     } finally {
       await client.query("ROLLBACK").catch(() => undefined);
       await client.query("RESET ROLE").catch(() => undefined);

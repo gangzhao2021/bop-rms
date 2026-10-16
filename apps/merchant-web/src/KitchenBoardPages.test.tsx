@@ -13,6 +13,7 @@ import {
   matchesKitchenOrderSearch,
   kitchenBoardSearch,
   earlierDaySearchText,
+  kitchenSearchHiddenText,
   KitchenWorkItemScreen,
   kitchenAgeTier,
   kitchenLateMinutes,
@@ -1095,6 +1096,60 @@ describe("DEC-KITCHEN-STALE-TICKETS earlier business days on the kitchen board",
     );
     expect(earlierDaySearchText(3, "6")).toBe(
       "3 tickets from earlier days have number or table “6”",
+    );
+  });
+
+  it("says an order or table is done when all its matching work is finished, not that filters hide it", () => {
+    const [base] = parseKitchenBoardView({
+      ...kitchenBoardFixture(),
+      items: [
+        {
+          ...kitchenItemFixture(),
+          orderLabel: { orderNumber: "9", orderType: "DineIn", tableLabel: "T4" },
+        },
+      ],
+    }).items;
+    if (!base) throw new Error("fixture");
+    const execution = {
+      orderItemReference: "018f0f58-767a-7f3b-a1d0-000000000701",
+      stationReference: "018f0f58-767a-7f3b-a1d0-000000000702",
+      ticketVersion: "1",
+      workItemVersion: "3",
+      acceptedAt: "2026-08-12T15:01:00.000Z",
+      readyAt: "2026-08-12T15:08:00.000Z",
+    };
+    const ready = { ...base, status: "Completed" as const, completedQuantity: 2, execution };
+    const cancelled = { ...base, status: "Cancelled" as const };
+    // Unfinished work hidden by the filters keeps the filters message.
+    expect(
+      kitchenSearchHiddenText({ matches: [ready, base], search: "9", inRecentlyFinished: false }),
+    ).toBe("Order or table “9” has work, but the filters hide it. Clear the filters to see it.");
+    // Cooked but not yet marked ready is still unfinished.
+    expect(
+      kitchenSearchHiddenText({
+        matches: [{ ...ready, execution: { ...execution, readyAt: null } }],
+        search: "9",
+        inRecentlyFinished: false,
+      }),
+    ).toContain("the filters hide it");
+    expect(
+      kitchenSearchHiddenText({
+        matches: [ready, cancelled],
+        search: "9",
+        inRecentlyFinished: false,
+      }),
+    ).toBe("All of order 9 is done.");
+    expect(
+      kitchenSearchHiddenText({ matches: [ready], search: "Order #9", inRecentlyFinished: true }),
+    ).toBe("All of order 9 is done. Its dishes are listed under Recently finished.");
+    expect(
+      kitchenSearchHiddenText({ matches: [ready], search: "t4", inRecentlyFinished: false }),
+    ).toBe("All of table T4 is done.");
+    expect(
+      kitchenSearchHiddenText({ matches: [cancelled], search: "9", inRecentlyFinished: false }),
+    ).toBe("Order 9 has nothing left to make: its items were cancelled.");
+    expect(kitchenSearchHiddenText({ matches: [], search: "9", inRecentlyFinished: false })).toBe(
+      null,
     );
   });
 });

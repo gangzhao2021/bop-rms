@@ -1,4 +1,5 @@
 import { UnpaidRoundCancelAction } from "./UnpaidRoundCancelAction.js";
+import { paidRoundWait, tableRoundWaitText, type PaidRoundWaitTier } from "./paid-round-wait.js";
 import { DiningHostTransferAction } from "./DiningHostTransferAction.js";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AppFrame } from "@bop-rms/ui";
@@ -155,6 +156,28 @@ export function guestRoundPaymentNotice(
       };
 }
 
+/**
+ * WP-2423 (v15 2026-10-16): paid rounds at this table that staff have not accepted (oldest first).
+ * They are never cancelled or refunded automatically, so the table says how long the oldest has
+ * waited: plain at first, a warning from 5 minutes, urgent from 10. Null when nothing waits.
+ */
+export function paidRoundAcceptanceNotice(
+  table: StaffDiningTable,
+  now: number,
+): { readonly tier: PaidRoundWaitTier; readonly text: string } | null {
+  const oldest = [...table.roundsAwaitingAcceptance].sort(
+    (a, b) => Date.parse(a.paidAt) - Date.parse(b.paidAt),
+  )[0];
+  if (oldest === undefined) return null;
+  const others = table.roundsAwaitingAcceptance.length - 1;
+  return {
+    tier: paidRoundWait(oldest.paidAt, now).tier,
+    text:
+      tableRoundWaitText(oldest.roundNumber, oldest.paidAt, now) +
+      (others > 0 ? ` (and ${String(others)} more paid round${others === 1 ? "" : "s"})` : ""),
+  };
+}
+
 export function DiningSessionWorkspace({
   csrf,
   storeLabel,
@@ -206,7 +229,9 @@ export function DiningSessionWorkspace({
   const [now, setNow] = useState(() => Date.now());
   const awaitingPayment = tables.some(
     (table) =>
-      table.staffRoundsAwaitingPayment.length > 0 || table.guestRoundsAwaitingPayment.length > 0,
+      table.staffRoundsAwaitingPayment.length > 0 ||
+      table.guestRoundsAwaitingPayment.length > 0 ||
+      table.roundsAwaitingAcceptance.length > 0,
   );
   /** `background`: an automatic retry; the selected table and any shown entry code stay. */
   const load = async (more = false, background = false) => {
@@ -565,6 +590,7 @@ export function DiningSessionWorkspace({
                             <p className="dining-table-tile__notice">{tableCodeNotice(table)}</p>
                           ) : null}
                           {[
+                            paidRoundAcceptanceNotice(table, now),
                             staffRoundPaymentNotice(table, now, timeZone),
                             guestRoundPaymentNotice(table, now, timeZone),
                           ].map((notice, index) =>
@@ -636,6 +662,15 @@ export function DiningSessionWorkspace({
                     </dd>
                   </div>
                 </dl>
+                {(() => {
+                  // WP-2423: paid rounds waiting for staff to accept them (never refunded by a timer).
+                  const notice = paidRoundAcceptanceNotice(selected, now);
+                  return notice === null ? null : (
+                    <p className="order-accept-by" data-tier={notice.tier} role="note">
+                      {notice.text}
+                    </p>
+                  );
+                })()}
                 {(() => {
                   // WP-2423 item 5: the same payment warning as the tile, beside the table's actions.
                   const notice = staffRoundPaymentNotice(selected, now, timeZone);

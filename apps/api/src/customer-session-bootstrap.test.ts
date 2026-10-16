@@ -75,12 +75,24 @@ it("answers a first visit without a Guest Session cookie with an empty 204, issu
   expect((await f.request({ cookie: "other=1" })).status).toBe(204);
   expect((await f.request({ cookie: "__Host-bop-guest=short" })).status).toBe(400);
 });
-it("conceals absent sessions and fails safely without configuration", async () => {
+it("answers an ended or expired visit like a first visit: an empty 204 with no token", async () => {
   const f = await setup();
   f.read.mockRejectedValue(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
   const r = await f.request();
+  expect(r.status).toBe(204);
+  expect(r.headers.get("cache-control")).toBe("no-store");
+  expect(r.headers.get("set-cookie")).toBeNull();
+  expect(await r.text()).toBe("");
+  expect(f.read).toHaveBeenCalledTimes(1);
+});
+it("conceals other Session failures and fails safely without configuration", async () => {
+  const f = await setup();
+  f.read.mockRejectedValue(new GuestSessionError("GUEST_SESSION_VERSION_CONFLICT"));
+  const r = await f.request();
   expect(r.status).toBe(401);
   expect(JSON.stringify(await r.json())).not.toContain("A".repeat(43));
+  f.read.mockRejectedValue(new Error("database down"));
+  expect((await f.request()).status).toBe(503);
   expect((await (await setup(false)).request()).status).toBe(503);
 });
 

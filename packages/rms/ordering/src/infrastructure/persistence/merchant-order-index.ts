@@ -561,9 +561,16 @@ export async function listStorePaidOrderBatches(
   /** WP-2423: every batch whose payment Ordering recorded (awaiting acceptance or disposed). */
   readonly paidBatches: ReadonlySet<string>;
   readonly awaitingAcceptance: ReadonlySet<string>;
+  /** WP-2423: when Ordering recorded each batch awaiting acceptance as paid (by batch). */
+  readonly awaitingSince: ReadonlyMap<string, string>;
 }> {
   if (orderReferences.length === 0)
-    return { paidOrders: new Set(), paidBatches: new Set(), awaitingAcceptance: new Set() };
+    return {
+      paidOrders: new Set(),
+      paidBatches: new Set(),
+      awaitingAcceptance: new Set(),
+      awaitingSince: new Map(),
+    };
   if (orderReferences.length > 100) throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
   const orders = orderReferences.map((reference) => parseOrderingReference(reference));
   await transaction.query(
@@ -577,16 +584,23 @@ export async function listStorePaidOrderBatches(
         "AND d.store_id=w.store_id AND d.order_batch_id=w.order_batch_id) " +
         // A never-accepted round staff cancelled (its payment refunded) no longer awaits acceptance.
         "AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation c WHERE c.brand_id=w.brand_id " +
-        "AND c.store_id=w.store_id AND c.order_batch_id=w.order_batch_id) awaiting " +
+        "AND c.store_id=w.store_id AND c.order_batch_id=w.order_batch_id) awaiting," +
+        "to_char(w.evaluated_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') since " +
         "FROM rms_ordering.order_payment_acceptance_wait w WHERE w.brand_id=$1 AND w.store_id=$2 AND w.order_id=ANY($3::uuid[]) " +
-        "UNION ALL SELECT d.order_id::text,d.order_batch_id::text,false FROM rms_ordering.order_payment_disposition_record d " +
+        "UNION ALL SELECT d.order_id::text,d.order_batch_id::text,false,NULL FROM rms_ordering.order_payment_disposition_record d " +
         "WHERE d.brand_id=$1 AND d.store_id=$2 AND d.order_id=ANY($3::uuid[])",
       [scope.brandReference, scope.storeReference, orders],
     )
-  ).rows as readonly { order_id: unknown; order_batch_id: unknown; awaiting: unknown }[];
+  ).rows as readonly {
+    order_id: unknown;
+    order_batch_id: unknown;
+    awaiting: unknown;
+    since: unknown;
+  }[];
   const paidOrders = new Set<string>(),
     paidBatches = new Set<string>(),
-    awaitingAcceptance = new Set<string>();
+    awaitingAcceptance = new Set<string>(),
+    awaitingSince = new Map<string, string>();
   for (const row of rows) {
     const order = parseOrderingReference(row.order_id),
       batch = parseOrderingReference(row.order_batch_id);
@@ -594,9 +608,13 @@ export async function listStorePaidOrderBatches(
       throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
     paidOrders.add(order);
     paidBatches.add(batch);
-    if (row.awaiting) awaitingAcceptance.add(batch);
+    if (row.awaiting) {
+      if (typeof row.since !== "string") throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+      awaitingAcceptance.add(batch);
+      awaitingSince.set(batch, parseOrderingInstant(row.since));
+    }
   }
-  return { paidOrders, paidBatches, awaitingAcceptance };
+  return { paidOrders, paidBatches, awaitingAcceptance, awaitingSince };
 }
 
 /**

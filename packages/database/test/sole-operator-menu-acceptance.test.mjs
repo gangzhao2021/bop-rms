@@ -22,6 +22,7 @@ import {
   seedBrandRole,
   seedSoleOperatorHistory,
   seedStepUp,
+  assertMarkNeedsSoleOperatorOn,
 } from "../test-support/sole-operator-brand-gate.mjs";
 
 const { Client } = pg;
@@ -348,6 +349,31 @@ it("menu review: submitter ≠ approver on the server; the sole operator approve
         ),
         /menu_sole_operator_approval_recent_mfa/u,
       );
+
+      // ── 6. Defence in depth (2000_071): the database refuses a mark while the Brand's
+      // sole-operator setting is Off, and accepts the same mark once it is On.
+      await assertMarkNeedsSoleOperatorOn(admin, {
+        id,
+        n: 0xf000,
+        tenantReference,
+        brandReference,
+        actorReference: owner,
+        insert: () =>
+          admin.query(
+            "INSERT INTO rms_catalog.menu_sole_operator_approval VALUES ($1,$2,$3,$4,$5,$6,'SoleOperator',$7,date_trunc('milliseconds',now()),date_trunc('milliseconds',now()),$8)",
+            [
+              brandReference,
+              id(911),
+              id(912),
+              second.menu,
+              second.version,
+              second.lifecycle,
+              owner,
+              id(913),
+            ],
+          ),
+      });
+      assert.equal((await marks()).length, 2);
     } finally {
       await admin.end();
     }

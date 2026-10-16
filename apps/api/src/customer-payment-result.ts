@@ -90,6 +90,7 @@ export class CustomerPaymentResultHandler {
           "checkoutSessionReference",
           "paymentIntentReference",
           "orderReference",
+          "orderBatchReference",
           "status",
           "total",
           "payBy",
@@ -116,6 +117,7 @@ export class CustomerPaymentResultHandler {
           if (
             result.status !== "Pending" ||
             result.orderReference !== null ||
+            result.orderBatchReference !== null ||
             result.total !== null
           )
             throw new Error();
@@ -124,7 +126,9 @@ export class CustomerPaymentResultHandler {
             typeof result.paymentIntentReference !== "string" ||
             !reference.test(result.paymentIntentReference) ||
             typeof result.orderReference !== "string" ||
-            !reference.test(result.orderReference)
+            !reference.test(result.orderReference) ||
+            typeof result.orderBatchReference !== "string" ||
+            !reference.test(result.orderBatchReference)
           )
             throw new Error();
           const total = readClosedRecord(result.total, ["amountMinor", "currency"]);

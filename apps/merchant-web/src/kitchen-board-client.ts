@@ -258,9 +258,10 @@ export function createKitchenBoardClient(options: {
       const reference = search ? parseKitchenRouteReference(search.reference) : null;
       if (search && search.kind !== "Order" && search.kind !== "Ticket") return fail();
       // A queue over one page is read page by page, and every kitchen step publishes a new
-      // projection generation; a step landing between two pages makes the next page a 409
-      // (Conflict). That is not a failure of the board: read it again from the first page at once,
-      // a bounded number of times, instead of showing it read-only until the backoff retry.
+      // projection generation. The server serves a later page from the generation of the first
+      // page while that is recent, so a step between two page reads no longer conflicts. A cursor
+      // too old for that is still a 409 (Conflict): read again from the first page at once, a
+      // bounded number of times, instead of showing the board read-only until the backoff retry.
       for (let attempt = 1; ; attempt++) {
         try {
           return await readQueue(search, reference);

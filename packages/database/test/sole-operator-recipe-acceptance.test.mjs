@@ -39,6 +39,7 @@ import {
   seedBrandRole,
   seedSoleOperatorSetting,
   seedStepUp,
+  assertMarkNeedsSoleOperatorOn,
 } from "../test-support/sole-operator-brand-gate.mjs";
 import {
   merchantBrandSoleOperatorGate,
@@ -722,6 +723,29 @@ it("recipe review: the sole operator reviews their own recipe alone, with MFA an
         admin.query("UPDATE rms_recipe.recipe_authoring_review SET review_mode='SoleOperator'"),
         /append-only/u,
       );
+
+      // 6. Defence in depth (2000_072): the database refuses a review marked SoleOperator while
+      // the Brand's sole-operator setting is Off, and accepts the same review once it is On.
+      const [soleReview, soleAudit] = [next(), next()];
+      await assertMarkNeedsSoleOperatorOn(admin, {
+        id,
+        n: 0xf000,
+        ...scope,
+        actorReference: owner,
+        insert: () =>
+          admin.query(
+            "INSERT INTO rms_recipe.recipe_authoring_review (review_id,recipe_version_id,recipe_id,brand_id,subject,subject_digest,review_kind,decision,reviewer_actor_id,author_actor_id,comment,reviewed_at,audit_id,review_mode,reviewer_mfa_at) VALUES ($1,$2,$3,$4,'Recipe',$5,'FoodSafety','Approved',$6,$6,NULL,date_trunc('milliseconds',now()),$7,'SoleOperator',date_trunc('milliseconds',now()))",
+            [
+              soleReview,
+              thirdDraft.versionReference,
+              third,
+              scope.brandReference,
+              "sha256:" + "a".repeat(64),
+              author,
+              soleAudit,
+            ],
+          ),
+      });
     } finally {
       await admin.end();
     }

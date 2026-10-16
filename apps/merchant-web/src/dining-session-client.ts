@@ -70,6 +70,12 @@ export interface StaffDiningTable {
     readonly payBy: string;
   }[];
   /**
+   * WP-2423 (v15 2026-10-16): paid rounds of the party at this table staff have not accepted yet,
+   * each with when it was paid (never refunded automatically; staff accept it on Orders). Empty
+   * from an older server.
+   */
+  roundsAwaitingAcceptance: readonly { readonly roundNumber: number; readonly paidAt: string }[];
+  /**
    * WP-2423 D4: the open session's phase and version and its Order, for closing the table's
    * session from the Tables page (absent when the staff member may not close sessions).
    */
@@ -230,6 +236,26 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
                   });
                 })
               : fail();
+        const acceptanceAwaiting =
+          r.roundsAwaitingAcceptance === undefined
+            ? []
+            : Array.isArray(r.roundsAwaitingAcceptance) &&
+                r.roundsAwaitingAcceptance.length <= 20 &&
+                (currentDiningSessionReference !== null || r.roundsAwaitingAcceptance.length === 0)
+              ? r.roundsAwaitingAcceptance.map((entry) => {
+                  const round = obj(entry);
+                  if (
+                    Object.keys(round).length !== 2 ||
+                    typeof round.paidAt !== "string" ||
+                    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(round.paidAt) ||
+                    typeof round.roundNumber !== "number" ||
+                    !Number.isSafeInteger(round.roundNumber) ||
+                    round.roundNumber < 1
+                  )
+                    return fail();
+                  return Object.freeze({ roundNumber: round.roundNumber, paidAt: round.paidAt });
+                })
+              : fail();
         // WP-2423 D4: present only for staff who may close sessions (older servers send none).
         const sessionValue: unknown = r.session;
         let session: StaffDiningTableSession | null = null;
@@ -263,6 +289,7 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
           qrCodeValidUntil,
           staffRoundsAwaitingPayment: Object.freeze(awaiting),
           guestRoundsAwaitingPayment: Object.freeze(guestAwaiting),
+          roundsAwaitingAcceptance: Object.freeze(acceptanceAwaiting),
           session,
         } as StaffDiningTable;
       });

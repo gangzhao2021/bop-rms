@@ -410,6 +410,19 @@ export function KitchenRemakeDialog({
   );
 }
 
+/** Finished dishes of the last two hours, newest first (at most 12): the Recently finished list. */
+export function recentlyFinishedKitchenItems(
+  items: readonly KitchenBoardItem[],
+  observedAt: string,
+): KitchenBoardItem[] {
+  const now = Date.parse(observedAt);
+  return items
+    .filter((item) => item.status === "Completed" && item.execution?.readyAt)
+    .filter((item) => now - Date.parse(item.execution?.readyAt ?? "") <= 2 * 60 * 60 * 1000)
+    .sort((a, b) => (b.execution?.readyAt ?? "").localeCompare(a.execution?.readyAt ?? ""))
+    .slice(0, 12);
+}
+
 /** Finished dishes of the last two hours, newest first, so a returned dish can be remade. */
 export function KitchenRecentlyFinished({
   items,
@@ -426,12 +439,7 @@ export function KitchenRecentlyFinished({
   readonly onRemake: (item: KitchenBoardItem) => void;
   readonly orderLabel: (item: KitchenBoardItem) => string;
 }) {
-  const now = Date.parse(observedAt);
-  const finished = items
-    .filter((item) => item.status === "Completed" && item.execution?.readyAt)
-    .filter((item) => now - Date.parse(item.execution?.readyAt ?? "") <= 2 * 60 * 60 * 1000)
-    .sort((a, b) => (b.execution?.readyAt ?? "").localeCompare(a.execution?.readyAt ?? ""))
-    .slice(0, 12);
+  const finished = recentlyFinishedKitchenItems(items, observedAt);
   if (finished.length === 0) return null;
   const remade = (item: KitchenBoardItem) =>
     reworks.filter((rework) => rework.originalWorkItemReference === item.workItemReference).length;

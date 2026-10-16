@@ -5,6 +5,7 @@ import {
   KitchenRemakeDialog,
   KitchenRemakeLane,
   KitchenReworkStatus,
+  recentlyFinishedKitchenItems,
   remakeOffered,
   useKitchenRework,
   type RemakeChoice,
@@ -159,6 +160,45 @@ export function kitchenBoardSearch(input: {
     /** Board items the search finds, for the recently finished list. */
     items: search === null ? input.items : input.items.filter(match),
   };
+}
+
+/**
+ * WP-2423: what the search found when nothing of it is shown in the lanes. Filters hide something
+ * only when unfinished work matches; when every matching item is finished (ready, or cancelled)
+ * the order or table is done, in staff words, pointing to Recently finished when it lists it.
+ * Null when the search found nothing today.
+ */
+export function kitchenSearchHiddenText(input: {
+  readonly matches: readonly KitchenBoardItem[];
+  readonly search: string;
+  /** Whether the Recently finished list on this board shows any of the matches. */
+  readonly inRecentlyFinished: boolean;
+}): string | null {
+  const { matches, search } = input;
+  if (matches.length === 0) return null;
+  if (matches.some(isActiveKitchenWork))
+    return `Order or table “${search}” has work, but the filters hide it. Clear the filters to see it.`;
+  const term = kitchenOrderSearchTerm(search);
+  const number = (value: string) => value.toUpperCase().replace(/^0+(?=\d)/u, "");
+  const byNumber = matches.find(
+    (item) =>
+      term !== null && item.orderLabel && number(item.orderLabel.orderNumber) === number(term),
+  );
+  const byTable = matches.find(
+    (item) => term !== null && item.orderLabel?.tableLabel?.toUpperCase() === term,
+  );
+  const subject =
+    byNumber && !byTable
+      ? `order ${byNumber.orderLabel?.orderNumber ?? search}`
+      : byTable && !byNumber
+        ? `table ${byTable.orderLabel?.tableLabel ?? search}`
+        : `order or table “${search}”`;
+  const allCancelled = matches.every((item) => item.status === "Cancelled");
+  const capitalized = subject.charAt(0).toUpperCase() + subject.slice(1);
+  return allCancelled
+    ? `${capitalized} has nothing left to make: its items were cancelled.`
+    : `All of ${subject} is done.` +
+        (input.inRecentlyFinished ? " Its dishes are listed under Recently finished." : "");
 }
 
 /** WP-2423: how many of the earlier days' tickets carry the searched number, in staff words. */
@@ -1377,7 +1417,16 @@ export function KitchenBoardScreen({
             <p>
               {orderSearch !== null
                 ? searchMatches.length > 0
-                  ? `Order or table “${orderSearch}” has work, but the filters hide it. Clear the filters to see it.`
+                  ? kitchenSearchHiddenText({
+                      matches: searchMatches,
+                      search: orderSearch,
+                      inRecentlyFinished:
+                        remakes !== undefined &&
+                        onRemake !== undefined &&
+                        recentlyFinishedKitchenItems(board.items, view.projectedAt).some((item) =>
+                          searchMatches.includes(item),
+                        ),
+                    })
                   : earlierElsewhere !== null
                     ? `Nothing from today for order or table “${orderSearch}”. ${earlierElsewhere}: see From earlier days above.`
                     : `Nothing on the board for order or table “${orderSearch}”. Clear the search to see the whole queue.`

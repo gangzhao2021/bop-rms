@@ -57,6 +57,12 @@ export function createMerchantOrderAcceptanceCommand(options: {
     transaction: ConsumerTransaction,
     scope: Composition["scope"] & { actorReference: string },
     command: Command,
+    /**
+     * This run's authorization: true only while the command runs for the caller resolved in full
+     * at its start (re-checked in full before the commit). Owner checks inside the configuration
+     * (Order, Payment, Inventory and workflow gates) take it instead of re-resolving the caller.
+     */
+    run: { allowed(): Promise<boolean> },
   ): Promise<
     | { kind?: "Initial"; configuration: ServerConfiguration<Composition>; paymentEvent: unknown }
     | {
@@ -167,6 +173,7 @@ export function createMerchantOrderAcceptanceCommand(options: {
                 actorReference: String(actorReference),
               },
               candidate,
+              { allowed: async () => (await allowed()) === true },
             );
             if (resolved.configuration.acceptance.permissionCode !== "order.accept") return deny();
             const security: Pick<

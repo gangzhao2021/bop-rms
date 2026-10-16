@@ -22,6 +22,7 @@ import {
   seedBrandRole,
   seedSoleOperatorSetting,
   seedStepUp,
+  assertMarkNeedsSoleOperatorOn,
 } from "../test-support/sole-operator-brand-gate.mjs";
 
 const { Client } = pg;
@@ -403,6 +404,30 @@ it("option recipe review: the sole operator reviews their own change alone, with
       await assert.rejects(
         admin.query("UPDATE rms_recipe.option_recipe_change_review SET review_mode='Independent'"),
         /append-only|Recipe/u,
+      );
+
+      // 6. Defence in depth (2000_072): the database refuses a review marked SoleOperator while
+      // the Brand's sole-operator setting is Off, and accepts the same review once it is On.
+      await assertMarkNeedsSoleOperatorOn(admin, {
+        id,
+        n: 0xf000,
+        tenantReference,
+        brandReference: brand,
+        actorReference: owner,
+        insert: () =>
+          admin.query(
+            "INSERT INTO rms_recipe.option_recipe_change_review (review_id,change_version_id,brand_id,change_digest,review_kind,decision,reviewer_actor_id,author_actor_id,comment,reviewed_at,operation_id,audit_id,review_mode,reviewer_mfa_at) SELECT $1,change_version_id,brand_id,change_digest,'FoodSafety','Approved',$2,author_actor_id,NULL,date_trunc('milliseconds',now()),$3,$4,'SoleOperator',date_trunc('milliseconds',now()) FROM rms_recipe.option_recipe_change WHERE change_version_id=$5",
+            [id(0xf800), owner, id(0xf801), id(0xf802), later],
+          ),
+      });
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT review_mode FROM rms_recipe.option_recipe_change_review WHERE review_id=$1",
+            [id(0xf800)],
+          )
+        ).rows[0]?.review_mode,
+        "SoleOperator",
       );
     } finally {
       await admin.end();

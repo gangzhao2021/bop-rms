@@ -16,6 +16,11 @@ import {
   summarizeOrders,
   summarizePickups,
 } from "./StoreOverview.js";
+import {
+  awaitingAcceptanceText,
+  paidRoundWaitText,
+  tableRoundWaitText,
+} from "./paid-round-wait.js";
 
 describe("WP-2423 P2 store overview", () => {
   it("counts open and awaiting orders from the current queue", () => {
@@ -23,6 +28,8 @@ describe("WP-2423 P2 store overview", () => {
     expect(summarizeOrders(queue)).toEqual({
       open: 3,
       awaitingAcceptance: 1,
+      awaitingRounds: 1,
+      urgentRounds: 0,
       // The fixture's only Ready order is a pickup; pickup readiness is counted from the pickup queue.
       readyToServe: 0,
       dineIn: true,
@@ -56,6 +63,59 @@ describe("WP-2423 P2 store overview", () => {
     expect(queue.items.map(isAwaitingAcceptance)).toEqual([true, false]);
     expect(ordersAwaitingAcceptance(queue)).toBe(1);
     expect(summarizeOrders(queue).awaitingAcceptance).toBe(1);
+  });
+  it("counts rounds when a table has several paid rounds to accept, and those waiting long", () => {
+    const fixture = currentOrderQueueFixture();
+    const [ready, , accepted] = fixture.items;
+    if (!ready || !accepted?.batches[0]) throw new Error("fixture");
+    const round = {
+      ...accepted.batches[0],
+      acceptanceStatus: "NotAccepted",
+      canRequestAcceptance: true,
+      canCancel: false,
+      canCancelItems: false,
+    };
+    const now = Date.parse("2026-10-16T15:00:00.000Z");
+    const table = {
+      ...accepted,
+      orderReference: "018f7600-0000-7000-8000-000000000031",
+      orderNumber: "ORD-1004",
+      orderType: "DineIn" as const,
+      initialBatchReference: round.orderBatchReference,
+      batches: [
+        { ...round, awaitingAcceptanceSince: "2026-10-16T14:48:00.000Z" },
+        {
+          ...round,
+          orderBatchReference: "018f7600-0000-7000-8000-000000000032",
+          sequence: 2,
+          awaitingAcceptanceSince: "2026-10-16T14:58:00.000Z",
+        },
+      ],
+      canRequestAcceptance: false,
+    };
+    const queue = parseCurrentOrderQueue({ ...fixture, items: [table, ready] }, null);
+    const summary = summarizeOrders(queue, now);
+    expect(summary).toMatchObject({ awaitingAcceptance: 1, awaitingRounds: 2, urgentRounds: 1 });
+    expect(
+      awaitingAcceptanceText({
+        orders: summary.awaitingAcceptance,
+        rounds: summary.awaitingRounds,
+        urgentRounds: summary.urgentRounds,
+      }),
+    ).toBe("2 rounds awaiting acceptance in 1 order (1 paid 10+ min ago)");
+    expect(awaitingAcceptanceText({ orders: 2, rounds: 2, urgentRounds: 0 })).toBe(
+      "2 awaiting acceptance",
+    );
+    // A paid round said on a pickup, or on a round that cannot be accepted, is refused.
+    expect(() =>
+      parseCurrentOrderQueue(
+        {
+          ...fixture,
+          items: [{ ...table, orderType: "Pickup" as const }, ready],
+        },
+        null,
+      ),
+    ).toThrow();
   });
   it("counts only dine-in orders as ready to serve; pickups ready for collection come from Fulfillment", () => {
     const fixture = currentOrderQueueFixture();
@@ -157,7 +217,15 @@ describe("WP-2423 P2 store overview", () => {
           state={{
             orders: {
               kind: "Ready",
-              value: { open: 50, awaitingAcceptance: 4, readyToServe: 2, dineIn: true, more: true },
+              value: {
+                open: 50,
+                awaitingAcceptance: 4,
+                awaitingRounds: 4,
+                urgentRounds: 0,
+                readyToServe: 2,
+                dineIn: true,
+                more: true,
+              },
             },
             pickups: { kind: "Unavailable" },
             exceptions: { kind: "Ready", value: { open: 0, overdue: 0 } },
@@ -209,6 +277,8 @@ describe("WP-2423 P2 store overview", () => {
               value: {
                 open: 5,
                 awaitingAcceptance: 0,
+                awaitingRounds: 0,
+                urgentRounds: 0,
                 readyToServe: 0,
                 dineIn: false,
                 more: false,
@@ -265,5 +335,22 @@ describe("v15 finding: the store system card follows the server's answer, not th
     );
     expect(html).toContain("Store system");
     expect(html).toContain("Checking the store system");
+  });
+  it("words a paid round's wait for staff: plain, then warning at 5 min, urgent at 10", () => {
+    const paidAt = "2026-10-16T14:50:00.000Z";
+    const at = (minute: number) => Date.parse(paidAt) + minute * 60_000;
+    expect(paidRoundWaitText(paidAt, at(2))).toBe("Paid · the kitchen gets it once you accept it");
+    expect(paidRoundWaitText(paidAt, at(6))).toBe(
+      "Paid 6 min ago · the guest is waiting. Accept it to send it to the kitchen",
+    );
+    expect(paidRoundWaitText(paidAt, at(12))).toMatch(
+      /^Paid 12 min ago and still not accepted · accept it now\. It is never cancelled or refunded automatically/u,
+    );
+    expect(tableRoundWaitText(2, paidAt, at(0))).toBe(
+      "Round 2 paid just now · accept it on the Orders page to send it to the kitchen",
+    );
+    expect(tableRoundWaitText(2, paidAt, at(11))).toBe(
+      "Round 2 paid 11 min ago and still not accepted · accept it on the Orders page now",
+    );
   });
 });

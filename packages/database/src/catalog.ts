@@ -475,7 +475,23 @@ function validateSql(
           (file ===
             "migrations/2000-release-001/2000_068_alter_receipt_template_sole_operator_setting_guard.sql" &&
             metadata.owner === "@rms/printing-device" &&
-            metadata.schema === "rms_device")) &&
+            metadata.schema === "rms_device") ||
+          (file ===
+            "migrations/2000-release-001/2000_070_alter_price_book_sole_operator_setting_guard.sql" &&
+            metadata.owner === "@rms/pricing" &&
+            metadata.schema === "rms_pricing") ||
+          (file ===
+            "migrations/2000-release-001/2000_071_alter_catalog_sole_operator_setting_guard.sql" &&
+            metadata.owner === "@rms/catalog" &&
+            metadata.schema === "rms_catalog") ||
+          (file ===
+            "migrations/2000-release-001/2000_072_alter_recipe_review_sole_operator_setting_guard.sql" &&
+            metadata.owner === "@rms/recipe" &&
+            metadata.schema === "rms_recipe") ||
+          (file ===
+            "migrations/2000-release-001/2000_073_alter_ordinary_refund_sole_operator_setting_guard.sql" &&
+            metadata.owner === "@rms/payment" &&
+            metadata.schema === "rms_payment")) &&
         match[1] === "bop_tenant" &&
         (match[2] === "hold_brand_sole_operator_on" || match[2] === "brand_sole_operator_was_on") &&
         /^\s*\(/u.test(body.slice(match.index + match[0].length))

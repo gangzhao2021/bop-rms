@@ -1101,3 +1101,82 @@ export async function listStoreUnpaidGuestDiningRounds(
     }),
   );
 }
+
+/**
+ * WP-2423 (v15 2026-10-16): paid guest rounds of the given dining sessions that staff have not
+ * accepted yet — Ordering recorded the payment as awaiting acceptance and nothing disposed of it
+ * (no acceptance, disposition, staff cancellation or Order termination). A paid dine-in round is
+ * never refunded automatically, so the Tables page warns staff while it waits; `paidAt` is when
+ * Ordering recorded the payment. Caller authorizes the Store and owns the transaction.
+ */
+export async function listStorePaidDiningRoundsAwaitingAcceptance(
+  transaction: ConsumerTransaction,
+  scope: StoreScope,
+  diningSessionReferences: readonly string[],
+): Promise<
+  readonly {
+    readonly diningSessionReference: string;
+    readonly orderReference: string;
+    readonly orderBatchReference: string;
+    readonly roundNumber: number;
+    readonly paidAt: string;
+  }[]
+> {
+  if (diningSessionReferences.length > 100) return fail();
+  if (diningSessionReferences.length === 0) return Object.freeze([]);
+  const sessions = diningSessionReferences.map((reference) => parseOrderingReference(reference));
+  await storeContext(transaction, scope);
+  const found = await transaction.query(
+    `SELECT r.dining_session_id::text AS "diningSessionReference",r.order_id::text AS "orderReference",
+      r.order_batch_id::text AS "orderBatchReference",r.round_number::integer AS "roundNumber",
+      to_char(w.evaluated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "paidAt"
+    FROM (SELECT h.dining_session_id,b.brand_id,b.store_id,b.order_id,b.order_batch_id,
+        row_number() OVER (PARTITION BY b.order_id ORDER BY b.submitted_at,b.order_batch_id) AS round_number
+      FROM rms_ordering.order_header h
+      JOIN rms_ordering.order_batch b ON b.brand_id=h.brand_id AND b.store_id=h.store_id AND b.order_id=h.order_id
+      WHERE h.brand_id=$1 AND h.store_id=$2 AND h.order_type='DineIn' AND h.dining_session_id=ANY($3::uuid[])) r
+    JOIN rms_ordering.order_payment_acceptance_wait w ON w.brand_id=r.brand_id AND w.store_id=r.store_id
+      AND w.order_id=r.order_id AND w.order_batch_id=r.order_batch_id
+    WHERE NOT EXISTS (SELECT 1 FROM rms_ordering.order_acceptance_record a WHERE a.brand_id=r.brand_id
+        AND a.store_id=r.store_id AND a.order_id=r.order_id AND a.order_batch_id=r.order_batch_id)
+      AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_payment_disposition_record d WHERE d.brand_id=r.brand_id
+        AND d.store_id=r.store_id AND d.order_id=r.order_id AND d.order_batch_id=r.order_batch_id)
+      AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation s WHERE s.brand_id=r.brand_id
+        AND s.store_id=r.store_id AND s.order_id=r.order_id AND s.order_batch_id=r.order_batch_id)
+      AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_termination_record t WHERE t.brand_id=r.brand_id
+        AND t.store_id=r.store_id AND t.order_id=r.order_id)
+    ORDER BY r.order_id,r.round_number LIMIT 201`,
+    [
+      parseOrderingReference(scope.brandReference),
+      parseOrderingReference(scope.storeReference),
+      sessions,
+    ],
+  );
+  if (!Array.isArray(found.rows) || found.rows.length > 200) return fail();
+  return Object.freeze(
+    found.rows.map((value) => {
+      const row = readClosedRecord(value, [
+        "diningSessionReference",
+        "orderReference",
+        "orderBatchReference",
+        "roundNumber",
+        "paidAt",
+      ]);
+      const diningSessionReference = parseOrderingReference(row.diningSessionReference);
+      if (
+        !sessions.includes(diningSessionReference) ||
+        typeof row.roundNumber !== "number" ||
+        !Number.isSafeInteger(row.roundNumber) ||
+        row.roundNumber < 1
+      )
+        return fail();
+      return Object.freeze({
+        diningSessionReference,
+        orderReference: parseOrderingReference(row.orderReference),
+        orderBatchReference: parseOrderingReference(row.orderBatchReference),
+        roundNumber: row.roundNumber,
+        paidAt: parseOrderingInstant(row.paidAt),
+      });
+    }),
+  );
+}
