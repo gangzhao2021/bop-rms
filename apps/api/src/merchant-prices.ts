@@ -406,10 +406,32 @@ export function createMerchantPrices(options: {
                 snapshot.lifecycle === "Archived" ? [] : await uncovered(tx, s.owner, snapshot, at),
             };
           }
+          const books = await listBrandPriceBooks(reads(tx), s.owner);
+          // WP-2423 Q19: whether someone who may approve may publish their own book alone, so
+          // the page says who publishes (another person, or the sole operator after verifying).
+          const gate = s.permissions.mayApprove
+            ? await merchantBrandSoleOperatorGate(tx as never, {
+                tenantReference: s.owner.tenantReference,
+                brandReference: s.owner.brandReference,
+                storeReference: s.owner.storeReference,
+                actorReference: s.actor,
+                permissionCode: "pricing.price-book.approve",
+                observedAt: at,
+                allowed: s.mayApproveNow,
+              })
+            : null;
           return {
             screenId: "PRICE-BOOK-LIST" as const,
             ...base,
-            books: await listBrandPriceBooks(reads(tx), s.owner),
+            books,
+            soleOperator:
+              gate === null
+                ? null
+                : {
+                    status: gate.status,
+                    otherApprovers: gate.otherApprovers,
+                    verifiedUntil: gate.verifiedUntil,
+                  },
           };
         }),
       ),

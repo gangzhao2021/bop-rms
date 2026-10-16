@@ -259,3 +259,63 @@ it("WP-2423 D5: serializes each item's price before tax when the receipt version
   const legacy = (await (await test.send()).json()) as typeof body;
   expect(legacy.receipt.records[0]?.snapshot.lines[0]).not.toHaveProperty("lineSubtotal");
 });
+it("serializes each line's chosen options with what they added, and older lines without them (WP-2423)", async () => {
+  const { chain } = await setup();
+  const original = chain.records[0];
+  if (!original) throw new Error("missing fixture");
+  const line = {
+    ...original.snapshot.lines[0],
+    lineSubtotal: money(100n),
+    options: [{ displayName: "Whipped cream", quantity: 1, amount: money(50n) }],
+  };
+  const withOptions = parseDigitalReceiptChain({
+    orderReference: chain.orderReference,
+    records: [{ ...original, snapshot: { ...original.snapshot, lines: [line] } }],
+  });
+  const server = createServer(
+    createApp({
+      customerReceipt: new CustomerReceiptHandler({
+        allowedOrigin: "https://pilot.example",
+        port: { read: vi.fn().mockResolvedValue(withOptions) },
+      }),
+    }),
+  );
+  servers.push(server);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const response = await fetch(
+    "http://127.0.0.1:" +
+      (server.address() as AddressInfo).port +
+      "/api/v1/orders/" +
+      id(1) +
+      "/receipt",
+    {
+      headers: {
+        "sec-fetch-site": "same-origin",
+        cookie: "__Host-bop-guest=" + "s".repeat(43),
+        "x-csrf-token": "c".repeat(43),
+      },
+    },
+  );
+  expect(response.status).toBe(200);
+  interface Body {
+    receipt: { records: { snapshot: { lines: Record<string, unknown>[] } }[] };
+  }
+  const body = (await response.json()) as Body;
+  expect(body.receipt.records[0]?.snapshot.lines[0]).toEqual({
+    lineReference: id(8),
+    displayName: "Synthetic item",
+    quantity: 1,
+    lineTotal: { amountMinor: "100", currencyCode: "CAD" },
+    lineSubtotal: { amountMinor: "100", currencyCode: "CAD" },
+    options: [
+      {
+        displayName: "Whipped cream",
+        quantity: 1,
+        amount: { amountMinor: "50", currencyCode: "CAD" },
+      },
+    ],
+  });
+  // A version issued before options were recorded is served exactly as issued.
+  const legacy = (await (await (await setup()).send()).json()) as Body;
+  expect(legacy.receipt.records[0]?.snapshot.lines[0]).not.toHaveProperty("options");
+});

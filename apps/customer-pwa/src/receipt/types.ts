@@ -23,6 +23,16 @@ export interface ReceiptSnapshotView {
     readonly lineTotal: ReceiptMoneyView;
     /** WP-2423 D5: the item's price before tax (absent on versions issued before it was frozen). */
     readonly lineSubtotal?: ReceiptMoneyView;
+    /**
+     * WP-2423: the options chosen for the item, each with what it added for the whole line; the
+     * item's `lineSubtotal` already includes them. Absent on versions issued before they were
+     * recorded, which print as issued.
+     */
+    readonly options?: readonly {
+      readonly displayName: string;
+      readonly quantity: number;
+      readonly amount: ReceiptMoneyView;
+    }[];
   }[];
   readonly adjustments?: { readonly discount: ReceiptMoneyView; readonly fee: ReceiptMoneyView };
   readonly subtotal: ReceiptMoneyView;

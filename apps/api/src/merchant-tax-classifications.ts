@@ -4,6 +4,7 @@ import {
   CatalogError,
   catalogProductTaxClassificationRegistryDigest,
   createPostgresProductTaxClassificationRegistryStore,
+  listBrandProducts,
   type CatalogTaxClassificationChange,
   taxClassificationRegistryFields,
   type CatalogProductTaxClassificationRegistry,
@@ -57,7 +58,9 @@ export const taxClassificationLocales = Object.freeze(["en-CA", "fr-CA"] as cons
 const readAction = "catalog.tax-classification.read",
   manageAction = "catalog.tax-classification.manage",
   catalogAction = "catalog.manage";
-const actions = Object.freeze([catalogAction, readAction, manageAction]);
+/** Optional: with it, the page shows which products use each tax class (and classes it lacks). */
+const productReadAction = "catalog.product.read";
+const actions = Object.freeze([catalogAction, readAction, manageAction, productReadAction]);
 
 export type TaxClassificationNames = Readonly<Record<string, string>>;
 export type TaxClassificationCommandBody =
@@ -224,7 +227,19 @@ export interface TaxClassificationView {
     readonly lifecycle: "Active" | "Inactive" | "Retired";
     readonly isDefault: boolean;
   }[];
+  /**
+   * The Brand's products (not archived) by the tax class their draft names, including classes
+   * that are not in this registry (a class from the Store's tax configuration) and products with
+   * none (null). Null when the viewer may not read products.
+   */
+  readonly productTaxClasses:
+    | readonly {
+        readonly classificationReference: string | null;
+        readonly productNames: readonly string[];
+      }[]
+    | null;
 }
+type ProductTaxClasses = TaxClassificationView["productTaxClasses"];
 
 export function createMerchantTaxClassifications(options: {
   persistence: PersistentMerchantBffOptions;
@@ -283,6 +298,7 @@ export function createMerchantTaxClassifications(options: {
     needsManage: boolean,
     work: (context: {
       decided: Decided;
+      productTaxClasses: () => Promise<ProductTaxClasses>;
       registryStore: () => ReturnType<typeof createPostgresProductTaxClassificationRegistryStore>;
       discard: (store: object) => void;
       window: () => { observedAt: string; validUntil: string };
@@ -386,8 +402,30 @@ export function createMerchantTaxClassifications(options: {
               });
               return created;
             };
+            const productTaxClasses = async (): Promise<ProductTaxClasses> => {
+              if (!decided.allowed.has(productReadAction)) return null;
+              used.add(productReadAction);
+              const groups = new Map<string | null, string[]>();
+              for (const product of await listBrandProducts(tx as never, {
+                brandReference: decided.scope.brandReference,
+              })) {
+                if (product.lifecycle === "Archived") continue;
+                const names = groups.get(product.taxClassificationReference) ?? [];
+                names.push(
+                  product.localizedNames[decided.brandLocale] ??
+                    Object.values(product.localizedNames)[0] ??
+                    "Unnamed product",
+                );
+                groups.set(product.taxClassificationReference, names);
+              }
+              return [...groups].map(([classificationReference, productNames]) => ({
+                classificationReference,
+                productNames,
+              }));
+            };
             const result = await work({
               decided,
+              productTaxClasses,
               registryStore,
               // A read that found no registry registered a guard that can only refuse; it read
               // nothing the reply relies on (the write re-reads the history under its own lock).
@@ -457,6 +495,7 @@ export function createMerchantTaxClassifications(options: {
   const view = (
     registry: CatalogProductTaxClassificationRegistry | null,
     decided: Decided,
+    productTaxClasses: ProductTaxClasses,
   ): TaxClassificationView => {
     const defaultLocale = registry?.defaultLocale ?? registryLocale(decided.brandLocale);
     return {
@@ -482,14 +521,16 @@ export function createMerchantTaxClassifications(options: {
           lifecycle: d.lifecycle,
           isDefault: registry?.defaultClassificationReference === d.classificationReference,
         })),
+      productTaxClasses,
     };
   };
 
   async function query(input: { sessionCookie: unknown; csrf: unknown }) {
     try {
-      return await authorizedRun(input, false, async (context) =>
-        view(await currentRegistry(context), context.decided),
-      );
+      return await authorizedRun(input, false, async (context) => {
+        const registry = await currentRegistry(context);
+        return view(registry, context.decided, await context.productTaxClasses());
+      });
     } catch (error) {
       return mapCatalog(error);
     }
@@ -502,6 +543,8 @@ export function createMerchantTaxClassifications(options: {
       return await authorizedRun(input, true, async (context) => {
         const { decided } = context;
         const current = await currentRegistry(context);
+        // Read before the change is recorded: products do not change with the registry.
+        const productTaxClasses = await context.productTaxClasses();
         const versionReference = derivedReference(
           body.operationReference,
           "tax-classification-version:" + bodyDigest,
@@ -554,7 +597,7 @@ export function createMerchantTaxClassifications(options: {
         const result = await context.registryStore().execute(commandValue);
         return {
           status: result.status,
-          view: view(result.registry, decided),
+          view: view(result.registry, decided, productTaxClasses),
         };
       });
     } catch (error) {

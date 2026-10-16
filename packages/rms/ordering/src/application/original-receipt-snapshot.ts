@@ -13,6 +13,7 @@ import {
   type ReceiptTaxRegistration,
 } from "../domain/digital-receipt.js";
 import type { OrderTaxComponentSnapshot } from "../domain/order-item-snapshot.js";
+import { orderItemOptionLines } from "../domain/order-item-option-lines.js";
 
 /** "0.13" → "13", "0.09975" → "9.975": the frozen decimal rate as a percent, by digit shift. */
 export function receiptRatePercent(rate: string): string {
@@ -212,14 +213,19 @@ export function createOriginalReceiptSnapshotFromCurrentOrder(
       ...(input.template.versionReference === undefined
         ? {}
         : { templateVersionReference: input.template.versionReference }),
-      lines: items.map((item) => ({
-        lineReference: item.orderItemReference,
-        displayName: item.catalog.localizedNames[input.template.locale],
-        quantity: item.quantity,
-        lineTotal: item.pricing.total,
-        // WP-2423 D5: print the item's price before tax; tax is listed after the subtotal.
-        lineSubtotal: item.pricing.subtotal,
-      })),
+      lines: items.map((item) => {
+        // WP-2423: the chosen options with their frozen prices, printed under the item.
+        const options = orderItemOptionLines(item, input.template.locale);
+        return {
+          lineReference: item.orderItemReference,
+          displayName: item.catalog.localizedNames[input.template.locale],
+          quantity: item.quantity,
+          lineTotal: item.pricing.total,
+          // WP-2423 D5: print the item's price before tax; tax is listed after the subtotal.
+          lineSubtotal: item.pricing.subtotal,
+          ...(options.length === 0 ? {} : { options }),
+        };
+      }),
       subtotal: sum("subtotal"),
       adjustments: { discount: sum("discount"), fee: sum("fee") },
       tax: sum("tax"),

@@ -87,3 +87,20 @@ export function percentOfMinor(amountMinor: string, percent: number): string | n
   if (base < 0n) return null;
   return ((base * BigInt(percent) + 50n) / 100n).toString();
 }
+
+/**
+ * WP-2423: one chosen option as the guest reads it on their order and receipt: "Whipped cream
+ * +$0.50", "Extra shot × 2 +$1.50", or just "Oat milk" when it is free. The amount is what the option
+ * added for the whole line (already part of the item's price).
+ */
+export function describeChosenOption(option: {
+  readonly displayName: string;
+  readonly quantity: number;
+  readonly amount: { readonly amountMinor: bigint; readonly currencyCode: string };
+}): string {
+  const name =
+    option.quantity === 1 ? option.displayName : `${option.displayName} × ${option.quantity}`;
+  return option.amount.amountMinor > 0n
+    ? `${name} +${formatMoney(option.amount.amountMinor, option.amount.currencyCode)}`
+    : name;
+}

@@ -51,12 +51,15 @@ export interface OptionRecipeRow {
     readonly version: number;
     readonly content: OptionRecipeChangeContent;
     readonly byViewer: boolean;
+    /** Who saved this change: "You", their name, or "Unnamed staff member". */
+    readonly authorLabel: string;
     readonly recordedAt: string;
     readonly published: boolean;
     readonly reviews: readonly {
       readonly kind: "Cost" | "FoodSafety";
       readonly decision: "Approved" | "Rejected";
       readonly byViewer: boolean;
+      readonly reviewerLabel: string;
       readonly comment: string | null;
       readonly reviewedAt: string;
     }[];

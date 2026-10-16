@@ -5,6 +5,7 @@ import { Link } from "react-router";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
 import { newOperationReference } from "./RoleAdministrationPages.js";
 import { FULL_SIGN_IN_REQUIRED, FULL_SIGN_IN_REQUIRED_TEXT } from "./full-sign-in.js";
+import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
 import {
   OptionPricePageError,
   moneyText,
@@ -18,7 +19,8 @@ import {
   type OptionPriceView,
 } from "./store-option-prices-page.js";
 
-/** WP-2423 slice 4.3: what each option costs on each product; another approver publishes. */
+/** WP-2423 slice 4.3: what each option costs on each product; another approver publishes, or the
+ * author alone as sole operator (DEC-SOLE-OPERATOR-APPROVAL). */
 const copy: Record<OptionPriceErrorCode | "Loading", string> = {
   Loading: "Loading option prices…",
   PermissionDenied: "You do not have permission for this price action.",
@@ -28,10 +30,18 @@ const copy: Record<OptionPriceErrorCode | "Loading", string> = {
   ApprovalRequired:
     "A price you set yourself must be published by another person who may approve prices.",
   Invalid: "A price is not valid. Enter an amount such as 0.75, or 0 for no charge.",
+  SoleOperatorNotInEffect:
+    "Someone else now holds price approval, so they must publish these prices. Refresh to see who.",
+  NeedsReverification: "Confirm it is you with your authenticator code, then publish again.",
   Offline: "Offline. Nothing was confirmed; retry sends the same request again.",
   Unavailable: "Option prices are unavailable.",
 };
 const key = (binding: string, option: string) => binding + ":" + option;
+/** "$" for CAD in en-CA (the amount itself stays an exact decimal string, never a float). */
+const currencySymbol = (code: string) =>
+  new Intl.NumberFormat("en-CA", { style: "currency", currency: code })
+    .formatToParts(0)
+    .find((part) => part.type === "currency")?.value ?? code + " ";
 
 export function StoreOptionPricesPage({
   client = unavailableOptionPriceClient,
@@ -86,7 +96,7 @@ export function StoreOptionPricesPage({
     );
   const view = state.view;
   const exponent = view.currency.minorUnitExponent;
-  const money = (minor: string) => `${view.currency.code} ${moneyText(minor, exponent)}`;
+  const money = (minor: string) => currencySymbol(view.currency.code) + moneyText(minor, exponent);
   const rows = view.products.flatMap((product) =>
     product.optionSets.flatMap((set) => set.options.map((option) => ({ product, set, option }))),
   );
@@ -104,6 +114,10 @@ export function StoreOptionPricesPage({
   const publishable = rows.filter(
     ({ option }) => option.pending !== null && !option.pending.byViewer,
   );
+  // The viewer's own waiting prices: another approver publishes them, or the viewer alone when
+  // sole operator is in effect for them.
+  const ownWaiting = rows.filter(({ option }) => option.pending?.byViewer === true);
+  const soleOperatorOn = view.soleOperator?.status === "Effective";
   const missing = rows.filter(({ option }) => option.offered && option.priceMinor === null);
   // Option names across products, for "set the same price on every product".
   const shared = [
@@ -117,7 +131,12 @@ export function StoreOptionPricesPage({
 
   const send = async (fresh: OptionPriceCommand, done: string) => {
     if (!client.command) return;
-    const command = pending !== null && pending.action === fresh.action ? pending : fresh;
+    const mode = (value: OptionPriceCommand) =>
+      value.action === "Publish" ? (value.approvalMode ?? null) : null;
+    const command =
+      pending !== null && pending.action === fresh.action && mode(pending) === mode(fresh)
+        ? pending
+        : fresh;
     setBusy(true);
     setMessage(null);
     setPending(command);
@@ -155,7 +174,9 @@ export function StoreOptionPricesPage({
           replacesPending: option.pending !== null,
         })),
       },
-      "Prices saved. They take effect when another person who may approve prices publishes them.",
+      soleOperatorOn
+        ? "Prices saved. They take effect when you publish them below."
+        : "Prices saved. They take effect when another person who may approve prices publishes them.",
     );
   const publish = () =>
     void send(
@@ -168,6 +189,19 @@ export function StoreOptionPricesPage({
         })),
       },
       "Prices published. Customers pay them from now on.",
+    );
+  const publishOwn = () =>
+    void send(
+      {
+        action: "Publish",
+        operationReference: newOperationReference(),
+        rules: ownWaiting.map(({ option }) => ({
+          ruleReference: option.ruleReference ?? "",
+          expectedAggregateVersion: option.aggregateVersion ?? 1,
+        })),
+        approvalMode: "SoleOperator",
+      },
+      "Prices published, approved by you alone. Customers pay them from now on.",
     );
   const applyEverywhere = (setName: string, optionName: string, text: string) => {
     setEverywhere((current) => ({ ...current, [setName + " · " + optionName]: text }));
@@ -188,8 +222,11 @@ export function StoreOptionPricesPage({
           <h2>Option prices</h2>
           <p>
             What each option adds to a product's price, for every size, pickup and dine-in. Enter 0
-            for no charge. A new price takes effect when another person who may approve prices
-            publishes it. An option without a published price cannot be ordered. Source as of{" "}
+            for no charge.{" "}
+            {soleOperatorOn
+              ? "You run this business alone (sole operator), so you may publish your own new prices after confirming it is you."
+              : "A new price takes effect when another person who may approve prices publishes it."}{" "}
+            An option without a published price cannot be ordered. Source as of{" "}
             <SourceTime instant={view.sourceAsOf} />
           </p>
         </div>
@@ -232,10 +269,40 @@ export function StoreOptionPricesPage({
             ))}
           </ul>
           <button type="button" disabled={busy} onClick={publish}>
-            {pending?.action === "Publish"
+            {pending?.action === "Publish" && pending.approvalMode === undefined
               ? "Retry publish"
               : `Publish ${publishable.length} price${publishable.length === 1 ? "" : "s"}`}
           </button>
+        </section>
+      ) : null}
+      {view.permissions.mayApprove && ownWaiting.length > 0 ? (
+        <section className="detail-section" aria-labelledby="publish-own-prices">
+          <h3 id="publish-own-prices">Your prices waiting for approval</h3>
+          <SoleOperatorSelfApproval
+            gate={view.soleOperator}
+            csrf={csrf}
+            fetcher={fetcher}
+            what="these prices"
+            permissionName="price approval"
+            busy={busy}
+            actionLabel={
+              pending?.action === "Publish" && pending.approvalMode === "SoleOperator"
+                ? "Retry publish"
+                : `Publish ${ownWaiting.length} price${ownWaiting.length === 1 ? "" : "s"} on my own`
+            }
+            summary={
+              <ul>
+                {ownWaiting.map(({ product, set, option }) => (
+                  <li key={key(set.bindingReference, option.optionReference)}>
+                    {product.name} · {set.name} · {option.name}:{" "}
+                    {option.priceMinor === null ? "no price" : money(option.priceMinor)} →{" "}
+                    {money(option.pending?.priceMinor ?? "0")}
+                  </li>
+                ))}
+              </ul>
+            }
+            onApprove={publishOwn}
+          />
         </section>
       ) : null}
       {view.permissions.mayEdit && shared.length > 0 ? (

@@ -8,9 +8,14 @@ const doubles = vi.hoisted(() => ({
   list: vi.fn(),
   get: vi.fn(),
   roundDates: vi.fn(),
+  today: vi.fn(),
 }));
-vi.mock("./merchant-round-business-date.js", () => ({
+vi.mock("./merchant-round-business-date.js", async (original) => ({
+  ...(await original<object>()),
   createMerchantRoundBusinessDates: () => doubles.roundDates,
+}));
+vi.mock("./merchant-business-day-window.js", () => ({
+  createMerchantBusinessDayWindows: () => ({ today: doubles.today }),
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => doubles.scope }));
 vi.mock("@rms/kitchen", async (original) => ({
@@ -103,6 +108,8 @@ it("derives current authority, preserves integer strings, and rechecks permissio
     operatorStatus: "Unverified",
     storeReference: id(4),
     canCloseEarlierDayTickets: false,
+    // The Store's business day could not be read here: the search says nothing about acceptance.
+    awaitingAcceptance: null,
     items: [
       {
         workItemReference: id(5),
@@ -397,4 +404,54 @@ describe("kdsOperatorStatus", () => {
       }),
     ).toBe("Unavailable");
   });
+});
+
+it("WP-2423 v15: names today's orders waiting for acceptance on the first page only", async () => {
+  const f = setup();
+  doubles.scope.mockResolvedValue({
+    actorReference: id(2),
+    context: { brand: { brandReference: id(3) } },
+    store: { storeReference: id(4), timeZone: "America/Toronto" },
+    selected: { tenantReference: id(1) },
+    allowed: f.allowed,
+    authorizeAction: f.authorizeAction,
+  });
+  doubles.today.mockResolvedValue({
+    businessDate: "2026-09-19",
+    startsAt: "2026-09-19T08:00:00.000Z",
+    timeZone: "America/Toronto",
+  });
+  const query = f.tx.query as unknown as ReturnType<
+    typeof vi.fn<(sql: string, values?: readonly unknown[]) => Promise<unknown>>
+  >;
+  query.mockImplementation(async (sql: string) =>
+    sql.includes("order_payment_acceptance_wait")
+      ? {
+          rows: [
+            { order_id: id(20), order_number: "13", order_type: "Pickup", dining_session: null },
+            { order_id: id(21), order_number: "7", order_type: "DineIn", dining_session: id(22) },
+          ],
+          rowCount: 2,
+        }
+      : sql.includes("rms_dining.dining_session")
+        ? { rows: [{ session_id: id(22), label: "T4" }], rowCount: 1 }
+        : { rows: [], rowCount: 0 },
+  );
+  const result = (await f.operation(f.input)) as { awaitingAcceptance: unknown };
+  expect(doubles.today).toHaveBeenCalledWith(expect.anything(), "2026-09-19T12:00:00.000Z");
+  expect(result.awaitingAcceptance).toEqual([
+    { orderNumber: "13", orderType: "Pickup", tableLabel: null },
+    { orderNumber: "7", orderType: "DineIn", tableLabel: "T4" },
+  ]);
+  const waiting = query.mock.calls.find(([sql]) =>
+    String(sql).includes("order_payment_acceptance_wait"),
+  );
+  // Today's business day only: an earlier day's order with the same number is never named.
+  expect(waiting?.[1]).toEqual([id(3), id(4), "2026-09-19", "2026-09-19T08:00:00.000Z", 100]);
+  // Later pages do not read it again.
+  const next = (await f.operation({
+    ...f.input,
+    query: { ...f.input.query, cursor: { afterWorkItemReference: id(5) } },
+  })) as Record<string, unknown>;
+  expect(Object.hasOwn(next, "awaitingAcceptance")).toBe(false);
 });

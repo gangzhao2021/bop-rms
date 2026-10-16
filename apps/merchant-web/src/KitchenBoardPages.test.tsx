@@ -14,6 +14,7 @@ import {
   kitchenBoardSearch,
   earlierDaySearchText,
   kitchenSearchHiddenText,
+  kitchenSearchAwaitingText,
   KitchenWorkItemScreen,
   kitchenAgeTier,
   kitchenLateMinutes,
@@ -1097,6 +1098,83 @@ describe("DEC-KITCHEN-STALE-TICKETS earlier business days on the kitchen board",
     expect(earlierDaySearchText(3, "6")).toBe(
       "3 tickets from earlier days have number or table “6”",
     );
+  });
+
+  it("v15: an earlier day's finished or cancelled order never answers for today's paid, not accepted order", () => {
+    const label = (n: string) => ({
+      orderNumber: n,
+      orderType: "Pickup" as const,
+      tableLabel: null,
+    });
+    // Earlier days' order 13 (finished) and order 12 (cancelled) share today's numbers.
+    const oldDone = {
+      ...old,
+      orderLabel: label("13"),
+      status: "Completed" as const,
+      completedQuantity: 2,
+      execution: { ...execution, readyAt: "2026-08-07T18:20:00.000Z" },
+    };
+    const oldCancelled = {
+      ...old,
+      workItemReference: "018f0f58-767a-7f3b-a1d0-000000000431",
+      orderLabel: label("12"),
+      status: "Cancelled" as const,
+    };
+    const view = parseKitchenBoardView({
+      ...kitchenBoardFixture(),
+      items: [{ ...today, orderLabel: label("14") }, oldDone, oldCancelled],
+      awaitingAcceptance: [
+        label("13"),
+        { orderNumber: "12", orderType: "DineIn", tableLabel: "T4" },
+      ],
+    });
+    expect(view.awaitingAcceptance?.map((entry) => entry.orderNumber)).toEqual(["13", "12"]);
+    const search = (term: string) =>
+      kitchenBoardSearch({
+        items: view.items,
+        reworks: [],
+        today: "2026-08-12",
+        search: term,
+        awaitingAcceptance: view.awaitingAcceptance,
+      });
+    const thirteen = search("13");
+    expect(thirteen.todayMatches).toEqual([]);
+    expect(thirteen.awaitingMatches.map((entry) => entry.orderNumber)).toEqual(["13"]);
+    expect(kitchenSearchAwaitingText(thirteen.awaitingMatches, "13", false)).toBe(
+      "Order 13 is not accepted yet — accept it on Orders.",
+    );
+    const twelve = search("12");
+    expect(twelve.todayMatches).toEqual([]);
+    expect(kitchenSearchAwaitingText(twelve.awaitingMatches, "12", false)).toBe(
+      "Order 12 (table T4) is not accepted yet — accept it on Orders.",
+    );
+    // A table's earlier round is done and a new round waits.
+    expect(kitchenSearchAwaitingText(twelve.awaitingMatches, "12", true)).toBe(
+      "Order 12 (table T4) has a new round that is not accepted yet — accept it on Orders.",
+    );
+    expect(
+      kitchenSearchAwaitingText(
+        [...thirteen.awaitingMatches, ...thirteen.awaitingMatches],
+        "13",
+        false,
+      ),
+    ).toBe("2 orders for “13” are not accepted yet — accept them on Orders.");
+    expect(kitchenSearchAwaitingText([], "13", false)).toBeNull();
+    // Today's own order is still found; nothing waits for it.
+    expect(search("14").todayMatches).toHaveLength(1);
+    expect(search("14").awaitingMatches).toEqual([]);
+    // An older server (no list) or an unread list: nothing is claimed about acceptance.
+    expect(
+      kitchenBoardSearch({ items: view.items, reworks: [], today: "2026-08-12", search: "13" })
+        .awaitingMatches,
+    ).toEqual([]);
+    expect(
+      parseKitchenBoardView({ ...kitchenBoardFixture(), awaitingAcceptance: null })
+        .awaitingAcceptance,
+    ).toBeNull();
+    expect(() =>
+      parseKitchenBoardView({ ...kitchenBoardFixture(), awaitingAcceptance: [null] }),
+    ).toThrow("KITCHEN_BOARD_INVALID");
   });
 
   it("says an order or table is done when all its matching work is finished, not that filters hide it", () => {

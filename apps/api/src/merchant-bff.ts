@@ -7386,6 +7386,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
     Conflict: 409,
     ApprovalRequired: 409,
     Invalid: 400,
+    SoleOperatorNotInEffect: 409,
+    NeedsReverification: 409,
   } as const;
   const optionPriceFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof MerchantOptionPriceError)) {

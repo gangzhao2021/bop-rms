@@ -14,7 +14,11 @@ import {
 } from "./tax-classification-page.js";
 
 const id = (n: number) => `0199e8a0-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
-const view = (mayManage = true, classifications = sample): TaxClassificationView =>
+const view = (
+  mayManage = true,
+  classifications = sample,
+  productTaxClasses: unknown = null,
+): TaxClassificationView =>
   parseTaxClassificationView({
     screenId: "CAT-TAX-CLASSIFICATION-LIST",
     sourceAsOf: "2026-10-15T12:00:00.000Z",
@@ -23,6 +27,7 @@ const view = (mayManage = true, classifications = sample): TaxClassificationView
     defaultLocale: "en-CA",
     locales: ["en-CA", "fr-CA"],
     classifications,
+    productTaxClasses,
   });
 const sample = [
   {
@@ -75,6 +80,8 @@ describe("WP-2423 tax classifications page", () => {
       { ...view(), locales: ["fr-CA", "en-CA"] },
       { ...view(), classifications: [{ ...sample[0], names: { "fr-CA": "Frais" } }] },
       { ...view(), classifications: [{ ...sample[0], lifecycle: "Paused" }] },
+      { ...view(), productTaxClasses: [{ classificationReference: "Class 1", productNames: [] }] },
+      { ...view(), productTaxClasses: undefined },
     ])
       expect(() => parseTaxClassificationView(broken)).toThrow(TaxClassificationPageError);
   });
@@ -93,6 +100,26 @@ describe("WP-2423 tax classifications page", () => {
     expect(text).toContain("Old bottles");
     expect(html).not.toContain('aria-label="Retire Old bottles"');
     expect(findInternalText([text])).toEqual([]);
+  });
+
+  it("names the products of each class and explains classes products use that are not listed", () => {
+    const html = render(
+      view(true, sample, [
+        { classificationReference: id(1), productNames: ["Mocha"] },
+        { classificationReference: id(9), productNames: ["Flat White", "DEMO Latte"] },
+        { classificationReference: null, productNames: ["Tea"] },
+      ]),
+    );
+    const text = staticText(html);
+    expect(text).toContain("Mocha");
+    expect(text).toContain("Tax classes your products use that are not listed above");
+    expect(text).toContain("Unnamed tax class: Flat White, DEMO Latte");
+    expect(text).toContain("No tax class yet: Tea.");
+    expect(text).toContain("See rates in Tax review");
+    expect(text).not.toMatch(/Class 1/u);
+    expect(findInternalText([text])).toEqual([]);
+    // Without product read permission the page lists the Brand's classes only.
+    expect(staticText(render(view()))).not.toContain("not listed above");
   });
 
   it("shows readers the list without change controls", () => {

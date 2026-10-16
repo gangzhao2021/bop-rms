@@ -6,6 +6,10 @@ import {
   decodeOrderItemSnapshot,
   decodeConfiguredOrderItemSnapshot,
 } from "../../domain/order-item-snapshot-codec.js";
+import {
+  orderItemOptionLines,
+  type OrderItemOptionLine,
+} from "../../domain/order-item-option-lines.js";
 
 const fail = (): never => {
   throw new DigitalReceiptError("DIGITAL_RECEIPT_DEPENDENCY_UNAVAILABLE");
@@ -123,6 +127,15 @@ export interface OrderItemPrice {
   readonly tax: { readonly amountMinor: bigint; readonly currencyCode: string };
   /** The item's frozen total after discount, fees and tax. */
   readonly total: { readonly amountMinor: bigint; readonly currencyCode: string };
+  /** WP-2423: the chosen options and what each added to `subtotal` (empty for a plain item). */
+  readonly options: readonly OrderItemOptionLine[];
+  /** The guest's note for the kitchen as frozen at checkout (null when none was left). */
+  readonly customerNote: string | null;
+  /**
+   * The dine-in participant who added the item (null for a pickup order, where the one guest
+   * added every item). Callers show a note only to the guest who wrote it, as the cart does.
+   */
+  readonly addedByParticipantReference: string | null;
 }
 
 /**
@@ -134,6 +147,8 @@ export async function listOrderItemPrices(
   tx: ConsumerTransaction,
   scope: { readonly brandReference: string; readonly storeReference: string },
   orderReference: string,
+  /** The guest's language for option names (each option falls back to a name it has). */
+  locale = "",
 ): Promise<readonly OrderItemPrice[]> {
   try {
     const brandReference = String(parseOrderingReference(scope.brandReference));
@@ -171,6 +186,12 @@ export async function listOrderItemPrices(
           subtotal: money(snapshot.pricing.subtotal),
           tax: money(snapshot.pricing.tax),
           total: money(snapshot.pricing.total),
+          options: orderItemOptionLines(snapshot, locale),
+          customerNote: snapshot.customerNote,
+          addedByParticipantReference:
+            snapshot.addedByParticipantReference === null
+              ? null
+              : String(snapshot.addedByParticipantReference),
         });
       }),
     );

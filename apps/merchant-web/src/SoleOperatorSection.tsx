@@ -176,10 +176,11 @@ export function SoleOperatorSection({
         For a business run by one owner with no one else who can approve. When it is on and you are
         the only person who can approve, you may approve your own changes: refunds that need
         approval (over $100, from an earlier business day or more than 24 hours after payment), new
-        prices, menus, recipes and the allergen list, and the Store&rsquo;s configuration (Store
-        setup, opening hours and the receipt template) before you publish it. You still confirm with
-        your authenticator code, every approval is recorded as approved by you alone, and the
-        day-end settlement shows your own refund approvals for your review.
+        prices (price books and option prices), menus, recipes (including option recipes) and the
+        allergen list, and the Store&rsquo;s configuration (Store setup, opening hours and the
+        receipt template) before you publish it. You still confirm with your authenticator code,
+        every approval is recorded as approved by you alone, and the day-end settlement shows your
+        own refund approvals for your review.
       </p>
       <dl>
         <div>

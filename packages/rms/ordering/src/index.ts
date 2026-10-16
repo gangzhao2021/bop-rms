@@ -274,6 +274,7 @@ export { createPostgresDigitalReceiptStore } from "./infrastructure/persistence/
 export { createPostgresOrderCompensationCandidateReader } from "./infrastructure/persistence/order-payment-disposition-store.js";
 
 export * from "./domain/receipt-order-snapshot.js";
+export * from "./domain/order-item-option-lines.js";
 
 export * from "./infrastructure/persistence/receipt-order-source.js";
 export * from "./domain/additional-dining-batch.js";
@@ -314,6 +315,8 @@ export {
   listStoreUnfulfillablePaidOrders,
   loadOrderNotAcceptedClosure,
   listStorePaidOrderBatches,
+  listStoreOrdersAwaitingAcceptance,
+  type StoreOrderAwaitingAcceptance,
   listStoreConfirmedOrderBatches,
   listStoreOrderBatchPayments,
   listStoreKitchenOrderLabels,

@@ -13,8 +13,10 @@ import {
   type OptionSetAggregate,
   type ProductAggregate,
   type ProductLifecycleTransaction,
+  listStoreAvailabilityRules,
 } from "@rms/catalog";
 import { listStoreTaxClassifications } from "@rms/pricing";
+import { itemAvailability } from "./merchant-availability.js";
 import { withRememberedBrandAuthorization } from "./merchant-brand-transaction-authorization.js";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -358,10 +360,28 @@ export function createMerchantProducts(options: {
             if (product === null) return fail("NotFound");
             const mayReadOptions =
               (await s.decision("catalog.option_set.read"))?.effect === "Allow";
+            // WP-2423 (v15 2026-10-16): whether each size is offered at the selected Store, so a
+            // new product is never assumed visible to customers here.
+            const rules = await listStoreAvailabilityRules(productTx(tx), {
+              brandReference: s.brand,
+              storeReference: s.store,
+            });
+            const availabilityHere = Object.fromEntries(
+              product.draft.skus.map((sku) => [
+                String(sku.skuReference),
+                itemAvailability(
+                  rules,
+                  { brandReference: s.brand, storeReference: s.store },
+                  String(sku.skuReference),
+                  at,
+                ).status,
+              ]),
+            );
             return {
               screenId: "CAT-PRODUCT-DETAIL" as const,
               ...base,
               product: productView(product, options.locale),
+              availabilityHere,
               optionSetChoices: mayReadOptions
                 ? optionSetChoices(
                     await listBrandOptionSets(productTx(tx), { brandReference: s.brand }),

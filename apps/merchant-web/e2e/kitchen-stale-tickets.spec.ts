@@ -39,7 +39,11 @@ const item = (n: number, overrides: Record<string, unknown>) => ({
   ...overrides,
 });
 
-async function board(page: Page, canClose: boolean) {
+async function board(
+  page: Page,
+  canClose: boolean,
+  extra: { items?: readonly unknown[]; awaitingAcceptance?: readonly unknown[] } = {},
+) {
   // Ticket ages follow the device clock; pin it to the board's time so "waiting 4 days" is stable.
   await page.clock.setFixedTime(new Date(at));
   await page.route("**/merchant/session", (route) =>
@@ -104,7 +108,8 @@ async function board(page: Page, canClose: boolean) {
         stale: false,
         freshnessStatus: "Fresh",
         canCloseEarlierDayTickets: canClose,
-        items: closed ? [today] : [today, old],
+        ...(extra.awaitingAcceptance ? { awaitingAcceptance: extra.awaitingAcceptance } : {}),
+        items: [...(closed ? [today] : [today, old]), ...(extra.items ?? [])],
         nextCursor: null,
       },
     }),
@@ -263,4 +268,49 @@ test("@production DEC-KITCHEN-STALE-TICKETS: kitchen staff see earlier days apar
   await search.getByRole("button", { name: "Find" }).click();
   await expect(page.locator("details.kitchen-earlier-days")).toHaveCount(0);
   await expect(page.getByText("Nothing on the board for order or table “9”.")).toBeVisible();
+});
+
+test("@production v15: the kitchen search answers for today's order only, and says a paid order is not accepted yet", async ({
+  page,
+}) => {
+  const label = (orderNumber: string) => ({ orderNumber, orderType: "Pickup", tableLabel: null });
+  // Earlier days' order 13 (finished) and order 12 (cancelled) share today's numbers; today's
+  // 13 and 12 are paid and wait for acceptance, so they have no kitchen work yet.
+  await board(page, false, {
+    items: [
+      item(0x30, {
+        orderLabel: label("13"),
+        localizedDisplayNames: { "en-CA": "Fried rice" },
+        status: "Completed",
+        completedQuantity: 1,
+        workItemCreatedAt: "2026-10-12T17:00:00.000Z",
+        acceptedAt: "2026-10-12T17:01:00.000Z",
+        orderItemReadyAt: "2026-10-12T17:10:00.000Z",
+        businessDate: "2026-10-12",
+      }),
+      item(0x40, {
+        orderLabel: label("12"),
+        localizedDisplayNames: { "en-CA": "Spring rolls" },
+        status: "Cancelled",
+        workItemCreatedAt: "2026-10-12T16:00:00.000Z",
+        businessDate: "2026-10-12",
+      }),
+    ],
+    awaitingAcceptance: [label("13"), label("12")],
+  });
+  await page.goto("/operations/kitchen");
+  const search = page.locator(".kitchen-reference-search--desktop");
+  for (const number of ["13", "12"]) {
+    await search.getByRole("searchbox", { name: "Order number or table" }).fill(number);
+    await search.getByRole("button", { name: "Find" }).click();
+    await expect(
+      page.getByText(`Order ${number} is not accepted yet — accept it on Orders.`),
+    ).toBeVisible();
+    await expect(page.getByText(`All of order ${number} is done.`)).toHaveCount(0);
+    await expect(page.getByText(/has nothing left to make/u)).toHaveCount(0);
+  }
+  // Today's own order is still found on the board.
+  await search.getByRole("searchbox", { name: "Order number or table" }).fill("2");
+  await search.getByRole("button", { name: "Find" }).click();
+  await expect(page.getByText(/is not accepted yet/u)).toHaveCount(0);
 });

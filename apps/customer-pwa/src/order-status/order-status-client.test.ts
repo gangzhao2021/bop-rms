@@ -271,6 +271,42 @@ describe("WP-2423 D5: item prices before tax", () => {
       },
     ]);
   });
+  it("decodes each item's chosen options and the guest's note (WP-2423)", async () => {
+    setCustomerCsrfCredential("a".repeat(43));
+    const priced = {
+      orderItemReference: id(4),
+      subtotal: { amountMinor: "2300", currencyCode: "CAD" },
+      tax: { amountMinor: "298", currencyCode: "CAD" },
+    };
+    const option = { displayName: "Whipped cream", quantity: 1 };
+    const result = await createHttpOrderStatusClient(
+      responder(
+        withPrices([
+          {
+            ...priced,
+            options: [{ ...option, amount: { amountMinor: "50", currencyCode: "CAD" } }],
+            customerNote: "Less sweet",
+          },
+        ]),
+      ),
+    ).load(id(1));
+    expect((result as OrderStatusView).sources?.itemPrices?.[0]).toEqual({
+      orderItemReference: id(4),
+      subtotal: { amountMinor: 2300n, currencyCode: "CAD" },
+      tax: { amountMinor: 298n, currencyCode: "CAD" },
+      options: [{ ...option, amount: { amountMinor: 50n, currencyCode: "CAD" } }],
+      customerNote: "Less sweet",
+    });
+    for (const options of [
+      [],
+      [{ ...option, amount: { amountMinor: "2301", currencyCode: "CAD" } }],
+      [{ ...option, amount: { amountMinor: "50", currencyCode: "USD" } }],
+      [{ ...option, quantity: 0, amount: { amountMinor: "50", currencyCode: "CAD" } }],
+    ])
+      await expect(
+        createHttpOrderStatusClient(responder(withPrices([{ ...priced, options }]))).load(id(1)),
+      ).rejects.toThrow();
+  });
   it.each([
     [[]],
     [
@@ -305,5 +341,83 @@ describe("WP-2423 D5: item prices before tax", () => {
     await expect(
       createHttpOrderStatusClient(responder(withPrices(prices))).load(id(1)),
     ).rejects.toMatchObject({ code: "service_unavailable" });
+  });
+});
+
+describe("WP-2423: an order received before its status is ready", () => {
+  const received = (overrides: Record<string, unknown> = {}) => ({
+    schemaVersion: 1,
+    received: {
+      orderReference: id(1),
+      orderNumber: "1001",
+      orderType: "Pickup",
+      submittedAt: "2026-08-11T13:55:00.000Z",
+      checkedAt: "2026-08-11T13:55:04.000Z",
+      ...overrides,
+    },
+  });
+
+  it("decodes the received answer for this exact order", async () => {
+    setCustomerCsrfCredential("a".repeat(43));
+    expect(await createHttpOrderStatusClient(responder(received())).load(id(1))).toEqual({
+      kind: "Received",
+      orderReference: id(1),
+      orderNumber: "1001",
+      orderType: "Pickup",
+      submittedAt: "2026-08-11T13:55:00.000Z",
+      checkedAt: "2026-08-11T13:55:04.000Z",
+    });
+  });
+
+  it.each([
+    { orderReference: id(99) },
+    { orderNumber: "0" },
+    { orderType: "Delivery" },
+    { checkedAt: "2026-08-11T13:54:00.000Z" },
+    { guestSessionReference: id(5) },
+  ])("rejects a mismatched or unexpected received answer %o", async (overrides) => {
+    setCustomerCsrfCredential("a".repeat(43));
+    await expect(
+      createHttpOrderStatusClient(responder(received(overrides))).load(id(1)),
+    ).rejects.toMatchObject({ code: "service_unavailable" });
+  });
+
+  it("shows received, keeps it while re-checking and then shows the status", async () => {
+    setCustomerCsrfCredential("a".repeat(43));
+    const answers: unknown[] = [received(), received(), payload()];
+    const request = vi.fn<typeof fetch>().mockImplementation(
+      async () =>
+        new Response(JSON.stringify(answers.shift()), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    const controller = createOrderStatusController(id(1), createHttpOrderStatusClient(request));
+    const seen: string[] = [];
+    controller.subscribe(() => seen.push(controller.getState().status));
+    await controller.refresh();
+    expect(controller.getState()).toMatchObject({
+      status: "received",
+      received: { orderNumber: "1001", orderType: "Pickup" },
+    });
+    await controller.refresh();
+    expect(controller.getState().status).toBe("received");
+    await controller.refresh();
+    expect(controller.getState()).toMatchObject({
+      status: "ready",
+      view: { order: { orderNumber: "1001" } },
+    });
+    // Re-checks while received never flash "loading".
+    expect(seen).toEqual(["loading", "received", "received", "ready"]);
+  });
+
+  it("still shows not found for an order this phone did not place", async () => {
+    setCustomerCsrfCredential("a".repeat(43));
+    const controller = createOrderStatusController(
+      id(1),
+      createHttpOrderStatusClient(responder({ schemaVersion: 1, error: { code: "x" } }, 404)),
+    );
+    await controller.refresh();
+    expect(controller.getState()).toEqual({ status: "not-found" });
   });
 });

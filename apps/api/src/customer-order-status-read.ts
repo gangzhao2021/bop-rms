@@ -30,6 +30,7 @@ import {
   loadOrderNotAcceptedClosure,
   loadPickupPaymentWindowClosure,
   createPostgresOrderStatusProjectionStore,
+  findGuestSessionOrder,
   OrderStatusProjectionError,
   parseOrderingReference,
   readCheckoutContactPresence,
@@ -394,11 +395,19 @@ export function createCustomerOrderStatusRead(
           // WP-2423 D5: each item's frozen price before tax, so the page prints item prices, then
           // the subtotal and tax, like the receipt. Ordering's own frozen order items; only for the
           // items this projection shows. If they can't be read, the page keeps the totals it has.
+          // WP-2423: with each item's chosen options (and what each added) and, on a pickup order,
+          // the guest's own note, from the same frozen items the cart and checkout showed.
           let itemPrices:
             | {
                 orderItemReference: string;
                 subtotal: { amountMinor: bigint; currencyCode: string };
                 tax: { amountMinor: bigint; currencyCode: string };
+                options: readonly {
+                  displayName: string;
+                  quantity: number;
+                  amount: { amountMinor: bigint; currencyCode: string };
+                }[];
+                customerNote: string | null;
               }[]
             | null = null;
           if (await stillAuthorized()) {
@@ -409,7 +418,12 @@ export function createCustomerOrderStatusRead(
             );
             try {
               await transaction.query("SAVEPOINT customer_order_item_prices", []);
-              const prices = await listOrderItemPrices(transaction, options.scope, orderReference);
+              const prices = await listOrderItemPrices(
+                transaction,
+                options.scope,
+                orderReference,
+                String(guest.locale),
+              );
               await transaction.query("RELEASE SAVEPOINT customer_order_item_prices", []);
               const matched = prices.filter((price) => shown.has(price.orderItemReference));
               if (
@@ -426,6 +440,11 @@ export function createCustomerOrderStatusRead(
                   orderItemReference: price.orderItemReference,
                   subtotal: price.subtotal,
                   tax: price.tax,
+                  options: price.options,
+                  // A shared table's items were added by several guests; like the cart, a note
+                  // is shown only to the guest who wrote it, so dine-in notes stay off this page.
+                  customerNote:
+                    price.addedByParticipantReference === null ? price.customerNote : null,
                 }));
             } catch {
               await transaction.query("ROLLBACK TO SAVEPOINT customer_order_item_prices", []);
@@ -549,5 +568,94 @@ export function createCustomerOrderStatusRead(
         );
       }
     },
+    /**
+     * WP-2423 (v15 2026-10-16): the customer status projection is built by the outbox worker after
+     * the Order is created, so a guest who opens the page right after paying can arrive before it.
+     * Called only when `read` found no projection: the same guest authorization (fence first, same
+     * lock order as `read`), then Ordering's own record of the Order this Session placed. `null`
+     * (refused like today) for an unknown Order or one another Session placed.
+     */
+    async received(value: unknown): Promise<CustomerOrderReceived | null> {
+      let credentials: { sessionCredential: string; csrfCredential: string };
+      let orderReference: string;
+      try {
+        const raw = readClosedRecord(value, [
+          "sessionCredential",
+          "csrfCredential",
+          "orderReference",
+        ]);
+        credentials = {
+          sessionCredential: parseGuestRawCredential(raw.sessionCredential),
+          csrfCredential: parseGuestRawCredential(raw.csrfCredential),
+        };
+        orderReference = String(parseOrderingReference(raw.orderReference));
+      } catch {
+        throw new OrderStatusProjectionError("ORDER_STATUS_INPUT_INVALID");
+      }
+      try {
+        return await retryTransactionConflict(() =>
+          options.transactions.run(async (transaction) => {
+            await acquireOrderDispositionFence(transaction, { ...options.scope, orderReference });
+            const runner: CartQueryTransactionRunner = { run: async (work) => work(transaction) };
+            let previous: string | undefined;
+            const now = () => {
+              const at = String(parseCanonicalInstant(options.now()));
+              if (previous !== undefined && at < previous)
+                throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
+              previous = at;
+              return at;
+            };
+            const guest = await new GuestSessionService({
+              store: createPostgresGuestSessionEntryStore(runner, options.scope),
+              credentials: options.credentials,
+              binding: options.binding(transaction),
+              now,
+              admission: { consume: async () => null },
+            }).authorize({ ...credentials, observedAt: now() });
+            if (
+              guest.brandReference !== options.scope.brandReference ||
+              guest.storeReference !== options.scope.storeReference
+            )
+              return null;
+            const order = await findGuestSessionOrder(transaction, options.scope, {
+              orderReference,
+              guestSessionReference: String(guest.sessionReference),
+            });
+            // A dine-in order is shown only to its own table's guest (as `read` requires).
+            if (
+              order === null ||
+              order.orderReference !== orderReference ||
+              (order.orderType === "DineIn" &&
+                (guest.channel !== "DineIn" || guest.diningSessionReference === null))
+            )
+              return null;
+            return Object.freeze({
+              orderReference: order.orderReference,
+              orderNumber: order.orderNumber,
+              orderType: order.orderType,
+              submittedAt: order.createdAt,
+              checkedAt: now(),
+            });
+          }),
+        );
+      } catch (error) {
+        if (error instanceof OrderStatusProjectionError) throw error;
+        if (error instanceof GuestSessionError)
+          throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
+        throw withFailureCause(
+          new OrderStatusProjectionError("ORDER_STATUS_DEPENDENCY_UNAVAILABLE"),
+          error,
+        );
+      }
+    },
   });
+}
+
+/** WP-2423: an Order this guest placed whose status page is still being prepared. */
+export interface CustomerOrderReceived {
+  readonly orderReference: string;
+  readonly orderNumber: string;
+  readonly orderType: "Pickup" | "DineIn";
+  readonly submittedAt: string;
+  readonly checkedAt: string;
 }

@@ -144,7 +144,10 @@ function brandScope(allowed: () => readonly string[], actor = owner) {
     })),
   };
 }
-function harness(allowedAt: (call: number) => readonly string[] = () => ownerActions) {
+function harness(
+  allowedAt: (call: number) => readonly string[] = () => ownerActions,
+  productRows: readonly Record<string, unknown>[] = [],
+) {
   let calls = 0;
   const resolveScope = vi.fn(async () => {
     const call = ++calls;
@@ -155,7 +158,12 @@ function harness(allowedAt: (call: number) => readonly string[] = () => ownerAct
     now,
     transactions: {
       async run<T>(work: (tx: unknown) => Promise<T>): Promise<T> {
-        const tx = { writes: [] as (() => void)[], query: vi.fn() };
+        const tx = {
+          writes: [] as (() => void)[],
+          query: vi.fn(async (sql: string) => ({
+            rows: sql.includes("FROM rms_catalog.product p") ? productRows : [],
+          })),
+        };
         const result = await work(tx);
         for (const write of tx.writes) write();
         committed.push(tx.writes.length);
@@ -247,6 +255,34 @@ describe("WP-2423 Brand tax classifications (merchant BFF)", () => {
     });
     // Resolved in full at the start and once more before the reply; owner reads took the guard.
     expect(h.resolveScope).toHaveBeenCalledTimes(2);
+  });
+
+  it("lists products by the tax class they name, only for a viewer who may read products", async () => {
+    const product = (n: number, name: string, tax: string | null, lifecycle = "Active") => ({
+      product: id(100 + n),
+      internal_code: "P" + n,
+      product_type: "PreparedFood",
+      lifecycle,
+      aggregate_version: 1,
+      names: { "en-CA": name },
+      tax,
+      updated: "2026-10-15T12:00:00.000Z",
+      sizes: 1,
+      active_sizes: 1,
+    });
+    const rows = [
+      product(1, "Flat White", id(50)),
+      product(2, "Mocha", id(50)),
+      product(3, "Tea", null),
+      product(4, "Old cake", id(50), "Archived"),
+    ];
+    const reader = harness(() => [...ownerActions, "catalog.product.read"], rows);
+    expect((await reader.query()).productTaxClasses).toEqual([
+      { classificationReference: id(50), productNames: ["Flat White", "Mocha"] },
+      { classificationReference: null, productNames: ["Tea"] },
+    ]);
+    // Without product read permission nothing about products is read or shown.
+    expect((await harness(() => ownerActions, rows).query()).productTaxClasses).toBeNull();
   });
 
   it("adds, renames, sets the default and retires as append-only versions, with audit", async () => {

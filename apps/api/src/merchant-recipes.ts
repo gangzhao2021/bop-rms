@@ -6,6 +6,7 @@ import {
 import {
   confirmActiveBrandMembers,
   listStoreMembers,
+  memberDisplayNames,
   type MemberDirectoryTransaction,
 } from "@bop/membership";
 import { brandActionHeldBy, type RoleAssignmentTransaction } from "@bop/permission";
@@ -338,13 +339,12 @@ export function createMerchantRecipes(options: {
             tx as unknown as MemberDirectoryTransaction,
             scope,
           );
-          const people = new Map(
+          const people = new Map<string, string | null>(
             members.map((member) => [member.actorReference, member.displayName]),
           );
+          // Staff read a person's name ("You" for themselves), never an identifier fragment.
           const label = (actor: string) =>
-            actor === scope.actorReference
-              ? "You"
-              : (people.get(actor) ?? "Staff " + actor.slice(-4));
+            actor === scope.actorReference ? "You" : (people.get(actor) ?? "Unnamed staff member");
           const choices = {
             yieldUnits: Object.keys(recipeYieldUnits),
             items: items
@@ -395,6 +395,18 @@ export function createMerchantRecipes(options: {
           if (input.recipeReference !== null) {
             const detail = await loadRecipe(rtx, scope, input.recipeReference, at);
             if (detail === null) return fail("NotFound");
+            // Recipes are the Brand's: an author or reviewer may be a Brand member not assigned
+            // to this Store (a Brand Owner). Name them from the Brand's member directory too.
+            const unnamed = [
+              detail.authorReference,
+              ...detail.reviews.map((review) => review.reviewerReference),
+            ].filter((actor) => actor !== scope.actorReference && !people.get(actor));
+            for (const [actor, displayName] of await memberDisplayNames(
+              tx as unknown as MemberDirectoryTransaction,
+              scope,
+              unnamed,
+            ))
+              people.set(actor, displayName);
             // WP-2423 Q19: a reviewer who would review their own recipe, or give the second kind,
             // sees whether they may do it alone as sole operator and why not.
             const gate = permissions.mayReview

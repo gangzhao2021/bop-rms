@@ -10,9 +10,18 @@ import {
   parseRecipeListView,
   RecipePageError,
   suggestRecipeCode,
+  unitText,
 } from "./recipe-pages.js";
 
 describe("WP-2423 recipe authoring page helpers", () => {
+  it("writes units as staff do, never as codes", () => {
+    expect(unitText("EACH")).toBe("each");
+    expect(unitText("KG")).toBe("kg");
+    expect(unitText("ML")).toBe("mL");
+    expect(unitText("L")).toBe("L");
+    expect(unitText("BOX")).toBe("box");
+    expect(unitText(undefined)).toBe("unit");
+  });
   it("suggests stable codes from names", () => {
     expect(suggestRecipeCode("Flat white 12 oz")).toBe("FLAT-WHITE-12-OZ");
     expect(suggestRecipeCode("Crème brûlée")).toBe("CREME-BRULEE");

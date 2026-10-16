@@ -144,16 +144,20 @@ function record(value: unknown, expectedVersion: number) {
   )
     return invalid();
   const lines = snapshot.lines.map((candidate) => {
-    const hasSubtotal =
+    const has = (key: string) =>
       candidate !== null &&
       typeof candidate === "object" &&
-      Object.hasOwn(candidate as object, "lineSubtotal");
+      Object.hasOwn(candidate as object, key);
+    const hasSubtotal = has("lineSubtotal");
+    // WP-2423: chosen options (versions issued since they were recorded), beside the item price.
+    const hasOptions = has("options");
     const line = exact(candidate, [
       "lineReference",
       "displayName",
       "quantity",
       "lineTotal",
       ...(hasSubtotal ? ["lineSubtotal"] : []),
+      ...(hasOptions ? ["options"] : []),
     ]);
     if (
       !reference.test(String(line.lineReference)) ||
@@ -162,7 +166,41 @@ function record(value: unknown, expectedVersion: number) {
       line.displayName.length > 160 ||
       !Number.isSafeInteger(line.quantity) ||
       (line.quantity as number) < 1 ||
-      (line.quantity as number) > 999
+      (line.quantity as number) > 999 ||
+      (hasOptions &&
+        (!hasSubtotal ||
+          !Array.isArray(line.options) ||
+          line.options.length < 1 ||
+          line.options.length > 100))
+    )
+      return invalid();
+    const lineSubtotal = hasSubtotal ? amount(line.lineSubtotal) : undefined;
+    const options = hasOptions
+      ? Object.freeze(
+          (line.options as unknown[]).map((value) => {
+            const option = exact(value, ["displayName", "quantity", "amount"]);
+            if (
+              typeof option.displayName !== "string" ||
+              option.displayName.length < 1 ||
+              option.displayName.length > 160 ||
+              !Number.isSafeInteger(option.quantity) ||
+              (option.quantity as number) < 1 ||
+              (option.quantity as number) > 999
+            )
+              return invalid();
+            return Object.freeze({
+              displayName: option.displayName,
+              quantity: option.quantity as number,
+              amount: amount(option.amount),
+            });
+          }),
+        )
+      : undefined;
+    if (
+      options !== undefined &&
+      (options.some((option) => option.amount.currencyCode !== lineSubtotal?.currencyCode) ||
+        options.reduce((sum, option) => sum + option.amount.amountMinor, 0n) >
+          (lineSubtotal?.amountMinor ?? 0n))
     )
       return invalid();
     return Object.freeze({
@@ -170,7 +208,8 @@ function record(value: unknown, expectedVersion: number) {
       displayName: line.displayName,
       quantity: line.quantity as number,
       lineTotal: amount(line.lineTotal),
-      ...(hasSubtotal ? { lineSubtotal: amount(line.lineSubtotal) } : {}),
+      ...(lineSubtotal === undefined ? {} : { lineSubtotal }),
+      ...(options === undefined ? {} : { options }),
     });
   });
   const subtotal = amount(snapshot.subtotal);

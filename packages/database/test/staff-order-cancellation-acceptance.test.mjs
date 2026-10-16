@@ -19,6 +19,7 @@ import {
 } from "../../rms/kitchen/src/index.ts";
 import {
   listStorePaidOrderBatches,
+  listStoreOrdersAwaitingAcceptance,
   createPostgresDiningOrderItemStateReader,
   createPostgresOrderCompensationCandidateReader,
   createPostgresStaffOrderCancellationReader,
@@ -2066,6 +2067,61 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       );
       assert.equal(waiting.awaitingAcceptance.has(left.batches[1].batch), false);
       assert.equal(waiting.awaitingAcceptance.has(left.batches[0].batch), true);
+      // WP-2423 v15 (kitchen search): today's order with a round still waiting is listed by its
+      // number for the kitchen; read as an earlier day's order (the next business day, a day that
+      // started after its rounds), the same number is never named as waiting today.
+      const leftHeader = (
+        await admin.query(
+          "SELECT business_date::text business_date,order_number FROM rms_ordering.order_header WHERE order_id=$1",
+          [left.order],
+        )
+      ).rows[0];
+      const awaitingOn = (input) =>
+        scoped((tx) =>
+          listStoreOrdersAwaitingAcceptance(
+            tx,
+            { brandReference: brand, storeReference: store },
+            { limit: 100, ...input },
+          ),
+        );
+      const listedToday = await awaitingOn({
+        businessDate: leftHeader.business_date,
+        since: time(minutes(24 * 60)),
+      });
+      assert.deepEqual(
+        listedToday.filter((entry) => entry.orderReference === left.order),
+        [
+          {
+            orderReference: left.order,
+            orderNumber: leftHeader.order_number,
+            orderType: "DineIn",
+            diningSessionReference: left.session,
+          },
+        ],
+      );
+      const followingDay = new Date(
+        Date.parse(leftHeader.business_date + "T12:00:00.000Z") + 86_400_000,
+      )
+        .toISOString()
+        .slice(0, 10);
+      const listedNextDay = await awaitingOn({
+        businessDate: followingDay,
+        since: time(minutes(24 * 60)),
+      });
+      assert.equal(
+        listedNextDay.some((entry) => entry.orderReference === left.order),
+        false,
+        "an earlier day's order sharing the number is not today's",
+      );
+      // D4: a round submitted since today's start is today's, even on an older table's Order.
+      const listedLaterRound = await awaitingOn({
+        businessDate: followingDay,
+        since: time(-minutes(24 * 60)),
+      });
+      assert.equal(
+        listedLaterRound.some((entry) => entry.orderReference === left.order),
+        true,
+      );
       // Payment refunds it in full: the staff cancellation is a compensation candidate.
       const leftDiscover = await scoped(async (tx) =>
         withoutCardMachinePayments(

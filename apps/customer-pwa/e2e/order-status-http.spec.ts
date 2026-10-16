@@ -585,4 +585,151 @@ test.describe("@production order status HTTP continuity", () => {
     await expect(main).not.toContainText("isn’t ready");
     await expectNoInternalText(page);
   });
+
+  // v15 2026-10-16: right after paying, the order's status can arrive a few seconds after the
+  // order itself. The guest sees "Order received" (never "can't show this order") until it does.
+  test("WP-2423: says a just-paid order was received and shows its status as soon as it arrives", async ({
+    page,
+  }) => {
+    await page.route("**/bff/customer/entry", (route) =>
+      route.fulfill({
+        status: 201,
+        headers: { "cache-control": "no-store" },
+        json: {
+          schemaVersion: 2,
+          status: "Established",
+          brandDisplayName: "Synthetic Brand",
+          storeDisplayName: "Synthetic Status Store",
+          publicStoreReference: id(6),
+          publicTableReference: null,
+          channel: "Pickup",
+          operatingState: "Open",
+          availableServiceModes: ["Pickup"],
+          locale: "en-CA",
+          contextExpiresAt: new Date(Date.now() + 600_000).toISOString(),
+          csrfToken: "h".repeat(43),
+        },
+      }),
+    );
+    let reads = 0;
+    await page.route("**/api/v1/orders/*/status", async (route) => {
+      reads += 1;
+      if (reads <= 2)
+        await route.fulfill({
+          headers: { "cache-control": "no-store" },
+          json: {
+            schemaVersion: 1,
+            received: {
+              orderReference: id(1),
+              orderNumber: "1001",
+              orderType: "Pickup",
+              submittedAt: "2026-08-11T13:55:00.000Z",
+              checkedAt: new Date().toISOString(),
+            },
+          },
+        });
+      else await route.fulfill({ json: status(id(1), "1001", "2598") });
+    });
+    await page.goto("/#qr=aaa.bbb.ccc");
+    await expect(
+      page.getByRole("heading", { name: "Synthetic Status Store", exact: true }),
+    ).toBeVisible();
+    await page.evaluate((reference) => {
+      history.pushState(null, "", "/orders/" + reference);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }, id(1));
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { name: "Order received" })).toBeVisible();
+    await expect(main).toContainText("Order 1001 is in");
+    await expect(main).not.toContainText("can't show this order");
+    await expect(main).not.toContainText("can’t show this order");
+    await expectNoInternalText(page);
+    // The page checks again by itself every couple of seconds; no tap needed.
+    await expect(main.getByText("Synthetic tea")).toBeVisible({ timeout: 6_000 });
+    await expect(main.getByRole("heading", { name: "Order received" })).toHaveCount(0);
+    expect(reads).toBeGreaterThanOrEqual(3);
+  });
+
+  // v15 2026-10-16: once the order is ready, the code is checked every second until it is issued,
+  // so it shows about a second after staff mark the order ready instead of ~4 s later.
+  test("WP-2423: shows the pickup code within about a second of it being issued", async ({
+    page,
+  }) => {
+    await page.route("**/bff/customer/entry", (route) =>
+      route.fulfill({
+        status: 201,
+        headers: { "cache-control": "no-store" },
+        json: {
+          schemaVersion: 2,
+          status: "Established",
+          brandDisplayName: "Synthetic Brand",
+          storeDisplayName: "Synthetic Status Store",
+          publicStoreReference: id(6),
+          publicTableReference: null,
+          channel: "Pickup",
+          operatingState: "Open",
+          availableServiceModes: ["Pickup"],
+          locale: "en-CA",
+          contextExpiresAt: new Date(Date.now() + 600_000).toISOString(),
+          csrfToken: "h".repeat(43),
+        },
+      }),
+    );
+    await page.route("**/api/v1/orders/*/status", async (route) => {
+      const body = status(id(1), "1001", "2598");
+      const kitchenBatch = body.status.sources.kitchen.batches[0];
+      if (kitchenBatch) kitchenBatch.status = "Ready";
+      await route.fulfill({ json: body });
+    });
+    let issuedAt: number | null = null;
+    let codeReads = 0;
+    await page.route("**/api/v1/orders/*/pickup-code", (route) => {
+      codeReads += 1;
+      // The first check finds the code still being issued; it exists from then on.
+      if (codeReads === 1) {
+        issuedAt = Date.now();
+        return route.fulfill({
+          headers: { "cache-control": "no-store" },
+          json: {
+            schemaVersion: 1,
+            status: "ReadyWithoutCode",
+            orderReference: id(1),
+            orderNumber: "1001",
+            reason: "CodePending",
+          },
+        });
+      }
+      return route.fulfill({
+        headers: { "cache-control": "no-store" },
+        json: {
+          schemaVersion: 1,
+          status: "Ready",
+          orderReference: id(1),
+          orderNumber: "1001",
+          storeDisplayName: "Synthetic Status Store",
+          pickupInstruction: "Show this code at the pickup counter.",
+          generation: 1,
+          proofKind: "Opaque",
+          proofValue: "AbCdEfGhIjKlMnOpQrStUQ",
+          counterCode: "048213",
+          observedAt: new Date(Date.now() - 1_000).toISOString(),
+          expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+        },
+      });
+    });
+    await page.goto("/#qr=aaa.bbb.ccc");
+    await expect(
+      page.getByRole("heading", { name: "Synthetic Status Store", exact: true }),
+    ).toBeVisible();
+    await page.evaluate((reference) => {
+      history.pushState(null, "", "/orders/" + reference);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }, id(1));
+    const main = page.getByRole("main");
+    await expect(main.getByText("048 213", { exact: true })).toBeVisible({ timeout: 5_000 });
+    expect(issuedAt).not.toBeNull();
+    // Shown on the first follow-up (one second), well before the old 2 s + 3 s backoff.
+    expect(Date.now() - (issuedAt ?? 0)).toBeLessThan(2_500);
+    expect(codeReads).toBeGreaterThanOrEqual(2);
+  });
 });

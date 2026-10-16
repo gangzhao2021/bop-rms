@@ -3258,6 +3258,24 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (WP-2423 store setup publication): Owner decision 2026-10-16 (\"扩展独营自批（推荐）\") covers the receipt template as part of Store configuration publication — an Owner running the Store alone approves their own receipt template, marked as sole operator"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "option_price_sole_operator_approval",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 sole operator): Owner decision 2026-10-10 DEC-SOLE-OPERATOR-APPROVAL covers price changes — an option price published by its author as sole operator, marked like price books (v15 run 2026-10-16)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "option_price_sole_operator_approval",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 sole operator): Owner decision 2026-10-10 DEC-SOLE-OPERATOR-APPROVAL covers price changes — an option price published by its author as sole operator, marked like price books (v15 run 2026-10-16)"
     }
   ]
 }

@@ -617,6 +617,78 @@ export async function listStorePaidOrderBatches(
   return { paidOrders, paidBatches, awaitingAcceptance, awaitingSince };
 }
 
+/** WP-2423 (v15 2026-10-16): a Store Order with a paid round still waiting for staff acceptance. */
+export interface StoreOrderAwaitingAcceptance {
+  readonly orderReference: string;
+  readonly orderNumber: string;
+  readonly orderType: "Pickup" | "DineIn";
+  readonly diningSessionReference: string | null;
+}
+
+/**
+ * WP-2423 (v15 2026-10-16): the Store's Orders of the current business day with a paid round
+ * still waiting for staff acceptance (payment recorded as awaiting acceptance, no outcome, not
+ * cancelled by staff), oldest wait first. An Order is today's when it was opened today
+ * (`businessDate`, order numbers restart every day) or, D4, when the waiting round was submitted
+ * at or after `since` (the start of the Store's current business day). Such an Order has no
+ * kitchen work yet, so the kitchen search says it is not accepted yet. Caller authorizes and owns
+ * the transaction.
+ */
+export async function listStoreOrdersAwaitingAcceptance(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  input: { readonly since: string; readonly businessDate: string; readonly limit: number },
+): Promise<readonly StoreOrderAwaitingAcceptance[]> {
+  const since = parseOrderingInstant(input.since);
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/u.test(input.businessDate) ||
+    !Number.isSafeInteger(input.limit) ||
+    input.limit < 1 ||
+    input.limit > 200
+  )
+    throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [scope.brandReference, scope.storeReference],
+  );
+  const rows = (
+    await transaction.query(
+      "SELECT h.order_id::text order_id,h.order_number,h.order_type,h.dining_session_id::text dining_session " +
+        "FROM rms_ordering.order_payment_acceptance_wait w " +
+        "JOIN rms_ordering.order_header h ON h.order_id=w.order_id AND h.brand_id=w.brand_id AND h.store_id=w.store_id " +
+        "JOIN rms_ordering.order_batch b ON b.order_batch_id=w.order_batch_id AND b.order_id=w.order_id " +
+        "AND b.brand_id=w.brand_id AND b.store_id=w.store_id " +
+        "WHERE w.brand_id=$1 AND w.store_id=$2 " +
+        "AND (h.business_date=$3::date OR b.submitted_at>=$4::timestamptz) " +
+        "AND h.canonical_phase IN ('Submitted','Accepted','InProgress','Ready') " +
+        "AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_payment_disposition_record d WHERE d.brand_id=w.brand_id " +
+        "AND d.store_id=w.store_id AND d.order_batch_id=w.order_batch_id) " +
+        "AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation c WHERE c.brand_id=w.brand_id " +
+        "AND c.store_id=w.store_id AND c.order_batch_id=w.order_batch_id) " +
+        "GROUP BY h.order_id,h.order_number,h.order_type,h.dining_session_id " +
+        "ORDER BY min(w.evaluated_at),h.order_id LIMIT $5",
+      [scope.brandReference, scope.storeReference, input.businessDate, since, input.limit],
+    )
+  ).rows as readonly Record<string, unknown>[];
+  return Object.freeze(
+    rows.map((row) => {
+      if (
+        typeof row.order_number !== "string" ||
+        (row.order_type !== "Pickup" && row.order_type !== "DineIn") ||
+        (row.order_type === "DineIn") !== (row.dining_session !== null)
+      )
+        throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+      return Object.freeze({
+        orderReference: parseOrderingReference(row.order_id),
+        orderNumber: row.order_number,
+        orderType: row.order_type,
+        diningSessionReference:
+          row.dining_session === null ? null : parseOrderingReference(row.dining_session),
+      });
+    }),
+  );
+}
+
 /**
  * WP-2423 Q2: how the kitchen names each Order — its number, type and, for dine-in, the dining
  * session it belongs to. No Customer identity. Caller authorizes and owns the transaction.

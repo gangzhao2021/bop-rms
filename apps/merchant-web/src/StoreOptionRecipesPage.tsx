@@ -19,6 +19,7 @@ import {
   type OptionRecipeStatus,
   type OptionRecipeView,
 } from "./store-option-recipes-page.js";
+import { unitText } from "./recipe-pages.js";
 
 /** WP-2423 slice 4.4: what each option does to a product's recipes, reviewed and published. */
 const copy: Record<OptionRecipeErrorCode | "Loading", string> = {
@@ -118,7 +119,7 @@ export function StoreOptionRecipesPage({
   const item = (reference: string | null) =>
     view.ingredients.find((candidate) => candidate.itemReference === reference);
   const amount = (micro: string | null, reference: string | null) =>
-    micro === null ? "" : `${microText(micro)} ${item(reference)?.unitCode.toLowerCase() ?? ""}`;
+    micro === null ? "" : `${microText(micro)} ${unitText(item(reference)?.unitCode)}`;
   const keyOf = (row: OptionRecipeRow) => row.bindingReference + ":" + row.optionReference;
   const summary = (content: OptionRecipeChangeContent) => {
     const from = item(content.fromItemReference)?.name ?? "";
@@ -126,7 +127,7 @@ export function StoreOptionRecipesPage({
     if (content.kind === "NoChange") return "No change to the recipe";
     if (content.kind === "Replace") return `${from} → ${to} (same amount)`;
     if (content.kind === "Remove") return `Without ${from}`;
-    return `+ ${content.quantity ?? ""} ${item(content.toItemReference)?.unitCode.toLowerCase() ?? ""} ${to} per one chosen`;
+    return `+ ${content.quantity ?? ""} ${unitText(item(content.toItemReference)?.unitCode)} ${to} per one chosen`;
   };
   const send = async (command: OptionRecipeCommand, done: string) => {
     if (!client.command) return;
@@ -267,7 +268,7 @@ export function StoreOptionRecipesPage({
             </label>
             {draft.kind === "Add" ? (
               <label>
-                {`Amount per one chosen (${item(draft.toItemReference)?.unitCode.toLowerCase() ?? "unit"})`}
+                {`Amount per one chosen (${unitText(item(draft.toItemReference)?.unitCode)})`}
                 <input
                   inputMode="decimal"
                   value={draft.quantity ?? ""}
@@ -276,7 +277,7 @@ export function StoreOptionRecipesPage({
               </label>
             ) : null}
             <label>
-              {`Cost (cents per ${item(draft.toItemReference)?.unitCode.toLowerCase() ?? "unit"}; empty if unknown)`}
+              {`Cost (cents per ${unitText(item(draft.toItemReference)?.unitCode)}; empty if unknown)`}
               <input
                 inputMode="decimal"
                 value={draft.unitCostCents ?? ""}
@@ -362,7 +363,8 @@ export function StoreOptionRecipesPage({
           Publish
         </button>,
       );
-    return buttons;
+    // Spaced apart, so the actions read as separate words (and wrap on narrow screens).
+    return buttons.flatMap((button, index) => (index === 0 ? [button] : [" ", button]));
   };
   const rejectable = view.options.filter(
     (row) =>
@@ -456,16 +458,7 @@ export function StoreOptionRecipesPage({
                     </td>
                     <td data-label="Status">
                       {statusText[optionRecipeStatus(row)]}
-                      {row.change !== null && row.change.reviews.length > 0 ? (
-                        <ul aria-label={`Reviews for ${row.optionName}`}>
-                          {row.change.reviews.map((review) => (
-                            <li key={review.kind}>
-                              {review.kind === "Cost" ? "Cost" : "Food safety"}: {review.decision}
-                              {review.comment ? ` — ${review.comment}` : ""}
-                            </li>
-                          ))}
-                        </ul>
-                      ) : null}
+                      {row.change !== null ? <ChangeHistory row={row} /> : null}
                     </td>
                     <td>{editing === keyOf(row) ? editor(row) : actions(row)}</td>
                   </tr>
@@ -489,7 +482,12 @@ export function StoreOptionRecipesPage({
         if (own.length === 0) return null;
         return (
           <section className="detail-section" aria-labelledby="own-option-reviews">
-            <h3 id="own-option-reviews">Your own changes</h3>
+            <h3 id="own-option-reviews">Reviews you cannot give as a second person</h3>
+            <p>
+              You saved these changes or already gave one of their reviews, so another person who
+              holds recipe review gives the remaining review — unless Sole operator is on and you
+              are the only one who holds it.
+            </p>
             {own.map((row) => {
               const change = row.change;
               if (change === null) return null;
@@ -500,13 +498,19 @@ export function StoreOptionRecipesPage({
               return (
                 <div key={keyOf(row)}>
                   <p>
-                    {row.productName} · {row.setName} · {row.optionName}
+                    {row.productName} · {row.setName} · {row.optionName}: the{" "}
+                    {kind === "Cost" ? "cost" : "food safety"} review is still needed.
                   </p>
                   <SoleOperatorSelfApproval
                     gate={view.soleOperator}
                     csrf={csrf}
                     what={`the ${kind === "Cost" ? "cost" : "food safety"} of this option change`}
                     permissionName="recipe review"
+                    yourPart={
+                      change.byViewer
+                        ? "You saved this change"
+                        : `You already gave the ${kind === "Cost" ? "food safety" : "cost"} review`
+                    }
                     busy={busy}
                     actionLabel={
                       kind === "Cost" ? "Approve cost on my own" : "Approve food safety on my own"
@@ -580,5 +584,39 @@ export function StoreOptionRecipesPage({
         </section>
       ) : null}
     </AppFrame>
+  );
+}
+
+/** Who saved the change and when, each review given (by whom, when) and what is still needed. */
+export function ChangeHistory({ row }: { readonly row: OptionRecipeRow }) {
+  const change = row.change;
+  if (change === null) return null;
+  const kindName = (kind: "Cost" | "FoodSafety") => (kind === "Cost" ? "Cost" : "Food safety");
+  const missing = (["Cost", "FoodSafety"] as const).filter(
+    (kind) => !change.reviews.some((review) => review.kind === kind),
+  );
+  return (
+    <ul aria-label={`Reviews for ${row.optionName}`}>
+      <li>
+        Saved by {change.authorLabel} on <SourceTime instant={change.recordedAt} />
+      </li>
+      {change.reviews.map((review) => (
+        <li key={review.kind}>
+          {kindName(review.kind)}: {review.decision === "Approved" ? "approved" : "rejected"} by{" "}
+          {review.reviewerLabel} on <SourceTime instant={review.reviewedAt} />
+          {review.comment ? ` — ${review.comment}` : ""}
+        </li>
+      ))}
+      {!change.published &&
+      missing.length > 0 &&
+      !change.reviews.some((review) => review.decision === "Rejected") ? (
+        <li>
+          Still needed: {missing.map((kind) => kindName(kind).toLowerCase()).join(" and ")} review,
+          by someone who holds recipe review
+          {change.byViewer ? " other than you" : " other than the person who saved it"}
+          {change.reviews.length > 0 ? " and the first reviewer" : ""}
+        </li>
+      ) : null}
+    </ul>
   );
 }

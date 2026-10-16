@@ -3,6 +3,8 @@ import pg from "pg";
 import { it } from "vitest";
 import {
   checkoutContactRetentionPolicy,
+  createPostgresOrderStatusProjectionStore,
+  findGuestSessionOrder,
   findLatestGuestSessionOrder,
   loadOrderCustomerSummary,
   loadOrderPickupContact,
@@ -56,6 +58,11 @@ it("WP-2423 Q10: order continuity reads, staff contact, retention removal and pa
       // Q10 additions): these reads, plus appending removal evidence and the guarded removal itself.
       await admin.query(
         "GRANT SELECT ON rms_ordering.order_header,rms_ordering.order_submission_record,rms_ordering.order_checkout_details_link,rms_ordering.checkout_details_record,rms_ordering.checkout_contact_redaction,rms_payment.payment_terminal_fact TO " +
+          apiRole,
+      );
+      // The customer order status read loads the Ordering status projection (pilot api grant).
+      await admin.query(
+        "GRANT SELECT ON rms_ordering.order_status_projection,rms_ordering.order_status_projection_generation TO " +
           apiRole,
       );
       await admin.query("GRANT UPDATE ON rms_ordering.checkout_details_record TO " + apiRole);
@@ -272,6 +279,56 @@ it("WP-2423 Q10: order continuity reads, staff contact, retention removal and pa
           )
         ).orderReference,
         id(0x101),
+      );
+
+      // 1b. v15 2026-10-16: the guest opens the status page right after paying, before the outbox
+      // worker has built the order's status projection. The projection is missing, but Ordering's
+      // own record shows this Guest Session placed the Order, so the read answers "received"
+      // (apps/api customer-order-status `received`). Anyone else is still refused (null -> 404).
+      const statusBeforeProjection = (guestSessionReference, orderReference, s = scope) =>
+        runAs(apiRole, async (tx) => {
+          const projection = await createPostgresOrderStatusProjectionStore({
+            ...s,
+            authorize: async () => true,
+            validateCurrentSource: async () => false,
+          }).load({ transaction: tx, orderReference });
+          if (projection !== null) return { projection: true };
+          const received = await findGuestSessionOrder(tx, s, {
+            orderReference,
+            guestSessionReference,
+          });
+          return received === null ? null : { received };
+        });
+      const receivedState = await statusBeforeProjection(guest, id(0x102));
+      assert.deepEqual(
+        {
+          orderReference: receivedState.received.orderReference,
+          orderNumber: receivedState.received.orderNumber,
+          orderType: receivedState.received.orderType,
+        },
+        { orderReference: id(0x102), orderNumber: "8", orderType: "Pickup" },
+      );
+      assert.equal(Date.parse(receivedState.received.createdAt), Date.parse(recent));
+      // Another guest's order, an unknown order and another Store's scope reveal nothing.
+      assert.equal(await statusBeforeProjection(guest, id(0x103)), null);
+      assert.equal(await statusBeforeProjection(otherGuest, id(0x102)), null);
+      assert.equal(await statusBeforeProjection(guest, id(0xfff)), null);
+      assert.equal(
+        await statusBeforeProjection(guest, id(0x102), {
+          brandReference: brand,
+          storeReference: otherStore,
+        }),
+        null,
+      );
+      // The other Store's own order stays readable only under its own scope.
+      assert.equal(
+        (
+          await statusBeforeProjection(guest, id(0x104), {
+            brandReference: brand,
+            storeReference: otherStore,
+          })
+        ).received.orderNumber,
+        "1",
       );
 
       // 2. Staff detail: the contact given for this order, or that none was given.

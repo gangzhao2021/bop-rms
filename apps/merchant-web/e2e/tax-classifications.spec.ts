@@ -44,6 +44,10 @@ async function install(page: Page, mayManage = true) {
         Number(a.lifecycle === "Retired") - Number(b.lifecycle === "Retired") ||
         (a.names["en-CA"] ?? "").localeCompare(b.names["en-CA"] ?? ""),
     ),
+    // v15: products name a class from the Store's tax configuration that the list does not have.
+    productTaxClasses: mayManage
+      ? [{ classificationReference: id(200), productNames: ["Flat White", "Mocha"] }]
+      : null,
   });
   await page.route("**/merchant/session", (route) =>
     route.fulfill({
@@ -178,6 +182,11 @@ test("@production the Brand Owner adds, renames, sets the default and retires ta
   await expect(page).toHaveURL(/\/app\/commerce\/tax-classifications$/u);
   await expect(page.getByText("No tax classifications yet.")).toBeVisible();
   await expect(page.getByText("No rates are set here")).toBeVisible();
+  const notListed = page.getByRole("region", {
+    name: "Tax classes your products use that are not listed above",
+  });
+  await expect(notListed).toContainText("Unnamed tax class: Flat White, Mocha");
+  await expect(notListed.getByRole("link", { name: "See rates in Tax review" })).toBeVisible();
   await checkLayout(page);
 
   const addForm = page.getByRole("form", { name: "Add a classification" });

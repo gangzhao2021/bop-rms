@@ -161,6 +161,16 @@ export class CustomerReceiptHandler {
                   lineTotal: money(line.lineTotal),
                   // WP-2423 D5: the item's pre-tax price, on versions issued since it was frozen.
                   ...(line.lineSubtotal ? { lineSubtotal: money(line.lineSubtotal) } : {}),
+                  // WP-2423: the chosen options and what each added (versions issued since then).
+                  ...(line.options
+                    ? {
+                        options: line.options.map((option) => ({
+                          displayName: option.displayName,
+                          quantity: option.quantity,
+                          amount: money(option.amount),
+                        })),
+                      }
+                    : {}),
                 })),
                 subtotal: money(snapshot.subtotal),
                 tax: money(snapshot.tax),

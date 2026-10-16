@@ -6,11 +6,12 @@ import {
 } from "../session/customer-transaction-context.js";
 import {
   OrderStatusClientError,
+  parseOrderReceived,
   parseOrderStatusView,
   type CustomerOrderStatusClient,
   type OrderStatusSubscriptionCallbacks,
 } from "./order-status-controller.js";
-import type { OrderStatusView } from "./types.js";
+import type { OrderReceivedView, OrderStatusView } from "./types.js";
 
 const reference = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const credential = /^[A-Za-z0-9_-]{43}$/u;
@@ -47,8 +48,11 @@ function decodeMoney(value: unknown) {
   return { ...money, amountMinor };
 }
 
-function decodeStatus(value: unknown, orderReference: string): OrderStatusView {
+function decodeStatus(value: unknown, orderReference: string): OrderStatusView | OrderReceivedView {
   const root = record(value);
+  // WP-2423 (v15 2026-10-16): the guest's own order, received but its status not prepared yet.
+  if (Object.keys(root).length === 2 && root.schemaVersion === 1 && Object.hasOwn(root, "received"))
+    return parseOrderReceived({ kind: "Received", ...record(root.received) }, orderReference);
   if (Object.keys(root).length !== 2 || root.schemaVersion !== 1 || !Object.hasOwn(root, "status"))
     throw new Error("invalid status");
   const status = record(root.status);
@@ -86,6 +90,15 @@ function decodeStatus(value: unknown, orderReference: string): OrderStatusView {
         ...sources,
         itemPrices: sources.itemPrices.map((value: unknown) => {
           const entry = record(value);
+          // WP-2423: what each chosen option added is money too.
+          if (Object.hasOwn(entry, "options")) {
+            if (!Array.isArray(entry.options) || entry.options.length > 100)
+              throw new Error("invalid status");
+            entry.options = entry.options.map((option: unknown) => {
+              const line = record(option);
+              return { ...line, amount: decodeMoney(line.amount) };
+            });
+          }
           return { ...entry, subtotal: decodeMoney(entry.subtotal), tax: decodeMoney(entry.tax) };
         }),
       };
@@ -120,7 +133,7 @@ export function createHttpOrderStatusClient(
 ): CustomerOrderStatusClient {
   return Object.freeze({
     subscribeContextChange: subscribeCustomerCsrfContext,
-    async load(orderReference: string): Promise<OrderStatusView> {
+    async load(orderReference: string): Promise<OrderStatusView | OrderReceivedView> {
       if (!reference.test(orderReference)) throw new OrderStatusClientError("service_unavailable");
       const csrf = getCustomerCsrfCredential();
       const contextCurrent = captureCustomerCsrfContext();

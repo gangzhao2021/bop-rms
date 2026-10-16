@@ -341,6 +341,11 @@ it("persists an immutable receipt chain with authorized replay, concurrency, RLS
       );
       assert.equal(finalAudit.rows[0].count, 5);
       assert.deepEqual((await load()).records[0], original);
+      // WP-2423: a version issued before item prices and option lines were recorded is read back
+      // exactly as issued, without either field (the receipt page prints it as issued).
+      const legacyLine = (await load()).records[0].snapshot.lines[0];
+      assert.equal("lineSubtotal" in legacyLine, false);
+      assert.equal("options" in legacyLine, false);
       assert.equal(active, 0);
     } finally {
       try {

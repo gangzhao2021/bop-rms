@@ -4,14 +4,20 @@ import { it } from "vitest";
 import { appendAuditRecordInTransaction, validateAuditRecord } from "../../bop/audit/src/index.ts";
 import {
   createOrderNumberAllocation,
+  createOriginalReceiptSnapshotFromCurrentOrder,
   createOriginalReceiptSnapshotFromOrder,
   createPostgresDigitalReceiptStore,
+  createPostgresReceiptOrderSource,
   createRefundReceiptSnapshot,
+  listOrderItemPrices,
   readCheckoutContactPresence,
   redactExpiredCheckoutContacts,
   removeCheckoutContactOnCustomerRequest,
 } from "../../rms/ordering/src/index.ts";
 import { orderWriteFixture } from "../../rms/ordering/src/tests/order-creation-store.fixture.ts";
+import { configuredOrderItemFixture } from "../../rms/ordering/src/tests/configured-order-item.fixture.ts";
+import { id as configuredId } from "../../rms/ordering/src/tests/configured-cart-quote.fixture.ts";
+import { encodeConfiguredOrderItemSnapshot } from "../../rms/ordering/src/domain/order-item-snapshot-codec.ts";
 import {
   createPostgresStoreReceiptProfileStore,
   readCurrentStoreReceiptProfile,
@@ -84,6 +90,13 @@ it("WP-2423 Q15/Q16: receipt tax details, privacy link and customer contact remo
       await admin.query("GRANT UPDATE (order_id) ON rms_ordering.order_header TO " + apiRole);
       await admin.query("GRANT UPDATE ON rms_ordering.order_submission_record TO " + apiRole);
       await admin.query("GRANT INSERT ON rms_ordering.checkout_contact_redaction TO " + apiRole);
+      // Receipt issuance reads the frozen Order batches and items (pilot matrix: SELECT plus the
+      // key-column UPDATE its row locks need).
+      await admin.query(
+        "GRANT SELECT ON rms_ordering.order_batch,rms_ordering.order_item TO " + apiRole,
+      );
+      await admin.query("GRANT UPDATE (order_batch_id) ON rms_ordering.order_batch TO " + apiRole);
+      await admin.query("GRANT UPDATE (order_item_id) ON rms_ordering.order_item TO " + apiRole);
       // A role that may only read the details cannot change them.
       await admin.query("GRANT SELECT ON rms_store.store_receipt_profile TO " + readRole);
 
@@ -485,6 +498,207 @@ it("WP-2423 Q15/Q16: receipt tax details, privacy link and customer contact remo
         ).taxRegistrations,
         [],
       );
+
+      // Items priced before option prices existed list their chosen options at no charge; their
+      // pre-tax prices (which never included an option charge) still add up to the subtotal.
+      for (const version of issued.records)
+        for (const [index, line] of version.snapshot.lines.entries()) {
+          const chosen = record.items[index].catalog.options;
+          assert.deepEqual(
+            line.options ?? [],
+            chosen.map((option) => ({
+              displayName: option.localizedNames["en-CA"],
+              quantity: option.quantity,
+              amount: money(0n),
+            })),
+          );
+        }
+
+      // 6. WP-2423 option lines: an item with a priced option ("Synthetic option", CAD 5.00 for
+      // the line) is issued from the Order's frozen priced lines with the option and its price,
+      // inside the item's pre-tax price; the items add up to the subtotal and, with tax and tip,
+      // to the captured total. Read and appended under the restricted api role.
+      {
+        const { item } = await configuredOrderItemFixture();
+        const optionScope = {
+          brandReference: item.catalog.brandReference,
+          storeReference: item.catalog.storeReference,
+        };
+        const optionOrder = item.pricing.optionPrices[0];
+        assert.ok(optionOrder && optionOrder.subtotal.amountMinor > 0n);
+        const createdAt = item.snapshotCapturedAt;
+        const optionGuest = id(0x501);
+        // The configured fixture's Order (its item and batch are frozen under it).
+        const optionOrderReference = configuredId(800);
+        await admin.query("SET session_replication_role = replica");
+        await admin.query(
+          "INSERT INTO rms_ordering.order_header (order_id,brand_id,store_id,business_date,order_number,order_type,source_channel,created_by_actor_id,submitted_by_actor_id,aggregate_version,canonical_phase,closure_status,payment_status,created_at) VALUES ($1,$2,$3,$4::date,'2','Pickup','Qr',$5,$5,1,'Submitted','Open','NotReported',$6)",
+          [
+            optionOrderReference,
+            optionScope.brandReference,
+            optionScope.storeReference,
+            createdAt.slice(0, 10),
+            optionGuest,
+            createdAt,
+          ],
+        );
+        await admin.query(
+          "INSERT INTO rms_ordering.order_submission_record (submission_id,brand_id,store_id,order_id,guest_session_id,intent_digest,source_cart_id,source_cart_version,quote_id,created_at,submission_kind) VALUES ($1,$2,$3,$4,$5,$6,$7,1,$8,$9,'Initial')",
+          [
+            id(0x502),
+            optionScope.brandReference,
+            optionScope.storeReference,
+            optionOrderReference,
+            optionGuest,
+            digest,
+            id(0x503),
+            item.pricing.quoteReference,
+            createdAt,
+          ],
+        );
+        await admin.query(
+          "INSERT INTO rms_ordering.order_batch (order_batch_id,brand_id,store_id,order_id,submission_id,source_cart_id,source_cart_version,checkout_validation_id,quote_id,submitted_by_actor_id,submitted_at) VALUES ($1,$2,$3,$4,$5,$6,1,$7,$8,$9,$10)",
+          [
+            item.orderBatchReference,
+            optionScope.brandReference,
+            optionScope.storeReference,
+            optionOrderReference,
+            id(0x502),
+            id(0x503),
+            id(0x504),
+            item.pricing.quoteReference,
+            optionGuest,
+            createdAt,
+          ],
+        );
+        await admin.query(
+          "INSERT INTO rms_ordering.order_item (order_item_id,brand_id,store_id,order_id,order_batch_id,source_cart_line_id,quantity,catalog_snapshot_digest,quote_input_digest,transaction_snapshot_json,snapshot_captured_at,ordinal) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,1)",
+          [
+            item.orderItemReference,
+            optionScope.brandReference,
+            optionScope.storeReference,
+            optionOrderReference,
+            item.orderBatchReference,
+            item.cartItemReference,
+            item.quantity,
+            item.catalog.snapshotDigest,
+            item.pricing.quoteInputDigest,
+            encodeConfiguredOrderItemSnapshot(item),
+            createdAt,
+          ],
+        );
+        await admin.query("SET session_replication_role = origin");
+        const optionIssuedAt = new Date().toISOString();
+        const tip = money(100n);
+        const optionSnapshot = await api(async (tx) =>
+          createOriginalReceiptSnapshotFromCurrentOrder({
+            order: await createPostgresReceiptOrderSource({
+              ...optionScope,
+              authorize: async () => true,
+            })(tx, { orderReference: optionOrderReference, observedAt: optionIssuedAt }),
+            receiptReference: id(0x505),
+            issuedAt: optionIssuedAt,
+            issuer: {
+              ...optionScope,
+              operatingEntityReference: id(0x506),
+              displayName: "Synthetic Issuer Ltd.",
+            },
+            store: { ...optionScope, displayName: "Synthetic Store", currencyCode: "CAD" },
+            template: { ...optionScope, locale: "en-CA", version: "RECEIPT_V1" },
+            financial: {
+              ...optionScope,
+              orderReference: optionOrderReference,
+              orderBatchReferences: [item.orderBatchReference],
+              captured: money(item.pricing.total.amountMinor + tip.amountMinor),
+              tip,
+              refunded: money(0n),
+              refundDisposition: "NonePending",
+            },
+          }),
+        );
+        const optionReceipts = createPostgresDigitalReceiptStore({
+          ...optionScope,
+          authorize: async () => true,
+          validateSources: async (_tx, _candidate, source) => source === digest,
+        });
+        const optionRecord = {
+          recordReference: id(0x507),
+          version: 1,
+          kind: "Original",
+          recordedAt: optionIssuedAt,
+          previousRecordReference: null,
+          reasonCode: null,
+          snapshot: optionSnapshot,
+        };
+        await api((transaction) =>
+          optionReceipts.issueOriginal({
+            transaction,
+            orderReference: optionOrderReference,
+            create: async () => ({
+              operationReference: id(0x508),
+              sourceDigest: digest,
+              record: optionRecord,
+              audit: {
+                ...audit(
+                  optionRecord.recordReference,
+                  optionIssuedAt,
+                  "SYNTHETIC_RECEIPT",
+                  id(0x508),
+                ),
+                brandId: optionScope.brandReference,
+                storeId: optionScope.storeReference,
+              },
+            }),
+          }),
+        );
+        const optionIssued = await api((transaction) =>
+          optionReceipts.load({ transaction, orderReference: optionOrderReference }),
+        );
+        assert.equal(optionIssued.records.length, 1);
+        const issuedSnapshot = optionIssued.records[0].snapshot;
+        const [line] = issuedSnapshot.lines;
+        assert.deepEqual(line.options, [
+          {
+            displayName: "Synthetic option",
+            quantity: item.catalog.options[0].quantity,
+            amount: optionOrder.subtotal,
+          },
+        ]);
+        assert.deepEqual(line.lineSubtotal, item.pricing.subtotal);
+        assert.ok(line.options[0].amount.amountMinor < line.lineSubtotal.amountMinor);
+        const itemsPrinted = issuedSnapshot.lines.reduce(
+          (sum, entry) => sum + entry.lineSubtotal.amountMinor,
+          0n,
+        );
+        assert.equal(itemsPrinted, issuedSnapshot.subtotal.amountMinor);
+        assert.equal(
+          itemsPrinted +
+            issuedSnapshot.tax.amountMinor +
+            issuedSnapshot.tip.amountMinor -
+            issuedSnapshot.adjustments.discount.amountMinor +
+            issuedSnapshot.adjustments.fee.amountMinor,
+          issuedSnapshot.total.amountMinor,
+        );
+        assert.equal(issuedSnapshot.total.amountMinor, item.pricing.total.amountMinor + 100n);
+        // The stored record holds the option line as issued (append-only JSON).
+        const stored = await admin.query(
+          "SELECT receipt_record_json #> '{snapshot,lines,0,options}' AS options FROM rms_ordering.digital_receipt_record WHERE order_id=$1",
+          [optionOrderReference],
+        );
+        assert.deepEqual(stored.rows[0].options, [
+          {
+            displayName: "Synthetic option",
+            quantity: item.catalog.options[0].quantity,
+            amount: { amountMinor: String(optionOrder.subtotal.amountMinor), currencyCode: "CAD" },
+          },
+        ]);
+        // The guest order page reads the same option lines from the same frozen items.
+        const prices = await api((tx) =>
+          listOrderItemPrices(tx, optionScope, optionOrderReference, "en-CA"),
+        );
+        assert.deepEqual(prices[0].options, line.options);
+        assert.equal(prices[0].addedByParticipantReference, null);
+      }
 
       // 5. The customer removes their contact: once, with evidence, only for their own order.
       const presence = (guestSession) =>

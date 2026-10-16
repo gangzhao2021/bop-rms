@@ -22,6 +22,7 @@ import {
   type RecipeErrorCode,
   type RecipeListView,
   allergenText,
+  unitText,
 } from "./recipe-pages.js";
 
 /** WP-2423 / DEC-RECIPE-AUTHORING: Brand recipes — drafts, independent review, publication, SKUs. */
@@ -93,7 +94,7 @@ function Failure({ code }: { code: RecipeErrorCode | "Loading" }) {
   );
 }
 const skuName = (choices: RecipeChoices, sku: string) =>
-  choices.skus.find((item) => item.skuReference === sku)?.name ?? "SKU " + sku.slice(-4);
+  choices.skus.find((item) => item.skuReference === sku)?.name ?? "A size no longer listed";
 
 export function RecipeListPage({
   client = unavailableRecipeClient,
@@ -149,7 +150,7 @@ export function RecipeListPage({
                 <td>{recipe.code}</td>
                 <td>{lifecycleText[recipe.lifecycle]}</td>
                 <td>
-                  {recipe.yieldQuantity} {recipe.yieldUnit}
+                  {recipe.yieldQuantity} {unitText(recipe.yieldUnit)}
                 </td>
                 <td>{centsText(recipe.standardCostCents)}</td>
                 <td>{recipe.kitchenInstructions === "Published" ? "Published" : "—"}</td>
@@ -370,7 +371,9 @@ function DraftForm({
         <select value={yieldUnit} onChange={(event) => setYieldUnit(event.currentTarget.value)}>
           {choices.yieldUnits.map((unit) => (
             <option key={unit} value={unit}>
-              {unit === "EACH" ? "EACH (portions sold as a SKU)" : unit + " (batch preparation)"}
+              {unit === "EACH"
+                ? "each (portions sold as a size)"
+                : unitText(unit) + " (batch preparation)"}
             </option>
           ))}
         </select>
@@ -381,10 +384,11 @@ function DraftForm({
       ) : null}
       {ingredients.map((item, index) => {
         const flagged = errorLine === index + 1;
-        const unit =
+        const unit = unitText(
           item.kind === "InventoryItem"
             ? items.get(item.sourceReference)?.unitCode
-            : subs.get(item.sourceReference)?.yieldUnit;
+            : subs.get(item.sourceReference)?.yieldUnit,
+        );
         const cents =
           item.kind === "InventoryItem"
             ? lineCostCentsText(
@@ -444,12 +448,12 @@ function DraftForm({
                 {item.kind === "InventoryItem"
                   ? choices.items.map((option) => (
                       <option key={option.itemReference} value={option.itemReference}>
-                        {option.name} ({option.unitCode})
+                        {option.name} ({unitText(option.unitCode)})
                       </option>
                     ))
                   : choices.subRecipes.map((option) => (
                       <option key={option.recipeReference} value={option.recipeReference}>
-                        {option.name} ({option.yieldUnit})
+                        {option.name} ({unitText(option.yieldUnit)})
                       </option>
                     ))}
               </select>
@@ -468,7 +472,7 @@ function DraftForm({
               </p>
             ) : null}
             <label>
-              Quantity ({unit ?? "unit"})
+              Quantity ({unit})
               <input
                 required
                 inputMode="decimal"
@@ -490,7 +494,7 @@ function DraftForm({
             </label>
             {item.kind === "InventoryItem" ? (
               <label>
-                Standard cost (CAD per {unit ?? "unit"})
+                Standard cost (CAD per {unit})
                 <input
                   inputMode="decimal"
                   value={item.unitCost}
@@ -653,9 +657,11 @@ function ReadOnlyRecipe({
               </td>
               <td>
                 {item.quantity}{" "}
-                {item.kind === "InventoryItem"
-                  ? items.get(item.sourceReference)?.unitCode
-                  : subs.get(item.sourceReference)?.yieldUnit}
+                {unitText(
+                  item.kind === "InventoryItem"
+                    ? items.get(item.sourceReference)?.unitCode
+                    : subs.get(item.sourceReference)?.yieldUnit,
+                )}
               </td>
               <td>{item.lossPercent}</td>
               <td>
@@ -671,10 +677,13 @@ function ReadOnlyRecipe({
       <AllergenSummary recipe={recipe} />
       <h3>Kitchen steps</h3>
       <ol>
-        {recipe.draft.steps.map((step, index) => (
+        {recipe.draft.steps.map((step, index, all) => (
           <li key={index}>
-            [{step.sequence}] {step.instruction} — {Math.round(step.durationSeconds / 6) / 10} min,{" "}
+            Step {index + 1}: {step.instruction} — {Math.round(step.durationSeconds / 6) / 10} min,{" "}
             {stations.get(step.capabilityReference) ?? "station"}
+            {index > 0 && all[index - 1]?.sequence === step.sequence
+              ? " (at the same time as the step before)"
+              : ""}
           </li>
         ))}
       </ol>
@@ -708,9 +717,16 @@ function ReviewPanel({
           return (
             <li key={kind}>
               <strong>{kindText[kind]} review:</strong>{" "}
-              {review
-                ? `${review.decision} by ${review.reviewerLabel} at ${review.reviewedAt}${review.comment ? ` — “${review.comment}”` : ""}${review.current ? "" : " (content changed since)"}`
-                : "waiting"}
+              {review ? (
+                <>
+                  {review.decision} by {review.reviewerLabel} on{" "}
+                  <SourceTime instant={review.reviewedAt} />
+                  {review.comment ? ` — “${review.comment}”` : ""}
+                  {review.current ? "" : " (content changed since)"}
+                </>
+              ) : (
+                "waiting"
+              )}
             </li>
           );
         })}
@@ -771,6 +787,11 @@ function ReviewPanel({
               csrf={csrf}
               what={`the ${kindText[kind].toLowerCase()} of this version`}
               permissionName="recipe review"
+              yourPart={
+                isAuthor
+                  ? "You wrote this version"
+                  : `You already gave the ${kindText[kind === "Cost" ? "FoodSafety" : "Cost"].toLowerCase()} review`
+              }
               busy={busy}
               actionLabel={`Approve ${kindText[kind].toLowerCase()} on my own`}
               summary={
@@ -824,7 +845,7 @@ function Bindings({
           <li key={binding.bindingReference}>
             {skuName(view.choices, binding.skuReference)} ·{" "}
             {binding.storeReference ? "this Store only" : "all Stores of the Brand"} · since{" "}
-            {binding.since}{" "}
+            <SourceTime instant={binding.since} />{" "}
             {binding.storeReference && view.permissions.mayPublish ? (
               <button
                 type="button"
@@ -1025,8 +1046,9 @@ function RecipeEditor({
           </p>
           <h2>{recipe.name}</h2>
           <p>
-            {lifecycleText[recipe.lifecycle]} · yield {recipe.yieldQuantity} {recipe.yieldUnit} ·
-            standard cost ${centsText(recipe.standardCostCents)} · written by {recipe.authorLabel}
+            {lifecycleText[recipe.lifecycle]} · yield {recipe.yieldQuantity}{" "}
+            {unitText(recipe.yieldUnit)} · standard cost ${centsText(recipe.standardCostCents)} ·
+            written by {recipe.authorLabel}
           </p>
         </div>
         <Link to="/app/commerce/recipes">All recipes</Link>

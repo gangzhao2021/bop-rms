@@ -1,5 +1,5 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
-import { SourceTime } from "./StoreTime.js";
+import { SourceTime, StoreDate } from "./StoreTime.js";
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 
@@ -114,7 +114,27 @@ const endText = {
   ProfessionalEvidence: "its professional review expires",
 } as const;
 const orderTypeText: Record<string, string> = { Pickup: "Pickup", DineIn: "Dine-in" };
-const day = (instant: string) => instant.slice(0, 10);
+const treatmentText: Record<string, string> = {
+  ZeroRated: "zero-rated",
+  Exempt: "tax-exempt",
+  OutOfScope: "not taxed",
+};
+const provinceText: Readonly<Record<string, string>> = {
+  "CA-AB": "Alberta",
+  "CA-BC": "British Columbia",
+  "CA-MB": "Manitoba",
+  "CA-NB": "New Brunswick",
+  "CA-NL": "Newfoundland and Labrador",
+  "CA-NS": "Nova Scotia",
+  "CA-NT": "Northwest Territories",
+  "CA-NU": "Nunavut",
+  "CA-ON": "Ontario",
+  "CA-PE": "Prince Edward Island",
+  "CA-QC": "Quebec",
+  "CA-SK": "Saskatchewan",
+  "CA-YT": "Yukon",
+};
+const currencyText: Readonly<Record<string, string>> = { CAD: "Canadian dollars" };
 
 /**
  * WP-2423 Q15/Q16: tells staff, where they review tax, that customer receipts print no GST/HST
@@ -190,7 +210,7 @@ export function StoreTaxReviewPage({
   const c = view.configuration;
   const classLabel = (reference: string | null) => {
     const index = view.classes.findIndex((item) => item.taxClassificationReference === reference);
-    return index < 0 ? "Not taxed at this Store" : `Class ${index + 1}`;
+    return index < 0 ? "Not taxed at this Store" : `Tax class ${index + 1}`;
   };
   const problems = view.products.filter((product) => product.status !== "Covered");
   return (
@@ -223,7 +243,7 @@ export function StoreTaxReviewPage({
           {c.testOnly ? (
             <StatePanel heading="Internal test rates" tone="error" status>
               <p>
-                These rates are TEST-ONLY values for internal testing, not verified tax facts.
+                These rates are test values for internal testing only, not verified tax facts.
                 Before real sales, the Store's registration and a professional review must confirm
                 the rates (for example Ontario HST and any point-of-sale rebate on prepared food).
               </p>
@@ -232,8 +252,8 @@ export function StoreTaxReviewPage({
           {c.endingSoon && c.endsAt !== null && c.endsBecause !== null ? (
             <StatePanel heading="Tax configuration ending soon" tone="error" status>
               <p>
-                Orders can be priced until {day(c.endsAt)}, when {endText[c.endsBecause]}. Renew it
-                before then or the Store cannot take orders.
+                Orders can be priced until <StoreDate value={c.endsAt} />, when{" "}
+                {endText[c.endsBecause]}. Renew it before then or the Store cannot take orders.
               </p>
             </StatePanel>
           ) : null}
@@ -242,17 +262,30 @@ export function StoreTaxReviewPage({
             <dl>
               <dt>Configuration</dt>
               <dd>
-                {c.stableCode} · version {c.versionNumber} · {c.jurisdictionCode} · {c.currencyCode}
+                {c.testOnly ? "Test configuration (internal testing only)" : "Tax configuration"} ·
+                version {c.versionNumber} · {provinceText[c.jurisdictionCode] ?? c.jurisdictionCode}{" "}
+                · prices in {currencyText[c.currencyCode] ?? c.currencyCode}
               </dd>
               <dt>In effect</dt>
               <dd>
-                from {day(c.effectiveFrom)}
-                {c.effectiveUntil === null ? ", no end date" : ` until ${day(c.effectiveUntil)}`}
+                from <StoreDate value={c.effectiveFrom} />
+                {c.effectiveUntil === null ? (
+                  ", no end date"
+                ) : (
+                  <>
+                    {" "}
+                    until <StoreDate value={c.effectiveUntil} />
+                  </>
+                )}
               </dd>
               <dt>Registration evidence valid until</dt>
-              <dd>{day(c.registrationEvidenceValidUntil)}</dd>
+              <dd>
+                <StoreDate value={c.registrationEvidenceValidUntil} />
+              </dd>
               <dt>Professional review valid until</dt>
-              <dd>{day(c.professionalEvidenceValidUntil)}</dd>
+              <dd>
+                <StoreDate value={c.professionalEvidenceValidUntil} />
+              </dd>
             </dl>
           </section>
         </>
@@ -273,13 +306,15 @@ export function StoreTaxReviewPage({
             <tbody>
               {view.classes.map((item, index) => (
                 <tr key={item.taxClassificationReference}>
-                  <td>Class {index + 1}</td>
+                  <td>Tax class {index + 1}</td>
                   <td data-label="Rates">
                     {item.rules
                       .map(
                         (rule) =>
                           `${orderTypeText[rule.orderType] ?? rule.orderType}: ${
-                            rule.treatment === "Taxable" ? percent(rule.rate) : rule.treatment
+                            rule.treatment === "Taxable"
+                              ? percent(rule.rate)
+                              : (treatmentText[rule.treatment] ?? rule.treatment.toLowerCase())
                           }${rule.priceInclusion === "Inclusive" ? " (included in price)" : ""}`,
                       )
                       .join(" · ")}

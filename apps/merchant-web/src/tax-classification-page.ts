@@ -12,6 +12,15 @@ export interface TaxClassificationView {
   readonly defaultLocale: string;
   readonly locales: readonly string[];
   readonly classifications: readonly TaxClassificationEntry[];
+  /**
+   * The Brand's products by the tax class they name (null: none), including classes not listed
+   * here (from the Store's tax configuration). Null when the viewer may not read products.
+   */
+  readonly productTaxClasses: readonly ProductTaxClassUse[] | null;
+}
+export interface ProductTaxClassUse {
+  readonly classificationReference: string | null;
+  readonly productNames: readonly string[];
 }
 export interface TaxClassificationEntry {
   readonly classificationReference: string;
@@ -95,6 +104,7 @@ export function parseTaxClassificationView(value: unknown): TaxClassificationVie
     "defaultLocale",
     "locales",
     "classifications",
+    "productTaxClasses",
   ]);
   const permissions = closed(r.permissions, ["mayManage"]);
   if (
@@ -109,7 +119,8 @@ export function parseTaxClassificationView(value: unknown): TaxClassificationVie
     !Array.isArray(r.locales) ||
     !r.locales.every((l) => typeof l === "string" && locale.test(l)) ||
     r.locales[0] !== r.defaultLocale ||
-    !Array.isArray(r.classifications)
+    !Array.isArray(r.classifications) ||
+    (r.productTaxClasses !== null && !Array.isArray(r.productTaxClasses))
   )
     return invalid();
   const defaultLocale = r.defaultLocale;
@@ -134,6 +145,26 @@ export function parseTaxClassificationView(value: unknown): TaxClassificationVie
       isDefault: c.isDefault,
     });
   });
+  const productTaxClasses =
+    r.productTaxClasses === null
+      ? null
+      : Object.freeze(
+          (r.productTaxClasses as unknown[]).map((item): ProductTaxClassUse => {
+            const u = closed(item, ["classificationReference", "productNames"]);
+            if (
+              (u.classificationReference !== null &&
+                (typeof u.classificationReference !== "string" ||
+                  !uuid.test(u.classificationReference))) ||
+              !Array.isArray(u.productNames) ||
+              !u.productNames.every((name) => typeof name === "string" && safe.test(name))
+            )
+              return invalid();
+            return Object.freeze({
+              classificationReference: u.classificationReference,
+              productNames: Object.freeze([...(u.productNames as string[])]),
+            });
+          }),
+        );
   return Object.freeze({
     screenId: "CAT-TAX-CLASSIFICATION-LIST",
     sourceAsOf: r.sourceAsOf,
@@ -142,6 +173,7 @@ export function parseTaxClassificationView(value: unknown): TaxClassificationVie
     defaultLocale,
     locales: Object.freeze([...(r.locales as string[])]),
     classifications: Object.freeze(classifications),
+    productTaxClasses,
   });
 }
 const codes = new Set<string>([

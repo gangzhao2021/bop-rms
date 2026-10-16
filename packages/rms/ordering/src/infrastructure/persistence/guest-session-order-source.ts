@@ -87,3 +87,51 @@ export async function loadOrderCustomerSummary(
     return fail();
   return Object.freeze({ orderNumber: row.order_number, orderType: row.order_type });
 }
+
+/**
+ * WP-2423 (v15 2026-10-16): one Order this exact Guest Session placed (its first submission), read
+ * from Ordering's own records. The order status page uses it while the customer status projection
+ * is still catching up, so a guest who just paid sees "Order received" instead of "not found". The
+ * caller must have authorized the Guest Session in the same transaction; `null` when the Order does
+ * not exist in this Store or another Session placed it, so nothing is revealed about it.
+ */
+export async function findGuestSessionOrder(
+  transaction: { query(text: string, values: readonly unknown[]): Promise<unknown> },
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  input: { readonly orderReference: string; readonly guestSessionReference: string },
+): Promise<GuestSessionLatestOrder | null> {
+  const brand = parseOrderingReference(scope.brandReference),
+    store = parseOrderingReference(scope.storeReference),
+    order = parseOrderingReference(input.orderReference),
+    guest = parseOrderingReference(input.guestSessionReference);
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [brand, store],
+  );
+  const result = (await transaction.query(
+    "SELECT h.order_id::text AS order_id,h.order_number,h.order_type," +
+      "to_char(h.created_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS created_at " +
+      "FROM rms_ordering.order_header h JOIN rms_ordering.order_submission_record s " +
+      "ON s.order_id=h.order_id AND s.brand_id=h.brand_id AND s.store_id=h.store_id AND s.submission_kind='Initial' " +
+      "WHERE h.brand_id=$1 AND h.store_id=$2 AND h.order_id=$3 AND s.guest_session_id=$4 LIMIT 2",
+    [brand, store, order, guest],
+  )) as { readonly rows?: unknown } | null;
+  const rows = result?.rows;
+  if (!Array.isArray(rows) || rows.length > 1) return fail();
+  const row = rows[0] as Record<string, unknown> | undefined;
+  if (row === undefined) return null;
+  if (
+    Object.keys(row).length !== 4 ||
+    row.order_id !== order ||
+    typeof row.order_number !== "string" ||
+    !/^[1-9][0-9]{0,18}$/u.test(row.order_number) ||
+    (row.order_type !== "Pickup" && row.order_type !== "DineIn")
+  )
+    return fail();
+  return Object.freeze({
+    orderReference: String(order),
+    orderNumber: row.order_number,
+    orderType: row.order_type,
+    createdAt: String(parseOrderingInstant(row.created_at)),
+  });
+}

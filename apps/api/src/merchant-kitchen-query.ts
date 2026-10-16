@@ -17,11 +17,16 @@ import {
   createPostgresStaffDiningRoundEntryStore,
   listStoreKitchenOrderLabels,
   listStoreOrderBusinessDates,
+  listStoreOrdersAwaitingAcceptance,
 } from "@rms/ordering";
 import { listDiningSessionTableLabels } from "@rms/dining";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
-import { createMerchantRoundBusinessDates } from "./merchant-round-business-date.js";
+import {
+  createMerchantRoundBusinessDates,
+  withOptionalRead,
+} from "./merchant-round-business-date.js";
+import { createMerchantBusinessDayWindows } from "./merchant-business-day-window.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 
@@ -236,6 +241,43 @@ export async function kitchenPreparation(
     }),
   );
 }
+/**
+ * WP-2423 (v15 2026-10-16): how the kitchen names today's orders waiting for acceptance — number,
+ * type and a dine-in order's current table. No Customer identity.
+ */
+export async function kitchenAwaitingAcceptance(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orders: readonly {
+    readonly orderNumber: string;
+    readonly orderType: "Pickup" | "DineIn";
+    readonly diningSessionReference: string | null;
+  }[],
+): Promise<readonly Omit<KitchenOrderLabel, "enteredByStaff">[]> {
+  const sessions = [
+    ...new Set(
+      orders.flatMap((order) =>
+        order.diningSessionReference === null ? [] : [order.diningSessionReference],
+      ),
+    ),
+  ];
+  const tables =
+    sessions.length === 0
+      ? new Map<string, string>()
+      : await listDiningSessionTableLabels(transaction, scope, sessions);
+  return Object.freeze(
+    orders.map((order) =>
+      Object.freeze({
+        orderNumber: order.orderNumber,
+        orderType: order.orderType,
+        tableLabel:
+          order.diningSessionReference === null
+            ? null
+            : (tables.get(order.diningSessionReference) ?? null),
+      }),
+    ),
+  );
+}
 async function kitchenAllergens(
   transaction: ConsumerTransaction,
   scope: { readonly brandReference: string; readonly storeReference: string },
@@ -441,11 +483,44 @@ export function createMerchantKitchenQuery(options: {
             const preparation = await kitchenPreparation(tx, authority, items, roundDates);
             const canCloseEarlierDayTickets =
               (await scope.authorizeAction(kitchenStaleTicketClosePermission))?.effect === "Allow";
+            // WP-2423 (v15 2026-10-16): today's paid orders still waiting for acceptance have no
+            // kitchen work yet; the board's order search names them instead of matching an
+            // earlier day's order with the same number. Read with the first page only; null when
+            // the Store's business day cannot be read (the search then says nothing about them).
+            const awaitingAcceptance =
+              query.cursor === null
+                ? await withOptionalRead(
+                    tx,
+                    async () => {
+                      const today = await createMerchantBusinessDayWindows({
+                        persistence: options.persistence,
+                        scope: {
+                          tenantReference: String(scope.selected.tenantReference),
+                          brandReference: String(authority.brandReference),
+                          storeReference: String(authority.storeReference),
+                        },
+                        timeZone: scope.store.timeZone,
+                        authorize: async () => authorized.guard(),
+                      }).today(tx, authority.observedAt);
+                      return kitchenAwaitingAcceptance(
+                        tx,
+                        authority,
+                        await listStoreOrdersAwaitingAcceptance(tx, authority, {
+                          since: today.startsAt,
+                          businessDate: today.businessDate,
+                          limit: 100,
+                        }),
+                      );
+                    },
+                    null,
+                  )
+                : undefined;
             return {
               ...result,
               operatorStatus: operatorStatus(result),
               storeReference: authority.storeReference,
               canCloseEarlierDayTickets,
+              ...(awaitingAcceptance === undefined ? {} : { awaitingAcceptance }),
               items: items.map((item) =>
                 itemView(item, preparation.get(item.workItemReference) ?? noPreparation),
               ),

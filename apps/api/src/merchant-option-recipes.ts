@@ -3,7 +3,12 @@ import {
   MerchantSoleOperatorGateError,
   requireMerchantBrandSoleOperator,
 } from "./merchant-sole-operator.js";
-import { confirmActiveBrandMembers, type MemberDirectoryTransaction } from "@bop/membership";
+import {
+  confirmActiveBrandMembers,
+  listStoreMembers,
+  memberDisplayNames,
+  type MemberDirectoryTransaction,
+} from "@bop/membership";
 import { brandActionHeldBy, type RoleAssignmentTransaction } from "@bop/permission";
 import {
   listBrandOptionSets,
@@ -284,6 +289,25 @@ export function createMerchantOptionRecipes(options: {
             rows.map((row) => row.target),
           );
           const ingredients = await recipeIngredientItems(tx, s, at);
+          // Who saved and who reviewed each change, by name ("You" for the viewer): Store members
+          // first, then the Brand's member directory (a Brand Owner need not be assigned here).
+          const directory = tx as unknown as MemberDirectoryTransaction;
+          const people = new Map<string, string | null>(
+            (await listStoreMembers(directory, scope)).map((member) => [
+              member.actorReference,
+              member.displayName,
+            ]),
+          );
+          const unnamed = [...changes.values()]
+            .flatMap((change) => [
+              change.authorReference,
+              ...change.reviews.map((review) => review.reviewerReference),
+            ])
+            .filter((actor) => actor !== s.actor && !people.get(actor));
+          for (const [actor, displayName] of await memberDisplayNames(directory, scope, unnamed))
+            people.set(actor, displayName);
+          const label = (actor: string) =>
+            actor === s.actor ? "You" : (people.get(actor) ?? "Unnamed staff member");
           const options_ = [];
           for (const row of rows) {
             const change =
@@ -306,12 +330,14 @@ export function createMerchantOptionRecipes(options: {
                       version: change.version,
                       content: change.content,
                       byViewer: change.authorReference === s.actor,
+                      authorLabel: label(change.authorReference),
                       recordedAt: change.recordedAt,
                       published: change.publishedAt !== null,
                       reviews: change.reviews.map((review) => ({
                         kind: review.kind,
                         decision: review.decision,
                         byViewer: review.reviewerReference === s.actor,
+                        reviewerLabel: label(review.reviewerReference),
                         comment: review.comment,
                         reviewedAt: review.reviewedAt,
                       })),

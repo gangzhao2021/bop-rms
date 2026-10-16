@@ -7,6 +7,7 @@ import {
 import {
   createPostgresOptionPriceAuthoringStore,
   OptionPriceAuthoringError,
+  recordOptionPriceSoleOperatorApproval,
   type CurrencyMetadataSnapshot,
   type OptionPriceAuthoringState,
   type OptionPriceRuleSnapshot,
@@ -18,6 +19,11 @@ import { localBoundary } from "./merchant-prices.js";
 import { derivedReference } from "./merchant-products.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
+import {
+  merchantBrandSoleOperatorGate,
+  MerchantSoleOperatorGateError,
+  requireMerchantBrandSoleOperator,
+} from "./merchant-sole-operator.js";
 
 /**
  * WP-2423 slice 4.3: PRICE-OPTION-LIST — what each option costs on each product (Brand-wide, every
@@ -26,11 +32,23 @@ import { retryTransactionConflict } from "./transaction-conflict-retry.js";
  * who may approve prices (pricing.price-book.approve) publishes it. An option without a published
  * price cannot be ordered and keeps its product's options off the next menu publication.
  * Pilot publication policy (WP-2423): approval is the publishing approver's own action, recorded
- * with its audit; no separate approval queue.
+ * with its audit; no separate approval queue. DEC-SOLE-OPERATOR-APPROVAL: the author who is the
+ * only Brand-level holder of price approval (sole operator in effect) publishes their own prices
+ * alone after a second-factor check, explicitly confirmed; marked SoleOperator on a companion
+ * record and the Audit, exactly as price books.
  */
 export class MerchantOptionPriceError extends Error {
   constructor(
-    readonly code: "PermissionDenied" | "NotFound" | "Conflict" | "ApprovalRequired" | "Invalid",
+    readonly code:
+      | "PermissionDenied"
+      | "NotFound"
+      | "Conflict"
+      | "ApprovalRequired"
+      | "Invalid"
+      /** The author asked to publish alone, but sole operator is not in effect for them. */
+      | "SoleOperatorNotInEffect"
+      /** Publishing alone needs a second-factor check in the last 15 minutes. */
+      | "NeedsReverification",
   ) {
     super(code);
     this.name = "MerchantOptionPriceError";
@@ -80,6 +98,8 @@ export type OptionPriceCommandBody =
         readonly ruleReference: string;
         readonly expectedAggregateVersion: number;
       }[];
+      /** WP-2423: the author publishes their own prices alone as sole operator (confirmed). */
+      readonly approvalMode?: "SoleOperator";
     };
 export function parseOptionPriceCommandBody(value: unknown): OptionPriceCommandBody {
   const r = value as Record<string, unknown> | null;
@@ -109,7 +129,12 @@ export function parseOptionPriceCommandBody(value: unknown): OptionPriceCommandB
     return { action: "SetPrices", operationReference: ref(r.operationReference), prices };
   }
   if (r.action === "Publish") {
-    exactKeys(r, "action,operationReference,rules");
+    const sole = Object.hasOwn(r, "approvalMode");
+    exactKeys(
+      r,
+      sole ? "action,approvalMode,operationReference,rules" : "action,operationReference,rules",
+    );
+    if (sole && r.approvalMode !== "SoleOperator") return fail("Invalid");
     if (!Array.isArray(r.rules) || r.rules.length < 1 || r.rules.length > 100)
       return fail("Invalid");
     const rules = r.rules.map((candidate: unknown) => {
@@ -122,7 +147,12 @@ export function parseOptionPriceCommandBody(value: unknown): OptionPriceCommandB
     });
     if (new Set(rules.map((rule) => rule.ruleReference)).size !== rules.length)
       return fail("Invalid");
-    return { action: "Publish", operationReference: ref(r.operationReference), rules };
+    return {
+      action: "Publish",
+      operationReference: ref(r.operationReference),
+      rules,
+      ...(sole ? { approvalMode: "SoleOperator" as const } : {}),
+    };
   }
   return fail("Invalid");
 }
@@ -173,6 +203,8 @@ export function createMerchantOptionPrices(options: {
     };
     if (!permissions.mayRead) fail("PermissionDenied");
     return {
+      /** The current approval grant, re-decided (for the sole-operator read). */
+      mayApproveNow: () => may("pricing.price-book.approve"),
       tenant: String(scope.tenantReference),
       brand: String(scope.context.brand.brandReference),
       store: String(scope.selectedStoreReference),
@@ -221,7 +253,13 @@ export function createMerchantOptionPrices(options: {
   }
 
   /** The Pricing option price writer bound to this request's transaction and authority. */
-  function priceStore(tx: Tx, s: Scope, operation: string, mode: "Read" | "Write") {
+  function priceStore(
+    tx: Tx,
+    s: Scope,
+    operation: string,
+    mode: "Read" | "Write",
+    soleOperator = false,
+  ) {
     const observedAt = options.persistence.now();
     const validUntil = new Date(Date.parse(observedAt) + 5000).toISOString();
     const hooks: { guard: () => Promise<void>; final: () => void }[] = [];
@@ -251,6 +289,7 @@ export function createMerchantOptionPrices(options: {
         },
       },
       publicationPolicyFamilyReference: pilotPolicy.family,
+      ...(soleOperator ? { soleOperatorApproval: true } : {}),
       publicationSource: {
         async withCurrentAuthorization(_tx, input, work) {
           if (!s.permissions.mayApprove || input.state.draftAuthorActorReference === null)
@@ -317,6 +356,10 @@ export function createMerchantOptionPrices(options: {
             dataClassification: "Internal",
             retentionPolicyCode: "CONFIGURATION_AUDIT",
             retentionPolicyVersion: 1,
+            // The author's own publication as sole operator says so.
+            ...(soleOperator && m !== "Abandon" && command.action === "Publish"
+              ? { afterSummary: { approvalMode: "SoleOperator" } }
+              : {}),
           }) as never,
       },
       registerBeforeCommit: (_tx, guard, final) => {
@@ -336,6 +379,18 @@ export function createMerchantOptionPrices(options: {
       },
     };
   }
+  /** The product option a rule of this page prices (its binding and option), if still offered. */
+  type Products = Awaited<ReturnType<typeof productOptions>>;
+  const ruleOption = (products: Products, rule: string) => {
+    for (const product of products)
+      for (const set of product.optionSets)
+        for (const option of set.options)
+          if (optionPriceRuleReference(set.bindingReference, option.optionReference) === rule)
+            return { binding: set.bindingReference, option: option.optionReference };
+    return null;
+  };
+  const bindingOf = (products: Products, rule: string) => ruleOption(products, rule)?.binding;
+  const optionOf = (products: Products, rule: string) => ruleOption(products, rule)?.option;
   const priceView = (state: OptionPriceAuthoringState | null, viewer: string) => {
     const published =
       state !== null && brandWide(state.currentPublished) ? state.currentPublished : null;
@@ -415,6 +470,25 @@ export function createMerchantOptionPrices(options: {
           } catch (error) {
             return mapError(error);
           }
+          // WP-2423: an author who may approve and has prices waiting sees whether they may
+          // publish them alone (sole operator) and why not.
+          const ownPending = rows.some((product) =>
+            product.optionSets.some((set) =>
+              set.options.some((option) => option.pending?.byViewer === true),
+            ),
+          );
+          const gate =
+            ownPending && s.permissions.mayApprove
+              ? await merchantBrandSoleOperatorGate(tx as never, {
+                  tenantReference: s.tenant,
+                  brandReference: s.brand,
+                  storeReference: s.store,
+                  actorReference: s.actor,
+                  permissionCode: "pricing.price-book.approve",
+                  observedAt: options.persistence.now(),
+                  allowed: s.mayApproveNow,
+                })
+              : null;
           return {
             screenId: "PRICE-OPTION-LIST" as const,
             sourceAsOf: options.persistence.now(),
@@ -423,6 +497,14 @@ export function createMerchantOptionPrices(options: {
               minorUnitExponent: options.currencyMetadata.minorUnitExponent,
             },
             permissions: { mayEdit: s.permissions.mayEdit, mayApprove: s.permissions.mayApprove },
+            soleOperator:
+              gate === null
+                ? null
+                : {
+                    status: gate.status,
+                    otherApprovers: gate.otherApprovers,
+                    verifiedUntil: gate.verifiedUntil,
+                  },
             products: rows,
           };
         }),
@@ -440,7 +522,33 @@ export function createMerchantOptionPrices(options: {
           if (body.action === "SetPrices" ? !s.permissions.mayEdit : !s.permissions.mayApprove)
             fail("PermissionDenied");
           const products = await productOptions(tx, s);
-          const { store, beforeCommit } = priceStore(tx, s, body.operationReference, "Write");
+          const sole = body.action === "Publish" && body.approvalMode === "SoleOperator";
+          // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: the author's own publication only while sole
+          // operator is in effect for them, read in this transaction, with a second factor at most
+          // 15 minutes old. Read before the writer starts its few-second window.
+          let soleOperatorMfaAt: string | null = null;
+          if (sole) {
+            try {
+              soleOperatorMfaAt = (
+                await requireMerchantBrandSoleOperator(tx as never, {
+                  tenantReference: s.tenant,
+                  brandReference: s.brand,
+                  storeReference: s.store,
+                  actorReference: s.actor,
+                  permissionCode: "pricing.price-book.approve",
+                  observedAt: options.persistence.now(),
+                  allowed: s.mayApproveNow,
+                })
+              ).actorMfaAt;
+            } catch (error) {
+              if (error instanceof MerchantSoleOperatorGateError)
+                return fail(
+                  error.code === "NotInEffect" ? "SoleOperatorNotInEffect" : "NeedsReverification",
+                );
+              throw error;
+            }
+          }
+          const { store, beforeCommit } = priceStore(tx, s, body.operationReference, "Write", sole);
           const results: { ruleReference: string; aggregateVersion: number; status: string }[] = [];
           try {
             if (body.action === "SetPrices") {
@@ -506,18 +614,41 @@ export function createMerchantOptionPrices(options: {
               }
             } else {
               for (const rule of body.rules) {
+                if (sole) {
+                  // Only the person's own drafts are published alone; anyone else's waits for them.
+                  // (No draft: a retry of this publication replays, anything else is refused.)
+                  const state = (
+                    await store.listForBinding({
+                      bindingReference: bindingOf(products, rule.ruleReference) ?? fail("NotFound"),
+                      optionReference: optionOf(products, rule.ruleReference) ?? fail("NotFound"),
+                    })
+                  ).find((item) => item.ruleReference === rule.ruleReference);
+                  if (state?.draft !== null && state?.draftAuthorActorReference !== s.actor)
+                    fail("Invalid");
+                }
+                const operationReference = derivedReference(
+                  body.operationReference,
+                  "publish:" + rule.ruleReference,
+                );
                 const result = await store.execute({
                   action: "Publish",
-                  operationReference: derivedReference(
-                    body.operationReference,
-                    "publish:" + rule.ruleReference,
-                  ),
+                  operationReference,
                   ruleReference: rule.ruleReference,
                   expectedAggregateVersion: rule.expectedAggregateVersion,
                   bindingReference: null,
                   optionReference: null,
                   content: null,
                 });
+                if (soleOperatorMfaAt !== null && result.outcome === "Committed")
+                  await recordOptionPriceSoleOperatorApproval(tx as never, {
+                    brandReference: s.brand,
+                    ruleReference: rule.ruleReference,
+                    operationReference,
+                    actorReference: s.actor,
+                    actorMfaAt: soleOperatorMfaAt,
+                    approvedAt: result.occurredAt,
+                    auditReference: String(result.auditReference),
+                  });
                 results.push({
                   ruleReference: rule.ruleReference,
                   aggregateVersion: result.state?.aggregateVersion ?? 0,

@@ -131,6 +131,8 @@ export function kitchenBoardSearch(input: {
   readonly reworks: readonly KitchenReworkView[];
   readonly today: string | null;
   readonly search: string | null;
+  /** v15: today's paid orders still waiting for acceptance (null or omitted when unknown). */
+  readonly awaitingAcceptance?: readonly KitchenOrderLabel[] | null | undefined;
 }) {
   const { search } = input;
   const match = (item: KitchenBoardItem) =>
@@ -149,10 +151,24 @@ export function kitchenBoardSearch(input: {
     earlierOpen,
     /** The earlier days' tickets the search finds. */
     earlierShown: search === null ? earlier : earlier.filter((ticket) => ticket.items.some(match)),
-    /** Today's work the search finds (before the lane filters). */
+    /**
+     * Today's work the search finds (before the lane filters). v15 2026-10-16: an earlier business
+     * day's work is never today's, open or finished: order numbers restart every day, so an earlier
+     * day's finished or cancelled order 13 must not answer for today's order 13.
+     */
     todayMatches: input.items.filter(
-      (item) => !earlierOpen.has(item.workItemReference) && match(item),
+      (item) =>
+        !earlierOpen.has(item.workItemReference) &&
+        !fromEarlierKitchenDay(item, input.today) &&
+        match(item),
     ),
+    /** v15: today's orders the search finds that are paid but not accepted yet (no work yet). */
+    awaitingMatches:
+      search === null
+        ? []
+        : (input.awaitingAcceptance ?? []).filter((label) =>
+            matchesKitchenOrderLabel(label, search),
+          ),
     reworks:
       search === null
         ? input.reworks
@@ -199,6 +215,29 @@ export function kitchenSearchHiddenText(input: {
     ? `${capitalized} has nothing left to make: its items were cancelled.`
     : `All of ${subject} is done.` +
         (input.inRecentlyFinished ? " Its dishes are listed under Recently finished." : "");
+}
+
+/**
+ * WP-2423 (v15 2026-10-16): the searched order is paid but staff have not accepted it, so the
+ * kitchen has nothing for it yet. `hasKitchenWork`: some of the order (an earlier round of a table)
+ * is already on the board and done, and a new round waits for acceptance.
+ */
+export function kitchenSearchAwaitingText(
+  labels: readonly Pick<KitchenOrderLabel, "orderNumber" | "orderType" | "tableLabel">[],
+  search: string,
+  hasKitchenWork: boolean,
+): string | null {
+  const [first] = labels;
+  if (first === undefined) return null;
+  if (labels.length > 1)
+    return `${labels.length} orders for “${search}” are not accepted yet — accept them on Orders.`;
+  const subject =
+    first.orderType === "DineIn" && first.tableLabel
+      ? `Order ${first.orderNumber} (table ${first.tableLabel})`
+      : `Order ${first.orderNumber}`;
+  return hasKitchenWork
+    ? `${subject} has a new round that is not accepted yet — accept it on Orders.`
+    : `${subject} is not accepted yet — accept it on Orders.`;
 }
 
 /** WP-2423: how many of the earlier days' tickets carry the searched number, in staff words. */
@@ -1010,6 +1049,7 @@ export function KitchenBoardScreen({
     reworks: remakes?.items ?? [],
     today,
     search: orderSearch,
+    awaitingAcceptance: view.awaitingAcceptance,
   });
   const { earlierOpen } = board;
   const earlierTickets = board.earlierShown;
@@ -1033,6 +1073,23 @@ export function KitchenBoardScreen({
   const activeAllergen = allergenFilterAvailable ? allergen : "All";
   const activeException = exceptionFilterAvailable ? exception : "All";
   const searchMatches = board.todayMatches;
+  // v15 2026-10-16: a paid order nobody accepted yet has no kitchen work; say so, and where to go.
+  const awaitingText =
+    orderSearch === null || searchMatches.some(isActiveKitchenWork)
+      ? null
+      : kitchenSearchAwaitingText(board.awaitingMatches, orderSearch, searchMatches.length > 0);
+  const awaitingNotice =
+    awaitingText === null ? null : (
+      <>
+        {awaitingText}
+        {view.operatorStatus === "Named" ? null : (
+          <>
+            {" "}
+            <Link to="/operations/orders">Open Orders</Link>
+          </>
+        )}
+      </>
+    );
   const items = searchMatches.filter(
     (item) =>
       (activeStation === "All" || item.stationLabel === activeStation) &&
@@ -1405,6 +1462,11 @@ export function KitchenBoardScreen({
             </div>
           </details>
         ) : null}
+        {items.length > 0 && awaitingNotice !== null ? (
+          <p className="kitchen-search-awaiting" role="status">
+            {awaitingNotice}
+          </p>
+        ) : null}
         {items.length === 0 ? (
           <StatePanel
             heading={
@@ -1415,27 +1477,29 @@ export function KitchenBoardScreen({
             status
           >
             <p>
-              {orderSearch !== null
-                ? searchMatches.length > 0
-                  ? kitchenSearchHiddenText({
-                      matches: searchMatches,
-                      search: orderSearch,
-                      inRecentlyFinished:
-                        remakes !== undefined &&
-                        onRemake !== undefined &&
-                        recentlyFinishedKitchenItems(board.items, view.projectedAt).some((item) =>
-                          searchMatches.includes(item),
-                        ),
-                    })
-                  : earlierElsewhere !== null
-                    ? `Nothing from today for order or table “${orderSearch}”. ${earlierElsewhere}: see From earlier days above.`
-                    : `Nothing on the board for order or table “${orderSearch}”. Clear the search to see the whole queue.`
-                : view.items.length > 0 && view.items.length === earlierOpen.size
-                  ? "Nothing from today is waiting. Earlier days' tickets are listed above."
-                  : !hasFilters || view.items.length === 0
-                    ? // v15 2026-10-16: an empty board with no filter set is simply quiet.
-                      "Nothing to make right now."
-                    : "Nothing matches these filters. Clear the filters to see all work."}
+              {orderSearch !== null && awaitingNotice !== null
+                ? awaitingNotice
+                : orderSearch !== null
+                  ? searchMatches.length > 0
+                    ? kitchenSearchHiddenText({
+                        matches: searchMatches,
+                        search: orderSearch,
+                        inRecentlyFinished:
+                          remakes !== undefined &&
+                          onRemake !== undefined &&
+                          recentlyFinishedKitchenItems(board.items, view.projectedAt).some((item) =>
+                            searchMatches.includes(item),
+                          ),
+                      })
+                    : earlierElsewhere !== null
+                      ? `Nothing from today for order or table “${orderSearch}”. ${earlierElsewhere}: see From earlier days above.`
+                      : `Nothing on the board for order or table “${orderSearch}”. Clear the search to see the whole queue.`
+                  : view.items.length > 0 && view.items.length === earlierOpen.size
+                    ? "Nothing from today is waiting. Earlier days' tickets are listed above."
+                    : !hasFilters || view.items.length === 0
+                      ? // v15 2026-10-16: an empty board with no filter set is simply quiet.
+                        "Nothing to make right now."
+                      : "Nothing matches these filters. Clear the filters to see all work."}
             </p>
           </StatePanel>
         ) : (

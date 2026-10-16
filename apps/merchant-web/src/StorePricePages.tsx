@@ -279,8 +279,11 @@ export function StorePriceList({
           <h2>Prices</h2>
           <p>
             A price book holds a price for each size. A published book never changes: to change
-            prices, start a new book (usually a copy of the current one), have someone else publish
-            it, then use it at this Store. Source as of <SourceTime instant={view.sourceAsOf} />
+            prices, start a new book (usually a copy of the current one),{" "}
+            {view.soleOperator?.status === "Effective"
+              ? "check it and publish it yourself (Sole operator is on and you are the only person who holds price approval, so you verify with your authenticator code first)"
+              : "have someone else who holds price approval publish it"}
+            , then use it at this Store. Source as of <SourceTime instant={view.sourceAsOf} />
           </p>
         </div>
       </header>
@@ -630,8 +633,10 @@ function PriceBookEditor({
         <section className="detail-section" aria-labelledby="publish">
           <h3 id="publish">Publish</h3>
           <p>
-            Publishing fixes these prices for good. It must be done by someone other than the person
-            who last changed the draft, who holds price approval.
+            Publishing fixes these prices for good.{" "}
+            {view.soleOperator?.status === "Effective"
+              ? "Sole operator is on and you are the only person who holds price approval, so you may publish your own draft after checking it and verifying it is you."
+              : "It must be done by someone other than the person who last changed the draft, who holds price approval."}
           </p>
           {changed ? <p>Save your changes first.</p> : null}
           {view.permissions.mayApprove && !authorIsViewer ? (

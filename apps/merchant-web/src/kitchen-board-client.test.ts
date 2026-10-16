@@ -313,3 +313,22 @@ it("DEC-KITCHEN-STALE-TICKETS: carries each ticket's business day and whether th
   );
   await expect(f.client.loadQueue()).rejects.toThrow();
 });
+it("WP-2423 v15: carries today's orders waiting for acceptance from the first page", async () => {
+  const f = setup();
+  f.fetcher.mockResolvedValue(
+    response({
+      ...metadata,
+      awaitingAcceptance: [{ orderNumber: "13", orderType: "Pickup", tableLabel: null }],
+      items: [item()],
+      nextCursor: null,
+    }),
+  );
+  const view = parseKitchenBoardView(await f.client.loadQueue());
+  expect(view.awaitingAcceptance).toEqual([
+    { orderNumber: "13", orderType: "Pickup", tableLabel: null, enteredByStaff: false },
+  ]);
+  f.fetcher.mockResolvedValue(response({ ...metadata, items: [item()], nextCursor: null }));
+  expect(
+    Object.hasOwn(parseKitchenBoardView(await f.client.loadQueue()), "awaitingAcceptance"),
+  ).toBe(false);
+});

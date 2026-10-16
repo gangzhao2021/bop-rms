@@ -20,6 +20,8 @@ export interface OptionSetRow {
   readonly internalCode: string;
   readonly aggregateVersion: number;
   readonly archived: boolean;
+  /** Products whose draft offers this set; customers see it once such a menu is published. */
+  readonly productNames: readonly string[];
   readonly name: string;
   readonly kind: OptionChoiceKind;
   readonly minimum: number;
@@ -157,4 +159,14 @@ export function createOptionSetClient(
       post("/merchant/commerce/option-sets/query", { optionSetReference }),
     command: (command) => post("/merchant/commerce/option-sets/command", command),
   };
+}
+/**
+ * Where a set stands, in staff words: archived, not on any product yet (customers cannot see it),
+ * or which products offer it. Never "in use" for a set no product offers.
+ */
+export function optionSetStateText(set: Pick<OptionSetRow, "archived" | "productNames">): string {
+  if (set.archived) return "Archived — it cannot be added to products.";
+  if (set.productNames.length === 0)
+    return "Saved, not on any product yet — customers cannot choose it until you add it to a product and publish a menu with that product.";
+  return `On ${set.productNames.join(", ")}.`;
 }

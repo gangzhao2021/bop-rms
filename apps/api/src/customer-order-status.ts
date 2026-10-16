@@ -1,4 +1,7 @@
-import type { createCustomerOrderStatusRead } from "./customer-order-status-read.js";
+import type {
+  createCustomerOrderStatusRead,
+  CustomerOrderReceived,
+} from "./customer-order-status-read.js";
 import { GuestSessionError, readClosedRecord } from "@bop/identity";
 import { OrderStatusProjectionError, type CustomerOrderStatusView } from "@rms/ordering";
 import type { RequestHandler, Response } from "express";
@@ -37,13 +40,18 @@ function reject(response: Response, status: number) {
     error: { code: "order_status_" + code, messageKey: "customer.order.status." + code },
   });
 }
+/**
+ * WP-2423 (v15 2026-10-16): the status projection lags the Order by the outbox worker's cycle. For
+ * the guest who placed the Order, `received` answers from Ordering's own record meanwhile.
+ */
+interface CustomerOrderStatusPort {
+  read(input: CustomerOrderStatusInput): Promise<CustomerStatusResponse>;
+  received?(input: CustomerOrderStatusInput): Promise<CustomerOrderReceived | null>;
+}
 export class CustomerOrderStatusHandler {
   readonly #origin: string;
-  readonly #port: { read(input: CustomerOrderStatusInput): Promise<CustomerStatusResponse> };
-  constructor(options: {
-    allowedOrigin: string;
-    port: { read(input: CustomerOrderStatusInput): Promise<CustomerStatusResponse> };
-  }) {
+  readonly #port: CustomerOrderStatusPort;
+  constructor(options: { allowedOrigin: string; port: CustomerOrderStatusPort }) {
     this.#origin = new URL(options.allowedOrigin).origin;
     this.#port = options.port;
   }
@@ -240,6 +248,22 @@ export class CustomerOrderStatusHandler {
                             amountMinor: price.tax.amountMinor.toString(),
                             currencyCode: price.tax.currencyCode,
                           },
+                          // WP-2423: the chosen options (what each added) and the guest's note.
+                          ...(price.options !== undefined && price.options.length > 0
+                            ? {
+                                options: price.options.map((option) => ({
+                                  displayName: option.displayName,
+                                  quantity: option.quantity,
+                                  amount: {
+                                    amountMinor: option.amount.amountMinor.toString(),
+                                    currencyCode: option.amount.currencyCode,
+                                  },
+                                })),
+                              }
+                            : {}),
+                          ...(typeof price.customerNote === "string"
+                            ? { customerNote: price.customerNote }
+                            : {}),
                         })),
                       }),
                   // WP-2423 Q6: dine-in rounds whose payment failed (with when they are cancelled)
@@ -291,7 +315,35 @@ export class CustomerOrderStatusHandler {
                 },
               };
         response.status(200).json({ schemaVersion: 1, status: { ...status, ...publicSources } });
-      } catch (error) {
+      } catch (caught) {
+        let error: unknown = caught;
+        // The guest is authorized but the Order's status projection has not arrived yet: say the
+        // order was received (and keep checking) instead of "not found". Anything else, including
+        // an Order this guest did not place, is refused exactly as before.
+        if (
+          error instanceof OrderStatusProjectionError &&
+          error.code === "ORDER_STATUS_NOT_FOUND" &&
+          this.#port.received !== undefined
+        ) {
+          try {
+            const received = await this.#port.received(input);
+            if (received !== null && received.orderReference === input.orderReference) {
+              response.status(200).json({
+                schemaVersion: 1,
+                received: {
+                  orderReference: received.orderReference,
+                  orderNumber: received.orderNumber,
+                  orderType: received.orderType,
+                  submittedAt: received.submittedAt,
+                  checkedAt: received.checkedAt,
+                },
+              });
+              return;
+            }
+          } catch (receivedError) {
+            error = receivedError;
+          }
+        }
         const status =
           error instanceof GuestSessionError
             ? 404

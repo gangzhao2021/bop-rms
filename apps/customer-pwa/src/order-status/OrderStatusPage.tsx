@@ -14,7 +14,12 @@ import type {
 import { PickupCodePanel } from "../pickup-code/PickupCodePanel.js";
 import type { PickupCodeController } from "../pickup-code/pickup-code-controller.js";
 import { CustomerPage, type CustomerStoreContext } from "../journey/CustomerPage.js";
-import { endSentence, formatClockTime, formatMoney } from "../journey/format.js";
+import {
+  describeChosenOption,
+  endSentence,
+  formatClockTime,
+  formatMoney,
+} from "../journey/format.js";
 import { StoreContactCard } from "../journey/StoreContact.js";
 import { ContactDetailsSection } from "./ContactDetailsSection.js";
 import type { ContactRemovalClient } from "./contact-removal-client.js";
@@ -76,6 +81,8 @@ export function orderMoneySummary(
 
 /** How often an active order re-reads its status when no live connection is available. */
 export const orderStatusPollIntervalMs = 15_000;
+/** WP-2423: how often a just-received order checks again until its status is ready to show. */
+export const orderReceivedPollIntervalMs = 2_000;
 
 /** WP-2423 Q6: why the store cancelled, in words for the customer (never internal codes). */
 export const staffCancellationReasonText: Readonly<Record<StaffCancellationReason, string>> = {
@@ -461,6 +468,9 @@ function StatusContent({
   const multipleBatches = view.order.batches.length > 1;
   // WP-2423: a round whose payment didn't go through is never charged (cancelled, or about to be).
   const summary = orderMoneySummary(view, (reference) => !notPaid.has(reference));
+  const itemDetails = new Map(
+    (view.sources?.itemPrices ?? []).map((price) => [price.orderItemReference, price] as const),
+  );
   const currency = view.order.batches[0]?.items[0]?.lineTotal.currencyCode ?? "CAD";
   return (
     <>
@@ -613,6 +623,20 @@ function StatusContent({
                     >
                       <span className="order-status__item-name">
                         {item.quantity} × {item.displayName}
+                        {/* WP-2423: the options chosen (with what each added) and the guest's note. */}
+                        {itemDetails.get(item.orderItemReference)?.options?.length ? (
+                          <span className="order-status__item-options">
+                            {itemDetails
+                              .get(item.orderItemReference)
+                              ?.options?.map(describeChosenOption)
+                              .join(", ")}
+                          </span>
+                        ) : null}
+                        {itemDetails.get(item.orderItemReference)?.customerNote ? (
+                          <span className="order-status__item-note">
+                            Note: {itemDetails.get(item.orderItemReference)?.customerNote}
+                          </span>
+                        ) : null}
                       </span>
                       <span className="order-status__item-amount">
                         {formatMoney(
@@ -748,20 +772,24 @@ export function OrderStatusPage({
   }, [controller]);
   const view = state.status === "ready" || state.status === "offline" ? state.view : null;
   const polling =
-    state.status === "ready" && state.realtime !== "available" && !isOrderSettled(state.view);
+    state.status === "received" ||
+    (state.status === "ready" && state.realtime !== "available" && !isOrderSettled(state.view));
+  // A just-placed order's status arrives within seconds; check it often until it does.
+  const pollInterval =
+    state.status === "received" ? orderReceivedPollIntervalMs : orderStatusPollIntervalMs;
   useEffect(() => {
     if (!polling) return;
     const tick = () => {
       if (typeof document === "undefined" || document.visibilityState === "visible")
         void controller.refresh();
     };
-    const timer = window.setInterval(tick, orderStatusPollIntervalMs);
+    const timer = window.setInterval(tick, pollInterval);
     document.addEventListener("visibilitychange", tick);
     return () => {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", tick);
     };
-  }, [controller, polling]);
+  }, [controller, polling, pollInterval]);
   return (
     <CustomerPage
       step="order"
@@ -777,6 +805,17 @@ export function OrderStatusPage({
       {state.status === "loading" ? (
         <section role="status">
           <h2>Loading order status</h2>
+        </section>
+      ) : null}
+      {state.status === "received" ? (
+        // WP-2423 (v15 2026-10-16): the order is in; its progress shows here within seconds.
+        <section className="order-status__received" role="status">
+          <h2>Order received</h2>
+          <p>
+            Order {state.received.orderNumber} is in. Its progress will show here in a few seconds —
+            this page updates by itself.
+          </p>
+          <p>If nothing changes after a minute, give your order number to a staff member.</p>
         </section>
       ) : null}
       {state.status === "invalid-reference" ? (

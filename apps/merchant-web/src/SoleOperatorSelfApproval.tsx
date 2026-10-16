@@ -59,6 +59,7 @@ export function SoleOperatorSelfApproval({
   busy,
   onApprove,
   fetcher,
+  yourPart = "You made this change",
 }: {
   readonly gate: SoleOperatorGateView | null;
   readonly csrf: string | undefined;
@@ -72,13 +73,18 @@ export function SoleOperatorSelfApproval({
   readonly busy: boolean;
   onApprove(): void;
   readonly fetcher?: typeof fetch | undefined;
+  /**
+   * Why the signed-in person cannot simply approve, in their words: "You made this change"
+   * (default) or, for a second review, "You already gave the cost review".
+   */
+  readonly yourPart?: string;
 }) {
   const [verifiedUntil, setVerifiedUntil] = useState<string | null>(gate?.verifiedUntil ?? null);
   const [confirmed, setConfirmed] = useState(false);
   if (gate === null || gate.status === "NotSet")
     return (
       <p>
-        You made this change, so someone else who holds {permissionName} must approve it.
+        {yourPart}, so someone else who holds {permissionName} must approve it.
         {gate === null ? " " : " Sole operator is off. "}If you run this business on your own, the
         brand owner can turn on Sole operator on the Approvals page.
       </p>
@@ -95,8 +101,8 @@ export function SoleOperatorSelfApproval({
   return (
     <div className="sole-operator-confirm">
       <p>
-        You made this change and you are the only person who holds {permissionName} (sole operator),
-        so you may approve it yourself. Check it first:
+        {yourPart} and you are the only person who holds {permissionName} (sole operator), so you
+        may approve it yourself. Check it first:
       </p>
       {summary}
       <p>It will be recorded as approved by you alone.</p>

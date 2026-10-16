@@ -75,6 +75,8 @@ export interface PriceBookSummary {
 export interface PriceBookListView extends PriceViewBase {
   readonly screenId: "PRICE-BOOK-LIST";
   readonly books: readonly PriceBookSummary[];
+  /** WP-2423 Q19: for a viewer who may approve: may they publish their own book alone. */
+  readonly soleOperator: SoleOperatorGateView | null;
 }
 export interface PriceBookEditorView extends PriceViewBase {
   readonly screenId: "PRICE-BOOK-EDITOR";
@@ -148,7 +150,10 @@ export function parsePriceBookListView(value: unknown): PriceBookListView {
   const r = object(value);
   if (!base(r) || r.screenId !== "PRICE-BOOK-LIST" || !Array.isArray(r.books))
     throw new Error("PRICE_PAGE_INVALID");
-  return r as unknown as PriceBookListView;
+  return {
+    ...r,
+    soleOperator: parseSoleOperatorGate(r.soleOperator),
+  } as unknown as PriceBookListView;
 }
 export function parsePriceBookEditorView(value: unknown): PriceBookEditorView {
   const r = object(value);

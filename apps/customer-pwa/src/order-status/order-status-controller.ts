@@ -1,6 +1,7 @@
 import { parsePrivacyNoticeUrl } from "../journey/PrivacyNotice.js";
 import { parseStoreContact } from "../journey/StoreContact.js";
 import type {
+  OrderReceivedView,
   OrderStatusSources,
   OrderStatusState,
   OrderStatusView,
@@ -557,22 +558,76 @@ function parseSources(
     const seen = new Set<string>();
     itemPrices = Object.freeze(
       raw.itemPrices.map((value: unknown) => {
-        const entry = exact(value, ["orderItemReference", "subtotal", "tax"]);
+        const has = (key: string) =>
+          value !== null && typeof value === "object" && Object.hasOwn(value, key);
+        const entry = exact(value, [
+          "orderItemReference",
+          "subtotal",
+          "tax",
+          ...(has("options") ? ["options"] : []),
+          ...(has("customerNote") ? ["customerNote"] : []),
+        ]);
         const orderItemReference = parseReference(entry.orderItemReference);
         const item = items.get(orderItemReference);
         const subtotal = parseMoney(entry.subtotal);
         const tax = parseMoney(entry.tax);
+        // WP-2423: chosen options (what each added, within the item's price) and the guest's note.
+        if (
+          has("options") &&
+          (!Array.isArray(entry.options) || entry.options.length < 1 || entry.options.length > 100)
+        )
+          return invalid();
+        const options = has("options")
+          ? Object.freeze(
+              (entry.options as unknown[]).map((candidate) => {
+                const option = exact(candidate, ["displayName", "quantity", "amount"]);
+                const amount = parseMoney(option.amount);
+                if (
+                  typeof option.displayName !== "string" ||
+                  option.displayName.trim() !== option.displayName ||
+                  option.displayName.length < 1 ||
+                  option.displayName.length > 200 ||
+                  !Number.isSafeInteger(option.quantity) ||
+                  (option.quantity as number) < 1 ||
+                  (option.quantity as number) > 999 ||
+                  amount.amountMinor < 0n ||
+                  amount.currencyCode !== subtotal.currencyCode
+                )
+                  return invalid();
+                return Object.freeze({
+                  displayName: option.displayName,
+                  quantity: option.quantity as number,
+                  amount,
+                });
+              }),
+            )
+          : undefined;
+        if (
+          has("customerNote") &&
+          (typeof entry.customerNote !== "string" ||
+            entry.customerNote.length < 1 ||
+            entry.customerNote.length > 500)
+        )
+          return invalid();
         if (
           item === undefined ||
           seen.has(orderItemReference) ||
           subtotal.amountMinor < 0n ||
           tax.amountMinor < 0n ||
           subtotal.currencyCode !== item.lineTotal.currencyCode ||
-          tax.currencyCode !== item.lineTotal.currencyCode
+          tax.currencyCode !== item.lineTotal.currencyCode ||
+          (options ?? []).reduce((sum, option) => sum + option.amount.amountMinor, 0n) >
+            subtotal.amountMinor
         )
           return invalid();
         seen.add(orderItemReference);
-        return Object.freeze({ orderItemReference, subtotal, tax });
+        return Object.freeze({
+          orderItemReference,
+          subtotal,
+          tax,
+          ...(options === undefined ? {} : { options }),
+          ...(has("customerNote") ? { customerNote: entry.customerNote as string } : {}),
+        });
       }),
     );
   }
@@ -623,6 +678,45 @@ function parseSources(
       : {}),
   });
 }
+
+/**
+ * WP-2423 (v15 2026-10-16): the API's "order received" answer, for the guest's own order whose
+ * status is still being prepared. Only the order number and type are shown.
+ */
+export function parseOrderReceived(value: unknown, expectedReference: string): OrderReceivedView {
+  const raw = exact(value, [
+    "kind",
+    "orderReference",
+    "orderNumber",
+    "orderType",
+    "submittedAt",
+    "checkedAt",
+  ]);
+  if (
+    raw.kind !== "Received" ||
+    parseReference(raw.orderReference) !== expectedReference ||
+    typeof raw.orderNumber !== "string" ||
+    !/^[1-9][0-9]{0,18}$/u.test(raw.orderNumber) ||
+    (raw.orderType !== "DineIn" && raw.orderType !== "Pickup")
+  )
+    return invalid();
+  const submittedAt = parseInstant(raw.submittedAt);
+  const checkedAt = parseInstant(raw.checkedAt);
+  if (Date.parse(checkedAt) < Date.parse(submittedAt)) return invalid();
+  return Object.freeze({
+    kind: "Received",
+    orderReference: expectedReference,
+    orderNumber: raw.orderNumber,
+    orderType: raw.orderType,
+    submittedAt,
+    checkedAt,
+  });
+}
+
+const isReceived = (value: unknown) =>
+  value !== null &&
+  typeof value === "object" &&
+  Object.getOwnPropertyDescriptor(value, "kind")?.value === "Received";
 
 export function parseOrderStatusView(value: unknown, expectedReference: string): OrderStatusView {
   const raw = exact(value, [
@@ -779,9 +873,19 @@ export function createOrderStatusController(
     }
     const token = ++request;
     if (retained) publish({ status: "ready", view: retained, realtime, refreshing: true });
-    else publish({ status: "loading" });
+    // While the order is "received", a re-check keeps that message instead of flashing "loading".
+    else if (state.status !== "received") publish({ status: "loading" });
     try {
-      const view = parseOrderStatusView(await client.load(orderReference), orderReference);
+      const loaded = await client.load(orderReference);
+      if (isReceived(loaded)) {
+        const received = parseOrderReceived(loaded, orderReference);
+        if (stopped || !online || token !== request) return;
+        // A status already shown is kept; the projection never goes back to missing.
+        if (retained) publish({ status: "ready", view: retained, realtime, refreshing: false });
+        else publish({ status: "received", received });
+        return;
+      }
+      const view = parseOrderStatusView(loaded, orderReference);
       if (!stopped && online && token === request)
         publish({ status: "ready", view, realtime, refreshing: false });
     } catch (error) {

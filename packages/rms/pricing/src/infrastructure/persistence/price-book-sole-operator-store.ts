@@ -71,3 +71,49 @@ export async function recordPriceBookSoleOperatorApproval(
   );
   return "Created";
 }
+
+/**
+ * WP-2423 DEC-SOLE-OPERATOR-APPROVAL: the mark of an option price published by its own draft
+ * author as sole operator, for a Publish operation already committed in this transaction (the
+ * database checks it is that author's own publication of the same rule at the same instant, the
+ * 15-minute second-factor window and that sole operator is on). The Brand scope must be set. Exact
+ * replay of the same operation returns the existing mark; anything else conflicts.
+ */
+export async function recordOptionPriceSoleOperatorApproval(
+  tx: PriceBookSoleOperatorTransaction,
+  input: {
+    readonly brandReference: string;
+    readonly ruleReference: string;
+    readonly operationReference: string;
+    readonly actorReference: string;
+    readonly actorMfaAt: string;
+    readonly approvedAt: string;
+    readonly auditReference: string;
+  },
+): Promise<"Created" | "AlreadyCommitted"> {
+  const value = {
+    brand: String(parsePricingReference(input.brandReference)),
+    rule: String(parsePricingReference(input.ruleReference)),
+    operation: String(parsePricingReference(input.operationReference)),
+    actor: String(parsePricingReference(input.actorReference)),
+    audit: String(parsePricingReference(input.auditReference)),
+    mfa: instant(input.actorMfaAt),
+    at: instant(input.approvedAt),
+  };
+  const prior = rows(
+    await tx.query(
+      "SELECT option_price_rule_id::text rule,actor_id::text actor,audit_id::text audit FROM rms_pricing.option_price_sole_operator_approval WHERE operation_id=$1 AND brand_id=$2",
+      [value.operation, value.brand],
+    ),
+  )[0];
+  if (prior !== undefined) {
+    if (prior.rule !== value.rule || prior.actor !== value.actor || prior.audit !== value.audit)
+      return conflict();
+    return "AlreadyCommitted";
+  }
+  await tx.query(
+    "INSERT INTO rms_pricing.option_price_sole_operator_approval (operation_id,brand_id,option_price_rule_id,approval_mode,actor_id,actor_mfa_at,approved_at,audit_id) VALUES ($1,$2,$3,'SoleOperator',$4,$5,$6,$7)",
+    [value.operation, value.brand, value.rule, value.actor, value.mfa, value.at, value.audit],
+  );
+  return "Created";
+}

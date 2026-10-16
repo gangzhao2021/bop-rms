@@ -1,4 +1,5 @@
 import { FULL_SIGN_IN_REQUIRED, isFullSignInRequired } from "./full-sign-in.js";
+import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
 
 /** WP-2423 slice 4.3: PRICE-OPTION-LIST view contract, money text and same-origin client. */
 export type OptionPriceErrorCode =
@@ -9,6 +10,10 @@ export type OptionPriceErrorCode =
   | "Conflict"
   | "ApprovalRequired"
   | "Invalid"
+  /** The author asked to publish alone, but someone else now also holds price approval. */
+  | "SoleOperatorNotInEffect"
+  /** Publishing alone needs a second-factor check in the last 15 minutes. */
+  | "NeedsReverification"
   | "Offline"
   | "Unavailable";
 export class OptionPricePageError extends Error {
@@ -41,6 +46,9 @@ export interface OptionPriceView {
   readonly sourceAsOf: string;
   readonly currency: { readonly code: string; readonly minorUnitExponent: number };
   readonly permissions: { readonly mayEdit: boolean; readonly mayApprove: boolean };
+  /** WP-2423: whether the signed-in author may publish their own waiting prices alone (sole
+   * operator), present only when they may approve and have prices waiting. */
+  readonly soleOperator: SoleOperatorGateView | null;
   readonly products: readonly OptionPriceProduct[];
 }
 export type OptionPriceCommand =
@@ -62,6 +70,8 @@ export type OptionPriceCommand =
         readonly ruleReference: string;
         readonly expectedAggregateVersion: number;
       }[];
+      /** WP-2423: the author publishes their own prices alone as sole operator. */
+      readonly approvalMode?: "SoleOperator";
     };
 export interface OptionPriceClient {
   load(): Promise<unknown>;
@@ -77,7 +87,10 @@ export function parseOptionPriceView(value: unknown): OptionPriceView {
     typeof (r.currency as { minorUnitExponent?: unknown } | null)?.minorUnitExponent !== "number"
   )
     throw new Error("OPTION_PRICE_PAGE_INVALID");
-  return r as unknown as OptionPriceView;
+  return {
+    ...(r as unknown as OptionPriceView),
+    soleOperator: parseSoleOperatorGate(r.soleOperator),
+  };
 }
 /** "0.75" from 75 minor units (exponent 2); "0.00" for 0. */
 export function moneyText(minor: string, exponent: number): string {
@@ -104,6 +117,8 @@ const codes = new Set<OptionPriceErrorCode>([
   "Conflict",
   "ApprovalRequired",
   "Invalid",
+  "SoleOperatorNotInEffect",
+  "NeedsReverification",
 ]);
 export function createOptionPriceClient(
   csrf: string,

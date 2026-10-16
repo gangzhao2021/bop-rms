@@ -299,3 +299,45 @@ describe("WP-2423 D5: item prices before tax", () => {
     ).toThrow("invalid receipt");
   });
 });
+
+describe("WP-2423: chosen option lines", () => {
+  const amount = (amountMinor: string, currencyCode = "CAD") => ({ amountMinor, currencyCode });
+  const withOptions = (options: unknown, lineSubtotal: unknown = amount("1000")) => {
+    const body = payload();
+    const line = body.records[0]?.snapshot.lines[0];
+    if (!line) throw new Error("fixture");
+    Object.assign(line, { lineTotal: amount("1130"), lineSubtotal, options });
+    return body;
+  };
+  const whipped = { displayName: "Whipped cream", quantity: 1, amount: amount("50") };
+  it("reads each option with what it added", () => {
+    const parsed = parseReceiptView(withOptions([whipped]), id(1));
+    expect(parsed.records[0]?.snapshot.lines[0]?.options).toEqual([
+      {
+        displayName: "Whipped cream",
+        quantity: 1,
+        amount: { amountMinor: 50n, currencyCode: "CAD" },
+      },
+    ]);
+  });
+  it("reads versions without options as issued", () => {
+    expect(parseReceiptView(payload(), id(1)).records[0]?.snapshot.lines[0]).not.toHaveProperty(
+      "options",
+    );
+  });
+  it.each([
+    ["empty", []],
+    ["above the item price", [{ ...whipped, amount: amount("1001") }]],
+    ["another currency", [{ ...whipped, amount: amount("50", "USD") }]],
+    ["an unknown field", [{ ...whipped, optionReference: id(9) }]],
+  ])("rejects options that are %s", (_label, options) => {
+    expect(() => parseReceiptView(withOptions(options), id(1))).toThrow("invalid receipt");
+  });
+  it("rejects options on a line without its price before tax", () => {
+    const body = payload();
+    const line = body.records[0]?.snapshot.lines[0];
+    if (!line) throw new Error("fixture");
+    Object.assign(line, { options: [whipped] });
+    expect(() => parseReceiptView(body, id(1))).toThrow("invalid receipt");
+  });
+});

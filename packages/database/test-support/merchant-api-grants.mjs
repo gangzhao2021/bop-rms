@@ -12,6 +12,8 @@ export const productApiGrants = [
   "GRANT SELECT,INSERT ON platform_audit.audit_record TO ROLE_",
   "GRANT SELECT,INSERT,UPDATE ON platform_audit.audit_chain_head TO ROLE_",
   "GRANT INSERT ON platform_eventing.outbox_event TO ROLE_",
+  // WP-2423: the product page shows whether each size is offered at the selected Store.
+  "GRANT SELECT ON rms_catalog.availability_rule TO ROLE_",
 ];
 
 /** The pilot API role's grants for Brand option sets and product bindings (pilot-acl-additions.json). */

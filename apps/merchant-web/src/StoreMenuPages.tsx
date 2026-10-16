@@ -1,13 +1,17 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { WorkspacePage } from "./WorkspacePage.js";
-import { SourceTime } from "./StoreTime.js";
+import { SourceTime, StaffTime } from "./StoreTime.js";
+import type { AvailabilityClient } from "./store-availability-page.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { newOperationReference } from "./RoleAdministrationPages.js";
 import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
 import {
   MenuPageError,
+  channelText,
+  itemsNotOfferedHere,
   menuStage,
+  orderTypeText,
   parseMenuBuilderView,
   parseMenuListView,
   parseMenuRouteReference,
@@ -94,7 +98,6 @@ function Failure({ code }: { readonly code: MenuErrorCode | "Loading" }) {
     </WorkspacePage>
   );
 }
-const when = (instant: string) => instant.replace("T", " ").slice(0, 16) + " UTC";
 
 export function StoreMenuListPage({
   client = unavailableMenuClient,
@@ -137,7 +140,7 @@ export function StoreMenuListPage({
               <td data-label="Version">{stageText[menuStage(menu.publication)]}</td>
               <td data-label="Items">{menu.placements}</td>
               <td data-label="Last published">
-                {menu.latestRelease ? when(menu.latestRelease.createdAt) : "—"}
+                {menu.latestRelease ? <StaffTime instant={menu.latestRelease.createdAt} /> : "—"}
               </td>
             </tr>
           ))}
@@ -150,15 +153,26 @@ export function StoreMenuListPage({
 export function StoreMenuBuilderPage({
   client = unavailableMenuClient,
   csrf,
+  availability,
 }: {
   readonly client?: MenuClient;
   /** For the second-factor check of a sole operator's own approval. */
   readonly csrf?: string;
+  /** Item availability at this Store, to offer menu items customers here cannot see yet. */
+  readonly availability?: AvailabilityClient;
 }) {
   const params = useParams();
   const reference = parseMenuRouteReference(params.id);
   if (reference === null) return <Failure code="NotFound" />;
-  return <MenuBuilder key={reference} client={client} menuReference={reference} csrf={csrf} />;
+  return (
+    <MenuBuilder
+      key={reference}
+      client={client}
+      menuReference={reference}
+      csrf={csrf}
+      availability={availability}
+    />
+  );
 }
 
 interface EditableSection {
@@ -174,10 +188,12 @@ function MenuBuilder({
   client,
   menuReference,
   csrf,
+  availability,
 }: {
   readonly client: MenuClient;
   readonly menuReference: string;
   readonly csrf: string | undefined;
+  readonly availability: AvailabilityClient | undefined;
 }) {
   const { state, reload } = useMenuView(client, menuReference, parseMenuBuilderView);
   const [name, setName] = useState("");
@@ -258,6 +274,53 @@ function MenuBuilder({
     [next[index], next[target]] = [next[target] as T, next[index] as T];
     return next;
   };
+  // WP-2423 (v15 2026-10-16): items on this menu that customers at this Store cannot see because
+  // they are not offered here yet (Item availability). Publishing never claims they are shown.
+  const hidden = itemsNotOfferedHere(view);
+  const hiddenNames = hidden
+    .map((item) =>
+      item.sizeName === item.productName
+        ? item.productName
+        : `${item.productName} — ${item.sizeName}`,
+    )
+    .join(", ");
+  const offerCommand = availability?.command?.bind(availability);
+  const mayOffer = view.mayOfferHere === true && offerCommand !== undefined;
+  const offerHidden = async () => {
+    if (offerCommand === undefined || hidden.length === 0) return;
+    setBusy(true);
+    setMessage(null);
+    let offered = 0;
+    try {
+      for (const item of hidden) {
+        await offerCommand({
+          action: "Offer",
+          operationReference: newOperationReference(),
+          skuReference: item.skuReference,
+        });
+        offered += 1;
+      }
+      setMessage({
+        tone: "neutral",
+        text: `${offered} item${offered === 1 ? " is" : "s are"} now offered at this Store. Customers here see ${offered === 1 ? "it" : "them"} on the published menu.`,
+      });
+    } catch {
+      setMessage({
+        tone: "error",
+        text:
+          (offered > 0 ? `${offered} of ${hidden.length} items were offered. ` : "") +
+          "The rest could not be offered. Refresh and try again, or offer them under Item availability.",
+      });
+    } finally {
+      setBusy(false);
+      setLoadedVersion(null);
+      reload();
+    }
+  };
+  const publishedText =
+    hidden.length === 0
+      ? "Published. Customers at this Store now see this menu."
+      : `Published. Customers at this Store see this menu, except ${hidden.length} item${hidden.length === 1 ? "" : "s"} not offered here yet: ${hiddenNames}.`;
   const publication = view.publication;
   const mayApproveHere =
     view.permissions.mayApprove && view.submittedBy !== null && view.submittedBy !== view.viewer;
@@ -268,8 +331,14 @@ function MenuBuilder({
           <p className="bop-eyebrow">Menu · Brand</p>
           <h2>{menu.name}</h2>
           <p>
-            {stageText[stage]} · {menu.channelCodes.join(", ")} · {menu.orderTypeCodes.join(", ")}
-            {view.latestRelease ? ` · last published ${when(view.latestRelease.createdAt)}` : ""}
+            {stageText[stage]} · {channelText(menu.channelCodes)} ·{" "}
+            {orderTypeText(menu.orderTypeCodes)}
+            {view.latestRelease ? (
+              <>
+                {" "}
+                · last published <StaffTime instant={view.latestRelease.createdAt} />
+              </>
+            ) : null}
           </p>
         </div>
         <Link to="/app/commerce/menus">Back to menus</Link>
@@ -281,6 +350,28 @@ function MenuBuilder({
           status
         >
           <p>{message.text}</p>
+        </StatePanel>
+      ) : null}
+      {hidden.length > 0 ? (
+        <StatePanel heading="Not offered at this Store" status>
+          <p>
+            {stage === "Published"
+              ? "Customers at this Store don't see these items on the published menu until they are offered here: "
+              : "When this menu is published, customers at this Store won't see these items until they are offered here: "}
+            {hiddenNames}.
+          </p>
+          <p>
+            {mayOffer ? (
+              <>
+                <button type="button" disabled={busy} onClick={() => void offerHidden()}>
+                  {`Offer ${hidden.length === 1 ? "this item" : `these ${hidden.length} items`} at this Store now`}
+                </button>{" "}
+              </>
+            ) : (
+              "Someone who manages item availability can offer them. "
+            )}
+            <Link to="/app/commerce/availability">Item availability</Link>
+          </p>
         </StatePanel>
       ) : null}
       {unpriced.length > 0 ? (
@@ -344,7 +435,7 @@ function MenuBuilder({
                     <th>Item</th>
                     <th>Price here</th>
                     <th>Featured</th>
-                    <th aria-label="Order" />
+                    {editable ? <th aria-label="Order" /> : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -356,59 +447,69 @@ function MenuBuilder({
                           "No price"}
                       </td>
                       <td>
-                        <input
-                          type="checkbox"
-                          aria-label={`Feature ${label(item.skuReference)}`}
-                          checked={item.featured}
-                          onChange={(event) =>
-                            updateSection(section.key, (s) => ({
-                              ...s,
-                              items: s.items.map((i) =>
-                                i.skuReference === item.skuReference
-                                  ? { ...i, featured: event.target.checked }
-                                  : i,
-                              ),
-                            }))
-                          }
-                        />
+                        {!editable ? (
+                          item.featured ? (
+                            "Featured"
+                          ) : (
+                            "—"
+                          )
+                        ) : (
+                          <input
+                            type="checkbox"
+                            aria-label={`Feature ${label(item.skuReference)}`}
+                            checked={item.featured}
+                            onChange={(event) =>
+                              updateSection(section.key, (s) => ({
+                                ...s,
+                                items: s.items.map((i) =>
+                                  i.skuReference === item.skuReference
+                                    ? { ...i, featured: event.target.checked }
+                                    : i,
+                                ),
+                              }))
+                            }
+                          />
+                        )}
                       </td>
-                      <td>
-                        <button
-                          type="button"
-                          aria-label={`Move ${label(item.skuReference)} up`}
-                          onClick={() =>
-                            updateSection(section.key, (s) => ({
-                              ...s,
-                              items: move(s.items, index, -1),
-                            }))
-                          }
-                        >
-                          ↑
-                        </button>
-                        <button
-                          type="button"
-                          aria-label={`Move ${label(item.skuReference)} down`}
-                          onClick={() =>
-                            updateSection(section.key, (s) => ({
-                              ...s,
-                              items: move(s.items, index, 1),
-                            }))
-                          }
-                        >
-                          ↓
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            updateSection(section.key, (s) => ({
-                              ...s,
-                              items: s.items.filter((i) => i.skuReference !== item.skuReference),
-                            }))
-                          }
-                        >
-                          Remove
-                        </button>
-                      </td>
+                      {editable ? (
+                        <td>
+                          <button
+                            type="button"
+                            aria-label={`Move ${label(item.skuReference)} up`}
+                            onClick={() =>
+                              updateSection(section.key, (s) => ({
+                                ...s,
+                                items: move(s.items, index, -1),
+                              }))
+                            }
+                          >
+                            ↑
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Move ${label(item.skuReference)} down`}
+                            onClick={() =>
+                              updateSection(section.key, (s) => ({
+                                ...s,
+                                items: move(s.items, index, 1),
+                              }))
+                            }
+                          >
+                            ↓
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateSection(section.key, (s) => ({
+                                ...s,
+                                items: s.items.filter((i) => i.skuReference !== item.skuReference),
+                              }))
+                            }
+                          >
+                            Remove
+                          </button>
+                        </td>
+                      ) : null}
                     </tr>
                   ))}
                 </tbody>
@@ -575,7 +676,12 @@ function MenuBuilder({
         ) : null}
         {stage === "Approved" && publication && view.permissions.mayPublish ? (
           <>
-            <p>Publishing makes this version the menu customers order from, starting now.</p>
+            <p>
+              Publishing makes this version the menu customers order from, starting now
+              {hidden.length > 0
+                ? ` (customers at this Store see the ${hidden.length === 1 ? "item" : "items"} listed above only once offered here).`
+                : "."}
+            </p>
             <button
               type="button"
               disabled={busy}
@@ -589,7 +695,7 @@ function MenuBuilder({
                     expectedVersion: publication.lifecycleVersion,
                     snapshotDigest: publication.snapshotDigest,
                   },
-                  "Published. Customers now see this menu.",
+                  publishedText,
                 )
               }
             >

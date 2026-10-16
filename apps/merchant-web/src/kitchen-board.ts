@@ -71,6 +71,11 @@ export interface KitchenBoardView {
   readonly items: readonly KitchenBoardItem[];
   /** DEC-KITCHEN-STALE-TICKETS: this staff member may close an earlier business day's ticket. */
   readonly canCloseEarlierDayTickets?: boolean;
+  /**
+   * WP-2423 (v15 2026-10-16): today's paid orders still waiting for acceptance (no kitchen work
+   * yet), so the order search can say so. Omitted by older servers; null when not read.
+   */
+  readonly awaitingAcceptance?: readonly KitchenOrderLabel[] | null;
 }
 
 export interface KitchenWorkItemDetailView {
@@ -335,6 +340,8 @@ export function parseKitchenBoardView(value: unknown): KitchenBoardView {
     value !== null &&
     typeof value === "object" &&
     Object.hasOwn(value, "canCloseEarlierDayTickets");
+  const hasAwaiting =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "awaitingAcceptance");
   const input = closed(value, [
     "screenId",
     "projectionName",
@@ -345,9 +352,26 @@ export function parseKitchenBoardView(value: unknown): KitchenBoardView {
     "operatorStatus",
     "items",
     ...(hasCanClose ? ["canCloseEarlierDayTickets"] : []),
+    ...(hasAwaiting ? ["awaitingAcceptance"] : []),
   ]);
   if (hasCanClose && typeof input.canCloseEarlierDayTickets !== "boolean")
     throw new Error("KITCHEN_BOARD_INVALID");
+  if (
+    hasAwaiting &&
+    input.awaitingAcceptance !== null &&
+    (!Array.isArray(input.awaitingAcceptance) || input.awaitingAcceptance.length > 200)
+  )
+    throw new Error("KITCHEN_BOARD_INVALID");
+  const awaiting =
+    !hasAwaiting || input.awaitingAcceptance === null
+      ? null
+      : Object.freeze(
+          (input.awaitingAcceptance as readonly unknown[]).map((entry) => {
+            const label = parseKitchenOrderLabel(entry);
+            if (label === null) throw new Error("KITCHEN_BOARD_INVALID");
+            return label;
+          }),
+        );
   if (
     input.screenId !== "KIT-KITCHEN-QUEUE" ||
     input.projectionName !== "kitchen_work_queue_v1" ||
@@ -377,6 +401,7 @@ export function parseKitchenBoardView(value: unknown): KitchenBoardView {
     ...(hasCanClose
       ? { canCloseEarlierDayTickets: input.canCloseEarlierDayTickets as boolean }
       : {}),
+    ...(hasAwaiting ? { awaitingAcceptance: awaiting } : {}),
   });
 }
 

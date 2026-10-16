@@ -246,9 +246,13 @@ export interface PickupCodeController {
   followUntilReady?(active: boolean): void;
 }
 
-/** Retry delays after a not-ready or unavailable answer while following; the last one repeats. */
+/**
+ * Retry delays after a not-ready or unavailable answer while following; the last one repeats. The
+ * code is normally issued a second or two after the order turns Ready, so the first checks are
+ * every second (v15 2026-10-16: 2 s then 3 s left the guest waiting ~4 s after the code existed).
+ */
 export const pickupCodeFollowDelaysMs: readonly number[] = Object.freeze([
-  2_000, 3_000, 5_000, 8_000, 15_000,
+  1_000, 1_000, 1_000, 2_000, 3_000, 5_000, 8_000, 15_000,
 ]);
 
 export function createPickupCodeController(

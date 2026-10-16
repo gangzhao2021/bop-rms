@@ -10,6 +10,7 @@ import { createPostgresCurrentOptionPriceStore } from "../../rms/pricing/src/ind
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { optionSetApiGrants, productApiGrants } from "../test-support/merchant-api-grants.mjs";
 import { syntheticMerchantBrandScope } from "../test-support/merchant-brand-scope.mjs";
+import { soleOperatorReadGrants } from "../test-support/sole-operator-brand-gate.mjs";
 
 const { Client } = pg;
 const id = (n) => "01909a22-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -18,6 +19,8 @@ const id = (n) => "01909a22-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 export const optionPriceApiGrants = [
   "GRANT SELECT,INSERT,UPDATE ON rms_pricing.option_price_rule,rms_pricing.option_price_rule_version TO ROLE_",
   "GRANT SELECT,INSERT ON rms_pricing.option_price_authoring_operation TO ROLE_",
+  // WP-2423: an author's own publication as sole operator is marked (2000_074).
+  "GRANT SELECT,INSERT ON rms_pricing.option_price_sole_operator_approval TO ROLE_",
   // A retried operation replays its recorded event (the pilot API role reads the outbox).
   "GRANT SELECT ON platform_eventing.outbox_event TO ROLE_",
   "GRANT EXECUTE ON FUNCTION rms_pricing.option_price_authoring_operation_available(platform_helpers.uuid_v7,platform_helpers.uuid_v7) TO ROLE_",
@@ -81,7 +84,13 @@ it("prices options per product with four-eyes publication and gates unpriced men
       await admin.query(
         "CREATE ROLE " + role + " NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
       );
-      for (const sql of [...productApiGrants, ...optionSetApiGrants, ...optionPriceApiGrants])
+      // The page tells an author who may approve whether they may publish alone (sole operator).
+      for (const sql of [
+        ...productApiGrants,
+        ...optionSetApiGrants,
+        ...optionPriceApiGrants,
+        ...soleOperatorReadGrants,
+      ])
         await admin.query(sql.replaceAll("ROLE_", role));
       const persistence = {
         now,

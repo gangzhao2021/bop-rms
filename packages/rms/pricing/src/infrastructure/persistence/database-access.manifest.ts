@@ -16,6 +16,15 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: option price sole-operator publication mark.
+      table: "option_price_sole_operator_approval",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "tax_config_publication_candidate",
       classification: "configuration-version",
       writeOwner: { kind: "module", id: "@rms/pricing" },
@@ -1043,6 +1052,35 @@ const databaseAccessManifestInput = {
       readPattern: null,
       source:
         "packages/rms/pricing/src/infrastructure/persistence/price-book-sole-operator-store.ts",
+    },
+    {
+      id: "option-price-sole-operator-approval.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "option_price_sole_operator_approval" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/price-book-sole-operator-store.ts",
+    },
+    {
+      id: "option-price-sole-operator-approval.write",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "option_price_sole_operator_approval" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/price-book-sole-operator-store.ts",
+    },
+    {
+      id: "option-price-sole-operator-approval.authoring-read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "option_price_sole_operator_approval" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source: "packages/rms/pricing/src/infrastructure/persistence/option-price-authoring-store.ts",
     },
   ],
 } as const;

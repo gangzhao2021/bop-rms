@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { expectNoInternalText } from "./internal-text-guard";
 
 // WP-2423 Q19 step 2 (DEC-SOLE-OPERATOR-APPROVAL): Brand gates — the author publishing their own
 // price book alone as sole operator, and the allergen list recorded by one person and approved by
@@ -121,7 +122,14 @@ test("@production the price book author publishes alone as sole operator after c
   });
   await page.goto("/app/commerce/pricing/" + id(10));
   const publish = page.getByRole("button", { name: "Publish on my own" });
-  await expect(page.getByText("you are the only person who holds price approval")).toBeVisible();
+  await expect(
+    page.getByText("You made this change and you are the only person who holds price approval"),
+  ).toBeVisible();
+  await expect(
+    page.getByText("you may publish your own draft after checking it and verifying it is you"),
+  ).toBeVisible();
+  await expect(page.getByText("must be done by someone other than")).toHaveCount(0);
+  await expectNoInternalText(page);
   await expect(publish).toBeDisabled();
   await verify(page, "Verify to approve on your own");
   expect(JSON.parse(stepUps[0] ?? "{}")).toEqual({
@@ -201,6 +209,7 @@ test("@production the price list shows drafts in Store time and discarding a dra
           ? {
               screenId: "PRICE-BOOK-LIST",
               ...base,
+              soleOperator: { status: "Effective", otherApprovers: [], verifiedUntil: null },
               books: [
                 {
                   ...draft,
@@ -244,6 +253,10 @@ test("@production the price list shows drafts in Store time and discarding a dra
   // Store time (America/Toronto), never UTC.
   await expect(row).toContainText("Oct 15, 2026, 12:30 PM");
   await expect(page.getByText(/UTC/u)).toHaveCount(0);
+  // Sole operator is on: the page does not tell the owner to have someone else publish.
+  await expect(page.getByText(/check it and publish it yourself/u)).toBeVisible();
+  await expect(page.getByText(/have someone else/u)).toHaveCount(0);
+  await expectNoInternalText(page);
   await row.getByRole("link", { name: "Continue draft PRICES-Q19-TEST" }).click();
   await expect(page).toHaveURL(new RegExp("/app/commerce/pricing/" + id(10)));
 
@@ -340,4 +353,413 @@ test("@production the allergen list is recorded by one person and approved by an
     expect.objectContaining({ action: "ApproveRegistry", proposalReference: id(30) }),
   ]);
   expect(JSON.parse(commands[1] ?? "{}")).not.toHaveProperty("approvalMode");
+});
+
+// WP-2423 v15 staff text: catalog pages show Store time, names and plain words — never ISO/UTC
+// times, codes (EACH, KG, DineIn, SYNTHETIC_TAX, OBS_ITEM_30001), step indexes or "Staff 0100".
+test("@production v15 catalog pages show staff words: recipe, option recipes, option set, product and tax review", async ({
+  page,
+}) => {
+  await session(page, [
+    {
+      screenId: "RECIPE-LIST",
+      label: "Recipes",
+      href: "/app/commerce/recipes",
+      permission: "recipe.read",
+    },
+    {
+      screenId: "RECIPE-OPTION-LIST",
+      label: "Option recipes",
+      href: "/app/commerce/option-recipes",
+      permission: "recipe.read",
+    },
+    {
+      screenId: "CAT-OPTIONSET-LIST",
+      label: "Options",
+      href: "/app/commerce/option-sets",
+      permission: "catalog.option_set.read",
+    },
+    {
+      screenId: "CAT-PRODUCT-LIST",
+      label: "Products",
+      href: "/app/commerce/products",
+      permission: "catalog.manage",
+    },
+    {
+      screenId: "TAX-STORE-REVIEW",
+      label: "Tax review",
+      href: "/app/commerce/tax-review",
+      permission: "pricing.tax_config.read",
+    },
+  ]);
+  const at = "2026-10-16T14:05:00.000Z";
+  const effective = { status: "Effective", otherApprovers: [], verifiedUntil: null };
+  const rules = [
+    {
+      orderType: "DineIn",
+      taxComponentCode: "SYNTHETIC_TAX",
+      treatment: "Taxable",
+      rate: "0.13",
+      priceInclusion: "Exclusive",
+    },
+    {
+      orderType: "Pickup",
+      taxComponentCode: "SYNTHETIC_TAX",
+      treatment: "Taxable",
+      rate: "0.13",
+      priceInclusion: "Exclusive",
+    },
+  ];
+  await page.route("**/merchant/commerce/recipes/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "RECIPE-EDITOR",
+        sourceAsOf: at,
+        permissions: { mayEdit: true, mayReview: true, mayPublish: true },
+        viewer: owner,
+        soleOperator: effective,
+        choices: {
+          yieldUnits: ["EACH", "KG"],
+          items: [
+            {
+              itemReference: id(45),
+              internalCode: "OBS_ITEM_30001",
+              name: "Espresso beans",
+              unitCode: "KG",
+              latestUnitCostCents: 289,
+              allergens: { status: "Declared", contains: [], mayContain: [] },
+            },
+          ],
+          subRecipes: [],
+          stations: [{ capabilityReference: id(46), name: "Station 1" }],
+          skus: [
+            {
+              skuReference: id(44),
+              code: "FLAT-WHITE-S",
+              name: "Flat White — Small",
+              unitOfSale: "EACH",
+            },
+          ],
+        },
+        recipe: {
+          recipeReference: id(40),
+          familyReference: id(41),
+          familyRevision: 1,
+          name: "Flat White",
+          code: "FLAT-WHITE",
+          lifecycle: "Published",
+          versionReference: id(42),
+          aggregateVersion: 3,
+          yieldQuantity: "1",
+          yieldUnit: "EACH",
+          ingredientCount: 1,
+          standardCostCents: "72",
+          kitchenInstructions: "NotPublished",
+          bindings: [
+            {
+              bindingReference: id(43),
+              recipeVersionReference: id(42),
+              skuReference: id(44),
+              storeReference: null,
+              since: at,
+            },
+          ],
+          updatedAt: at,
+          draft: {
+            name: "Flat White",
+            code: "FLAT-WHITE",
+            yieldQuantity: "1",
+            yieldUnit: "EACH",
+            ingredients: [
+              {
+                kind: "InventoryItem",
+                sourceReference: id(45),
+                quantity: "0.018",
+                lossPercent: "0",
+                unitCostCents: "0.289",
+              },
+            ],
+            steps: [
+              {
+                sequence: 0,
+                instruction: "Pull a double shot",
+                durationSeconds: 30,
+                capabilityReference: id(46),
+              },
+              {
+                sequence: 0,
+                instruction: "Steam the milk",
+                durationSeconds: 60,
+                capabilityReference: id(46),
+              },
+              {
+                sequence: 1,
+                instruction: "Pour",
+                durationSeconds: 30,
+                capabilityReference: id(46),
+              },
+            ],
+          },
+          ingredientAllergens: [
+            {
+              line: 1,
+              kind: "InventoryItem",
+              declared: true,
+              current: true,
+              contains: [],
+              mayContain: [],
+            },
+          ],
+          authorReference: owner,
+          authorLabel: "You",
+          reviews: [
+            {
+              reviewReference: id(47),
+              subject: "Preparation",
+              kind: "Cost",
+              decision: "Approved",
+              reviewerReference: id(5),
+              reviewerLabel: "Noah",
+              comment: null,
+              reviewedAt: at,
+              current: true,
+            },
+          ],
+          family: [{ recipeReference: id(40), revision: 1, lifecycle: "Published" }],
+        },
+      },
+    }),
+  );
+  await page.goto(`/app/commerce/recipes/${id(40)}/edit`);
+  await expect(page.getByRole("heading", { name: "Flat White", level: 2 })).toBeVisible();
+  await expect(page.getByText("written by You")).toBeVisible();
+  await expect(page.getByText("Step 1: Pull a double shot")).toBeVisible();
+  await expect(
+    page.getByText(/Step 2: Steam the milk .* \(at the same time as the step before\)/u),
+  ).toBeVisible();
+  await expect(page.getByText("0.018 kg")).toBeVisible();
+  await expect(page.getByText("Approved by Noah on Oct 16, 2026, 10:05 AM")).toBeVisible();
+  await expect(page.getByText(/since Oct 16, 2026, 10:05 AM/u)).toBeVisible();
+  await expect(page.getByText(/You wrote this version and you are the only person/u)).toBeVisible();
+  await expect(page.getByText(/\[0\]|Staff \d{4}/u)).toHaveCount(0);
+  await expectNoInternalText(page);
+
+  await page.route("**/merchant/commerce/option-recipes/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "RECIPE-OPTION-LIST",
+        sourceAsOf: at,
+        permissions: { mayEdit: true, mayReview: true, mayPublish: true },
+        soleOperator: effective,
+        ingredients: [
+          {
+            itemReference: id(50),
+            name: "Oat milk",
+            unitCode: "L",
+            declared: true,
+            latestUnitCostCents: "0.4",
+          },
+          {
+            itemReference: id(51),
+            name: "Whole milk",
+            unitCode: "L",
+            declared: true,
+            latestUnitCostCents: "0.3",
+          },
+        ],
+        options: [
+          {
+            productName: "Flat White",
+            setName: "Milk",
+            optionName: "Oat milk",
+            offered: true,
+            bindingReference: id(52),
+            optionReference: id(53),
+            quantities: [1],
+            sizes: [{ skuReference: id(44), name: "Small" }],
+            covered: false,
+            change: {
+              changeVersionReference: id(54),
+              version: 1,
+              content: {
+                kind: "Replace",
+                fromItemReference: id(51),
+                toItemReference: id(50),
+                quantity: null,
+                unitCostCents: null,
+                lossPercent: "0",
+              },
+              byViewer: false,
+              authorLabel: "Mia",
+              recordedAt: at,
+              published: false,
+              reviews: [
+                {
+                  kind: "Cost",
+                  decision: "Approved",
+                  byViewer: true,
+                  reviewerLabel: "You",
+                  comment: null,
+                  reviewedAt: at,
+                },
+              ],
+              lines: [
+                {
+                  skuReference: id(44),
+                  quantity: 1,
+                  changes: [
+                    {
+                      fromItemReference: id(51),
+                      fromQuantityMicrounits: "200000",
+                      toItemReference: id(50),
+                      toQuantityMicrounits: "200000",
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto("/app/commerce/option-recipes");
+  await expect(page.getByText("Saved by Mia on Oct 16, 2026, 10:05 AM")).toBeVisible();
+  await expect(page.getByText("Cost: approved by You on Oct 16, 2026, 10:05 AM")).toBeVisible();
+  await expect(page.getByText("Whole milk 0.2 L → Oat milk 0.2 L")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Reviews you cannot give as a second person" }),
+  ).toBeVisible();
+  await expect(page.getByText("Your own changes")).toHaveCount(0);
+  await expect(
+    page.getByText(/You already gave the cost review and you are the only person/u),
+  ).toBeVisible();
+  await expectNoInternalText(page);
+
+  await page.route("**/merchant/commerce/option-sets/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "CAT-OPTIONSET-EDIT",
+        sourceAsOf: at,
+        permissions: { mayEdit: true },
+        optionSet: {
+          optionSetReference: id(60),
+          internalCode: "EXTRA_SHOT",
+          aggregateVersion: 1,
+          archived: false,
+          productNames: [],
+          name: "Extra shot",
+          kind: "Quantity",
+          minimum: 0,
+          maximum: 2,
+          perOptionMaximum: 2,
+          updatedAt: at,
+          options: [
+            {
+              optionReference: id(61),
+              code: "EXTRA_SHOT",
+              name: "Extra shot",
+              offered: true,
+              defaultChoice: false,
+            },
+          ],
+        },
+      },
+    }),
+  );
+  await page.goto(`/app/commerce/option-sets/${id(60)}`);
+  await expect(page.getByText(/Saved, not on any product yet/u)).toBeVisible();
+  await expect(page.getByText(/In use/u)).toHaveCount(0);
+  await expectNoInternalText(page);
+
+  await page.route("**/merchant/commerce/products/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "CAT-PRODUCT-DETAIL",
+        sourceAsOf: at,
+        locale: "en-CA",
+        permissions: {
+          mayRead: true,
+          mayCreate: true,
+          mayEdit: true,
+          mayAddSize: true,
+          mayStartSelling: true,
+        },
+        productTypes: ["PreparedFood"],
+        sellingUnits: ["EACH"],
+        taxClasses: [{ taxClassificationReference: id(70), rules }],
+        product: {
+          productReference: id(71),
+          internalCode: "FLAT_WHITE",
+          productType: "PreparedFood",
+          lifecycle: "Active",
+          aggregateVersion: 4,
+          name: "Flat White",
+          taxClassificationReference: id(70),
+          sizes: [
+            {
+              skuReference: id(44),
+              skuCode: "FLAT_WHITE_S",
+              name: "Small",
+              lifecycle: "Active",
+              unitOfSale: "EACH",
+            },
+          ],
+          optionSets: [],
+          createdAt: at,
+          updatedAt: at,
+        },
+        optionSetChoices: [],
+      },
+    }),
+  );
+  await page.goto(`/app/commerce/products/${id(71)}/edit`);
+  await expect(page.getByText(/updated Oct 16, 2026, 10:05 AM/u)).toBeVisible();
+  await expect(page.getByRole("option", { name: /Dine-in 13%/u })).toHaveCount(1);
+  await expectNoInternalText(page);
+
+  await page.route("**/merchant/commerce/tax-review/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "TAX-STORE-REVIEW",
+        sourceAsOf: at,
+        receiptSetup: { taxRegistrationMissing: false, privacyNoticeMissing: false },
+        configuration: {
+          stableCode: "PILOT_STORE_TAX",
+          versionNumber: 1,
+          jurisdictionCode: "CA-ON",
+          currencyCode: "CAD",
+          effectiveFrom: "2026-10-01T04:00:00.000Z",
+          effectiveUntil: null,
+          registrationEvidenceValidUntil: "2026-10-20T04:00:00.000Z",
+          professionalEvidenceValidUntil: "2026-10-20T04:00:00.000Z",
+          testOnly: true,
+          endsAt: "2026-10-20T04:00:00.000Z",
+          endsBecause: "RegistrationEvidence",
+          endingSoon: true,
+        },
+        classes: [{ taxClassificationReference: id(70), rules, productNames: ["Flat White"] }],
+        products: [
+          {
+            productReference: id(71),
+            name: "Flat White",
+            selling: true,
+            taxClassificationReference: id(70),
+            status: "Covered",
+            missingOrderTypes: [],
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto("/app/commerce/tax-review");
+  await expect(page.getByText(/Test configuration \(internal testing only\)/u)).toBeVisible();
+  await expect(page.getByText(/Orders can be priced until Oct 20, 2026/u)).toBeVisible();
+  await expect(page.getByText(/Dine-in: 13%/u)).toBeVisible();
+  await expectNoInternalText(page);
 });

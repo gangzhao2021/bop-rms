@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   choiceRule,
   createOptionSetClient,
+  optionSetStateText,
   parseOptionSetListView,
 } from "./store-option-set-page.js";
 
@@ -16,6 +17,16 @@ describe("WP-2423 option set page helpers", () => {
     expect(choiceRule({ kind: "Quantity", minimum: 0, maximum: null, perOptionMaximum: 3 })).toBe(
       "Up to 3 of each, any number in total (optional)",
     );
+  });
+  it("never calls a set no product offers 'in use'", () => {
+    expect(optionSetStateText({ archived: false, productNames: [] })).toMatch(
+      /^Saved, not on any product yet — customers cannot choose it/u,
+    );
+    expect(optionSetStateText({ archived: false, productNames: ["Flat White", "Mocha"] })).toBe(
+      "On Flat White, Mocha.",
+    );
+    expect(optionSetStateText({ archived: true, productNames: ["Mocha"] })).toMatch(/^Archived/u);
+    expect(optionSetStateText({ archived: false, productNames: [] })).not.toMatch(/in use/iu);
   });
   it("accepts only option set lists", () => {
     const view = {

@@ -96,8 +96,16 @@ describe("WP-2423 price changes on a PIN sign-in", () => {
 });
 
 const ref = (n: number) => "0190aaaa-0000-7000-8000-" + n.toString(16).padStart(12, "0");
-const listView = (permissions = { mayRead: true, mayEdit: true, mayApprove: true }) =>
+const listView = (
+  permissions = { mayRead: true, mayEdit: true, mayApprove: true },
+  soleOperator: {
+    readonly status: "Effective" | "NotSet" | "OtherApprovers";
+    readonly otherApprovers: readonly { readonly displayName: string | null }[];
+    readonly verifiedUntil: string | null;
+  } | null = null,
+) =>
   ({
+    soleOperator,
     screenId: "PRICE-BOOK-LIST",
     sourceAsOf: "2026-10-14T18:05:00.000Z",
     viewer: ref(1),
@@ -199,6 +207,29 @@ describe("WP-2423 price book list", () => {
     );
     expect(html).toContain("Review draft");
     expect(html).not.toContain("Continue draft");
+  });
+  it("says who publishes: another approver, or the sole operator after verifying", async () => {
+    const twoPerson = (await renderList(listView(), "America/Toronto")).text;
+    expect(twoPerson).toContain("have someone else who holds price approval publish it, then use");
+    const alone = (
+      await renderList(
+        listView(undefined, { status: "Effective", otherApprovers: [], verifiedUntil: null }),
+        "America/Toronto",
+      )
+    ).text;
+    expect(alone).toContain("check it and publish it yourself (Sole operator is on");
+    expect(alone).not.toContain("have someone else");
+    const others = (
+      await renderList(
+        listView(undefined, {
+          status: "OtherApprovers",
+          otherApprovers: [{ displayName: "Mia" }],
+          verifiedUntil: null,
+        }),
+        "America/Toronto",
+      )
+    ).text;
+    expect(others).toContain("have someone else who holds price approval publish it");
   });
   it("shows times in the Store's time zone, not UTC", async () => {
     const { html, text } = await renderList(listView(), "America/Toronto");

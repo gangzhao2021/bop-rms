@@ -12,8 +12,10 @@ import {
   createPostgresMenuReviewContentStore,
   createPostgresPublishedMenuConsumerService,
   currentAllergenRegistry,
+  availabilityPermission,
   listBrandMenus,
   listBrandSkuChoices,
+  listStoreAvailabilityRules,
   parseCatalogHash,
   parseCatalogReference,
   type MenuAggregate,
@@ -33,6 +35,7 @@ import {
   menuOptionsWithoutRecipes,
   unpricedMenuOptions,
 } from "./menu-option-gates.js";
+import { itemAvailability } from "./merchant-availability.js";
 import { localBoundary } from "./merchant-prices.js";
 import { derivedReference } from "./merchant-products.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -329,15 +332,23 @@ export function createMerchantMenus(options: {
         if (entry.scopeKind === "Brand" && entry.channelCode === null && entry.orderType === null)
           prices.set(entry.sellableReference, entry.amount.amountMinor.toString());
     }
+    // WP-2423 (v15 2026-10-16): customers at this Store see a menu item only where it is offered
+    // here (Item availability). Sold out still counts as offered: it comes back by itself.
+    const rules = await listStoreAvailabilityRules(ptx(tx), s.owner);
+    const at = options.persistence.now();
     await brandScope(tx, s.owner.brandReference);
-    return skus.map((sku) => ({
-      skuReference: sku.skuReference,
-      skuCode: sku.skuCode,
-      productName: name(sku.productLocalizedNames, ""),
-      sizeName: name(sku.localizedNames, sku.skuCode),
-      active: sku.active,
-      priceMinor: prices.get(sku.skuReference) ?? null,
-    }));
+    return skus.map((sku) => {
+      const status = itemAvailability(rules, s.owner, sku.skuReference, at).status;
+      return {
+        skuReference: sku.skuReference,
+        skuCode: sku.skuCode,
+        productName: name(sku.productLocalizedNames, ""),
+        sizeName: name(sku.localizedNames, sku.skuCode),
+        active: sku.active,
+        priceMinor: prices.get(sku.skuReference) ?? null,
+        offeredHere: status !== "NotOffered" && status !== "Unavailable",
+      };
+    });
   };
   const unpricedOptions = async (tx: unknown, s: Scope, aggregate: MenuAggregate) => {
     const missing = await unpricedMenuOptions(ptx(tx) as never, {
@@ -419,6 +430,8 @@ export function createMerchantMenus(options: {
                     (await s.decision("catalog.menu.approve"))?.effect === "Allow",
                 })
               : null;
+          // Whether the viewer may offer items at this Store (Item availability) from here.
+          const mayOfferHere = (await s.decision(availabilityPermission))?.effect === "Allow";
           await brandScope(tx, s.owner.brandReference);
           return {
             screenId: "CAT-MENU-BUILDER" as const,
@@ -436,6 +449,7 @@ export function createMerchantMenus(options: {
                     verifiedUntil: gate.verifiedUntil,
                   },
             sellables: await sellables(tx, s),
+            mayOfferHere,
             allergenRegistry: (await currentAllergenRegistry(ptx(tx) as never, s.owner)) !== null,
           };
         }),

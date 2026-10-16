@@ -6,6 +6,7 @@ import { newOperationReference } from "./RoleAdministrationPages.js";
 import {
   OptionSetPageError,
   choiceRule,
+  optionSetStateText,
   parseOptionSetEditView,
   parseOptionSetListView,
   unavailableOptionSetClient,
@@ -103,6 +104,7 @@ export function StoreOptionSetListPage({
               <th>Option set</th>
               <th>Customer chooses</th>
               <th>Options offered</th>
+              <th>Used on</th>
             </tr>
           </thead>
           <tbody>
@@ -113,6 +115,9 @@ export function StoreOptionSetListPage({
                 </td>
                 <td data-label="Customer chooses">{choiceRule(set)}</td>
                 <td data-label="Options offered">{offeredNames(set)}</td>
+                <td data-label="Used on">
+                  {set.productNames.length === 0 ? "No product yet" : set.productNames.join(", ")}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -318,7 +323,7 @@ function OptionSetEditor({
           <h2>{title}</h2>
           <p>
             {set
-              ? `${set.archived ? "Archived" : "In use"} · version ${set.aggregateVersion}`
+              ? optionSetStateText(set)
               : "Name the choice, say how customers choose, and list the options."}
           </p>
           <p>

@@ -1292,6 +1292,14 @@
   color: var(--bop-color-text-muted);
   font-size: 0.875rem;
 }
+/* WP-2423: the options chosen for an item and the guest's note, under its name. */
+.order-status__item-options,
+.order-status__item-note,
+.receipt-page__option {
+  display: block;
+  color: var(--bop-color-text-muted);
+  font-size: 0.875rem;
+}
 /* WP-2423 Q6 step 2: items the store cancelled stay listed, muted, with their refund. */
 .order-status__item--cancelled .order-status__item-name,
 .order-status__item--cancelled .order-status__item-amount {

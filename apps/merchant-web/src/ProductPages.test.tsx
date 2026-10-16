@@ -52,7 +52,7 @@ describe("WP-2423 product page helpers", () => {
           },
         ],
       }),
-    ).toBe("DineIn 13% · Pickup 5% · Delivery ZeroRated · Catering 14.975%");
+    ).toBe("Dine-in 13% · Pickup 5% · Delivery zero-rated · Catering 14.975%");
   });
   it("maps server refusals and offline failures", async () => {
     const reply = (status: number, body: unknown) =>

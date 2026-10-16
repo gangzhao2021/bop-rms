@@ -269,15 +269,15 @@ it("keeps checking quietly after the order turns Ready until the code is issued 
   controller.followUntilReady?.(true);
   await controller.reveal();
   expect(controller.getState()).toEqual({ status: "not-ready" });
-  await vi.advanceTimersByTimeAsync(1_999);
+  await vi.advanceTimersByTimeAsync(999);
   expect(calls).toBe(1);
   await vi.advanceTimersByTimeAsync(1);
   expect(calls).toBe(2);
   expect(controller.getState()).toEqual({ status: "not-ready" });
-  await vi.advanceTimersByTimeAsync(3_000);
+  await vi.advanceTimersByTimeAsync(1_000);
   expect(calls).toBe(3);
   expect(controller.getState()).toEqual({ status: "unavailable" });
-  await vi.advanceTimersByTimeAsync(5_000);
+  await vi.advanceTimersByTimeAsync(1_000);
   expect(calls).toBe(4);
   expect(controller.getState().status).toBe("ready");
   // Follow-ups never flash the "checking" state between answers.
@@ -303,7 +303,7 @@ it("stops following when the order is no longer Ready or the page closes", async
   await vi.advanceTimersByTimeAsync(30_000);
   expect(calls).toBe(1);
   controller.followUntilReady?.(true);
-  await vi.advanceTimersByTimeAsync(2_000);
+  await vi.advanceTimersByTimeAsync(1_000);
   expect(calls).toBe(2);
   controller.dispose();
   await vi.advanceTimersByTimeAsync(30_000);
@@ -358,9 +358,10 @@ it("shows a ready order without a usable code and follows only a code still bein
     orderNumber: "1001",
     reason: "CodePending",
   });
-  await vi.advanceTimersByTimeAsync(2_000);
+  // The code is checked every second at first, so it shows about a second after it is issued.
+  await vi.advanceTimersByTimeAsync(1_000);
   expect(calls).toBe(2);
-  await vi.advanceTimersByTimeAsync(3_000);
+  await vi.advanceTimersByTimeAsync(1_000);
   expect(calls).toBe(3);
   expect(controller.getState().status).toBe("ready");
   controller.dispose();

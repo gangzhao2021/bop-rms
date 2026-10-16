@@ -95,6 +95,10 @@ export interface ProductDetailView extends ProductViewBase {
   readonly product: ProductDetail;
   /** The Brand's option sets; null without permission to read them. */
   readonly optionSetChoices?: readonly ProductOptionSetChoice[] | null;
+  /** WP-2423: each size's availability at the selected Store (Item availability), by size. */
+  readonly availabilityHere?: Readonly<
+    Record<string, "Available" | "SoldOut" | "Unavailable" | "NotOffered" | "Varies">
+  >;
 }
 export interface ProductOptionSetInput {
   readonly optionSetReference: string;
@@ -180,7 +184,18 @@ export const suggestProductCode = (name: string) =>
     .replace(/^[^A-Za-z]+|-+$/gu, "")
     .toUpperCase()
     .slice(0, 40);
-/** "Pickup 13% · DineIn 13%" — each order type's sellable rate (rates are exact decimals). */
+const orderTypeText: Readonly<Record<string, string>> = {
+  Pickup: "Pickup",
+  DineIn: "Dine-in",
+  Delivery: "Delivery",
+  Catering: "Catering",
+};
+const treatmentText: Readonly<Record<string, string>> = {
+  ZeroRated: "zero-rated",
+  Exempt: "tax-exempt",
+  OutOfScope: "not taxed",
+};
+/** "Pickup 13% · Dine-in 13%" — each order type's sellable rate (rates are exact decimals). */
 export function taxClassText(choice: ProductTaxClass): string {
   const percent = (rate: string) => {
     const [whole = "0", fraction = ""] = rate.split(".");
@@ -191,7 +206,11 @@ export function taxClassText(choice: ProductTaxClass): string {
   return choice.rules
     .map(
       (rule) =>
-        `${rule.orderType} ${rule.treatment === "Taxable" ? percent(rule.rate) : rule.treatment}`,
+        `${orderTypeText[rule.orderType] ?? rule.orderType} ${
+          rule.treatment === "Taxable"
+            ? percent(rule.rate)
+            : (treatmentText[rule.treatment] ?? rule.treatment.toLowerCase())
+        }`,
     )
     .join(" · ");
 }

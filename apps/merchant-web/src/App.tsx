@@ -841,6 +841,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                   key={state.workspace.selectedScope.storeReference + state.csrf}
                   client={createMenuClient(state.csrf)}
                   csrf={state.csrf}
+                  availability={createAvailabilityClient(state.csrf)}
                 />
               ) : (
                 <StoreMenuBuilderPage />

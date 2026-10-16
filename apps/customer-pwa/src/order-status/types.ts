@@ -53,6 +53,13 @@ export interface OrderStatusSources {
     readonly orderItemReference: string;
     readonly subtotal: { readonly amountMinor: bigint; readonly currencyCode: string };
     readonly tax: { readonly amountMinor: bigint; readonly currencyCode: string };
+    /**
+     * WP-2423: the options the guest chose, each with what it added for the whole line (zero
+     * when free; `subtotal` already includes it). Absent for a plain item.
+     */
+    readonly options?: readonly OrderItemOptionView[];
+    /** WP-2423: the guest's own note for the kitchen (pickup orders; absent when none). */
+    readonly customerNote?: string;
   }[];
   /** WP-2423 Q26: items the kitchen is remaking (open portions per Order item). */
   readonly remakes?: readonly {
@@ -140,8 +147,22 @@ export interface OrderStatusView {
 
 export type RealtimeAvailability = "connecting" | "available" | "unavailable";
 
+/**
+ * WP-2423 (v15 2026-10-16): the guest's own order exists but its status is still being prepared
+ * (normally a few seconds after paying). The page says the order was received and keeps checking.
+ */
+export interface OrderReceivedView {
+  readonly kind: "Received";
+  readonly orderReference: string;
+  readonly orderNumber: string;
+  readonly orderType: "DineIn" | "Pickup";
+  readonly submittedAt: string;
+  readonly checkedAt: string;
+}
+
 export type OrderStatusState =
   | { readonly status: "loading" }
+  | { readonly status: "received"; readonly received: OrderReceivedView }
   | { readonly status: "invalid-reference" }
   | { readonly status: "permission-denied" }
   | { readonly status: "not-found" }
@@ -154,3 +175,10 @@ export type OrderStatusState =
       readonly realtime: RealtimeAvailability;
       readonly refreshing: boolean;
     };
+
+/** WP-2423: one option chosen for an ordered item ("Whipped cream", "Extra shot × 2"). */
+export interface OrderItemOptionView {
+  readonly displayName: string;
+  readonly quantity: number;
+  readonly amount: { readonly amountMinor: bigint; readonly currencyCode: string };
+}

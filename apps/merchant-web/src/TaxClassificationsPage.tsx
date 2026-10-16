@@ -73,6 +73,14 @@ export function TaxClassificationsView({
   useEffect(() => setAdding({}), [view.registryVersion]);
   const inUse = view.classifications.filter((c) => c.lifecycle !== "Retired");
   const retired = view.classifications.filter((c) => c.lifecycle === "Retired");
+  const productUse = view.productTaxClasses;
+  const productsOf = (reference: string) =>
+    productUse?.find((use) => use.classificationReference === reference)?.productNames ?? [];
+  const listed = new Set(view.classifications.map((c) => c.classificationReference));
+  const notListed = (productUse ?? []).filter(
+    (use) => use.classificationReference !== null && !listed.has(use.classificationReference),
+  );
+  const withoutClass = productUse?.find((use) => use.classificationReference === null);
   const nameFields = (
     draft: Draft,
     set: (next: Draft) => void,
@@ -147,6 +155,7 @@ export function TaxClassificationsView({
                   </th>
                 ))}
                 <th scope="col">Brand default</th>
+                {productUse !== null ? <th scope="col">Products</th> : null}
                 {manage ? <th scope="col">Changes</th> : null}
               </tr>
             </thead>
@@ -164,6 +173,11 @@ export function TaxClassificationsView({
                     <td data-label="Brand default">
                       {entry.isDefault ? "Default for products without their own" : "—"}
                     </td>
+                    {productUse !== null ? (
+                      <td data-label="Products">
+                        {productsOf(entry.classificationReference).join(", ") || "None yet"}
+                      </td>
+                    ) : null}
                     {manage ? (
                       <td data-label="Changes">
                         {editing && renaming ? (
@@ -289,6 +303,38 @@ export function TaxClassificationsView({
           </section>
         ) : null}
       </section>
+      {notListed.length > 0 || withoutClass !== undefined ? (
+        <section className="detail-section" aria-labelledby="tax-classes-not-listed">
+          <h3 id="tax-classes-not-listed">
+            Tax classes your products use that are not listed above
+          </h3>
+          {notListed.length > 0 ? (
+            <>
+              <p>
+                These products use a tax class that comes from this Store&rsquo;s tax configuration
+                and has no name in the Brand&rsquo;s list above. Tax review shows its rates. To give
+                products a named class, add it above, then choose it on each product once the tax
+                configuration sets its rates.
+              </p>
+              <ul>
+                {notListed.map((use, index) => (
+                  <li key={use.classificationReference}>
+                    Unnamed tax class{notListed.length > 1 ? ` ${index + 1}` : ""}:{" "}
+                    {use.productNames.join(", ")}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+          {withoutClass !== undefined ? (
+            <p>
+              No tax class yet: {withoutClass.productNames.join(", ")}. These products cannot be
+              sold until each names one.
+            </p>
+          ) : null}
+          <Link to="/app/commerce/tax-review">See rates in Tax review</Link>
+        </section>
+      ) : null}
       {manage ? (
         <section className="detail-section" aria-labelledby="tax-classification-add">
           <h3 id="tax-classification-add">Add a classification</h3>

@@ -1,5 +1,5 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
-import { SourceTime } from "./StoreTime.js";
+import { SourceTime, StoreDate } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { newOperationReference } from "./RoleAdministrationPages.js";
@@ -154,8 +154,8 @@ export function AllergenListPage({
         {view.registry ? (
           <>
             <p>
-              {view.registry.jurisdictionCode} list approved {view.registry.reviewedAt.slice(0, 10)}
-              :{" "}
+              {view.registry.jurisdictionCode} list approved{" "}
+              <StoreDate value={view.registry.reviewedAt} />:{" "}
               {view.registry.entries
                 .map((entry) => allergenName(view.registry, entry.allergenReference, view.locale))
                 .join(", ")}
@@ -249,7 +249,6 @@ export function AllergenListPage({
           <thead>
             <tr>
               <th>Ingredient</th>
-              <th>Code</th>
               <th>Status</th>
               <th>Declared allergens</th>
               <th>Valid through</th>
@@ -261,7 +260,6 @@ export function AllergenListPage({
                 <td>
                   <Link to={`/app/compliance/allergens/${item.itemReference}`}>{item.name}</Link>
                 </td>
-                <td>{item.internalCode}</td>
                 <td>{statusText[item.status]}</td>
                 <td>
                   {item.declaration
@@ -269,9 +267,13 @@ export function AllergenListPage({
                     : "—"}
                 </td>
                 <td>
-                  {item.declaration
-                    ? (item.declaration.validThrough ?? item.declaration.validUntil.slice(0, 10))
-                    : "—"}
+                  {item.declaration ? (
+                    <StoreDate
+                      value={item.declaration.validThrough ?? item.declaration.validUntil}
+                    />
+                  ) : (
+                    "—"
+                  )}
                 </td>
               </tr>
             ))}
@@ -352,7 +354,7 @@ function AllergenItem({
           <p className="bop-eyebrow">Allergens · Ingredient</p>
           <h2>{item.name}</h2>
           <p>
-            {item.internalCode} · {statusText[item.status]}
+            {statusText[item.status]}
             {item.declaration
               ? " · " + declarationSummary(registry, item.declaration, view.locale)
               : ""}
@@ -501,9 +503,9 @@ function AllergenItem({
           <ul>
             {view.history.map((d) => (
               <li key={d.evidenceReference}>
-                {d.reviewedAt.slice(0, 10)}: {declarationSummary(registry, d, view.locale)} ·{" "}
+                <StoreDate value={d.reviewedAt} />: {declarationSummary(registry, d, view.locale)} ·{" "}
                 {sourceText[d.sourceKind] ?? d.sourceKind}: {d.documentReference} · valid through{" "}
-                {d.validThrough ?? d.validUntil.slice(0, 10)}
+                <StoreDate value={d.validThrough ?? d.validUntil} />
                 {d.declaredBy === view.viewer ? " · by you" : ""}
               </li>
             ))}

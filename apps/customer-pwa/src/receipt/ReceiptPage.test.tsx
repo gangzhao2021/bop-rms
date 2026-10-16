@@ -290,6 +290,49 @@ describe("WP-2423 D5/D6: item prices before tax and plain payment wording", () =
     expect(html).toContain("<span>1 × DEMO Latte</span><span>$11.30</span>");
     expect(html).toContain("Item amounts on this version already include tax");
   });
+  it("lists each chosen option with what it added under its item, inside the item price (WP-2423)", () => {
+    const lines = [
+      {
+        lineReference: id(4),
+        displayName: "TEST Hot Chocolate — Small (8 oz)",
+        quantity: 1,
+        lineTotal: amount(452n),
+        lineSubtotal: amount(400n),
+        options: [
+          { displayName: "Whipped cream", quantity: 1, amount: amount(50n) },
+          { displayName: "Extra shot", quantity: 2, amount: amount(150n) },
+          { displayName: "Oat milk", quantity: 1, amount: amount(0n) },
+        ],
+      },
+    ];
+    const html = render(versioned(lines, 400n, 52n));
+    expect(html).toContain(
+      '<span>1 × TEST Hot Chocolate — Small (8 oz)<span class="receipt-page__option">Whipped cream +$0.50</span><span class="receipt-page__option">Extra shot × 2 +$1.50</span><span class="receipt-page__option">Oat milk</span></span><span>$4.00</span>',
+    );
+    // The item price already includes its options, so the items still add up to the subtotal.
+    expect(html).toContain("<dt>Subtotal</dt><dd>$4.00</dd>");
+    expect(html).toContain("<dt>Total</dt><dd>$4.52</dd>");
+    expect(lines.reduce((sum, line) => sum + receiptLineAmount(line).amountMinor, 0n)).toBe(400n);
+  });
+  it("prints a version issued before options were recorded exactly as issued", () => {
+    const html = render(
+      versioned(
+        [
+          {
+            lineReference: id(4),
+            displayName: "TEST Hot Chocolate — Small (8 oz)",
+            quantity: 1,
+            lineTotal: amount(452n),
+            lineSubtotal: amount(400n),
+          },
+        ],
+        400n,
+        52n,
+      ),
+    );
+    expect(html).toContain("<span>1 × TEST Hot Chocolate — Small (8 oz)</span><span>$4.00</span>");
+    expect(html).not.toContain("receipt-page__option");
+  });
   it("labels the captured amount as Paid", () => {
     const state = ready();
     if (state.status !== "ready") throw new Error("fixture");

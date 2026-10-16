@@ -545,3 +545,88 @@ describe("item prices before tax (WP-2423 D5)", () => {
     ).toBeNull();
   });
 });
+
+describe("chosen option lines (WP-2423)", () => {
+  const money = (amountMinor: bigint, currencyCode = "CAD") => ({ amountMinor, currencyCode });
+  const whipped = { displayName: "Whipped cream", quantity: 1, amount: money(50n) };
+  const withOptions = () =>
+    snapshot({
+      lines: [
+        {
+          lineReference: id(7),
+          displayName: "Hot chocolate",
+          quantity: 1,
+          lineTotal: money(452n),
+          lineSubtotal: money(400n),
+          options: [whipped, { displayName: "Oat milk", quantity: 1, amount: money(0n) }],
+        },
+      ],
+      subtotal: money(400n),
+      tax: money(52n),
+      total: money(452n),
+    });
+  it("records each option with what it added, inside the item price that adds up to the subtotal", () => {
+    const parsed = parseDigitalReceiptSnapshot(withOptions());
+    const [line] = parsed.lines;
+    expect(line?.options).toEqual([
+      whipped,
+      { displayName: "Oat milk", quantity: 1, amount: money(0n) },
+    ]);
+    expect(line?.lineSubtotal?.amountMinor).toBe(parsed.subtotal.amountMinor);
+    expect(Object.isFrozen(line?.options)).toBe(true);
+    const record = { ...chain().records[0], snapshot: withOptions() };
+    expect(decodeDigitalReceiptRecord(encodeDigitalReceiptRecord(record))).toEqual(
+      parseDigitalReceiptRecord(record),
+    );
+  });
+  it("reads receipts issued before options were recorded exactly as issued", () => {
+    const legacy = parseDigitalReceiptSnapshot(snapshot());
+    expect(legacy.lines[0]).not.toHaveProperty("options");
+  });
+  it("rejects options without an item price, above it, empty, or in another currency", () => {
+    const value = withOptions();
+    const base = value.lines[0] as Record<string, unknown>;
+    for (const line of [
+      Object.fromEntries(Object.entries(base).filter(([key]) => key !== "lineSubtotal")),
+      { ...base, options: [{ ...whipped, amount: money(401n) }] },
+      { ...base, options: [] },
+      { ...base, options: [{ ...whipped, amount: money(50n, "USD") }] },
+      { ...base, options: [{ ...whipped, quantity: 0 }] },
+      { ...base, options: [{ ...whipped, optionReference: id(99) }] },
+    ])
+      expect(() => parseDigitalReceiptSnapshot({ ...value, lines: [line] })).toThrow(
+        DigitalReceiptError,
+      );
+  });
+  it("lets a later paid round add option lines without rewriting an older version's items", () => {
+    const previous = chain().records[0];
+    if (!previous) throw new Error("missing fixture");
+    const old = snapshot();
+    const current = snapshot({
+      lines: [
+        { ...old.lines[0], lineSubtotal: money(1000n), options: [whipped] },
+        { ...old.lines[0], lineReference: id(70), lineSubtotal: money(1000n), options: [whipped] },
+      ],
+      subtotal: money(2000n),
+      tax: money(260n),
+      total: money(2260n),
+    });
+    expect(createAdditionalReceiptSnapshot(previous, current)?.lines[1]?.options).toEqual([
+      whipped,
+    ]);
+    const priced = { ...previous, snapshot: withOptions() };
+    // An item issued with its options can't lose or change them on a later version.
+    expect(() =>
+      createAdditionalReceiptSnapshot(priced, {
+        ...withOptions(),
+        lines: [
+          { ...withOptions().lines[0], options: [{ ...whipped, amount: money(40n) }] },
+          { ...withOptions().lines[0], lineReference: id(70) },
+        ],
+        subtotal: money(800n),
+        tax: money(104n),
+        total: money(904n),
+      }),
+    ).toThrow(DigitalReceiptError);
+  });
+});

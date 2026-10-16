@@ -4,6 +4,7 @@ import {
   createPostgresMerchantOrderIndex,
   listStoreKitchenOrderLabels,
   listStoreOrderRoundSubmissions,
+  listStoreOrdersAwaitingAcceptance,
   listStoreOrdersWithRoundsSince,
   listStorePaidOrderBatches,
 } from "../infrastructure/persistence/merchant-order-index.js";
@@ -393,6 +394,57 @@ it("WP-2423 Q2: names many Orders for the kitchen without Customer identity", as
     rowCount: 1,
   });
   await expect(listStoreKitchenOrderLabels(tx, scope, [id(3)])).rejects.toThrow();
+});
+
+it("WP-2423 v15: lists today's Orders with a paid round waiting for acceptance", async () => {
+  const query = vi.fn<(sql: string, values?: readonly unknown[]) => Promise<unknown>>(
+    async (sql) => ({
+      rows: sql.startsWith("SELECT set_config")
+        ? []
+        : [
+            { order_id: id(3), order_number: "13", order_type: "Pickup", dining_session: null },
+            { order_id: id(4), order_number: "7", order_type: "DineIn", dining_session: id(40) },
+          ],
+      rowCount: 2,
+    }),
+  );
+  const tx = { query } as unknown as ConsumerTransaction;
+  const input = { since: "2026-10-16T08:00:00.000Z", businessDate: "2026-10-16", limit: 50 };
+  expect(await listStoreOrdersAwaitingAcceptance(tx, scope, input)).toEqual([
+    { orderReference: id(3), orderNumber: "13", orderType: "Pickup", diningSessionReference: null },
+    {
+      orderReference: id(4),
+      orderNumber: "7",
+      orderType: "DineIn",
+      diningSessionReference: id(40),
+    },
+  ]);
+  const sql = String(query.mock.calls[1]?.[0]);
+  // Today's only: the Order's business date, or a later round submitted since the day started.
+  expect(sql).toContain("h.business_date=$3::date OR b.submitted_at>=$4::timestamptz");
+  expect(sql).toContain("order_payment_disposition_record");
+  expect(sql).toContain("order_staff_cancellation");
+  expect(sql).not.toMatch(/guest|contact|name/iu);
+  expect(query.mock.calls[1]?.[1]).toEqual([
+    scope.brandReference,
+    scope.storeReference,
+    "2026-10-16",
+    "2026-10-16T08:00:00.000Z",
+    50,
+  ]);
+  await expect(
+    listStoreOrdersAwaitingAcceptance(tx, scope, { ...input, businessDate: "16/10/2026" }),
+  ).rejects.toThrow("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+  await expect(
+    listStoreOrdersAwaitingAcceptance(tx, scope, { ...input, limit: 0 }),
+  ).rejects.toThrow("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+  query.mockResolvedValueOnce({ rows: [], rowCount: 0 }).mockResolvedValueOnce({
+    rows: [{ order_id: id(3), order_number: "13", order_type: "DineIn", dining_session: null }],
+    rowCount: 1,
+  });
+  await expect(listStoreOrdersAwaitingAcceptance(tx, scope, input)).rejects.toThrow(
+    "MERCHANT_ORDER_INDEX_UNAVAILABLE",
+  );
 });
 
 it("WP-2423 D4: reads each round's submission time, whether it is the first and the Order's date", async () => {

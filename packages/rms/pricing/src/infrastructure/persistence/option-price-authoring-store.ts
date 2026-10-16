@@ -103,6 +103,11 @@ export interface OptionPriceAuthoringStoreOptions {
     ): Promise<string>;
   };
   readonly publicationPolicyFamilyReference?: string;
+  /** WP-2423 DEC-SOLE-OPERATOR-APPROVAL: the caller verified, in this transaction, that the actor
+   * may publish their own draft alone as sole operator (in effect, second factor at most 15
+   * minutes old) and records the mark of each such publication before commit (the database
+   * refuses an author's own publication without it). Otherwise approver = author is refused. */
+  readonly soleOperatorApproval?: boolean;
   readonly publicationSource?: {
     /** This callback must retain its actual owner locks and COMMIT guards.
      * Acquire Publishing before the Pricing writer lock to preserve lock order. */
@@ -453,6 +458,7 @@ export function createPostgresOptionPriceAuthoringStore(options: OptionPriceAuth
     draftDigest: string,
     draftAuthor: string,
     expectedPolicyFamily: string | null = policyFamily,
+    sameActorAllowed = false,
   ): OptionPricePublicationAuthorization => {
     const r = closed(raw, [
       "policy",
@@ -504,7 +510,7 @@ export function createPostgresOptionPriceAuthoringStore(options: OptionPriceAuth
         r.approvedActorReference === null ? null : parsePricingReference(r.approvedActorReference);
     if ((approvalEvidenceReference === null) !== (approvedActorReference === null)) return fail();
     if (
-      approvedActorReference === draftAuthor ||
+      (approvedActorReference === draftAuthor && !sameActorAllowed) ||
       (p.approvalPolicy === "Required" &&
         (approvalEvidenceReference === null || approvedActorReference === null))
     )
@@ -622,6 +628,15 @@ export function createPostgresOptionPriceAuthoringStore(options: OptionPriceAuth
           )
         ).rows;
         if (draftRows.length !== 1) return fail();
+        // WP-2423: an author's own publication replays only with its sole-operator mark.
+        const marked =
+          rawProof.approvedActorReference === rawProof.draftAuthorActorReference &&
+          (
+            await query(
+              "SELECT 1 FROM rms_pricing.option_price_sole_operator_approval WHERE operation_id=$1 AND brand_id=$2 AND option_price_rule_id=$3",
+              [command.operationReference, brand, command.ruleReference],
+            )
+          ).rows.length === 1;
         const originalDraft = parseOptionPriceWireSnapshot(draftRows[0]?.snapshot);
         if (
           originalDraft.lifecycle !== "Draft" ||
@@ -650,6 +665,7 @@ export function createPostgresOptionPriceAuthoringStore(options: OptionPriceAuth
               "effectiveUntil",
             ]).familyReference,
           ),
+          marked,
         );
       } else if (r.publicationAuthorization !== null) return fail();
     } else if (r.publicationAuthorization !== null) return fail();
@@ -1086,6 +1102,8 @@ export function createPostgresOptionPriceAuthoringStore(options: OptionPriceAuth
               current.draft.versionReference,
               current.draft.snapshotDigest,
               current.draftAuthorActorReference,
+              policyFamily,
+              options.soleOperatorApproval === true,
             );
             if (proof.observedAt < startedAt) return fail();
             tighten(proof.validUntil);

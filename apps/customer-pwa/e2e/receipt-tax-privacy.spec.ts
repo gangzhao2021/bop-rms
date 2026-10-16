@@ -326,6 +326,62 @@ for (const viewport of [
       await expect(page.getByRole("link", { name: /Privacy notice/u })).toHaveCount(0);
     });
 
+    test("the receipt and the order page list each item's chosen options with their prices", async ({
+      page,
+    }) => {
+      // WP-2423: the item price already includes its options, so the items still add up to the
+      // subtotal; a free option prints its name only. TEST-ONLY item and option names.
+      const options = [
+        { displayName: "Whipped cream", quantity: 1, amount: money("50") },
+        { displayName: "Oat milk", quantity: 1, amount: money("0") },
+      ];
+      const issued = receipt(true);
+      const issuedLine = issued.receipt.records[0]?.snapshot.lines[0];
+      if (!issuedLine) throw new Error("fixture");
+      Object.assign(issuedLine, { displayName: "TEST Hot Chocolate", options });
+      const current = status("Stored");
+      Object.assign(current.status.sources, {
+        itemPrices: [
+          {
+            orderItemReference: id(10),
+            subtotal: money("1000"),
+            tax: money("130"),
+            options,
+            customerNote: "Less sweet",
+          },
+        ],
+      });
+      await bootstrap(page);
+      await page.route("**/api/v1/orders/*/receipt", (route) =>
+        route.fulfill({ headers: json, body: JSON.stringify(issued) }),
+      );
+      await page.route("**/api/v1/orders/*/status", (route) =>
+        route.fulfill({ headers: json, body: JSON.stringify(current) }),
+      );
+      await page.goto("/orders/" + orderReference + "/receipt");
+      const line = page.locator(".receipt-page__lines li").first();
+      await expect(line).toContainText("1 × TEST Hot Chocolate");
+      await expect(line.locator(".receipt-page__option")).toHaveText([
+        "Whipped cream +$0.50",
+        "Oat milk",
+      ]);
+      await expect(line.locator("> span").last()).toHaveText("$10.00");
+      await expect(page.locator(".receipt-page__totals div", { hasText: "Subtotal" })).toHaveText(
+        "Subtotal$10.00",
+      );
+      await expectNoInternalText(page);
+      await noOverflowOrBlockingAxe(page);
+      await page.goto("/orders/" + orderReference);
+      const item = page.locator(".order-status__batch li").first();
+      await expect(item.locator(".order-status__item-options")).toHaveText(
+        "Whipped cream +$0.50, Oat milk",
+      );
+      await expect(item.locator(".order-status__item-note")).toHaveText("Note: Less sweet");
+      await expect(item.locator(".order-status__item-amount")).toHaveText("$10.00");
+      await expectNoInternalText(page);
+      await noOverflowOrBlockingAxe(page);
+    });
+
     test("checkout links the privacy notice where contact details are collected", async ({
       page,
     }) => {

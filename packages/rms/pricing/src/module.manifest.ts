@@ -67,6 +67,7 @@ const moduleManifestInput =
       schema: "rms_pricing",
       tables: [
         "price_book_sole_operator_approval",
+        "option_price_sole_operator_approval",
         "configuration_reference_generation",
         "tax_configuration",
         "tax_reference_generation",

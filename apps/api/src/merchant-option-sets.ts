@@ -4,6 +4,8 @@ import {
   createOptionSetService,
   createPostgresOptionSetRepository,
   listBrandOptionSets,
+  listBrandProducts,
+  loadBrandProduct,
   parseCatalogHash,
   parseCatalogReference,
   type OptionSetAggregate,
@@ -214,11 +216,36 @@ export function createMerchantOptionSets(options: {
   type Scope = Awaited<ReturnType<typeof scopeFor>>;
   const name = (names: Readonly<Record<string, string>>, fallback: string) =>
     names[options.locale] ?? Object.values(names)[0] ?? fallback;
-  const view = (set: OptionSetAggregate) => ({
+  /**
+   * The Brand's products (not archived) whose draft offers each option set, by name: a set no
+   * product uses cannot reach customers, so staff are not told it is "in use".
+   */
+  async function usage(tx: unknown, brand: string): Promise<ReadonlyMap<string, string[]>> {
+    const used = new Map<string, string[]>();
+    for (const summary of await listBrandProducts(ptx(tx) as never, { brandReference: brand })) {
+      if (summary.lifecycle === "Archived") continue;
+      const product = await loadBrandProduct(
+        ptx(tx) as never,
+        { brandReference: brand },
+        summary.productReference,
+      );
+      if (product === null) continue;
+      const productName = name(product.draft.localizedNames, product.internalCode);
+      for (const binding of product.draft.optionBindings) {
+        const names = used.get(String(binding.optionSetReference)) ?? [];
+        if (!names.includes(productName)) names.push(productName);
+        used.set(String(binding.optionSetReference), names);
+      }
+    }
+    return used;
+  }
+  const view = (set: OptionSetAggregate, used: ReadonlyMap<string, readonly string[]>) => ({
     optionSetReference: set.optionSetReference,
     internalCode: set.internalCode,
     aggregateVersion: set.aggregateVersion,
     archived: set.lifecycle === "Archived",
+    /** Products whose draft offers this set (customers see it once such a menu is published). */
+    productNames: used.get(String(set.optionSetReference)) ?? [],
     name: name(set.draft.localizedNames, set.internalCode),
     kind: kindOf(set.draft.displayStyle),
     minimum: set.draft.minimumSelection,
@@ -251,13 +278,18 @@ export function createMerchantOptionSets(options: {
             sourceAsOf: options.persistence.now(),
             permissions: s.permissions,
           };
+          const used = await usage(tx, s.brand);
           if (input.optionSetReference === null)
-            return { screenId: "CAT-OPTIONSET-LIST" as const, ...base, optionSets: sets.map(view) };
+            return {
+              screenId: "CAT-OPTIONSET-LIST" as const,
+              ...base,
+              optionSets: sets.map((set) => view(set, used)),
+            };
           const set = sets.find(
             (candidate) => candidate.optionSetReference === input.optionSetReference,
           );
           if (set === undefined) return fail("NotFound");
-          return { screenId: "CAT-OPTIONSET-EDIT" as const, ...base, optionSet: view(set) };
+          return { screenId: "CAT-OPTIONSET-EDIT" as const, ...base, optionSet: view(set, used) };
         }),
       ),
     );
@@ -288,7 +320,10 @@ export function createMerchantOptionSets(options: {
               record.aggregate.brandReference !== s.brand
             )
               return fail("Conflict");
-            return { status: "AlreadyApplied" as const, optionSet: view(record.aggregate) };
+            return {
+              status: "AlreadyApplied" as const,
+              optionSet: view(record.aggregate, await usage(tx, s.brand)),
+            };
           }
           try {
             if (body.action === "Create") {
@@ -308,7 +343,10 @@ export function createMerchantOptionSets(options: {
                 operationReference: body.operationReference,
                 requestedAt: at,
               });
-              return { status: result.status, optionSet: view(result.aggregate) };
+              return {
+                status: result.status,
+                optionSet: view(result.aggregate, await usage(tx, s.brand)),
+              };
             }
             const sets = await listBrandOptionSets(ptx(tx), { brandReference: s.brand });
             const existing = sets.find((set) => set.optionSetReference === body.optionSetReference);
@@ -320,7 +358,10 @@ export function createMerchantOptionSets(options: {
                 operationReference: body.operationReference,
                 requestedAt: at,
               });
-              return { status: result.status, optionSet: view(result.aggregate) };
+              return {
+                status: result.status,
+                optionSet: view(result.aggregate, await usage(tx, s.brand)),
+              };
             }
             const priorOptions = existing.draft.options;
             const kept = optionInputs(body, priorOptions);
@@ -361,7 +402,10 @@ export function createMerchantOptionSets(options: {
               operationReference: body.operationReference,
               requestedAt: at,
             });
-            return { status: result.status, optionSet: view(result.aggregate) };
+            return {
+              status: result.status,
+              optionSet: view(result.aggregate, await usage(tx, s.brand)),
+            };
           } catch (error) {
             const mapped = error instanceof CatalogError ? catalogErrors[error.code] : undefined;
             if (mapped !== undefined) return fail(mapped);

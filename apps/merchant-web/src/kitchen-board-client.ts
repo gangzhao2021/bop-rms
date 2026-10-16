@@ -243,6 +243,10 @@ export function createKitchenBoardClient(options: {
           ...(typeof first.canCloseEarlierDayTickets === "boolean"
             ? { canCloseEarlierDayTickets: first.canCloseEarlierDayTickets }
             : {}),
+          // WP-2423 (v15): read with the first page; the parser checks it.
+          ...("awaitingAcceptance" in first
+            ? { awaitingAcceptance: first.awaitingAcceptance }
+            : {}),
         });
       const next = record(cursor);
       // A page may be empty when every ticket on it was just closed (DEC-KITCHEN-STALE-TICKETS);

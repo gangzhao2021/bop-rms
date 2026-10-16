@@ -8,7 +8,12 @@ import {
 import type { ReceiptMoneyView, ReceiptRecordView, ReceiptView } from "./types.js";
 
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
-import { formatDateTime, formatLocalityLine, formatMoney } from "../journey/format.js";
+import {
+  describeChosenOption,
+  formatDateTime,
+  formatLocalityLine,
+  formatMoney,
+} from "../journey/format.js";
 import { StoreContactCard } from "../journey/StoreContact.js";
 import { PrivacyNoticeLink } from "../journey/PrivacyNotice.js";
 
@@ -89,6 +94,12 @@ function ReceiptVersion({ record }: { readonly record: ReceiptRecordView }) {
           <li key={line.lineReference}>
             <span>
               {line.quantity} × {line.displayName}
+              {/* WP-2423: each chosen option and what it added (part of the item's price). */}
+              {line.options?.map((option, index) => (
+                <span className="receipt-page__option" key={index}>
+                  {describeChosenOption(option)}
+                </span>
+              ))}
             </span>
             <span>{money(receiptLineAmount(line))}</span>
           </li>

@@ -47,13 +47,14 @@ async function setup(enabled = true) {
     },
   };
   const read = vi.fn().mockResolvedValue(result);
+  const received = vi.fn().mockResolvedValue(null);
   const server = createServer(
     createApp(
       enabled
         ? {
             customerOrderStatus: new CustomerOrderStatusHandler({
               allowedOrigin: "https://pilot.example",
-              port: { read },
+              port: { read, received },
             }),
           }
         : {},
@@ -69,6 +70,7 @@ async function setup(enabled = true) {
     "/status";
   return {
     read,
+    received,
     result,
     send: (headers: Record<string, string> = {}, query = "") =>
       fetch(url + query, {
@@ -336,4 +338,107 @@ it("WP-2423 D5: serializes each item's price before tax and its tax as exact dec
     },
   ]);
   expect(JSON.stringify(body)).not.toContain("private");
+});
+it("WP-2423: serializes each item's chosen options with what they added, and the guest's note", async () => {
+  const f = await setup();
+  f.read.mockResolvedValue({
+    ...f.result,
+    sources: {
+      checkedAt: "2026-09-12T12:00:00.000Z",
+      kitchen: null,
+      payments: null,
+      itemPrices: [
+        {
+          orderItemReference: id(4),
+          subtotal: { amountMinor: 400n, currencyCode: "CAD" },
+          tax: { amountMinor: 52n, currencyCode: "CAD" },
+          options: [
+            {
+              displayName: "Whipped cream",
+              quantity: 1,
+              amount: { amountMinor: 50n, currencyCode: "CAD" },
+            },
+          ],
+          customerNote: "Less sweet",
+        },
+      ],
+    },
+  });
+  const body = (await (await f.send()).json()) as {
+    status: { sources: Record<string, unknown> };
+  };
+  expect(body.status.sources.itemPrices).toEqual([
+    {
+      orderItemReference: id(4),
+      subtotal: { amountMinor: "400", currencyCode: "CAD" },
+      tax: { amountMinor: "52", currencyCode: "CAD" },
+      options: [
+        {
+          displayName: "Whipped cream",
+          quantity: 1,
+          amount: { amountMinor: "50", currencyCode: "CAD" },
+        },
+      ],
+      customerNote: "Less sweet",
+    },
+  ]);
+});
+it("WP-2423: answers 'received' for the guest's own order while its status projection catches up", async () => {
+  const f = await setup();
+  f.read.mockRejectedValue(new OrderStatusProjectionError("ORDER_STATUS_NOT_FOUND"));
+  f.received.mockResolvedValue({
+    orderReference: id(31),
+    orderNumber: "1001",
+    orderType: "Pickup",
+    submittedAt: "2026-09-12T11:00:00.000Z",
+    checkedAt: "2026-09-12T11:00:04.000Z",
+    guestSessionReference: "private",
+  });
+  const response = await f.send();
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual({
+    schemaVersion: 1,
+    received: {
+      orderReference: id(31),
+      orderNumber: "1001",
+      orderType: "Pickup",
+      submittedAt: "2026-09-12T11:00:00.000Z",
+      checkedAt: "2026-09-12T11:00:04.000Z",
+    },
+  });
+  expect(f.received).toHaveBeenCalledWith({
+    sessionCredential: "s".repeat(43),
+    csrfCredential: "c".repeat(43),
+    orderReference: id(31),
+  });
+});
+it("WP-2423: still refuses an unknown order, another guest's order and failed authorization", async () => {
+  const f = await setup();
+  // Unknown order or one this guest did not place: the owner record lookup answers null.
+  f.read.mockRejectedValue(new OrderStatusProjectionError("ORDER_STATUS_NOT_FOUND"));
+  f.received.mockResolvedValue(null);
+  let response = await f.send();
+  expect(response.status).toBe(404);
+  expect(await response.text()).not.toContain("received");
+  // A record for a different order is never shown.
+  f.received.mockResolvedValue({
+    orderReference: id(99),
+    orderNumber: "1002",
+    orderType: "Pickup",
+    submittedAt: "2026-09-12T11:00:00.000Z",
+    checkedAt: "2026-09-12T11:00:04.000Z",
+  });
+  expect((await f.send()).status).toBe(404);
+  f.received.mockRejectedValue(new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED"));
+  expect((await f.send()).status).toBe(404);
+  f.received.mockRejectedValue(new Error("private SQL credentials"));
+  response = await f.send();
+  expect(response.status).toBe(503);
+  expect(await response.text()).not.toContain("private");
+  // A projection that exists but belongs to another guest is refused without the fallback.
+  f.received.mockClear();
+  f.read.mockRejectedValue(new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED"));
+  expect((await f.send()).status).toBe(404);
+  expect(f.received).not.toHaveBeenCalled();
 });

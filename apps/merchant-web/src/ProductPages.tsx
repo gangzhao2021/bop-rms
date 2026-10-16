@@ -368,9 +368,14 @@ function ProductEditor({
           <p className="bop-eyebrow">{product ? "Edit product" : "New product"} · Brand</p>
           <h2>{product ? product.name : "New product"}</h2>
           <p>
-            {product
-              ? `${lifecycleText[product.lifecycle] ?? product.lifecycle} · version ${product.aggregateVersion} · updated ${product.updatedAt}`
-              : "Name the product, choose its tax class and list the sizes a customer can order."}
+            {product ? (
+              <>
+                {lifecycleText[product.lifecycle] ?? product.lifecycle} · version{" "}
+                {product.aggregateVersion} · updated <SourceTime instant={product.updatedAt} />
+              </>
+            ) : (
+              "Name the product, choose its tax class and list the sizes a customer can order."
+            )}
           </p>
           <p>
             Pilot: changes apply to the Brand's product directly, without a separate publication
@@ -444,7 +449,7 @@ function ProductEditor({
                   key={choice.taxClassificationReference}
                   value={choice.taxClassificationReference}
                 >
-                  {`Class ${index + 1} — ${taxClassText(choice)}`}
+                  {`Tax class ${index + 1} — ${taxClassText(choice)}`}
                 </option>
               ))}
             </select>
@@ -571,9 +576,38 @@ function ProductEditor({
           {changed ? <p>Save your changes first.</p> : null}
         </section>
       ) : null}
+      {product && view.screenId === "CAT-PRODUCT-DETAIL" && view.availabilityHere ? (
+        <section className="detail-section" aria-labelledby="at-this-store">
+          <h3 id="at-this-store">At this Store</h3>
+          <p>
+            Customers at this Store see a size only when it is offered here, priced and on a
+            published menu.
+          </p>
+          <ul>
+            {product.sizes.map((size) => (
+              <li key={size.skuReference}>
+                {size.name}:{" "}
+                {storeAvailabilityText[view.availabilityHere?.[size.skuReference] ?? "NotOffered"]}
+              </li>
+            ))}
+          </ul>
+          <p>
+            <Link to="/app/commerce/availability">Item availability</Link>
+          </p>
+        </section>
+      ) : null}
     </AppFrame>
   );
 }
+
+/** WP-2423: a size's availability at the selected Store, as staff say it. */
+const storeAvailabilityText = {
+  Available: "Offered here",
+  SoldOut: "Offered here, sold out right now",
+  Unavailable: "Not offered here (stopped)",
+  NotOffered: "Not offered at this Store yet — customers here don't see it",
+  Varies: "Offered here for some order types",
+} as const;
 
 /** WP-2423 slice 4: the option sets customers choose from on this product, and which options. */
 function ProductOptionSetsFieldset({

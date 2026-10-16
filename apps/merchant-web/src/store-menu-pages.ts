@@ -68,6 +68,9 @@ export interface MenuSellable {
   readonly sizeName: string;
   readonly active: boolean;
   readonly priceMinor: string | null;
+  /** WP-2423: offered at the selected Store (Item availability); customers here see it only then.
+   * Absent from older views: treated as offered. */
+  readonly offeredHere?: boolean;
 }
 export interface MenuBuilderView extends MenuViewBase {
   readonly screenId: "CAT-MENU-BUILDER";
@@ -97,6 +100,8 @@ export interface MenuBuilderView extends MenuViewBase {
   /** WP-2423 Q19: present for a submitter who may approve: may they approve alone, and why not. */
   readonly soleOperator: SoleOperatorGateView | null;
   readonly sellables: readonly MenuSellable[];
+  /** WP-2423: whether the viewer may offer items at this Store from the menu page. */
+  readonly mayOfferHere?: boolean;
   readonly allergenRegistry: boolean;
 }
 export interface MenuSectionInput {
@@ -182,6 +187,37 @@ export const sectionCode = (name: string) =>
     .replace(/^[^A-Za-z]+|_+$/gu, "")
     .toUpperCase()
     .slice(0, 40);
+/** WP-2423: plain names for a menu's sales channels and order types (never the internal codes). */
+const channelNames: Readonly<Record<string, string>> = {
+  CUSTOMER_PWA: "Customer ordering app",
+  POS: "Counter",
+};
+const orderTypeNames: Readonly<Record<string, string>> = {
+  DINE_IN: "Dine-in",
+  PICKUP: "Pickup",
+};
+const plainCode = (code: string) =>
+  code.charAt(0) + code.slice(1).toLowerCase().replaceAll("_", " ");
+export const channelText = (codes: readonly string[]) =>
+  codes.map((code) => channelNames[code] ?? plainCode(code)).join(", ");
+export const orderTypeText = (codes: readonly string[]) =>
+  codes.map((code) => orderTypeNames[code] ?? plainCode(code)).join(", ");
+/** Items placed on the menu that customers at this Store cannot see because they are not offered
+ * here, in menu order, without repeats. */
+export function itemsNotOfferedHere(view: MenuBuilderView): readonly MenuSellable[] {
+  const sellables = new Map(view.sellables.map((item) => [item.skuReference, item]));
+  const seen = new Set<string>();
+  const hidden: MenuSellable[] = [];
+  for (const section of view.menu.sections)
+    for (const item of section.items) {
+      const sellable = sellables.get(item.skuReference);
+      if (sellable === undefined || sellable.offeredHere !== false || seen.has(item.skuReference))
+        continue;
+      seen.add(item.skuReference);
+      hidden.push(sellable);
+    }
+  return hidden;
+}
 /** Where the current version stands: editable, in review, approved or published. */
 export function menuStage(publication: MenuPublicationStatus | null) {
   if (publication === null) return "Editing" as const;

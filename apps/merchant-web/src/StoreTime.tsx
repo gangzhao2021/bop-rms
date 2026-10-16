@@ -240,3 +240,25 @@ export function Freshness({
     </span>
   );
 }
+
+/**
+ * A calendar date as staff read it ("Oct 20, 2026"), never 2026-10-20: an instant is shown on its
+ * Store-local day; a plain local date ("2026-10-20", already a Store date) as that day.
+ */
+export function storeDate(value: string, timeZone: string | undefined): string {
+  const plain = /^\d{4}-\d{2}-\d{2}$/u.test(value);
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: plain ? "UTC" : (timeZone ?? "UTC"),
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  }).format(new Date(plain ? value + "T00:00:00.000Z" : value));
+}
+export function StoreDate({ value }: { readonly value: string }) {
+  const timeZone = useContext(StoreTimeZoneContext);
+  return (
+    <time dateTime={value} title={value}>
+      {storeDate(value, timeZone)}
+    </time>
+  );
+}

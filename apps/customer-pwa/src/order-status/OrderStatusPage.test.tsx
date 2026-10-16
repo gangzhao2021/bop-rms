@@ -947,6 +947,26 @@ describe("WP-2423 Q10 plain guidance when the visit has ended", () => {
     expect(html).toContain('href="/"');
     expect(html).not.toMatch(/access denied|browser you used at checkout|session/iu);
   });
+  it("says a just-paid order was received while its status is prepared, in plain words", () => {
+    const html = render({
+      status: "received",
+      received: {
+        kind: "Received",
+        orderReference: id(1),
+        orderNumber: "1001",
+        orderType: "Pickup",
+        submittedAt: "2026-08-11T13:55:00.000Z",
+        checkedAt: "2026-08-11T13:55:04.000Z",
+      },
+    });
+    expect(html).toContain("Order received");
+    expect(html).toContain("Order 1001 is in");
+    expect(html).toContain("this page updates by itself");
+    expect(html).toContain("give your order number to a staff member");
+    expect(html).not.toContain("We can&#x27;t show this order here yet");
+    expect(html).not.toContain(id(1));
+    expect(findInternalText([staticText(html)])).toEqual([]);
+  });
   it("lets a just-paid customer retry instead of a dead end", () => {
     const html = render({ status: "not-found" });
     expect(html).toContain("can take a few seconds to appear");
@@ -1070,6 +1090,42 @@ describe("WP-2423 D5: item prices before tax, then subtotal, tax and total", () 
     expect(html).not.toContain("$11.30");
     expect(html).not.toContain("Discounts and fees");
     expect(html).not.toContain("Items total");
+  });
+
+  it("shows each item's chosen options with what they added, and the guest's note (WP-2423)", () => {
+    const view = pricedView();
+    const sources = view.sources;
+    if (!sources) throw new Error("fixture");
+    const html = render({
+      status: "ready",
+      realtime: "unavailable",
+      refreshing: false,
+      view: {
+        ...view,
+        sources: {
+          ...sources,
+          itemPrices: [
+            {
+              orderItemReference: id(4),
+              subtotal: money(1000n),
+              tax: money(130n),
+              options: [
+                { displayName: "Whipped cream", quantity: 1, amount: money(50n) },
+                { displayName: "Oat milk", quantity: 1, amount: money(0n) },
+              ],
+              customerNote: "Less sweet",
+            },
+            { orderItemReference: id(5), subtotal: money(801n), tax: money(104n) },
+          ],
+        },
+      } as OrderStatusView,
+    });
+    expect(html).toContain(
+      'DEMO Latte<span class="order-status__item-options">Whipped cream +$0.50, Oat milk</span><span class="order-status__item-note">Note: Less sweet</span></span><span class="order-status__item-amount">$10.00</span>',
+    );
+    // The item price already includes its options: the page still adds up the same way.
+    expect(html).toMatch(/Subtotal<\/dt><dd>\$18\.01</u);
+    expect(html).not.toMatch(/Synthetic muffin<span/u);
   });
 
   it("keeps totals including tax when the item prices are not available", () => {

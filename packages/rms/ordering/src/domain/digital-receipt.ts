@@ -23,6 +23,23 @@ export interface ReceiptLineSnapshot {
    * to `subtotal`, or none do (versions issued before D5 are never rewritten).
    */
   readonly lineSubtotal?: ReceiptMoney;
+  /**
+   * WP-2423 (receipt option lines): the options the guest chose for this item, each with what it
+   * added for the whole line, frozen from the Order item at issue. Present only on lines issued
+   * since it was recorded that have options, always together with `lineSubtotal`, which already
+   * includes them: the item's own price is `lineSubtotal` less these amounts. Lines issued before it
+   * (or without options) do not carry it and print as issued.
+   */
+  readonly options?: readonly ReceiptLineOption[];
+}
+
+/** WP-2423: one chosen option printed under its item ("Whipped cream", "Extra shot × 2"). */
+export interface ReceiptLineOption {
+  readonly displayName: string;
+  /** How many of this option were chosen for each item. */
+  readonly quantity: number;
+  /** What the option added for the whole line; zero for a free option. */
+  readonly amount: ReceiptMoney;
 }
 
 /** WP-2423 Q15: the Store address printed on the receipt (its published address at issue). */
@@ -199,25 +216,61 @@ function money(value: unknown): ReceiptMoney {
   return Object.freeze({ amountMinor: raw.amountMinor, currencyCode: raw.currencyCode });
 }
 
+function lineOption(value: unknown): ReceiptLineOption {
+  const raw = exact(value, ["displayName", "quantity", "amount"]);
+  if (
+    !Number.isSafeInteger(raw.quantity) ||
+    (raw.quantity as number) < 1 ||
+    (raw.quantity as number) > 999
+  )
+    return fail();
+  return Object.freeze({
+    displayName: text(raw.displayName),
+    quantity: raw.quantity as number,
+    amount: money(raw.amount),
+  });
+}
+
 function line(value: unknown): ReceiptLineSnapshot {
-  const hasSubtotal =
-    value !== null &&
-    typeof value === "object" &&
-    Object.prototype.hasOwnProperty.call(value, "lineSubtotal");
+  const has = (key: string) =>
+    value !== null && typeof value === "object" && Object.prototype.hasOwnProperty.call(value, key);
+  const hasSubtotal = has("lineSubtotal");
+  const hasOptions = has("options");
   const raw = exact(value, [
     "lineReference",
     "displayName",
     "quantity",
     "lineTotal",
     ...(hasSubtotal ? ["lineSubtotal"] : []),
+    ...(hasOptions ? ["options"] : []),
   ]);
   if (!Number.isSafeInteger(raw.quantity) || (raw.quantity as number) < 1) return fail();
+  // WP-2423: option lines are recorded only beside the item's pre-tax price, which includes them.
+  if (
+    hasOptions &&
+    (!hasSubtotal ||
+      !Array.isArray(raw.options) ||
+      raw.options.length < 1 ||
+      raw.options.length > 100)
+  )
+    return fail();
+  const lineSubtotal = hasSubtotal ? money(raw.lineSubtotal) : null;
+  const options = hasOptions ? Object.freeze((raw.options as unknown[]).map(lineOption)) : null;
+  if (
+    options !== null &&
+    lineSubtotal !== null &&
+    (options.some((option) => option.amount.currencyCode !== lineSubtotal.currencyCode) ||
+      options.reduce((sum, option) => sum + option.amount.amountMinor, 0n) >
+        lineSubtotal.amountMinor)
+  )
+    return fail();
   return Object.freeze({
     lineReference: reference(raw.lineReference),
     displayName: text(raw.displayName),
     quantity: raw.quantity as number,
     lineTotal: money(raw.lineTotal),
-    ...(hasSubtotal ? { lineSubtotal: money(raw.lineSubtotal) } : {}),
+    ...(lineSubtotal === null ? {} : { lineSubtotal }),
+    ...(options === null ? {} : { options }),
   });
 }
 
