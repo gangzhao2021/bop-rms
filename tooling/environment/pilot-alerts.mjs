@@ -139,6 +139,18 @@ export const ALERT_CATALOG = Object.freeze({
       "Do not take a second payment from guests who say they paid. Check Orders and Exceptions; ask the pilot operator to review the stuck updates (dead-letter list) and retry them.",
     runbook: "alert-payment-updates",
   },
+  // WP-2423 (2026-10-16): early warning while events are still being retried, before any dead
+  // letter (a dead letter only follows about 36-71 minutes of failures). Urgent after 30 minutes.
+  "updates.retrying": {
+    severity: "warning",
+    raiseAfterMs: 0,
+    title: () => "Some order updates are being retried",
+    summary: (p) =>
+      `${count(p.count, "order update is", "order updates are")} being retried (failing for ${formatDuration(p.oldestAgeMs)}). Ready orders may not show for pickup yet, and kitchen or payment changes may be late.`,
+    action: () =>
+      'Hand over ready orders in person: check the order number plus the guest\'s name or phone number. Compare the kitchen board with Orders. Ask the pilot operator to read the order processing log now; if it is not fixed, this becomes "Order or payment updates are stuck".',
+    runbook: "alert-updates-retrying",
+  },
   "reconciliation.differences": {
     severity: "warning",
     raiseAfterMs: 0,
@@ -270,6 +282,7 @@ export const DEFAULT_THRESHOLDS = Object.freeze({
   diskCriticalPercent: 5,
   diskCriticalBytes: 1024 ** 3,
   channelFailingMs: 30 * MINUTE,
+  retryingCriticalMs: 30 * MINUTE,
 });
 const natural = (value) => Number.isSafeInteger(value) && value >= 0;
 
@@ -304,6 +317,17 @@ export function evaluateAlertConditions(observations, thresholds = DEFAULT_THRES
         count: business.stuckUpdates.count,
         oldestAgeMs: business.stuckUpdates.oldestAgeMs,
       });
+    if (pick(business.retryingUpdates))
+      raise(
+        "updates.retrying",
+        {
+          count: business.retryingUpdates.count,
+          oldestAgeMs: business.retryingUpdates.oldestAgeMs,
+        },
+        business.retryingUpdates.oldestAgeMs > thresholds.retryingCriticalMs
+          ? "critical"
+          : "warning",
+      );
     if (pick(business.reconciliationDifferences))
       raise(
         "reconciliation.differences",

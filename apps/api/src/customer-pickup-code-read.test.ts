@@ -6,6 +6,12 @@ const ports = vi.hoisted(() => ({
   recover: vi.fn(),
   counterCode: vi.fn(),
   recoverCounterCode: vi.fn(),
+  codeChecks: vi.fn(),
+  counterOrders: vi.fn(),
+}));
+vi.mock("@rms/ordering", async (original) => ({
+  ...(await original<typeof import("@rms/ordering")>()),
+  listStoreCounterOrders: ports.counterOrders,
 }));
 vi.mock("./customer-order-status-read.js", () => ({
   createCustomerOrderStatusRead: () => ({ read: ports.status }),
@@ -16,6 +22,7 @@ vi.mock("@rms/fulfillment", async (original) => ({
   createPostgresPickupProofStore: () => ({
     lockByOrder: ports.proof,
     currentCounterCode: ports.counterCode,
+    codeChecks: ports.codeChecks,
   }),
 }));
 import {
@@ -80,6 +87,8 @@ beforeEach(() => {
   ports.recover.mockReturnValue("synthetic-proof-result");
   ports.counterCode.mockResolvedValue({ derivationIndex: 0, selectorHash: "a".repeat(64) });
   ports.recoverCounterCode.mockReturnValue("048213");
+  ports.codeChecks.mockResolvedValue({ rejections: 0, locked: false, counterCode: true });
+  ports.counterOrders.mockResolvedValue(new Set());
 });
 describe("current Guest pickup proof read", () => {
   it("denies mismatched Store configuration before any query", () => {
@@ -170,5 +179,55 @@ describe("current Guest pickup proof read", () => {
       throw new Error("expired");
     });
     await expect(createCustomerPickupCodeRead(options()).read(input)).rejects.toThrow("expired");
+  });
+  // WP-2423: a Ready order is never reported as not ready when it has no usable code.
+  it("says a ready counter order is ready without issuing or reading a code", async () => {
+    ports.counterOrders.mockResolvedValue(new Set([input.orderReference]));
+    await expect(createCustomerPickupCodeRead(options()).read(input)).resolves.toEqual({
+      schemaVersion: 1,
+      status: "ReadyWithoutCode",
+      orderReference: input.orderReference,
+      orderNumber: "11",
+      reason: "CounterOrder",
+    });
+    expect(ports.proof).not.toHaveBeenCalled();
+    expect(ports.recover).not.toHaveBeenCalled();
+    expect(ports.status).toHaveBeenCalledTimes(2);
+  });
+  it("says a ready order whose code is still being issued is ready", async () => {
+    ports.proof.mockResolvedValue({ capability: null });
+    await expect(createCustomerPickupCodeRead(options()).read(input)).resolves.toMatchObject({
+      status: "ReadyWithoutCode",
+      orderNumber: "11",
+      reason: "CodePending",
+    });
+    expect(ports.recover).not.toHaveBeenCalled();
+  });
+  it("says a ready order is ready once its code window ended, without recovering it", async () => {
+    ports.proof.mockResolvedValue({
+      capability: { generation: 1, expiresAt: "2026-09-20T06:00:00.000Z" },
+    });
+    await expect(createCustomerPickupCodeRead(options()).read(input)).resolves.toMatchObject({
+      status: "ReadyWithoutCode",
+      reason: "CodeUnavailable",
+    });
+    expect(ports.recover).not.toHaveBeenCalled();
+  });
+  it("says a ready order is ready when code checks locked after wrong tries", async () => {
+    ports.codeChecks.mockResolvedValue({ rejections: 5, locked: true, counterCode: true });
+    await expect(createCustomerPickupCodeRead(options()).read(input)).resolves.toMatchObject({
+      status: "ReadyWithoutCode",
+      reason: "CodeUnavailable",
+    });
+    expect(ports.recover).not.toHaveBeenCalled();
+  });
+  it("rechecks Guest authorization before saying a code-less order is ready", async () => {
+    ports.proof.mockResolvedValue({ capability: null });
+    ports.status
+      .mockResolvedValueOnce({
+        order: { orderType: "Pickup", orderNumber: "11", fulfillmentStatus: "Pending" },
+      })
+      .mockRejectedValueOnce(new Error("revoked"));
+    await expect(createCustomerPickupCodeRead(options()).read(input)).rejects.toThrow("revoked");
   });
 });

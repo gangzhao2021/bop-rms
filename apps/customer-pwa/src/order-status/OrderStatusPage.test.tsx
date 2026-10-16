@@ -899,7 +899,7 @@ it("WP-2423 Q26: a ready pickup with a dish being remade says to wait, not that 
     "We&#x27;re remaking part of your order. We&#x27;ll have it ready shortly",
   );
   expect(html).toContain("Being remade");
-  expect(html).not.toContain("Your order is ready. Show your pickup code at the counter.");
+  expect(html).not.toContain("Your order is ready. Collect it at the counter.");
   // The pickup code stays available.
   expect(html).toContain("Checking your pickup code");
 });

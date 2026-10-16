@@ -19,8 +19,25 @@ export interface PickupCodeView {
   readonly expiresAt: string;
 }
 
+/**
+ * WP-2423: the order is ready but has no code to show. `CounterOrder`: staff took it at the
+ * counter; `CodePending`: the code is still being issued; `CodeUnavailable`: its time window
+ * ended or code checks were locked. Staff hand the order over after checking name or phone.
+ */
+export type PickupWithoutCodeReason = "CounterOrder" | "CodePending" | "CodeUnavailable";
+export interface PickupWithoutCodeView {
+  readonly status: "ReadyWithoutCode";
+  readonly orderNumber: string;
+  readonly reason: PickupWithoutCodeReason;
+}
+
 export type PickupCodeState =
   | { readonly status: "hidden" }
+  | {
+      readonly status: "ready-without-code";
+      readonly orderNumber: string;
+      readonly reason: PickupWithoutCodeReason;
+    }
   | { readonly status: "loading" }
   | { readonly status: "not-ready" }
   | { readonly status: "permission-denied" }
@@ -110,7 +127,8 @@ function parseInstant(value: unknown): string {
   return value;
 }
 
-export type PickupCodeResult = { readonly status: "NotReady" } | PickupCodeView;
+export type PickupCodeResult =
+  { readonly status: "NotReady" } | PickupWithoutCodeView | PickupCodeView;
 
 export function parsePickupCodeResult(
   value: unknown,
@@ -131,20 +149,22 @@ export function parsePickupCodeResult(
     value,
     status === "NotReady"
       ? ["schemaVersion", "status", "orderReference"]
-      : [
-          "schemaVersion",
-          "status",
-          "orderReference",
-          "orderNumber",
-          "storeDisplayName",
-          "pickupInstruction",
-          "generation",
-          "proofKind",
-          "proofValue",
-          "counterCode",
-          "observedAt",
-          "expiresAt",
-        ],
+      : status === "ReadyWithoutCode"
+        ? ["schemaVersion", "status", "orderReference", "orderNumber", "reason"]
+        : [
+            "schemaVersion",
+            "status",
+            "orderReference",
+            "orderNumber",
+            "storeDisplayName",
+            "pickupInstruction",
+            "generation",
+            "proofKind",
+            "proofValue",
+            "counterCode",
+            "observedAt",
+            "expiresAt",
+          ],
   );
   if (
     base.schemaVersion !== 1 ||
@@ -153,6 +173,20 @@ export function parsePickupCodeResult(
   )
     return invalid();
   if (base.status === "NotReady") return Object.freeze({ status: "NotReady" });
+  if (base.status === "ReadyWithoutCode") {
+    if (
+      base.orderNumber !== expectedOrderNumber ||
+      (base.reason !== "CounterOrder" &&
+        base.reason !== "CodePending" &&
+        base.reason !== "CodeUnavailable")
+    )
+      return invalid();
+    return Object.freeze({
+      status: "ReadyWithoutCode",
+      orderNumber: expectedOrderNumber,
+      reason: base.reason,
+    });
+  }
   if (
     base.status !== "Ready" ||
     base.orderNumber !== expectedOrderNumber ||
@@ -291,6 +325,16 @@ export function createPickupCodeController(
         scheduleFollow();
         return;
       }
+      if (result.status === "ReadyWithoutCode") {
+        publish({
+          status: "ready-without-code",
+          orderNumber: result.orderNumber,
+          reason: result.reason,
+        });
+        // A code still being issued is followed until it arrives; the other reasons are final.
+        if (result.reason === "CodePending") scheduleFollow();
+        return;
+      }
       followAttempt = 0;
       publish({ status: "ready", view: result, refreshing: false });
       const delay = Date.parse(result.expiresAt) - clock();
@@ -333,7 +377,12 @@ export function createPickupCodeController(
       following = active;
       followAttempt = 0;
       clearFollow();
-      if (active && (state.status === "not-ready" || state.status === "unavailable"))
+      if (
+        active &&
+        (state.status === "not-ready" ||
+          state.status === "unavailable" ||
+          (state.status === "ready-without-code" && state.reason === "CodePending"))
+      )
         scheduleFollow();
     },
     dispose() {

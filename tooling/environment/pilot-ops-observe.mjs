@@ -145,15 +145,38 @@ export async function observeDisks(paths, statfs = fs.statfs) {
   }
 }
 
-const DEAD_LETTER_SUMMARY =
+export const DEAD_LETTER_SUMMARY =
   "SELECT count(*)::int AS count, min(opened_at) AS oldest FROM platform_eventing.dead_letter_item WHERE status IN ('open','retry_scheduled')";
+/**
+ * WP-2423 (2026-10-16): early warning before a dead letter. Under the eventing retry policy a
+ * failing event is dead-lettered only after 8 tries (about 36-71 minutes), so the stuck-updates
+ * alert came 43 minutes after the kitchen finished an order. These read work that is still being
+ * retried: a consumer retry not yet completed or dead-lettered that has failed 4 times (the first
+ * try plus 3 retries) or began failing at least 10 minutes ago, and an unpublished, not dead-
+ * lettered outbox event that has been tried 4 times or has been due for 10 minutes (including
+ * events held behind an earlier one of the same order). Counts and instants only.
+ *
+ * Retry rows carry no first-failure instant; their deadline is that instant plus the policy's
+ * 24-hour horizon (`retryPolicy.maximumHorizonMs`), so `deadline_at <= $1` with $1 = now - 10 min
+ * + 24 h selects work failing for 10 minutes or more. Retry rows are Store- or Brand-scoped like
+ * dead letters (row security shows one scope per transaction); outbox rows of the Brand are also
+ * visible in the Store transaction, so the outbox is read there only.
+ */
+export const RETRYING_UPDATE_ATTEMPTS = 4;
+export const RETRYING_UPDATE_AGE_MS = 10 * 60_000;
+export const RETRY_HORIZON_MS = 24 * 60 * 60_000;
+export const CONSUMER_RETRYING_SUMMARY =
+  "SELECT count(*)::int AS count, min(deadline_at) AS oldest_deadline FROM platform_eventing.consumer_retry_schedule WHERE state IN ('scheduled','claimed') AND (attempt_count >= $1 OR deadline_at <= $2)";
+export const OUTBOX_RETRYING_SUMMARY =
+  "SELECT count(*)::int AS count, min(recorded_at) AS oldest FROM platform_eventing.outbox_event WHERE published_at IS NULL AND last_error_code IS NULL AND (attempt_count >= $1 OR available_at <= $2)";
 const settlementMissingGraceMs = 6 * 60 * 60_000;
 
 /**
  * Payment and settlement signals for the installation's Store, through the api role and its
  * Brand/Store row security. Stuck updates: dead-lettered events (Store rows and Brand-wide rows);
- * reconciliation differences: owner exception source items not yet closed by a refund; settlement:
- * the daily settlement status (days with differences, and closed days still missing after 6 h).
+ * retrying updates: events still being retried for a while (see above); reconciliation
+ * differences: owner exception source items not yet closed by a refund; settlement: the daily
+ * settlement status (days with differences, and closed days still missing after 6 h).
  */
 export async function readBusinessSignals({
   resources,
@@ -165,11 +188,25 @@ export async function readBusinessSignals({
   const age = (instant) => (instant === null ? 0 : Math.max(0, now - Date.parse(instant)));
   const iso = (value) =>
     value === null || value === undefined ? null : new Date(value).toISOString();
-  const store = await resources.transactions.run((tx) => tx.query(DEAD_LETTER_SUMMARY, []));
+  const consumerParameters = [
+    RETRYING_UPDATE_ATTEMPTS,
+    new Date(now - RETRYING_UPDATE_AGE_MS + RETRY_HORIZON_MS).toISOString(),
+  ];
+  const store = await resources.transactions.run(async (tx) => ({
+    dead: await tx.query(DEAD_LETTER_SUMMARY, []),
+    consumer: await tx.query(CONSUMER_RETRYING_SUMMARY, consumerParameters),
+    outbox: await tx.query(OUTBOX_RETRYING_SUMMARY, [
+      RETRYING_UPDATE_ATTEMPTS,
+      new Date(now - RETRYING_UPDATE_AGE_MS).toISOString(),
+    ]),
+  }));
   const brand = await resources.database
     .transactions({ brandId: resources.scope.brandReference })
-    .run((tx) => tx.query(DEAD_LETTER_SUMMARY, []));
-  const deadRows = [...store.rows, ...brand.rows];
+    .run(async (tx) => ({
+      dead: await tx.query(DEAD_LETTER_SUMMARY, []),
+      consumer: await tx.query(CONSUMER_RETRYING_SUMMARY, consumerParameters),
+    }));
+  const deadRows = [...store.dead.rows, ...brand.dead.rows];
   const deadOldest =
     deadRows
       .map((row) => iso(row.oldest))
@@ -178,6 +215,19 @@ export async function readBusinessSignals({
   const stuckUpdates = {
     count: deadRows.reduce((sum, row) => sum + Number(row.count), 0),
     oldestAgeMs: age(deadOldest),
+  };
+  const consumerRows = [...store.consumer.rows, ...brand.consumer.rows];
+  const retryingOldest =
+    [
+      ...consumerRows
+        .map((row) => iso(row.oldest_deadline))
+        .filter((value) => value !== null)
+        .map((value) => new Date(Date.parse(value) - RETRY_HORIZON_MS).toISOString()),
+      ...store.outbox.rows.map((row) => iso(row.oldest)).filter((value) => value !== null),
+    ].sort()[0] ?? null;
+  const retryingUpdates = {
+    count: [...consumerRows, ...store.outbox.rows].reduce((sum, row) => sum + Number(row.count), 0),
+    oldestAgeMs: age(retryingOldest),
   };
 
   const page = dependencies.createReconciliationExceptions(resources);
@@ -199,6 +249,7 @@ export async function readBusinessSignals({
   if (settlementExceptions !== null)
     return {
       stuckUpdates,
+      retryingUpdates,
       reconciliationDifferences: { count: open, oldestAgeMs: age(oldest) },
       settlementExceptions,
     };
@@ -211,6 +262,7 @@ export async function readBusinessSignals({
   const settlementOldest = problems.map((day) => day.endsAt).sort()[0] ?? null;
   return {
     stuckUpdates,
+    retryingUpdates,
     reconciliationDifferences: { count: open, oldestAgeMs: age(oldest) },
     settlementExceptions: { count: problems.length, oldestAgeMs: age(settlementOldest) },
   };

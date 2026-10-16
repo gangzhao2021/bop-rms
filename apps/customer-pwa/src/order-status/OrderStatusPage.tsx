@@ -306,7 +306,7 @@ function StatusContent({
                           ? view.order.orderType === "Pickup"
                             ? [
                                 "Ready for pickup",
-                                "Your order is ready. Show your pickup code at the counter.",
+                                "Your order is ready. Collect it at the counter.",
                               ]
                             : ["Kitchen preparation complete", "All listed batches are ready."]
                           : kitchenLabel === "Preparing"

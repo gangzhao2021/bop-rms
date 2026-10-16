@@ -32,6 +32,7 @@ function fakeIo({ apiUp = () => true, channels = [] } = {}) {
     observeSupervisor: async () => ({ maintenance: false, reportAgeMs: 1000, attention: [] }),
     observeBusiness: async () => ({
       stuckUpdates: { count: 0, oldestAgeMs: 0 },
+      retryingUpdates: { count: 0, oldestAgeMs: 0 },
       reconciliationDifferences: { count: 0, oldestAgeMs: 0 },
       settlementExceptions: { count: 0, oldestAgeMs: 0 },
     }),
@@ -181,14 +182,36 @@ describe("WP-2423 Q13 observations", () => {
   });
   it("summarises stuck updates, open differences and settlement problems as counts and ages only", async () => {
     const now = Date.parse("2026-10-15T16:00:00.000Z");
-    const run = (rows) => ({ run: async (work) => work({ query: async () => ({ rows }) }) });
+    // Each scope answers by statement: dead letters, consumer retries, outbox events.
+    const queries = [];
+    const run = (answers) => ({
+      run: async (work) =>
+        work({
+          query: async (sql, parameters) => {
+            queries.push([sql, parameters]);
+            if (sql.includes("dead_letter_item")) return { rows: answers.dead };
+            if (sql.includes("consumer_retry_schedule")) return { rows: answers.consumer };
+            if (sql.includes("outbox_event")) return { rows: answers.outbox };
+            throw Error("unexpected query");
+          },
+        }),
+    });
     const resources = {
       scope: { brandReference: "b", storeReference: "s" },
-      transactions: run([{ count: 2, oldest: new Date("2026-10-15T15:00:00.000Z") }]),
+      transactions: run({
+        dead: [{ count: 2, oldest: new Date("2026-10-15T15:00:00.000Z") }],
+        // Store retry first failed at 15:40 (deadline = first failure + 24 h).
+        consumer: [{ count: 1, oldest_deadline: new Date("2026-10-16T15:40:00.000Z") }],
+        outbox: [{ count: 1, oldest: new Date("2026-10-15T15:45:00.000Z") }],
+      }),
       database: {
         transactions: (scope) => (
           expect(scope).toEqual({ brandId: "b" }),
-          run([{ count: 1, oldest: null }])
+          run({
+            dead: [{ count: 1, oldest: null }],
+            consumer: [{ count: 0, oldest_deadline: null }],
+            outbox: [{ count: 99, oldest: new Date("2026-10-01T00:00:00.000Z") }],
+          })
         ),
       },
     };
@@ -223,9 +246,19 @@ describe("WP-2423 Q13 observations", () => {
     });
     expect(value).toEqual({
       stuckUpdates: { count: 3, oldestAgeMs: 3600_000 },
+      // WP-2423: retries still running (4 tries or failing 10+ minutes), oldest failing 20 minutes.
+      retryingUpdates: { count: 2, oldestAgeMs: 20 * 60_000 },
       reconciliationDifferences: { count: 2, oldestAgeMs: 24 * 3600_000 },
       settlementExceptions: { count: 2, oldestAgeMs: 32 * 3600_000 },
     });
+    // The outbox is read in the Store scope only (Brand-wide events are visible there too).
+    expect(queries.filter(([sql]) => sql.includes("outbox_event"))).toEqual([
+      [expect.any(String), [4, "2026-10-15T15:50:00.000Z"]],
+    ]);
+    expect(queries.filter(([sql]) => sql.includes("consumer_retry_schedule"))).toEqual([
+      [expect.any(String), [4, "2026-10-16T15:50:00.000Z"]],
+      [expect.any(String), [4, "2026-10-16T15:50:00.000Z"]],
+    ]);
   });
   it("reports business signals as unreadable when the database cannot be reached, and retries", async () => {
     const load = vi.fn(async () => {

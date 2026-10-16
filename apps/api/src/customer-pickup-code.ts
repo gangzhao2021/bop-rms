@@ -81,6 +81,22 @@ export class CustomerPickupCodeHandler {
             .json({ schemaVersion: 1, status: "NotReady", orderReference: input.orderReference });
           return;
         }
+        // WP-2423: Ready with no usable code; staff hand it over in person (name or phone).
+        if (view.status === "ReadyWithoutCode") {
+          if (
+            !/^[1-9][0-9]{0,18}$/u.test(view.orderNumber) ||
+            !["CounterOrder", "CodePending", "CodeUnavailable"].includes(view.reason)
+          )
+            throw new Error("PICKUP_RESULT_INVALID");
+          response.status(200).json({
+            schemaVersion: 1,
+            status: "ReadyWithoutCode",
+            orderReference: input.orderReference,
+            orderNumber: view.orderNumber,
+            reason: view.reason,
+          });
+          return;
+        }
         if (
           view.status !== "Ready" ||
           view.proofKind !== "Opaque" ||

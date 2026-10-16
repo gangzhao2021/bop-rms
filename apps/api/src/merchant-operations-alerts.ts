@@ -18,6 +18,7 @@ export const operationsAlertKeys = Object.freeze([
   "supervisor.silent",
   "service.attention",
   "payment.updates",
+  "updates.retrying",
   "reconciliation.differences",
   "settlement.exceptions",
   "backup.failed",

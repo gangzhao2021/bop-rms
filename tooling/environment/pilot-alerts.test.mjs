@@ -21,6 +21,7 @@ const healthy = (now = T0) => ({
   supervisor: { maintenance: false, reportAgeMs: 5000, attention: [] },
   business: {
     stuckUpdates: { count: 0, oldestAgeMs: 0 },
+    retryingUpdates: { count: 0, oldestAgeMs: 0 },
     reconciliationDifferences: { count: 0, oldestAgeMs: 0 },
     settlementExceptions: { count: 0, oldestAgeMs: 0 },
   },
@@ -87,6 +88,41 @@ describe("WP-2423 Q13 alert rules", () => {
       "payment and settlement status",
       "disk space",
     ]);
+  });
+  it("WP-2423: warns while order updates are still being retried, urgent after 30 minutes, and clears once processed", () => {
+    const o = healthy();
+    o.business.retryingUpdates = { count: 1, oldestAgeMs: 2 * MIN };
+    const c = evaluateAlertConditions(o);
+    expect(keys(c)).toEqual(["updates.retrying"]);
+    expect(c.get("updates.retrying").severity).toBe("warning");
+    const text = renderAlert("updates.retrying", c.get("updates.retrying").params);
+    expect(text.title).toBe("Some order updates are being retried");
+    expect(text.summary).toContain("1 order update is being retried (failing for 2 minutes)");
+    expect(text.summary).toContain("Ready orders may not show for pickup yet");
+    expect(text.action).toContain("name or phone number");
+    expect(text.runbook).toBe("alert-updates-retrying");
+    expect(text.summary.length).toBeLessThanOrEqual(600);
+    expect(text.action.length).toBeLessThanOrEqual(400);
+    // Raised on the first cycle it is seen (no wait), escalated after 30 minutes.
+    let { state, notifications } = advanceAlertState(emptyAlertState(), c, T0);
+    expect(notifications.map((n) => [n.kind, n.key])).toEqual([["raised", "updates.retrying"]]);
+    o.business.retryingUpdates = { count: 2, oldestAgeMs: 31 * MIN };
+    ({ state, notifications } = advanceAlertState(
+      state,
+      evaluateAlertConditions(o),
+      T0 + 29 * MIN,
+    ));
+    expect(notifications.map((n) => [n.kind, n.severity])).toEqual([["escalated", "critical"]]);
+    // Processed: the condition is gone and the alert clears after the quiet period.
+    o.business.retryingUpdates = { count: 0, oldestAgeMs: 0 };
+    ({ state, notifications } = advanceAlertState(
+      state,
+      evaluateAlertConditions(o),
+      T0 + 30 * MIN,
+    ));
+    expect(notifications).toEqual([]);
+    ({ notifications } = advanceAlertState(state, evaluateAlertConditions(o), T0 + 32 * MIN));
+    expect(notifications.map((n) => [n.kind, n.key])).toEqual([["cleared", "updates.retrying"]]);
   });
   it("says no backup exists until the first one, and nothing about the supervisor during maintenance", () => {
     const o = healthy();

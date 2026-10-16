@@ -128,3 +128,30 @@ it("says the code is on its way, not that the order isn't ready, once the order 
   expect(html).toContain("Your pickup code appears here in a moment.");
   expect(html).not.toContain("isn’t ready yet");
 });
+
+it("says a ready order without a usable code is ready and how staff hand it over (WP-2423)", () => {
+  const show = (reason: "CounterOrder" | "CodePending" | "CodeUnavailable") =>
+    renderToStaticMarkup(
+      <PickupCodePanel
+        orderReference={id(1)}
+        orderNumber="1001"
+        controller={controller({ status: "ready-without-code", orderNumber: "1001", reason })}
+        autoReveal
+      />,
+    );
+  const counter = show("CounterOrder");
+  expect(counter).toContain("Your order is ready at the counter.");
+  expect(counter).toContain("<code>1001</code>");
+  const unavailable = show("CodeUnavailable");
+  expect(unavailable).toContain(
+    "Your order is ready. Show your order number at the counter — staff will check your name or phone number.",
+  );
+  expect(unavailable).toContain("<code>1001</code>");
+  const pending = show("CodePending");
+  expect(pending).toContain("Your pickup code appears here in a moment.");
+  expect(pending).toContain("show your order number");
+  for (const html of [counter, unavailable, pending]) {
+    expect(html).not.toContain("isn’t ready");
+    expect(html).toContain("Ready for pickup");
+  }
+});

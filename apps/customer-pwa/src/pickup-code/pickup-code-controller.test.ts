@@ -325,3 +325,66 @@ it("does not follow up a not-ready code before the order is Ready", async () => 
   expect(calls).toBe(1);
   controller.dispose();
 });
+
+// WP-2423: a ready order without a usable code is never shown as not ready.
+it("shows a ready order without a usable code and follows only a code still being issued", async () => {
+  vi.useFakeTimers();
+  const without = (reason: string, orderNumber = "1001") => ({
+    schemaVersion: 1,
+    status: "ReadyWithoutCode",
+    orderReference: id(1),
+    orderNumber,
+    reason,
+  });
+  expect(parsePickupCodeResult(without("CounterOrder"), id(1), "1001", now)).toEqual({
+    status: "ReadyWithoutCode",
+    orderNumber: "1001",
+    reason: "CounterOrder",
+  });
+  for (const value of [
+    without("Expired"),
+    without("CodeUnavailable", "1002"),
+    { ...without("CodePending"), extra: true },
+  ])
+    expect(() => parsePickupCodeResult(value, id(1), "1001", now)).toThrow();
+  const answers: unknown[] = [without("CodePending"), without("CodePending"), ready()];
+  let calls = 0;
+  const client: CustomerPickupCodeClient = { load: async () => answers[calls++] };
+  const controller = createPickupCodeController(id(1), "1001", client, () => now);
+  controller.followUntilReady?.(true);
+  await controller.reveal();
+  expect(controller.getState()).toEqual({
+    status: "ready-without-code",
+    orderNumber: "1001",
+    reason: "CodePending",
+  });
+  await vi.advanceTimersByTimeAsync(2_000);
+  expect(calls).toBe(2);
+  await vi.advanceTimersByTimeAsync(3_000);
+  expect(calls).toBe(3);
+  expect(controller.getState().status).toBe("ready");
+  controller.dispose();
+
+  let finalCalls = 0;
+  const final = createPickupCodeController(
+    id(1),
+    "1001",
+    {
+      load: async () => {
+        finalCalls += 1;
+        return without("CodeUnavailable");
+      },
+    },
+    () => now,
+  );
+  final.followUntilReady?.(true);
+  await final.reveal();
+  expect(final.getState()).toEqual({
+    status: "ready-without-code",
+    orderNumber: "1001",
+    reason: "CodeUnavailable",
+  });
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(finalCalls).toBe(1);
+  final.dispose();
+});

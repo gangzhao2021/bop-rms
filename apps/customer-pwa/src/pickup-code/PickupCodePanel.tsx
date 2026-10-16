@@ -61,7 +61,9 @@ export function PickupCodePanel({
   );
   return (
     <section className="pickup-code" aria-labelledby="pickup-code-heading">
-      <h2 id="pickup-code-heading">Pickup code</h2>
+      <h2 id="pickup-code-heading">
+        {state.status === "ready-without-code" ? "Pickup" : "Pickup code"}
+      </h2>
       {state.status === "hidden" ? (
         autoReveal ? (
           <p role="status">Checking your pickup code…</p>
@@ -137,6 +139,29 @@ export function PickupCodePanel({
             Check again
           </button>
         </>
+      ) : null}
+      {state.status === "ready-without-code" ? (
+        // WP-2423: ready, but no code to show; staff hand it over after checking name or phone.
+        <div className="pickup-code__ready" role="status">
+          <p className="bop-eyebrow">{remaking ? "Almost ready" : "Ready for pickup"}</p>
+          {remaking ? (
+            <p className="pickup-code__wait">
+              Part of your order is being remade. Please wait until it&apos;s ready before
+              collecting it.
+            </p>
+          ) : null}
+          <p>
+            {state.reason === "CounterOrder"
+              ? "Your order is ready at the counter."
+              : state.reason === "CodePending"
+                ? "Your order is ready. Your pickup code appears here in a moment. If you’re already at the counter, show your order number — staff will check your name or phone number."
+                : "Your order is ready. Show your order number at the counter — staff will check your name or phone number."}
+          </p>
+          <div className="pickup-code__visual pickup-code__visual--short">
+            <span>Your order number</span>
+            <code>{state.orderNumber}</code>
+          </div>
+        </div>
       ) : null}
       {state.status === "ready" ? (
         <div className="pickup-code__ready" role="status">

@@ -8,6 +8,15 @@ import {
   type createPickupCredentialProvider,
   PickupProofError,
 } from "@rms/fulfillment";
+import { listStoreCounterOrders } from "@rms/ordering";
+
+/**
+ * WP-2423: why a Ready pickup order has no code to show. `CounterOrder`: staff took it at the
+ * counter, so none is issued; `CodePending`: the code is being issued (normally seconds);
+ * `CodeUnavailable`: its 1-hour window ended or code checks locked after wrong tries. In every
+ * case staff hand the order over in person after checking the guest's name or phone number.
+ */
+export type CustomerPickupWithoutCodeReason = "CounterOrder" | "CodePending" | "CodeUnavailable";
 
 export interface CustomerPickupCodeReadOptions {
   readonly status: Parameters<typeof createCustomerOrderStatusRead>[0];
@@ -71,18 +80,37 @@ export function createCustomerPickupCodeRead(options: CustomerPickupCodeReadOpti
         });
         if (source === null || parseFulfillmentReadinessSource(source).canonicalPhase !== "Ready")
           return notReady;
-        const current = await proof.lockByOrder({
-          transaction,
-          orderReference: input.orderReference,
-        });
-        if (current.capability === null) return notReady;
+        const observedAt = options.status.now();
+        // WP-2423: a Ready order is never reported as not ready. Without a usable code the guest
+        // is told the order is ready and how staff hand it over in person.
+        let withoutCode: CustomerPickupWithoutCodeReason | null = null;
+        const counterOrders = await listStoreCounterOrders(transaction, scope, [
+          input.orderReference,
+        ]);
+        const current = counterOrders.has(input.orderReference)
+          ? null
+          : await proof.lockByOrder({ transaction, orderReference: input.orderReference });
+        if (current === null) withoutCode = "CounterOrder";
+        else if (current.capability === null) withoutCode = "CodePending";
+        else if (
+          Date.parse(observedAt) >= Date.parse(current.capability.expiresAt) ||
+          (await proof.codeChecks({ transaction, orderReference: input.orderReference })).locked
+        )
+          withoutCode = "CodeUnavailable";
         const after = await status.read(input);
         if (
           after.order.orderNumber !== before.order.orderNumber ||
           after.order.fulfillmentStatus === "Completed"
         )
           throw new PickupProofError("PICKUP_PROOF_UNAVAILABLE");
-        const observedAt = options.status.now();
+        if (withoutCode !== null || current?.capability == null)
+          return {
+            schemaVersion: 1 as const,
+            status: "ReadyWithoutCode" as const,
+            orderReference: input.orderReference,
+            orderNumber: after.order.orderNumber,
+            reason: withoutCode ?? ("CodePending" as const),
+          };
         const proofValue = options.credentials.recoverOpaque({
           brandReference: scope.brandReference,
           capability: current.capability,

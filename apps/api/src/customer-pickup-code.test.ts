@@ -111,3 +111,30 @@ it("rejects a proof bound to a different order", async () => {
   });
   expect((await f.request()).status).toBe(503);
 });
+it("WP-2423: answers a ready order without a usable code with only its number and reason", async () => {
+  const f = await setup();
+  f.read.mockResolvedValue({
+    schemaVersion: 1,
+    status: "ReadyWithoutCode",
+    orderReference: id,
+    orderNumber: "12",
+    reason: "CodeUnavailable",
+  });
+  const response = await f.request();
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({
+    schemaVersion: 1,
+    status: "ReadyWithoutCode",
+    orderReference: id,
+    orderNumber: "12",
+    reason: "CodeUnavailable",
+  });
+  f.read.mockResolvedValue({
+    schemaVersion: 1,
+    status: "ReadyWithoutCode",
+    orderReference: id,
+    orderNumber: "12",
+    reason: "Other",
+  });
+  expect((await f.request()).status).toBe(503);
+});
