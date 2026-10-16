@@ -6,6 +6,8 @@ import {
   type DigitalReceiptChain,
 } from "@rms/ordering";
 import type { RequestHandler, Response } from "express";
+import { customerFailureCode } from "./customer-failure-diagnostic.js";
+import { markRequestFailure } from "./request-correlation.js";
 import { storeContactJson, type CustomerStoreContact } from "./customer-store-contact.js";
 
 export const customerReceiptRoute = "/api/v1/orders/:order_id/receipt";
@@ -213,6 +215,7 @@ export class CustomerReceiptHandler {
             ["DIGITAL_RECEIPT_PERMISSION_DENIED", "DIGITAL_RECEIPT_NOT_FOUND"].includes(error.code))
             ? 404
             : 503;
+        if (status === 503) markRequestFailure(request, customerFailureCode(error));
         reject(response, status);
       }
     };

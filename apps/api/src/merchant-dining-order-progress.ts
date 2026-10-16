@@ -3,6 +3,7 @@ import {
   createPostgresMerchantOrderIndex,
   createPostgresOrderClosurePosition,
   createPostgresMerchantOrderItemLabels,
+  loadMerchantOrderLines,
   parseOrderingReference,
 } from "@rms/ordering";
 import type { ConsumerTransaction } from "@bop/eventing";
@@ -120,15 +121,42 @@ export function createMerchantDiningOrderProgress(options: {
           );
           if (labels.length !== membership.size)
             throw new Error("DINING_ORDER_PROGRESS_UNAVAILABLE");
+          // WP-2423 (v15 2026-10-16): each line's options and the customer's note ("Cup 3"), as the
+          // order detail shows them, so staff serving several identical drinks can tell them
+          // apart. Ordering's own order lines; if they can't be read the lines show by name only.
+          let details: ReadonlyMap<
+            string,
+            { options: readonly { name: string; quantity: number }[]; customerNote: string | null }
+          > | null = null;
+          try {
+            if ((await allowed()) === true) {
+              const lines = await loadMerchantOrderLines(
+                businessTransaction,
+                scope,
+                orderReference,
+                options.locale,
+              );
+              if (lines !== null)
+                details = new Map(lines.items.map((line) => [line.orderItemReference, line]));
+            }
+          } catch (error) {
+            // A database failure aborts this transaction: never continue on it.
+            if (error !== null && typeof error === "object" && "diagnostic" in error) throw error;
+            details = null;
+          }
           const items = labels.map((label) => {
             const item = membership.get(label.orderItemReference);
             if (!item || String(item.orderBatchReference) !== String(label.orderBatchReference))
               throw new Error("DINING_ORDER_PROGRESS_UNAVAILABLE");
+            const detail = details?.get(label.orderItemReference);
             return Object.freeze({
               ...item,
               displayName: label.displayName,
               batchSequence: label.batchSequence,
               itemOrdinal: label.itemOrdinal,
+              ...(detail === undefined
+                ? {}
+                : { options: detail.options, customerNote: detail.customerNote }),
             });
           });
           const table = await createMerchantDiningTableContext({

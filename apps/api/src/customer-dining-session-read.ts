@@ -33,6 +33,8 @@ import {
   listStoreOrderBatchPaymentOutcomes,
   listStoreOrderBatchesWithOnlinePayment,
 } from "@rms/payment";
+import { retryTransactionConflict } from "./transaction-conflict-retry.js";
+import { withFailureCause } from "./customer-failure-diagnostic.js";
 import type { createCustomerOrderStatusRead } from "./customer-order-status-read.js";
 import { createDiningOrderDeliveryProgress } from "./dining-order-delivery-progress.js";
 import { readItemCancellationRefundStatus } from "./merchant-order-item-staff-cancellation.js";
@@ -786,8 +788,15 @@ export function createCustomerDiningSessionRead(
         throw new OrderStatusProjectionError("ORDER_STATUS_INPUT_INVALID");
       }
       const deps = (dependencies ?? ((c) => postgresDependencies(options, c)))(credentials);
+      // v15 2026-10-16: this read authorizes (reading the Dining table row FOR SHARE) before it
+      // knows the order, so it cannot take the Order fence first; a deadlock or lock wait with a
+      // payment outcome or acceptance is rerun instead of answering 503.
+      const transactions = {
+        run: <T>(work: (transaction: ConsumerTransaction) => Promise<T>) =>
+          retryTransactionConflict(() => options.transactions.run(work)),
+      };
       try {
-        return await options.transactions.run(async (transaction) => {
+        return await transactions.run(async (transaction) => {
           let previous: string | undefined;
           const now = () => {
             const at = String(parseCanonicalInstant(options.now()));
@@ -825,7 +834,10 @@ export function createCustomerDiningSessionRead(
         if (error instanceof OrderStatusProjectionError) throw error;
         if (error instanceof GuestSessionError)
           throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
-        throw new OrderStatusProjectionError("ORDER_STATUS_DEPENDENCY_UNAVAILABLE");
+        throw withFailureCause(
+          new OrderStatusProjectionError("ORDER_STATUS_DEPENDENCY_UNAVAILABLE"),
+          error,
+        );
       }
     },
   });

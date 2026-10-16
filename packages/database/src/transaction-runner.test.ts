@@ -151,6 +151,33 @@ describe("WP-2212 pooled transaction runner", () => {
       diagnostic: { sqlState: null, constraint: null, table: null, closed: true },
     });
   });
+  it("keeps the caller's own error after a failed query, with the SQLSTATE riding along", async () => {
+    const f = fixture();
+    f.query.mockImplementation(async (sql: string) => {
+      if (sql === "SELECT denied")
+        throw Object.assign(new Error("permission denied for table secret_table"), {
+          code: "42501",
+        });
+      return { rows: [] };
+    });
+    class DomainError extends Error {
+      readonly code = "ORDER_STATUS_DEPENDENCY_UNAVAILABLE";
+    }
+    const thrown = await f.runner
+      .run(async (t) => {
+        await t.query("SELECT denied", []).catch(() => {
+          throw new DomainError();
+        });
+      })
+      .catch((error: unknown) => error);
+    expect(thrown).toBeInstanceOf(DomainError);
+    expect(
+      Object.getOwnPropertyDescriptor(thrown, Symbol.for("bop.database.failure"))?.value,
+    ).toMatchObject({ sqlState: "42501" });
+    // Not enumerable: never serialized into a payload or log by accident.
+    expect(Object.keys(thrown as object)).not.toContain("sqlState");
+    expect(JSON.stringify(thrown)).not.toContain("42501");
+  });
   it("refuses a second query while one is in flight and rolls the transaction back", async () => {
     const f = fixture();
     let release: (() => void) | undefined;

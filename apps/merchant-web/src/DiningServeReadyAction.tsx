@@ -22,6 +22,58 @@ export function readyToServe(view: DiningProgress, batchSequence?: number): read
   );
 }
 
+/** "Small (8 oz) · Extra shot × 2", as the order detail writes a line's options. */
+export function optionsText(item: Item): string {
+  return (item.details?.options ?? [])
+    .map((option) => (option.quantity > 1 ? `${option.name} × ${option.quantity}` : option.name))
+    .join(" · ");
+}
+
+export interface ServeLine {
+  readonly key: string;
+  readonly quantity: number;
+  readonly name: string;
+  readonly options: string;
+  readonly note: string | null;
+  readonly round: number;
+}
+
+/**
+ * WP-2423 (v15 2026-10-16): what the confirmation lists. Lines that are the same dish with the
+ * same options and no note are one line ("10 × Flat White"); a line with a note ("Cup 3") stays on
+ * its own with that note, so staff can match each one at the table. A line whose options could not
+ * be read is never merged with another.
+ */
+export function serveLines(lines: readonly Item[], byRound: boolean): readonly ServeLine[] {
+  const result: ServeLine[] = [];
+  const grouped = new Map<string, number>();
+  for (const item of lines) {
+    const options = optionsText(item);
+    const note = item.details?.customerNote ?? null;
+    const line = {
+      key: item.orderItemReference,
+      quantity: item.remainingQuantity,
+      name: item.displayName,
+      options,
+      note,
+      round: item.batchSequence,
+    };
+    if (item.details === undefined || note !== null) {
+      result.push(line);
+      continue;
+    }
+    const same = JSON.stringify([item.displayName, options, byRound ? item.batchSequence : 0]);
+    const at = grouped.get(same);
+    const existing = at === undefined ? undefined : result[at];
+    if (existing === undefined) {
+      grouped.set(same, result.length);
+      result.push(line);
+    } else if (at !== undefined)
+      result[at] = { ...existing, quantity: existing.quantity + item.remainingQuantity };
+  }
+  return result;
+}
+
 const refusal = {
   Denied:
     "Nothing was marked served. Your access may have changed; check serving progress and try again.",
@@ -169,11 +221,15 @@ export function DiningServeReadyAction({
           Mark {items(lines.length)} served for {where}?
         </h2>
         <p>Each item is marked served in full. Only confirm once they are all on the table.</p>
-        <ul>
-          {lines.map((item) => (
-            <li key={item.orderItemReference}>
-              {item.remainingQuantity} × {item.displayName}
-              {scope.kind === "Table" ? ` · round ${item.batchSequence}` : ""}
+        <ul className="dining-serve-ready-lines">
+          {serveLines(lines, scope.kind === "Table").map((line) => (
+            <li key={line.key}>
+              {line.quantity} × {line.name}
+              {scope.kind === "Table" ? ` · round ${line.round}` : ""}
+              {line.options ? <span className="order-line-options">{line.options}</span> : null}
+              {line.note !== null ? (
+                <span className="order-line-note">Note: {line.note}</span>
+              ) : null}
             </li>
           ))}
         </ul>

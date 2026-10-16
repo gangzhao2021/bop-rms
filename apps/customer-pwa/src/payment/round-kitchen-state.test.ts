@@ -134,7 +134,9 @@ describe("WP-2423 paid round: sent to the kitchen only once staff accept it", ()
     expect(paidIntroText("SentToKitchen")).toBe(
       "Thank you. Your order has been sent to the kitchen.",
     );
-    for (const state of ["Checking", "Other", null] as const)
+    // Not known yet (or a read failed in passing): still checking, never another state.
+    expect(paidIntroText("Checking")).toBe("Paid. Checking on your order…");
+    for (const state of ["Other", null] as const)
       expect(paidIntroText(state)).toBe("Thank you. Your payment went through.");
   });
 
@@ -191,8 +193,12 @@ describe("WP-2423 paid round: sent to the kitchen only once staff accept it", ()
     ended();
 
     const timers: (() => void)[] = [];
+    const delays: number[] = [];
     const cleared: unknown[] = [];
     const retried: RoundKitchenState[] = [];
+    // v15 2026-10-16: the first read on reopening the page failed once; the page must stay
+    // "still checking" and say "the staff will send it" once the retry answers, never fall back
+    // to the generic line in between.
     const load = vi
       .fn()
       .mockRejectedValueOnce(new OrderStatusClientError("service_unavailable"))
@@ -202,17 +208,39 @@ describe("WP-2423 paid round: sent to the kitchen only once staff accept it", ()
       orderReference: order,
       orderBatchReference: round,
       onChange: (state) => retried.push(state),
-      setTimer: (run) => {
+      setTimer: (run, delay) => {
         timers.push(run);
+        delays.push(delay);
         return "timer-" + load.mock.calls.length;
       },
       clearTimer: (timer) => cleared.push(timer),
     });
     await vi.waitFor(() => expect(timers).toHaveLength(1));
+    expect(retried).toEqual([]);
     timers.shift()?.();
-    await vi.waitFor(() => expect(retried).toEqual(["Other", "AwaitingStaff"]));
+    await vi.waitFor(() => expect(retried).toEqual(["AwaitingStaff"]));
     stop();
+    expect(delays).toEqual([1_500, 10_000]);
     expect(cleared).toEqual(["timer-2"]);
     expect(roundKitchenPollLimit).toBeGreaterThan(10);
+
+    // A read that never answers ends as the plain "payment went through", not "checking" forever.
+    const never: RoundKitchenState[] = [];
+    const pending: (() => void)[] = [];
+    const failing = vi.fn().mockRejectedValue(new OrderStatusClientError("service_unavailable"));
+    createRoundKitchenWatch({
+      client: { load: failing, subscribe: () => () => undefined },
+      orderReference: order,
+      orderBatchReference: round,
+      onChange: (state) => never.push(state),
+      setTimer: (run) => pending.push(run),
+    });
+    for (let check = 1; check < roundKitchenPollLimit; check++) {
+      await vi.waitFor(() => expect(pending).toHaveLength(1));
+      pending.shift()?.();
+    }
+    await vi.waitFor(() => expect(never).toEqual(["Other"]));
+    expect(failing).toHaveBeenCalledTimes(roundKitchenPollLimit);
+    expect(pending).toHaveLength(0);
   });
 });

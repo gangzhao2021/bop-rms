@@ -3,6 +3,8 @@ import { GuestSessionError, readClosedRecord } from "@bop/identity";
 import { OrderStatusProjectionError, type CustomerOrderStatusView } from "@rms/ordering";
 import type { RequestHandler, Response } from "express";
 import { storeContactJson } from "./customer-store-contact.js";
+import { customerFailureCode } from "./customer-failure-diagnostic.js";
+import { markRequestFailure } from "./request-correlation.js";
 
 type SourcedStatus = Awaited<ReturnType<ReturnType<typeof createCustomerOrderStatusRead>["read"]>>;
 type CustomerStatusResponse = CustomerOrderStatusView & Partial<Pick<SourcedStatus, "sources">>;
@@ -297,6 +299,7 @@ export class CustomerOrderStatusHandler {
                 ["ORDER_STATUS_PERMISSION_DENIED", "ORDER_STATUS_NOT_FOUND"].includes(error.code)
               ? 404
               : 503;
+        if (status === 503) markRequestFailure(request, customerFailureCode(error));
         reject(response, status);
       }
     };

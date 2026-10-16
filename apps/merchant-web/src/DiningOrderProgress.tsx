@@ -1,7 +1,8 @@
 import { DiningSessionCloseAction } from "./DiningSessionCloseAction.js";
 import { DiningOrderCloseAction } from "./DiningOrderCloseAction.js";
 import { DiningServeAction } from "./DiningServeAction.js";
-import { DiningServeReadyActions } from "./DiningServeReadyAction.js";
+import { DiningServeReadyActions, optionsText } from "./DiningServeReadyAction.js";
+import { CheckedTime } from "./StoreTime.js";
 import { useEffect, useRef, useState } from "react";
 import {
   createDiningProgressClient,
@@ -11,6 +12,21 @@ import {
 type State =
   | { kind: "Idle" | "Loading" | "PermissionDenied" | "Unavailable" }
   | { kind: "Ready"; view: DiningProgress };
+/** WP-2423 (v15 2026-10-16): an item's progress and the table's state in staff words. */
+const itemPhaseText: Readonly<Record<string, string>> = {
+  Submitted: "Waiting for staff",
+  Accepted: "Sent to the kitchen",
+  InProgress: "Being made",
+  Ready: "Ready to serve",
+  Fulfilled: "Served",
+  Rejected: "Not accepted",
+  Cancelled: "Cancelled",
+};
+const sessionPhaseText = {
+  Active: "Table open",
+  Closing: "Table closing",
+  Closed: "Table closed",
+} as const;
 export function DiningProgressView({
   view,
   action,
@@ -24,20 +40,26 @@ export function DiningProgressView({
         <strong>Table {view.tableLabel}</strong>
       </p>
       <p>
-        Last checked <time dateTime={view.observedAt}>{view.observedAt}</time>
+        <CheckedTime instant={view.observedAt} />
       </p>
       {view.closureStatus === "Closed" ? <p>Order closed. Serving history is read-only.</p> : null}
-      <p>Dining session: {view.sessionPhase}</p>
-      <ol>
+      <p>{sessionPhaseText[view.sessionPhase]}</p>
+      <ol className="dining-progress-lines">
         {view.items.map((item) => (
           <li key={item.orderItemReference}>
             <strong>{item.displayName}</strong>
+            {optionsText(item) ? (
+              <span className="order-line-options">{optionsText(item)}</span>
+            ) : null}
+            {item.details?.customerNote ? (
+              <span className="order-line-note">Note: {item.details.customerNote}</span>
+            ) : null}
             <p>
               Round {item.batchSequence} · Item {item.itemOrdinal}
             </p>
             <p>
-              {item.phase} · Ordered {item.orderedQuantity} · Served {item.deliveredQuantity} ·
-              Remaining {item.remainingQuantity}
+              {itemPhaseText[item.phase] ?? "Checking"} · Ordered {item.orderedQuantity} · Served{" "}
+              {item.deliveredQuantity} · Remaining {item.remainingQuantity}
             </p>
             {view.closureStatus === "Open" && view.sessionPhase === "Active"
               ? action?.(item)

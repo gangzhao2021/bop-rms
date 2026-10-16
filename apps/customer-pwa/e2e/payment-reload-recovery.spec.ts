@@ -230,3 +230,124 @@ test("@production explicit recovery never repeats payment creation", async ({ pa
     "POST payment-reconciliation",
   ]);
 });
+
+// v15 2026-10-16: reopening the payment result, the first order status read failed once (503) and
+// the page said "Thank you. Your payment went through." instead of where the paid round stands.
+// A failed read is "still checking", and the retry soon says the staff will send it.
+test("@production a passing order status failure keeps the paid round's wording", async ({
+  page,
+}) => {
+  const order = "0190fa21-0000-7000-8000-000000000003",
+    round = "0190fa21-0000-7000-8000-000000000004";
+  let statusReads = 0;
+  const intros: string[] = [];
+  await page.route("**/api/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/api/v1/customer/session/csrf")
+      await route.fulfill({
+        json: { schemaVersion: 1, csrfToken: "B".repeat(43), checkoutSessionReference: checkout },
+        headers: { "cache-control": "no-store" },
+      });
+    else if (url.pathname === `/api/v1/checkout-sessions/${checkout}/payment-result`)
+      await route.fulfill({
+        json: {
+          schemaVersion: 1,
+          payment: {
+            checkoutSessionReference: checkout,
+            paymentIntentReference: "0190fa21-0000-7000-8000-000000000002",
+            orderReference: order,
+            orderBatchReference: round,
+            status: "Succeeded",
+            total: { amountMinor: "1130", currency: "CAD" },
+            payBy: "2026-01-01T12:30:00.000Z",
+            failure: null,
+          },
+        },
+        headers: { "cache-control": "no-store" },
+      });
+    else if (url.pathname === `/api/v1/orders/${order}/status`) {
+      statusReads++;
+      if (statusReads === 1)
+        await route.fulfill({
+          status: 503,
+          headers: { "cache-control": "no-store", "retry-after": "5" },
+          json: {
+            schemaVersion: 1,
+            error: {
+              code: "order_status_service_unavailable",
+              messageKey: "customer.order.status.service_unavailable",
+            },
+          },
+        });
+      else
+        await route.fulfill({
+          headers: { "cache-control": "no-store" },
+          json: {
+            schemaVersion: 1,
+            status: {
+              projectionName: "ordering_order_status_v1",
+              projectionVersion: 1,
+              sourceCheckpoint: "0190fa21-0000-7000-8000-000000000008",
+              projectedAt: "2026-08-11T14:00:00.000Z",
+              freshnessStatus: "Fresh",
+              order: {
+                orderReference: order,
+                orderNumber: "11",
+                orderType: "DineIn",
+                canonicalPhase: "Submitted",
+                paymentStatus: "NotReported",
+                kitchenStatus: "Unavailable",
+                fulfillmentStatus: "Unavailable",
+                fulfilledAt: null,
+                eta: null,
+                submittedAt: "2026-08-11T13:55:00.000Z",
+                batches: [
+                  {
+                    orderBatchReference: round,
+                    submittedAt: "2026-08-11T13:55:00.000Z",
+                    items: [
+                      {
+                        orderItemReference: "0190fa21-0000-7000-8000-000000000005",
+                        displayName: "Flat White",
+                        quantity: 1,
+                        lineTotal: { amountMinor: "1130", currencyCode: "CAD" },
+                      },
+                    ],
+                  },
+                ],
+              },
+              sources: {
+                checkedAt: "2026-08-11T14:00:00.000Z",
+                kitchen: null,
+                payments: [
+                  {
+                    status: "Succeeded",
+                    occurredAt: "2026-08-11T13:56:00.000Z",
+                    amount: { amountMinor: "1130", currencyCode: "CAD" },
+                    freshnessStatus: "Fresh",
+                  },
+                ],
+              },
+            },
+          },
+        });
+    } else await route.fulfill({ status: 503, json: { unavailable: true } });
+  });
+  await page.goto("/checkout/payment");
+  const intro = page.locator(".payment-result-page__intro");
+  await expect(page.getByText("Payment confirmed", { exact: true })).toBeVisible();
+  // Record every wording the page shows until it settles.
+  const settle = Date.now() + 8_000;
+  while (Date.now() < settle) {
+    const text = (await intro.textContent()) ?? "";
+    if (intros.at(-1) !== text) intros.push(text);
+    if (text === "Paid. The staff will send it to the kitchen shortly.") break;
+    await page.waitForTimeout(50);
+  }
+  expect(statusReads).toBeGreaterThanOrEqual(2);
+  expect(intros.at(-1)).toBe("Paid. The staff will send it to the kitchen shortly.");
+  expect(intros).not.toContain("Thank you. Your payment went through.");
+  expect(
+    intros.filter((text) => text !== "Paid. The staff will send it to the kitchen shortly."),
+  ).toEqual(intros.length > 1 ? ["Paid. Checking on your order…"] : []);
+});

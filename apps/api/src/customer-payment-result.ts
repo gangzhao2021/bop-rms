@@ -1,6 +1,8 @@
 import { GuestSessionError, readClosedRecord } from "@bop/identity";
 import { CheckoutSessionServiceError } from "@rms/ordering";
 import type { RequestHandler, Response } from "express";
+import { customerFailureCode } from "./customer-failure-diagnostic.js";
+import { markRequestFailure } from "./request-correlation.js";
 
 export const customerPaymentResultRoute =
   "/api/v1/checkout-sessions/:checkout_session_id/payment-result";
@@ -148,6 +150,7 @@ export class CustomerPaymentResultHandler {
             : error instanceof CheckoutSessionServiceError && error.code === "PERMISSION_DENIED"
               ? 404
               : 503;
+        if (status === 503) markRequestFailure(request, customerFailureCode(error));
         reject(response, status);
       }
     };

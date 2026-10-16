@@ -1198,3 +1198,27 @@ describe("WP-2423 follow-up: kitchen ticket ages follow the clock", () => {
     );
   });
 });
+
+it("v15 2026-10-16: a board with only finished work and no filter set says nothing is waiting", () => {
+  const view = parseKitchenBoardView({
+    ...kitchenBoardFixture(),
+    items: [{ ...kitchenItemFixture(), status: "Completed", completedQuantity: 2 }],
+  });
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <KitchenBoardScreen view={view} onRefresh={() => undefined} />
+    </MemoryRouter>,
+  );
+  expect(html).toContain("No active work");
+  expect(html).toContain("Nothing to make right now.");
+  expect(html).not.toContain("Clear the filters");
+  const empty = renderToStaticMarkup(
+    <MemoryRouter>
+      <KitchenBoardScreen
+        view={parseKitchenBoardView({ ...kitchenBoardFixture(), items: [] })}
+        onRefresh={() => undefined}
+      />
+    </MemoryRouter>,
+  );
+  expect(empty).toContain("Nothing to make right now.");
+});

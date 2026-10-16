@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { expectNoInternalText } from "./internal-text-guard";
 
 test("@production serve all ready items of a round with one confirmation, retrying a lost answer", async ({
   page,
@@ -8,6 +9,7 @@ test("@production serve all ready items of a round with one confirmation, retryi
     brandLabel: "Synthetic Brand",
     storeLabel: "Synthetic Store",
     storeReference: id(99),
+    timeZone: "America/Toronto",
   };
   const headers = { "cache-control": "no-store" };
   await page.route("**/merchant/session", (route) =>
@@ -78,7 +80,17 @@ test("@production serve all ready items of a round with one confirmation, retryi
       },
     }),
   );
-  const line = (n: number, name: string, served: boolean, cancelled = false) => ({
+  const line = (
+    n: number,
+    name: string,
+    served: boolean,
+    cancelled = false,
+    details: {
+      options: { name: string; quantity: number }[];
+      customerNote: string | null;
+    } = { options: [], customerNote: null },
+  ) => ({
+    ...details,
     orderItemReference: id(n),
     orderBatchReference: id(90),
     displayName: name,
@@ -109,7 +121,19 @@ test("@production serve all ready items of a round with one confirmation, retryi
         items: [
           line(3, "Meal", committed),
           line(4, "Salad", committed),
-          line(5, "Soup", false, committed),
+          line(5, "Soup", false, committed, {
+            options: [{ name: "Bowl", quantity: 1 }],
+            customerNote: "Cup 3",
+          }),
+          // v15 2026-10-16: identical drinks without a note are one line in the confirmation.
+          line(6, "Flat White", committed, false, {
+            options: [{ name: "Small (8 oz)", quantity: 1 }],
+            customerNote: null,
+          }),
+          line(7, "Flat White", committed, false, {
+            options: [{ name: "Small (8 oz)", quantity: 1 }],
+            customerNote: null,
+          }),
         ],
       },
     }),
@@ -124,7 +148,7 @@ test("@production serve all ready items of a round with one confirmation, retryi
       headers,
       json: {
         operationReference: body.operationReference,
-        served: 2,
+        served: 4,
         alreadyServed: 0,
         changed: 1,
         failed: 0,
@@ -132,19 +156,33 @@ test("@production serve all ready items of a round with one confirmation, retryi
           { orderItemReference: id(3), outcome: "Served" },
           { orderItemReference: id(4), outcome: "Served" },
           { orderItemReference: id(5), outcome: "Changed" },
+          { orderItemReference: id(6), outcome: "Served" },
+          { orderItemReference: id(7), outcome: "Served" },
         ],
       },
     });
   });
   await page.goto("/operations/orders");
   await page.getByRole("button", { name: "View serving progress", exact: true }).click();
+  // The serving progress in staff words: store time, table state, each line's options and note.
+  await expect(page.getByText("Table open", { exact: true })).toBeVisible();
+  await expect(page.getByText("Checked Sep 13, 8:01 PM", { exact: true })).toBeVisible();
+  await expect(
+    page.locator(".dining-progress-lines").getByText("Note: Cup 3", { exact: true }),
+  ).toBeVisible();
+  await expectNoInternalText(page);
   await page
-    .getByRole("button", { name: "Serve all 3 ready items in round 1", exact: true })
+    .getByRole("button", { name: "Serve all 5 ready items in round 1", exact: true })
     .click();
-  const dialog = page.getByRole("dialog", { name: "Mark 3 items served for round 1 at table T1?" });
+  const dialog = page.getByRole("dialog", { name: "Mark 5 items served for round 1 at table T1?" });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByText("2 × Soup", { exact: true })).toBeVisible();
-  await dialog.getByRole("button", { name: "Mark 3 items served", exact: true }).click();
+  const listed = dialog.getByRole("listitem");
+  await expect(listed).toHaveCount(4);
+  await expect(listed.nth(2)).toHaveText("2 × SoupBowlNote: Cup 3");
+  await expect(listed.nth(3)).toHaveText("4 × Flat WhiteSmall (8 oz)");
+  await expect(dialog.getByText("Note: Cup 3", { exact: true })).toBeVisible();
+  await expectNoInternalText(page);
+  await dialog.getByRole("button", { name: "Mark 5 items served", exact: true }).click();
   const retry = dialog.getByRole("button", { name: "Retry the same request", exact: true });
   await expect(retry).toBeEnabled();
   await expect(page.getByRole("button", { name: "Refresh orders", exact: true })).toBeDisabled();
@@ -152,13 +190,13 @@ test("@production serve all ready items of a round with one confirmation, retryi
   await expect(dialog).toBeHidden();
   await expect(
     page.getByText(
-      "2 served. 1 could not be served because it changed (cancelled, partly served or the table moved). Check it and try again.",
+      "4 served. 1 could not be served because it changed (cancelled, partly served or the table moved). Check it and try again.",
       { exact: true },
     ),
   ).toBeVisible();
   await expect(
-    page.getByText("Fulfilled · Ordered 2 · Served 2 · Remaining 0", { exact: true }),
-  ).toHaveCount(2);
+    page.getByText("Served · Ordered 2 · Served 2 · Remaining 0", { exact: true }),
+  ).toHaveCount(4);
   await expect(page.getByRole("button", { name: /Serve all .* ready items/u })).toHaveCount(0);
   expect(bodies).toHaveLength(2);
   expect(bodies[1]).toBe(bodies[0]);
@@ -171,6 +209,8 @@ test("@production serve all ready items of a round with one confirmation, retryi
       { orderItemReference: id(3), quantity: 2, expectedItemServiceVersion: 0 },
       { orderItemReference: id(4), quantity: 2, expectedItemServiceVersion: 0 },
       { orderItemReference: id(5), quantity: 2, expectedItemServiceVersion: 0 },
+      { orderItemReference: id(6), quantity: 2, expectedItemServiceVersion: 0 },
+      { orderItemReference: id(7), quantity: 2, expectedItemServiceVersion: 0 },
     ],
   });
 });

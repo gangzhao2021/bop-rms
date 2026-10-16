@@ -1,4 +1,6 @@
 import type { RequestHandler, Response } from "express";
+import { customerFailureCode } from "./customer-failure-diagnostic.js";
+import { markRequestFailure } from "./request-correlation.js";
 import { GuestSessionError, readClosedRecord } from "@bop/identity";
 import { OrderStatusProjectionError } from "@rms/ordering";
 import type { CustomerOrderStatusInput } from "./customer-order-status.js";
@@ -123,14 +125,14 @@ export class CustomerPickupCodeHandler {
           expiresAt: view.expiresAt,
         });
       } catch (error) {
-        reject(
-          response,
+        const status =
           error instanceof GuestSessionError ||
-            (error instanceof OrderStatusProjectionError &&
-              ["ORDER_STATUS_PERMISSION_DENIED", "ORDER_STATUS_NOT_FOUND"].includes(error.code))
+          (error instanceof OrderStatusProjectionError &&
+            ["ORDER_STATUS_PERMISSION_DENIED", "ORDER_STATUS_NOT_FOUND"].includes(error.code))
             ? 404
-            : 503,
-        );
+            : 503;
+        if (status === 503) markRequestFailure(request, customerFailureCode(error));
+        reject(response, status);
       }
     };
   }

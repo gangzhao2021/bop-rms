@@ -865,6 +865,105 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         csrfCredential: guest.csrfCredential,
         orderReference,
       });
+      // v15 2026-10-16 regression: a payment outcome (or acceptance) takes the Order's disposition
+      // fence, then locks the Dining table row FOR UPDATE. The guest's status read on reopening
+      // the payment result used to read that row FOR SHARE first and then wait for the fence, and
+      // one of the two died in a deadlock (40P01, the 503s). The read now queues on the fence
+      // before touching the row, so both finish.
+      {
+        // As the pilot composes it: the guest's binding check reads the Dining table row through
+        // Dining's public table reader (FOR SHARE) inside the read's transaction.
+        const pilotStatusRead = createCustomerOrderStatusRead({
+          scope,
+          transactions: transactions(api),
+          credentials: guest.identity.session.credentials,
+          diningScope: ownerScope,
+          paymentScope,
+          now,
+          binding: (transaction) => ({
+            validate: async (session, observedAt) => {
+              const table = await createPostgresDiningPublicTableReader({
+                transaction,
+                scope: ownerScope,
+                authorize: async () => true,
+              }).read({
+                tableReference: dining.table.tableReference,
+                purpose: "GuestSessionBinding",
+                observedAt,
+              });
+              if (table === null) return "Unavailable";
+              const evidence = await createDiningGuestBindingQuery({
+                scope,
+                now: () => observedAt,
+                repository: createPostgresDiningGuestBindingStore(
+                  { run: (work) => work(transaction) },
+                  ownerScope,
+                ),
+              }).resolve({
+                purpose: "GuestSessionBinding",
+                diningSessionReference: session.diningSessionReference,
+                participantReference: session.diningParticipantReference,
+                tableReference: dining.table.tableReference,
+              });
+              return evidence ? "Current" : "Unavailable";
+            },
+          }),
+        });
+        assert.equal(
+          (
+            await pilotStatusRead.read({
+              sessionCredential: guest.sessionCredential,
+              csrfCredential: guest.csrfCredential,
+              orderReference,
+            })
+          ).order.orderReference,
+          orderReference,
+        );
+        const holder = new Client(context.clientConfig);
+        await holder.connect();
+        try {
+          await holder.query("BEGIN");
+          await holder.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+            "OrderingOrderDisposition:" +
+              scope.brandReference +
+              ":" +
+              scope.storeReference +
+              ":" +
+              orderReference,
+          ]);
+          const reading = pilotStatusRead
+            .read({
+              sessionCredential: guest.sessionCredential,
+              csrfCredential: guest.csrfCredential,
+              orderReference,
+            })
+            .then(
+              (view) => ({ view }),
+              (error) => ({ error }),
+            );
+          // The read is waiting for a lock the holder has.
+          for (let tries = 0; ; tries++) {
+            const [{ waiting }] = await one(
+              "SELECT count(*)::int AS waiting FROM pg_locks WHERE NOT granted AND pid<>$1",
+              [holder.processID],
+            );
+            if (waiting > 0) break;
+            assert.ok(tries < 200, "the status read never waited for the Order fence");
+            await delay(25);
+          }
+          await holder.query(
+            "SELECT table_id FROM rms_dining.dining_table WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND table_id=$4 FOR UPDATE",
+            [tenant, scope.brandReference, scope.storeReference, dining.table.tableReference],
+          );
+          await holder.query("COMMIT");
+          const outcome = await reading;
+          assert.equal(outcome.error, undefined, String(outcome.error?.code ?? outcome.error));
+          assert.equal(outcome.view.order.orderReference, orderReference);
+        } finally {
+          await holder.query("ROLLBACK").catch(() => undefined);
+          await holder.end();
+        }
+      }
       assert.deepEqual(
         status.sources.unpaidCancellations?.map((e) => e.orderBatchReference),
         [R2.batch.orderBatchReference],
@@ -1203,6 +1302,13 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         const value = await read();
         queries[name] = queryCount.value;
         if (name === "taskInbox") assert.equal(value.items.length, 5, "task inbox items");
+        // v15 2026-10-16: serving progress carries each line's options and note (Ordering's own
+        // order lines, read under the restricted API role) so identical lines can be told apart.
+        if (name === "diningOrderProgress")
+          for (const item of value.items) {
+            assert.ok(Array.isArray(item.options), "serving progress options");
+            assert.ok(item.customerNote === null || typeof item.customerNote === "string");
+          }
       }
       // Measured 2026-10-14 (before → after): order queue 349 → 168, order detail 384 → 170,
       // tables 156 → 87, dining order progress 652 → 100, kitchen up to its projection read

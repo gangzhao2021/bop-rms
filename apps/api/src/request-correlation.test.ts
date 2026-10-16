@@ -6,8 +6,10 @@ import {
   createRequestCommandCorrelation,
   createRequestCorrelationMiddleware,
   getRequestCorrelationContext,
+  markRequestFailure,
   type RequestCorrelationContext,
 } from "./request-correlation.js";
+import { customerFailureCode, withFailureCause } from "./customer-failure-diagnostic.js";
 
 const ids = {
   requestA: "018f1f48-7b5d-7a01-8a1b-123456789abc",
@@ -167,6 +169,71 @@ describe("WP-0041 request-local correlation adapter", () => {
     if (completedRequest === undefined) throw new Error("request was not captured");
     expect(() => getRequestCorrelationContext(completedRequest)).toThrow(
       "REQUEST_CORRELATION_CONTEXT_UNAVAILABLE",
+    );
+  });
+});
+
+describe("v15 2026-10-16: a server error logs its safe cause code", () => {
+  it("logs a recorded safe code on a 5xx only, and nothing unsafe", async () => {
+    const app = express();
+    const entries: unknown[] = [];
+    app.use(
+      createRequestCorrelationMiddleware({
+        logger: { info: (entry) => entries.push(entry) },
+        uuidV7Factory: sequence([
+          ids.requestA,
+          ids.correlationA,
+          ids.requestB,
+          ids.correlationB,
+          ids.commandA,
+          "018f1f48-7b5d-7a04-8a1b-123456789abc",
+        ]),
+      }),
+    );
+    app.get("/busy", (request, response) => {
+      markRequestFailure(request, "TENANT_DATABASE_TRANSACTION_CONFLICT_SQL_40P01");
+      response.status(503).end();
+    });
+    app.get("/fine", (request, response) => {
+      markRequestFailure(request, "ORDER_STATUS_NOT_FOUND");
+      response.status(404).end();
+    });
+    app.get("/unsafe", (request, response) => {
+      markRequestFailure(request, "guest@example.test 01a145a7");
+      response.status(503).end();
+    });
+    const base = await listen(app);
+    for (const path of ["/busy", "/fine", "/unsafe"]) await fetch(base + path);
+    await expect.poll(() => entries.length).toBe(3);
+    expect(entries.map((entry) => (entry as { error?: unknown }).error)).toEqual([
+      { code: "TENANT_DATABASE_TRANSACTION_CONFLICT_SQL_40P01", value: undefined },
+      undefined,
+      undefined,
+    ]);
+  });
+
+  it("names the innermost safe code and SQLSTATE behind a customer error", () => {
+    const conflict = Object.assign(new Error("x"), {
+      code: "TENANT_DATABASE_TRANSACTION_CONFLICT",
+      diagnostic: { sqlState: "40P01", constraint: null, table: null, closed: false },
+    });
+    const outer = withFailureCause(
+      Object.assign(new Error("order status is unavailable"), {
+        code: "ORDER_STATUS_DEPENDENCY_UNAVAILABLE",
+      }),
+      conflict,
+    );
+    expect(customerFailureCode(outer)).toBe("TENANT_DATABASE_TRANSACTION_CONFLICT_SQL_40P01");
+    // A domain error a transaction raised after a failed query carries the runner's diagnostic.
+    const denied = Object.assign(new Error("y"), { code: "ORDER_STATUS_DEPENDENCY_UNAVAILABLE" });
+    Object.defineProperty(denied, Symbol.for("bop.database.failure"), {
+      value: { sqlState: "42501" },
+    });
+    expect(customerFailureCode(denied)).toBe("ORDER_STATUS_DEPENDENCY_UNAVAILABLE_SQL_42501");
+    // Messages and unsafe values are never used.
+    expect(customerFailureCode(new Error("guest@example.test"))).toBeUndefined();
+    expect(customerFailureCode({ code: "lower case", diagnostic: { sqlState: "bad" } })).toBe(
+      undefined,
     );
   });
 });

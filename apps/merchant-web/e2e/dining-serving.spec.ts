@@ -138,7 +138,7 @@ test("@production serving retains its intent after a lost response and locks ref
   ).toBeDisabled();
   await retry.click();
   await expect(
-    page.getByText("Fulfilled · Ordered 2 · Served 2 · Remaining 0", { exact: true }),
+    page.getByText("Served · Ordered 2 · Served 2 · Remaining 0", { exact: true }),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Refresh orders", exact: true })).toBeEnabled();
   // WP-2423: the order's status is reread as soon as the item is served (before the 10 s poll).

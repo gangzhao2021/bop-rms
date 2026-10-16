@@ -1408,7 +1408,7 @@ export function KitchenBoardScreen({
         {items.length === 0 ? (
           <StatePanel
             heading={
-              searchApplied || view.items.length > earlierOpen.size
+              searchApplied || (hasFilters && view.items.length > earlierOpen.size)
                 ? "No matching work"
                 : "No active work"
             }
@@ -1430,11 +1430,12 @@ export function KitchenBoardScreen({
                   : earlierElsewhere !== null
                     ? `Nothing from today for order or table “${orderSearch}”. ${earlierElsewhere}: see From earlier days above.`
                     : `Nothing on the board for order or table “${orderSearch}”. Clear the search to see the whole queue.`
-                : view.items.length === 0
-                  ? "No authorized work item is available in the loaded queue."
-                  : view.items.length === earlierOpen.size
-                    ? "Nothing from today is waiting. Earlier days' tickets are listed above."
-                    : "No loaded work item matches the current filters. Clear the filters to restore the queue."}
+                : view.items.length > 0 && view.items.length === earlierOpen.size
+                  ? "Nothing from today is waiting. Earlier days' tickets are listed above."
+                  : !hasFilters || view.items.length === 0
+                    ? // v15 2026-10-16: an empty board with no filter set is simply quiet.
+                      "Nothing to make right now."
+                    : "Nothing matches these filters. Clear the filters to see all work."}
             </p>
           </StatePanel>
         ) : (

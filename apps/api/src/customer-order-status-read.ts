@@ -19,6 +19,7 @@ import {
   readClosedRecord,
 } from "@bop/identity";
 import {
+  acquireOrderDispositionFence,
   createOrderStatusQueryService,
   createPostgresStaffItemCancellationReader,
   createPostgresStaffOrderCancellationReader,
@@ -36,6 +37,8 @@ import {
   type CheckoutContactPresence,
 } from "@rms/ordering";
 import { readCurrentStoreReceiptProfile } from "@rms/store";
+import { retryTransactionConflict } from "./transaction-conflict-retry.js";
+import { withFailureCause } from "./customer-failure-diagnostic.js";
 import type { CustomerCheckoutSessionAuthorizationOptions } from "./customer-checkout-session-authorization.js";
 import type { PersistentPublicStoreProfileOptions } from "./persistent-public-store-profile.js";
 import { readCustomerStoreContact, type CustomerStoreContact } from "./customer-store-contact.js";
@@ -107,8 +110,19 @@ export function createCustomerOrderStatusRead(
       } catch {
         throw new OrderStatusProjectionError("ORDER_STATUS_INPUT_INVALID");
       }
+      // v15 2026-10-16: a deadlock or lock wait with a payment outcome or acceptance (which take
+      // the Order fence, then lock the Dining table row) is rerun instead of answering 503.
+      const transactions = {
+        run: <T>(work: (transaction: ConsumerTransaction) => Promise<T>) =>
+          retryTransactionConflict(() => options.transactions.run(work)),
+      };
       try {
-        return await options.transactions.run(async (transaction) => {
+        return await transactions.run(async (transaction) => {
+          // WP-2423 lock order: the Order's disposition fence comes before the guest authorization
+          // below reads the Dining table row FOR SHARE. Taken after it, a payment outcome holding
+          // the fence and waiting for that row deadlocked this read (v15 2026-10-16: 40P01 each
+          // time a guest reopened the payment result).
+          await acquireOrderDispositionFence(transaction, { ...options.scope, orderReference });
           const runner: CartQueryTransactionRunner = { run: async (work) => work(transaction) };
           let previous: string | undefined;
           const now = () => {
@@ -529,7 +543,10 @@ export function createCustomerOrderStatusRead(
         if (error instanceof OrderStatusProjectionError) throw error;
         if (error instanceof GuestSessionError)
           throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
-        throw new OrderStatusProjectionError("ORDER_STATUS_DEPENDENCY_UNAVAILABLE");
+        throw withFailureCause(
+          new OrderStatusProjectionError("ORDER_STATUS_DEPENDENCY_UNAVAILABLE"),
+          error,
+        );
       }
     },
   });

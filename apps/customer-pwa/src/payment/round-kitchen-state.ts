@@ -42,6 +42,8 @@ export function roundKitchenState(
 
 /** While staff have not sent it yet, the page checks again with a growing delay, this often. */
 export const roundKitchenPollDelaysMs = [5_000, 10_000, 15_000, 30_000] as const;
+/** After a read that failed in passing, the page checks again sooner, this often. */
+export const roundKitchenRetryDelaysMs = [1_500, 3_000, 5_000, 10_000] as const;
 export const roundKitchenPollLimit = 40;
 
 /**
@@ -63,6 +65,7 @@ export function createRoundKitchenWatch(input: {
     ((timer: unknown) => globalThis.clearTimeout(timer as ReturnType<typeof setTimeout>));
   let stopped = false,
     checks = 0,
+    failures = 0,
     timer: unknown = null,
     state: RoundKitchenState = "Checking";
   const publish = (next: RoundKitchenState) => {
@@ -70,11 +73,16 @@ export function createRoundKitchenWatch(input: {
     state = next;
     input.onChange(next);
   };
-  const again = () => {
-    if (stopped || checks >= roundKitchenPollLimit) return;
-    const delay =
-      roundKitchenPollDelaysMs[Math.min(checks - 1, roundKitchenPollDelaysMs.length - 1)] ??
-      roundKitchenPollDelaysMs[0];
+  const again = (afterFailure = false) => {
+    if (stopped) return;
+    if (checks >= roundKitchenPollLimit) {
+      // Out of checks without one answer: say only that the payment went through.
+      if (state === "Checking") publish("Other");
+      return;
+    }
+    const delays = afterFailure ? roundKitchenRetryDelaysMs : roundKitchenPollDelaysMs;
+    const step = afterFailure ? failures - 1 : checks - 1;
+    const delay = delays[Math.min(step, delays.length - 1)] ?? delays[0];
     timer = setTimer(() => void check(), delay);
   };
   const check = async () => {
@@ -86,6 +94,7 @@ export function createRoundKitchenWatch(input: {
         input.orderReference,
       );
       if (stopped) return;
+      failures = 0;
       const next = roundKitchenState(view, input.orderBatchReference);
       publish(next);
       if (next === "AwaitingStaff") again();
@@ -96,9 +105,10 @@ export function createRoundKitchenWatch(input: {
         publish("Other");
         return;
       }
-      // A passing failure keeps what was last known and checks again.
-      if (state === "Checking") publish("Other");
-      again();
+      // A passing failure is not news: the page keeps what it last knew ("still checking" until
+      // the first answer) and checks again soon. It never reads as a different state.
+      failures++;
+      again(true);
     }
   };
   void check();
@@ -114,5 +124,7 @@ export function paidIntroText(state: RoundKitchenState | null): string {
     ? "Thank you. Your order has been sent to the kitchen."
     : state === "AwaitingStaff"
       ? "Paid. The staff will send it to the kitchen shortly."
-      : "Thank you. Your payment went through.";
+      : state === "Checking"
+        ? "Paid. Checking on your order…"
+        : "Thank you. Your payment went through.";
 }

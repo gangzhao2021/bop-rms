@@ -7368,6 +7368,13 @@ body:has(.product-complete-draft) .bop-shell__header,
 .order-line-note {
   color: var(--bop-color-text-default);
 }
+/* WP-2423: the serve confirmation and serving progress list each line's options and note below it. */
+.dining-serve-ready-lines .order-line-options,
+.dining-serve-ready-lines .order-line-note,
+.dining-progress-lines .order-line-options,
+.dining-progress-lines .order-line-note {
+  display: block;
+}
 .order-line-amount,
 .order-lines-totals dd {
   font-variant-numeric: tabular-nums;

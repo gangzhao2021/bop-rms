@@ -29,6 +29,39 @@ function reference(value: unknown) {
   if (typeof value !== "string" || !ref.test(value)) return fail();
   return value;
 }
+function line(value: unknown, max: number) {
+  if (
+    typeof value !== "string" ||
+    !value.trim() ||
+    value.length > max ||
+    Array.from(value).some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127)
+  )
+    return fail();
+  return value;
+}
+/** WP-2423 (v15 2026-10-16): a line's options and the customer's note, when the read has them. */
+function details(item: Record<string, unknown>) {
+  if (item.options === undefined && item.customerNote === undefined) return null;
+  if (!Array.isArray(item.options) || item.options.length > 100) return fail();
+  return Object.freeze({
+    options: Object.freeze(
+      item.options.map((value: unknown) => {
+        const option = record(value);
+        return Object.freeze({
+          name: line(option.name, 500),
+          quantity: integer(option.quantity, 1, 999),
+        });
+      }),
+    ),
+    // A note is the customer's own text (it may span lines); shown as written, never logged.
+    customerNote:
+      item.customerNote === null
+        ? null
+        : typeof item.customerNote === "string" && item.customerNote.length <= 2000
+          ? item.customerNote.trim() || null
+          : fail(),
+  });
+}
 function phase(value: unknown) {
   if (typeof value !== "string" || !phases.includes(value)) return fail();
   return value;
@@ -67,7 +100,8 @@ export function parseDiningProgress(value: unknown, expectedOrder: string) {
     const orderedQuantity = integer(item.orderedQuantity, 1, 999),
       deliveredQuantity = integer(item.deliveredQuantity, 0, orderedQuantity),
       remainingQuantity = integer(item.remainingQuantity, 0, orderedQuantity),
-      currentPhase = phase(item.phase);
+      currentPhase = phase(item.phase),
+      lineDetails = details(item);
     if (
       deliveredQuantity + remainingQuantity !== orderedQuantity ||
       (currentPhase === "Fulfilled" && remainingQuantity !== 0) ||
@@ -85,6 +119,8 @@ export function parseDiningProgress(value: unknown, expectedOrder: string) {
       deliveredQuantity,
       remainingQuantity,
       itemServiceVersion: integer(item.itemServiceVersion, 0, 2147483647),
+      /** Options and the customer's note; absent when the read could not include them. */
+      ...(lineDetails === null ? {} : { details: lineDetails }),
     });
   });
   if (data.closureStatus !== "Open" && data.closureStatus !== "Closed") return fail();

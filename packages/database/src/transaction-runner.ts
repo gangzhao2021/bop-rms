@@ -33,6 +33,22 @@ function refuseConcurrentQueries(): boolean {
   return process.env.NODE_ENV !== "production";
 }
 
+/** Read by `customerFailureCode` (apps/api); holds only the sanitized diagnostic. */
+const databaseFailureKey = Symbol.for("bop.database.failure");
+function attachFailureDiagnostic(
+  error: unknown,
+  diagnostic: ReturnType<typeof tenantContextDatabaseDiagnostic>,
+): void {
+  if (
+    error === null ||
+    typeof error !== "object" ||
+    !Object.isExtensible(error) ||
+    Object.getOwnPropertyDescriptor(error, databaseFailureKey) !== undefined
+  )
+    return;
+  Object.defineProperty(error, databaseFailureKey, { value: diagnostic, enumerable: false });
+}
+
 const transactionLimits =
   "SET LOCAL statement_timeout = '5s'; SET LOCAL lock_timeout = '2s'; " +
   "SET LOCAL idle_in_transaction_session_timeout = '5s'";
@@ -76,6 +92,7 @@ export function createTenantTransactionRunner(
         let failed = false;
         let conflicted = false;
         let conflictDiagnostic: ReturnType<typeof tenantContextDatabaseDiagnostic> | null = null;
+        let failureDiagnostic: ReturnType<typeof tenantContextDatabaseDiagnostic> | null = null;
         let concurrent = false;
         let pending = 0;
         // The scope settings withTenantContextTransaction installed before this callback; repeats
@@ -115,6 +132,7 @@ export function createTenantTransactionRunner(
                   // Lock timeout, serialization failure and deadlock leave nothing committed; the
                   // caller may rerun the whole idempotent transaction. No SQL detail is exposed.
                   const diagnostic = tenantContextDatabaseDiagnostic(error);
+                  failureDiagnostic ??= diagnostic;
                   if (retryableSqlStates.has(sqlState(error))) {
                     conflicted = true;
                     conflictDiagnostic ??= diagnostic;
@@ -152,6 +170,10 @@ export function createTenantTransactionRunner(
               "TENANT_DATABASE_TRANSACTION_CONFLICT",
               conflictDiagnostic,
             );
+          // A caller that turned a failed query into its own error keeps that error; the first
+          // failure's SQLSTATE rides along (non-enumerable) so a 503 can be logged with its cause.
+          if (failed && failureDiagnostic !== null)
+            attachFailureDiagnostic(error, failureDiagnostic);
           throw error;
         } finally {
           active = false;

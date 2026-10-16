@@ -1,6 +1,8 @@
 import { GuestSessionError, readClosedRecord } from "@bop/identity";
 import { OrderStatusProjectionError } from "@rms/ordering";
 import type { RequestHandler, Response } from "express";
+import { customerFailureCode } from "./customer-failure-diagnostic.js";
+import { markRequestFailure } from "./request-correlation.js";
 import type { CustomerDiningSessionView, CustomerMoney } from "./customer-dining-session-read.js";
 
 /** WP-2423 Q8 (CUST-DINE-IN-SESSION): the guest's own table; the browser never names a session. */
@@ -135,6 +137,7 @@ export class CustomerDiningSessionHandler {
             ["ORDER_STATUS_PERMISSION_DENIED", "ORDER_STATUS_NOT_FOUND"].includes(error.code))
             ? 404
             : 503;
+        if (status === 503) markRequestFailure(request, customerFailureCode(error));
         reject(response, status);
       }
     };

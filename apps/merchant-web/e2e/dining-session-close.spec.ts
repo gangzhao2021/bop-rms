@@ -147,14 +147,14 @@ test("@production session closing advances both steps and recovers a lost finali
   await begin.click();
   const finalize = page.getByRole("button", { name: "Finalize session closing", exact: true });
   await expect(finalize).toBeDisabled();
-  await expect(page.getByText("Dining session: Closing", { exact: true })).toBeVisible();
+  await expect(page.getByText("Table closing", { exact: true })).toBeVisible();
   await confirm.check();
   await finalize.click();
   const retry = page.getByRole("button", { name: "Retry same session close request", exact: true });
   await expect(retry).toBeEnabled();
   await expect(page.getByRole("button", { name: "Refresh orders", exact: true })).toBeDisabled();
   await retry.click();
-  await expect(page.getByText("Dining session: Closed", { exact: true })).toBeVisible();
+  await expect(page.getByText("Table closed", { exact: true })).toBeVisible();
   await expect(confirm).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Refresh orders", exact: true })).toBeEnabled();
   expect(bodies).toHaveLength(5);
