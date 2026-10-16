@@ -214,7 +214,11 @@ export function createMerchantRefundSoleOperatorResolver(
 
 /** WP-2423 Q19 step 2: why a Brand gate refused the author's own approval as sole operator. */
 export class MerchantSoleOperatorGateError extends Error {
-  constructor(readonly code: "NotInEffect" | "NeedsReverification") {
+  constructor(
+    readonly code: "NotInEffect" | "NeedsReverification",
+    /** WP-2423: why it is not in effect — turned off, or someone else also holds the approval. */
+    readonly reason?: "Off" | "OtherApprovers",
+  ) {
     super("Sole operator approval was not accepted");
     this.name = "MerchantSoleOperatorGateError";
   }
@@ -282,7 +286,11 @@ export async function requireMerchantBrandSoleOperator(
   input: Parameters<typeof merchantBrandSoleOperatorGate>[1],
 ): Promise<{ readonly actorMfaAt: string }> {
   const gate = await merchantBrandSoleOperatorGate(tx, input);
-  if (gate.status !== "Effective") throw new MerchantSoleOperatorGateError("NotInEffect");
+  if (gate.status !== "Effective")
+    throw new MerchantSoleOperatorGateError(
+      "NotInEffect",
+      gate.status === "NotSet" ? "Off" : "OtherApprovers",
+    );
   if (gate.actorMfaAt === null || !soleOperatorMfaRecent(gate.actorMfaAt, input.observedAt))
     throw new MerchantSoleOperatorGateError("NeedsReverification");
   return Object.freeze({ actorMfaAt: gate.actorMfaAt });
@@ -351,7 +359,11 @@ export async function requireMerchantStoreSoleOperator(
   input: Parameters<typeof merchantStoreSoleOperatorGate>[1],
 ): Promise<{ readonly actorMfaAt: string }> {
   const gate = await merchantStoreSoleOperatorGate(tx, input);
-  if (gate.status !== "Effective") throw new MerchantSoleOperatorGateError("NotInEffect");
+  if (gate.status !== "Effective")
+    throw new MerchantSoleOperatorGateError(
+      "NotInEffect",
+      gate.status === "NotSet" ? "Off" : "OtherApprovers",
+    );
   if (gate.actorMfaAt === null || !soleOperatorMfaRecent(gate.actorMfaAt, input.observedAt))
     throw new MerchantSoleOperatorGateError("NeedsReverification");
   return Object.freeze({ actorMfaAt: gate.actorMfaAt });

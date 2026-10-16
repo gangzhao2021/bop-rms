@@ -21,5 +21,9 @@ export * from "./infrastructure/persistence/digital-receipt-template-artifact-st
 export * from "./infrastructure/persistence/digital-receipt-template-draft-store.js";
 export * from "./infrastructure/persistence/digital-receipt-template-submission-store.js";
 export * from "./infrastructure/persistence/digital-receipt-template-submit-store.js";
-export { createPostgresReceiptTemplatePublicationProof } from "./infrastructure/template-publication-proof.js";
+export * from "./infrastructure/persistence/digital-receipt-template-sole-operator-store.js";
+export {
+  createPostgresReceiptTemplatePublicationProof,
+  createPostgresInstalledReceiptTemplatePublicationProof,
+} from "./infrastructure/template-publication-proof.js";
 export { createPostgresReceiptTemplateContentPublicationProof } from "./infrastructure/template-content-publication-proof.js";

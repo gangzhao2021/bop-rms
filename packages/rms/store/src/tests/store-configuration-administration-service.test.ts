@@ -473,6 +473,27 @@ describe("WP-2423 (v15 D2/D3) open changes and withdrawals", () => {
       }).saveDraft(withExpected(next(id(10)))),
     ).resolves.toMatchObject({ status: "Applied" });
   });
+  it("lets only the person who made a change check it or send it for approval", async () => {
+    const draft = () => createStoreConfigurationVersion(configuration("Draft"));
+    for (const step of ["validate", "submit"] as const) {
+      const other = createStoreConfigurationAdministrationService(ports(draft()).value);
+      const raw = {
+        ...command(
+          step === "validate" ? configuration("Draft") : configuration("PendingApproval"),
+          id(34),
+          id(40),
+        ),
+        expectedVersion: 1,
+      };
+      await expect(other[step](raw)).rejects.toMatchObject({
+        code: "STORE_CONFIGURATION_NOT_YOUR_CHANGE",
+      });
+      const own = createStoreConfigurationAdministrationService(ports(draft()).value);
+      await expect(own[step]({ ...raw, actorReference: id(10) })).resolves.toMatchObject({
+        status: "Applied",
+      });
+    }
+  });
   it("refuses every further step of a withdrawn configuration", async () => {
     const harness = ports(pending()),
       service = createStoreConfigurationAdministrationService({

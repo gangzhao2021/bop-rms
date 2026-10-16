@@ -39,6 +39,8 @@ describe("WP-2423 Q19 sole operator decision", () => {
     );
     // Owner decision 2026-10-16: Store configuration approval (Store setup step 8) is a gate.
     expect(parseSoleOperatorPermissionCode("store.service.approve")).toBe("store.service.approve");
+    // ... and so is receipt template approval (Owner access to the Store, WP-2423).
+    expect(parseSoleOperatorPermissionCode("organization.manage")).toBe("organization.manage");
     for (const code of [
       "publishing.release.publish",
       "publishing.review.approve",

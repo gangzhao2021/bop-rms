@@ -6,6 +6,7 @@ import {
   createPostgresDigitalReceiptTemplateSubmissionStore,
   digitalReceiptTemplateSubmissionRequiredFields,
   createPostgresReceiptTemplateContentPublicationProof,
+  createPostgresInstalledReceiptTemplatePublicationProof,
   resolveDigitalReceiptTemplate,
   type DigitalReceiptTemplateVersion,
   type DigitalReceiptTemplateAuthoredContent,
@@ -213,7 +214,7 @@ export function createMerchantReceiptTemplatePublished(options: {
           pubScope,
         );
         const owners: ReturnType<typeof createPostgresDigitalReceiptTemplateSubmissionStore>[] = [];
-        const authored = new Map<string, DigitalReceiptTemplateAuthoredContent>();
+        const authored = new Map<string, DigitalReceiptTemplateAuthoredContent | null>();
         const proofs = new Map<
           string,
           ReturnType<typeof createPostgresReceiptTemplateContentPublicationProof>
@@ -231,7 +232,7 @@ export function createMerchantReceiptTemplatePublished(options: {
           currentScope();
           const ref = String(version.versionReference),
             old = authored.get(ref);
-          if (old) return old;
+          if (old !== undefined) return old;
           if (phase !== "Work") return fail();
           const owner = createPostgresDigitalReceiptTemplateSubmissionStore({
             ...fixed,
@@ -296,11 +297,27 @@ export function createMerchantReceiptTemplatePublished(options: {
             versionReference: ref,
           });
           currentScope();
-          // Legacy publication without immutable V2 author provenance cannot be upgraded into qualification.
-          if (!content) return fail();
-          authored.set(ref, content);
-          return content;
+          // WP-2423: a version without an authored submission (installer-published) is proved
+          // separately as installed; it never gains authored provenance.
+          authored.set(ref, content ?? null);
+          return content ?? null;
         };
+        // WP-2423 DEC-STORE-SETUP-PUBLICATION: the installer-published template the Store uses
+        // today (no authored submission), proved through its exact current Publishing release.
+        const installedProof = createPostgresInstalledReceiptTemplatePublicationProof({
+          tenantReference: fixed.tenantReference,
+          brandReference: fixed.brandReference,
+          storeReference: fixed.storeReference,
+          configurationType: "RECEIPT_TEMPLATE",
+          purposeCode: "RECEIPT_ISSUANCE",
+          async authorize(actual, observedAt) {
+            currentScope();
+            if (actual !== tx || observedAt < origin || observedAt > last) return fail();
+            await fresh();
+            currentScope();
+            return true;
+          },
+        });
         const qualified: DigitalReceiptTemplateVersion[] = [];
         const writer = createPostgresDigitalReceiptTemplateStore({
           brandReference: fixed.brandReference,
@@ -337,6 +354,13 @@ export function createMerchantReceiptTemplatePublished(options: {
                 return fail();
               await fresh();
               const content = await acquire(version);
+              if (content === null) {
+                const installed = await installedProof(tx, version, at);
+                currentScope();
+                if (installed === null) return false;
+                qualified.push(version);
+                return true;
+              }
               const current = await pubOwner.resolveCurrentRelease({
                 familyReference: content.familyReference,
                 configurationType: "RECEIPT_TEMPLATE",

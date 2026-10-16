@@ -724,6 +724,21 @@ it("offers independent approval only for exact submitted saved version and prese
     ),
   ).toBe(false);
 });
+// WP-2423 DEC-SOLE-OPERATOR-APPROVAL: the sole-operator approval is offered only to the person who
+// wrote or sent the version, and the ordinary approval only to someone else.
+it("offers approving alone only to the author or sender, never for publication", async () => {
+  const f = await lifecycleFixture(),
+    now = Date.parse(at);
+  expect(receiptTemplateLifecycleAvailable(scope, f.current, f.review, "Approve", now, true)).toBe(
+    true,
+  );
+  expect(
+    receiptTemplateLifecycleAvailable(f.scope, f.current, f.review, "Approve", now, true),
+  ).toBe(false);
+  expect(receiptTemplateLifecycleAvailable(scope, f.current, f.review, "Publish", now, true)).toBe(
+    false,
+  );
+});
 it("reserves actual approval before POST and clears after separate true Draft and Review refresh", async () => {
   const f = await lifecycleFixture();
   f.order.length = 0;

@@ -651,3 +651,29 @@ it("short actual authorization lease consumed at finalization refuses COMMIT wit
   expect(f.database.lifecycle).toHaveLength(0);
   expect(f.database.publishing).toHaveLength(2);
 });
+// WP-2423 DEC-SOLE-OPERATOR-APPROVAL: asked explicitly, only for Approve, and only where the
+// deployment evaluates the Store's approvers; never implied without the request.
+it("refuses a sole-operator request where it is not offered, or for another command, with no artifacts", async () => {
+  const f = fixture(await submitted()),
+    before = f.database.audits.length;
+  for (const [command, approvalMode] of [
+    [actionBody(f), "SoleOperator"],
+    [actionBody(f), "Independent"],
+    [actionBody(f, "Publish"), "SoleOperator"],
+  ] as const)
+    await expect(
+      f.service.write({
+        sessionCookie: "synthetic",
+        csrf: "synthetic",
+        expectedScope: scopeFor(f),
+        command,
+        approvalMode,
+      }),
+    ).rejects.toMatchObject({ code: "RECEIPT_TEMPLATE_INPUT_INVALID" });
+  expect(f.database.lifecycle).toHaveLength(0);
+  expect(f.database.publishing).toHaveLength(2);
+  expect(f.database.audits).toHaveLength(before);
+  expect(
+    await f.service.soleOperatorGate({ sessionCookie: "synthetic", expectedScope: scopeFor(f) }),
+  ).toBeNull();
+});

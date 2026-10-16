@@ -578,3 +578,95 @@ it("read-before-execute, reentry and a changed exact original cannot become anot
     reader.readActualAction(h.tx, { ...original, operationReference: id(901) }),
   ).rejects.toThrow();
 });
+// WP-2423 DEC-SOLE-OPERATOR-APPROVAL (Owner decision 2026-10-16): the author or sender approves
+// alone only through the explicit sole-operator option; the mark is written in the approving
+// transaction and every later read (and Publish) accepts the self-approval only with it.
+function withMarks(f: Awaited<ReturnType<typeof fixture>>) {
+  const marks: unknown[][] = [];
+  type Query = (sql: string, values: readonly unknown[]) => Promise<unknown>;
+  const query = f.tx.query as unknown as ReturnType<typeof vi.fn<Query>>;
+  const original = query.getMockImplementation();
+  if (!original) throw new Error("controlled query required");
+  query.mockImplementation(async (sql: string, values: readonly unknown[]) => {
+    if (sql.startsWith("INSERT INTO rms_device.digital_receipt_template_sole_operator_approval")) {
+      marks.push([...values]);
+      return { rows: [], rowCount: 1 };
+    }
+    if (sql.startsWith("SELECT tenant_id::text tenant")) {
+      const rows = marks
+        .filter((m) => m[4] === values[3] && m[7] === values[4])
+        .map((m) => ({
+          tenant: m[0],
+          brand: m[1],
+          store: m[2],
+          template: m[3],
+          version: m[4],
+          lifecycle: m[5],
+          operation: m[6],
+          evidence: m[7],
+          mode: "SoleOperator",
+          actor: m[8],
+          mfa: m[9],
+          at: m[10],
+          audit: m[11],
+        }));
+      return { rows, rowCount: rows.length };
+    }
+    return original(sql, values);
+  });
+  return marks;
+}
+it.each([id(4), id(9)])(
+  "the sender or author %s approves alone as sole operator with a recorded mark, then publishes",
+  async (actor) => {
+    const f = await fixture(actor),
+      marks = withMarks(f);
+    const gate = vi.fn(async (actual: unknown, input: { occurredAt: string }) => {
+      expect(actual).toBe(f.tx);
+      return { actorMfaAt: new Date(Date.parse(input.occurredAt) - 60000).toISOString() };
+    });
+    f.lifecycleOptions.soleOperatorApproval = gate;
+    const c = f.create(),
+      action = f.action(),
+      result = await c.execute(f.tx, action);
+    expect(result.approval.approvedActorReference).toBe(actor);
+    expect(gate).toHaveBeenCalledTimes(1);
+    expect(marks).toHaveLength(1);
+    expect(marks[0]?.[6]).toBe(action.operationReference);
+    expect(marks[0]?.[7]).toBe(result.approval.evidenceReference);
+    expect(marks[0]?.[8]).toBe(actor);
+    expect(marks[0]?.[11]).toBe(result.mutation.audit.auditId);
+    expect(await c.readActualAction(f.tx, action)).toEqual(result);
+    // Publish (no sole-operator option needed) accepts the self-approval only with its mark.
+    delete f.lifecycleOptions.soleOperatorApproval;
+    const published = await f.create().execute(f.tx, f.action("Publish"));
+    expect(published.mutation.operation).toBe("Publish");
+  },
+);
+it("refuses the sole-operator option for someone else's version, a refused gate, and a lost mark", async () => {
+  const other = await fixture(id(14));
+  withMarks(other);
+  other.lifecycleOptions.soleOperatorApproval = async () => ({ actorMfaAt: at });
+  await expect(other.create().execute(other.tx, other.action())).rejects.toMatchObject({
+    code: "RECEIPT_TEMPLATE_CONFLICT",
+  });
+  expect(other.records).toHaveLength(2);
+  const refused = await fixture(id(4)),
+    refusedMarks = withMarks(refused);
+  refused.lifecycleOptions.soleOperatorApproval = async () => {
+    throw new Error("sole operator not in effect");
+  };
+  await expect(refused.create().execute(refused.tx, refused.action())).rejects.toThrow();
+  expect(refused.records).toHaveLength(2);
+  expect(refusedMarks).toHaveLength(0);
+  const lost = await fixture(id(4)),
+    lostMarks = withMarks(lost);
+  lost.lifecycleOptions.soleOperatorApproval = async () => ({ actorMfaAt: at });
+  await lost.create().execute(lost.tx, lost.action());
+  lostMarks.splice(0);
+  delete lost.lifecycleOptions.soleOperatorApproval;
+  await expect(lost.create().execute(lost.tx, lost.action("Publish"))).rejects.toMatchObject({
+    code: "RECEIPT_TEMPLATE_CONFLICT",
+  });
+  expect(lost.records).toHaveLength(3);
+});

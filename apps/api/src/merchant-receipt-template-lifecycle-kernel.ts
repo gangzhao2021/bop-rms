@@ -38,6 +38,8 @@ import {
   type DigitalReceiptTemplateContent,
   type DigitalReceiptTemplateVersion,
   type DigitalReceiptTemplateDraftActorScope,
+  hasDigitalReceiptTemplateSoleOperatorApproval,
+  recordDigitalReceiptTemplateSoleOperatorApproval,
 } from "@rms/printing-device";
 export interface MerchantReceiptTemplateLifecycleActualPacket {
   readonly mutation: CommitPublishingMutationInput;
@@ -76,6 +78,17 @@ export interface MerchantReceiptTemplateLifecycleKernelOptions {
       operationReference: string;
     }>,
   ) => Promise<DigitalReceiptTemplateVersion>;
+  /**
+   * WP-2423 DEC-SOLE-OPERATOR-APPROVAL (Owner decision 2026-10-16): present only when the approver
+   * explicitly approves, alone as sole operator, a version they wrote or sent for approval. It
+   * must decide in this transaction that sole operator is in effect for them at `occurredAt` and
+   * that their second factor is at most 15 minutes old, and throw otherwise. Absent, an approver
+   * who wrote or sent the version is refused; present, any other approval is refused.
+   */
+  readonly soleOperatorApproval?: (
+    tx: PublishingTransaction,
+    input: Readonly<{ occurredAt: string }>,
+  ) => Promise<Readonly<{ actorMfaAt: string }>>;
 }
 /** Fresh-only producer under the actual outer original fence. Caller owns all
  * current source/IAM guards, durable terminal and COMMIT; no internal savepoint.
@@ -92,7 +105,8 @@ export function createMerchantReceiptTemplateLifecycleKernel(
     allocate = options.nextReference,
     readSources = options.readReviewSources,
     authorize = options.authorizePublishing,
-    append = options.appendPublication;
+    append = options.appendPublication,
+    sole = options.soleOperatorApproval;
   const r = readClosedRecord(scopeOwner, [
     "tenantReference",
     "brandReference",
@@ -136,6 +150,7 @@ export function createMerchantReceiptTemplateLifecycleKernel(
   };
   if (
     [query, now, allocate, readSources, authorize, append].some((p) => typeof p !== "function") ||
+    (sole !== undefined && typeof sole !== "function") ||
     !Number.isSafeInteger(duration) ||
     duration <= 0 ||
     deadline <= origin ||
@@ -161,6 +176,7 @@ export function createMerchantReceiptTemplateLifecycleKernel(
       options.readReviewSources !== readSources ||
       options.authorizePublishing !== authorize ||
       options.appendPublication !== append ||
+      options.soleOperatorApproval !== sole ||
       options.originalObservedAt !== origin ||
       options.originalValidUntil !== deadline ||
       options.approvalValidityMs !== duration
@@ -242,20 +258,55 @@ export function createMerchantReceiptTemplateLifecycleKernel(
     )
       return fail();
   };
-  const approvalPins = (a: PublishingApprovalEvidence, s: DigitalReceiptTemplateSubmission) => {
+  /** `selfMarked`: the approval by the version's author or sender is backed by its recorded
+   * sole-operator approval (WP-2423); otherwise such an approval is refused. */
+  const approvalPins = (
+    a: PublishingApprovalEvidence,
+    s: DigitalReceiptTemplateSubmission,
+    selfMarked = false,
+  ) => {
     if (
       String(a.reviewLifecycleId) !== s.reviewLifecycleReference ||
       Number(a.reviewVersion) !== s.reviewVersion ||
       String(a.snapshotReference) !== s.versionReference ||
       String(a.snapshotDigest) !== s.contentDigest ||
       canonicalizeRfc8785(a.scope) !== canonicalizeRfc8785(scope) ||
-      String(a.approvedActorReference) === s.authoredByReference ||
-      String(a.approvedActorReference) === s.submittedByReference ||
+      (!selfMarked &&
+        (String(a.approvedActorReference) === s.authoredByReference ||
+          String(a.approvedActorReference) === s.submittedByReference)) ||
       String(a.approvedAt) < s.submittedAt ||
       String(a.validUntil) > s.validationValidUntil
     )
       return fail("RECEIPT_TEMPLATE_CONFLICT");
     evidenceCurrent(s, a);
+  };
+  /** WP-2423 DEC-SOLE-OPERATOR-APPROVAL: whether the approval was given by the version's author or
+   * sender; if so it must be backed by its exact recorded sole-operator approval. */
+  const soleMarked = async (
+    s: DigitalReceiptTemplateSubmission,
+    a: PublishingApprovalEvidence,
+    approvalOperationReference: string,
+  ) => {
+    if (
+      String(a.approvedActorReference) !== s.authoredByReference &&
+      String(a.approvedActorReference) !== s.submittedByReference
+    )
+      return false;
+    check();
+    const marked = await hasDigitalReceiptTemplateSoleOperatorApproval(tx, {
+      tenantReference: fixed.tenantReference,
+      brandReference: fixed.brandReference,
+      storeReference: fixed.storeReference,
+      versionReference: s.versionReference,
+      reviewLifecycleReference: s.reviewLifecycleReference,
+      approvalEvidenceReference: String(a.evidenceReference),
+      approverReference: String(a.approvedActorReference),
+      approvedAt: String(a.approvedAt),
+      operationReference: approvalOperationReference,
+    });
+    check();
+    if (!marked) return fail("RECEIPT_TEMPLATE_CONFLICT");
+    return true;
   };
   const readHead = async (s: DigitalReceiptTemplateSubmission) => {
     check();
@@ -336,9 +387,17 @@ export function createMerchantReceiptTemplateLifecycleKernel(
     )
       return fail();
     const approval = createPublishingApprovalEvidence(m.approvalEvidence);
-    approvalPins(approval, submission);
+    const marked = await soleMarked(
+      submission,
+      approval,
+      action.action === "Approve"
+        ? action.operationReference
+        : action.expectedReviewOperationReference,
+    );
+    approvalPins(approval, submission, marked);
     if (action.action === "Approve") {
-      const proof = await owner.resolveCurrentIndependentApproval({
+      // WP-2423: read as recorded; "SameActor" stands only with the mark checked above.
+      const proof = await owner.resolveCurrentRecordedApproval({
         familyReference: submission.familyReference,
         lifecycleReference: submission.reviewLifecycleReference,
         configurationType: "RECEIPT_TEMPLATE",
@@ -350,6 +409,8 @@ export function createMerchantReceiptTemplateLifecycleKernel(
       });
       check();
       if (
+        proof.profile !== "CurrentRecordedPublishingApprovalV1" ||
+        (proof.recordedIndependence !== "Verified" && !marked) ||
         String(proof.reviewOperationReference) !== submission.operationReference ||
         String(proof.approvalOperationReference) !== action.operationReference ||
         String(proof.approvedByActorReference) !== fixed.actorReference
@@ -462,11 +523,13 @@ export function createMerchantReceiptTemplateLifecycleKernel(
           publishedVersion: DigitalReceiptTemplateVersion | null = null,
           publicationDigest: string | null = null;
         if (command.action === "Approve") {
-          if (
+          // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: another person approves what someone wrote or
+          // sent, except that person alone as an in-effect, re-verified sole operator; the
+          // sole-operator path is never used for someone else's version.
+          const self =
             fixed.actorReference === s.authoredByReference ||
-            fixed.actorReference === s.submittedByReference
-          )
-            return fail("RECEIPT_TEMPLATE_CONFLICT");
+            fixed.actorReference === s.submittedByReference;
+          if (self !== (sole !== undefined)) return fail("RECEIPT_TEMPLATE_CONFLICT");
           const validation = current.validationEvidence;
           if (
             current.operation !== "SubmitReview" ||
@@ -504,7 +567,12 @@ export function createMerchantReceiptTemplateLifecycleKernel(
             approvedAt,
             validUntil,
           });
-          approvalPins(approval, s);
+          const soleGate =
+            sole === undefined
+              ? null
+              : await sole.call(options, tx, Object.freeze({ occurredAt: String(approvedAt) }));
+          check();
+          approvalPins(approval, s, soleGate !== null);
           const next = createPublishingLifecycleRecord({
             ...current.next,
             version: parsePublishingVersion(current.next.version + 1),
@@ -525,8 +593,29 @@ export function createMerchantReceiptTemplateLifecycleKernel(
             occurredAt: next.changedAt,
             sourceChannel: parsePublishingCode("MERCHANT_WEB"),
           });
+          if (soleGate !== null) {
+            // The mark, in this transaction, before the lifecycle record that relies on it.
+            check();
+            await recordDigitalReceiptTemplateSoleOperatorApproval(tx, {
+              tenantReference: fixed.tenantReference,
+              brandReference: fixed.brandReference,
+              storeReference: fixed.storeReference,
+              templateReference: s.templateReference,
+              versionReference: s.versionReference,
+              reviewLifecycleReference: s.reviewLifecycleReference,
+              operationReference: command.operationReference,
+              approvalEvidenceReference: String(approval.evidenceReference),
+              actorReference: fixed.actorReference,
+              actorMfaAt: soleGate.actorMfaAt,
+              approvedAt: String(approvedAt),
+              auditReference: String(mutation.audit.auditId),
+            });
+            check();
+          }
         } else {
-          const proof = await owner.resolveCurrentIndependentApproval({
+          // WP-2423: read as recorded; an approval by the author or sender stands only with its
+          // recorded sole-operator approval (checked below).
+          const proof = await owner.resolveCurrentRecordedApproval({
             familyReference: s.familyReference,
             lifecycleReference: s.reviewLifecycleReference,
             configurationType: "RECEIPT_TEMPLATE",
@@ -546,8 +635,11 @@ export function createMerchantReceiptTemplateLifecycleKernel(
           });
           check();
           approval = createPublishingApprovalEvidence(candidate.approvalEvidence);
-          approvalPins(approval, s);
+          const marked = await soleMarked(s, approval, command.expectedReviewOperationReference);
+          approvalPins(approval, s, marked);
           if (
+            proof.profile !== "CurrentRecordedPublishingApprovalV1" ||
+            (proof.recordedIndependence !== "Verified" && !marked) ||
             String(proof.reviewOperationReference) !== s.operationReference ||
             String(proof.approvalOperationReference) !== command.expectedReviewOperationReference ||
             canonicalizeRfc8785(candidate.lifecycle) !== canonicalizeRfc8785(current.next) ||

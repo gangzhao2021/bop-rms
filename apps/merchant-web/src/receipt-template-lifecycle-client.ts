@@ -14,6 +14,66 @@ import {
 } from "./store-setup-client.js";
 export { StoreSetupClientError as ReceiptTemplateLifecycleClientError };
 import { receiptTemplateArtifactRequiredFields } from "./receipt-template-artifact-client.js";
+import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
+
+/** WP-2423 DEC-SOLE-OPERATOR-APPROVAL: why the Owner's own approval was refused, if it says so. */
+async function soleOperatorRefusal(
+  response: Response,
+): Promise<"SoleOperatorNotInEffect" | "SoleOperatorNeedsVerification" | "SoleOperatorOff" | null> {
+  try {
+    const text = await response.text();
+    if (text.length > 4096) return null;
+    const error = (JSON.parse(text) as { error?: unknown } | null)?.error;
+    return error === "sole_operator_not_in_effect"
+      ? "SoleOperatorNotInEffect"
+      : error === "sole_operator_needs_verification"
+        ? "SoleOperatorNeedsVerification"
+        : error === "sole_operator_off"
+          ? "SoleOperatorOff"
+          : null;
+  } catch {
+    return null;
+  }
+}
+const encodeScope = (scope: StoreSetupScope) =>
+  btoa(canonical(scope)).replace(/\+/gu, "-").replace(/\//gu, "_").replace(/=+$/u, "");
+/**
+ * WP-2423 DEC-SOLE-OPERATOR-APPROVAL: whether the signed-in person may approve, alone, a receipt
+ * template they wrote or sent (null where this deployment does not offer it). Authority is the
+ * server's; this read only explains it.
+ */
+export async function loadReceiptTemplateSoleOperatorGate(
+  scope: StoreSetupScope,
+  options: { signal?: AbortSignal } = {},
+  fetcher: typeof fetch = fetch,
+): Promise<SoleOperatorGateView | null> {
+  const expected = parseStoreSetupScope(scope);
+  let response: Response;
+  try {
+    response = await fetcher("/merchant/store-setup/receipt-template-sole-operator", {
+      method: "GET",
+      credentials: "same-origin",
+      cache: "no-store",
+      redirect: "error",
+      ...(options.signal ? { signal: options.signal } : {}),
+      headers: { Accept: "application/json", "X-BOP-Store-Setup-Scope": encodeScope(expected) },
+    });
+  } catch {
+    throw new StoreSetupClientError("Unavailable");
+  }
+  if (response.status === 403) throw new StoreSetupClientError("Denied");
+  if (!response.ok) throw new StoreSetupClientError("Unavailable");
+  try {
+    const text = await response.text();
+    if (text.length > 16384) throw new Error("too large");
+    const body = JSON.parse(text) as Record<string, unknown> | null;
+    if (!body || typeof body !== "object" || Object.keys(body).join(",") !== "soleOperator")
+      throw new Error("invalid");
+    return parseSoleOperatorGate(body.soleOperator);
+  } catch {
+    throw new StoreSetupClientError("Unavailable");
+  }
+}
 interface LifecyclePins {
   readonly action: "Approve" | "Publish";
   readonly operationReference: string;
@@ -425,7 +485,7 @@ export function createReceiptTemplateLifecycleClient(fetcher: typeof fetch = fet
       if (captured !== epoch || options.csrf !== csrf || options.signal !== signal)
         return fail("ScopeChanged");
       if (controller.signal.aborted) return fail(body ? "OutcomeUnknown" : "Unavailable");
-      if (response.status === 403) return fail("Denied");
+      if (response.status === 403) return fail((await soleOperatorRefusal(response)) ?? "Denied");
       if (response.status === 409) return fail("Conflict");
       if (response.status === 400) return fail("Invalid");
       if (
@@ -558,6 +618,8 @@ export function createReceiptTemplateLifecycleClient(fetcher: typeof fetch = fet
     async execute(
       input: PreparedReceiptTemplateLifecycle,
       options: RequestOptions & { csrf: string },
+      /** WP-2423: "SoleOperator" when the author or sender approves their own version alone. */
+      approvalMode?: "SoleOperator",
     ) {
       const csrf = options.csrf,
         signal = options.signal,
@@ -569,7 +631,9 @@ export function createReceiptTemplateLifecycleClient(fetcher: typeof fetch = fet
       if (
         !sameScope(scopeFrom({ ...command }), cursor.scope) ||
         canonical(pins({ ...command })) !== canonical(pins({ ...cursor })) ||
-        r.intentDigest !== cursor.intentDigest
+        r.intentDigest !== cursor.intentDigest ||
+        (approvalMode !== undefined &&
+          (approvalMode !== "SoleOperator" || cursor.action !== "Approve"))
       )
         return fail();
       await checkDigest(cursor);
@@ -578,7 +642,11 @@ export function createReceiptTemplateLifecycleClient(fetcher: typeof fetch = fet
         cursor.scope.storeReference,
         cursor.scope,
         options,
-        { command: cursor.action, ...bodyPins(cursor) },
+        {
+          command: cursor.action,
+          ...bodyPins(cursor),
+          ...(approvalMode === undefined ? {} : { approvalMode }),
+        },
         cursor.templateReference,
       );
       return terminal(raw, cursor, epoch, options, csrf, signal);

@@ -320,7 +320,7 @@ const ordinaryReadPath = "/merchant/store-configuration/ordinary?expectedStoreRe
 /** WP-2423 DEC-SOLE-OPERATOR-APPROVAL: why the Owner's own approval was refused, if it says so. */
 async function soleOperatorRefusal(
   response: Response,
-): Promise<"SoleOperatorNotInEffect" | "SoleOperatorNeedsVerification" | null> {
+): Promise<"SoleOperatorNotInEffect" | "SoleOperatorNeedsVerification" | "SoleOperatorOff" | null> {
   try {
     const text = await response.text();
     if (text.length > 4096) return null;
@@ -329,7 +329,9 @@ async function soleOperatorRefusal(
       ? "SoleOperatorNotInEffect"
       : error === "sole_operator_needs_verification"
         ? "SoleOperatorNeedsVerification"
-        : null;
+        : error === "sole_operator_off"
+          ? "SoleOperatorOff"
+          : null;
   } catch {
     return null;
   }
@@ -337,7 +339,9 @@ async function soleOperatorRefusal(
 /** WP-2423 (v15 D2/D3): a refusal the Owner can act on, if the answer names it. */
 async function ordinaryConflictReason(
   response: Response,
-): Promise<"SetupIncomplete" | "SetupOutdated" | "OpenChangeByAnother" | "Withdrawn" | null> {
+): Promise<
+  "SetupIncomplete" | "SetupOutdated" | "OpenChangeByAnother" | "Withdrawn" | "NotYourChange" | null
+> {
   try {
     const text = await response.text();
     if (text.length > 4096) return null;
@@ -350,7 +354,9 @@ async function ordinaryConflictReason(
           ? "OpenChangeByAnother"
           : error === "store_configuration_withdrawn"
             ? "Withdrawn"
-            : null;
+            : error === "not_your_change"
+              ? "NotYourChange"
+              : null;
   } catch {
     return null;
   }

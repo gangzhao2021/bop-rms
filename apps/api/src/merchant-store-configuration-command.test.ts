@@ -132,16 +132,20 @@ it("binds a pending approval to the current independent actor and stable operati
     approvalEvidenceReference: body.operationReference,
   });
 });
-it("rejects approval of the current actor's own pending draft", () => {
-  expect(() =>
-    bindMerchantStoreConfigurationCommand(
-      {
-        ...body,
-        command: "Approve",
-        expectedVersion: 1,
-        configuration: configuration("PendingApproval"),
-      },
-      context,
-    ),
-  ).toThrow("STORE_CONFIGURATION_COMMAND_INVALID");
+it("binds the current actor's approval of their own pending draft for the route to decide", () => {
+  // WP-2423 DEC-SOLE-OPERATOR-APPROVAL (v15): the route refuses it unless the actor asks to
+  // approve alone as sole operator and it is in effect (and the database requires the mark).
+  const bound = bindMerchantStoreConfigurationCommand(
+    {
+      ...body,
+      command: "Approve",
+      expectedVersion: 1,
+      configuration: configuration("PendingApproval"),
+    },
+    context,
+  );
+  expect(bound.method).toBe("approve");
+  expect(bound.input.configuration.approvedByReference).toBe(
+    bound.input.configuration.authoredByReference,
+  );
 });

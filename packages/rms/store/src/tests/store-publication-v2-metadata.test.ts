@@ -619,14 +619,14 @@ describe("Store V2 current independent approval authority", () => {
   });
   it("refuses actual approval Actor/evidence drift and original Submitter self-approval", async () => {
     const h = approvedFixture();
-    // A structurally self-approved legacy configuration is refused by the owning parser; one
-    // from Store setup parses (WP-2423 sole operator) and is refused below without its mark.
+    // A structurally self-approved configuration parses (WP-2423 sole operator, since v15 also an
+    // installed configuration's hours change) and is refused below without its mark.
     expect(() =>
       createStoreConfigurationVersion({
         ...configuration(false),
         authoredByReference: h.value.approvedByReference,
       }),
-    ).toThrow();
+    ).not.toThrow();
     const self = createStoreConfigurationVersion({
       ...h.value,
       authoredByReference: h.value.approvedByReference,

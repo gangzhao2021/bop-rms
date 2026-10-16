@@ -1,4 +1,5 @@
 import { parseStoreSetupFeeContexts } from "./store-setup-client.js";
+import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
 import {
   parseServiceIntervals,
   type ServiceMode,
@@ -309,11 +310,27 @@ export interface StoreConfigurationView {
     readonly kind: "Withdrawn" | "Declined";
     readonly withdrawnAt: string;
     readonly byYou: boolean;
+    /** WP-2423 (v15): why it was declined, when the Owner gave a reason. */
+    readonly reason?: StoreConfigurationDeclineReason | null;
   } | null;
+  /** WP-2423 (v15): who made the open change, when it is someone else (their Store name). */
+  readonly latestAuthorName?: string | null;
+  /** WP-2423 DEC-SOLE-OPERATOR-APPROVAL: whether you may approve your own waiting change alone. */
+  readonly soleOperator?: SoleOperatorGateView | null;
 }
+/** WP-2423 (v15): why an Owner declined someone else's change (optional). */
+export type StoreConfigurationDeclineReason = "NotRight" | "NotNeeded" | "TalkFirst";
+export const storeConfigurationDeclineReasonText: Readonly<
+  Record<StoreConfigurationDeclineReason, string>
+> = Object.freeze({
+  NotRight: "Something in it is not right",
+  NotNeeded: "It is not needed",
+  TalkFirst: "Talk to me before changing this",
+});
 export function parseStoreConfigurationView(raw: unknown, store: string): StoreConfigurationView {
   const extended =
     raw !== null && typeof raw === "object" && Object.hasOwn(raw, "viewerActorReference");
+  const named = extended && Object.hasOwn(raw, "latestAuthorName");
   const v = exact(raw, [
     "screenId",
     "storeReference",
@@ -322,6 +339,7 @@ export function parseStoreConfigurationView(raw: unknown, store: string): StoreC
     "expectedVersion",
     "observedAt",
     ...(extended ? ["viewerActorReference", "latestWithdrawal"] : []),
+    ...(named ? ["latestAuthorName", "soleOperator"] : []),
   ]);
   if (v.screenId !== "STORE-HOURS-SERVICE" || !reference(store) || v.storeReference !== store)
     return invalid();
@@ -344,18 +362,34 @@ export function parseStoreConfigurationView(raw: unknown, store: string): StoreC
     return invalid();
   let latestWithdrawal: StoreConfigurationView["latestWithdrawal"] = null;
   if (extended && v.latestWithdrawal !== null) {
-    const w = exact(v.latestWithdrawal, ["kind", "withdrawnAt", "byYou"]);
+    const withReason =
+      v.latestWithdrawal !== null &&
+      typeof v.latestWithdrawal === "object" &&
+      Object.hasOwn(v.latestWithdrawal, "reason");
+    const w = exact(v.latestWithdrawal, [
+      "kind",
+      "withdrawnAt",
+      "byYou",
+      ...(withReason ? ["reason"] : []),
+    ]);
     if (
       (w.kind !== "Withdrawn" && w.kind !== "Declined") ||
       typeof w.byYou !== "boolean" ||
       latest === null ||
-      latest.lifecycle === "Published"
+      latest.lifecycle === "Published" ||
+      (withReason &&
+        w.reason !== null &&
+        (w.kind !== "Declined" ||
+          !Object.hasOwn(storeConfigurationDeclineReasonText, String(w.reason))))
     )
       return invalid();
     latestWithdrawal = Object.freeze({
       kind: w.kind,
       withdrawnAt: instant(w.withdrawnAt),
       byYou: w.byYou,
+      ...(withReason
+        ? { reason: (w.reason ?? null) as StoreConfigurationDeclineReason | null }
+        : {}),
     });
   }
   if (
@@ -372,6 +406,25 @@ export function parseStoreConfigurationView(raw: unknown, store: string): StoreC
     observedAt,
     ...(extended
       ? { viewerActorReference: v.viewerActorReference as string, latestWithdrawal }
+      : {}),
+    ...(named
+      ? {
+          latestAuthorName:
+            v.latestAuthorName === null
+              ? null
+              : typeof v.latestAuthorName === "string" &&
+                  v.latestAuthorName.length > 0 &&
+                  v.latestAuthorName.length <= 80
+                ? v.latestAuthorName
+                : invalid(),
+          soleOperator: (() => {
+            try {
+              return parseSoleOperatorGate(v.soleOperator);
+            } catch {
+              return invalid();
+            }
+          })(),
+        }
       : {}),
   });
 }
@@ -410,12 +463,34 @@ export const OPEN_CHANGE_BY_ANOTHER_MESSAGE =
 /** WP-2423 (v15 D2/D3): the change was withdrawn or declined and takes no further step. */
 export const STORE_CONFIGURATION_WITHDRAWN_MESSAGE =
   "This change was withdrawn or declined. Make a new change instead.";
+/** WP-2423 (v15): only the person who made a change checks it and sends it for approval. */
+export const NOT_YOUR_CHANGE_MESSAGE =
+  "Only the person who made this change can check it or send it for approval. Ask them to, or, if you are an Owner, approve or decline it.";
+/** WP-2423 DEC-SOLE-OPERATOR-APPROVAL: refusals of an approval, each with what to do next. */
+export const APPROVAL_NEEDS_ANOTHER_PERSON_MESSAGE =
+  "You made or sent this change, so someone else with Owner access must approve it, or approve it on your own as sole operator.";
+export const SOLE_OPERATOR_OFF_MESSAGE =
+  "Sole operator is off, so another person with Owner access must approve this. If you run this business on your own, turn on Sole operator on the Approvals page, then approve again.";
+export const SOLE_OPERATOR_OTHERS_MESSAGE =
+  "Someone else also holds Owner access at this Store, so they must approve this change.";
+export const SOLE_OPERATOR_VERIFY_MESSAGE =
+  "Your verification is more than 15 minutes old, so the approval was not recorded. Verify again, then approve.";
+/** Refusals after which the form and the open change stay on screen as they were. */
+export const storeConfigurationKeptRefusals: ReadonlySet<string> = new Set([
+  NOT_YOUR_CHANGE_MESSAGE,
+  APPROVAL_NEEDS_ANOTHER_PERSON_MESSAGE,
+  SOLE_OPERATOR_OFF_MESSAGE,
+  SOLE_OPERATOR_OTHERS_MESSAGE,
+  SOLE_OPERATOR_VERIFY_MESSAGE,
+]);
 /** WP-2423 (v15 D2/D3): withdraw your own open change, or decline someone else's (Owner). */
 export async function withdrawStoreConfiguration(
   input: {
     readonly configurationReference: string;
     readonly configurationVersion: number;
     readonly auditReference: string;
+    /** Only when declining someone else's change; optional. */
+    readonly declineReason?: StoreConfigurationDeclineReason;
   },
   csrf: string,
   fetcher: typeof fetch = fetch,
@@ -453,6 +528,7 @@ export function createStoreConfigurationClient(fetcher: typeof fetch = fetch) {
     signal: AbortSignal,
     command?: StoreConfigurationCommand | StoreHoursDraftCommand,
     csrf?: string,
+    approvalMode?: "SoleOperator",
   ) {
     const hours = command !== undefined && "expectedSetup" in command;
     const controller = new AbortController();
@@ -473,26 +549,44 @@ export function createStoreConfigurationClient(fetcher: typeof fetch = fetch) {
             Accept: "application/json",
             ...(command ? { "Content-Type": "application/json", "X-BOP-CSRF": csrf ?? "" } : {}),
           },
-          ...(command ? { body: JSON.stringify(command) } : {}),
+          ...(command
+            ? {
+                body: JSON.stringify(
+                  approvalMode === undefined ? command : { ...command, approvalMode },
+                ),
+              }
+            : {}),
         },
       );
-      if (response.status === 403)
+      const answer: unknown =
+        response.status === 403 || response.status === 409
+          ? await response.json().catch(() => null)
+          : null;
+      const error =
+        answer !== null && typeof answer === "object"
+          ? Object.getOwnPropertyDescriptor(answer, "error")?.value
+          : undefined;
+      if (response.status === 403) {
+        // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: why your own approval alone was not accepted.
+        if (error === "sole_operator_off") throw new Error(SOLE_OPERATOR_OFF_MESSAGE);
+        if (error === "sole_operator_not_in_effect") throw new Error(SOLE_OPERATOR_OTHERS_MESSAGE);
+        if (error === "sole_operator_needs_verification")
+          throw new Error(SOLE_OPERATOR_VERIFY_MESSAGE);
         throw new Error(
           command && "command" in command && command.command === "Approve"
             ? "Permission denied. Someone other than the person who made this change, with approval access, must approve it."
             : "Permission denied. Check your session and Store access.",
         );
+      }
       if (response.status === 409) {
-        const answer: unknown = await response.json().catch(() => null);
-        const error =
-          answer !== null && typeof answer === "object"
-            ? Object.getOwnPropertyDescriptor(answer, "error")?.value
-            : undefined;
         if (hours && error === "store_setup_has_unpublished_changes")
           throw new Error(STORE_SETUP_UNPUBLISHED_MESSAGE);
         if (error === "open_change_by_another") throw new Error(OPEN_CHANGE_BY_ANOTHER_MESSAGE);
         if (error === "store_configuration_withdrawn")
           throw new Error(STORE_CONFIGURATION_WITHDRAWN_MESSAGE);
+        if (error === "not_your_change") throw new Error(NOT_YOUR_CHANGE_MESSAGE);
+        if (error === "approval_needs_another_person")
+          throw new Error(APPROVAL_NEEDS_ANOTHER_PERSON_MESSAGE);
         throw new Error("Source changed. Refresh before trying again.");
       }
       // WP-2423 Q4: the change itself was not accepted; keep the form so staff can correct it.
@@ -519,8 +613,19 @@ export function createStoreConfigurationClient(fetcher: typeof fetch = fetch) {
     async load(store: string, signal: AbortSignal) {
       return parseStoreConfigurationView(await request(signal), store);
     },
-    async execute(command: StoreConfigurationCommand, csrf: string, signal: AbortSignal) {
-      const result = exact(await request(signal, command, csrf), ["status", "resultingVersion"]);
+    async execute(
+      command: StoreConfigurationCommand,
+      csrf: string,
+      signal: AbortSignal,
+      /** WP-2423: "SoleOperator" when you approve your own change alone. */
+      approvalMode?: "SoleOperator",
+    ) {
+      if (approvalMode !== undefined && command.command !== "Approve")
+        throw new Error("Configuration request unavailable.");
+      const result = exact(await request(signal, command, csrf, approvalMode), [
+        "status",
+        "resultingVersion",
+      ]);
       if (
         !["Applied", "AlreadyApplied"].includes(String(result.status)) ||
         result.resultingVersion !==

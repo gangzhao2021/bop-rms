@@ -1,11 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import { digitalReceiptRequiredFields } from "../contracts/digital-receipt-template.js";
-import { createPostgresReceiptTemplatePublicationProof } from "../infrastructure/template-publication-proof.js";
-const mocks = vi.hoisted(() => ({ resolve: vi.fn() }));
+import {
+  createPostgresReceiptTemplatePublicationProof,
+  createPostgresInstalledReceiptTemplatePublicationProof,
+} from "../infrastructure/template-publication-proof.js";
+const mocks = vi.hoisted(() => ({ resolve: vi.fn(), forReference: vi.fn() }));
 vi.mock("@bop/publishing", async (load) => ({
   ...(await load<typeof import("@bop/publishing")>()),
-  createPostgresPublishingMutationStore: () => ({ resolveCurrentRelease: mocks.resolve }),
+  createPostgresPublishingMutationStore: () => ({
+    resolveCurrentRelease: mocks.resolve,
+    resolveCurrentReleaseForReference: mocks.forReference,
+  }),
 }));
 const id = (n: number) => "0190ed14-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const at = "2026-09-13T00:00:00.000Z";
@@ -97,5 +103,45 @@ describe("receipt template current publication proof", () => {
     f.authorize.mockResolvedValue(false);
     await expect(f.read(f.tx, f.version, at)).rejects.toThrow("RECEIPT_TEMPLATE_UNAVAILABLE");
     expect(mocks.resolve).not.toHaveBeenCalled();
+  });
+});
+// WP-2423 DEC-STORE-SETUP-PUBLICATION: the installer-published template the Store uses today.
+describe("installed receipt template publication proof", () => {
+  const installed = (f: ReturnType<typeof fixture>) =>
+    createPostgresInstalledReceiptTemplatePublicationProof({
+      brandReference: id(1),
+      storeReference: id(2),
+      tenantReference: id(9),
+      configurationType: "RECEIPT_TEMPLATE",
+      purposeCode: "RECEIPT_ISSUANCE",
+      authorize: f.authorize,
+    });
+  const recorded = (f: ReturnType<typeof fixture>) => ({
+    recorded: { release: { ...f.current.release, familyReference: id(10) } },
+    current: f.current,
+  });
+  it("learns the family from the exact current release and proves the full version envelope", async () => {
+    const f = fixture();
+    mocks.forReference.mockResolvedValue(recorded(f));
+    const proof = await installed(f)(f.tx, f.version, at);
+    expect(proof?.contentDigest).toBe(f.digest);
+    expect(proof?.familyReference).toBe(id(10));
+    expect(mocks.forReference).toHaveBeenCalledWith({
+      publicationReference: id(7),
+      configurationType: "RECEIPT_TEMPLATE",
+      purposeCode: "RECEIPT_ISSUANCE",
+      observedAt: at,
+    });
+  });
+  it("proves nothing for a release that is not current, and refuses changed content", async () => {
+    const f = fixture();
+    mocks.forReference.mockRejectedValueOnce(new Error("not current"));
+    expect(await installed(f)(f.tx, f.version, at)).toBeNull();
+    mocks.forReference.mockResolvedValue(recorded(f));
+    await expect(installed(f)(f.tx, { ...f.version, locale: "fr-CA" }, at)).rejects.toThrow(
+      "RECEIPT_TEMPLATE_UNAVAILABLE",
+    );
+    f.authorize.mockResolvedValueOnce(false);
+    await expect(installed(f)(f.tx, f.version, at)).rejects.toThrow("RECEIPT_TEMPLATE_UNAVAILABLE");
   });
 });

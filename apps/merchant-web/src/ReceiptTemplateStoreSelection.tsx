@@ -24,6 +24,8 @@ export interface ReceiptTemplateStoreSelectionProps {
   readonly hidden?: boolean;
   readonly disabled?: boolean;
   readonly value: StoreSetupValue<string>;
+  /** WP-2423 (v15): the template the live Store issues receipts with today, when known. */
+  readonly liveTemplateReference?: string | null;
   readonly onSelect: (templateReference: string | null) => void;
   readonly client?: ReturnType<typeof createReceiptTemplatePublishedClient>;
   readonly rosterClient?: ReturnType<typeof createReceiptTemplateDraftClient>;
@@ -106,7 +108,7 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
       controllers.current.delete(c);
     }
   }
-  async function preview(templateReference: string) {
+  async function preview(templateReference: string, apply = false) {
     if (disabled.current || !templateReference) return;
     const sequence = ++previewSequence.current,
       e = epoch.current,
@@ -127,6 +129,11 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
         if (!disabled.current) {
           setCandidate(result);
           setExpired(false);
+          // WP-2423 (v15): "Keep the receipt template in use today" checks and keeps it at once.
+          if (apply) {
+            applyReceiptTemplateStoreSelection(result, props.scope, props.locale, props.onSelect);
+            setSelected(templateReference);
+          }
         }
         setBusy(false);
       }
@@ -183,6 +190,11 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
     );
     return () => clearTimeout(timer);
   }, [candidate]);
+  const live = props.liveTemplateReference ?? null,
+    liveListed =
+      live !== null &&
+      (roster?.entries ?? []).some((entry) => entry.content.templateReference === live),
+    usingLive = live !== null && props.value.state === "Configured" && props.value.value === live;
   const blocked = props.disabled || busy,
     fresh =
       candidate !== null &&
@@ -197,9 +209,30 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
     >
       <h4>Published receipt template</h4>
       <p>
-        Choose a saved template, then check its currently effective version for this store language.
-        Save the setup draft separately to keep the selection.
+        Keep the template the Store issues receipts with today, or choose a saved template and check
+        its currently effective version for this store language. Save the setup draft separately to
+        keep the selection.
       </p>
+      {live !== null && (
+        <div>
+          <p>
+            {usingLive
+              ? "This setup uses the receipt template the Store issues receipts with today."
+              : "The Store issues receipts with a published template today. Keep it unless you want customers' receipts to change."}
+          </p>
+          <button
+            type="button"
+            disabled={blocked || usingLive}
+            onClick={() => {
+              previewSequence.current++;
+              setError("");
+              void preview(live, true);
+            }}
+          >
+            Keep the receipt template in use today
+          </button>
+        </div>
+      )}
       <label>
         Saved templates
         <select
@@ -214,6 +247,9 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
           }}
         >
           <option value="">Choose a saved template</option>
+          {live !== null && !liveListed && (
+            <option value={live}>Receipt template in use today</option>
+          )}
           {roster?.entries.map((entry) => (
             <option key={entry.content.templateReference} value={entry.content.templateReference}>
               {languageName(entry.content.locale)} · draft {entry.revision}
@@ -297,8 +333,9 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
           }
         }}
       >
-        Leave receipt template unconfigured
+        Clear receipt template choice
       </button>
+      <p>A setup without a receipt template can be saved, but it cannot be published.</p>
     </section>
   );
 }

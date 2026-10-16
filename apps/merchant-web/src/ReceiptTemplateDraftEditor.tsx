@@ -37,8 +37,10 @@ import {
   createReceiptTemplateSubmitPendingJournal,
   type ReceiptTemplateSubmitPendingJournal,
 } from "./receipt-template-submit-pending-journal.js";
+import { SoleOperatorSelfApproval, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
 import {
   createReceiptTemplateLifecycleClient,
+  loadReceiptTemplateSoleOperatorGate,
   type ReceiptTemplateLifecycleCursor,
   type PreparedReceiptTemplateLifecycle,
   type ReceiptTemplatePublishedVersion,
@@ -263,6 +265,8 @@ export function receiptTemplateLifecycleAvailable(
   review: ReceiptTemplateReviewCurrent,
   action: "Approve" | "Publish",
   now: number,
+  /** WP-2423: the author or sender approving their own version alone, as sole operator. */
+  soleOperator = false,
 ) {
   const snapshot = current.snapshot,
     submission = review.submission,
@@ -280,25 +284,28 @@ export function receiptTemplateLifecycleAvailable(
     Date.parse(submission.validationValidUntil) > now &&
     (action === "Approve"
       ? lifecycle.state === "InReview" &&
-        scope.actorReference !== submission.authoredByReference &&
-        scope.actorReference !== submission.submittedByReference
-      : lifecycle.state === "Approved"),
+        (scope.actorReference === submission.authoredByReference ||
+          scope.actorReference === submission.submittedByReference) === soleOperator
+      : !soleOperator && lifecycle.state === "Approved"),
   );
 }
 export async function finishReceiptTemplateLifecycleOriginal(
   input: LifecycleOperation & {
     cursor: ReceiptTemplateLifecycleCursor;
     prepared?: PreparedReceiptTemplateLifecycle;
+    /** WP-2423: "SoleOperator" when the author or sender approves their own version alone. */
+    approvalMode?: "SoleOperator";
   },
 ) {
   lifecycleCheck(input);
   if (input.prepared && canonical(input.prepared.cursor) !== canonical(input.cursor))
     throw new StoreSetupClientError("Conflict");
   const receipt = input.prepared
-    ? await input.lifecycleClient.execute(input.prepared, {
-        csrf: input.csrf,
-        signal: input.signal,
-      })
+    ? await input.lifecycleClient.execute(
+        input.prepared,
+        { csrf: input.csrf, signal: input.signal },
+        input.approvalMode,
+      )
     : await input.lifecycleClient.resolve(input.cursor, { csrf: input.csrf, signal: input.signal });
   lifecycleCheck(input);
   const current = await input.client.load({
@@ -335,6 +342,7 @@ export async function advanceReceiptTemplateLifecycle(
     fields: ReceiptTemplateDraftFields;
     action: "Approve" | "Publish";
     onReserved: (prepared: PreparedReceiptTemplateLifecycle) => void;
+    approvalMode?: "SoleOperator";
   },
 ) {
   lifecycleCheck(input);
@@ -358,7 +366,14 @@ export async function advanceReceiptTemplateLifecycle(
   });
   lifecycleCheck(input);
   if (
-    !receiptTemplateLifecycleAvailable(input.scope, current, review, input.action, Date.now()) ||
+    !receiptTemplateLifecycleAvailable(
+      input.scope,
+      current,
+      review,
+      input.action,
+      Date.now(),
+      input.approvalMode === "SoleOperator",
+    ) ||
     canonical(review.currentDraft) !== canonical(input.review.currentDraft) ||
     canonical(review.lifecycle) !== canonical(input.review.lifecycle) ||
     canonical(current.snapshot) !== canonical(input.baseline.snapshot) ||
@@ -397,6 +412,8 @@ export interface ReceiptTemplateDraftEditorProps {
   readonly lifecycleJournalFactory?: typeof createReceiptTemplateLifecyclePendingJournal;
   readonly submitClient?: SubmitClient;
   readonly submitJournalFactory?: typeof createReceiptTemplateSubmitPendingJournal;
+  /** WP-2423 DEC-SOLE-OPERATOR-APPROVAL: the server's sole-operator view for this person. */
+  readonly soleOperatorGateLoader?: typeof loadReceiptTemplateSoleOperatorGate;
 }
 /** Authoring and mechanical preview only. A Draft is never a Published Store template. */
 export function ReceiptTemplateDraftEditor({
@@ -413,6 +430,7 @@ export function ReceiptTemplateDraftEditor({
   lifecycleJournalFactory = createReceiptTemplateLifecyclePendingJournal,
   submitClient: injectedSubmit,
   submitJournalFactory = createReceiptTemplateSubmitPendingJournal,
+  soleOperatorGateLoader = loadReceiptTemplateSoleOperatorGate,
 }: ReceiptTemplateDraftEditorProps) {
   const lifecycleClient = useMemo(
     () => injectedLifecycle ?? createReceiptTemplateLifecycleClient(),
@@ -443,6 +461,11 @@ export function ReceiptTemplateDraftEditor({
       null,
     ),
     [reviewNow, setReviewNow] = useState(() => Date.now()),
+    // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: undefined while not needed or loading; null when this
+    // deployment does not offer approving alone; "failed" when it could not be read.
+    [soleGate, setSoleGate] = useState<SoleOperatorGateView | null | "failed" | undefined>(
+      undefined,
+    ),
     [ready, setReady] = useState(false),
     [busy, setBusy] = useState(false),
     [listing, setListing] = useState(false),
@@ -474,12 +497,39 @@ export function ReceiptTemplateDraftEditor({
     submitOriginal = useRef<PreparedReceiptTemplateSubmit | null>(null),
     submitJournal = useRef<ReceiptTemplateSubmitPendingJournal | null>(null),
     lifecycleOriginal = useRef<PreparedReceiptTemplateLifecycle | null>(null),
+    // WP-2423: the exact approval mode of the reserved original, kept for its exact retry.
+    lifecycleMode = useRef<"SoleOperator" | undefined>(undefined),
     lifecycleJournal = useRef<ReceiptTemplateLifecyclePendingJournal | null>(null),
     scopeKey = JSON.stringify(scope),
     identityKey = JSON.stringify({ scope, csrf, defaultLocale }),
     identity = useRef(identityKey),
     loadedIdentity = useRef("");
   identity.current = identityKey;
+  // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: when the signed-in person wrote or sent the version
+  // waiting for approval, read whether they may approve it alone (the server decides).
+  const ownReview =
+    review?.submission !== null &&
+    review?.submission !== undefined &&
+    review.lifecycle?.state === "InReview" &&
+    (scope.actorReference === review.submission.authoredByReference ||
+      scope.actorReference === review.submission.submittedByReference);
+  useEffect(() => {
+    if (!ownReview) {
+      setSoleGate(undefined);
+      return;
+    }
+    const c = new AbortController();
+    setSoleGate(undefined);
+    soleOperatorGateLoader(scope, { signal: c.signal }).then(
+      (gate) => {
+        if (!c.signal.aborted) setSoleGate(gate);
+      },
+      () => {
+        if (!c.signal.aborted) setSoleGate("failed");
+      },
+    );
+    return () => c.abort();
+  }, [ownReview, scopeKey, soleOperatorGateLoader, review?.lifecycle?.version]);
   const apply = (v: ReceiptTemplateDraftCurrent) => {
     setView(v);
     const c = v.snapshot?.content;
@@ -687,6 +737,7 @@ export function ReceiptTemplateDraftEditor({
       | "Publish"
       | "LifecycleResolve"
       | "LifecycleRetry",
+    approvalMode?: "SoleOperator",
   ) => {
     if (
       disabled ||
@@ -750,9 +801,11 @@ export function ReceiptTemplateDraftEditor({
             review,
             fields: savedFields(view),
             action: mode,
+            ...(approvalMode === undefined || mode !== "Approve" ? {} : { approvalMode }),
             onReserved: (prepared) => {
               if (valid()) {
                 lifecycleOriginal.current = prepared;
+                lifecycleMode.current = mode === "Approve" ? approvalMode : undefined;
                 setLifecyclePending(prepared.cursor);
               }
             },
@@ -764,12 +817,18 @@ export function ReceiptTemplateDraftEditor({
             ...common,
             cursor: lp,
             ...(mode === "LifecycleRetry" && lifecycleOriginal.current
-              ? { prepared: lifecycleOriginal.current }
+              ? {
+                  prepared: lifecycleOriginal.current,
+                  ...(lifecycleMode.current === undefined
+                    ? {}
+                    : { approvalMode: lifecycleMode.current }),
+                }
               : {}),
           });
         }
         if (valid()) {
           lifecycleOriginal.current = null;
+          lifecycleMode.current = undefined;
           setLifecyclePending(null);
           apply(result.current);
           setReview(result.review);
@@ -782,7 +841,10 @@ export function ReceiptTemplateDraftEditor({
               : result.historical
                 ? "Original review action confirmed from history; the current review is shown separately."
                 : result.receipt.action === "Approve"
-                  ? "Independent approval confirmed. Publication remains separate."
+                  ? result.receipt.result?.approvedByReference === scope.actorReference &&
+                    approvalMode === "SoleOperator"
+                    ? "Approved by you alone as sole operator. You can now publish it."
+                    : "Independent approval confirmed. Publication remains separate."
                   : "Template publication confirmed. Store selection and operational readiness remain separate.",
           );
         }
@@ -1129,12 +1191,51 @@ export function ReceiptTemplateDraftEditor({
           >
             Publish receipt template
           </button>
-          {review.submission &&
-            (scope.actorReference === review.submission.authoredByReference ||
-              scope.actorReference === review.submission.submittedByReference) &&
-            review.lifecycle?.state === "InReview" && (
-              <p>Approval requires an actor other than the original author and submitter.</p>
-            )}
+          {ownReview && soleGate === undefined && (
+            <p role="status">Checking who can approve this template…</p>
+          )}
+          {ownReview && soleGate === "failed" && (
+            <p>
+              You wrote or sent this template, so another person with Owner access must approve it.
+              Whether you may approve it on your own could not be checked; refresh to try again.
+            </p>
+          )}
+          {ownReview && soleGate === null && (
+            <p>
+              You wrote or sent this template, so another person with Owner access must approve it.
+            </p>
+          )}
+          {ownReview && soleGate !== undefined && soleGate !== null && soleGate !== "failed" && (
+            <section aria-label="Approve your own receipt template">
+              <SoleOperatorSelfApproval
+                gate={soleGate}
+                csrf={csrf}
+                summary={
+                  <p>
+                    {languageName(selected.content.locale)} receipt template, draft{" "}
+                    {review.submission?.draftRevision}, as checked when it was sent for approval.
+                  </p>
+                }
+                what="this receipt template"
+                permissionName="Owner access to this Store"
+                actionLabel="Approve receipt template on my own"
+                busy={
+                  locked ||
+                  dirty ||
+                  !view ||
+                  !receiptTemplateLifecycleAvailable(
+                    scope,
+                    view,
+                    review,
+                    "Approve",
+                    reviewNow,
+                    true,
+                  )
+                }
+                onApprove={() => void action("Approve", "SoleOperator")}
+              />
+            </section>
+          )}
         </div>
       )}
       {publishedHistory && (
@@ -1255,7 +1356,13 @@ export function ReceiptTemplateDraftEditor({
                 ? "Check the language, saved receipt presets and the start and end times. An earlier save remains protected."
                 : error === "Conflict"
                   ? "The template changed or the original save conflicts. Refresh or recover the original save; no version has been silently substituted."
-                  : "The template draft could not be loaded or saved. Refresh when connected; an earlier save remains protected."}
+                  : error === "SoleOperatorOff"
+                    ? "Sole operator is off, so another person with Owner access must approve this template. If you run the business on your own, the brand owner can turn on Sole operator on the Approvals page. Recover the request, then refresh."
+                    : error === "SoleOperatorNotInEffect"
+                      ? "Someone else also holds Owner access to this Store, so they must approve this template. Recover the request, then refresh."
+                      : error === "SoleOperatorNeedsVerification"
+                        ? "Your verification is more than 15 minutes old, so the approval was not recorded. Recover the request, verify again, then approve."
+                        : "The template draft could not be loaded or saved. Refresh when connected; an earlier save remains protected."}
         </p>
       )}
       {pending && (

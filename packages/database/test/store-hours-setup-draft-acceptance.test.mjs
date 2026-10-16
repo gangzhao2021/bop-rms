@@ -29,6 +29,8 @@ import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { seedMerchantAcceptanceSession } from "../test-support/merchant-acceptance-session.mjs";
 import { seedJourneyStorePublication } from "../test-support/dine-in-journey-seed.mjs";
 import { seedTaxConfiguration } from "../test-support/tax-configuration-seed.mjs";
+import { seedSoleOperatorSetting, seedStepUp } from "../test-support/sole-operator-brand-gate.mjs";
+import { createIdentityActor } from "../../bop/identity/src/index.ts";
 
 const { Client } = pg;
 const id = (n) => "01a7e100-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -159,11 +161,27 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
           referencePrefix: prefix,
           sessionReferencePrefix: sessionPrefix,
         });
-        // A live server clock (the session's own clock is fixed at sign-in).
+        // A live server clock (the session's own clock is fixed at sign-in), and an Identity roster
+        // double (pilot `currentActor`): an active workforce actor per reference, so the
+        // sole-operator gate evaluates each Store member as an approval would (TEST-ONLY).
         people[name] = {
           ...session,
           actor,
-          persistence: { ...session.persistence, now },
+          persistence: {
+            ...session.persistence,
+            now,
+            currentActor: async (_tx, reference, authenticatedAt) =>
+              createIdentityActor({
+                actorType: "User",
+                actorReference: reference,
+                accountKind: "Workforce",
+                status: "Active",
+                authenticationMethod: "Oidc",
+                verificationLevel: "SingleFactor",
+                authenticatedAt,
+                recentMfaAt: null,
+              }),
+          },
         };
       }
       const manager = storeRoleTemplateActions("store-manager");
@@ -199,6 +217,261 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
         (await (await hoursFor(people.owner)).read(people.owner.sessionCookie)).current.setupBasis,
         undefined,
       );
+      /** One hours-editor step (as the browser sends it), optionally approved alone. */
+      const act = async (person, command, approvalMode) => {
+        const composition = await hoursFor(person);
+        const current = await composition.read(person.sessionCookie);
+        const latest = current.latest;
+        return composition({
+          sessionCookie: person.sessionCookie,
+          csrf: person.csrf,
+          command: {
+            command,
+            operationReference: reference(),
+            auditReference: reference(),
+            expectedVersion: current.expectedVersion,
+            configuration: {
+              ...latest,
+              lifecycle:
+                command === "Submit" || command === "Approve"
+                  ? "PendingApproval"
+                  : command === "Publish"
+                    ? "Approved"
+                    : "Draft",
+              updatedAt: command === "Publish" ? latest.updatedAt : current.observedAt,
+            },
+            ...(approvalMode === undefined ? {} : { approvalMode }),
+          },
+        });
+      };
+      const counts = async () =>
+        (
+          await admin.query(
+            "SELECT (SELECT count(*) FROM rms_store.store_configuration_authoring_operation)::int authoring,(SELECT count(*) FROM rms_store.store_configuration_version)::int versions,(SELECT count(*) FROM rms_store.store_configuration_sole_operator_approval)::int marks,(SELECT count(*) FROM bop_publishing.publishing_mutation_record)::int publishing,(SELECT count(*) FROM platform_audit.audit_record)::int audits",
+          )
+        ).rows[0];
+      const refusedUnchanged = async (attempt, check) => {
+        const before = await counts();
+        await assert.rejects(attempt(), check);
+        assert.deepEqual(await counts(), before);
+      };
+      const isCode = (code) => (error) => error?.code === code || error?.message === code;
+      const isSole = (code, reason) => (error) =>
+        error?.name === "MerchantSoleOperatorGateError" &&
+        error.code === code &&
+        error.reason === reason;
+      const secondOwnerApproval = () =>
+        admin.query(
+          "SELECT grant_id FROM bop_permission.permission_grant WHERE role_id=$1 AND lifecycle='Active' AND permission_id IN (SELECT permission_id FROM bop_permission.permission_definition WHERE action_code='store.service.approve')",
+          ["01a7e1c0-0000-7000-8000-000000000004"],
+        );
+      const revokeSecondOwnerApproval = async () => {
+        const revoked = await admin.query(
+          "UPDATE bop_permission.permission_grant SET lifecycle='Revoked',version=version+1 WHERE role_id=$1 AND lifecycle='Active' AND permission_id IN (SELECT permission_id FROM bop_permission.permission_definition WHERE action_code='store.service.approve') RETURNING permission_id,effective_from,effective_until",
+          ["01a7e1c0-0000-7000-8000-000000000004"],
+        );
+        assert.equal(revoked.rowCount, 1);
+        return revoked.rows[0];
+      };
+      const restoreSecondOwnerApproval = async (revoked) => {
+        await admin.query(
+          "INSERT INTO bop_permission.permission_grant VALUES ($1,$2,$3,$4,$5,'Active',$6,$7,1,$6,$6)",
+          [
+            reference(),
+            "01a7e1c0-0000-7000-8000-000000000004",
+            revoked.permission_id,
+            scope.brandReference,
+            scope.storeReference,
+            revoked.effective_from,
+            revoked.effective_until,
+          ],
+        );
+        assert.equal((await secondOwnerApproval()).rowCount, 1);
+      };
+      const sid = (n) => id(0x9000 + n);
+      let settingVersion = 0;
+      const soleOperator = (state) =>
+        seedSoleOperatorSetting(admin, {
+          id: sid,
+          n: 0x100 + settingVersion * 0x10,
+          tenantReference: scope.tenantReference,
+          brandReference: scope.brandReference,
+          actorReference: people.owner.actor,
+          state,
+          version: ++settingVersion,
+        });
+      let stepUps = 0;
+      const verifyOwner = (ageMs = 0) =>
+        seedStepUp(admin, {
+          id: sid,
+          n: 0x400 + 0x10 * stepUps++,
+          brandReference: scope.brandReference,
+          storeReference: scope.storeReference,
+          actorReference: people.owner.actor,
+          ageMs,
+        });
+
+      // --- WP-2423 v15: the Owner changes the installed configuration's hours (no Store setup
+      // yet); only the Owner checks and sends their own change, and approves it alone only as an
+      // in-effect, verified sole operator (DEC-SOLE-OPERATOR-APPROVAL 2026-10-16).
+      {
+        const ownerComposition = await hoursFor(people.owner);
+        const view = await ownerComposition.read(people.owner.sessionCookie);
+        const installedHours = view.current.weeklySchedule.map((day) => ({
+          ...day,
+          intervals: day.intervals.map((i) => ({ ...i, orderCutoffSeconds: 1200 })),
+        }));
+        const saved = await ownerComposition({
+          sessionCookie: people.owner.sessionCookie,
+          csrf: people.owner.csrf,
+          command: {
+            command: "SaveDraft",
+            operationReference: reference(),
+            auditReference: reference(),
+            expectedVersion: view.expectedVersion,
+            configuration: {
+              ...view.current,
+              configurationReference: reference(),
+              configurationVersion: view.expectedVersion + 1,
+              supersedesConfigurationReference: view.current.configurationReference,
+              lifecycle: "Draft",
+              weeklySchedule: installedHours,
+              effectiveFrom: view.observedAt,
+              effectiveUntil: null,
+              reasonCode: "STORE_HOURS_UPDATE",
+              approvedByReference: null,
+              approvalEvidenceReference: null,
+              publicationReference: null,
+              liveGateEvidenceReference: null,
+              createdAt: view.observedAt,
+              updatedAt: view.observedAt,
+            },
+          },
+        });
+        assert.equal(saved.status, "Applied");
+        // The Store Manager cannot check or send the Owner's change (named refusal, nothing
+        // recorded); the Owner does.
+        for (const command of ["Validate", "Submit"])
+          await refusedUnchanged(
+            () => act(people.manager, command),
+            isCode("STORE_CONFIGURATION_NOT_YOUR_CHANGE"),
+          );
+        await act(people.owner, "Validate");
+        await act(people.owner, "Submit");
+        // The Owner's own approval: refused unless asked alone; sole operator off says so.
+        let read = await (await hoursFor(people.owner)).read(people.owner.sessionCookie);
+        assert.equal(read.latest.lifecycle, "PendingApproval");
+        assert.equal(read.latestAuthorName, null);
+        assert.equal(read.soleOperator.status, "NotSet");
+        await refusedUnchanged(
+          () => act(people.owner, "Approve"),
+          isCode("STORE_CONFIGURATION_SELF_APPROVAL"),
+        );
+        await refusedUnchanged(
+          () => act(people.owner, "Approve", "SoleOperator"),
+          isSole("NotInEffect", "Off"),
+        );
+        // The Store Manager sees whose change waits (by the name the Store keeps for the Owner,
+        // owner-seeded TEST-ONLY), and gets no sole-operator view.
+        await admin.query(
+          "INSERT INTO bop_membership.member_profile_version (membership_id,version,brand_id,actor_id,display_name,operation_id,changed_by,changed_at,data_classification) VALUES ($1,1,$2,$3,'Test Owner',$4,$3,$5,'PersonalData')",
+          [
+            "01a7e1b0-0000-7000-8000-000000000001",
+            scope.brandReference,
+            people.owner.actor,
+            reference(),
+            now(),
+          ],
+        );
+        const managerRead = await (
+          await hoursFor(people.manager)
+        ).read(people.manager.sessionCookie);
+        assert.equal(managerRead.latestAuthorName, "Test Owner");
+        assert.equal(managerRead.soleOperator, null);
+        // On, but the second Owner also approves Store configuration.
+        await soleOperator("On");
+        read = await (await hoursFor(people.owner)).read(people.owner.sessionCookie);
+        assert.equal(read.soleOperator.status, "OtherApprovers");
+        await refusedUnchanged(
+          () => act(people.owner, "Approve", "SoleOperator"),
+          isSole("NotInEffect", "OtherApprovers"),
+        );
+        // The Owner is the only approver; verification missing or older than 15 minutes refused.
+        const revoked = await revokeSecondOwnerApproval();
+        await refusedUnchanged(
+          () => act(people.owner, "Approve", "SoleOperator"),
+          isSole("NeedsReverification", undefined),
+        );
+        await verifyOwner(20 * 60000);
+        await refusedUnchanged(
+          () => act(people.owner, "Approve", "SoleOperator"),
+          isSole("NeedsReverification", undefined),
+        );
+        const verifiedAt = await verifyOwner();
+        read = await (await hoursFor(people.owner)).read(people.owner.sessionCookie);
+        assert.equal(read.soleOperator.status, "Effective");
+        // Someone else's change is never approved "alone".
+        await refusedUnchanged(
+          () => act(people.secondOwner, "Approve", "SoleOperator"),
+          (error) =>
+            /STORE_CONFIGURATION_(COMMAND_INVALID|PERMISSION_DENIED)/u.test(
+              String(error?.code ?? error?.message),
+            ),
+        );
+        const approved = await act(people.owner, "Approve", "SoleOperator");
+        assert.equal(approved.status, "Applied");
+        await act(people.owner, "Publish");
+        read = await (await hoursFor(people.owner)).read(people.owner.sessionCookie);
+        assert.equal(read.current.configurationVersion, view.expectedVersion + 1);
+        assert.equal(read.current.approvedByReference, people.owner.actor);
+        assert.equal(read.current.authoredByReference, people.owner.actor);
+        assert.equal(read.current.setupBasis, undefined);
+        const mark = (
+          await admin.query(
+            "SELECT actor_id::text actor,approval_evidence_id::text evidence,actor_mfa_at FROM rms_store.store_configuration_sole_operator_approval WHERE configuration_id=$1",
+            [read.current.configurationReference],
+          )
+        ).rows;
+        assert.equal(mark.length, 1);
+        assert.equal(mark[0].actor, people.owner.actor);
+        assert.equal(mark[0].evidence, read.current.approvalEvidenceReference);
+        assert.equal(mark[0].actor_mfa_at.toISOString(), verifiedAt);
+        const approvalAudit = (
+          await admin.query(
+            "SELECT reason_code,after_summary_json FROM platform_audit.audit_record WHERE target_id=$1 AND action_code='STORE_CONFIGURATION_CHANGED' AND reason_code LIKE 'STORE_HOURS_CHANGE%' ORDER BY occurred_at",
+            [read.current.configurationReference],
+          )
+        ).rows.map((row) => [row.reason_code, row.after_summary_json]);
+        assert.deepEqual(approvalAudit.slice(-2), [
+          ["STORE_HOURS_CHANGE_SOLE_OPERATOR", { approvalMode: "SoleOperator" }],
+          ["STORE_HOURS_CHANGE", {}],
+        ]);
+        // The Store runs on it (the publication proof accepts the Owner's approval with its mark).
+        const running = await transactions.run((tx) =>
+          readPublishedStoreConfiguration(operating, tx, now(), async () => true),
+        );
+        assert.equal(
+          running.configuration.configurationReference,
+          read.current.configurationReference,
+        );
+        // Back to two people for the rest of this journey.
+        await soleOperator("Off");
+        await restoreSecondOwnerApproval(revoked);
+      }
+      // The database refuses a Store Manager's check of the Owner's change, whatever the caller.
+      await assert.rejects(
+        admin.query(
+          "INSERT INTO rms_store.store_configuration_authoring_operation SELECT * FROM jsonb_populate_record(NULL::rms_store.store_configuration_authoring_operation,(SELECT to_jsonb(a)||jsonb_build_object('operation_id',$1::text,'sequence_number',(SELECT max(sequence_number)+1 FROM rms_store.store_configuration_authoring_operation),'audit_reference',$2::text,'actor_reference',$3::text,'command_type','Validate','lifecycle','Draft') FROM rms_store.store_configuration_authoring_operation a WHERE command_type='Validate' ORDER BY sequence_number DESC LIMIT 1))",
+          [reference(), reference(), people.manager.actor],
+        ),
+        /only the person who made a store configuration change checks or sends it/u,
+      );
+      const installedNow = (
+        await admin.query(
+          "SELECT configuration_json FROM rms_store.store_configuration_publication_content WHERE store_id=$1 ORDER BY (configuration_json->>'configurationVersion')::int DESC LIMIT 1",
+          [scope.storeReference],
+        )
+      ).rows[0].configuration_json;
 
       // --- Seed (test-controlled): the Owner's Store setup revision 1, based on the installed one.
       const setupSave = async (content, expected, base) => {
@@ -277,12 +550,13 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
             "enabledServiceModes",
             "weeklySchedule",
             "exceptions",
-          ].map((field) => [field, configured(installed[field])]),
+          ].map((field) => [field, configured(installedNow[field])]),
         ),
-        effectiveFrom: configured(new Date(Date.now() - 3600000).toISOString()),
+        // From now: after the Owner's own hours change published above.
+        effectiveFrom: configured(now()),
         effectiveUntil: configured(null),
       };
-      const revision1 = await setupSave(setupContent, null, installed.configurationReference);
+      const revision1 = await setupSave(setupContent, null, installedNow.configurationReference);
 
       // --- The Owner publishes revision 1 through the ordinary Store setup publication (another
       // Owner approves). Test-controlled: the saved references are accepted as they are.
@@ -581,21 +855,90 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
       assert.equal(final.current.setupBasis.sourceRevision, Number(head.revision));
       assert.equal(final.current.setupBasis.sourceSnapshotDigest, head.snapshot_digest);
 
+      // --- WP-2423 v15: the Owner's own hours change on the configuration from Store setup (an
+      // hours-only Store setup revision): the Store Manager cannot check or send it; the Owner
+      // approves it alone as an in-effect, verified sole operator and publishes it.
+      const ownerHoursCommand = {
+        expectedSetup: {
+          setupDraftReference: final.current.setupBasis.setupDraftReference,
+          sourceRevision: final.current.setupBasis.sourceRevision,
+          sourceSnapshotDigest: final.current.setupBasis.sourceSnapshotDigest,
+        },
+        setupOperationReference: reference(),
+        operationReference: reference(),
+        auditReference: reference(),
+        configurationReference: reference(),
+        expectedVersion: final.expectedVersion,
+        weeklySchedule: newHours.map((day) => ({
+          ...day,
+          intervals: day.intervals.map((i) => ({ ...i, endLocalTime: "21:00:00" })),
+        })),
+        exceptions: newExceptions,
+        effectiveFrom: final.observedAt,
+      };
+      assert.equal((await saveHours(people.owner, ownerHoursCommand)).status, "Applied");
+      for (const command of ["Validate", "Submit"])
+        await refusedUnchanged(
+          () => act(people.manager, command),
+          isCode("STORE_CONFIGURATION_NOT_YOUR_CHANGE"),
+        );
+      await act(people.owner, "Validate");
+      await act(people.owner, "Submit");
+      await refusedUnchanged(
+        () => act(people.owner, "Approve"),
+        isCode("STORE_CONFIGURATION_SELF_APPROVAL"),
+      );
+      await soleOperator("On");
+      const revokedAgain = await revokeSecondOwnerApproval();
+      await verifyOwner();
+      const ownerApproved = await act(people.owner, "Approve", "SoleOperator");
+      assert.equal(ownerApproved.status, "Applied");
+      await act(people.owner, "Publish");
+      const afterOwn = await (await hoursFor(people.owner)).read(people.owner.sessionCookie);
+      assert.equal(afterOwn.current.approvedByReference, people.owner.actor);
+      assert.equal(afterOwn.current.authoredByReference, people.owner.actor);
+      assert.notEqual(afterOwn.current.setupBasis, undefined);
+      assert.deepEqual(afterOwn.current.weeklySchedule, ownerHoursCommand.weeklySchedule);
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::int n FROM rms_store.store_configuration_sole_operator_approval WHERE configuration_id=$1",
+            [afterOwn.current.configurationReference],
+          )
+        ).rows[0].n,
+        1,
+      );
+      const runningOwn = await transactions.run((tx) =>
+        readPublishedStoreConfiguration(operating, tx, now(), async () => true),
+      );
+      assert.equal(
+        runningOwn.configuration.configurationReference,
+        afterOwn.current.configurationReference,
+      );
+      await soleOperator("Off");
+      await restoreSecondOwnerApproval(revokedAgain);
+      const latestRevision = (
+        await admin.query(
+          "SELECT revision,snapshot_json FROM rms_store.store_setup_draft_revision WHERE store_id=$1 ORDER BY revision DESC LIMIT 1",
+          [scope.storeReference],
+        )
+      ).rows[0];
+
       // --- Store setup changes the Owner has not published block an hours change.
       const revision3 = await setupSave(
-        { ...revision2.snapshot_json.content, contactReference: configured(id(0x300)) },
-        revision2.snapshot_json,
-        final.current.configurationReference,
+        { ...latestRevision.snapshot_json.content, contactReference: configured(id(0x300)) },
+        latestRevision.snapshot_json,
+        afterOwn.current.configurationReference,
       );
-      assert.equal(revision3.revision, 3);
+      assert.equal(revision3.revision, Number(latestRevision.revision) + 1);
       const blockedView = await managerHours.read(people.manager.sessionCookie);
       await assert.rejects(
         saveHours(people.manager, {
           ...hoursCommand,
           expectedSetup: {
-            setupDraftReference: final.current.setupBasis.setupDraftReference,
-            sourceRevision: final.current.setupBasis.sourceRevision,
-            sourceSnapshotDigest: final.current.setupBasis.sourceSnapshotDigest,
+            setupDraftReference: afterOwn.current.setupBasis.setupDraftReference,
+            sourceRevision: afterOwn.current.setupBasis.sourceRevision,
+            sourceSnapshotDigest: afterOwn.current.setupBasis.sourceSnapshotDigest,
           },
           setupOperationReference: reference(),
           operationReference: reference(),

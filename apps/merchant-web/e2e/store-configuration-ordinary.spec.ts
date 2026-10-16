@@ -91,7 +91,7 @@ const baseConfiguration = (lifecycle: "Draft" | "PendingApproval" | "Approved" |
   dataClassification: "ConfigurationMetadata",
 });
 
-function savedSetup() {
+function savedSetup(unset: readonly string[] = []) {
   const c = baseConfiguration("Draft"),
     configured = (value: unknown) => ({ state: "Configured", value });
   const fields = [
@@ -124,7 +124,12 @@ function savedSetup() {
       currencyCode: "CAD",
       baseConfigurationReference: null,
       content: {
-        ...Object.fromEntries(fields.map((key) => [key, configured(c[key])])),
+        ...Object.fromEntries(
+          fields.map((key) => [
+            key,
+            unset.includes(key) ? { state: "Unconfigured" } : configured(c[key]),
+          ]),
+        ),
         feeContexts: configured([
           {
             chargeType: "ServiceCharge",
@@ -170,9 +175,13 @@ interface OrdinaryFixtureControl {
   reads: string[];
   errors: string[];
 }
-async function install(page: Page) {
+async function install(
+  page: Page,
+  /** WP-2423 v15: settings the saved setup lacks, and whether a live (installed) Store runs. */
+  options: { readonly unset?: readonly string[]; readonly live?: boolean } = {},
+) {
   // Explicitly omit actorReference from the owning snapshot (reader is envelope-only).
-  const setupValue = savedSetup();
+  const setupValue = savedSetup(options.unset);
   const control: OrdinaryFixtureControl = {
     actor: scope.actorReference,
     loseNext: false,
@@ -191,23 +200,27 @@ async function install(page: Page) {
     errors: [] as string[],
   };
   let latest: ReturnType<typeof createStoreConfigurationVersion> | null = null,
-    current: ReturnType<typeof createStoreConfigurationVersion> | null = null;
+    current: ReturnType<typeof createStoreConfigurationVersion> | null = options.live
+      ? createStoreConfigurationVersion(baseConfiguration("Published"))
+      : null;
   let allocation = 200;
   const ledger = new Map<string, StoreConfigurationOrdinaryReceipt>();
   const actualScope = () => ({ ...scope, actorReference: control.actor });
   const workspace = (original: StoreConfigurationOrdinaryReceipt | null = null) => {
     const observedAt = new Date().toISOString();
+    // The server's head: the latest recorded configuration, else the published one.
+    const head = latest ?? current;
     return parseMerchantStoreConfigurationOrdinaryWorkspace(
       {
         profile: "StoreConfigurationOrdinaryWorkspaceV1",
         scope: actualScope(),
         latest,
         current,
-        expectedHead: latest
+        expectedHead: head
           ? {
-              configurationReference: latest.configurationReference,
-              configurationVersion: latest.configurationVersion,
-              contentDigest: hash(latest),
+              configurationReference: head.configurationReference,
+              configurationVersion: head.configurationVersion,
+              contentDigest: hash(head),
             }
           : { configurationReference: null, configurationVersion: 0, contentDigest: null },
         original,
@@ -278,11 +291,17 @@ async function install(page: Page) {
       expect(request.method()).toBe("POST");
       expect(request.headers()["x-bop-csrf"]).toBe(csrf);
       const body: Record<string, unknown> = request.postDataJSON();
-      expect(Object.keys(body).sort()).toEqual([
-        "auditReference",
-        "configurationReference",
-        "configurationVersion",
-      ]);
+      // A decline may carry the decliner's reason (fixed list); a withdrawal never does.
+      const declining = latest?.authoredByReference !== control.actor;
+      expect(Object.keys(body).sort()).toEqual(
+        [
+          "auditReference",
+          "configurationReference",
+          "configurationVersion",
+          ...(declining && body.declineReason !== undefined ? ["declineReason"] : []),
+        ].sort(),
+      );
+      if (!declining) expect(body.declineReason).toBeUndefined();
       if (!latest || body.configurationReference !== latest.configurationReference)
         return respond(route, { error: "store_configuration_conflict" }, 409);
       const kind = latest.authoredByReference === control.actor ? "Withdrawn" : "Declined";
@@ -989,7 +1008,12 @@ test("someone else's open configuration is shown, cannot be replaced and can be 
       fullPage: true,
     });
   }
+  // WP-2423 v15: declining is confirmed first, with an optional reason.
   await theirs.getByRole("button", { name: "Decline version 1" }).click();
+  expect(state.writes).toEqual(["Materialize", "Submit"]);
+  const confirm = theirs.getByRole("group", { name: "Decline this configuration" });
+  await confirm.getByLabel("Reason (optional)").selectOption("TalkFirst");
+  await confirm.getByRole("button", { name: "Decline version 1" }).click();
   await expect(panel(page).getByRole("status")).toHaveText(
     "Version 1 declined. A new configuration can now be created from the saved setup.",
   );
@@ -1003,5 +1027,62 @@ test("someone else's open configuration is shown, cannot be replaced and can be 
   ).toBeDisabled();
   await expectNoInternalText(page);
   expect(state.writes).toEqual(["Materialize", "Submit", "Declined"]);
+  expect(state.errors).toEqual([]);
+});
+
+test("WP-2423 v15: 'Use the live Store's settings' fills time zone, business day start, service modes and receipt; Review names each missing setting @production", async ({
+  page,
+}) => {
+  const state = await install(page, {
+    unset: ["timeZone", "businessDayStartLocalTime", "enabledServiceModes", "receiptReference"],
+    live: true,
+  });
+  await page.goto("/app");
+  const workspaceNav = page.getByRole("navigation", { name: "Workspace" });
+  await workspaceNav.waitFor();
+  const compactMenu = workspaceNav.locator(".workspace-sidebar__compact > summary");
+  if (await compactMenu.isVisible()) await compactMenu.click();
+  await page.getByRole("link", { name: "Store setup", exact: true }).click();
+  await page.getByRole("button", { name: /^8\. Review$/u }).click();
+  const missing = page.getByRole("region", { name: "Settings not set yet" });
+  await expect(missing).toContainText("Time zone: set it in step 2, Address and timezone");
+  await expect(missing).toContainText("Business day start: set it in step 2, Address and timezone");
+  await expect(missing).toContainText("Service modes: set it in step 3, Service modes");
+  await expect(missing).toContainText("Receipt template: set it in step 5, Tax and payment");
+  await expect(page.getByText("4 settings are not set yet.", { exact: false })).toBeVisible();
+  // The publication panel names what is missing instead of only disabling Create.
+  await expect(panel(page)).toContainText(
+    "Time zone (step 2, Address and timezone); Business day start (step 2, Address and timezone)",
+  );
+  await expect(
+    panel(page).getByRole("button", { name: "Create configuration from saved setup" }),
+  ).toBeDisabled();
+  await page.getByRole("button", { name: "Use the live Store’s settings" }).click();
+  await expect(missing).toHaveCount(0);
+  await expect(page.getByText("Every setting is set.")).toBeVisible();
+  await expect(page.getByText("Business day start: 04:00:00")).toBeVisible();
+  await expect(page.getByText("Service modes: Pickup", { exact: true })).toBeVisible();
+  await expect(page.getByText("Receipt: Already configured")).toBeVisible();
+  for (const [width, height] of [
+    [1440, 900],
+    [1024, 768],
+    [390, 844],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      `no horizontal overflow at ${width}`,
+    ).toBe(true);
+    await page.screenshot({
+      path: `/private/tmp/wp2423-store-setup-live-settings-${width}.png`,
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  // Step 2 now holds the live Store's time zone (the inputs Save reads).
+  await page.getByRole("button", { name: /^2\. Address and timezone$/u }).click();
+  await expect(page.getByLabel("Draft timezone")).toHaveValue("America/Toronto");
+  await expect(page.getByLabel("Business day starts at (local time)")).toHaveValue("04:00:00");
+  await expectNoInternalText(page);
   expect(state.errors).toEqual([]);
 });

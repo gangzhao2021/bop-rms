@@ -410,6 +410,14 @@ async function install(page: Page) {
         }),
       );
     }
+    // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: sole operator is off for this Brand.
+    if (
+      path === "/merchant/store-setup/receipt-template-sole-operator" &&
+      request.method() === "GET"
+    )
+      return respond(route, {
+        soleOperator: { status: "NotSet", otherApprovers: [], verifiedUntil: null },
+      });
     if (path === "/merchant/store-setup/receipt-template-review" && request.method() === "GET") {
       if (state.failReview > 0) {
         state.failReview--;
@@ -1074,7 +1082,10 @@ async function independentReview(
     region.getByRole("button", { name: "Approve receipt template", exact: true }),
   ).toBeDisabled();
   await expect(
-    region.getByText("Approval requires an actor other than the original author and submitter."),
+    region.getByText(
+      "You made this change, so someone else who holds Owner access to this Store must approve it.",
+      { exact: false },
+    ),
   ).toBeVisible();
   state.selectActor(id(40));
   await page.reload();

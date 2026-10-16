@@ -163,9 +163,14 @@ describe("WP-2192 Store configuration administration", () => {
     },
   );
 
-  it("requires independent approval plus Publishing and Live Gate evidence", () => {
+  it("requires approval plus Publishing and Live Gate evidence", () => {
+    // WP-2423 DEC-SOLE-OPERATOR-APPROVAL (v15): an author's own approval parses; it is accepted
+    // only with its recorded sole-operator approval (publication readers and the database).
     expect(() =>
       createStoreConfigurationVersion({ ...published(), approvedByReference: id(10) }),
+    ).not.toThrow();
+    expect(() =>
+      createStoreConfigurationVersion({ ...published(), approvedByReference: null }),
     ).toThrow(StoreConfigurationAdministrationError);
     expect(() =>
       createStoreConfigurationVersion({ ...published(), liveGateEvidenceReference: null }),

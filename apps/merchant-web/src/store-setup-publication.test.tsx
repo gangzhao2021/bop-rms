@@ -34,6 +34,7 @@ const live = {
     businessDayStartLocalTime: "04:00:00",
     enabledServiceModes: ["DineIn", "Pickup"],
     capacityConfigurationReference: null,
+    receiptReference: id(16),
   } as unknown as StoreConfigurationSnapshot,
 };
 
@@ -76,6 +77,8 @@ describe("WP-2423 DEC-STORE-SETUP-PUBLICATION Store setup publication screens", 
       enabledServiceModes: { state: "Configured", value: ["DineIn", "Pickup"] },
       weeklySchedule: { state: "Configured", value: live.current.weeklySchedule },
       capacityConfigurationReference: { state: "Configured", value: null },
+      // WP-2423 (v15): the receipt template the Store issues receipts with today.
+      receiptReference: { state: "Configured", value: id(16) },
       taxConfigurationReference: { state: "Configured", value: id(15) },
       brandBaseVersionReference: { state: "Configured", value: id(11) },
       exceptions: { state: "Configured", value: live.current.exceptions },

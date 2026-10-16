@@ -30,6 +30,26 @@ const fail = (code: MerchantStoreConfigurationWithdrawalError["code"]): never =>
  * configuration and version the person saw; a newer change refuses it. `auditReference` makes a
  * retry return the recorded withdrawal.
  */
+/** WP-2423 (v15): why an Owner declined someone else's change (optional, fixed list). */
+export const storeConfigurationDeclineReasons = ["NotRight", "NotNeeded", "TalkFirst"] as const;
+export type StoreConfigurationDeclineReason = (typeof storeConfigurationDeclineReasons)[number];
+/** The withdrawal record's reason code for each decline reason (and back). */
+export const storeConfigurationDeclineReasonCodes: Readonly<
+  Record<StoreConfigurationDeclineReason, string>
+> = Object.freeze({
+  NotRight: "STORE_CONFIGURATION_DECLINED_NOT_RIGHT",
+  NotNeeded: "STORE_CONFIGURATION_DECLINED_NOT_NEEDED",
+  TalkFirst: "STORE_CONFIGURATION_DECLINED_TALK_FIRST",
+});
+export function storeConfigurationDeclineReasonOf(
+  reasonCode: string,
+): StoreConfigurationDeclineReason | null {
+  return (
+    storeConfigurationDeclineReasons.find(
+      (reason) => storeConfigurationDeclineReasonCodes[reason] === reasonCode,
+    ) ?? null
+  );
+}
 export function createMerchantStoreConfigurationWithdrawal(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
@@ -41,13 +61,26 @@ export function createMerchantStoreConfigurationWithdrawal(options: {
       configurationReference: string;
       configurationVersion: number;
       auditReference: string;
+      declineReason: StoreConfigurationDeclineReason | null;
     };
     try {
+      const withReason =
+        input.command !== null &&
+        typeof input.command === "object" &&
+        Object.hasOwn(input.command, "declineReason");
       const raw = readClosedRecord(input.command, [
         "configurationReference",
         "configurationVersion",
         "auditReference",
+        ...(withReason ? ["declineReason"] : []),
       ]);
+      if (
+        withReason &&
+        !storeConfigurationDeclineReasons.includes(
+          raw.declineReason as StoreConfigurationDeclineReason,
+        )
+      )
+        return fail("Invalid");
       const version = raw.configurationVersion;
       if (typeof version !== "number" || !Number.isSafeInteger(version) || version < 1)
         return fail("Invalid");
@@ -57,6 +90,7 @@ export function createMerchantStoreConfigurationWithdrawal(options: {
         ),
         configurationVersion: version,
         auditReference: String(parseOpaqueUuidV7(raw.auditReference, "ACTOR_REFERENCE_INVALID")),
+        declineReason: withReason ? (raw.declineReason as StoreConfigurationDeclineReason) : null,
       };
     } catch (error) {
       if (error instanceof MerchantStoreConfigurationWithdrawalError) throw error;
@@ -111,6 +145,8 @@ export function createMerchantStoreConfigurationWithdrawal(options: {
             String(latest.authoredByReference) === actor ? "Withdrawn" : "Declined";
           const needed = kind === "Withdrawn" ? actions[0] : actions[1];
           if (decisions.get(needed)?.effect !== "Allow") return fail("Denied");
+          // A reason is given only when declining someone else's change.
+          if (kind === "Withdrawn" && command.declineReason !== null) return fail("Invalid");
           const prior = await readStoreConfigurationWithdrawal(tx, {
             brandReference: brand,
             storeReference: store,
@@ -123,6 +159,12 @@ export function createMerchantStoreConfigurationWithdrawal(options: {
           }
           const reasonCode =
             kind === "Withdrawn" ? "STORE_CONFIGURATION_WITHDRAWN" : "STORE_CONFIGURATION_DECLINED";
+          // WP-2423 (v15): the decliner's optional reason, from a fixed list (no free text), kept
+          // on the record so the person who made the change sees why.
+          const recordedReason =
+            command.declineReason === null
+              ? reasonCode
+              : storeConfigurationDeclineReasonCodes[command.declineReason];
           await recordStoreConfigurationWithdrawal(tx, {
             brandReference: brand,
             storeReference: store,
@@ -131,7 +173,7 @@ export function createMerchantStoreConfigurationWithdrawal(options: {
             withdrawnLifecycle: latest.lifecycle,
             kind,
             actorReference: actor,
-            reasonCode,
+            reasonCode: recordedReason,
             auditReference: command.auditReference,
             withdrawnAt: at,
           });
@@ -149,7 +191,12 @@ export function createMerchantStoreConfigurationWithdrawal(options: {
                 correlationId: command.auditReference,
                 reasonCode,
                 beforeSummary: { lifecycle: latest.lifecycle },
-                afterSummary: { withdrawal: kind },
+                afterSummary: {
+                  withdrawal: kind,
+                  ...(command.declineReason === null
+                    ? {}
+                    : { declineReason: command.declineReason }),
+                },
                 occurredAt: at,
                 sourceChannel: "MERCHANT_WEB",
                 dataClassification: "Internal",

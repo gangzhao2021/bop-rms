@@ -1,5 +1,8 @@
 import { createMerchantReceiptTemplatePublished } from "../../apps/api/dist/merchant-receipt-template-published.js";
-import { createMerchantReceiptTemplateLifecycle } from "../../apps/api/dist/merchant-receipt-template-lifecycle.js";
+import {
+  createMerchantReceiptTemplateLifecycle,
+  receiptTemplateSoleOperatorPermission,
+} from "../../apps/api/dist/merchant-receipt-template-lifecycle.js";
 import { createMerchantReceiptTemplateReview } from "../../apps/api/dist/merchant-receipt-template-review.js";
 import { createMerchantReceiptTemplateSubmit } from "../../apps/api/dist/merchant-receipt-template-submit.js";
 import { createMerchantReceiptTemplateDraft } from "../../apps/api/dist/merchant-receipt-template-draft.js";
@@ -9,6 +12,7 @@ import { createMerchantStoreSetupReferences } from "../../apps/api/dist/merchant
 import { createMerchantStoreSetup } from "../../apps/api/dist/merchant-store-setup.js";
 import { createMerchantStoreConfigurationWithdrawal } from "../../apps/api/dist/merchant-store-configuration-withdrawal.js";
 import { logUnexpected } from "./pilot-merchant-pickup.mjs";
+import { createInternalRefundWorkforceContext } from "./pilot-refund-workforce.mjs";
 import {
   createInternalStoreConfigurationOrdinary,
   readPublishedStoreConfiguration,
@@ -74,7 +78,27 @@ export function createInternalStoreSetupDraftBff({
       authentication,
     }),
     receiptTemplateReview: createMerchantReceiptTemplateReview({ persistence, authentication }),
-    receiptTemplateLifecycle: createMerchantReceiptTemplateLifecycle(ports),
+    receiptTemplateLifecycle: createMerchantReceiptTemplateLifecycle({
+      ...ports,
+      // WP-2423 DEC-SOLE-OPERATOR-APPROVAL (Owner decision 2026-10-16): who else at the Store could
+      // approve a receipt template, each member read from Identity, Membership and Permission as
+      // an approval would be; the Owner running the Store alone approves their own template.
+      soleOperator: {
+        resolveContext: (tx, scope) =>
+          createInternalRefundWorkforceContext({
+            expected: {
+              tenantReference: scope.selected.tenantReference,
+              brandReference: scope.context.brand.brandReference,
+              storeReference: scope.store.storeReference,
+            },
+            persistence,
+            sessionActorReference: String(scope.actorReference),
+            sessionContext: async () => scope.context,
+            current: async (t) => t === tx && (await scope.allowed()),
+            permissions: [receiptTemplateSoleOperatorPermission],
+          }),
+      },
+    }),
     receiptTemplateSubmit: createMerchantReceiptTemplateSubmit(ports),
     receiptTemplateDraft: createMerchantReceiptTemplateDraft(ports),
     receiptTemplateArtifacts: createMerchantReceiptTemplateArtifacts(ports),

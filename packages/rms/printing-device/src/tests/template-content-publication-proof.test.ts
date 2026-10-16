@@ -147,6 +147,44 @@ it.each(["authoredByReference", "submittedByReference"] as const)(
     await expect(f.read(f.tx, f.version, observed)).rejects.toThrow("RECEIPT_TEMPLATE_UNAVAILABLE");
   },
 );
+const soleMark = (approver: string, at = approved) => ({
+  tenant: id(1),
+  brand: id(2),
+  store: id(3),
+  template: id(4),
+  version: id(5),
+  lifecycle: id(9),
+  operation: id(30),
+  evidence: id(10),
+  mode: "SoleOperator",
+  actor: approver,
+  mfa: new Date(Date.parse(at) - 60000),
+  at: new Date(at),
+  audit: id(31),
+});
+it.each(["authoredByReference", "submittedByReference"] as const)(
+  "accepts approval by %s only with its exact recorded sole-operator approval (WP-2423)",
+  async (key) => {
+    const f = fixture();
+    const approver = f.packet[key];
+    f.current.approvalEvidence.approvedActorReference = approver;
+    f.tx.query.mockImplementation(async (sql: string) =>
+      sql.startsWith("SELECT tenant_id") ? { rows: [soleMark(approver)] } : { rows: [] },
+    );
+    expect((await f.read(f.tx, f.version, observed))?.contentDigest).toBe(f.digest);
+    // A mark for another time or person does not count.
+    f.tx.query.mockImplementation(async (sql: string) =>
+      sql.startsWith("SELECT tenant_id")
+        ? { rows: [soleMark(approver, "2026-10-05T14:31:00.000Z")] }
+        : { rows: [] },
+    );
+    await expect(f.read(f.tx, f.version, observed)).rejects.toThrow("RECEIPT_TEMPLATE_UNAVAILABLE");
+    f.tx.query.mockImplementation(async (sql: string) =>
+      sql.startsWith("SELECT tenant_id") ? { rows: [soleMark(id(40))] } : { rows: [] },
+    );
+    await expect(f.read(f.tx, f.version, observed)).rejects.toThrow("RECEIPT_TEMPLATE_UNAVAILABLE");
+  },
+);
 it.each([
   "layoutDefinitionReference",
   "complianceRuleReference",

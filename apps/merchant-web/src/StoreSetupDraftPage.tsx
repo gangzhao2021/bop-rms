@@ -1,10 +1,12 @@
 import { StoreConfigurationOrdinaryPanel } from "./StoreConfigurationOrdinaryPanel.js";
 import type { StoreConfigurationSnapshot } from "./store-configuration-client.js";
+import { createStoreConfigurationOrdinaryClient } from "./store-configuration-ordinary-client.js";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
 import { FULL_SIGN_IN_REQUIRED_TEXT } from "./full-sign-in.js";
 import { ReceiptTemplateStoreSelection } from "./ReceiptTemplateStoreSelection.js";
 import { ReceiptTemplateArtifactEditor } from "./ReceiptTemplateArtifactEditor.js";
 import { ReceiptTemplateDraftEditor } from "./ReceiptTemplateDraftEditor.js";
+import { storeSetupMissingItems } from "./store-setup-missing.js";
 import {
   createStorePaymentConfigurationClient,
   parseStorePaymentConfigurationContent,
@@ -248,6 +250,10 @@ const messages: Record<StoreSetupClientError["code"], string> = {
     "Sole operator is not in effect for you now, so another person with Owner access must approve this.",
   SoleOperatorNeedsVerification:
     "Your verification is more than 15 minutes old. Verify again, then approve.",
+  SoleOperatorOff:
+    "Sole operator is off, so another person with Owner access must approve this. If you run this business on your own, turn on Sole operator on the Approvals page, then approve again.",
+  NotYourChange:
+    "Only the person who made this configuration can check it or send it for approval. Ask them to, or approve or decline it.",
   SetupIncomplete:
     "The saved setup still has settings that are not set (see the list in this step). Finish them, save the setup, then create the configuration.",
   SetupOutdated:
@@ -607,6 +613,21 @@ export function StoreSetupDraftPage({
   } catch {
     /* Review shows a safe validation state; local raw input remains. */
   }
+  // WP-2423 (v15): step 5 offers the receipt template the live Store issues receipts with; read
+  // the live configuration once when it is needed (step 8 reads it again with its panel).
+  const liveScope = workspace ? JSON.stringify(workspace.scope) : null;
+  useEffect(() => {
+    if (liveScope === null || workspace === null || step !== 4 || live !== null) return;
+    const c = new AbortController();
+    void createStoreConfigurationOrdinaryClient()
+      .load(workspace.scope, { signal: c.signal })
+      .then((read) => {
+        if (!c.signal.aborted)
+          setLive((old) => old ?? { current: read.current, observedAt: read.observedAt });
+      })
+      .catch(() => undefined);
+    return () => c.abort();
+  }, [liveScope, step, live === null]);
   const ownerOnly = storeSetupOwnerOnly(error, workspace, id === storeReference);
   return (
     <AppFrame
@@ -1070,6 +1091,7 @@ export function StoreSetupDraftPage({
               locale={workspace.store.locale}
               csrf={csrf}
               value={content.receiptReference}
+              liveTemplateReference={live?.current?.receiptReference ?? null}
               hidden={step !== 4}
               disabled={busy || !ready || !online || !!pending}
               onSelect={(templateReference) => {
@@ -1164,9 +1186,21 @@ export function StoreSetupDraftPage({
                   onUse={(change) => {
                     const next = parseStoreSetupContent({ ...content, ...change });
                     setContent(next);
-                    // Opening hours are edited through the step 4 inputs; keep them in step.
-                    if (change.weeklySchedule !== undefined)
-                      setInputs((old) => ({ ...old, hours: editInputs(next).hours }));
+                    // WP-2423 (v15): time zone, business day start, service modes and opening
+                    // hours are edited through the step 2-4 inputs, which Review and Save read;
+                    // carry each value taken from the live Store into them too.
+                    const edited = editInputs(next);
+                    setInputs((old) => ({
+                      ...old,
+                      ...(change.timeZone !== undefined ? { timeZone: edited.timeZone } : {}),
+                      ...(change.businessDayStartLocalTime !== undefined
+                        ? { businessStart: edited.businessStart }
+                        : {}),
+                      ...(change.enabledServiceModes !== undefined
+                        ? { serviceModes: edited.serviceModes }
+                        : {}),
+                      ...(change.weeklySchedule !== undefined ? { hours: edited.hours } : {}),
+                    }));
                     setDirty(true);
                     setError(null);
                   }}
@@ -1274,7 +1308,7 @@ function storeReview(content: StoreSetupContent): readonly (readonly [string, st
         ? "Already configured"
         : notSet(5),
     ],
-    ["Receipt", content.receiptReference.state === "Configured" ? "Already configured" : notSet(7)],
+    ["Receipt", content.receiptReference.state === "Configured" ? "Already configured" : notSet(5)],
     [
       "Capacity",
       content.capacityConfigurationReference.state === "Unconfigured"
@@ -1291,21 +1325,29 @@ function storeReview(content: StoreSetupContent): readonly (readonly [string, st
 }
 
 export function StoreSetupDraftReview({ content }: { readonly content: StoreSetupContent | null }) {
-  const missing = content
-    ? Object.values(content).filter((value) => value.state === "Unconfigured").length +
-      (content.feeContexts?.state === "Configured"
-        ? content.feeContexts.value.filter((v) => v.state === "Unconfigured").length
-        : 0)
-    : null;
+  // WP-2423 (v15): the count is exactly the list of what is not set, each with where to set it.
+  const missing = content ? storeSetupMissingItems(content) : null;
   return (
     <>
       <p>
         {missing === null
           ? "Some edited times or wait values need correction before saving."
-          : missing === 0
+          : missing.length === 0
             ? "Every setting is set."
-            : `${missing} ${missing === 1 ? "setting is" : "settings are"} not set yet. An unfinished draft can be saved.`}
+            : `${missing.length} ${missing.length === 1 ? "setting is" : "settings are"} not set yet. An unfinished draft can be saved.`}
       </p>
+      {missing !== null && missing.length > 0 && (
+        <section aria-label="Settings not set yet">
+          <h4>Not set yet</h4>
+          <ul>
+            {missing.map((item) => (
+              <li key={item.label}>
+                {item.label}: set it in {item.where}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {content && (
         <ul>
           {storeReview(content).map(([label, value]) => (
@@ -2298,8 +2340,10 @@ export function StoreSetupFeeContextEditor({
 }
 
 /** The live Store's own operating settings "Use the live Store's settings" also fills in where the
- * setup has none yet (WP-2423 v15: a running Store starts its setup from what it runs today). Saved
- * address, contact, payment and receipt settings are never taken: they are set in their steps. */
+ * setup has none yet (WP-2423 v15: a running Store starts its setup from what it runs today),
+ * including the receipt template it issues receipts with today (checked again when the
+ * configuration is created). The address, contact and payment settings it runs with were set at
+ * installation and are not Store setup records: they are entered and saved in their steps. */
 const liveOperatingFields = [
   "source",
   "timeZone",
@@ -2307,6 +2351,7 @@ const liveOperatingFields = [
   "enabledServiceModes",
   "weeklySchedule",
   "capacityConfigurationReference",
+  "receiptReference",
 ] as const;
 /** The setup change "Use the live Store's settings" makes: tax and Brand settings of the live Store,
  * its holidays when the setup has none, a start as soon as it is published (server time), and the
@@ -2399,9 +2444,20 @@ export function StoreSetupLiveSettings({
         <li>Takes effect: {start ? "as soon as it is published" : "not set yet"}</li>
         {missingOperating.length > 0 && (
           <li>
-            Time zone, business day start, service modes, opening hours and order limits not set in
-            this setup: the live Store&rsquo;s are used when you choose &ldquo;Use the live
-            Store&rsquo;s settings&rdquo;.
+            Time zone, business day start, service modes, opening hours, order limits and the
+            receipt template not set in this setup: the live Store&rsquo;s are used when you choose
+            &ldquo;Use the live Store&rsquo;s settings&rdquo;.
+          </li>
+        )}
+        {(content.addressReference.state !== "Configured" ||
+          content.contactReference.state !== "Configured" ||
+          content.paymentConfigurationReference.state !== "Configured") && (
+          <li>
+            Address, contact details and payment settings: the ones the Store runs with today were
+            set when it was installed and cannot be carried over. Enter them in step 2 (address),
+            step 7 (contact) and step 5 (payment), save each, choose &ldquo;Use saved&rdquo;, then
+            save the setup draft. They can be the same as the name and contact shown to customers
+            above.
           </li>
         )}
         <li>

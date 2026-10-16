@@ -496,11 +496,13 @@ it("forwards only an explicit sole-operator approval and names its refusals (WP-
   for (const approvalMode of ["Independent", null, ""])
     expect((await send(h.root, { body: { command, approvalMode } })).status).toBe(400);
   expect(endpoint.write).toHaveBeenCalledTimes(calls);
-  for (const [code, error] of [
-    ["NotInEffect", "sole_operator_not_in_effect"],
-    ["NeedsReverification", "sole_operator_needs_verification"],
+  for (const [code, reason, error] of [
+    ["NotInEffect", "OtherApprovers", "sole_operator_not_in_effect"],
+    // WP-2423 (v15): turned off is said as such, so the Owner knows to turn it on.
+    ["NotInEffect", "Off", "sole_operator_off"],
+    ["NeedsReverification", undefined, "sole_operator_needs_verification"],
   ] as const) {
-    endpoint.write.mockRejectedValueOnce(new MerchantSoleOperatorGateError(code));
+    endpoint.write.mockRejectedValueOnce(new MerchantSoleOperatorGateError(code, reason));
     const reply = await send(h.root, { body: { command, approvalMode: "SoleOperator" } });
     expect(reply.status).toBe(403);
     expect(reply.body).toEqual({ error });
@@ -522,6 +524,10 @@ it("names the refusals an Owner can act on (WP-2423 v15 D2/D3)", async () => {
     [
       new StoreConfigurationAdministrationServiceError("STORE_CONFIGURATION_WITHDRAWN"),
       "store_configuration_withdrawn",
+    ],
+    [
+      new StoreConfigurationAdministrationServiceError("STORE_CONFIGURATION_NOT_YOUR_CHANGE"),
+      "not_your_change",
     ],
   ] as const) {
     endpoint.write.mockRejectedValueOnce(error);

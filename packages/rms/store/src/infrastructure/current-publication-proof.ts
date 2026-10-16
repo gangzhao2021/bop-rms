@@ -248,6 +248,21 @@ function publicationAuthorization(
           JSON.stringify(ordered(original.currentRelease)) !== JSON.stringify(ordered(current))
         )
           throw new Error();
+      } else if (configuration.approvedByReference === configuration.authoredByReference) {
+        // WP-2423 DEC-SOLE-OPERATOR-APPROVAL (v15): an installed configuration's hours change
+        // approved by its own author is accepted only with the Store's recorded sole-operator
+        // approval of exactly that approval.
+        const mark = await readStoreConfigurationSoleOperatorApproval(tx, {
+          brandReference: scope.brandReference,
+          storeReference: String(scope.storeReference),
+          configurationReference: configuration.configurationReference,
+        });
+        if (
+          mark === null ||
+          mark.actorReference !== String(configuration.approvedByReference) ||
+          mark.approvalEvidenceReference !== String(configuration.approvalEvidenceReference)
+        )
+          throw new Error();
       }
       await createPostgresCurrentLiveGateSource({
         tenantReference: tenant,
@@ -397,6 +412,21 @@ export function createPostgresStoreApprovalAuthorization(
         approval.approvedAt > candidate.updatedAt
       )
         throw new Error();
+      // WP-2423 DEC-SOLE-OPERATOR-APPROVAL (v15): approved by its own author only with the
+      // Store's recorded sole-operator approval of exactly that approval.
+      if (candidate.approvedByReference === candidate.authoredByReference) {
+        const mark = await readStoreConfigurationSoleOperatorApproval(tx, {
+          brandReference: scope.brandReference,
+          storeReference: String(scope.storeReference),
+          configurationReference: candidate.configurationReference,
+        });
+        if (
+          mark === null ||
+          mark.actorReference !== String(candidate.approvedByReference) ||
+          mark.approvalEvidenceReference !== String(candidate.approvalEvidenceReference)
+        )
+          throw new Error();
+      }
       if ((await options.authorize(tx, at)) !== true) throw new Error();
       return Object.freeze({
         configuration: candidate,

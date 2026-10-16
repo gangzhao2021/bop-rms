@@ -10,8 +10,12 @@ import {
   STORE_SETUP_UNPUBLISHED_MESSAGE,
   OPEN_CHANGE_BY_ANOTHER_MESSAGE,
   STORE_CONFIGURATION_WITHDRAWN_MESSAGE,
+  storeConfigurationDeclineReasonText,
+  storeConfigurationKeptRefusals,
   withdrawStoreConfiguration,
+  type StoreConfigurationDeclineReason,
 } from "./store-configuration-client.js";
+import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
 import { StaffTime } from "./StoreTime.js";
 import {
   serviceOperationReference,
@@ -84,6 +88,8 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
   const [online, setOnline] = useState(navigator.onLine);
   const controller = useRef<AbortController | null>(null);
   const pending = useRef<StoreConfigurationCommand | StoreHoursDraftCommand | null>(null);
+  // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: the pending request is your own approval given alone.
+  const pendingMode = useRef<"SoleOperator" | undefined>(undefined);
   const running = useRef(false);
   useEffect(() => {
     const update = () => setOnline(navigator.onLine);
@@ -119,8 +125,10 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
   }
   async function save(
     command: "SaveDraft" | "Validate" | "Submit" | "Approve" | "Publish" = "SaveDraft",
+    approvalMode?: "SoleOperator",
   ) {
     if (running.current || !online || !view || !draft) return;
+    if (!pending.current) pendingMode.current = command === "Approve" ? approvalMode : undefined;
     if (
       !pending.current &&
       command !== "SaveDraft" &&
@@ -199,11 +207,13 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
     try {
       const sent = pending.current;
       const completedCommand = "command" in sent ? sent.command : "SaveDraft";
-      if ("command" in sent) await client.execute(sent, csrf, active.signal);
+      if ("command" in sent) await client.execute(sent, csrf, active.signal, pendingMode.current);
       else await client.saveHoursDraft(sent, csrf, active.signal);
       pending.current = null;
       setUncertain(false);
       const next = await client.load(store, active.signal);
+      const doneMode = pendingMode.current;
+      pendingMode.current = undefined;
       if (active.signal.aborted) return;
       setView(next);
       setDraft(storeConfigurationEditBase(next));
@@ -211,7 +221,9 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
         completedCommand === "Publish"
           ? "Configuration published."
           : completedCommand === "Approve"
-            ? "Configuration approved. Published hours remain unchanged until publication."
+            ? doneMode === "SoleOperator"
+              ? "Configuration approved by you alone as sole operator. Publish it to change the hours customers see."
+              : "Configuration approved. Published hours remain unchanged until publication."
             : completedCommand === "Validate"
               ? "Saved draft validated."
               : completedCommand === "Submit"
@@ -221,12 +233,16 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
     } catch (error) {
       if (active.signal.aborted) return;
       const text = error instanceof Error ? error.message : "Configuration request unavailable.";
-      if (text.startsWith("Permission denied") || text.startsWith("Source changed")) {
+      if (text.startsWith("Source changed")) {
         pending.current = null;
         setUncertain(false);
         setView(null);
         setDraft(null);
       } else if (
+        // WP-2423 (v15): a refusal keeps the form and the change on screen (an approval refused
+        // with 403 no longer collapses the editor); the reason says what to do next.
+        text.startsWith("Permission denied") ||
+        storeConfigurationKeptRefusals.has(text) ||
         text.startsWith("Change not accepted") ||
         text === STORE_SETUP_UNPUBLISHED_MESSAGE ||
         text === OPEN_CHANGE_BY_ANOTHER_MESSAGE ||
@@ -245,7 +261,7 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
     }
   }
   /** WP-2423 (v15 D2/D3): withdraw your own open change, or decline someone else's. */
-  async function withdraw() {
+  async function withdraw(declineReason?: StoreConfigurationDeclineReason) {
     const latest = view?.latest;
     if (running.current || !online || !latest || pending.current) return;
     running.current = true;
@@ -258,6 +274,7 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
           configurationReference: latest.configurationReference,
           configurationVersion: latest.configurationVersion,
           auditReference: serviceOperationReference(),
+          ...(declineReason === undefined ? {} : { declineReason }),
         },
         csrf,
       );
@@ -305,7 +322,15 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
           disabled={disabled}
           onDraftChange={setDraft}
           onCommand={(command) => void save(command)}
-          onWithdraw={() => void withdraw()}
+          onWithdraw={(reason) => void withdraw(reason)}
+        />
+      )}
+      {view && draft && (
+        <StoreHoursOwnApproval
+          view={view}
+          csrf={csrf}
+          busy={disabled || JSON.stringify(draft) !== JSON.stringify(view.latest)}
+          onApprove={() => void save("Approve", "SoleOperator")}
         />
       )}
     </section>
@@ -326,10 +351,19 @@ export function StoreHoursDraftForm({
   readonly disabled: boolean;
   onDraftChange(draft: StoreConfigurationSnapshot): void;
   onCommand(command: "SaveDraft" | "Validate" | "Submit" | "Approve" | "Publish"): void;
-  /** WP-2423 (v15 D2/D3): withdraw your own open change, or decline someone else's. */
-  onWithdraw?(): void;
+  /** WP-2423 (v15 D2/D3): withdraw your own open change, or decline someone else's (optional
+   * reason, after confirming). */
+  onWithdraw?(declineReason?: StoreConfigurationDeclineReason): void;
 }) {
+  const [declining, setDeclining] = useState(false),
+    [declineReason, setDeclineReason] = useState<StoreConfigurationDeclineReason | "">("");
   const open = storeConfigurationOpenChange(view),
+    // WP-2423 (v15): the person who made a change waiting for approval is not its approver (they
+    // approve alone as sole operator below, when that applies).
+    ownWaiting =
+      view.latest?.lifecycle === "PendingApproval" &&
+      (open === "Yours" || (view.soleOperator !== undefined && view.soleOperator !== null)),
+    author = view.latestAuthorName ?? null,
     withdrawn = view.latestWithdrawal ?? null,
     // A withdrawn or declined change takes no further step.
     stepsClosed = withdrawn !== null;
@@ -370,22 +404,70 @@ export function StoreHoursDraftForm({
       {withdrawn && (
         <p>
           It was {withdrawn.kind === "Withdrawn" ? "withdrawn" : "declined"}
-          {withdrawn.byYou ? " by you" : ""} <StaffTime instant={withdrawn.withdrawnAt} />. The next
-          change starts from the published hours.
+          {withdrawn.byYou ? " by you" : ""} <StaffTime instant={withdrawn.withdrawnAt} />
+          {withdrawn.reason ? ` (${storeConfigurationDeclineReasonText[withdrawn.reason]})` : ""}.
+          The next change starts from the published hours.
         </p>
       )}
       {open === "SomeoneElse" && view.latest && (
         <section aria-label="Change waiting from someone else">
           <p>
-            Someone else&rsquo;s change (version {view.latest.configurationVersion},{" "}
+            {author === null ? "Someone else" : author}&rsquo;s change (version{" "}
+            {view.latest.configurationVersion},{" "}
             {storeConfigurationStateLabel(view.latest.lifecycle).toLowerCase()}) is still open. It
             is shown below. A new change cannot be saved until it is approved and published, or
-            declined. If you are an Owner you can review it here; otherwise ask an Owner.
+            declined. Only {author === null ? "the person who made it" : author} can check it or
+            send it for approval. If you are an Owner you can review it here; otherwise ask an
+            Owner.
           </p>
-          {onWithdraw && (
-            <button type="button" disabled={disabled} onClick={onWithdraw}>
+          {onWithdraw && !declining && (
+            <button type="button" disabled={disabled} onClick={() => setDeclining(true)}>
               Decline this change
             </button>
+          )}
+          {onWithdraw && declining && (
+            <div role="group" aria-label="Decline this change">
+              <p>
+                Decline version {view.latest.configurationVersion}? It stays in the history and
+                cannot be approved or published.{" "}
+                {author === null ? "The person who made it" : author} sees that it was declined
+                {declineReason === "" ? "" : " and why"}, and can make a new change.
+              </p>
+              <label>
+                Reason (optional)
+                <select
+                  value={declineReason}
+                  disabled={disabled}
+                  onChange={(event) =>
+                    setDeclineReason(event.currentTarget.value as StoreConfigurationDeclineReason)
+                  }
+                >
+                  <option value="">No reason given</option>
+                  {(
+                    Object.keys(
+                      storeConfigurationDeclineReasonText,
+                    ) as StoreConfigurationDeclineReason[]
+                  ).map((reason) => (
+                    <option key={reason} value={reason}>
+                      {storeConfigurationDeclineReasonText[reason]}
+                    </option>
+                  ))}
+                </select>
+              </label>{" "}
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => {
+                  setDeclining(false);
+                  onWithdraw(declineReason === "" ? undefined : declineReason);
+                }}
+              >
+                Decline version {view.latest.configurationVersion}
+              </button>{" "}
+              <button type="button" disabled={disabled} onClick={() => setDeclining(false)}>
+                Keep it
+              </button>
+            </div>
           )}
         </section>
       )}
@@ -397,7 +479,7 @@ export function StoreHoursDraftForm({
             replaces it; it then needs to be sent and approved again.
           </p>
           {onWithdraw && (
-            <button type="button" disabled={disabled} onClick={onWithdraw}>
+            <button type="button" disabled={disabled} onClick={() => onWithdraw()}>
               Withdraw my change
             </button>
           )}
@@ -586,14 +668,18 @@ export function StoreHoursDraftForm({
         </button>
         <button
           type="button"
-          disabled={stepsClosed || view.latest?.lifecycle !== "Draft" || !saved}
+          disabled={
+            stepsClosed || open === "SomeoneElse" || view.latest?.lifecycle !== "Draft" || !saved
+          }
           onClick={() => onCommand("Validate")}
         >
           Validate saved draft
         </button>
         <button
           type="button"
-          disabled={stepsClosed || view.latest?.lifecycle !== "Draft" || !saved}
+          disabled={
+            stepsClosed || open === "SomeoneElse" || view.latest?.lifecycle !== "Draft" || !saved
+          }
           onClick={() => onCommand("Submit")}
         >
           Submit saved draft
@@ -603,10 +689,8 @@ export function StoreHoursDraftForm({
             Publish approved configuration
           </button>
         )}
-        {!stepsClosed && view.latest?.lifecycle === "PendingApproval" && (
+        {!stepsClosed && view.latest?.lifecycle === "PendingApproval" && !ownWaiting && (
           <>
-            {/* The view does not identify the signed-in person, so the author check is the
-                server's: approving your own change is refused. */}
             <p>
               Approval requires an authorized reviewer other than the person who made the change.
             </p>
@@ -617,6 +701,63 @@ export function StoreHoursDraftForm({
         )}
       </fieldset>
     </form>
+  );
+}
+
+/**
+ * WP-2423 DEC-SOLE-OPERATOR-APPROVAL (Owner decision 2026-10-16): the Owner's own hours change
+ * waiting for approval — approved alone as sole operator (verified, confirmed), or why another
+ * person must approve it. Outside the hours form: the verification dialog holds its own form.
+ */
+export function StoreHoursOwnApproval({
+  view,
+  csrf,
+  busy,
+  onApprove,
+}: {
+  readonly view: StoreConfigurationView;
+  readonly csrf: string;
+  readonly busy: boolean;
+  onApprove(): void;
+}) {
+  const latest = view.latest;
+  if (
+    latest === null ||
+    latest.lifecycle !== "PendingApproval" ||
+    view.latestWithdrawal ||
+    view.soleOperator === undefined
+  )
+    return null;
+  const yours = storeConfigurationOpenChange(view) === "Yours";
+  if (view.soleOperator === null)
+    return yours ? (
+      <section aria-label="Approve your own change">
+        <h3>Approval</h3>
+        <p>
+          You made this change, so another person with Owner access must approve it. You cannot
+          approve a change you made.
+        </p>
+      </section>
+    ) : null;
+  return (
+    <section aria-label="Approve your own change">
+      <h3>Approval</h3>
+      <SoleOperatorSelfApproval
+        gate={view.soleOperator}
+        csrf={csrf}
+        summary={
+          <p>
+            Version {latest.configurationVersion}: opening hours and dated closures as shown above.
+            Once approved, publish it to change the hours customers see.
+          </p>
+        }
+        what="these opening hours"
+        permissionName="Owner access to this Store"
+        actionLabel="Approve hours on my own"
+        busy={busy}
+        onApprove={onApprove}
+      />
+    </section>
   );
 }
 

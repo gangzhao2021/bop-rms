@@ -41,6 +41,7 @@ const moduleManifestInput =
       schema: "rms_device",
       tables: [
         "digital_receipt_template_lifecycle_operation",
+        "digital_receipt_template_sole_operator_approval",
         "digital_receipt_template_submit_operation",
         "digital_receipt_template_submission",
         "digital_receipt_template_draft_revision",

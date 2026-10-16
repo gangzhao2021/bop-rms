@@ -2,6 +2,7 @@
 import { expect, it, vi } from "vitest";
 import {
   createReceiptTemplateLifecycleClient,
+  loadReceiptTemplateSoleOperatorGate,
   parseReceiptTemplateLifecycleCursor,
   validateReceiptTemplateLifecycleReceipt,
   type PreparedReceiptTemplateLifecycle,
@@ -334,4 +335,53 @@ it("enforces bounded response streams and immutable prepared canonical bytes", a
   expect(canonicalPublicationValue(p.command)).toBe(before);
   expect(Object.isFrozen(p.command)).toBe(true);
   await expect(c.execute(p, { csrf })).rejects.toMatchObject({ code: "OutcomeUnknown" });
+});
+// WP-2423 DEC-SOLE-OPERATOR-APPROVAL: an Approve given alone carries approvalMode; refusals say why.
+it("sends approvalMode only on a sole-operator Approve and names the refusal", async () => {
+  let reply: Response | null = null;
+  const bodies: unknown[] = [];
+  const fetcher = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+    bodies.push(JSON.parse(String(init?.body)));
+    if (reply) return reply;
+    if (!p) throw new Error("fixture not prepared");
+    return response(receipt(p));
+  });
+  const c = createReceiptTemplateLifecycleClient(fetcher);
+  const p = await c.prepare(input("Approve"));
+  await c.execute(p, { csrf }, "SoleOperator");
+  expect(bodies[0]).toMatchObject({ command: "Approve", approvalMode: "SoleOperator" });
+  for (const [error, code] of [
+    ["sole_operator_off", "SoleOperatorOff"],
+    ["sole_operator_not_in_effect", "SoleOperatorNotInEffect"],
+    ["sole_operator_needs_verification", "SoleOperatorNeedsVerification"],
+    ["request_denied", "Denied"],
+  ] as const) {
+    reply = response({ error }, 403);
+    await expect(c.execute(p, { csrf }, "SoleOperator")).rejects.toMatchObject({ code });
+  }
+  const publish = await c.prepare(input("Publish"));
+  const before = fetcher.mock.calls.length;
+  await expect(c.execute(publish, { csrf }, "SoleOperator")).rejects.toMatchObject({
+    code: "Invalid",
+  });
+  expect(fetcher.mock.calls.length).toBe(before);
+});
+it("reads the receipt template sole-operator view, null where not offered", async () => {
+  const gate = {
+    status: "OtherApprovers",
+    otherApprovers: [{ displayName: "Mia" }],
+    verifiedUntil: null,
+  };
+  const fetcher = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+    expect(url).toBe("/merchant/store-setup/receipt-template-sole-operator");
+    expect(init?.method).toBe("GET");
+    return response({ soleOperator: gate });
+  });
+  expect(await loadReceiptTemplateSoleOperatorGate(scope, {}, fetcher)).toEqual(gate);
+  const none = vi.fn(async () => response({ soleOperator: null }));
+  expect(await loadReceiptTemplateSoleOperatorGate(scope, {}, none)).toBeNull();
+  const bad = vi.fn(async () => response({ soleOperator: { status: "Maybe" } }));
+  await expect(loadReceiptTemplateSoleOperatorGate(scope, {}, bad)).rejects.toMatchObject({
+    code: "Unavailable",
+  });
 });

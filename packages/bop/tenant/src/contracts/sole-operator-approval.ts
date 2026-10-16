@@ -26,6 +26,10 @@ export const soleOperatorApprovalPermissionCodes: ReadonlySet<string> = new Set(
   // Store gate (Owner decision 2026-10-16): Store configuration approval for publication
   // (Store setup step 8), held by the Store's Owners.
   "store.service.approve",
+  // Store gate (Owner decision 2026-10-16, part of Store configuration publication): receipt
+  // template approval. Every receipt template approval also needs this Owner-level access, so its
+  // holders include everyone else who could approve one.
+  "organization.manage",
   // Brand gates (WP-2423 Q19 step 2), exactly as each gate checks them: the price book gate
   // still checks the legacy hyphenated code; menu review approval; recipe review; allergen roster.
   "pricing.price-book.approve",

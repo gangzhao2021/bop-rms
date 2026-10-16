@@ -546,7 +546,12 @@ export interface MerchantBffRouterOptions {
   readonly storeSetupClock?: { readonly now: () => string };
   readonly receiptTemplateArtifacts?: ReturnType<typeof createMerchantReceiptTemplateArtifacts>;
   readonly receiptTemplateDraft?: ReturnType<typeof createMerchantReceiptTemplateDraft>;
-  readonly receiptTemplateLifecycle?: ReturnType<typeof createMerchantReceiptTemplateLifecycle>;
+  /** WP-2423: `soleOperatorGate` only where sole-operator approval of receipt templates is offered. */
+  readonly receiptTemplateLifecycle?: Pick<
+    ReturnType<typeof createMerchantReceiptTemplateLifecycle>,
+    "write"
+  > &
+    Partial<Pick<ReturnType<typeof createMerchantReceiptTemplateLifecycle>, "soleOperatorGate">>;
   readonly receiptTemplateSubmit?: ReturnType<typeof createMerchantReceiptTemplateSubmit>;
   readonly receiptTemplatePublished?: ReturnType<typeof createMerchantReceiptTemplatePublished>;
   readonly receiptTemplateReview?: ReturnType<typeof createMerchantReceiptTemplateReview>;
@@ -2402,9 +2407,11 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         .set("Cache-Control", NO_STORE)
         .json({
           error:
-            error.code === "NotInEffect"
-              ? "sole_operator_not_in_effect"
-              : "sole_operator_needs_verification",
+            error.code !== "NotInEffect"
+              ? "sole_operator_needs_verification"
+              : error.reason === "Off"
+                ? "sole_operator_off"
+                : "sole_operator_not_in_effect",
         });
       return;
     }
@@ -2425,7 +2432,9 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             ? "open_change_by_another"
             : code === "STORE_CONFIGURATION_WITHDRAWN"
               ? "store_configuration_withdrawn"
-              : null;
+              : code === "STORE_CONFIGURATION_NOT_YOUR_CHANGE"
+                ? "not_your_change"
+                : null;
     if (reason !== null) {
       response.status(409).set("Cache-Control", NO_STORE).json({ error: reason });
       return;
@@ -4690,6 +4699,71 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       .catch((error) => receiptTemplateReviewFailure(response, error));
   });
 
+  // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: whether the signed-in person may approve, alone, a receipt
+  // template they wrote or sent (null when this deployment offers no sole-operator approval).
+  router.get(
+    "/store-setup/receipt-template-sole-operator",
+    safeRead(options),
+    (request, response) => {
+      response.set("Cache-Control", NO_STORE);
+      const sessionCookie = cookie(request, "__Host-bop-merchant");
+      if (
+        request.method !== "GET" ||
+        sessionCookie === null ||
+        request.body !== undefined ||
+        Object.keys(request.query).length !== 0 ||
+        rawHeaderValues(request, "origin").length > 1 ||
+        rawHeaderValues(request, "sec-fetch-site").length !== 1 ||
+        rawHeaderValues(request, "x-bop-store-setup-scope").length !== 1
+      ) {
+        denied(response);
+        return;
+      }
+      let expectedScope: {
+        tenantReference: string;
+        brandReference: string;
+        storeReference: string;
+        actorReference: string;
+      };
+      try {
+        const encoded = exactHeader(request, "x-bop-store-setup-scope");
+        if (typeof encoded !== "string" || !/^[A-Za-z0-9_-]{1,1024}$/u.test(encoded))
+          throw new Error("invalid");
+        const bytes = Buffer.from(encoded, "base64url"),
+          decoded = bytes.toString("utf8");
+        if (bytes.toString("base64url") !== encoded || !Buffer.from(decoded, "utf8").equals(bytes))
+          throw new Error("invalid");
+        const raw = readClosedRecord(JSON.parse(decoded), [
+          "tenantReference",
+          "brandReference",
+          "storeReference",
+          "actorReference",
+        ]);
+        expectedScope = Object.freeze({
+          tenantReference: parseStoreAdministrationReference(raw.tenantReference),
+          brandReference: parseStoreAdministrationReference(raw.brandReference),
+          storeReference: parseStoreAdministrationReference(raw.storeReference),
+          actorReference: parseStoreAdministrationReference(raw.actorReference),
+        });
+      } catch {
+        receiptTemplateReviewFailure(
+          response,
+          new DigitalReceiptTemplateError("RECEIPT_TEMPLATE_INPUT_INVALID"),
+        );
+        return;
+      }
+      const port = options.receiptTemplateLifecycle,
+        gate = port?.soleOperatorGate;
+      if (!port || typeof gate !== "function") {
+        response.json({ soleOperator: null });
+        return;
+      }
+      void retryTransactionConflict(() => gate.call(port, { sessionCookie, expectedScope }))
+        .then((value) => response.json({ soleOperator: value }))
+        .catch((error) => receiptTemplateReviewFailure(response, error));
+    },
+  );
+
   const receiptTemplatePublishedFailure = (response: express.Response, error: unknown): void => {
     if (transactionConflictRetryLater(response, error)) return;
     const code = error instanceof DigitalReceiptTemplateError ? error.code : undefined;
@@ -4886,6 +4960,21 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
   );
 
   const receiptTemplateLifecycleFailure = (response: express.Response, error: unknown): void => {
+    // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: why the Owner's own approval was not accepted.
+    if (error instanceof MerchantSoleOperatorGateError) {
+      response
+        .status(403)
+        .set("Cache-Control", NO_STORE)
+        .json({
+          error:
+            error.code === "NeedsReverification"
+              ? "sole_operator_needs_verification"
+              : error.reason === "Off"
+                ? "sole_operator_off"
+                : "sole_operator_not_in_effect",
+        });
+      return;
+    }
     const code = error instanceof DigitalReceiptTemplateError ? error.code : undefined;
     const invalid = code === "RECEIPT_TEMPLATE_INPUT_INVALID";
     const forbidden = code === "RECEIPT_TEMPLATE_PERMISSION_DENIED";
@@ -4954,8 +5043,24 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         );
         return;
       }
+      // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: an Approve may ask to be given alone, as sole
+      // operator ("approvalMode": "SoleOperator"); the command itself is unchanged.
+      let command: unknown = request.body,
+        approvalMode: "SoleOperator" | undefined;
       try {
-        bindMerchantReceiptTemplateLifecycleCommand(request.body, expectedScope);
+        if (
+          request.body !== null &&
+          typeof request.body === "object" &&
+          !Array.isArray(request.body) &&
+          Object.hasOwn(request.body, "approvalMode")
+        ) {
+          const { approvalMode: mode, ...rest } = request.body as Record<string, unknown>;
+          if (mode !== "SoleOperator" || rest.command !== "Approve")
+            throw new DigitalReceiptTemplateError("RECEIPT_TEMPLATE_INPUT_INVALID");
+          approvalMode = "SoleOperator";
+          command = rest;
+        }
+        bindMerchantReceiptTemplateLifecycleCommand(command, expectedScope);
       } catch (error) {
         receiptTemplateLifecycleFailure(response, error);
         return;
@@ -4966,7 +5071,13 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         return;
       }
       void port
-        .write({ sessionCookie, csrf, command: request.body, expectedScope })
+        .write({
+          sessionCookie,
+          csrf,
+          command,
+          expectedScope,
+          ...(approvalMode === undefined ? {} : { approvalMode }),
+        })
         .then((value) => response.json(value))
         .catch((error) => receiptTemplateLifecycleFailure(response, error));
     },
@@ -11262,9 +11373,25 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           error instanceof Error
             ? Object.getOwnPropertyDescriptor(error, "code")?.value
             : undefined;
+        // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: why the Owner's own approval was not accepted.
+        if (error instanceof MerchantSoleOperatorGateError)
+          response.status(403).json({
+            error:
+              error.code !== "NotInEffect"
+                ? "sole_operator_needs_verification"
+                : error.reason === "Off"
+                  ? "sole_operator_off"
+                  : "sole_operator_not_in_effect",
+          });
         // WP-2423 (v15 D2/D3): another person's open change, or a withdrawn one, said plainly.
-        if (code === "STORE_CONFIGURATION_OPEN_CHANGE_BY_ANOTHER")
+        else if (code === "STORE_CONFIGURATION_OPEN_CHANGE_BY_ANOTHER")
           response.status(409).json({ error: "open_change_by_another" });
+        // WP-2423 (v15): only the person who made a change checks it or sends it for approval;
+        // the person who made or sent a change approves it only alone as sole operator.
+        else if (code === "STORE_CONFIGURATION_NOT_YOUR_CHANGE")
+          response.status(409).json({ error: "not_your_change" });
+        else if (code === "STORE_CONFIGURATION_SELF_APPROVAL")
+          response.status(409).json({ error: "approval_needs_another_person" });
         else if (code === "STORE_CONFIGURATION_WITHDRAWN")
           response.status(409).json({ error: "store_configuration_withdrawn" });
         else if (

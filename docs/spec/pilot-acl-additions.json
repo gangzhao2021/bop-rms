@@ -3240,6 +3240,24 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (WP-2423 sole operator store configuration): v15 live check D2/D3 — a Store configuration change that is not published is withdrawn by its author or declined by an approver (append-only record), and no change silently replaces another person's open change"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_sole_operator_approval",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 store setup publication): Owner decision 2026-10-16 (\"扩展独营自批（推荐）\") covers the receipt template as part of Store configuration publication — an Owner running the Store alone approves their own receipt template, marked as sole operator"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_sole_operator_approval",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 store setup publication): Owner decision 2026-10-16 (\"扩展独营自批（推荐）\") covers the receipt template as part of Store configuration publication — an Owner running the Store alone approves their own receipt template, marked as sole operator"
     }
   ]
 }

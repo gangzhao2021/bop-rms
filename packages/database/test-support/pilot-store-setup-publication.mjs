@@ -29,6 +29,8 @@ import { seedJourneyStorePublication } from "./dine-in-journey-seed.mjs";
 import { seedMerchantAcceptanceSession } from "./merchant-acceptance-session.mjs";
 import { seedTaxConfiguration } from "./tax-configuration-seed.mjs";
 import { seedSoleOperatorSetting, seedStepUp } from "./sole-operator-brand-gate.mjs";
+import { digitalReceiptRequiredFields } from "../../rms/printing-device/src/index.ts";
+import { prepareReceiptTemplatePublication } from "./receipt-template-publication.mjs";
 
 const require = createRequire(new URL("../../../apps/api/package.json", import.meta.url));
 const express = require("express");
@@ -291,8 +293,70 @@ export async function exercisePilotStoreSetupPublication(input) {
           : [],
     }));
     const taxReference = next();
+    // WP-2423 v15: the receipt template the Store issues receipts with today, as the installer
+    // published it (TEST-ONLY seed, v15 shape: Publishing history by one installer actor, the
+    // version row, no authored submission). The setup keeps it ("Keep the receipt template in
+    // use today") instead of needing a new template approved by a second person.
+    const storeLocale = (
+      await admin.query("SELECT locale FROM bop_tenant.store WHERE store_id=$1", [store])
+    ).rows[0].locale;
+    const receiptAt = new Date(Date.now() - 3600000).toISOString();
+    const liveReceipt = {
+      templateReference: next(),
+      versionReference: next(),
+      versionNumber: 1,
+      versionCode: "RECEIPT_V1",
+      brandReference: scope.brandReference,
+      storeReference: store,
+      locale: storeLocale,
+      dataContractVersion: 1,
+      renderEngineVersion: 1,
+      outputProfile: "AccessibleDigitalReceipt",
+      layoutDefinitionReference: next(),
+      complianceRuleReference: next(),
+      requiredFields: [...digitalReceiptRequiredFields],
+      publicationReference: next(),
+      publishedAt: receiptAt,
+      effectiveFrom: receiptAt,
+      effectiveUntil: null,
+    };
+    const receiptInstaller = await prepareReceiptTemplatePublication({
+      admin,
+      role: worker,
+      scope: { brandReference: scope.brandReference, storeReference: store },
+      version: liveReceipt,
+      digest: hash(liveReceipt),
+      tenantReference: scope.tenantReference,
+    });
+    await receiptInstaller.publish();
+    await admin.query(
+      "INSERT INTO rms_device.digital_receipt_template_version(version_id,brand_id,store_id,template_id,version_number,version_code,operation_id,audit_id,publication_id,publication_digest,published_at,version_json,data_classification) VALUES($1,$2,$3,$4,1,'RECEIPT_V1',$5,$6,$7,$8,$9,$10::jsonb,'Confidential')",
+      [
+        liveReceipt.versionReference,
+        scope.brandReference,
+        store,
+        liveReceipt.templateReference,
+        next(),
+        next(),
+        liveReceipt.publicationReference,
+        hash(liveReceipt),
+        receiptAt,
+        JSON.stringify(liveReceipt),
+      ],
+    );
     let setup;
     await listen(session, async (send, selected) => {
+      // The Owner checks the template in use today (the step 5 published read) and keeps it.
+      const kept = await send(
+        "store-setup/receipt-template-published?storeReference=" +
+          store +
+          "&templateReference=" +
+          liveReceipt.templateReference +
+          "&locale=" +
+          storeLocale,
+      );
+      assert.equal(kept.status, 200, JSON.stringify(kept.body));
+      assert.deepEqual(kept.body.currentVersion, liveReceipt);
       const current = await send("store-setup?storeReference=" + store);
       assert.equal(current.status, 200, JSON.stringify(current.body));
       const head = current.body.setup.snapshot;
@@ -301,6 +365,7 @@ export async function exercisePilotStoreSetupPublication(input) {
       const content = {
         ...head.content,
         source: configured("StoreOverride"),
+        receiptReference: configured(liveReceipt.templateReference),
         brandBaseVersionReference: configured(installed(4)),
         timeZone: configured("America/Toronto"),
         businessDayStartLocalTime: configured("04:00:00"),
@@ -524,6 +589,8 @@ export async function exercisePilotStoreSetupPublication(input) {
       assert.equal(published.configurationReference, workspace.body.latest.configurationReference);
       assert.equal(published.setupBasis.sourceRevision, setup.revision);
       assert.equal(published.supersedesConfigurationReference, installed(1));
+      // The Store keeps issuing receipts with the template it used before.
+      assert.equal(published.receiptReference, liveReceipt.templateReference);
       assert.equal(Object.hasOwn(workspace.body, "publicationChecks"), false);
     });
 
@@ -671,14 +738,11 @@ export async function exercisePilotStoreSetupPublication(input) {
       workspace = await workspaceOf(send);
       assert.equal(workspace.body.latest.lifecycle, "PendingApproval");
       assert.equal(workspace.body.latest.authoredByReference, owner);
-      // Setting off: the Owner is told another person must approve; asking alone is refused.
+      // Setting off: the Owner is told another person must approve; asking alone is refused and
+      // says sole operator is off (WP-2423 v15: so the Owner knows to turn it on).
       assert.equal(workspace.body.soleOperator.status, "NotSet");
       ownHead = workspace.body.expectedHead;
-      await refusedUnchanged(
-        () => ownApproval(send, selected, ownHead),
-        403,
-        "sole_operator_not_in_effect",
-      );
+      await refusedUnchanged(() => ownApproval(send, selected, ownHead), 403, "sole_operator_off");
       await refusedUnchanged(() => ownApproval(send, selected, ownHead, null), 503);
       await refusedUnchanged(() => ownApproval(send, selected, ownHead, "Independent"), 400);
     });
@@ -907,7 +971,7 @@ export async function exercisePilotStoreSetupPublication(input) {
     const withdrawals = async () =>
       (
         await admin.query(
-          "SELECT configuration_id::text configuration,withdrawal_kind kind,actor_id::text actor,withdrawn_lifecycle lifecycle FROM rms_store.store_configuration_withdrawal ORDER BY withdrawn_at",
+          "SELECT configuration_id::text configuration,withdrawal_kind kind,actor_id::text actor,withdrawn_lifecycle lifecycle,reason_code reason FROM rms_store.store_configuration_withdrawal ORDER BY withdrawn_at",
         )
       ).rows;
     const saveSetup = async (send, change) => {
@@ -939,11 +1003,12 @@ export async function exercisePilotStoreSetupPublication(input) {
           reasonCode: "STORE_SETUP_MATERIALIZATION",
         }),
       });
-    const withdraw = (send, latest, auditReference = next()) =>
+    const withdraw = (send, latest, auditReference = next(), declineReason) =>
       send("store-configuration/withdrawal", {
         configurationReference: latest.configurationReference,
         configurationVersion: latest.configurationVersion,
         auditReference,
+        ...(declineReason === undefined ? {} : { declineReason }),
       });
     let ownOpen;
     await listen(session, async (send, selected) => {
@@ -1012,6 +1077,7 @@ export async function exercisePilotStoreSetupPublication(input) {
         kind: "Withdrawn",
         actor: owner,
         lifecycle: "PendingApproval",
+        reason: "STORE_CONFIGURATION_WITHDRAWN",
       },
     ]);
     // The second Owner's change builds on the withdrawn one; the Owner cannot replace it but
@@ -1044,7 +1110,14 @@ export async function exercisePilotStoreSetupPublication(input) {
         409,
         "open_change_by_another",
       );
-      const declined = await withdraw(send, managerOpen);
+      // WP-2423 v15: a reason is offered only when declining someone else's change, from a fixed
+      // list (refused when unknown, and when withdrawing one's own).
+      await refusedUnchanged(
+        () => withdraw(send, managerOpen, next(), "Because"),
+        400,
+        "store_configuration_withdrawal_invalid",
+      );
+      const declined = await withdraw(send, managerOpen, next(), "NotRight");
       assert.deepEqual(declined.body, { status: "Applied", kind: "Declined" });
       workspace = await workspaceOf(send);
       assert.deepEqual(
@@ -1059,10 +1132,22 @@ export async function exercisePilotStoreSetupPublication(input) {
       assert.equal(created.status, 200, JSON.stringify(created.body));
     });
     assert.deepEqual(
-      (await withdrawals()).map((w) => [w.configuration, w.kind, w.actor, w.lifecycle]),
+      (await withdrawals()).map((w) => [w.configuration, w.kind, w.actor, w.lifecycle, w.reason]),
       [
-        [ownOpen.configurationReference, "Withdrawn", owner, "PendingApproval"],
-        [managerOpen.configurationReference, "Declined", owner, "Draft"],
+        [
+          ownOpen.configurationReference,
+          "Withdrawn",
+          owner,
+          "PendingApproval",
+          "STORE_CONFIGURATION_WITHDRAWN",
+        ],
+        [
+          managerOpen.configurationReference,
+          "Declined",
+          owner,
+          "Draft",
+          "STORE_CONFIGURATION_DECLINED_NOT_RIGHT",
+        ],
       ],
     );
     const withdrawalAudits = (
@@ -1071,10 +1156,18 @@ export async function exercisePilotStoreSetupPublication(input) {
       )
     ).rows;
     assert.deepEqual(
-      withdrawalAudits.map((a) => [a.target, a.reason_code, a.after_summary_json.withdrawal]),
+      withdrawalAudits.map((a) => [a.target, a.reason_code, a.after_summary_json]),
       [
-        [ownOpen.configurationReference, "STORE_CONFIGURATION_WITHDRAWN", "Withdrawn"],
-        [managerOpen.configurationReference, "STORE_CONFIGURATION_DECLINED", "Declined"],
+        [
+          ownOpen.configurationReference,
+          "STORE_CONFIGURATION_WITHDRAWN",
+          { withdrawal: "Withdrawn" },
+        ],
+        [
+          managerOpen.configurationReference,
+          "STORE_CONFIGURATION_DECLINED",
+          { withdrawal: "Declined", declineReason: "NotRight" },
+        ],
       ],
     );
     // The database refuses the same, whatever the caller: a further step of a withdrawn change,

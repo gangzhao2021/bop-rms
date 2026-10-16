@@ -26,6 +26,7 @@ import {
   type DigitalReceiptTemplateLifecycleReceipt,
   type DigitalReceiptTemplateLifecycleResult,
 } from "../../contracts/digital-receipt-template-lifecycle-action.js";
+import { hasDigitalReceiptTemplateSoleOperatorApproval } from "./digital-receipt-template-sole-operator-store.js";
 export interface DigitalReceiptTemplateLifecycleActualPacket {
   readonly mutation: CommitPublishingMutationInput;
   readonly approval: PublishingApprovalEvidence;
@@ -544,8 +545,6 @@ export function createPostgresDigitalReceiptTemplateLifecycleStore(
       a.snapshotDigest !== sub.contentDigest ||
       !sameScope(a.scope) ||
       a.decision !== "Accepted" ||
-      String(a.approvedActorReference) === sub.authoredByReference ||
-      String(a.approvedActorReference) === sub.submittedByReference ||
       String(a.approvedAt) < sub.submittedAt ||
       String(a.approvedAt) > at ||
       String(a.validUntil) > sub.validationValidUntil ||
@@ -553,6 +552,33 @@ export function createPostgresDigitalReceiptTemplateLifecycleStore(
       String(n.approvalEvidenceReference) !== String(a.evidenceReference)
     )
       return fail("RECEIPT_TEMPLATE_CONFLICT");
+    // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: an approval by the person who wrote the version or sent
+    // it for approval stands only with its exact recorded sole-operator approval (written in the
+    // approving transaction, before this record).
+    if (
+      String(a.approvedActorReference) === sub.authoredByReference ||
+      String(a.approvedActorReference) === sub.submittedByReference
+    ) {
+      await restore();
+      const marked = await hasDigitalReceiptTemplateSoleOperatorApproval(
+        { query: (sql, values) => query(sql, values) },
+        {
+          tenantReference: fixed.tenantReference,
+          brandReference: fixed.brandReference,
+          storeReference: fixed.storeReference,
+          versionReference: sub.versionReference,
+          reviewLifecycleReference: sub.reviewLifecycleReference,
+          approvalEvidenceReference: String(a.evidenceReference),
+          approverReference: String(a.approvedActorReference),
+          approvedAt: String(a.approvedAt),
+          operationReference:
+            command.action === "Approve"
+              ? command.operationReference
+              : command.expectedReviewOperationReference,
+        },
+      ).catch(() => false);
+      if (!marked) return fail("RECEIPT_TEMPLATE_CONFLICT");
+    }
     const validation = m.validationEvidence;
     if (
       validation &&

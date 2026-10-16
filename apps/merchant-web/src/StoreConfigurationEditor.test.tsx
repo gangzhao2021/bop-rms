@@ -6,6 +6,7 @@ import {
   StoreConfigurationFeeBasisView,
   StoreConfigurationEditingBoundary,
   StoreHoursDraftForm,
+  StoreHoursOwnApproval,
   storeConfigurationEditBase,
   storeConfigurationOpenChange,
   storeConfigurationStateLabel,
@@ -336,4 +337,128 @@ it("shows another person's open change, blocks saving over it and offers to decl
       id(3),
     ),
   ).toThrow();
+});
+
+it("WP-2423 v15: names who made the open change, and declining it is confirmed with an optional reason", () => {
+  const base = hoursView({ ...configuration("Draft"), authoredByReference: id(40) });
+  const view = parseStoreConfigurationView(
+    {
+      ...base,
+      viewerActorReference: id(10),
+      latestWithdrawal: null,
+      latestAuthorName: "Mia Chen",
+      soleOperator: null,
+    },
+    id(3),
+  );
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <StoreHoursDraftForm
+        view={view}
+        draft={storeConfigurationEditBase(view) as NonNullable<typeof view.current>}
+        disabled={false}
+        onDraftChange={() => undefined}
+        onCommand={() => undefined}
+        onWithdraw={() => undefined}
+      />
+    </MemoryRouter>,
+  );
+  expect(html).toContain("Mia Chen’s change (version 2, draft, not yet sent for approval)");
+  expect(html).toContain("Only Mia Chen can check it or send it for approval.");
+  // Another person's draft: you cannot check or send it.
+  expect(html).toMatch(/<button type="button" disabled="">Validate saved draft<\/button>/u);
+  expect(html).toMatch(/<button type="button" disabled="">Submit saved draft<\/button>/u);
+  expect(findInternalText([staticText(html)])).toEqual([]);
+  // The decliner's reason is shown to the person who made the change.
+  const declined = parseStoreConfigurationView(
+    {
+      ...base,
+      viewerActorReference: id(40),
+      latestWithdrawal: { kind: "Declined", withdrawnAt: at, byYou: false, reason: "TalkFirst" },
+      latestAuthorName: null,
+      soleOperator: null,
+    },
+    id(3),
+  );
+  const closed = renderToStaticMarkup(
+    <MemoryRouter>
+      <StoreHoursDraftForm
+        view={declined}
+        draft={storeConfigurationEditBase(declined) as NonNullable<typeof view.current>}
+        disabled={false}
+        onDraftChange={() => undefined}
+        onCommand={() => undefined}
+      />
+    </MemoryRouter>,
+  );
+  expect(closed).toContain("(Talk to me before changing this)");
+  expect(() =>
+    parseStoreConfigurationView(
+      {
+        ...base,
+        viewerActorReference: id(40),
+        latestWithdrawal: { kind: "Withdrawn", withdrawnAt: at, byYou: true, reason: "TalkFirst" },
+        latestAuthorName: null,
+        soleOperator: null,
+      },
+      id(3),
+    ),
+  ).toThrow();
+});
+
+it("WP-2423 DEC-SOLE-OPERATOR-APPROVAL: your own hours change is approved alone, or says why not", () => {
+  const base = hoursView({ ...configuration("PendingApproval"), authoredByReference: id(10) });
+  const view = (soleOperator: unknown) =>
+    parseStoreConfigurationView(
+      {
+        ...base,
+        viewerActorReference: id(10),
+        latestWithdrawal: null,
+        latestAuthorName: null,
+        soleOperator,
+      },
+      id(3),
+    );
+  const render = (soleOperator: unknown) => {
+    const v = view(soleOperator);
+    const form = renderToStaticMarkup(
+      <MemoryRouter>
+        <StoreHoursDraftForm
+          view={v}
+          draft={storeConfigurationEditBase(v) as NonNullable<typeof v.current>}
+          disabled={false}
+          onDraftChange={() => undefined}
+          onCommand={() => undefined}
+        />
+      </MemoryRouter>,
+    );
+    return {
+      form,
+      own: renderToStaticMarkup(
+        <StoreHoursOwnApproval
+          view={v}
+          csrf="synthetic"
+          busy={false}
+          onApprove={() => undefined}
+        />,
+      ),
+    };
+  };
+  const off = render({ status: "NotSet", otherApprovers: [], verifiedUntil: null });
+  // The person who made it is never offered the ordinary approval of someone else's change.
+  expect(off.form).not.toContain("Approve reviewed configuration");
+  expect(off.own).toContain("Sole operator is off.");
+  expect(off.own).toContain("turn on Sole operator on the Approvals page");
+  const others = render({
+    status: "OtherApprovers",
+    otherApprovers: [{ displayName: "Sam Lee" }],
+    verifiedUntil: null,
+  });
+  expect(others.own).toContain("Sam Lee also holds Owner access to this Store");
+  const effective = render({ status: "Effective", otherApprovers: [], verifiedUntil: null });
+  expect(effective.own).toContain("Approve hours on my own");
+  expect(effective.own).toContain("I checked these opening hours and approve on my own");
+  expect(findInternalText([staticText(effective.own)])).toEqual([]);
+  // Without the sole-operator offer (another deployment): your own change needs another person.
+  expect(render(null).own).toContain("You cannot approve a change you made.");
 });

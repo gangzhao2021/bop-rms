@@ -25,6 +25,11 @@ export type StoreConfigurationAdministrationServiceErrorCode =
   // withdraw or decline it first); or this configuration was withdrawn or declined.
   | "STORE_CONFIGURATION_OPEN_CHANGE_BY_ANOTHER"
   | "STORE_CONFIGURATION_WITHDRAWN"
+  // WP-2423 (v15): only the person who made a change checks it and sends it for approval.
+  | "STORE_CONFIGURATION_NOT_YOUR_CHANGE"
+  // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: the person who made or sent a change approves it only
+  // alone as sole operator, explicitly asked.
+  | "STORE_CONFIGURATION_SELF_APPROVAL"
   | "STORE_CONFIGURATION_DEPENDENCY_UNAVAILABLE";
 
 export class StoreConfigurationAdministrationServiceError extends Error {
@@ -181,6 +186,14 @@ export function createStoreConfigurationAdministrationService(
       if (open && !withdrawn && current.authoredByReference !== input.actorReference)
         return fail("STORE_CONFIGURATION_OPEN_CHANGE_BY_ANOTHER");
     } else if (withdrawn) return fail("STORE_CONFIGURATION_WITHDRAWN");
+    // WP-2423 (v15): another person never checks or sends someone else's change for approval
+    // (they approve, decline or ask its author); the database refuses it as well (2000_064).
+    if (
+      (command === "Validate" || command === "Submit") &&
+      current !== null &&
+      current.authoredByReference !== input.actorReference
+    )
+      return fail("STORE_CONFIGURATION_NOT_YOUR_CHANGE");
     if (
       configuration.setupBasis !== undefined &&
       ["Submit", "Approve", "Publish"].includes(command) &&

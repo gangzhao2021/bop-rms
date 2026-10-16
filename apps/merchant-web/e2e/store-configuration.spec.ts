@@ -186,6 +186,7 @@ async function hoursPage(page: Page, store: string) {
     brandLabel: "Synthetic Brand",
     storeLabel: "Synthetic Store",
     storeReference: store,
+    timeZone: "America/Toronto",
   };
   const headers = { "cache-control": "no-store" };
   await page.route("**/merchant/session", (route) =>
@@ -344,4 +345,152 @@ test("@production WP-2423 Q4: hours of a configuration from Store setup are save
   expect(bodies[1]?.operationReference).not.toBe(bodies[0]?.operationReference);
   await expect(editor.getByRole("button", { name: "Submit saved draft" })).toBeEnabled();
   await expectHoursLayout(page, "store-hours-setup-basis-saved");
+});
+
+test("@production WP-2423 v15: your own hours change is approved alone; a refusal keeps the editor", async ({
+  page,
+}) => {
+  const store = "018f8100-0000-7000-8000-000000000003";
+  const headers = await hoursPage(page, store);
+  const viewer = id(10);
+  const current = {
+    ...configuration("Published"),
+    storeReference: store,
+    enabledServiceModes: ["DineIn", "Pickup"],
+  };
+  const latest = {
+    ...current,
+    configurationReference: id(20),
+    configurationVersion: 2,
+    lifecycle: "PendingApproval",
+    supersedesConfigurationReference: current.configurationReference,
+    reasonCode: "STORE_HOURS_UPDATE",
+    authoredByReference: viewer,
+    approvedByReference: null,
+    approvalEvidenceReference: null,
+    publicationReference: null,
+    liveGateEvidenceReference: null,
+  };
+  const observedAt = new Date(Date.now() - 1000).toISOString();
+  const bodies: Record<string, unknown>[] = [];
+  await page.route("**/merchant/store-configuration", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({
+        headers,
+        json: {
+          screenId: "STORE-HOURS-SERVICE",
+          storeReference: store,
+          current,
+          latest,
+          expectedVersion: 2,
+          observedAt,
+          viewerActorReference: viewer,
+          latestWithdrawal: null,
+          latestAuthorName: null,
+          soleOperator: {
+            status: "Effective",
+            otherApprovers: [],
+            verifiedUntil: new Date(Date.now() + 10 * 60000).toISOString(),
+          },
+        },
+      });
+      return;
+    }
+    bodies.push(route.request().postDataJSON() as Record<string, unknown>);
+    // Sole operator was turned off meanwhile: refused, and said so.
+    await route.fulfill({ status: 403, headers, json: { error: "sole_operator_off" } });
+  });
+  await page.goto("/app/organization/stores/" + store + "/service");
+  const editor = page.getByRole("region", { name: "Operating hours draft" });
+  await editor.getByRole("button", { name: "Edit operating hours" }).click();
+  const own = page.getByRole("region", { name: "Approve your own change" });
+  await expect(own.getByText("you are the only person who holds Owner access")).toBeVisible();
+  await expect(editor.getByRole("button", { name: "Approve reviewed configuration" })).toHaveCount(
+    0,
+  );
+  await expectHoursLayout(page, "store-hours-own-approval");
+  await own.getByLabel("I checked these opening hours and approve on my own").check();
+  await own.getByRole("button", { name: "Approve hours on my own" }).click();
+  await expect(editor.getByText(/^Sole operator is off, so another person/u)).toBeVisible();
+  // The editor and the waiting change stay on screen.
+  await expect(editor.getByRole("button", { name: "Save hours draft" })).toBeVisible();
+  await expect(own).toBeVisible();
+  expect(bodies).toHaveLength(1);
+  expect(bodies[0]?.approvalMode).toBe("SoleOperator");
+  expect(bodies[0]?.command).toBe("Approve");
+  await expectNoInternalText(page);
+});
+
+test("@production WP-2423 v15: someone else's open change names them; declining is confirmed", async ({
+  page,
+}) => {
+  const store = "018f8100-0000-7000-8000-000000000004";
+  const headers = await hoursPage(page, store);
+  const current = {
+    ...configuration("Published"),
+    storeReference: store,
+    enabledServiceModes: ["DineIn", "Pickup"],
+  };
+  const latest = {
+    ...current,
+    configurationReference: id(21),
+    configurationVersion: 2,
+    lifecycle: "Draft",
+    supersedesConfigurationReference: current.configurationReference,
+    reasonCode: "STORE_HOURS_UPDATE",
+    authoredByReference: id(40),
+    approvedByReference: null,
+    approvalEvidenceReference: null,
+    publicationReference: null,
+    liveGateEvidenceReference: null,
+  };
+  let declined = false;
+  const withdrawals: Record<string, unknown>[] = [];
+  await page.route("**/merchant/store-configuration", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "STORE-HOURS-SERVICE",
+        storeReference: store,
+        current,
+        latest,
+        expectedVersion: 2,
+        observedAt: new Date(Date.now() - 1000).toISOString(),
+        viewerActorReference: id(10),
+        latestWithdrawal: declined
+          ? {
+              kind: "Declined",
+              withdrawnAt: new Date().toISOString(),
+              byYou: true,
+              reason: "NotRight",
+            }
+          : null,
+        latestAuthorName: "Mia Chen",
+        soleOperator: null,
+      },
+    }),
+  );
+  await page.route("**/merchant/store-configuration/withdrawal", async (route) => {
+    withdrawals.push(route.request().postDataJSON() as Record<string, unknown>);
+    declined = true;
+    await route.fulfill({ headers, json: { status: "Applied", kind: "Declined" } });
+  });
+  await page.goto("/app/organization/stores/" + store + "/service");
+  const editor = page.getByRole("region", { name: "Operating hours draft" });
+  await editor.getByRole("button", { name: "Edit operating hours" }).click();
+  await expect(editor.getByText("Mia Chen’s change (version 2", { exact: false })).toBeVisible();
+  await expect(editor.getByRole("button", { name: "Validate saved draft" })).toBeDisabled();
+  await expect(editor.getByRole("button", { name: "Submit saved draft" })).toBeDisabled();
+  await editor.getByRole("button", { name: "Decline this change" }).click();
+  // Nothing is sent until the decline is confirmed.
+  expect(withdrawals).toHaveLength(0);
+  const confirm = editor.getByRole("group", { name: "Decline this change" });
+  await expectHoursLayout(page, "store-hours-decline-confirm");
+  await confirm.getByLabel("Reason (optional)").selectOption("NotRight");
+  await confirm.getByRole("button", { name: "Decline version 2" }).click();
+  await expect(editor.getByText("The change was declined.", { exact: false })).toBeVisible();
+  expect(withdrawals).toHaveLength(1);
+  expect(withdrawals[0]?.declineReason).toBe("NotRight");
+  await expect(editor.getByText("(Something in it is not right)", { exact: false })).toBeVisible();
+  await expectNoInternalText(page);
 });

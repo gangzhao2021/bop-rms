@@ -21,6 +21,7 @@ import {
   createPostgresDigitalReceiptTemplateStore,
   createPostgresDigitalReceiptTemplateSubmissionStore,
   createPostgresReceiptTemplateContentPublicationProof,
+  createPostgresInstalledReceiptTemplatePublicationProof,
   digitalReceiptTemplateSubmissionRequiredFields,
   type DigitalReceiptTemplateAuthoredContent,
   type DigitalReceiptTemplateVersion,
@@ -436,7 +437,7 @@ export function createMerchantStoreConfigurationReferenceSources(
           return { rows, ...(rowCount === undefined ? {} : { rowCount }) };
         },
       });
-      const contents = new Map<string, DigitalReceiptTemplateAuthoredContent>();
+      const contents = new Map<string, DigitalReceiptTemplateAuthoredContent | null>();
       const proofs = new Map<
         string,
         ReturnType<typeof createPostgresReceiptTemplateContentPublicationProof>
@@ -453,7 +454,7 @@ export function createMerchantStoreConfigurationReferenceSources(
       const contentFor = async (v: DigitalReceiptTemplateVersion) => {
         const ref = String(v.versionReference),
           old = contents.get(ref);
-        if (old) return old;
+        if (old !== undefined) return old;
         if (phase !== "Work") fail();
         const owner = createPostgresDigitalReceiptTemplateSubmissionStore({
           ...fixed,
@@ -482,10 +483,23 @@ export function createMerchantStoreConfigurationReferenceSources(
           templateReference: template,
           versionReference: ref,
         });
-        if (!value) fail();
-        contents.set(ref, value);
-        return value;
+        // WP-2423: a version without an authored submission (installer-published) is proved
+        // separately as installed below.
+        contents.set(ref, value ?? null);
+        return value ?? null;
       };
+      // WP-2423 DEC-STORE-SETUP-PUBLICATION: the installer-published template the Store uses today
+      // (no authored submission), proved through its exact current Publishing release.
+      const installedProof = createPostgresInstalledReceiptTemplatePublicationProof({
+        ...fixed,
+        configurationType: "RECEIPT_TEMPLATE",
+        purposeCode: "RECEIPT_ISSUANCE",
+        authorize: async (actual, observed) => {
+          if (actual !== deviceTx || observed < origin || observed > check()) fail();
+          await fresh();
+          return true;
+        },
+      });
       const owner = createPostgresDigitalReceiptTemplateStore({
         brandReference: fixed.brandReference,
         storeReference: fixed.storeReference,
@@ -505,6 +519,11 @@ export function createMerchantStoreConfigurationReferenceSources(
         isCurrentPublication: async (actual, v, at) => {
           if (actual !== deviceTx || at < origin || at > check()) fail();
           const content = await contentFor(v);
+          if (content === null) {
+            const installed = await installedProof(deviceTx, v, at);
+            check();
+            return installed !== null;
+          }
           const current = await publishing.resolveCurrentRelease({
             familyReference: content.familyReference,
             configurationType: "RECEIPT_TEMPLATE",

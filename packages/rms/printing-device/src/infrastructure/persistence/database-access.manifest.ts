@@ -3,6 +3,15 @@ const databaseAccessManifestInput = {
   module: { moduleName: "printing-device", packageName: "@rms/printing-device", layer: "RMS" },
   tables: [
     {
+      // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: receipt template sole-operator approval mark.
+      table: "digital_receipt_template_sole_operator_approval",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/printing-device" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "digital_receipt_template_lifecycle_operation",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/printing-device" },
@@ -166,6 +175,26 @@ const databaseAccessManifestInput = {
     },
   ],
   accesses: [
+    {
+      id: "digital-receipt-template-sole-operator-store.digital_receipt_template_sole_operator_approval.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_device", table: "digital_receipt_template_sole_operator_approval" },
+      principal: { kind: "module", id: "@rms/printing-device" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/printing-device/src/infrastructure/persistence/digital-receipt-template-sole-operator-store.ts",
+    },
+    {
+      id: "digital-receipt-template-sole-operator-store.digital_receipt_template_sole_operator_approval.write",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_device", table: "digital_receipt_template_sole_operator_approval" },
+      principal: { kind: "module", id: "@rms/printing-device" },
+      readPattern: null,
+      source:
+        "packages/rms/printing-device/src/infrastructure/persistence/digital-receipt-template-sole-operator-store.ts",
+    },
     {
       id: "digital-receipt-template-lifecycle-store.digital_receipt_template_lifecycle_operation.read",
       operation: "read",

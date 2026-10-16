@@ -6,6 +6,7 @@ import {
 } from "../../packages/rms/store/src/index.ts";
 import { appendAuditRecordInTransaction, sha256Hex } from "../../packages/bop/audit/src/index.ts";
 import { logUnexpected } from "./pilot-merchant-pickup.mjs";
+import { createInternalRefundWorkforceContext } from "./pilot-refund-workforce.mjs";
 import {
   createStoreConfigurationV2Ports,
   readPublishedStoreConfiguration,
@@ -131,6 +132,23 @@ export async function createInternalStoreConfiguration(resources, { persistence,
       approve: "store.service.approve",
       publish: "store.service.publish",
     },
+    // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: who else at the Store holds Store configuration
+    // approval, each member read from Identity, Membership and Permission as an approval would be.
+    soleOperator: {
+      resolveContext: (tx, scope) =>
+        createInternalRefundWorkforceContext({
+          expected: {
+            tenantReference: scope.selected.tenantReference,
+            brandReference: scope.context.brand.brandReference,
+            storeReference: scope.store.storeReference,
+          },
+          persistence,
+          sessionActorReference: String(scope.actorReference),
+          sessionContext: async () => scope.context,
+          current: async (t) => t === tx && (await scope.allowed()),
+          permissions: ["store.service.approve"],
+        }),
+    },
     configure: (tx, scope, publishing) => {
       const authorize = async (transaction, at) =>
         (await scope.allowed()) && (await operating.authorize(transaction, at));
@@ -174,6 +192,11 @@ export async function createInternalStoreConfiguration(resources, { persistence,
         hashContent: operating.hashContent,
         currentTenantContext: async () => scope.context,
         publishingAuthorization: () => publishing,
+        // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: only when the Owner asked to approve their own
+        // hours change alone; the API decides it in this transaction.
+        ...(publishing.soleOperatorApproval === undefined
+          ? {}
+          : { soleOperatorApproval: publishing.soleOperatorApproval }),
       });
       return {
         publication: {
@@ -224,7 +247,13 @@ export async function createInternalStoreConfiguration(resources, { persistence,
                 targetType: "StoreConfiguration",
                 targetId: input.operation.configuration.configurationReference,
                 correlationId: input.operation.operationReference,
-                reasonCode: "STORE_HOURS_CHANGE",
+                // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: the Owner's own approval, given alone.
+                ...(input.approvalMode === "SoleOperator"
+                  ? {
+                      reasonCode: "STORE_HOURS_CHANGE_SOLE_OPERATOR",
+                      afterSummary: { approvalMode: "SoleOperator" },
+                    }
+                  : { reasonCode: "STORE_HOURS_CHANGE" }),
                 occurredAt: input.audit.occurredAt,
               }),
             );

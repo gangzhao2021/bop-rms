@@ -17,8 +17,11 @@ import {
   type StoreConfigurationPublicationCheckCode,
   type StoreConfigurationPublicationChecks,
 } from "./store-configuration-pending-journal.js";
+import { storeSetupMissingItems, storeSetupMissingText } from "./store-setup-missing.js";
 import {
+  storeConfigurationDeclineReasonText,
   withdrawStoreConfiguration,
+  type StoreConfigurationDeclineReason,
   type StoreConfigurationSnapshot,
 } from "./store-configuration-client.js";
 import {
@@ -234,6 +237,10 @@ const messages: Record<StoreSetupClientError["code"], string> = {
     "Sole operator is not in effect for you now (it is off, or someone else also holds Owner access here), so another person with Owner access must approve this. Recover the request, then refresh.",
   SoleOperatorNeedsVerification:
     "Your verification is more than 15 minutes old, so the approval was not recorded. Recover the request, verify again, then approve.",
+  SoleOperatorOff:
+    "Sole operator is off, so another person with Owner access must approve this. Recover the request. If you run this business on your own, turn on Sole operator on the Approvals page, then approve again.",
+  NotYourChange:
+    "Only the person who made this configuration can check it or send it for approval, so nothing was recorded. Recover the request; ask them to, or approve or decline it.",
   SetupIncomplete:
     "The saved setup still has settings that are not set, so nothing was created. Recover the request, finish those settings in the earlier steps and save, then create the configuration.",
   SetupOutdated:
@@ -273,7 +280,10 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
     [busy, setBusy] = useState(true),
     [error, setError] = useState<string | null>(null),
     [notice, setNotice] = useState<string | null>(null),
-    [notOffered, setNotOffered] = useState(false);
+    [notOffered, setNotOffered] = useState(false),
+    // WP-2423 (v15): declining someone else's configuration is confirmed, with an optional reason.
+    [declining, setDeclining] = useState(false),
+    [declineReason, setDeclineReason] = useState<StoreConfigurationDeclineReason | "">("");
   useEffect(() => {
     ++historyGeneration.current;
     historyController.current?.abort();
@@ -464,7 +474,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
     }
   }
   /** WP-2423 (v15 D2/D3): withdraw your own open configuration, or decline someone else's. */
-  async function withdrawLatest() {
+  async function withdrawLatest(declineReason?: StoreConfigurationDeclineReason) {
     const target = workspace?.latest;
     if (running.current || pending || !target) return;
     const epoch = generation.current,
@@ -482,6 +492,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
           configurationReference: target.configurationReference,
           configurationVersion: target.configurationVersion,
           auditReference: serviceOperationReference(),
+          ...(declineReason === undefined ? {} : { declineReason }),
         },
         props.csrf,
       );
@@ -565,11 +576,9 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
         latest.lifecycle === "Approved"),
     openByAnother = openLatest && latest.authoredByReference !== props.scope.actorReference,
     openYours = openLatest && latest.authoredByReference === props.scope.actorReference,
-    setupIncomplete =
-      props.saved !== null &&
-      (Object.values(props.saved.content).some((part) => part?.state === "Unconfigured") ||
-        (props.saved.content.feeContexts?.state === "Configured" &&
-          props.saved.content.feeContexts.value.some((fee) => fee.state === "Unconfigured"))),
+    // WP-2423 (v15): what the saved setup still lacks, named with where to set it.
+    setupMissing = props.saved === null ? [] : storeSetupMissingItems(props.saved.content),
+    setupIncomplete = setupMissing.length > 0,
     // The setup builds on the configuration that was latest when it was saved.
     setupOutdated =
       props.saved !== null &&
@@ -638,7 +647,14 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
             <dt>Latest recorded configuration</dt>
             <dd>
               {latest
-                ? `Version ${latest.configurationVersion} · ${storeConfigurationStateLabel(latest.lifecycle)}`
+                ? `Version ${latest.configurationVersion} · ${
+                    // WP-2423 (v15): a withdrawn or declined version is shown as such.
+                    withdrawal
+                      ? withdrawal.kind === "Withdrawn"
+                        ? "Withdrawn"
+                        : "Declined"
+                      : storeConfigurationStateLabel(latest.lifecycle)
+                  }`
                 : "None recorded"}
             </dd>
             <dt>Current published configuration</dt>
@@ -681,9 +697,55 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
                 cannot be created until it is approved and published, or declined. Declining keeps
                 it in the history; the person who made it can make a new change.
               </p>
-              <button type="button" disabled={locked} onClick={() => void withdrawLatest()}>
-                Decline version {latest.configurationVersion}
-              </button>
+              {!declining ? (
+                <button type="button" disabled={locked} onClick={() => setDeclining(true)}>
+                  Decline version {latest.configurationVersion}
+                </button>
+              ) : (
+                <div role="group" aria-label="Decline this configuration">
+                  <p>
+                    Decline version {latest.configurationVersion}? It stays in the history and
+                    cannot be approved or published. The person who made it sees that it was
+                    declined{declineReason === "" ? "" : " and why"}.
+                  </p>
+                  <label>
+                    Reason (optional)
+                    <select
+                      value={declineReason}
+                      disabled={locked}
+                      onChange={(event) =>
+                        setDeclineReason(
+                          event.currentTarget.value as StoreConfigurationDeclineReason,
+                        )
+                      }
+                    >
+                      <option value="">No reason given</option>
+                      {(
+                        Object.keys(
+                          storeConfigurationDeclineReasonText,
+                        ) as StoreConfigurationDeclineReason[]
+                      ).map((reason) => (
+                        <option key={reason} value={reason}>
+                          {storeConfigurationDeclineReasonText[reason]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>{" "}
+                  <button
+                    type="button"
+                    disabled={locked}
+                    onClick={() => {
+                      setDeclining(false);
+                      void withdrawLatest(declineReason === "" ? undefined : declineReason);
+                    }}
+                  >
+                    Decline version {latest.configurationVersion}
+                  </button>{" "}
+                  <button type="button" disabled={locked} onClick={() => setDeclining(false)}>
+                    Keep it
+                  </button>
+                </div>
+              )}
             </section>
           )}
           {openYours && latest && (
@@ -707,8 +769,10 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
           )}
           {setupIncomplete && (
             <p>
-              The saved setup still has settings that are not set (see the list above). Finish them
-              in the earlier steps and save before creating a configuration.
+              A configuration cannot be created yet: the saved setup still has{" "}
+              {setupMissing.length === 1 ? "a setting" : `${setupMissing.length} settings`} not set:{" "}
+              {storeSetupMissingText(setupMissing)}. Set {setupMissing.length === 1 ? "it" : "them"}
+              , save the setup draft, then create the configuration.
             </p>
           )}
           {ownChange && latest && soleOperator !== undefined && (
@@ -735,7 +799,13 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
               />
             </section>
           )}
-          {ownChange && soleOperator === undefined && (
+          {ownChange && soleOperator === undefined && latest?.setupBasis === undefined && (
+            <p>
+              This is an opening hours change. Approve it (on your own as sole operator, when that
+              applies) and publish it on Hours &amp; ordering.
+            </p>
+          )}
+          {ownChange && soleOperator === undefined && latest?.setupBasis !== undefined && (
             <p>
               Another person with Owner access must approve this configuration. You cannot approve a
               change you made.

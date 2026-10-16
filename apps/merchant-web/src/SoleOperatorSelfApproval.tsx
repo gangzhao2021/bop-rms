@@ -78,8 +78,9 @@ export function SoleOperatorSelfApproval({
   if (gate === null || gate.status === "NotSet")
     return (
       <p>
-        You made this change, so someone else who holds {permissionName} must approve it. If you run
-        this business on your own, the brand owner can turn on Sole operator on the Approvals page.
+        You made this change, so someone else who holds {permissionName} must approve it.
+        {gate === null ? " " : " Sole operator is off. "}If you run this business on your own, the
+        brand owner can turn on Sole operator on the Approvals page.
       </p>
     );
   if (gate.status === "OtherApprovers")

@@ -83,9 +83,31 @@ it("rendered entry keeps discovery separate from current qualification and saves
   expect(html).toContain("Saved templates");
   expect(html).toContain("Check published receipt template");
   expect(html).toContain("Save the setup draft separately");
-  expect(html).toContain("Leave receipt template unconfigured");
+  expect(html).toContain("Clear receipt template choice");
   expect(html).not.toContain("Provider ready");
   expect(html).not.toContain('value="' + id(9) + '"');
+});
+it("WP-2423 v15: offers the template the Store issues receipts with today, and says when it is kept", () => {
+  const render = (value: { state: "Unconfigured" } | { state: "Configured"; value: string }) =>
+    renderToStaticMarkup(
+      <ReceiptTemplateStoreSelection
+        scope={scope}
+        locale="en"
+        csrf={"A".repeat(43)}
+        value={value}
+        liveTemplateReference={id(30)}
+        onSelect={() => undefined}
+      />,
+    );
+  const open = render({ state: "Unconfigured" });
+  expect(open).toContain("Keep the receipt template in use today");
+  expect(open).toContain(">Receipt template in use today</option>");
+  expect(open).toContain("cannot be published");
+  const kept = render({ state: "Configured", value: id(30) });
+  expect(kept).toContain(
+    "This setup uses the receipt template the Store issues receipts with today.",
+  );
+  expect(kept).not.toContain(id(30) + "</");
 });
 it("parent pending barrier disables every initial selection action and hidden step remains scoped", () => {
   const selected = vi.fn(),

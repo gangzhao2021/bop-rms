@@ -20,6 +20,7 @@ import {
   assertDigitalReceiptTemplateContentEnvelope,
 } from "../contracts/digital-receipt-template-content.js";
 import type { ReceiptTemplateTransaction } from "./persistence/digital-receipt-template-store.js";
+import { hasDigitalReceiptTemplateSoleOperatorApproval } from "./persistence/digital-receipt-template-sole-operator-store.js";
 
 const fail = (): never => {
   throw new DigitalReceiptTemplateError("RECEIPT_TEMPLATE_UNAVAILABLE");
@@ -186,8 +187,6 @@ export function createPostgresReceiptTemplateContentPublicationProof(options: {
         approval.snapshotReference !== release.snapshotReference ||
         approval.snapshotDigest !== digest ||
         !sameScope(approval.scope) ||
-        String(approval.approvedActorReference) === String(owner.authoredByReference) ||
-        String(approval.approvedActorReference) === String(owner.submittedByReference) ||
         approval.approvedAt > release.createdAt ||
         approval.validUntil <= release.createdAt ||
         validation.snapshotReference !== release.snapshotReference ||
@@ -195,6 +194,23 @@ export function createPostgresReceiptTemplateContentPublicationProof(options: {
         !sameScope(validation.scope) ||
         validation.checkedAt > release.createdAt ||
         validation.validUntil <= release.createdAt
+      )
+        return fail();
+      // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: approved by the person who wrote it or sent it for
+      // approval only with the recorded sole-operator approval of exactly that approval.
+      if (
+        (String(approval.approvedActorReference) === String(owner.authoredByReference) ||
+          String(approval.approvedActorReference) === String(owner.submittedByReference)) &&
+        !(await hasDigitalReceiptTemplateSoleOperatorApproval(tx, {
+          tenantReference: tenant,
+          brandReference: String(brand),
+          storeReference: String(store),
+          versionReference: String(version.versionReference),
+          reviewLifecycleReference: String(owner.reviewLifecycleReference),
+          approvalEvidenceReference: String(approval.evidenceReference),
+          approverReference: String(approval.approvedActorReference),
+          approvedAt: String(approval.approvedAt),
+        }))
       )
         return fail();
       return Object.freeze({ version, content, contentDigest: digest, release, observedAt: at });

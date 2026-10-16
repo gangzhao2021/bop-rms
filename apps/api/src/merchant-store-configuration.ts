@@ -9,13 +9,23 @@ import {
   createStoreConfigurationVersion,
   createStoreConfigurationPublicationHash,
   readStoreConfigurationWithdrawal,
+  readStoreConfigurationSubmitter,
+  recordStoreConfigurationSoleOperatorApproval,
   StoreConfigurationAdministrationServiceError,
 } from "@rms/store";
+import { loadStoreMember } from "@bop/membership";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import { bindMerchantStoreConfigurationCommand } from "./merchant-store-configuration-command.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
+import {
+  merchantStoreSoleOperatorGate,
+  MerchantSoleOperatorGateError,
+  requireMerchantStoreSoleOperator,
+  type ResolveContext,
+} from "./merchant-sole-operator.js";
+import { storeConfigurationDeclineReasonOf } from "./merchant-store-configuration-withdrawal.js";
 
 type AdministrationOptions = Parameters<typeof createPersistentStoreConfigurationAdministration>[0];
 type Tx = Parameters<AdministrationOptions["ports"]>[0];
@@ -33,7 +43,37 @@ export type StoreConfigurationPublishingAccess = ReturnType<
 > & {
   /** When this run bound its command (its Publishing steps are recorded at this instant). */
   readonly observedAt: string;
+  /**
+   * WP-2423 DEC-SOLE-OPERATOR-APPROVAL: present only when the Owner explicitly approves their own
+   * hours change from Store setup alone; the V2 preparation takes it as its sole-operator check.
+   */
+  readonly soleOperatorApproval?: (
+    tx: Tx,
+    input: { readonly occurredAt: string },
+  ) => Promise<{ readonly actorMfaAt: string }>;
 };
+/** The permission whose holders decide whether sole operator is in effect at the Store. */
+const soleOperatorPermission = "store.service.approve";
+/** WP-2423: the optional "approve alone as sole operator" request beside a configuration command. */
+function splitApprovalMode(raw: unknown): {
+  readonly command: unknown;
+  readonly approvalMode: "SoleOperator" | undefined;
+} {
+  if (
+    raw === null ||
+    typeof raw !== "object" ||
+    Array.isArray(raw) ||
+    Object.getPrototypeOf(raw) !== Object.prototype ||
+    !Object.hasOwn(raw, "approvalMode")
+  )
+    return { command: raw, approvalMode: undefined };
+  const descriptor = Object.getOwnPropertyDescriptor(raw, "approvalMode");
+  if (!descriptor || !("value" in descriptor) || descriptor.value !== "SoleOperator")
+    throw new StoreConfigurationAdministrationServiceError("STORE_CONFIGURATION_COMMAND_INVALID");
+  const command: Record<string, unknown> = { ...(raw as Record<string, unknown>) };
+  Reflect.deleteProperty(command, "approvalMode");
+  return { command, approvalMode: "SoleOperator" };
+}
 /** The Publishing decisions each step of a setup-based configuration needs (WP-2423 Q4). */
 export const setupBasedPublishingActions: Readonly<Record<Method, readonly string[]>> =
   Object.freeze({
@@ -135,6 +175,14 @@ export function createMerchantStoreConfiguration(options: {
     snapshotAudit: ReviewOptions["snapshotAudit"];
   };
   /**
+   * WP-2423 DEC-SOLE-OPERATOR-APPROVAL (Owner decision 2026-10-16): the run's workforce context
+   * for evaluating who else at the Store holds Store configuration approval. Absent: an Owner never
+   * approves their own hours change.
+   */
+  soleOperator?: {
+    resolveContext(tx: Tx, scope: Scope): ResolveContext;
+  };
+  /**
    * `publishing` answers the Publishing decisions this run resolved for its command (WP-2423 Q4:
    * Submit, Approve and Publish of a configuration from Store setup); it refuses anything else.
    */
@@ -159,184 +207,285 @@ export function createMerchantStoreConfiguration(options: {
     Object.freeze({ ...scope, allowed: guard });
   const write = async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
     const session = await options.authentication.authorize(input);
+    // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: an explicit request to approve one's own change alone.
+    const { command: rawCommand, approvalMode } = splitApprovalMode(input.command);
+    const sole = approvalMode === "SoleOperator";
+    let soleRefusal: MerchantSoleOperatorGateError | undefined;
     // WP-2423: one authorized run. The caller, the command's permission and the Publishing
     // decisions the command may need are resolved in full once at the start (one permission
     // packet) and re-checked in full once more inside the transaction before it commits; owner
     // callbacks in between take the run's guard instead of re-resolving the caller (~30
     // statements each).
     const usedPublishing = new Set<string>();
-    return source.transactions.run((tx) =>
-      withMerchantTransactionAuthorization(
-        {
-          transaction: tx,
-          resolve: async () => {
-            // Identity first; the specific action is decided before any owner dependency runs.
-            const scope = await resolveScope(
-              tx,
-              input.sessionCookie,
-              "store.service.read",
-              session.sessionReference,
-            );
-            const bound = bindMerchantStoreConfigurationCommand(input.command, {
-              brandReference: scope.context.brand.brandReference,
-              storeReference: scope.store.storeReference,
-              actorReference: scope.actorReference,
-              observedAt: source.now(),
-            });
-            const action = actions[bound.method];
-            // WP-2423 Q4: a configuration from Store setup is changed only through the hours draft
-            // (an hours-only Store setup revision), never as a whole configuration from the browser.
-            if (bound.method === "saveDraft" && bound.input.configuration.setupBasis !== undefined)
-              throw new StoreConfigurationAdministrationServiceError(
-                "STORE_CONFIGURATION_COMMAND_INVALID",
-              );
-            const publishing: readonly string[] =
-              bound.input.configuration.setupBasis !== undefined
-                ? setupBasedPublishingActions[bound.method]
-                : !options.review
-                  ? []
-                  : bound.method === "publish"
-                    ? ["publishing.release.publish"]
-                    : bound.method === "approve"
-                      ? approvalPublishingActions
-                      : [];
-            const decisions = await scope.authorizeActions([action, ...publishing]);
-            if (
-              (bound.input.configuration.setupBasis !== undefined &&
-                bound.input.configuration.setupBasis.tenantReference !==
-                  scope.selected.tenantReference) ||
-              scope.context.brand.brandReference !== bound.input.configuration.brandReference ||
-              scope.store.storeReference !== bound.input.configuration.storeReference ||
-              String(scope.actorReference) !== String(bound.input.actorReference) ||
-              decisions.get(action)?.effect !== "Allow"
-            )
-              return denied();
-            return { scope, bound, action, decisions, publishing };
-          },
-          recheck: async ({ scope, action, decisions }) => {
-            const rechecked = [action, ...usedPublishing];
-            const current = await scope.authorizeActions(rechecked);
-            return (
-              current.get(action)?.effect === "Allow" &&
-              [...usedPublishing].every(
-                (item) =>
-                  current.get(item)?.effect !== undefined &&
-                  current.get(item)?.effect === decisions.get(item)?.effect,
-              )
-            );
-          },
-          denied,
-        },
-        async (authority) => {
-          const { scope: resolved, bound, decisions, publishing } = authority.scope;
-          const guard = () => authority.guard();
-          const scope = runScope(resolved, guard);
-          /** A Publishing decision taken at the start of this run (no query). */
-          const publishingDecision = async (
-            action: string,
-            permitted: readonly string[],
-          ): Promise<NonNullable<Decision>> => {
-            if (!permitted.includes(action) || !(await guard())) return denied();
-            const decision = decisions.get(action);
-            if (decision === null || decision === undefined) return denied();
-            usedPublishing.add(action);
-            return decision;
-          };
-          const configured = options.configure(tx, scope, {
-            authorize: (request) => publishingDecision(request.action, publishing),
-            observedAt: bound.input.occurredAt,
-          });
-          const administrationOptions = storeConfigurationAdministrationOptions({
-            configured,
-            scope,
+    return source.transactions
+      .run((tx) =>
+        withMerchantTransactionAuthorization(
+          {
             transaction: tx,
-            now: source.now,
-            guard,
-          });
-          let result;
-          if (
-            bound.input.configuration.setupBasis !== undefined &&
-            ["submit", "approve", "publish"].includes(bound.method)
-          ) {
-            // V2's fresh-only owning preparation performs real Core transitions after
-            // original lookup/CAS. Legacy approval-time Submit is not a V2 path.
-            result = await createPersistentStoreConfigurationAdministration(administrationOptions)[
-              bound.method
-            ](bound.input);
-          } else if (bound.method === "publish" && options.review) {
-            result = await createPersistentStoreConfigurationPublication({
-              administration: administrationOptions,
-              snapshotAudit: options.review.snapshotAudit,
-              publishingAuthorization: () => ({
-                authorize: (request) =>
-                  publishingDecision(request.action, ["publishing.release.publish"]),
-              }),
-            })(bound.input, scope.context);
-          } else if (bound.method === "approve" && options.review) {
-            if (
-              String(bound.input.configuration.approvedByReference) !== String(scope.actorReference)
-            )
-              return denied();
-            const review = options.review;
-            const publishingAuthorization: ReviewOptions["publishingAuthorization"] = () => ({
-              authorize: (request) => publishingDecision(request.action, approvalPublishingActions),
-            });
-            const prepare = createPersistentStoreApprovalPreparation({
-              ...administrationOptions.publication,
-              brandReference: scope.context.brand.brandReference,
-              storeReference: scope.store.storeReference,
-              nextReference: administrationOptions.nextReference,
-              appendAudit: review.snapshotAudit,
-              publishingAuthorization,
-              validate: async (transaction, configuration, at) => {
-                const references = configured.ports(transaction).references;
-                if (
-                  !(await references.validateControlledReferences(configuration)) ||
-                  !(await references.validateBrandBaseCompatibility(configuration))
+            resolve: async () => {
+              // Identity first; the specific action is decided before any owner dependency runs.
+              const scope = await resolveScope(
+                tx,
+                input.sessionCookie,
+                "store.service.read",
+                session.sessionReference,
+              );
+              const bound = bindMerchantStoreConfigurationCommand(rawCommand, {
+                brandReference: scope.context.brand.brandReference,
+                storeReference: scope.store.storeReference,
+                actorReference: scope.actorReference,
+                observedAt: source.now(),
+              });
+              const action = actions[bound.method];
+              if (sole && (bound.method !== "approve" || options.soleOperator === undefined))
+                throw new StoreConfigurationAdministrationServiceError(
+                  "STORE_CONFIGURATION_COMMAND_INVALID",
+                );
+              // WP-2423 Q4: a configuration from Store setup is changed only through the hours draft
+              // (an hours-only Store setup revision), never as a whole configuration from the browser.
+              if (
+                bound.method === "saveDraft" &&
+                bound.input.configuration.setupBasis !== undefined
+              )
+                throw new StoreConfigurationAdministrationServiceError(
+                  "STORE_CONFIGURATION_COMMAND_INVALID",
+                );
+              const publishing: readonly string[] =
+                bound.input.configuration.setupBasis !== undefined
+                  ? setupBasedPublishingActions[bound.method]
+                  : !options.review
+                    ? []
+                    : bound.method === "publish"
+                      ? ["publishing.release.publish"]
+                      : bound.method === "approve"
+                        ? approvalPublishingActions
+                        : [];
+              const decisions = await scope.authorizeActions([action, ...publishing]);
+              if (
+                (bound.input.configuration.setupBasis !== undefined &&
+                  bound.input.configuration.setupBasis.tenantReference !==
+                    scope.selected.tenantReference) ||
+                scope.context.brand.brandReference !== bound.input.configuration.brandReference ||
+                scope.store.storeReference !== bound.input.configuration.storeReference ||
+                String(scope.actorReference) !== String(bound.input.actorReference) ||
+                decisions.get(action)?.effect !== "Allow"
+              )
+                return denied();
+              return { scope, bound, action, decisions, publishing };
+            },
+            recheck: async ({ scope, action, decisions }) => {
+              const rechecked = [action, ...usedPublishing];
+              const current = await scope.authorizeActions(rechecked);
+              return (
+                current.get(action)?.effect === "Allow" &&
+                [...usedPublishing].every(
+                  (item) =>
+                    current.get(item)?.effect !== undefined &&
+                    current.get(item)?.effect === decisions.get(item)?.effect,
                 )
-                  throw new Error("STORE_CONFIGURATION_REFERENCE_INVALID");
-                return review.validate(transaction, scope, configuration, at);
-              },
+              );
+            },
+            denied,
+          },
+          async (authority) => {
+            const { scope: resolved, bound, decisions, publishing } = authority.scope;
+            const guard = () => authority.guard();
+            const scope = runScope(resolved, guard);
+            /** A Publishing decision taken at the start of this run (no query). */
+            const publishingDecision = async (
+              action: string,
+              permitted: readonly string[],
+            ): Promise<NonNullable<Decision>> => {
+              if (!permitted.includes(action) || !(await guard())) return denied();
+              const decision = decisions.get(action);
+              if (decision === null || decision === undefined) return denied();
+              usedPublishing.add(action);
+              return decision;
+            };
+            // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: the person who made or sent a change approves it
+            // only when they ask to approve it alone as sole operator; nobody else uses that path.
+            if (bound.method === "approve") {
+              const target = bound.input.configuration,
+                actor = String(scope.actorReference);
+              if (!(await guard())) return denied();
+              // Since only the author sends a change for approval, the sender is read only when
+              // the Owner asks to approve alone a change someone else made.
+              const self =
+                String(target.authoredByReference) === actor ||
+                (sole &&
+                  (await readStoreConfigurationSubmitter(tx, {
+                    brandReference: scope.context.brand.brandReference,
+                    storeReference: scope.store.storeReference,
+                    configurationReference: target.configurationReference,
+                  })) === actor);
+              if (self !== sole)
+                throw new StoreConfigurationAdministrationServiceError(
+                  sole
+                    ? "STORE_CONFIGURATION_COMMAND_INVALID"
+                    : "STORE_CONFIGURATION_SELF_APPROVAL",
+                );
+            }
+            const soleOperator = options.soleOperator;
+            /** Sole operator in effect for the caller now, with a second factor ≤ 15 minutes old. */
+            const soleCheck = async (observedAt: string) => {
+              if (!sole || soleOperator === undefined || !(await guard())) return denied();
+              try {
+                return await requireMerchantStoreSoleOperator(tx as never, {
+                  tenantReference: scope.selected.tenantReference,
+                  brandReference: scope.context.brand.brandReference,
+                  storeReference: scope.store.storeReference,
+                  actorReference: String(scope.actorReference),
+                  permissionCode: soleOperatorPermission,
+                  observedAt,
+                  resolveContext: soleOperator.resolveContext(tx, scope),
+                  allowed: guard,
+                });
+              } catch (error) {
+                if (error instanceof MerchantSoleOperatorGateError) soleRefusal = error;
+                throw error;
+              }
+            };
+            const configured = options.configure(tx, scope, {
+              authorize: (request) => publishingDecision(request.action, publishing),
+              observedAt: bound.input.occurredAt,
+              ...(sole
+                ? {
+                    soleOperatorApproval: async (
+                      actual: Tx,
+                      packet: { readonly occurredAt: string },
+                    ) => (actual === tx ? soleCheck(String(packet.occurredAt)) : denied()),
+                  }
+                : {}),
             });
-            const prepared = await prepare(
-              tx,
-              bound.input.configuration,
-              scope.context,
-              source.now(),
-            );
-            const storeCommand = { ...bound.input, configuration: prepared.configuration };
-            if (prepared.kind === "Replay") {
-              result =
-                await createPersistentStoreConfigurationAdministration(
-                  administrationOptions,
-                ).approve(storeCommand);
-            } else {
-              const approve = createPersistentStoreConfigurationReview({
+            const baseOptions = storeConfigurationAdministrationOptions({
+              configured,
+              scope,
+              transaction: tx,
+              now: source.now,
+              guard,
+            });
+            // WP-2423: the approval given alone says so on its audit record.
+            const administrationOptions: AdministrationOptions = sole
+              ? {
+                  ...baseOptions,
+                  appendAudit: async (actual, packet) => {
+                    const marked =
+                      packet.operation.command === "Approve"
+                        ? Object.freeze({ ...packet, approvalMode: "SoleOperator" as const })
+                        : packet;
+                    return baseOptions.appendAudit(actual, marked);
+                  },
+                }
+              : baseOptions;
+            let result;
+            if (
+              bound.input.configuration.setupBasis !== undefined &&
+              ["submit", "approve", "publish"].includes(bound.method)
+            ) {
+              // V2's fresh-only owning preparation performs real Core transitions after
+              // original lookup/CAS. Legacy approval-time Submit is not a V2 path.
+              result = await createPersistentStoreConfigurationAdministration(
+                administrationOptions,
+              )[bound.method](bound.input);
+            } else if (bound.method === "publish" && options.review) {
+              result = await createPersistentStoreConfigurationPublication({
                 administration: administrationOptions,
                 snapshotAudit: options.review.snapshotAudit,
-                publishingAuthorization,
+                publishingAuthorization: () => ({
+                  authorize: (request) =>
+                    publishingDecision(request.action, ["publishing.release.publish"]),
+                }),
+              })(bound.input, scope.context);
+            } else if (bound.method === "approve" && options.review) {
+              if (
+                String(bound.input.configuration.approvedByReference) !==
+                String(scope.actorReference)
+              )
+                return denied();
+              const review = options.review;
+              const publishingAuthorization: ReviewOptions["publishingAuthorization"] = () => ({
+                authorize: (request) =>
+                  publishingDecision(request.action, approvalPublishingActions),
               });
-              result = await approve({
-                storeCommand,
-                snapshot: prepared.snapshot,
-                publishingApproval: {
-                  ...prepared.publishingApproval,
-                  tenantContext: scope.context,
+              const prepare = createPersistentStoreApprovalPreparation({
+                ...administrationOptions.publication,
+                brandReference: scope.context.brand.brandReference,
+                storeReference: scope.store.storeReference,
+                nextReference: administrationOptions.nextReference,
+                appendAudit: review.snapshotAudit,
+                publishingAuthorization,
+                validate: async (transaction, configuration, at) => {
+                  const references = configured.ports(transaction).references;
+                  if (
+                    !(await references.validateControlledReferences(configuration)) ||
+                    !(await references.validateBrandBaseCompatibility(configuration))
+                  )
+                    throw new Error("STORE_CONFIGURATION_REFERENCE_INVALID");
+                  return review.validate(transaction, scope, configuration, at);
                 },
               });
+              // WP-2423: decided before anything is written; recorded with the approval below.
+              const soleGate = sole ? await soleCheck(bound.input.occurredAt) : undefined;
+              const prepared = await prepare(
+                tx,
+                bound.input.configuration,
+                scope.context,
+                source.now(),
+              );
+              const storeCommand = { ...bound.input, configuration: prepared.configuration };
+              // The sole-operator mark precedes the approval it marks (the database checks both).
+              if (soleGate !== undefined && prepared.kind === "Approve")
+                await recordStoreConfigurationSoleOperatorApproval(tx, {
+                  brandReference: scope.context.brand.brandReference,
+                  storeReference: scope.store.storeReference,
+                  configurationReference: prepared.configuration.configurationReference,
+                  operationReference: bound.input.operationReference,
+                  approvalEvidenceReference: String(
+                    prepared.configuration.approvalEvidenceReference,
+                  ),
+                  actorReference: String(scope.actorReference),
+                  actorMfaAt: soleGate.actorMfaAt,
+                  approvedAt: bound.input.occurredAt,
+                  auditReference: bound.input.auditReference,
+                });
+              if (prepared.kind === "Replay") {
+                result =
+                  await createPersistentStoreConfigurationAdministration(
+                    administrationOptions,
+                  ).approve(storeCommand);
+              } else {
+                const approve = createPersistentStoreConfigurationReview({
+                  administration: administrationOptions,
+                  snapshotAudit: options.review.snapshotAudit,
+                  publishingAuthorization,
+                });
+                result = await approve({
+                  storeCommand,
+                  snapshot: prepared.snapshot,
+                  publishingApproval: {
+                    ...prepared.publishingApproval,
+                    tenantContext: scope.context,
+                  },
+                });
+              }
+            } else {
+              result = await createPersistentStoreConfigurationAdministration(
+                administrationOptions,
+              )[bound.method](bound.input);
             }
-          } else {
-            result = await createPersistentStoreConfigurationAdministration(administrationOptions)[
-              bound.method
-            ](bound.input);
-          }
-          return Object.freeze({
-            status: result.status,
-            resultingVersion: result.operation.resultingVersion,
-          });
-        },
-      ),
-    );
+            return Object.freeze({
+              status: result.status,
+              resultingVersion: result.operation.resultingVersion,
+            });
+          },
+        ),
+      )
+      .catch((error: unknown) => {
+        // The transaction host reports owner failures generically; the sole-operator refusal of
+        // this run says why (turned off, someone else also approves, verify again).
+        if (soleRefusal !== undefined) throw soleRefusal;
+        throw error;
+      });
   };
   /** Reads never take a Publishing decision. */
   const refusePublishing = (): StoreConfigurationPublishingAccess => ({
@@ -394,6 +543,51 @@ export function createMerchantStoreConfiguration(options: {
                   configurationReference: latest.configurationReference,
                 })
               : null;
+          const open =
+            latest !== null &&
+            withdrawal === null &&
+            (latest.lifecycle === "Draft" ||
+              latest.lifecycle === "PendingApproval" ||
+              latest.lifecycle === "Approved");
+          const viewer = String(scope.actorReference),
+            brandReference = scope.context.brand.brandReference,
+            storeReference = scope.store.storeReference;
+          // WP-2423 (v15): staff see who made a change that is still open (by the name the Store
+          // keeps; none when they are no longer a member).
+          let latestAuthorName: string | null = null;
+          if (open && String(latest.authoredByReference) !== viewer)
+            latestAuthorName = await loadStoreMember(
+              tx as never,
+              { brandReference, storeReference },
+              String(latest.authoredByReference),
+            ).then(
+              (member) => member.displayName ?? null,
+              () => null,
+            );
+          // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: the Owner who made or sent the change awaiting
+          // approval sees whether they may approve it alone, and why not.
+          let soleOperator: Awaited<ReturnType<typeof merchantStoreSoleOperatorGate>> | null = null;
+          if (
+            open &&
+            options.soleOperator !== undefined &&
+            latest.lifecycle === "PendingApproval" &&
+            (String(latest.authoredByReference) === viewer ||
+              (await readStoreConfigurationSubmitter(tx, {
+                brandReference,
+                storeReference,
+                configurationReference: latest.configurationReference,
+              })) === viewer)
+          )
+            soleOperator = await merchantStoreSoleOperatorGate(tx as never, {
+              tenantReference: scope.selected.tenantReference,
+              brandReference,
+              storeReference,
+              actorReference: viewer,
+              permissionCode: soleOperatorPermission,
+              observedAt,
+              resolveContext: options.soleOperator.resolveContext(tx, scope),
+              allowed: () => authority.guard(),
+            });
           return Object.freeze({
             screenId: "STORE-HOURS-SERVICE" as const,
             storeReference: scope.store.storeReference,
@@ -405,11 +599,22 @@ export function createMerchantStoreConfiguration(options: {
                     kind: withdrawal.kind,
                     withdrawnAt: withdrawal.withdrawnAt,
                     byYou: withdrawal.actorReference === String(scope.actorReference),
+                    // WP-2423 (v15): the decliner's reason, when they gave one.
+                    reason: storeConfigurationDeclineReasonOf(withdrawal.reasonCode),
                   }),
             current,
             latest,
             expectedVersion: latest?.configurationVersion ?? current?.configurationVersion ?? 0,
             observedAt,
+            latestAuthorName,
+            soleOperator:
+              soleOperator === null
+                ? null
+                : Object.freeze({
+                    status: soleOperator.status,
+                    otherApprovers: soleOperator.otherApprovers,
+                    verifiedUntil: soleOperator.verifiedUntil,
+                  }),
           });
         },
       ),

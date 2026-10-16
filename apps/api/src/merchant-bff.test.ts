@@ -1,3 +1,4 @@
+import { MerchantSoleOperatorGateError } from "./merchant-sole-operator.js";
 import { MerchantStepUpError } from "./merchant-mfa-step-up.js";
 import { MerchantRefundApprovalError } from "./merchant-ordinary-refund-approval.js";
 import { MerchantSoleOperatorError } from "./merchant-sole-operator-setting.js";
@@ -697,6 +698,35 @@ it("protects store-configuration transport and exposes only bounded results", as
   }
   control.mockRejectedValueOnce(new Error("STORE_CONFIGURATION_COMMAND_INVALID"));
   expect((await submit()).status).toBe(403);
+  // WP-2423 (v15): refusals of another person's step or of one's own approval, said plainly.
+  for (const [rejected, status, error] of [
+    [
+      Object.assign(new Error("safe"), { code: "STORE_CONFIGURATION_NOT_YOUR_CHANGE" }),
+      409,
+      "not_your_change",
+    ],
+    [
+      Object.assign(new Error("safe"), { code: "STORE_CONFIGURATION_SELF_APPROVAL" }),
+      409,
+      "approval_needs_another_person",
+    ],
+    [new MerchantSoleOperatorGateError("NotInEffect", "Off"), 403, "sole_operator_off"],
+    [
+      new MerchantSoleOperatorGateError("NotInEffect", "OtherApprovers"),
+      403,
+      "sole_operator_not_in_effect",
+    ],
+    [
+      new MerchantSoleOperatorGateError("NeedsReverification"),
+      403,
+      "sole_operator_needs_verification",
+    ],
+  ] as const) {
+    control.mockRejectedValueOnce(rejected);
+    const response = await submit();
+    expect(response.status).toBe(status);
+    expect(await response.json()).toEqual({ error });
+  }
   control.mockRejectedValueOnce(new Error("synthetic private failure detail"));
   const failed = await submit();
   expect(failed.status).toBe(403);

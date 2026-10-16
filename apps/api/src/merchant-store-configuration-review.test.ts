@@ -536,3 +536,46 @@ describe("WP-2423 Q4: Publishing decisions of a configuration from Store setup",
     expect(mocks.administration).not.toHaveBeenCalled();
   });
 });
+
+describe("WP-2423 DEC-SOLE-OPERATOR-APPROVAL: approving your own hours change", () => {
+  const own = (approvalMode?: unknown) => {
+    const f = setup();
+    // The signed-in Owner (id 11) made the change waiting for approval.
+    return {
+      f,
+      request: {
+        ...f.request,
+        command: {
+          ...f.request.command,
+          configuration: { ...configuration("PendingApproval"), authoredByReference: id(11) },
+          ...(approvalMode === undefined ? {} : { approvalMode }),
+        },
+      },
+    };
+  };
+  it("refuses the author's own approval unless they ask to approve it alone", async () => {
+    const { f, request } = own();
+    await expect(f.service(request)).rejects.toMatchObject({
+      code: "STORE_CONFIGURATION_SELF_APPROVAL",
+    });
+    expect(f.prepare).not.toHaveBeenCalled();
+  });
+  it("refuses an unknown approval mode, and asking alone where the deployment does not offer it", async () => {
+    const odd = own("Alone");
+    await expect(odd.f.service(odd.request)).rejects.toMatchObject({
+      code: "STORE_CONFIGURATION_COMMAND_INVALID",
+    });
+    // This deployment evaluates no Store approvers (no sole-operator option).
+    const offered = own("SoleOperator");
+    await expect(offered.f.service(offered.request)).rejects.toMatchObject({
+      code: "STORE_CONFIGURATION_COMMAND_INVALID",
+    });
+    expect(offered.f.prepare).not.toHaveBeenCalled();
+  });
+  it("never lets someone approve another person's change as sole operator", async () => {
+    const f = setup();
+    await expect(
+      f.service({ ...f.request, command: { ...f.request.command, approvalMode: "SoleOperator" } }),
+    ).rejects.toMatchObject({ code: "STORE_CONFIGURATION_COMMAND_INVALID" });
+  });
+});

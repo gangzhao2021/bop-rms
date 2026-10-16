@@ -31,6 +31,10 @@ export class StoreSetupClientError extends Error {
       // operator is not in effect for them now, or their verification is older than 15 minutes.
       | "SoleOperatorNotInEffect"
       | "SoleOperatorNeedsVerification"
+      // WP-2423 (v15): sole operator is turned off for the Brand (say how to turn it on).
+      | "SoleOperatorOff"
+      // WP-2423 (v15): only the person who made a configuration change checks or sends it.
+      | "NotYourChange"
       // WP-2423 (v15 D2/D3): the saved setup has settings that are not set; another person's
       // configuration change is still open; or this configuration was withdrawn or declined.
       | "SetupIncomplete"

@@ -8,6 +8,7 @@ import {
 import { createApp } from "./app.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { createMerchantReceiptTemplateLifecycle } from "./merchant-receipt-template-lifecycle.js";
+import { MerchantSoleOperatorGateError } from "./merchant-sole-operator.js";
 // Actual Express App/localhost HTTP; controlled typed service output, not native IAM or persistence.
 const id = (n: number) => "01902421-1424-7000-8000-" + n.toString(16).padStart(12, "0"),
   at = "2026-10-05T12:00:00.000Z",
@@ -103,7 +104,8 @@ const session = createAuthenticationSession({
   revocationReason: null,
   revokedAt: null,
 });
-type Port = ReturnType<typeof createMerchantReceiptTemplateLifecycle>;
+type Port = Pick<ReturnType<typeof createMerchantReceiptTemplateLifecycle>, "write"> &
+  Partial<Pick<ReturnType<typeof createMerchantReceiptTemplateLifecycle>, "soleOperatorGate">>;
 const servers: Server[] = [];
 afterEach(async () => {
   await Promise.all(
@@ -154,7 +156,9 @@ async function send(
     body = command(),
     customHeaders = headers,
     text,
+    path = "/merchant/store-setup/receipt-template-lifecycle",
   }: {
+    path?: string;
     method?: "GET" | "POST";
     query?: string;
     body?: unknown;
@@ -165,7 +169,7 @@ async function send(
   return new Promise<{ status: number; headers: Headers; body: unknown; raw: string }>(
     (resolve, reject) => {
       const outgoing = httpRequest(
-        new URL("/merchant/store-setup/receipt-template-lifecycle" + query, root),
+        new URL(path + query, root),
         { method, headers: customHeaders },
         (incoming) => {
           const chunks: Buffer[] = [];
@@ -345,4 +349,70 @@ it("uses the dedicated 32KiB parser, rejects malformed JSON and oversized reques
     await send(root, { text: JSON.stringify({ ...command(), private: "x".repeat(32768) }) }),
   ).toMatchObject({ status: 413, body: { error: "receipt_template_lifecycle_invalid" } });
   expect(port.write).not.toHaveBeenCalled();
+});
+// WP-2423 DEC-SOLE-OPERATOR-APPROVAL: an Approve may ask to be given alone as sole operator.
+it("forwards an explicit sole-operator Approve and refuses it on any other command or value", async () => {
+  const port = endpoints(),
+    root = await serve(port),
+    reply = await send(root, { body: { ...command(), approvalMode: "SoleOperator" } });
+  expect(reply.status).toBe(200);
+  expect(port.write).toHaveBeenCalledExactlyOnceWith({
+    sessionCookie: cookie,
+    csrf,
+    command: command(),
+    expectedScope: scope,
+    approvalMode: "SoleOperator",
+  });
+  for (const body of [
+    { ...command(), approvalMode: "Independent" },
+    { ...command(), approvalMode: null },
+    { ...command(), command: "Publish", approvalMode: "SoleOperator" },
+    { ...resolveCommand, approvalMode: "SoleOperator" },
+  ])
+    expect(await send(root, { body })).toMatchObject({
+      status: 400,
+      body: { error: "receipt_template_lifecycle_invalid" },
+    });
+  expect(port.write).toHaveBeenCalledTimes(1);
+});
+it.each([
+  [new MerchantSoleOperatorGateError("NotInEffect", "Off"), "sole_operator_off"],
+  [
+    new MerchantSoleOperatorGateError("NotInEffect", "OtherApprovers"),
+    "sole_operator_not_in_effect",
+  ],
+  [new MerchantSoleOperatorGateError("NotInEffect"), "sole_operator_not_in_effect"],
+  [new MerchantSoleOperatorGateError("NeedsReverification"), "sole_operator_needs_verification"],
+] as const)("says why a sole-operator approval was refused (%s)", async (error, code) => {
+  const port = endpoints();
+  port.write.mockRejectedValueOnce(error);
+  const reply = await send(await serve(port), {
+    body: { ...command(), approvalMode: "SoleOperator" },
+  });
+  expect(reply).toMatchObject({ status: 403, body: { error: code } });
+});
+it("reads the receipt template sole-operator gate, or null where it is not offered", async () => {
+  const gate = { status: "Effective", otherApprovers: [], verifiedUntil: null } as const;
+  const port = {
+    ...endpoints(),
+    soleOperatorGate: vi.fn(async () => gate),
+  };
+  const path = "/merchant/store-setup/receipt-template-sole-operator",
+    getHeaders = { ...headers };
+  Reflect.deleteProperty(getHeaders, "Content-Type");
+  const reply = await send(await serve(port), { method: "GET", path, customHeaders: getHeaders });
+  expect(reply).toMatchObject({ status: 200, body: { soleOperator: gate } });
+  expect(port.soleOperatorGate).toHaveBeenCalledExactlyOnceWith({
+    sessionCookie: cookie,
+    expectedScope: scope,
+  });
+  expect(
+    await send(await serve(endpoints()), { method: "GET", path, customHeaders: getHeaders }),
+  ).toMatchObject({ status: 200, body: { soleOperator: null } });
+  port.soleOperatorGate.mockRejectedValueOnce(
+    new DigitalReceiptTemplateError("RECEIPT_TEMPLATE_PERMISSION_DENIED"),
+  );
+  expect(
+    (await send(await serve(port), { method: "GET", path, customHeaders: getHeaders })).status,
+  ).toBe(403);
 });

@@ -1094,6 +1094,15 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.tables?.includes("store_configuration_withdrawal") &&
           moduleRelative ===
             "src/infrastructure/persistence/store-configuration-withdrawal-store.ts";
+        // WP-2423 (Owner decision 2026-10-16): receipt template sole-operator approval mark.
+        const acceptedReceiptTemplateSoleOperatorAsset =
+          module.packageName === "@rms/printing-device" &&
+          module.manifest.ownedDatabase?.schema === "rms_device" &&
+          module.manifest.ownedDatabase?.tables?.includes(
+            "digital_receipt_template_sole_operator_approval",
+          ) &&
+          moduleRelative ===
+            "src/infrastructure/persistence/digital-receipt-template-sole-operator-store.ts";
         const acceptedMenuSoleOperatorAsset =
           module.packageName === "@rms/catalog" &&
           module.manifest.ownedDatabase?.schema === "rms_catalog" &&
@@ -3489,6 +3498,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedMenuSoleOperatorAsset &&
           !acceptedStoreConfigurationSoleOperatorAsset &&
           !acceptedStoreConfigurationWithdrawalAsset &&
+          !acceptedReceiptTemplateSoleOperatorAsset &&
           !acceptedBrandLifecycleAsset &&
           !acceptedBrandConfigurationAuthoringAsset &&
           !acceptedPlatformBrandTemplateAsset &&
