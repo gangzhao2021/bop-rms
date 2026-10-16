@@ -164,7 +164,7 @@ export function createPostgresKitchenReworkStore(options: {
       "SELECT " +
         columns +
         " FROM rms_kitchen.kitchen_rework_item WHERE brand_id=$1 AND store_id=$2 AND kitchen_rework_item_id=$3" +
-        (lock ? " FOR UPDATE" : ""),
+        (lock ? " FOR NO KEY UPDATE" : ""),
       [brand, store, reworkReference],
     );
     return result.rows.length === 1 ? parseKitchenReworkRow(result.rows[0]) : null;
@@ -250,7 +250,7 @@ export function createPostgresKitchenReworkStore(options: {
             "AND k.original_kitchen_work_item_id=w.kitchen_work_item_id) AS prior," +
             "(SELECT count(*)::int FROM rms_kitchen.kitchen_rework_item k WHERE k.brand_id=w.brand_id AND k.store_id=w.store_id " +
             "AND k.original_kitchen_work_item_id=w.kitchen_work_item_id AND k.reason_code='NOT_READY' AND k.status<>'Completed') AS open_not_ready " +
-            "FROM rms_kitchen.kitchen_work_item w WHERE w.brand_id=$1 AND w.store_id=$2 AND w.kitchen_work_item_id=$3 FOR UPDATE OF w",
+            "FROM rms_kitchen.kitchen_work_item w WHERE w.brand_id=$1 AND w.store_id=$2 AND w.kitchen_work_item_id=$3 FOR NO KEY UPDATE OF w",
           [brand, store, command.originalWorkItemReference],
         );
         if (found.rows.length !== 1) return fail("KITCHEN_REWORK_NOT_FOUND");

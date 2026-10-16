@@ -1,6 +1,7 @@
 import { DiningSessionCloseAction } from "./DiningSessionCloseAction.js";
 import { DiningOrderCloseAction } from "./DiningOrderCloseAction.js";
 import { DiningServeAction } from "./DiningServeAction.js";
+import { DiningServeReadyActions } from "./DiningServeReadyAction.js";
 import { useEffect, useRef, useState } from "react";
 import {
   createDiningProgressClient,
@@ -69,6 +70,8 @@ export function DiningOrderProgress({
 }) {
   const [state, setState] = useState<State>({ kind: "Idle" });
   const [busy, setBusy] = useState(false);
+  // WP-2423: what "Serve all ready items" did, kept across the reread that follows it.
+  const [notice, setNotice] = useState<string | null>(null);
   const active = useRef<AbortController | null>(null);
   // WP-2423: a command in flight pauses the page's background reread (onBusy). If this panel is
   // closed meanwhile (the order collapsed), its command is abandoned and never reports back, so
@@ -93,6 +96,7 @@ export function DiningOrderProgress({
   };
   useEffect(() => {
     setState({ kind: "Idle" });
+    setNotice(null);
     return () => {
       active.current?.abort();
     };
@@ -121,7 +125,13 @@ export function DiningOrderProgress({
   };
   return (
     <section aria-label="Dining serving progress">
-      <button onClick={() => void load()} disabled={state.kind === "Loading" || busy || locked}>
+      <button
+        onClick={() => {
+          setNotice(null);
+          void load();
+        }}
+        disabled={state.kind === "Loading" || busy || locked}
+      >
         {state.kind === "Idle" ? "View serving progress" : "Refresh serving progress"}
       </button>
       <div role="status">
@@ -132,6 +142,7 @@ export function DiningOrderProgress({
         ) : state.kind === "Unavailable" ? (
           <p>Serving progress unavailable. Check your connection and refresh.</p>
         ) : null}
+        {notice === null ? null : <p>{notice}</p>}
       </div>
       {state.kind === "Ready" ? (
         <>
@@ -156,6 +167,18 @@ export function DiningOrderProgress({
             locked={busy || locked}
             onBusy={markBusy}
             onClosed={changed}
+          />
+          <DiningServeReadyActions
+            key={"serve-ready:" + state.view.observedAt}
+            view={state.view}
+            csrf={csrf}
+            locked={busy || locked}
+            onBusy={markBusy}
+            onDone={(summary) => {
+              setNotice(summary);
+              changed();
+            }}
+            fetcher={fetcher}
           />
           <DiningProgressView
             view={state.view}

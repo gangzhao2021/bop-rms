@@ -25,6 +25,7 @@ import { createMerchantOrderStaffCancellation } from "../../../apps/api/src/merc
 import { createMerchantOrderItemStaffCancellation } from "../../../apps/api/src/merchant-order-item-staff-cancellation.ts";
 import { createMerchantDiningOrderProgress } from "../../../apps/api/src/merchant-dining-order-progress.ts";
 import { createMerchantDiningServeCommand } from "../../../apps/api/src/merchant-dining-serve-command.ts";
+import { createMerchantDiningServeReadyCommand } from "../../../apps/api/src/merchant-dining-serve-ready-command.ts";
 import { createMerchantDiningOrderCloseCommand } from "../../../apps/api/src/merchant-dining-order-close-command.ts";
 import { createDiningOrderCloseConfiguration } from "../../../apps/api/src/dining-order-close-configuration.ts";
 import { createKitchenInventoryConsumption } from "../../../apps/api/src/kitchen-inventory-consumption.ts";
@@ -105,6 +106,9 @@ const LINE_A_MINOR = 9040n,
  * real Ordering kitchen source), Inventory consumes it from the Kitchen events, the staff serving
  * view shows the remaining line Ready at the current Order version, staff serve it (the merchant
  * serve command at version 3; the version the page held before the cancellation is refused), and
+ * "Serve all ready items" composes that command per line: a request from a page still holding the
+ * version before the cancellation serves neither line (both changed), the current page's request
+ * serves line A once even when retried, and another device's request finds it already served. Then
  * the Order closes: the cancelled-and-refunded line does not block execution or settlement.
  *
  * Every command runs under a restricted NOBYPASSRLS role holding exactly the rendered pilot API
@@ -1192,8 +1196,76 @@ it("after staff cancel one line of a dine-in round, the kitchen completes the re
         },
       });
       await assert.rejects(serve(serveCommand(2)), /DINING_SERVE_COMMAND_DENIED/u);
-      const served = await serve(serveCommand(ready.currentOrderVersion));
-      assert.deepEqual(served, { status: "Created", itemServiceVersion: 1 });
+
+      // ── WP-2423 "Serve all ready items": the same serve command, once per line, each in its own
+      // restricted-role transaction, with operation references derived from the request's.
+      const serveReady = createMerchantDiningServeReadyCommand({
+        serve,
+        progress: createMerchantDiningOrderProgress({
+          persistence,
+          locale: "en-CA",
+          authentication,
+        }),
+      });
+      const readyRequest = (operationReference, expectedOrderVersion, lines) => ({
+        ...session,
+        command: {
+          operationReference,
+          orderReference: order.order,
+          expectedOrderVersion,
+          expectedSessionVersion: ready.sessionVersion,
+          expectedTableAssignmentVersion: ready.tableAssignmentVersion,
+          lines: lines.map(([orderItemReference, quantity]) => ({
+            orderItemReference,
+            quantity,
+            expectedItemServiceVersion: 0,
+          })),
+        },
+      });
+      const serviceRecords = async () =>
+        (
+          await one(
+            "SELECT count(*)::int AS n FROM rms_dining.dining_item_service_record WHERE order_id=$1",
+            [order.order],
+          )
+        )[0].n;
+      const outcomes = (result) => result.lines.map((line) => line.outcome);
+      // A page still holding version 2 (both lines then waiting to be served) serves nothing:
+      // line A's Order revision moved on and line B was cancelled meanwhile.
+      const stale = await serveReady(
+        readyRequest(fresh(), 2, [
+          [refs.items[0], LINES[0].quantity],
+          [refs.items[1], LINES[1].quantity],
+        ]),
+      );
+      assert.deepEqual(outcomes(stale), ["Changed", "Changed"]);
+      assert.equal(await serviceRecords(), 0);
+      // The current page's request serves line A; its retry (same reference) serves nothing twice.
+      const batchReference = fresh();
+      const current = readyRequest(batchReference, ready.currentOrderVersion, [
+        [refs.items[0], LINES[0].quantity],
+      ]);
+      const servedAll = await serveReady(current);
+      assert.deepEqual(
+        [servedAll.served, servedAll.alreadyServed, servedAll.changed, servedAll.failed],
+        [1, 0, 0, 0],
+      );
+      assert.deepEqual(outcomes(await serveReady(current)), ["Served"]);
+      assert.equal(await serviceRecords(), 1);
+      // Another device that still shows line A ready finds it already served; so does a single
+      // serve with a new operation.
+      assert.deepEqual(
+        outcomes(
+          await serveReady(
+            readyRequest(fresh(), ready.currentOrderVersion, [[refs.items[0], LINES[0].quantity]]),
+          ),
+        ),
+        ["AlreadyServed"],
+      );
+      await assert.rejects(serve(serveCommand(ready.currentOrderVersion)), {
+        code: "DINING_ITEM_SERVICE_UNAVAILABLE",
+      });
+      assert.equal(await serviceRecords(), 1);
       const delivered = await progress();
       assert.equal(delivered.phase, "Fulfilled");
       assert.deepEqual(phases(delivered), [

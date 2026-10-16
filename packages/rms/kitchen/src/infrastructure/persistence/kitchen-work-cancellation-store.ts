@@ -254,7 +254,7 @@ export function createPostgresKitchenBatchCancellation(options: {
 
     const tickets = await tx.query(
       "SELECT kitchen_ticket_id,order_id,status,aggregate_version::text AS version,updated_at " +
-        "FROM rms_kitchen.kitchen_ticket WHERE brand_id=$1 AND store_id=$2 AND order_batch_id=$3 FOR UPDATE",
+        "FROM rms_kitchen.kitchen_ticket WHERE brand_id=$1 AND store_id=$2 AND order_batch_id=$3 FOR NO KEY UPDATE",
       [brand, store, input.orderBatchReference],
     );
     if (tickets.rows.length === 0)
@@ -277,7 +277,7 @@ export function createPostgresKitchenBatchCancellation(options: {
     const itemRows = await tx.query(
       "SELECT kitchen_work_item_id,order_id,order_batch_id,order_item_id,version::text AS version,status,updated_at " +
         "FROM rms_kitchen.kitchen_work_item WHERE brand_id=$1 AND store_id=$2 AND kitchen_ticket_id=$3 " +
-        "ORDER BY order_item_id,kitchen_work_item_id FOR UPDATE",
+        "ORDER BY order_item_id,kitchen_work_item_id FOR NO KEY UPDATE",
       [brand, store, ticketReference],
     );
     if (itemRows.rows.length < 1 || itemRows.rows.length > 100) return unavailable();

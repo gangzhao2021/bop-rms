@@ -172,3 +172,21 @@ it("rejects browser intent after Store switch and rejects authority injection", 
   ).rejects.toMatchObject({ code: "KITCHEN_WORK_INPUT_INVALID" });
   expect(doubles.execute).not.toHaveBeenCalled();
 });
+it("WP-2423: reruns a step whose transaction met a database conflict, with the same command", async () => {
+  // v15 2026-10-16: a deadlock with the queue rebuild answered the cook 403. Nothing of the failed
+  // run was committed; the rerun carries the same idempotency key.
+  const s = setup();
+  const conflict = Object.assign(new Error("conflict"), {
+    code: "TENANT_DATABASE_TRANSACTION_CONFLICT",
+  });
+  s.run.mockRejectedValueOnce(conflict);
+  await expect(s.operation(s.input)).resolves.toEqual({ outcome: "Accepted" });
+  expect(s.run).toHaveBeenCalledTimes(2);
+  expect(doubles.execute).toHaveBeenCalledTimes(1);
+  expect(doubles.execute.mock.calls[0]?.[0]).toMatchObject({ idempotencyKey: id(1) });
+  // A conflict that persists stays a conflict (the route answers "busy, try again").
+  s.run.mockRejectedValue(conflict);
+  await expect(s.operation(s.input)).rejects.toMatchObject({
+    code: "TENANT_DATABASE_TRANSACTION_CONFLICT",
+  });
+}, 15_000);

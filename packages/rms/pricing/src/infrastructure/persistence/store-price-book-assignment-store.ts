@@ -114,7 +114,11 @@ export interface BrandPriceBookSummary {
   readonly createdAt: string;
   readonly updatedAt: string;
 }
-/** The Brand's price books with their current version. */
+/**
+ * The Brand's price books with their latest version: drafts, published and discarded books.
+ * `price_book.current_version_id` names only the Published version a Store may charge (it is NULL
+ * for a Draft or a discarded book), so the list follows the newest version instead.
+ */
 export async function listBrandPriceBooks(
   tx: Tx,
   scope: { readonly brandReference: string },
@@ -129,8 +133,9 @@ export async function listBrandPriceBooks(
         (SELECT count(*) FROM rms_pricing.price_entry e WHERE e.brand_id=b.brand_id AND e.price_book_id=b.price_book_id
           AND e.price_book_version_id=v.price_book_version_id)::int entries,
         ${iso("b.created_at")} created_at,${iso("b.updated_at")} updated_at
-       FROM rms_pricing.price_book b JOIN rms_pricing.price_book_version v
-        ON v.price_book_version_id=b.current_version_id AND v.price_book_id=b.price_book_id AND v.brand_id=b.brand_id
+       FROM rms_pricing.price_book b CROSS JOIN LATERAL (SELECT lv.price_book_version_id,lv.lifecycle
+         FROM rms_pricing.price_book_version lv WHERE lv.price_book_id=b.price_book_id AND lv.brand_id=b.brand_id
+         ORDER BY lv.version_number DESC LIMIT 1) v
        WHERE b.brand_id=$1 ORDER BY v.lifecycle='Archived',b.updated_at DESC LIMIT 200`,
       [brand],
     )

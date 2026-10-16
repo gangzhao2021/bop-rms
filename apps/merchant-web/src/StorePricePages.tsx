@@ -1,6 +1,6 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./RoleAdministrationPages.js";
 import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
@@ -109,7 +109,87 @@ function Failure({ code }: { readonly code: PriceErrorCode | "Loading" }) {
 }
 const itemName = (sellable: PriceSellable | undefined, reference: string) =>
   sellable ? `${sellable.productName} — ${sellable.sizeName}` : "Item " + reference.slice(-4);
-const localTime = (instant: string) => instant.replace("T", " ").slice(0, 16) + " UTC";
+/** A price book's state in staff words, with the Store's book named as in use here. */
+export function priceBookStatus(lifecycle: string, inUseHere: boolean): string {
+  if (lifecycle === "Draft") return "Draft, not published yet";
+  if (lifecycle === "Published") return inUseHere ? "In use at this Store" : "Published";
+  return lifecycleText[lifecycle] ?? "Discarded";
+}
+
+/**
+ * Discarding a draft cannot be undone, so the button only opens a question; the draft is discarded
+ * from the dialog, and "Keep draft" closes it with nothing sent.
+ */
+export function DiscardDraftAction({
+  stableCode,
+  busy,
+  retry,
+  onDiscard,
+}: {
+  readonly stableCode: string;
+  readonly busy: boolean;
+  /** The last discard was not confirmed by the server; the same request is sent again. */
+  readonly retry: boolean;
+  readonly onDiscard: () => void;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  return (
+    <>
+      <button type="button" disabled={busy} onClick={() => dialog.current?.showModal()}>
+        {retry ? "Retry discard" : "Discard draft"}
+      </button>
+      <dialog
+        ref={dialog}
+        className="order-cancel-dialog"
+        aria-labelledby="discard-draft-title"
+        onCancel={(event) => {
+          if (busy) event.preventDefault();
+        }}
+      >
+        <DiscardDraftQuestion
+          stableCode={stableCode}
+          busy={busy}
+          onDiscard={() => {
+            dialog.current?.close();
+            onDiscard();
+          }}
+          onKeep={() => dialog.current?.close()}
+        />
+      </dialog>
+    </>
+  );
+}
+
+/** The confirmation itself (no state of its own). */
+export function DiscardDraftQuestion({
+  stableCode,
+  busy,
+  onDiscard,
+  onKeep,
+}: {
+  readonly stableCode: string;
+  readonly busy: boolean;
+  readonly onDiscard: () => void;
+  readonly onKeep: () => void;
+}) {
+  return (
+    <>
+      <h2 id="discard-draft-title">Discard draft {stableCode}?</h2>
+      <p>
+        Its prices are thrown away and it cannot be published or used at a Store. This cannot be
+        undone. Its code stays taken, so a new price book needs a different code.
+      </p>
+      <div className="card-actions">
+        <button type="button" data-variant="destructive" disabled={busy} onClick={onDiscard}>
+          Discard draft
+        </button>
+        <button type="button" disabled={busy} onClick={onKeep}>
+          Keep draft
+        </button>
+      </div>
+    </>
+  );
+}
 
 /** One command at a time; an unconfirmed attempt is retried with the same operation. */
 function useCommand(client: PriceClient, onDone: (result: unknown, command: PriceCommand) => void) {
@@ -162,16 +242,30 @@ export function StorePriceListPage({
   /** For the authenticator check (tests). */
   readonly fetcher?: typeof fetch;
 }) {
-  const navigate = useNavigate();
   const { state } = usePriceView(client, null, parsePriceBookListView);
+  if (state.kind !== "Found") return <Failure code={state.kind} />;
+  return <StorePriceList view={state.view} client={client} csrf={csrf} fetcher={fetcher} />;
+}
+
+/** The loaded price book list: this Store's book, a new draft, and every book of the Brand. */
+export function StorePriceList({
+  view,
+  client,
+  csrf,
+  fetcher,
+}: {
+  readonly view: PriceBookListView;
+  readonly client: PriceClient;
+  readonly csrf: string | undefined;
+  readonly fetcher: typeof fetch | undefined;
+}) {
+  const navigate = useNavigate();
   const [code, setCode] = useState("");
   const [copyFrom, setCopyFrom] = useState<string | null | undefined>(undefined);
   const { send, busy, pending, message } = useCommand(client, (result) => {
     const book = (result as { priceBookReference?: string }).priceBookReference;
     if (book) void navigate(`/app/commerce/pricing/${book}`);
   });
-  if (state.kind !== "Found") return <Failure code={state.kind} />;
-  const view: PriceBookListView = state.view;
   const current = view.storeAssignment;
   const source = copyFrom === undefined ? (current?.priceBookReference ?? null) : copyFrom;
   const stableCode = (code || suggestPriceBookCode(view.sourceAsOf.slice(0, 10)))
@@ -197,7 +291,7 @@ export function StorePriceListPage({
             <Link to={`/app/commerce/pricing/${current.priceBookReference}`}>
               {current.stableCode}
             </Link>{" "}
-            since {localTime(current.effectiveFrom)}
+            since <SourceTime instant={current.effectiveFrom} />
           </p>
         ) : (
           <p>No price book is in use: customers cannot be quoted until one is used here.</p>
@@ -245,7 +339,7 @@ export function StorePriceListPage({
             >
               <option value="">Empty</option>
               {view.books
-                .filter((book) => book.lifecycle !== "Archived")
+                .filter((book) => book.lifecycle === "Published")
                 .map((book) => (
                   <option key={book.priceBookReference} value={book.priceBookReference}>
                     {`Copy of ${book.stableCode}${book.priceBookReference === current?.priceBookReference ? " (in use here)" : ""}`}
@@ -265,6 +359,9 @@ export function StorePriceListPage({
             <th>Status</th>
             <th>Prices</th>
             <th>Updated</th>
+            <th>
+              <span className="visually-hidden">Next step</span>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -274,13 +371,28 @@ export function StorePriceListPage({
                 <Link to={`/app/commerce/pricing/${book.priceBookReference}`}>
                   {book.stableCode}
                 </Link>
-                {book.priceBookReference === current?.priceBookReference
-                  ? " (in use at this Store)"
-                  : ""}
               </td>
-              <td>{lifecycleText[book.lifecycle] ?? book.lifecycle}</td>
+              <td>
+                {priceBookStatus(
+                  book.lifecycle,
+                  book.priceBookReference === current?.priceBookReference,
+                )}
+              </td>
               <td>{book.entries}</td>
-              <td>{localTime(book.updatedAt)}</td>
+              <td>
+                <SourceTime instant={book.updatedAt} />
+              </td>
+              <td>
+                {book.lifecycle === "Draft" &&
+                (view.permissions.mayEdit || view.permissions.mayApprove) ? (
+                  <Link
+                    to={`/app/commerce/pricing/${book.priceBookReference}`}
+                    aria-label={`${view.permissions.mayEdit ? "Continue draft" : "Review draft"} ${book.stableCode}`}
+                  >
+                    {view.permissions.mayEdit ? "Continue draft" : "Review draft"}
+                  </Link>
+                ) : null}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -291,8 +403,15 @@ export function StorePriceListPage({
           <ul>
             {view.assignmentHistory.map((item) => (
               <li key={item.assignmentReference}>
-                {item.stableCode}: {localTime(item.effectiveFrom)}
-                {item.endedAt ? ` – ${localTime(item.endedAt)}` : " – now"}
+                {item.stableCode}: <SourceTime instant={item.effectiveFrom} />
+                {item.endedAt ? (
+                  <>
+                    {" – "}
+                    <SourceTime instant={item.endedAt} />
+                  </>
+                ) : (
+                  " – now"
+                )}
               </li>
             ))}
           </ul>
@@ -561,20 +680,20 @@ function PriceBookEditor({
             <p>You do not hold price approval.</p>
           )}
           {view.permissions.mayEdit ? (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() =>
+            <DiscardDraftAction
+              stableCode={book.stableCode}
+              busy={busy}
+              retry={pending?.action === "Discard"}
+              onDiscard={() => {
+                setMessage(null);
                 void send({
                   action: "Discard",
                   operationReference: newOperationReference(),
                   priceBookReference: book.priceBookReference,
                   expectedAggregateVersion: book.aggregateVersion,
-                })
-              }
-            >
-              Discard draft
-            </button>
+                });
+              }}
+            />
           ) : null}
         </section>
       ) : null}

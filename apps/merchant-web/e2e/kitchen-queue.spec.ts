@@ -949,7 +949,9 @@ test("@production Kitchen commands preserve intent and wait for projection versi
       await firstCommandBarrier;
       return route.abort("failed");
     }
-    if (commands.length === 2) return route.abort("failed");
+    // WP-2423 (v15 2026-10-16): the server was busy (a database conflict after its own reruns).
+    if (commands.length === 2)
+      return route.fulfill({ headers, status: 503, json: { error: "retry_later" } });
     if (conflict)
       return route.fulfill({ headers, status: 409, json: { error: "version_conflict" } });
     return route.fulfill({
@@ -1026,8 +1028,11 @@ test("@production Kitchen commands preserve intent and wait for projection versi
   const retry = page.getByRole("button", { name: "Retry same operation" });
   await tabTo(page, retry);
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("heading", { name: "Action result unknown" })).toBeVisible();
-  await expect(retry).toBeFocused();
+  // A busy server changed nothing: "try again", never a permission message.
+  await expect(page.getByRole("heading", { name: "Kitchen busy, try again" })).toBeVisible();
+  await expect(page.getByText("Your current permission", { exact: false })).toHaveCount(0);
+  const tryAgain = page.getByRole("button", { name: "Try again", exact: true });
+  await expect(tryAgain).toBeFocused();
   await page.keyboard.press("Enter");
   // WP-2423: the confirmed step shows at once, in plain words, before the queue catches up.
   await expect(

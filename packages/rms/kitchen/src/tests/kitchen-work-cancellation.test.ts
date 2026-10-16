@@ -198,8 +198,10 @@ describe("Kitchen staff batch cancellation (WP-2423 Q6)", () => {
       workItemCount: 2,
     });
     const lockOrder = test.calls.map((call) => call.sql.split(" ").slice(0, 4).join(" "));
-    expect(test.calls[0]?.sql).toMatch(/kitchen_ticket .*FOR UPDATE$/u);
-    expect(test.calls[1]?.sql).toMatch(/ORDER BY order_item_id,kitchen_work_item_id FOR UPDATE$/u);
+    expect(test.calls[0]?.sql).toMatch(/kitchen_ticket .*FOR NO KEY UPDATE$/u);
+    expect(test.calls[1]?.sql).toMatch(
+      /ORDER BY order_item_id,kitchen_work_item_id FOR NO KEY UPDATE$/u,
+    );
     expect(
       lockOrder.filter((sql) => sql.startsWith("UPDATE rms_kitchen.kitchen_ticket")),
     ).toHaveLength(2);

@@ -84,7 +84,8 @@ it.each([
   [409, "Conflict"],
   [422, "PreconditionFailed"],
   [400, "Invalid"],
-  [503, "OutcomeUnknown"],
+  [503, "Busy"],
+  [502, "OutcomeUnknown"],
 ] as const)("maps %s without changing intent", async (status, code) => {
   const f = setup();
   f.fetcher.mockResolvedValueOnce(response({}, status));

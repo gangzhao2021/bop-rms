@@ -162,6 +162,109 @@ test("@production the price book author publishes alone as sole operator after c
   await expect(page.getByRole("button", { name: "Publish on my own" })).toHaveCount(0);
 });
 
+test("@production the price list shows drafts in Store time and discarding a draft asks first", async ({
+  page,
+}) => {
+  await session(page, [
+    {
+      screenId: "PRICE-BOOK-LIST",
+      label: "Prices",
+      href: "/app/commerce/pricing",
+      permission: "pricing.price_book.read",
+    },
+  ]);
+  const base = {
+    sourceAsOf: "2026-10-14T18:05:00.000Z",
+    viewer: owner,
+    permissions: { mayRead: true, mayEdit: true, mayApprove: true },
+    currencyCode: "CAD",
+    storeAssignment: null,
+    assignmentHistory: [],
+    sellables: [],
+    menuSellables: [],
+  };
+  const draft = {
+    priceBookReference: id(10),
+    versionReference: id(11),
+    stableCode: "PRICES-Q19-TEST",
+    lifecycle: "Draft",
+    aggregateVersion: 1,
+  };
+  await page.route("**/merchant/commerce/pricing/query", (route) => {
+    const body = JSON.parse(route.request().postData() ?? "{}") as {
+      priceBookReference: string | null;
+    };
+    return route.fulfill({
+      headers,
+      json:
+        body.priceBookReference === null
+          ? {
+              screenId: "PRICE-BOOK-LIST",
+              ...base,
+              books: [
+                {
+                  ...draft,
+                  entries: 0,
+                  createdAt: "2026-10-15T16:30:00.000Z",
+                  updatedAt: "2026-10-15T16:30:00.000Z",
+                },
+              ],
+            }
+          : {
+              screenId: "PRICE-BOOK-EDITOR",
+              ...base,
+              book: {
+                ...draft,
+                createdAt: "2026-10-15T16:30:00.000Z",
+                prices: [],
+                otherEntries: 0,
+              },
+              draftAuthor: id(5),
+              soleOperator: null,
+              uncovered: [],
+            },
+    });
+  });
+  const commands: string[] = [];
+  await page.route("**/merchant/commerce/pricing/command", (route) => {
+    commands.push(route.request().postData() ?? "");
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Applied",
+        priceBookReference: id(10),
+        aggregateVersion: 2,
+        lifecycle: "Archived",
+      },
+    });
+  });
+  await page.goto("/app/commerce/pricing");
+  const row = page.getByRole("row", { name: /PRICES-Q19-TEST/u });
+  await expect(row).toContainText("Draft, not published yet");
+  // Store time (America/Toronto), never UTC.
+  await expect(row).toContainText("Oct 15, 2026, 12:30 PM");
+  await expect(page.getByText(/UTC/u)).toHaveCount(0);
+  await row.getByRole("link", { name: "Continue draft PRICES-Q19-TEST" }).click();
+  await expect(page).toHaveURL(new RegExp("/app/commerce/pricing/" + id(10)));
+
+  // Discarding asks first; keeping the draft sends nothing.
+  await page.getByRole("button", { name: "Discard draft" }).click();
+  const question = page.getByRole("dialog", { name: "Discard draft PRICES-Q19-TEST?" });
+  await expect(question).toBeVisible();
+  await question.getByRole("button", { name: "Keep draft" }).click();
+  await expect(question).toBeHidden();
+  expect(commands).toHaveLength(0);
+  await page.getByRole("button", { name: "Discard draft" }).click();
+  await question.getByRole("button", { name: "Discard draft" }).click();
+  await expect(page.getByText("Draft discarded.")).toBeVisible();
+  expect(commands).toHaveLength(1);
+  expect(JSON.parse(commands[0] ?? "{}")).toMatchObject({
+    action: "Discard",
+    priceBookReference: id(10),
+    expectedAggregateVersion: 1,
+  });
+});
+
 test("@production the allergen list is recorded by one person and approved by another", async ({
   page,
 }) => {

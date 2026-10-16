@@ -22,6 +22,7 @@ import { CounterMenuError } from "./merchant-counter-menu.js";
 import { CardMachinePaymentCommandError } from "./merchant-card-machine-payment.js";
 import { CardMachineRefundCommandError } from "./merchant-card-machine-refund.js";
 import { OrderCloseCommandError } from "./merchant-dining-order-close-command.js";
+import { DiningServeReadyError } from "./merchant-dining-serve-ready-command.js";
 import { BrowserSessionError } from "@bop/identity";
 import { parsePaymentReference, ReconciliationFollowUpError } from "@rms/payment";
 import { parsePaymentInstant } from "@rms/payment";
@@ -1627,6 +1628,23 @@ it("protects Kitchen commands and preserves typed recovery outcomes", async () =
     expect(result.headers.get("cache-control")).toBe("no-store");
     expect(await result.json()).toEqual({ error: code });
   }
+  // WP-2423 (v15 2026-10-16): a step that kept meeting a database conflict (a deadlock with the
+  // queue rebuild), a busy pool or a statement timeout is "busy, try again" (503), never 403; a
+  // refused row or anything unknown stays a refusal.
+  const database = (code: string, sqlState: string | null = null) =>
+    Object.assign(new Error("database"), { code, diagnostic: { sqlState } });
+  for (const [error, status, body] of [
+    [database("TENANT_DATABASE_TRANSACTION_CONFLICT", "40P01"), 503, { error: "retry_later" }],
+    [database("TENANT_DATABASE_ACQUIRE_FAILED"), 503, { error: "retry_later" }],
+    [database("TENANT_DATABASE_TRANSACTION_FAILED", "57014"), 503, { error: "retry_later" }],
+    [database("TENANT_DATABASE_TRANSACTION_FAILED", "42501"), 403, { error: "request_denied" }],
+    [new Error("synthetic-private-source"), 403, { error: "request_denied" }],
+  ] as const) {
+    execute.mockRejectedValueOnce(error);
+    const result = await submit();
+    expect([result.status, await result.json()]).toEqual([status, body]);
+    if (status === 503) expect(result.headers.get("retry-after")).toBe("1");
+  }
   const result = parseKitchenWorkLifecycleResult({
     operationReference: "018f7f9a-ad3e-7a11-8d01-000000000011",
     action: "AcceptKitchenWorkItem" as const,
@@ -2129,6 +2147,84 @@ it("protects the minimal Dining serve command and keeps private facts out of res
   const absent = await serve(fakeService());
   expect(
     (await request(absent, "/merchant/dining/serve", { method: "POST", headers, body: "{}" }))
+      .status,
+  ).toBe(503);
+});
+
+it("WP-2423: protects Serve all ready items and maps whole-request outcomes", async () => {
+  const lineReference = "0190a7c6-1111-7000-8000-00000000000a";
+  const summary = {
+    operationReference: "0190a7c6-1111-7000-8000-000000000001",
+    served: 1,
+    alreadyServed: 0,
+    changed: 0,
+    failed: 0,
+    lines: [{ orderItemReference: lineReference, outcome: "Served" as const }],
+  };
+  const command = vi
+    .fn<NonNullable<MerchantBffRouterOptions["diningServeReady"]>>()
+    .mockResolvedValue(summary);
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      diningServeReady: command,
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  const root = `http://127.0.0.1:${address.port}`;
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const submit = (extra: Record<string, string> = {}, path = "/merchant/dining/serve-ready") =>
+    request(root, path, {
+      method: "POST",
+      body: JSON.stringify({ syntheticIntent: true }),
+      headers: { ...headers, ...extra },
+    });
+  expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
+  expect((await submit({ Cookie: "" })).status).toBe(403);
+  expect((await submit({}, "/merchant/dining/serve-ready?store=other")).status).toBe(403);
+  expect(command).not.toHaveBeenCalled();
+  const response = await submit();
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual(summary);
+  expect(command).toHaveBeenCalledWith({ sessionCookie, csrf, command: { syntheticIntent: true } });
+  const answer = async (error: unknown) => {
+    command.mockRejectedValueOnce(error);
+    const failure = await submit();
+    return [failure.status, await failure.json()];
+  };
+  expect(await answer(new DiningServeReadyError("PermissionDenied"))).toEqual([
+    403,
+    { error: "request_denied" },
+  ]);
+  expect(await answer(new DiningServeReadyError("Invalid"))).toEqual([
+    400,
+    { error: "dining_serve_ready_invalid" },
+  ]);
+  expect(await answer(new DiningServeReadyError("NotFound"))).toEqual([
+    404,
+    { error: "dining_serve_ready_not_found" },
+  ]);
+  expect(await answer(new Error("private details"))).toEqual([
+    503,
+    { error: "dining_serve_ready_unavailable" },
+  ]);
+  const absent = await serve(fakeService());
+  expect(
+    (await request(absent, "/merchant/dining/serve-ready", { method: "POST", headers, body: "{}" }))
       .status,
   ).toBe(503);
 });

@@ -191,7 +191,7 @@ export function createPostgresKitchenStaleTicketStore(options: {
       const tickets = await tx.query(
         "SELECT kitchen_ticket_id::text AS ticket,order_id::text AS order_id,order_batch_id::text AS batch," +
           "status,aggregate_version::text AS version,updated_at FROM rms_kitchen.kitchen_ticket " +
-          "WHERE brand_id=$1 AND store_id=$2 AND kitchen_ticket_id=$3 FOR UPDATE",
+          "WHERE brand_id=$1 AND store_id=$2 AND kitchen_ticket_id=$3 FOR NO KEY UPDATE",
         [brand, store, command.ticketReference],
       );
       if (tickets.rows.length !== 1) return fail("KITCHEN_STALE_TICKET_NOT_FOUND");
@@ -212,7 +212,7 @@ export function createPostgresKitchenStaleTicketStore(options: {
           "WHERE r.brand_id=w.brand_id AND r.store_id=w.store_id AND r.kitchen_ticket_id=w.kitchen_ticket_id " +
           "AND r.order_item_id=w.order_item_id) AS ready FROM rms_kitchen.kitchen_work_item w " +
           "WHERE w.brand_id=$1 AND w.store_id=$2 AND w.kitchen_ticket_id=$3 " +
-          "ORDER BY w.order_item_id,w.kitchen_work_item_id FOR UPDATE OF w",
+          "ORDER BY w.order_item_id,w.kitchen_work_item_id FOR NO KEY UPDATE OF w",
         [brand, store, command.ticketReference],
       );
       if (items.rows.length < 1 || items.rows.length > 100) return unavailable();

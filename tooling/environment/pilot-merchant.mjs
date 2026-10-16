@@ -37,6 +37,7 @@ import { createDiningOrderCloseConfiguration } from "../../apps/api/dist/dining-
 import { createPersistentMerchantTaskInbox } from "../../apps/api/dist/persistent-merchant-task-inbox.js";
 import { createMerchantDiningTaskSource } from "../../apps/api/dist/merchant-dining-task-source.js";
 import { createMerchantDiningServeCommand } from "../../apps/api/dist/merchant-dining-serve-command.js";
+import { createMerchantDiningServeReadyCommand } from "../../apps/api/dist/merchant-dining-serve-ready-command.js";
 import { createMerchantDiningOrderProgress } from "../../apps/api/dist/merchant-dining-order-progress.js";
 import { createHash } from "node:crypto";
 import { createMerchantKitchenQuery } from "../../apps/api/dist/merchant-kitchen-query.js";
@@ -1079,6 +1080,11 @@ export async function createInternalMerchant(
       retentionPolicyVersion: 1,
     },
   });
+  // WP-2423: "Serve all ready items" runs the serve command above once per line.
+  const diningServeReady = createMerchantDiningServeReadyCommand({
+    serve: diningServe,
+    progress: diningOrderProgress,
+  });
   const diningItemService = createInternalMerchantDining(resources, persistence, service);
   const kitchenCommand = createInternalKitchenCommand(resources, persistence, service);
   const kitchenQuery = storePresence.wrap(
@@ -1454,6 +1460,7 @@ export async function createInternalMerchant(
       orderClosure,
       taskInbox,
       diningServe,
+      diningServeReady,
       diningOrderProgress,
       diningTableClosePlan,
       diningItemService,

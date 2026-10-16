@@ -14,10 +14,11 @@ interface Attempt {
   operation: Operation;
   revision: number;
 }
-type State =
+export type KitchenActionState =
   | { kind: "Idle" }
   | { kind: "Submitting"; attempt: Attempt }
-  | { kind: "Unknown"; attempt: Attempt }
+  /** The outcome is not known (lost answer), or the server was busy and changed nothing. */
+  | { kind: "Unknown"; attempt: Attempt; busy: boolean }
   | { kind: "Confirmed"; attempt: Attempt; result: Result }
   | { kind: "Rejected"; attempt: Attempt; code: KitchenWorkClientError["code"] };
 
@@ -116,7 +117,7 @@ export function useKitchenActions(input: {
   view: KitchenBoardView | null;
   revision: number;
 }) {
-  const [state, setState] = useState<State>({ kind: "Idle" });
+  const [state, setState] = useState<KitchenActionState>({ kind: "Idle" });
   const [confirmed, setConfirmed] = useState<readonly KitchenConfirmedStep[]>([]);
   // A confirmed step is dropped once the projection shows it (or no longer lists the work).
   useEffect(() => {
@@ -185,9 +186,11 @@ export function useKitchenActions(input: {
     } catch (error) {
       if (!controller.signal.aborted) {
         const code = error instanceof KitchenWorkClientError ? error.code : "OutcomeUnknown";
+        // WP-2423 (v15 2026-10-16): a busy server (503) committed nothing; the same operation is
+        // offered again, like a lost answer, never reported as a permission refusal.
         setState(
-          code === "OutcomeUnknown"
-            ? { kind: "Unknown", attempt }
+          code === "OutcomeUnknown" || code === "Busy"
+            ? { kind: "Unknown", attempt, busy: code === "Busy" }
             : { kind: "Rejected", attempt, code },
         );
       }
@@ -217,5 +220,45 @@ export function useKitchenActions(input: {
       if (state.kind === "Unknown" && authority) void execute(state.attempt);
     },
     canRetry: authority && state.kind === "Unknown",
+  };
+}
+
+/**
+ * What the board says about the last kitchen step that is not (yet) confirmed: the panel heading,
+ * its sentence and the retry button's label. A busy server (WP-2423 v15 2026-10-16) is "try
+ * again", never a permission problem; only a refusal says permission.
+ */
+export function kitchenActionNotice(
+  state: Exclude<KitchenActionState, { kind: "Idle" } | { kind: "Confirmed" }>,
+  rejectedRefreshed: boolean,
+): { heading: string; text: string; retry: string | null } {
+  if (state.kind === "Submitting")
+    return {
+      heading: "Submitting Kitchen action",
+      text: "Please wait before taking another action.",
+      retry: null,
+    };
+  if (state.kind === "Unknown")
+    return state.busy
+      ? {
+          heading: "Kitchen busy, try again",
+          text: "The kitchen system was busy for a moment and nothing was changed. Try again.",
+          retry: "Try again",
+        }
+      : {
+          heading: "Action result unknown",
+          text: "The response was lost. Retry this same operation to recover its result; do not create another operation.",
+          retry: "Retry same operation",
+        };
+  return {
+    heading: "Kitchen action not completed",
+    text: rejectedRefreshed
+      ? "The queue has been refreshed. Review the current item before choosing an action."
+      : state.code === "PermissionDenied"
+        ? "Your current permission or Store scope no longer allows this action. Refresh before continuing."
+        : state.code === "Conflict"
+          ? "The work item changed. Refresh and review its current state before choosing an action."
+          : "The action was not accepted. Refresh and review the current work item.",
+    retry: null,
   };
 }

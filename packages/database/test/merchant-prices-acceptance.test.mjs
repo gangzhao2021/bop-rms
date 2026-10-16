@@ -412,6 +412,16 @@ it("drafts, independently publishes and assigns price books that cover the Store
           copyFrom: null,
         })
       ).priceBookReference;
+      // An unpublished draft is listed with its state so it can be continued.
+      const withDraft = await prices.query({ ...session, priceBookReference: null });
+      assert.deepEqual(
+        withDraft.books.map((book) => book.stableCode + ":" + book.lifecycle).sort(),
+        ["PRICES-A:Published", "PRICES-B:Published", "PRICES-C:Published", "PRICES-D:Draft"],
+      );
+      assert.equal(
+        withDraft.books.find((book) => book.stableCode === "PRICES-D").priceBookReference,
+        bookD,
+      );
       const discarded = await command({
         action: "Discard",
         operationReference: op(),
@@ -419,6 +429,12 @@ it("drafts, independently publishes and assigns price books that cover the Store
         expectedAggregateVersion: 1,
       });
       assert.equal(discarded.lifecycle, "Archived");
+      // A discarded draft stays listed (its code stays taken), after the books in use.
+      const afterDiscard = await prices.query({ ...session, priceBookReference: null });
+      assert.equal(
+        afterDiscard.books.at(-1).stableCode + ":" + afterDiscard.books.at(-1).lifecycle,
+        "PRICES-D:Archived",
+      );
       await assert.rejects(
         admin.query("UPDATE rms_pricing.store_price_book_assignment SET effective_from=now()"),
         /append-only/u,

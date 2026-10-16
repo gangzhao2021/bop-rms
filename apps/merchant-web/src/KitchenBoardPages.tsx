@@ -1,4 +1,4 @@
-import { kitchenStepText, useKitchenActions } from "./use-kitchen-actions.js";
+import { kitchenActionNotice, kitchenStepText, useKitchenActions } from "./use-kitchen-actions.js";
 import { useKitchenClock } from "./kitchen-clock.js";
 import {
   KitchenRecentlyFinished,
@@ -1845,35 +1845,19 @@ function KitchenBoardContent(
       {actions.state.kind !== "Idle" ? (
         <StatePanel
           heading={
-            actions.state.kind === "Submitting"
-              ? "Submitting Kitchen action"
-              : actions.state.kind === "Unknown"
-                ? "Action result unknown"
-                : actions.state.kind === "Confirmed"
-                  ? // WP-2423: what the cook just did, said plainly; the card already shows it.
-                    kitchenStepText(
-                      kitchenOrderLabel(actions.state.attempt.item),
-                      actions.state.attempt.item,
-                      actions.state.result,
-                    )
-                  : "Kitchen action not completed"
+            actions.state.kind === "Confirmed"
+              ? // WP-2423: what the cook just did, said plainly; the card already shows it.
+                kitchenStepText(
+                  kitchenOrderLabel(actions.state.attempt.item),
+                  actions.state.attempt.item,
+                  actions.state.result,
+                )
+              : kitchenActionNotice(actions.state, actions.rejectedRefreshed).heading
           }
           status
         >
           {actions.state.kind === "Confirmed" ? null : (
-            <p>
-              {actions.state.kind === "Submitting"
-                ? "Please wait before taking another action."
-                : actions.state.kind === "Unknown"
-                  ? "The response was lost. Retry this same operation to recover its result; do not create another operation."
-                  : actions.rejectedRefreshed
-                    ? "The queue has been refreshed. Review the current item before choosing an action."
-                    : actions.state.code === "PermissionDenied"
-                      ? "Your current permission or Store scope no longer allows this action. Refresh before continuing."
-                      : actions.state.code === "Conflict"
-                        ? "The work item changed. Refresh and review its current state before choosing an action."
-                        : "The action was not accepted. Refresh and review the current work item."}
-            </p>
+            <p>{kitchenActionNotice(actions.state, actions.rejectedRefreshed).text}</p>
           )}
           {actions.state.kind === "Unknown" ? (
             <button
@@ -1881,7 +1865,7 @@ function KitchenBoardContent(
               disabled={!actions.canRetry || stale !== undefined}
               onClick={retry}
             >
-              Retry same operation
+              {kitchenActionNotice(actions.state, actions.rejectedRefreshed).retry}
             </button>
           ) : null}
         </StatePanel>

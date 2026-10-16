@@ -184,6 +184,10 @@ import {
 import { DiningClosingError } from "@rms/dining";
 import type { createMerchantTaskInboxRead } from "./merchant-task-inbox-read.js";
 import type { createMerchantDiningServeCommand } from "./merchant-dining-serve-command.js";
+import {
+  DiningServeReadyError,
+  type createMerchantDiningServeReadyCommand,
+} from "./merchant-dining-serve-ready-command.js";
 import type { createMerchantDiningTableCommand } from "./merchant-dining-table-command.js";
 import type { createMerchantDiningTableQr } from "./merchant-dining-table-qr.js";
 import type { createMerchantDiningOrderProgress } from "./merchant-dining-order-progress.js";
@@ -754,6 +758,8 @@ export interface MerchantBffRouterOptions {
   readonly orderClosure?: ReturnType<typeof createMerchantDiningOrderCloseCommand>;
   readonly orderAcceptance?: ReturnType<typeof createMerchantOrderAcceptanceCommand>;
   readonly diningServe?: ReturnType<typeof createMerchantDiningServeCommand>;
+  /** WP-2423: "Serve all ready items" for a round or a table (one serve command per line). */
+  readonly diningServeReady?: ReturnType<typeof createMerchantDiningServeReadyCommand>;
   readonly diningTables?: ReturnType<typeof createMerchantDiningTables>;
   readonly diningTableCommand?: ReturnType<typeof createMerchantDiningTableCommand>;
   /** WP-2423 Q11: table QR codes (DIN-TABLE-LIST). */
@@ -1165,6 +1171,120 @@ function transactionConflictRetryLater(response: express.Response, error: unknow
     error === null ||
     typeof error !== "object" ||
     Object.getOwnPropertyDescriptor(error, "code")?.value !== "TENANT_DATABASE_TRANSACTION_CONFLICT"
+  )
+    return false;
+  response
+    .status(503)
+    .set("Cache-Control", NO_STORE)
+    .set("Retry-After", "1")
+    .json({ error: "retry_later" });
+  return true;
+}
+
+type MerchantOrderQueueItem = Awaited<
+  ReturnType<NonNullable<MerchantBffRouterOptions["orderQueue"]>>
+>["items"][number];
+
+/**
+ * WP-2423: one Order as the Orders list, Home and the order detail answer it. The browser's
+ * Orders/Home/detail parsers read this row; `tooling/e2e/merchant-bff-response-contract` runs this
+ * mapping over the read model's full output and fails when a field the browser parses is dropped
+ * (v15 2026-10-16: `awaitingAcceptanceSince` was, so no paid round ever showed its wait).
+ */
+function orderQueueRow(item: MerchantOrderQueueItem) {
+  return {
+    orderReference: item.orderReference,
+    orderNumber: item.orderNumber,
+    orderType: item.orderType,
+    sourceChannel: item.sourceChannel,
+    // WP-2423 Q21: the Store business day the Order belongs to (order numbers restart daily).
+    businessDate: item.businessDate,
+    // WP-2423 D4: the day it is listed under (today when an older table ordered today).
+    listedBusinessDate: item.listedBusinessDate,
+    // WP-2423 (2026-10-16): stock still set aside for an Order of an earlier day.
+    heldStock: item.heldStock,
+    submittedAt: item.submittedAt,
+    initialBatchReference: item.initialBatchReference,
+    canRequestAcceptance: item.canRequestAcceptance,
+    unfulfillable: item.unfulfillable,
+    pickupNotCollected: item.pickupNotCollected,
+    acceptBy: item.acceptBy,
+    // WP-2423 Q9-G1: paid while the Store was offline; held for a manager's decision.
+    acceptanceHold: item.acceptanceHold,
+    awaitingPayment: item.awaitingPayment,
+    // WP-2423 Q7: a staff-taken counter order and its card-machine payment.
+    counter: item.counter,
+    // WP-2423: what the Order was paid online (null for counter or unpaid orders).
+    paidOnline: item.paidOnline,
+    // WP-2423: refunds of that online payment (the detail's position) when it has any.
+    paymentPosition: item.paymentPosition,
+    batches: item.batches.map((batch) => ({
+      orderBatchReference: batch.orderBatchReference,
+      sequence: batch.sequence,
+      acceptanceStatus: batch.acceptanceStatus,
+      canRequestAcceptance: batch.canRequestAcceptance,
+      canCancel: batch.canCancel,
+      canCancelItems: batch.canCancelItems,
+      // WP-2423 abandoned payment: a manager may cancel this unpaid round.
+      canCancelUnpaid: batch.canCancelUnpaid,
+      paymentDue:
+        batch.paymentDue === null
+          ? null
+          : { status: batch.paymentDue.status, cancelsAt: batch.paymentDue.cancelsAt },
+      staffCancellation:
+        batch.staffCancellation === null
+          ? null
+          : {
+              reasonCode: batch.staffCancellation.reasonCode,
+              cancelledAt: batch.staffCancellation.cancelledAt,
+              refundStatus: batch.staffCancellation.refundStatus,
+              refundMethod: batch.staffCancellation.refundMethod,
+              refundAmountMinor: batch.staffCancellation.refundAmountMinor,
+            },
+      // WP-2423 Q7 slice 2: a round staff entered for the table and its card-machine payment.
+      staffRound: batch.staffRound,
+      // WP-2423 (v15 2026-10-16): when this paid dine-in round, still waiting for staff, was
+      // paid; Orders, Home and Tables warn at 5 and 10 minutes (it is never refunded on its own).
+      awaitingAcceptanceSince: batch.awaitingAcceptanceSince,
+    })),
+    currentPhase: item.currentPhase,
+    currentVersion: item.currentVersion,
+    // WP-2423: dine-in items ready at the pass and not yet served (the Home's count).
+    ...(item.readyToServeItemCount === undefined
+      ? {}
+      : { readyToServeItemCount: item.readyToServeItemCount }),
+    observedAt: item.observedAt,
+  };
+}
+
+/**
+ * WP-2423 (v15 2026-10-16): a kitchen step that kept meeting a database conflict (a lock wait or
+ * deadlock with the queue rebuild or another step, after its own reruns), a busy connection pool or
+ * a statement timeout is "busy, try again" (503 with Retry-After), never a permission refusal. Returns false otherwise.
+ */
+function kitchenDatabaseRetryLater(response: express.Response, error: unknown): boolean {
+  const code =
+    error !== null && typeof error === "object"
+      ? Object.getOwnPropertyDescriptor(error, "code")?.value
+      : undefined;
+  const sqlState =
+    error !== null && typeof error === "object"
+      ? (
+          Object.getOwnPropertyDescriptor(error, "diagnostic")?.value as {
+            sqlState?: unknown;
+          } | null
+        )?.sqlState
+      : undefined;
+  // A statement cancelled by its timeout or a lost connection under load is transient too; a
+  // failure such as a refused row (missing grant) stays a refusal.
+  if (
+    code !== "TENANT_DATABASE_TRANSACTION_CONFLICT" &&
+    code !== "TENANT_DATABASE_ACQUIRE_FAILED" &&
+    !(
+      code === "TENANT_DATABASE_TRANSACTION_FAILED" &&
+      typeof sqlState === "string" &&
+      (sqlState === "57014" || sqlState.startsWith("08"))
+    )
   )
     return false;
   response
@@ -1821,60 +1941,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         }
         response.json({
           screenId: "OPS-ORDER-DETAIL",
-          order: {
-            orderReference: item.orderReference,
-            orderNumber: item.orderNumber,
-            orderType: item.orderType,
-            sourceChannel: item.sourceChannel,
-            // WP-2423 Q21: the Store business day the Order belongs to (order numbers restart daily).
-            businessDate: item.businessDate,
-            // WP-2423 D4: the day it is listed under (today when an older table ordered today).
-            listedBusinessDate: item.listedBusinessDate,
-            // WP-2423 (2026-10-16): stock still set aside for an Order of an earlier day.
-            heldStock: item.heldStock,
-            submittedAt: item.submittedAt,
-            initialBatchReference: item.initialBatchReference,
-            canRequestAcceptance: item.canRequestAcceptance,
-            unfulfillable: item.unfulfillable,
-            pickupNotCollected: item.pickupNotCollected,
-            acceptBy: item.acceptBy,
-            // WP-2423 Q9-G1: paid while the Store was offline; held for a manager's decision.
-            acceptanceHold: item.acceptanceHold,
-            awaitingPayment: item.awaitingPayment,
-            // WP-2423 Q7: a staff-taken counter order and its card-machine payment.
-            counter: item.counter,
-            // WP-2423: what the Order was paid online (null for counter or unpaid orders).
-            paidOnline: item.paidOnline,
-            batches: item.batches.map((batch) => ({
-              orderBatchReference: batch.orderBatchReference,
-              sequence: batch.sequence,
-              acceptanceStatus: batch.acceptanceStatus,
-              canRequestAcceptance: batch.canRequestAcceptance,
-              canCancel: batch.canCancel,
-              canCancelItems: batch.canCancelItems,
-              // WP-2423 abandoned payment: a manager may cancel this unpaid round.
-              canCancelUnpaid: batch.canCancelUnpaid,
-              paymentDue:
-                batch.paymentDue === null
-                  ? null
-                  : { status: batch.paymentDue.status, cancelsAt: batch.paymentDue.cancelsAt },
-              staffCancellation:
-                batch.staffCancellation === null
-                  ? null
-                  : {
-                      reasonCode: batch.staffCancellation.reasonCode,
-                      cancelledAt: batch.staffCancellation.cancelledAt,
-                      refundStatus: batch.staffCancellation.refundStatus,
-                      refundMethod: batch.staffCancellation.refundMethod,
-                      refundAmountMinor: batch.staffCancellation.refundAmountMinor,
-                    },
-              // WP-2423 Q7 slice 2: a round staff entered for the table and its card-machine payment.
-              staffRound: batch.staffRound,
-            })),
-            currentPhase: item.currentPhase,
-            currentVersion: item.currentVersion,
-            observedAt: item.observedAt,
-          },
+          // The same Order row as the list (one mapping, so the two answers cannot drift apart).
+          order: orderQueueRow(item),
           lines: view.lines,
           // WP-2423: refunds of the online payment, when Payment's position could be read.
           paymentPosition: view.paymentPosition,
@@ -1926,66 +1994,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       orderQueue({ sessionCookie, afterOrderReference: after ?? null }),
     )
       .then((view) => {
-        const row = (item: (typeof view.items)[number]) => ({
-          orderReference: item.orderReference,
-          orderNumber: item.orderNumber,
-          orderType: item.orderType,
-          sourceChannel: item.sourceChannel,
-          // WP-2423 Q21: the Store business day the Order belongs to (order numbers restart daily).
-          businessDate: item.businessDate,
-          // WP-2423 D4: the day it is listed under (today when an older table ordered today).
-          listedBusinessDate: item.listedBusinessDate,
-          // WP-2423 (2026-10-16): stock still set aside for an Order of an earlier day.
-          heldStock: item.heldStock,
-          submittedAt: item.submittedAt,
-          initialBatchReference: item.initialBatchReference,
-          canRequestAcceptance: item.canRequestAcceptance,
-          unfulfillable: item.unfulfillable,
-          pickupNotCollected: item.pickupNotCollected,
-          acceptBy: item.acceptBy,
-          // WP-2423 Q9-G1: paid while the Store was offline; held for a manager's decision.
-          acceptanceHold: item.acceptanceHold,
-          awaitingPayment: item.awaitingPayment,
-          // WP-2423 Q7: a staff-taken counter order and its card-machine payment.
-          counter: item.counter,
-          // WP-2423: what the Order was paid online (null for counter or unpaid orders).
-          paidOnline: item.paidOnline,
-          // WP-2423: refunds of that online payment (the detail's position) when it has any.
-          paymentPosition: item.paymentPosition,
-          batches: item.batches.map((batch) => ({
-            orderBatchReference: batch.orderBatchReference,
-            sequence: batch.sequence,
-            acceptanceStatus: batch.acceptanceStatus,
-            canRequestAcceptance: batch.canRequestAcceptance,
-            canCancel: batch.canCancel,
-            canCancelItems: batch.canCancelItems,
-            // WP-2423 abandoned payment: a manager may cancel this unpaid round.
-            canCancelUnpaid: batch.canCancelUnpaid,
-            paymentDue:
-              batch.paymentDue === null
-                ? null
-                : { status: batch.paymentDue.status, cancelsAt: batch.paymentDue.cancelsAt },
-            staffCancellation:
-              batch.staffCancellation === null
-                ? null
-                : {
-                    reasonCode: batch.staffCancellation.reasonCode,
-                    cancelledAt: batch.staffCancellation.cancelledAt,
-                    refundStatus: batch.staffCancellation.refundStatus,
-                    refundMethod: batch.staffCancellation.refundMethod,
-                    refundAmountMinor: batch.staffCancellation.refundAmountMinor,
-                  },
-            // WP-2423 Q7 slice 2: a round staff entered for the table and its card-machine payment.
-            staffRound: batch.staffRound,
-          })),
-          currentPhase: item.currentPhase,
-          currentVersion: item.currentVersion,
-          // WP-2423: dine-in items ready at the pass and not yet served (the Home's count).
-          ...(item.readyToServeItemCount === undefined
-            ? {}
-            : { readyToServeItemCount: item.readyToServeItemCount }),
-          observedAt: item.observedAt,
-        });
+        const row = orderQueueRow;
         // WP-2423 (2026-10-16 v15): earlier-day Orders listed with today's (first page only) are
         // returned apart from the page, which holds exactly the page size whenever a next page follows.
         response.json({
@@ -6336,7 +6345,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       .then((result) => response.json(result))
       .catch((error: unknown) => {
         if (!(error instanceof KitchenWorkLifecycleError)) {
-          denied(response);
+          if (!kitchenDatabaseRetryLater(response, error)) denied(response);
           return;
         }
         const status = {
@@ -6354,7 +6363,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
   // WP-2423 Q26 (Handoff Section 26.6): Kitchen remakes. Errors carry a code only.
   const kitchenReworkFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof KitchenReworkError)) {
-      denied(response);
+      if (!kitchenDatabaseRetryLater(response, error)) denied(response);
       return;
     }
     const status = {
@@ -6436,7 +6445,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       .then((result) => response.json(result))
       .catch((error: unknown) => {
         if (!(error instanceof KitchenStaleTicketError)) {
-          denied(response);
+          if (!kitchenDatabaseRetryLater(response, error)) denied(response);
           return;
         }
         const status = {
@@ -8470,6 +8479,50 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         }),
       )
       .catch(() => denied(response));
+  });
+
+  // WP-2423: "Serve all ready items" for a round or a table. 200 reports every line (served,
+  // already served elsewhere, changed, failed); 503 means the outcome is unknown and the same
+  // request (same operation reference) may be retried safely.
+  router.post("/dining/serve-ready", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.diningServeReady) {
+      response.status(503).json({ error: "dining_serve_ready_unavailable" });
+      return;
+    }
+    void options
+      .diningServeReady({ sessionCookie, csrf, command: request.body })
+      .then((result) =>
+        response.json({
+          operationReference: result.operationReference,
+          served: result.served,
+          alreadyServed: result.alreadyServed,
+          changed: result.changed,
+          failed: result.failed,
+          lines: result.lines.map((line) => ({
+            orderItemReference: line.orderItemReference,
+            outcome: line.outcome,
+          })),
+        }),
+      )
+      .catch((error: unknown) => {
+        if (error instanceof DiningServeReadyError && error.code === "Invalid")
+          response.status(400).json({ error: "dining_serve_ready_invalid" });
+        else if (error instanceof DiningServeReadyError && error.code === "NotFound")
+          response.status(404).json({ error: "dining_serve_ready_not_found" });
+        else if (error instanceof DiningServeReadyError) denied(response);
+        else response.status(503).json({ error: "dining_serve_ready_unavailable" });
+      });
   });
 
   router.post("/dining/item-service", sameOriginMutation(options), (request, response) => {

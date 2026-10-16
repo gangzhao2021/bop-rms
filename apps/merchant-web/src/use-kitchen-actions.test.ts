@@ -3,6 +3,7 @@ import { parseKitchenBoardView, parseKitchenWorkItemView } from "./kitchen-board
 import { kitchenBoardFixture, kitchenItemFixture } from "./kitchen-board.fixtures.js";
 import {
   applyConfirmedKitchenSteps,
+  kitchenActionNotice,
   kitchenStepText,
   type KitchenConfirmedStep,
 } from "./use-kitchen-actions.js";
@@ -117,5 +118,31 @@ describe("WP-2423 a confirmed kitchen step shows at once", () => {
         completedQuantity: 2,
       }),
     ).toBe("Pickup · Order 6 · Latte ready.");
+  });
+});
+
+describe("WP-2423 (v15 2026-10-16) what the board says about a step that did not complete", () => {
+  const attempt = { item: kitchenItemFixture(), operation: {}, revision: 1 } as never;
+  it("a busy server is 'try again', never a permission problem", () => {
+    const busy = kitchenActionNotice({ kind: "Unknown", attempt, busy: true }, false);
+    expect(busy).toEqual({
+      heading: "Kitchen busy, try again",
+      text: "The kitchen system was busy for a moment and nothing was changed. Try again.",
+      retry: "Try again",
+    });
+    expect(JSON.stringify(busy)).not.toMatch(/permission/iu);
+  });
+  it("a lost answer offers the same operation again", () => {
+    expect(kitchenActionNotice({ kind: "Unknown", attempt, busy: false }, false).retry).toBe(
+      "Retry same operation",
+    );
+  });
+  it("only a refusal speaks of permission", () => {
+    expect(
+      kitchenActionNotice({ kind: "Rejected", attempt, code: "PermissionDenied" }, false).text,
+    ).toMatch(/permission/u);
+    expect(kitchenActionNotice({ kind: "Rejected", attempt, code: "Conflict" }, false).text).toBe(
+      "The work item changed. Refresh and review its current state before choosing an action.",
+    );
   });
 });

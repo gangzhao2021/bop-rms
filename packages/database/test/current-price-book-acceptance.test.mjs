@@ -1,6 +1,9 @@
 import { createPriceBookDraftAuthorSource } from "../../../apps/api/src/price-book-draft-author-source.ts";
 import { appendEventInTransaction } from "../../bop/eventing/src/index.ts";
-import { createPostgresPriceBookRepository } from "../../rms/pricing/src/index.ts";
+import {
+  createPostgresPriceBookRepository,
+  listBrandPriceBooks,
+} from "../../rms/pricing/src/index.ts";
 import assert from "node:assert/strict";
 import pg from "pg";
 import { it } from "vitest";
@@ -441,6 +444,19 @@ it("persists authored price versions with exact replay and atomic Audit/Outbox",
       assert.deepEqual(await repository.create({ record: reversed, audit: audit(first) }), first);
       assert.deepEqual(await repository.load(base.priceBookReference), first.aggregate);
       assert.deepEqual(await repository.loadCurrentOperation(base.priceBookReference), first);
+      // The Brand list shows each book by its newest version, so an unpublished draft is listed.
+      const listed = () =>
+        runner.run(async (tx) =>
+          (await listBrandPriceBooks(tx, { brandReference: base.brandReference })).map((book) => [
+            book.priceBookReference,
+            book.lifecycle,
+            book.aggregateVersion,
+            book.versionReference,
+          ]),
+        );
+      assert.deepEqual(await listed(), [
+        [base.priceBookReference, "Draft", 1, first.aggregate.versionReference],
+      ]);
       assert.deepEqual(await runner.run((tx) => author.load(tx, base.priceBookReference)), {
         actorReference: id(500),
         operationReference: first.operationReference,
@@ -475,6 +491,9 @@ it("persists authored price versions with exact replay and atomic Audit/Outbox",
       );
       assert.deepEqual(await repository.resolveOperation(first.operationReference), first);
       assert.deepEqual(await repository.loadCurrentOperation(base.priceBookReference), published);
+      assert.deepEqual(await listed(), [
+        [base.priceBookReference, "Published", 2, published.aggregate.versionReference],
+      ]);
       assert.equal(await runner.run((tx) => author.load(tx, base.priceBookReference)), null);
       assert.deepEqual(await repository.create({ record: first, audit: audit(first) }), first);
       assert.deepEqual(await count(), { versions: 2, audits: 2, events: 2 });
@@ -523,6 +542,9 @@ it("persists authored price versions with exact replay and atomic Audit/Outbox",
         expectedAggregateVersion: 2,
       });
       assert.deepEqual(await repository.resolveOperation(published.operationReference), published);
+      assert.deepEqual(await listed(), [
+        [base.priceBookReference, "Archived", 3, archived.aggregate.versionReference],
+      ]);
       assert.equal(
         await createPostgresCurrentPriceBookStore(
           scopedRunner,

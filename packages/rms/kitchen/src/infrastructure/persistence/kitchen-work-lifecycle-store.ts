@@ -71,13 +71,13 @@ export function createPostgresKitchenWorkLifecycleWriter(
     if ((await options.validateCurrentSource(tx, effect)) !== true) return unavailable();
     const ticket = await tx.query(
       "SELECT aggregate_version::text AS version,status FROM rms_kitchen.kitchen_ticket " +
-        "WHERE brand_id=$1 AND store_id=$2 AND kitchen_ticket_id=$3 FOR UPDATE",
+        "WHERE brand_id=$1 AND store_id=$2 AND kitchen_ticket_id=$3 FOR NO KEY UPDATE",
       [brand, store, m.ticketReference],
     );
     const item = await tx.query(
       "SELECT version::text AS version,status,completed_quantity,required_quantity " +
         "FROM rms_kitchen.kitchen_work_item WHERE brand_id=$1 AND store_id=$2 " +
-        "AND kitchen_ticket_id=$3 AND kitchen_work_item_id=$4 AND order_item_id=$5 FOR UPDATE",
+        "AND kitchen_ticket_id=$3 AND kitchen_work_item_id=$4 AND order_item_id=$5 FOR NO KEY UPDATE",
       [brand, store, m.ticketReference, m.workItemReference, m.orderItemReference],
     );
     const t = ticket.rows[0];
@@ -229,7 +229,7 @@ export function createPostgresKitchenWorkLifecycleStore(
       if ((await options.validateCurrentSource(tx, c)) !== true) return unavailable();
       const tickets = await tx.query(
         "SELECT order_id,order_batch_id,status,aggregate_version::text AS version,updated_at " +
-          "FROM rms_kitchen.kitchen_ticket WHERE brand_id=$1 AND store_id=$2 AND kitchen_ticket_id=$3 FOR UPDATE",
+          "FROM rms_kitchen.kitchen_ticket WHERE brand_id=$1 AND store_id=$2 AND kitchen_ticket_id=$3 FOR NO KEY UPDATE",
         [brand, store, c.ticketReference],
       );
       if (tickets.rows.length === 0) return null;
@@ -238,7 +238,7 @@ export function createPostgresKitchenWorkLifecycleStore(
       const items = await tx.query(
         "SELECT kitchen_work_item_id,order_item_id,source_item_ordinal,split_ordinal,version::text AS version," +
           "status,required_quantity,completed_quantity,created_at,updated_at FROM rms_kitchen.kitchen_work_item " +
-          "WHERE brand_id=$1 AND store_id=$2 AND kitchen_ticket_id=$3 ORDER BY order_item_id,kitchen_work_item_id FOR UPDATE",
+          "WHERE brand_id=$1 AND store_id=$2 AND kitchen_ticket_id=$3 ORDER BY order_item_id,kitchen_work_item_id FOR NO KEY UPDATE",
         [brand, store, c.ticketReference],
       );
       const records = await tx.query(

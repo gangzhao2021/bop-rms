@@ -25,7 +25,9 @@ export class KitchenWorkClientError extends Error {
       | "Conflict"
       | "PreconditionFailed"
       | "Invalid"
-      | "OutcomeUnknown",
+      | "OutcomeUnknown"
+      // WP-2423 (v15 2026-10-16): the server was busy (503) and changed nothing; try again.
+      | "Busy",
   ) {
     super("Kitchen action could not be confirmed");
     this.name = "KitchenWorkClientError";
@@ -122,6 +124,7 @@ export function createKitchenWorkClient(fetcher: typeof fetch = fetch) {
             if (response.status === 409) return fail("Conflict");
             if (response.status === 422) return fail("PreconditionFailed");
             if (response.status === 400) return fail("Invalid");
+            if (response.status === 503) return fail("Busy");
             if (
               !response.ok ||
               response.headers.get("cache-control") !== "no-store" ||

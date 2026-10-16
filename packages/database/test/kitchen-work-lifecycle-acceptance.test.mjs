@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { it } from "vitest";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+import { createPostgresKitchenWorkLifecycleStore } from "../../rms/kitchen/src/index.ts";
 
 const { Client } = pg;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -1321,4 +1322,133 @@ async function prove(context) {
 
 it("proves the append-only Store-scoped Kitchen work lifecycle schema", async () => {
   await withIsolatedDatabase({ caseId: "kitchen_lifecycle", root }, prove);
+}, 180_000);
+
+it("a kitchen step never waits for the queue rebuild's foreign-key checks", async () => {
+  // WP-2423 (v15 2026-10-16): POST /merchant/kitchen/work answered 403 twice while the board read
+  // and the queue worker rebuilt the projection after the previous step. The rebuild inserts one
+  // projection row per work item; each insert's foreign-key check takes FOR KEY SHARE on that
+  // item. The step locked the ticket's items FOR UPDATE, which conflicts with FOR KEY SHARE, in
+  // another order than the rebuild: a deadlock (or a lock timeout), reported as a transaction
+  // conflict and mapped to "request_denied". A step changes no key column, so it locks
+  // FOR NO KEY UPDATE: the rebuild's checks pass, and steps on one ticket still exclude each other.
+  await withIsolatedDatabase({ caseId: "kitchen_step_rebuild", root }, async (context) => {
+    const admin = new pg.Client(context.clientConfig);
+    const step = new pg.Client(context.clientConfig);
+    const competing = new pg.Client(context.clientConfig);
+    await Promise.all([admin.connect(), step.connect(), competing.connect()]);
+    const role = "bop_kitchen_step_" + context.runId;
+    let roleCreated = false;
+    try {
+      const value = source(8200);
+      await seedSource(admin, value);
+      const first = (
+        await admin.query(
+          "SELECT * FROM rms_kitchen.kitchen_work_item WHERE kitchen_work_item_id=$1",
+          [value.workItemId],
+        )
+      ).rows[0];
+      const second = {
+        ...first,
+        kitchen_work_item_id: id(8211),
+        order_item_id: id(8214),
+        source_item_ordinal: 2,
+      };
+      for (const [key, column] of Object.entries(second))
+        if (key.endsWith("_json")) second[key] = JSON.stringify(column);
+      await insertRow(admin, "kitchen_work_item", second);
+      // The pilot API's grants for a kitchen step, under a role that does not bypass RLS.
+      await admin.query(
+        `CREATE ROLE ${role} NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT`,
+      );
+      roleCreated = true;
+      await admin.query(`GRANT USAGE ON SCHEMA rms_kitchen,platform_helpers TO ${role}`);
+      await admin.query(
+        `GRANT EXECUTE ON FUNCTION platform_helpers.current_brand_id(),
+           platform_helpers.current_store_id(),platform_helpers.is_uuid_v7(uuid) TO ${role}`,
+      );
+      await admin.query(
+        `GRANT SELECT ON rms_kitchen.kitchen_ticket,rms_kitchen.kitchen_work_item,
+           rms_kitchen.kitchen_work_lifecycle_operation,rms_kitchen.kitchen_order_item_ready_result,
+           rms_kitchen.kitchen_work_cancellation TO ${role}`,
+      );
+      await admin.query(
+        `GRANT UPDATE ON rms_kitchen.kitchen_ticket,rms_kitchen.kitchen_work_item TO ${role}`,
+      );
+      const repository = createPostgresKitchenWorkLifecycleStore({
+        brandReference: value.brandId,
+        storeReference: value.storeId,
+        references: { next: () => id(8299), derive: () => id(8298) },
+        digests: { sha256: (text) => "sha256:" + createHash("sha256").update(text).digest("hex") },
+        authorize: async () => true,
+        validateCurrentSource: async () => true,
+      });
+      const command = {
+        action: "AcceptKitchenWorkItem",
+        idempotencyKey: "kitchen-step-rebuild-" + value.ticketId,
+        actorReference: id(8290),
+        brandReference: value.brandId,
+        storeReference: value.storeId,
+        ticketReference: value.ticketId,
+        workItemReference: value.workItemId,
+        orderItemReference: value.orderItemId,
+        expectedTicketVersion: "1",
+        expectedWorkItemVersion: "1",
+        correlationReference: value.correlationId,
+      };
+      const begin = async (client, timeout) => {
+        await client.query("BEGIN");
+        await client.query(
+          "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+          [value.brandId, value.storeId],
+        );
+        await client.query(`SET LOCAL ROLE ${role}`);
+        await client.query(`SET LOCAL lock_timeout='${timeout}'`);
+      };
+      const load = (client) =>
+        repository.loadSourceForUpdate({
+          command,
+          transaction: { query: (sql, values) => client.query(sql, [...values]) },
+        });
+      // Test-only stand-in for the queue worker: the exact lock PostgreSQL's foreign-key check
+      // takes for a projection row of the second item (owner connection; RI runs as the owner).
+      const keyShare = (workItem) =>
+        admin.query(
+          "SELECT 1 FROM ONLY rms_kitchen.kitchen_work_item x WHERE brand_id=$1 AND store_id=$2 " +
+            "AND kitchen_ticket_id=$3 AND kitchen_work_item_id=$4 FOR KEY SHARE OF x",
+          [value.brandId, value.storeId, value.ticketId, workItem],
+        );
+      await admin.query("BEGIN");
+      await admin.query("SET LOCAL lock_timeout='1s'");
+      await keyShare(second.kitchen_work_item_id);
+      // The step loads (and locks) its ticket while the rebuild holds the second item.
+      await begin(step, "1s");
+      const loaded = await load(step);
+      assert.equal(loaded.target.workItemReference, value.workItemId);
+      // The rebuild goes on to the first item, which the step now holds: no wait, no deadlock.
+      await keyShare(value.workItemId);
+      // The step's own write (a non-key column) does not wait for the rebuild either.
+      await step.query(
+        "UPDATE rms_kitchen.kitchen_work_item SET updated_at=updated_at WHERE kitchen_work_item_id=$1",
+        [value.workItemId],
+      );
+      await admin.query("COMMIT");
+      // A second step on the same ticket still waits for the first (steps never interleave).
+      await begin(competing, "300ms");
+      await assert.rejects(load(competing), { code: "55P03" });
+      await competing.query("ROLLBACK");
+      await step.query("ROLLBACK");
+    } finally {
+      for (const client of [admin, step, competing]) {
+        await client.query("ROLLBACK").catch(() => undefined);
+      }
+      if (roleCreated) {
+        await admin.query(`DROP OWNED BY ${role}`).catch(() => undefined);
+        await admin.query(`DROP ROLE IF EXISTS ${role}`).catch(() => undefined);
+      }
+      await Promise.all(
+        [admin.end(), step.end(), competing.end()].map((p) => p.catch(() => undefined)),
+      );
+    }
+  });
 }, 180_000);
