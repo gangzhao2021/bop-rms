@@ -10,7 +10,8 @@ import { orderSnapshotInput } from "../../rms/ordering/src/tests/order-item-snap
  * owner (createPriceQuote) and persisted through its owner store, never hand-written.
  *
  * lines: [{ cartLineReference, orderItemReference, sellableReference, unitAmountMinor, quantity,
- *   name? }] (name: the sellable's display name, default "Synthetic item N")
+ *   name?, localizedNames? }] (name: the sellable's display name, default "Synthetic item N";
+ *   localizedNames: names per locale, default { "en-CA": name })
  */
 export async function seedStaffItemCancellationQuote({
   runner,
@@ -131,7 +132,9 @@ export async function seedStaffItemCancellationQuote({
         sellableReference: line.sellableReference,
         productVersionReference: priced.productVersionReference,
         menuVersionReference: priced.menuVersionReference,
-        localizedNames: { "en-CA": line.name ?? "Synthetic item " + (index + 1) },
+        localizedNames: line.localizedNames ?? {
+          "en-CA": line.name ?? "Synthetic item " + (index + 1),
+        },
         taxClassificationReference: classification,
         options: [],
         capturedAt,

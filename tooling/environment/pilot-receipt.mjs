@@ -1,4 +1,5 @@
 import { createPersistentReceiptRuntime } from "../../apps/api/dist/persistent-receipt-runtime.js";
+import { createPublishedReceiptTemplateSource } from "../../apps/api/dist/published-receipt-template-source.js";
 import { createStoreReceiptDetailsSource } from "../../apps/api/dist/store-receipt-details-source.js";
 import { isPilotRuntime, matchesPilotEnvironment } from "./pilot-environment.mjs";
 export async function createInternalReceipt(
@@ -31,18 +32,12 @@ export async function createInternalReceipt(
         publicProfile: resources.publicProfile,
       }),
     },
-    template: {
-      store: { ...resources.operating, authorize: async () => active() },
-      templatePublication: {
-        tenantReference: scope.tenantReference,
-        templateReference: config.templateReference,
-        familyReference: config.familyReference,
-        configurationType: "RECEIPT_TEMPLATE",
-        purposeCode: "RECEIPT_ISSUANCE",
-        authorize: async () => active(),
-      },
+    template: createInternalReceiptTemplateOptions(
+      resources,
+      scope.tenantReference,
+      active,
       authorize,
-    },
+    ),
     authorize,
     authorizeOrder: authorize,
     identities: () => ({
@@ -67,4 +62,46 @@ export async function createInternalReceipt(
       retentionPolicyVersion: 1,
     }),
   });
+}
+
+/**
+ * WP-2423 DEC-STORE-SETUP-PUBLICATION: the receipt template is the one the Store's published
+ * configuration names (`receiptReference`), proved per version by its owners (installed release or
+ * authored content). The operating file's template/family references are no longer used; its
+ * environment still gates issuance (internal test only).
+ */
+export function createInternalReceiptTemplateOptions(
+  resources,
+  tenantReference,
+  active,
+  authorize,
+) {
+  return {
+    store: { ...resources.operating, authorize: async () => active() },
+    templatePublication: {
+      tenantReference,
+      configurationType: "RECEIPT_TEMPLATE",
+      purposeCode: "RECEIPT_ISSUANCE",
+      authorize: async () => active(),
+    },
+    authorize,
+    now: () => new Date(resources.now()).toISOString(),
+  };
+}
+
+/**
+ * Whether the Store's published receipt template can be used now (read only), for the operations
+ * monitor: `{ ready: true, ... }` or `{ ready: false, reason }` with reason
+ * "TemplateNotProven" | "StoreConfigurationUnavailable".
+ */
+export async function readInternalReceiptTemplateReadiness(
+  resources,
+  transactions = resources.transactions,
+) {
+  const tenantReference = resources.publicProfile.binding.tenantReference;
+  const active = () => resources.now() < resources.publicProfile.binding.validUntil;
+  const source = createPublishedReceiptTemplateSource(
+    createInternalReceiptTemplateOptions(resources, tenantReference, active, async () => active()),
+  );
+  return transactions.run((tx) => source.readiness(tx, new Date(resources.now()).toISOString()));
 }

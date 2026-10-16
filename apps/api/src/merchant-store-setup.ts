@@ -423,7 +423,11 @@ export function createMerchantStoreSetup(options: {
           await fresh();
           const feeContexts = bound.command.content.feeContexts;
           if (feeContexts?.state === "Configured") {
-            const enabled = feeContexts.value.filter((entry) => entry.state === "Enabled");
+            // WP-2423 (v15 D7): a Tip On without a tax classification (not taxed) has nothing to
+            // check here; every classification that is named must still be active.
+            const enabled = feeContexts.value.filter(
+              (entry) => entry.state === "Enabled" && entry.taxClassificationReference !== null,
+            );
             if (enabled.length) {
               const choices = await registrySource().read(
                 "sha256:" + sha256Hex(canonicalizeRfc8785(bound.command)),

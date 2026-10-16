@@ -234,7 +234,7 @@ export async function recoverStoreSetupDraft(input: {
 }
 const messages: Record<StoreSetupClientError["code"], string> = {
   Invalid:
-    "Check the edited settings. Each service interval needs valid times and at least one service mode. Wait times are whole minutes, up to 24 hours (1,440 minutes). A fee that is On needs a tax classification that is still in use and at least one order type.",
+    "Check the edited settings. Each service interval needs valid times and at least one service mode. Wait times are whole minutes, up to 24 hours (1,440 minutes). A service charge or delivery fee that is On needs a tax classification that is still in use, and every fee that is On needs at least one order type.",
   Denied: "Your current permission or selected Store does not allow this action.",
   Conflict:
     "The saved settings or their baseline changed. Refresh, then discard your local edits to use the latest saved version.",
@@ -513,7 +513,10 @@ export function StoreSetupDraftPage({
     try {
       if (
         candidate.feeContexts?.state === "Configured" &&
-        candidate.feeContexts.value.some((v) => v.state === "Enabled")
+        candidate.feeContexts.value.some(
+          // WP-2423 (v15 D7): a Tip On without a tax classification needs no classification read.
+          (v) => v.state === "Enabled" && v.taxClassificationReference !== null,
+        )
       ) {
         const choices = await feeClient.classifications({
           storeReference,
@@ -2121,6 +2124,8 @@ export function validateStoreSetupFeeSelections(
   for (const entry of content.feeContexts.value) {
     if (
       entry.state === "Enabled" &&
+      // WP-2423 (v15 D7): only a Tip may be On with no tax classification (not taxed).
+      (entry.taxClassificationReference !== null || entry.chargeType !== "Tip") &&
       !choices.choices.some(
         (v) =>
           v.classificationReference === entry.taxClassificationReference &&
@@ -2189,10 +2194,10 @@ export function StoreSetupFeeContextEditor({
       : storeSetupFeeCharges.map((chargeType) => ({ chargeType, state: "Unconfigured" as const }));
   const change = (index: number, entry: StoreSetupFeeContext) =>
     onChange({ state: "Configured", value: entries.map((v, i) => (i === index ? entry : v)) });
-  const fresh =
-    choices !== null &&
-    Date.parse(choices.observedAt) <= Date.now() &&
-    Date.parse(choices.validUntil) > Date.now();
+  // WP-2423 (v15 D5): the choices load as soon as this step opens. They are only what can be
+  // picked: the server answers within seconds of reading them, and Save reads them again and
+  // refuses a classification no longer in use, so picking never waits for a manual refresh.
+  const loading = choices === null && error === false;
   return (
     <section className="store-setup-fee-contexts" aria-label="Fees">
       <h4>Fees</h4>
@@ -2202,10 +2207,12 @@ export function StoreSetupFeeContextEditor({
         or tax rates, and customers are not charged anything new until the store settings are
         approved and published.
       </p>
+      {loading && <p role="status">Loading tax classification choices…</p>}
       {error === "NotRegistered" && (
         <p role="status">
-          No tax classifications are set up for this Brand yet, so these fees cannot be turned on
-          here. Leave each fee as Not set or Off; you can still save the rest of this setup.
+          No tax classifications are set up for this Brand yet, so a service charge or delivery fee
+          cannot be turned on here. Leave them as Not set or Off; tips can still be turned on, and
+          you can save the rest of this setup.
         </p>
       )}
       {taxClassificationsHref !== undefined &&
@@ -2219,16 +2226,17 @@ export function StoreSetupFeeContextEditor({
       {error === "Denied" && (
         <p role="status">
           Choosing a tax classification needs permission to read Products and tax settings. Leave
-          each fee as Not set or Off; you can still save the rest of this setup.
+          the service charge and delivery fee as Not set or Off; tips can still be turned on, and
+          you can save the rest of this setup.
         </p>
       )}
       {error === "Unavailable" && (
         <p role="status">
-          Tax classifications could not be loaded. Refresh to try again; fees that are Not set or
-          Off can still be saved.
+          Tax classifications could not be loaded. Choose Refresh fee classification choices to try
+          again; tips, and fees that are Not set or Off, can still be saved.
         </p>
       )}
-      <button type="button" disabled={disabled} onClick={() => setReload((v) => v + 1)}>
+      <button type="button" disabled={disabled || loading} onClick={() => setReload((v) => v + 1)}>
         Refresh fee classification choices
       </button>
       {entries.map((entry, index) => (
@@ -2251,7 +2259,8 @@ export function StoreSetupFeeContextEditor({
                       : {
                           chargeType: entry.chargeType,
                           state: "Enabled",
-                          taxClassificationReference: "",
+                          // WP-2423 (v15 D7): a tip is not taxed, so it starts without one.
+                          taxClassificationReference: entry.chargeType === "Tip" ? null : "",
                           orderTypes: [],
                         },
                   );
@@ -2266,24 +2275,40 @@ export function StoreSetupFeeContextEditor({
             {feeLabel(entry.chargeType)} tax classification
             <select
               aria-label={`${feeLabel(entry.chargeType)} tax classification`}
-              disabled={disabled || !fresh || entry.state !== "Enabled"}
-              value={entry.state === "Enabled" ? entry.taxClassificationReference : ""}
+              disabled={
+                disabled ||
+                entry.state !== "Enabled" ||
+                (choices === null && entry.chargeType !== "Tip")
+              }
+              value={
+                entry.state === "Enabled" && entry.taxClassificationReference !== null
+                  ? entry.taxClassificationReference
+                  : ""
+              }
               onChange={(e) => {
+                if (entry.state !== "Enabled") return;
+                if (e.currentTarget.value === "" && entry.chargeType === "Tip") {
+                  change(index, { ...entry, taxClassificationReference: null });
+                  return;
+                }
                 const selected = choices?.choices.find(
                   (v) =>
                     v.classificationReference === e.currentTarget.value && v.lifecycle === "Active",
                 );
-                if (!fresh || !selected) return;
+                if (!selected) return;
                 change(index, {
-                  chargeType: entry.chargeType,
-                  state: "Enabled",
+                  ...entry,
                   taxClassificationReference: selected.classificationReference,
-                  orderTypes: entry.state === "Enabled" ? entry.orderTypes : [],
                 });
               }}
             >
-              <option value="">Choose a tax classification to turn this on</option>
+              <option value="">
+                {entry.chargeType === "Tip"
+                  ? "No tax classification (tips are not taxed)"
+                  : "Choose a tax classification to turn this on"}
+              </option>
               {entry.state === "Enabled" &&
+                entry.taxClassificationReference !== null &&
                 entry.taxClassificationReference !== "" &&
                 !choices?.choices.some(
                   (v) => v.classificationReference === entry.taxClassificationReference,
@@ -2331,9 +2356,11 @@ export function StoreSetupFeeContextEditor({
         </fieldset>
       ))}
       <p>
-        A fee that is On needs a tax classification and at least one order type before saving. The
-        classification is the Brand&rsquo;s own choice; it has not been checked by a tax
-        professional.
+        A service charge or delivery fee that is On needs a tax classification, and every fee that
+        is On needs at least one order type before saving. Tips customers choose to give go to staff
+        and are generally not subject to GST/HST, so a tip needs no tax classification (a service
+        charge every customer must pay is taxed). The classification is the Brand&rsquo;s own
+        choice; it has not been checked by a tax professional.
       </p>
     </section>
   );
@@ -2369,7 +2396,7 @@ export function liveStoreSettingsChange(
   ) as Partial<StoreSetupContent>;
   return {
     ...operating,
-    taxConfigurationReference: { state: "Configured", value: current.taxConfigurationReference },
+    taxConfigurationReference: { state: "Configured", value: liveStoreTaxReference(live) },
     brandBaseVersionReference: { state: "Configured", value: current.brandBaseVersionReference },
     exceptions:
       content.exceptions.state === "Configured"
@@ -2383,6 +2410,16 @@ export function liveStoreSettingsChange(
 export interface StoreSetupLiveConfiguration {
   readonly current: StoreConfigurationSnapshot | null;
   readonly observedAt: string;
+  /** WP-2423 (v15 `8bd902e3` D1): the tax configuration that governs the Store now (the one its
+   * quotes use and the publication check expects), when read. */
+  readonly storeTaxConfigurationReference?: string | null;
+}
+/** v15 D1: the Store's tax settings in force: its tax configuration record (an installed
+ * configuration may still name the installer's reference), else the live configuration's. */
+export function liveStoreTaxReference(
+  live: StoreSetupLiveConfiguration & { readonly current: StoreConfigurationSnapshot },
+): string {
+  return live.storeTaxConfigurationReference ?? live.current.taxConfigurationReference;
 }
 /**
  * WP-2423 DEC-STORE-SETUP-PUBLICATION: settings Store setup does not edit itself — the Store's tax
@@ -2405,7 +2442,7 @@ export function StoreSetupLiveSettings({
   const known = { ...live, current };
   const same = <T,>(value: StoreSetupContent[keyof StoreSetupContent] | undefined, expected: T) =>
     value?.state === "Configured" && JSON.stringify(value.value) === JSON.stringify(expected);
-  const tax = same(content.taxConfigurationReference, current.taxConfigurationReference),
+  const tax = same(content.taxConfigurationReference, liveStoreTaxReference(known)),
     brand = same(content.brandBaseVersionReference, current.brandBaseVersionReference),
     closures = content.exceptions.state === "Configured",
     start =

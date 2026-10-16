@@ -423,6 +423,8 @@ export async function exercisePilotStoreSetupPublication(input) {
       assert.equal(draft.supersedesConfigurationReference, installed(1));
       const outcomes = (body) =>
         Object.fromEntries(body.publicationChecks.checks.map((c) => [c.code, c.outcome]));
+      // v15 D1: no tax configuration in force yet: the workspace says none.
+      assert.equal(workspace.body.storeTaxConfigurationReference, null);
       assert.deepEqual(outcomes(workspace.body), {
         Tax: "Fail",
         BrandSettings: "Pass",
@@ -531,6 +533,12 @@ export async function exercisePilotStoreSetupPublication(input) {
       let workspace = await workspaceOf(send);
       assert.equal(workspace.status, 200, JSON.stringify(workspace.body));
       assert(workspace.body.publicationChecks.checks.every((c) => c.outcome === "Pass"));
+      // WP-2423 v15 (`8bd902e3` D1): the installed configuration names the installer's tax
+      // reference; the Store's tax configuration in force is its Pricing record (the one quotes
+      // use). The workspace names it, so "Use the live Store's settings" carries it and the
+      // "Tax" check compares like with like.
+      assert.equal(workspace.body.storeTaxConfigurationReference, taxReference);
+      assert.notEqual(workspace.body.current.taxConfigurationReference, taxReference);
       const submitted = await send("store-configuration/ordinary-command", {
         command: command(selected, "Submit", workspace.body.expectedHead),
       });
@@ -1208,6 +1216,28 @@ export async function exercisePilotStoreSetupPublication(input) {
     await assert.rejects(
       admin.query("UPDATE rms_store.store_configuration_withdrawal SET reason_code='X'"),
     );
+    // WP-2423: further Store configuration journeys on this published Store (same roles).
+    if (typeof input.afterPublication === "function")
+      await input.afterPublication({
+        ...input,
+        api,
+        store,
+        owner,
+        second,
+        next,
+        now,
+        transactions,
+        operating,
+        resources,
+        listen,
+        command,
+        workspaceOf,
+        saveSetup,
+        materialize,
+        liveReceipt,
+        receiptInstaller,
+        storeLocale,
+      });
     return { published, soleApproved };
   } finally {
     for (const name of [api, worker]) {

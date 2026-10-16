@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   ReceiptTemplateStoreSelection,
   applyReceiptTemplateStoreSelection,
+  receiptTemplateStoreOptions,
 } from "./ReceiptTemplateStoreSelection.js";
 import { parseReceiptTemplatePublishedCurrent } from "./receipt-template-published-client.js";
 import { receiptTemplateArtifactRequiredFields } from "./receipt-template-artifact-client.js";
@@ -142,4 +143,31 @@ it("forged readiness and non-effective scheduled metadata cannot be applied as a
     ),
   ).toThrow();
   expect(selected).not.toHaveBeenCalled();
+});
+it("WP-2423: always offers the receipt template the Store started with, in plain words", () => {
+  // The Store moved to a template written in the product: the installed one is offered too.
+  expect(
+    receiptTemplateStoreOptions({ live: id(31), startedWith: id(30), saved: [id(31)] }),
+  ).toEqual([{ value: id(30), label: "Receipt template the Store started with" }]);
+  expect(receiptTemplateStoreOptions({ live: id(31), startedWith: id(30), saved: [] })).toEqual([
+    { value: id(31), label: "Receipt template in use today" },
+    { value: id(30), label: "Receipt template the Store started with" },
+  ]);
+  // Still on the installed template: one entry, said once.
+  expect(receiptTemplateStoreOptions({ live: id(30), startedWith: id(30), saved: [] })).toEqual([
+    {
+      value: id(30),
+      label: "Receipt template in use today (the one the Store started with)",
+    },
+  ]);
+  // Not found (yet): nothing invented.
+  expect(receiptTemplateStoreOptions({ live: null, startedWith: null, saved: [id(31)] })).toEqual(
+    [],
+  );
+  for (const option of receiptTemplateStoreOptions({
+    live: id(31),
+    startedWith: id(30),
+    saved: [],
+  }))
+    expect(option.label).not.toMatch(/RECEIPT_|[0-9a-f]{8}-/u);
 });

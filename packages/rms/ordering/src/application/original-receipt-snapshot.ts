@@ -85,6 +85,8 @@ export interface OriginalReceiptSources {
     readonly storeReference: string;
     readonly version: string;
     readonly locale: string;
+    /** WP-2423: the exact published template version (recorded on the receipt when given). */
+    readonly versionReference?: string;
   };
   readonly financial: {
     readonly brandReference: string;
@@ -207,6 +209,9 @@ export function createOriginalReceiptSnapshotFromCurrentOrder(
       issuedAt: input.issuedAt,
       locale: input.template.locale,
       templateVersion: input.template.version,
+      ...(input.template.versionReference === undefined
+        ? {}
+        : { templateVersionReference: input.template.versionReference }),
       lines: items.map((item) => ({
         lineReference: item.orderItemReference,
         displayName: item.catalog.localizedNames[input.template.locale],

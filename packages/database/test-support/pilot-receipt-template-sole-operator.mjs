@@ -236,6 +236,11 @@ export async function exercisePilotReceiptTemplateSoleOperator(input) {
       ).rows[0].n,
       0,
     );
+    const startedWithPath =
+      "store-setup/receipt-template-published?storeReference=" +
+      store +
+      "&installed=true&locale=" +
+      storeLocale;
     const publishedPath = (template) =>
       "store-setup/receipt-template-published?storeReference=" +
       store +
@@ -248,6 +253,11 @@ export async function exercisePilotReceiptTemplateSoleOperator(input) {
       assert.equal(read.status, 200, JSON.stringify(read.body));
       assert.deepEqual(read.body.currentVersion, installed);
       assert.equal(read.body.templateReference, installed.templateReference);
+      // WP-2423 (2026-10-16): Store setup finds the template the Store started with by itself.
+      const started = await send(startedWithPath);
+      assert.equal(started.status, 200, JSON.stringify(started.body));
+      assert.equal(started.body.templateReference, installed.templateReference);
+      assert.deepEqual(started.body.currentVersion, installed);
     });
     // The Store configuration reference source (what Store setup re-reads when it creates, sends,
     // approves and publishes a configuration naming this template).
@@ -512,6 +522,11 @@ export async function exercisePilotReceiptTemplateSoleOperator(input) {
       const read = await send(publishedPath(draft.content.templateReference));
       assert.equal(read.status, 200, JSON.stringify(read.body));
       assert.equal(read.body.currentVersion.versionReference, draft.content.versionReference);
+      // The Owner's own template is never "the one the Store started with"; that stays the
+      // installed one, so they can go back to it from Store setup.
+      const started = await send(startedWithPath);
+      assert.equal(started.status, 200, JSON.stringify(started.body));
+      assert.equal(started.body.templateReference, installed.templateReference);
     });
     // ... and the Store configuration reference source.
     const own = await referenceRead(session, draft.content.templateReference);

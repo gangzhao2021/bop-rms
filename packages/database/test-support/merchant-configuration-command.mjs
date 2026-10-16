@@ -89,12 +89,21 @@ export async function verifyMerchantConfigurationCommand({
       authorize: async () => true,
       hashContent,
     },
+    // WP-2423: the template is the one the published configuration names; this installer-shaped
+    // version (no authored submission) is proved by its exact current release.
     templatePublication: {
-      ...templateFixture.publicationOptions,
-      templateReference: templateFixture.templateReference,
+      tenantReference: templateFixture.publicationOptions.tenantReference,
+      configurationType: templateFixture.publicationOptions.configurationType,
+      purposeCode: templateFixture.publicationOptions.purposeCode,
+      authorize: async () => true,
     },
     authorize: async () => true,
   });
+  // Pilot api grants for the authored-content owner read (docs/spec/pilot-acl-additions.json).
+  await admin.query(
+    "GRANT SELECT ON rms_device.digital_receipt_template_submission,rms_device.digital_receipt_template_draft_revision TO " +
+      role,
+  );
   const receiptRequest = {
     brandReference: f.BRAND,
     storeReference: f.STORE,
@@ -108,6 +117,7 @@ export async function verifyMerchantConfigurationCommand({
     templateSource(tx, receiptRequest),
   );
   assert.equal(selectedTemplate.template.version, "RECEIPT_V1");
+  assert.equal(selectedTemplate.template.versionReference, selectedTemplate.evidenceReference);
   assert.equal(selectedTemplate.template.locale, baseline.defaultLocale);
   await assert.rejects(
     options.transactions.run((tx) =>
@@ -220,6 +230,9 @@ export async function verifyMerchantConfigurationCommand({
     "GRANT SELECT,INSERT,UPDATE ON rms_store.store_configuration_authoring_operation TO " + role,
   );
   await admin.query("GRANT SELECT ON rms_store.store_configuration_original_operation TO " + role);
+  // Pilot api grant (docs/spec/pilot-acl-additions.json, v15 D2/D3): a save over an open change
+  // reads its withdrawal record.
+  await admin.query("GRANT SELECT ON rms_store.store_configuration_withdrawal TO " + role);
 
   for (const [code, n] of [
     ["store.service.validate", 4004],

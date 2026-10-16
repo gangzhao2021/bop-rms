@@ -15,6 +15,20 @@ export function formatMoney(amountMinor: string | bigint, currency: string): str
   return currency === "CAD" ? `${sign}$${amount}` : `${sign}${currency} ${amount}`;
 }
 
+/**
+ * Menu prices arrive as exact decimal text ("0.75", "4.5000"): "$0.75" / "$4.50" in the same style
+ * as {@link formatMoney}. Digits past the cents are kept only when they are not zero, so nothing is
+ * rounded; null for malformed input so the caller can show its own wording.
+ */
+export function formatDecimalMoney(amount: string, currency: string): string | null {
+  const match = /^(0|[1-9][0-9]{0,20})(?:\.([0-9]{1,6}))?$/u.exec(amount);
+  if (!match || !/^[A-Z]{3}$/u.test(currency)) return null;
+  let fraction = (match[2] ?? "").padEnd(2, "0");
+  while (fraction.length > 2 && fraction.endsWith("0")) fraction = fraction.slice(0, -1);
+  const text = `${wholeUnits.format(BigInt(match[1] ?? "0"))}.${fraction}`;
+  return currency === "CAD" ? `$${text}` : `${currency} ${text}`;
+}
+
 /** "Toronto, ON M5V 1A1": the one locality line for every postal address shown to customers. */
 export function formatLocalityLine(address: {
   readonly locality: string;

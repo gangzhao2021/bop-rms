@@ -88,6 +88,9 @@ export interface StoreConfigurationOrdinaryWorkspace {
     readonly withdrawnAt: string;
     readonly byYou: boolean;
   };
+  /** WP-2423 (v15 `8bd902e3` D1): the tax configuration that governs the Store now (the one
+   * quotes use), or null when none; absent when not read. */
+  readonly storeTaxConfigurationReference?: string | null;
 }
 /** Every check blocks sending, approval and publication; the screen explains each in plain words. */
 export const storeConfigurationPublicationCheckCodes = [
@@ -429,7 +432,13 @@ export async function parseStoreConfigurationOrdinaryWorkspace(
         copy !== null &&
         typeof copy === "object" &&
         Object.hasOwn(copy, "latestWithdrawal") &&
-        (copy as { latestWithdrawal?: unknown }).latestWithdrawal !== undefined;
+        (copy as { latestWithdrawal?: unknown }).latestWithdrawal !== undefined,
+      hasTax =
+        copy !== null &&
+        typeof copy === "object" &&
+        Object.hasOwn(copy, "storeTaxConfigurationReference") &&
+        (copy as { storeTaxConfigurationReference?: unknown }).storeTaxConfigurationReference !==
+          undefined;
     const r = closed(copy, [
         "profile",
         "scope",
@@ -443,6 +452,7 @@ export async function parseStoreConfigurationOrdinaryWorkspace(
         ...(hasChecks ? ["publicationChecks"] : []),
         ...(hasSoleOperator ? ["soleOperator"] : []),
         ...(hasWithdrawal ? ["latestWithdrawal"] : []),
+        ...(hasTax ? ["storeTaxConfigurationReference"] : []),
       ]),
       scope = parseStoreSetupScope(r.scope),
       selected = parseStoreSetupScope(expectedScope);
@@ -549,6 +559,14 @@ export async function parseStoreConfigurationOrdinaryWorkspace(
       if (withdrawnAt > observedAt) return fail();
       latestWithdrawal = Object.freeze({ kind: w.kind, withdrawnAt, byYou: w.byYou });
     }
+    const tax = r.storeTaxConfigurationReference;
+    if (
+      hasTax &&
+      tax !== null &&
+      (typeof tax !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(tax))
+    )
+      return fail();
     if (Date.now() >= Date.parse(validUntil)) return fail("Stale");
     return Object.freeze({
       profile: r.profile,
@@ -563,6 +581,7 @@ export async function parseStoreConfigurationOrdinaryWorkspace(
       ...(publicationChecks === undefined ? {} : { publicationChecks }),
       ...(soleOperator === null ? {} : { soleOperator }),
       ...(latestWithdrawal === undefined ? {} : { latestWithdrawal }),
+      ...(hasTax ? { storeTaxConfigurationReference: tax as string | null } : {}),
     });
   } catch (error) {
     if (error instanceof StoreSetupClientError) throw error;

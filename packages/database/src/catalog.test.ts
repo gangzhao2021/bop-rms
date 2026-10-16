@@ -706,6 +706,7 @@ describe("migration catalog", () => {
       "2000_062_create_consumer_retry_pending_index",
       "2000_063_create_receipt_template_sole_operator_approval",
       "2000_064_alter_store_configuration_author_steps",
+      "2000_065_alter_store_setup_tip_without_tax_classification",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

@@ -110,6 +110,9 @@ export interface MerchantStoreConfigurationOrdinaryOptions extends Omit<
     readonly publicationChecks?: (
       configuration: StoreConfigurationVersion,
     ) => Promise<StoreConfigurationPublicationChecks>;
+    /** WP-2423 (v15 `8bd902e3` D1): the tax configuration currently governing the Store (Pricing
+     * owner read in this run's transaction), or null when none or several. */
+    readonly storeTaxConfigurationReference?: () => Promise<string | null>;
     readonly appendAudit: (
       tx: Parameters<Existing["configure"]>[0],
       input: MerchantStoreConfigurationOrdinaryAuditInput,
@@ -971,6 +974,9 @@ export function createMerchantStoreConfigurationOrdinary(
           recordedLatest.lifecycle === "Approved")
           ? await evaluate(recordedLatest)
           : undefined;
+      // v15 `8bd902e3` D1: the Store's tax configuration in force, so the Owner's setup names it.
+      const readTax = configuration().storeTaxConfigurationReference;
+      const storeTaxConfigurationReference = readTax === undefined ? undefined : await readTax();
       // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: the Owner who created or sent the configuration
       // awaiting approval sees whether they may approve it alone, and why not.
       let soleOperator: Awaited<ReturnType<typeof merchantStoreSoleOperatorGate>> | undefined;
@@ -1018,6 +1024,9 @@ export function createMerchantStoreConfigurationOrdinary(
           validUntil: deadline,
           businessReferenceValidation: "NotEvaluated",
           ...(publicationChecks === undefined ? {} : { publicationChecks }),
+          ...(storeTaxConfigurationReference === undefined
+            ? {}
+            : { storeTaxConfigurationReference }),
           ...(withdrawal === null
             ? {}
             : {

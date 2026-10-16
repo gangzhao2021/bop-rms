@@ -320,9 +320,12 @@ function fixture(mode: "Immediate" | "Scheduled" | "Expired" = "Immediate") {
     finalChange: null,
   };
   let publishedReads = 0;
+  const installedRows: Record<string, unknown>[] = [{ template_id: id(6) }];
   const query = vi.fn(async (sql: string, values: readonly unknown[]) => {
     void values;
     if (sql.includes("transaction_isolation")) return { rows: [{ isolation: "read committed" }] };
+    // WP-2423: the receipt template the Store started with (installer-published).
+    if (sql.includes("GROUP BY v.template_id")) return { rows: installedRows };
     if (
       sql.startsWith("SELECT") &&
       sql.includes("FROM rms_device.digital_receipt_template_submission")
@@ -413,6 +416,7 @@ function fixture(mode: "Immediate" | "Scheduled" | "Expired" = "Immediate") {
   return {
     service,
     read,
+    installedRows,
     state,
     selected,
     query,
@@ -568,4 +572,30 @@ it("refuses a captured clock replacement before opening a transaction", async ()
   f.options.persistence.now = () => at;
   await expect(f.read()).rejects.toThrow("RECEIPT_TEMPLATE_UNAVAILABLE");
   expect(f.query).not.toHaveBeenCalled();
+});
+it("reads the receipt template the Store started with when asked for the installed one", async () => {
+  const f = fixture();
+  const base = {
+    sessionCookie: "synthetic-session",
+    expectedStoreReference: id(3),
+    expectedScope: scope,
+    locale: "en-CA",
+  };
+  const read = (extra: Record<string, unknown>) =>
+    f.service.read({ ...base, ...extra } as Parameters<typeof f.service.read>[0]);
+  const r = await f.service.readInstalled(base);
+  expect(r?.templateReference).toBe(id(6));
+  expect(r?.currentVersion).toEqual(f.publishedVersion);
+  const lookup = f.query.mock.calls.find(([sql]) => sql.includes("GROUP BY v.template_id"));
+  expect(lookup?.[1]).toEqual([id(2), id(3)]);
+  expect(lookup?.[0]).toContain("NOT EXISTS");
+  // A Store without one has nothing to offer (null); the request shape stays exact.
+  f.installedRows.length = 0;
+  expect(await f.service.readInstalled(base)).toBeNull();
+  // The ordinary read never answers "none".
+  await expect(read({ installed: true, templateReference: undefined })).rejects.toThrow();
+  await expect(read({ installed: false })).rejects.toThrow("RECEIPT_TEMPLATE_INPUT_INVALID");
+  await expect(read({ installed: true, templateReference: id(6) })).rejects.toThrow(
+    "RECEIPT_TEMPLATE_INPUT_INVALID",
+  );
 });

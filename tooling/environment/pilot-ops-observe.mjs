@@ -245,11 +245,26 @@ export async function readBusinessSignals({
     if (after === null) break;
   }
 
+  // WP-2423 DEC-STORE-SETUP-PUBLICATION: can a receipt be issued with the template the Store's
+  // published settings name (read only; ready/reason only)? null when not composed.
+  let receiptTemplate = null;
+  if (typeof dependencies.readReceiptTemplate === "function")
+    try {
+      const readiness = await dependencies.readReceiptTemplate(resources);
+      receiptTemplate =
+        readiness?.ready === true
+          ? { ready: true }
+          : { ready: false, reason: String(readiness?.reason ?? "TemplateNotProven") };
+    } catch {
+      receiptTemplate = "unreadable";
+    }
+
   // WP-2423: a recent clean settlement answer may be reused (see createBusinessObserver).
   if (settlementExceptions !== null)
     return {
       stuckUpdates,
       retryingUpdates,
+      receiptTemplate,
       reconciliationDifferences: { count: open, oldestAgeMs: age(oldest) },
       settlementExceptions,
     };
@@ -263,6 +278,7 @@ export async function readBusinessSignals({
   return {
     stuckUpdates,
     retryingUpdates,
+    receiptTemplate,
     reconciliationDifferences: { count: open, oldestAgeMs: age(oldest) },
     settlementExceptions: { count: problems.length, oldestAgeMs: age(settlementOldest) },
   };

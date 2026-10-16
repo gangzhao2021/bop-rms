@@ -166,3 +166,31 @@ export function createPostgresInstalledReceiptTemplatePublicationProof(options: 
     return packet === null ? null : Object.freeze({ ...packet, familyReference });
   };
 }
+
+/**
+ * WP-2423 (DEC-STORE-SETUP-PUBLICATION 已知遗留, fixed 2026-10-16): the receipt template this Store
+ * started with — the earliest-published template none of whose versions has an authored
+ * submission (published by the installer, e.g. its first receipt template). Returns its template
+ * reference, or null when the Store has none. This only finds the template; whether it can be used
+ * today is proved by the caller with the installed publication proof above (its exact current
+ * Publishing release). Read under the caller's held Store scope (row security applies).
+ */
+export async function readInstalledReceiptTemplateReference(
+  tx: ReceiptTemplateTransaction,
+  input: { readonly brandReference: string; readonly storeReference: string },
+): Promise<string | null> {
+  const brand = String(parseBrandReference(input.brandReference)),
+    store = String(parseStoreReference(input.storeReference));
+  const result = await tx.query(
+    "SELECT v.template_id::text AS template_id FROM rms_device.digital_receipt_template_version v WHERE v.brand_id=$1 AND v.store_id=$2 AND NOT EXISTS (SELECT 1 FROM rms_device.digital_receipt_template_submission s WHERE s.brand_id=v.brand_id AND s.store_id=v.store_id AND s.template_id=v.template_id) GROUP BY v.template_id ORDER BY min(v.published_at),v.template_id LIMIT 1",
+    [brand, store],
+  );
+  if (result.rows.length === 0) return null;
+  const value = result.rows[0]?.template_id;
+  if (
+    typeof value !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value)
+  )
+    return fail();
+  return value;
+}

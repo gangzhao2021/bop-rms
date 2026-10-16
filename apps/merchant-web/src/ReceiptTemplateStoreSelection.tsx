@@ -29,7 +29,19 @@ export interface ReceiptTemplateStoreSelectionProps {
   readonly onSelect: (templateReference: string | null) => void;
   readonly client?: ReturnType<typeof createReceiptTemplatePublishedClient>;
   readonly rosterClient?: ReturnType<typeof createReceiptTemplateDraftClient>;
+  /** WP-2423 (2026-10-16): finds the receipt template the Store started with. Defaults to its own
+   * client unless `client` is injected (then only when given). */
+  readonly installedClient?: Pick<
+    ReturnType<typeof createReceiptTemplatePublishedClient>,
+    "loadInstalled"
+  >;
 }
+/** What is known about the receipt template the Store started with (installer-published). */
+type InstalledTemplate =
+  | { readonly state: "Loading" }
+  | { readonly state: "Found"; readonly templateReference: string }
+  | { readonly state: "None" }
+  | { readonly state: "Unavailable" };
 export function applyReceiptTemplateStoreSelection(
   current: ReceiptTemplatePublishedCurrent,
   scope: StoreSetupScope,
@@ -52,13 +64,43 @@ export function applyReceiptTemplateStoreSelection(
     throw new StoreSetupClientError("Stale");
   onSelect(current.templateReference);
 }
+/** WP-2423: the templates offered besides the saved (product-authored) ones, in staff language:
+ * the one the Store issues receipts with today, and the one it started with (installer-published,
+ * so it is never in the saved list) when that is a different template. */
+export function receiptTemplateStoreOptions(input: {
+  readonly live: string | null;
+  readonly startedWith: string | null;
+  readonly saved: readonly string[];
+}): readonly { readonly value: string; readonly label: string }[] {
+  const options: { value: string; label: string }[] = [];
+  if (input.live !== null && !input.saved.includes(input.live))
+    options.push({
+      value: input.live,
+      label:
+        input.live === input.startedWith
+          ? "Receipt template in use today (the one the Store started with)"
+          : "Receipt template in use today",
+    });
+  if (
+    input.startedWith !== null &&
+    input.startedWith !== input.live &&
+    !input.saved.includes(input.startedWith)
+  )
+    options.push({ value: input.startedWith, label: "Receipt template the Store started with" });
+  return options;
+}
 export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelectionProps) {
   const defaults = useRef({
       client: createReceiptTemplatePublishedClient(),
       roster: createReceiptTemplateDraftClient(),
+      // Its own client: a check of another template never cancels this lookup.
+      installed: createReceiptTemplatePublishedClient(),
     }),
     client = props.client ?? defaults.current.client,
-    rosterClient = props.rosterClient ?? defaults.current.roster;
+    rosterClient = props.rosterClient ?? defaults.current.roster,
+    installedClient =
+      props.installedClient ??
+      (props.client === undefined ? defaults.current.installed : undefined);
   const identity = canonical({ scope: props.scope, locale: props.locale, csrf: props.csrf }),
     identityRef = useRef(identity),
     disabled = useRef(props.disabled);
@@ -73,11 +115,39 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
     [selected, setSelected] = useState(""),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
-    [expired, setExpired] = useState(false);
+    [expired, setExpired] = useState(false),
+    [installed, setInstalled] = useState<InstalledTemplate | null>(null),
+    installedSequence = useRef(0);
   const code = (e: unknown) => (e instanceof StoreSetupClientError ? e.code : "Unavailable");
   const timeZone = useContext(StoreTimeZoneContext);
   const valid = (e: number, key: string, c: AbortController) =>
     epoch.current === e && identityRef.current === key && !c.signal.aborted;
+  /** WP-2423 (2026-10-16): the receipt template the Store started with, read from its actual
+   * current Publishing release (so the Owner can always go back to it). */
+  function loadInstalled() {
+    if (!installedClient) return;
+    const sequence = ++installedSequence.current,
+      e = epoch.current,
+      key = identityRef.current,
+      c = new AbortController();
+    controllers.current.add(c);
+    setInstalled({ state: "Loading" });
+    void installedClient
+      .loadInstalled({ expectedScope: props.scope, locale: props.locale, signal: c.signal })
+      .then((result) => {
+        if (valid(e, key, c) && sequence === installedSequence.current)
+          setInstalled(
+            result === null
+              ? { state: "None" }
+              : { state: "Found", templateReference: result.templateReference },
+          );
+      })
+      .catch(() => {
+        if (valid(e, key, c) && sequence === installedSequence.current)
+          setInstalled({ state: "Unavailable" });
+      })
+      .finally(() => controllers.current.delete(c));
+  }
   async function loadRoster(after: string | null) {
     if (disabled.current) return;
     const sequence = ++rosterSequence.current,
@@ -176,12 +246,14 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
         if (valid(e, key, c) && sequence === rosterSequence.current) setError(code(e2));
       })
       .finally(() => controllers.current.delete(c));
+    setInstalled(null);
+    loadInstalled();
     return () => {
       epoch.current++;
       for (const x of controllers.current) x.abort();
       controllers.current.clear();
     };
-  }, [identity, client, rosterClient]);
+  }, [identity, client, rosterClient, installedClient]);
   useEffect(() => {
     if (!candidate) return;
     const timer = setTimeout(
@@ -191,10 +263,12 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
     return () => clearTimeout(timer);
   }, [candidate]);
   const live = props.liveTemplateReference ?? null,
-    liveListed =
-      live !== null &&
-      (roster?.entries ?? []).some((entry) => entry.content.templateReference === live),
-    usingLive = live !== null && props.value.state === "Configured" && props.value.value === live;
+    usingLive = live !== null && props.value.state === "Configured" && props.value.value === live,
+    startedWith = installed?.state === "Found" ? installed.templateReference : null,
+    usingStartedWith =
+      startedWith !== null &&
+      props.value.state === "Configured" &&
+      props.value.value === startedWith;
   const blocked = props.disabled || busy,
     fresh =
       candidate !== null &&
@@ -233,6 +307,26 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
           </button>
         </div>
       )}
+      {startedWith !== null && startedWith !== live && (
+        <div>
+          <p>
+            {usingStartedWith
+              ? "This setup goes back to the receipt template the Store started with."
+              : "You can go back to the receipt template the Store started with."}
+          </p>
+          <button
+            type="button"
+            disabled={blocked || usingStartedWith}
+            onClick={() => {
+              previewSequence.current++;
+              setError("");
+              void preview(startedWith, true);
+            }}
+          >
+            Use the receipt template the Store started with
+          </button>
+        </div>
+      )}
       <label>
         Saved templates
         <select
@@ -247,9 +341,15 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
           }}
         >
           <option value="">Choose a saved template</option>
-          {live !== null && !liveListed && (
-            <option value={live}>Receipt template in use today</option>
-          )}
+          {receiptTemplateStoreOptions({
+            live,
+            startedWith,
+            saved: (roster?.entries ?? []).map((entry) => entry.content.templateReference),
+          }).map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
           {roster?.entries.map((entry) => (
             <option key={entry.content.templateReference} value={entry.content.templateReference}>
               {languageName(entry.content.locale)} · draft {entry.revision}
@@ -258,7 +358,14 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
         </select>
       </label>
       <div className="store-setup-actions">
-        <button type="button" disabled={blocked} onClick={() => void loadRoster(null)}>
+        <button
+          type="button"
+          disabled={blocked}
+          onClick={() => {
+            void loadRoster(null);
+            loadInstalled();
+          }}
+        >
           Refresh saved templates
         </button>
         <button
@@ -289,6 +396,12 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
               ? "This check is out of date. Check the published template again."
               : ""}
       </p>
+      {installed?.state === "Unavailable" && (
+        <p>
+          The receipt template the Store started with could not be checked now. Refresh saved
+          templates to try again.
+        </p>
+      )}
       {candidate && (
         <div>
           <p>

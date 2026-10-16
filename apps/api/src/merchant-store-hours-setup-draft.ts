@@ -14,6 +14,7 @@ import {
   createStoreConfigurationVersion,
   materializeStoreSetupConfigurationVersionV2,
   parseStoreAdministrationReference,
+  readStoreConfigurationWithdrawal,
   parseStoreServiceExceptions,
   parseStoreSetupSaveCommand,
   parseStoreWeeklyServiceSchedule,
@@ -338,6 +339,41 @@ export function createMerchantStoreHoursSetupDraft(options: MerchantStoreConfigu
             digest(head) !== latestBasis.sourceSnapshotDigest
           )
             throw new StoreSetupOperationError("STORE_SETUP_OPERATION_UNPUBLISHED_CHANGES");
+          // v15 `8bd902e3` D2: a withdrawn or declined latest change never steers the next one. It
+          // is continued from only when it changed nothing but hours (its hours are replaced by
+          // this change); Store setup changes it carried are the Owner's to finish in Store setup.
+          const withdrawn =
+            recorded !== null &&
+            recorded.configurationReference !== published.configurationReference &&
+            (recorded.lifecycle === "Draft" ||
+              recorded.lifecycle === "PendingApproval" ||
+              recorded.lifecycle === "Approved") &&
+            (await readStoreConfigurationWithdrawal(tx, {
+              brandReference: fixed.brandReference,
+              storeReference: fixed.storeReference,
+              configurationReference: recorded.configurationReference,
+            })) !== null;
+          if (withdrawn) {
+            const basis = published.setupBasis;
+            const live: StoreSetupDraft = await setup.readRevision({
+              setupDraftReference: basis.setupDraftReference,
+              sourceRevision: basis.sourceRevision,
+              sourceSnapshotDigest: basis.sourceSnapshotDigest,
+            });
+            const apartFromHours = (content: StoreSetupDraft["content"]) =>
+              digest(
+                Object.fromEntries(
+                  Object.entries(content).filter(
+                    ([field]) =>
+                      !["weeklySchedule", "exceptions", "effectiveFrom", "effectiveUntil"].includes(
+                        field,
+                      ),
+                  ),
+                ),
+              );
+            if (apartFromHours(head.content) !== apartFromHours(live.content))
+              throw new StoreSetupOperationError("STORE_SETUP_OPERATION_UNPUBLISHED_CHANGES");
+          }
           // Everything but hours comes from the exact revision the editor showed (immutable), so a
           // retried request rebuilds the identical change.
           const from: StoreSetupDraft = await setup.readRevision(command.expectedSetup);

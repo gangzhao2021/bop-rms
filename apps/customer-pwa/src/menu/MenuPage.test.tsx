@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { MenuScreen, SellableConfigurator } from "./MenuPage.js";
 import type { ConfigureController } from "./configure-state.js";
 import type { MenuJourneyContext, MenuSellable, MenuView } from "./types.js";
+import { findInternalText, staticText } from "../../e2e/internal-text-patterns.js";
 
 const context: MenuJourneyContext = Object.freeze({
   publicStoreReference: "018f7500-0000-7000-8000-000000000001",
@@ -203,7 +204,9 @@ describe("WP-1701 Customer Menu screens", () => {
     expect(html).toContain("Milk requires at least 1");
     expect(html).toContain("Milk — choose 1");
     expect(html).toContain('type="radio"');
-    expect(html).toContain("+ CAD 0.75");
+    expect(html).toContain("+ $0.75");
+    expect(html).not.toContain("CAD");
+    expect(findInternalText([staticText(html)])).toEqual([]);
     expect(html).toContain("Prices shown are what each choice adds now");
     expect(html).toContain("Oat beverage");
     expect(html).toContain("Do not enter allergy, medical or other sensitive details");

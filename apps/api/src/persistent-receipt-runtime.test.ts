@@ -50,8 +50,6 @@ function fixture() {
       },
       templatePublication: {
         tenantReference: id(4),
-        templateReference: id(5),
-        familyReference: id(6),
         configurationType: "RECEIPT_TEMPLATE",
         purposeCode: "RECEIPT_ISSUANCE",
         authorize: async () => true,

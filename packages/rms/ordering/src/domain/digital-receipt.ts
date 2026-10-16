@@ -76,6 +76,11 @@ export interface DigitalReceiptSnapshot {
   readonly issuedAt: string;
   readonly locale: string;
   readonly templateVersion: string;
+  /**
+   * WP-2423: the exact published receipt template version this receipt was issued with (internal
+   * reference, never shown to customers). Absent on receipts issued before it was recorded.
+   */
+  readonly templateVersionReference?: string;
   readonly lines: readonly ReceiptLineSnapshot[];
   readonly subtotal: ReceiptMoney;
   readonly adjustments?: { readonly discount: ReceiptMoney; readonly fee: ReceiptMoney };
@@ -115,7 +120,9 @@ export class DigitalReceiptError extends Error {
       | "DIGITAL_RECEIPT_CHAIN_CONFLICT"
       | "DIGITAL_RECEIPT_PERMISSION_DENIED"
       | "DIGITAL_RECEIPT_NOT_FOUND"
-      | "DIGITAL_RECEIPT_DEPENDENCY_UNAVAILABLE",
+      | "DIGITAL_RECEIPT_DEPENDENCY_UNAVAILABLE"
+      /** WP-2423: the Store's published receipt template cannot be proven; nothing is issued. */
+      | "DIGITAL_RECEIPT_TEMPLATE_UNAVAILABLE",
   ) {
     super(code);
     this.name = "DigitalReceiptError";
@@ -294,6 +301,7 @@ export function parseDigitalReceiptSnapshot(value: unknown): DigitalReceiptSnaps
     value !== null && typeof value === "object" && Object.prototype.hasOwnProperty.call(value, key);
   const hasAdjustments = has("adjustments");
   const hasTaxDetails = has("taxDetails");
+  const hasTemplateVersionReference = has("templateVersionReference");
   const raw = exact(value, [
     "receiptReference",
     "orderReference",
@@ -316,6 +324,7 @@ export function parseDigitalReceiptSnapshot(value: unknown): DigitalReceiptSnaps
     "refundedTotal",
     ...(hasAdjustments ? ["adjustments"] : []),
     ...(hasTaxDetails ? ["taxDetails"] : []),
+    ...(hasTemplateVersionReference ? ["templateVersionReference"] : []),
   ]);
   if (!Array.isArray(raw.lines) || raw.lines.length < 1 || raw.lines.length > 200) return fail();
   if (typeof raw.locale !== "string" || !localePattern.test(raw.locale)) return fail();
@@ -330,6 +339,9 @@ export function parseDigitalReceiptSnapshot(value: unknown): DigitalReceiptSnaps
   const parsedTaxDetails = hasTaxDetails ? taxDetails(raw.taxDetails) : null;
   const parsed = Object.freeze({
     ...(parsedTaxDetails === null ? {} : { taxDetails: parsedTaxDetails }),
+    ...(hasTemplateVersionReference
+      ? { templateVersionReference: reference(raw.templateVersionReference) }
+      : {}),
     ...(adjustments === null
       ? {}
       : {

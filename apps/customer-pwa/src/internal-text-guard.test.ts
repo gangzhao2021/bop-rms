@@ -37,3 +37,11 @@ it("flags the capitalized role on the item page and keeps the plain wording", ()
     ]),
   ).toEqual([]);
 });
+
+it("flags an amount written with its currency code and keeps the app's money format", () => {
+  for (const text of ["Oat beverage + CAD 0.75", "Total CAD $14.68", "From CAD5.25"])
+    expect(findInternalText([text]), text).not.toEqual([]);
+  expect(
+    findInternalText(["Oat beverage + $0.75", "From $5.25", "Tip (CAD)", "No extra charge"]),
+  ).toEqual([]);
+});

@@ -124,6 +124,44 @@ describe("WP-2423 Q13 alert rules", () => {
     ({ notifications } = advanceAlertState(state, evaluateAlertConditions(o), T0 + 32 * MIN));
     expect(notifications.map((n) => [n.kind, n.key])).toEqual([["cleared", "updates.retrying"]]);
   });
+  it("WP-2423: says receipts are not issued after 2 minutes when the Store's receipt template cannot be used", () => {
+    const o = healthy();
+    o.business.receiptTemplate = { ready: true };
+    expect(keys(evaluateAlertConditions(o))).toEqual([]);
+    o.business.receiptTemplate = { ready: false, reason: "TemplateNotProven" };
+    const c = evaluateAlertConditions(o);
+    expect(keys(c)).toEqual(["receipts.template"]);
+    expect(c.get("receipts.template").severity).toBe("critical");
+    const text = renderAlert("receipts.template", c.get("receipts.template").params);
+    expect(text.title).toBe("Receipts are not being issued");
+    expect(text.summary).toContain("The receipt template chosen in Store setup cannot be used");
+    expect(text.action).toContain("step 5");
+    expect(text.runbook).toBe("alert-receipts-template");
+    expect(text.summary.length).toBeLessThanOrEqual(600);
+    expect(text.action.length).toBeLessThanOrEqual(400);
+    expect(`${text.title} ${text.summary} ${text.action}`).not.toMatch(/[A-Z]{2,}_[A-Z]/u);
+    // A brief failure is not raised; one lasting 2 minutes is, and it clears once receipts work.
+    let { state, notifications } = advanceAlertState(emptyAlertState(), c, T0);
+    expect(notifications).toEqual([]);
+    ({ state, notifications } = advanceAlertState(state, c, T0 + 2 * MIN));
+    expect(notifications.map((n) => [n.kind, n.key])).toEqual([["raised", "receipts.template"]]);
+    o.business.receiptTemplate = { ready: false, reason: "StoreConfigurationUnavailable" };
+    expect(
+      renderAlert("receipts.template", evaluateAlertConditions(o).get("receipts.template").params)
+        .summary,
+    ).toContain("published settings could not be read");
+    o.business.receiptTemplate = { ready: true };
+    ({ state, notifications } = advanceAlertState(state, evaluateAlertConditions(o), T0 + 3 * MIN));
+    expect(notifications).toEqual([]);
+    ({ notifications } = advanceAlertState(state, evaluateAlertConditions(o), T0 + 6 * MIN));
+    expect(notifications.map((n) => [n.kind, n.key])).toEqual([["cleared", "receipts.template"]]);
+    // A check that could not run is reported as such, never as fine.
+    o.business.receiptTemplate = "unreadable";
+    expect(keys(evaluateAlertConditions(o))).toEqual(["monitor.source"]);
+    expect(evaluateAlertConditions(o).get("monitor.source").params.sources).toEqual([
+      "the receipt template check",
+    ]);
+  });
   it("says no backup exists until the first one, and nothing about the supervisor during maintenance", () => {
     const o = healthy();
     o.backup = { lastSuccessAt: null };

@@ -12,6 +12,7 @@ import {
 } from "../../rms/store/src/index.ts";
 import { input as quoteInput } from "../../rms/pricing/src/tests/price-quote.fixture.ts";
 import { createMerchantStoreConfigurationOrdinary } from "../../../apps/api/dist/merchant-store-configuration-ordinary.js";
+import { createMerchantStoreConfigurationWithdrawal } from "../../../apps/api/dist/merchant-store-configuration-withdrawal.js";
 import { appendAuditRecordInTransaction } from "../../bop/audit/src/index.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { createInternalStoreConfiguration } from "../../../tooling/environment/pilot-store-configuration.mjs";
@@ -371,6 +372,23 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
           () => act(people.owner, "Approve", "SoleOperator"),
           isSole("NotInEffect", "Off"),
         );
+        // v15 (`8bd902e3` D3/D9): with no Store name kept for the Owner, the Store Manager sees
+        // the Owner's Store role (administered name, owner-seeded TEST-ONLY; v15 "Owner"), never a
+        // reference, and is not offered to decline it.
+        await admin.query(
+          "INSERT INTO bop_permission.role_administration_version (administration_reference,role_id,version,brand_id,store_id,role_code,display_name,description,role_type,lifecycle,source_policy_version,authored_by_reference,submitted_by_reference,approved_by_reference,decision_evidence_reference,reason_code,changed_at,data_classification) SELECT $1,role_id,1,brand_id,$2,role_code,'Owner','All Store permissions (TEST-ONLY)','System','Active',1,$3,$3,$4,$5,'STORE_OPENING',now(),'ConfigurationMetadata' FROM bop_permission.role WHERE role_id=$6",
+          [
+            reference(),
+            scope.storeReference,
+            people.secondOwner.actor,
+            people.frontOfHouse.actor,
+            reference(),
+            "01a7e1b0-0000-7000-8000-000000000004",
+          ],
+        );
+        const byRole = await (await hoursFor(people.manager)).read(people.manager.sessionCookie);
+        assert.equal(byRole.latestAuthorName, "the Owner");
+        assert.equal(byRole.viewerMayDecline, false);
         // The Store Manager sees whose change waits (by the name the Store keeps for the Owner,
         // owner-seeded TEST-ONLY), and gets no sole-operator view.
         await admin.query(
@@ -556,7 +574,7 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
         effectiveFrom: configured(now()),
         effectiveUntil: configured(null),
       };
-      const revision1 = await setupSave(setupContent, null, installedNow.configurationReference);
+      let revision1 = await setupSave(setupContent, null, installedNow.configurationReference);
 
       // --- The Owner publishes revision 1 through the ordinary Store setup publication (another
       // Owner approves). Test-controlled: the saved references are accepted as they are.
@@ -645,10 +663,210 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
           },
         });
       };
+      // --- WP-2423 v15 (`8bd902e3` D2): a configuration created from Store setup is withdrawn
+      // while the published configuration is still the installed (V1) kind. The hours editor's
+      // path follows the PUBLISHED configuration: an ordinary hours change (the hours-only setup
+      // revision is refused for a V1 published configuration), which builds on the published
+      // hours, not the withdrawn change. The Store Manager and the Owner both save, send and get
+      // their changes published (the Owner alone as sole operator); v15 recovers without data fix.
+      {
+        await publishStep(people.owner, "Materialize", {
+          setupSelector: {
+            setupDraftReference: revision1.setupDraftReference,
+            sourceRevision: revision1.revision,
+            sourceSnapshotDigest: digest(revision1),
+          },
+          reasonCode: "STORE_SETUP_PUBLICATION",
+        });
+        let read = await (await hoursFor(people.owner)).read(people.owner.sessionCookie);
+        const created = read.latest;
+        assert.notEqual(created.setupBasis, undefined);
+        assert.equal(read.current.setupBasis, undefined);
+        const withdrawn = await createMerchantStoreConfigurationWithdrawal({
+          persistence: people.owner.persistence,
+          authentication: people.owner.authentication,
+        })({
+          sessionCookie: people.owner.sessionCookie,
+          csrf: people.owner.csrf,
+          command: {
+            configurationReference: created.configurationReference,
+            configurationVersion: created.configurationVersion,
+            auditReference: reference(),
+          },
+        });
+        assert.deepEqual(withdrawn, { status: "Applied", kind: "Withdrawn" });
+        /** The browser's ordinary hours save: from the published hours (the latest was withdrawn),
+         * superseding the latest recorded change. */
+        const ordinaryHours = async (person, cutoff) => {
+          const composition = await hoursFor(person);
+          const view = await composition.read(person.sessionCookie);
+          assert.notEqual(view.latestWithdrawal ?? null, null);
+          const base = view.current;
+          assert.equal(base.setupBasis, undefined);
+          return composition({
+            sessionCookie: person.sessionCookie,
+            csrf: person.csrf,
+            command: {
+              command: "SaveDraft",
+              operationReference: reference(),
+              auditReference: reference(),
+              expectedVersion: view.expectedVersion,
+              configuration: {
+                ...base,
+                configurationReference: reference(),
+                configurationVersion: view.expectedVersion + 1,
+                supersedesConfigurationReference: view.latest.configurationReference,
+                lifecycle: "Draft",
+                weeklySchedule: base.weeklySchedule.map((day) => ({
+                  ...day,
+                  intervals: day.intervals.map((i) => ({ ...i, orderCutoffSeconds: cutoff })),
+                })),
+                effectiveFrom: view.observedAt,
+                effectiveUntil: null,
+                reasonCode: "STORE_HOURS_UPDATE",
+                approvedByReference: null,
+                approvalEvidenceReference: null,
+                publicationReference: null,
+                liveGateEvidenceReference: null,
+                createdAt: view.observedAt,
+                updatedAt: view.observedAt,
+              },
+            },
+          });
+        };
+        // The hours-only setup revision the editor used to send (v15: 409 "Source changed") is
+        // refused for a V1 published configuration and writes nothing.
+        const stuck = await (await hoursFor(people.manager)).read(people.manager.sessionCookie);
+        await refusedUnchanged(
+          () =>
+            hoursFor(people.manager).then((composition) =>
+              composition.hoursDraft({
+                sessionCookie: people.manager.sessionCookie,
+                csrf: people.manager.csrf,
+                command: {
+                  expectedSetup: {
+                    setupDraftReference: created.setupBasis.setupDraftReference,
+                    sourceRevision: created.setupBasis.sourceRevision,
+                    sourceSnapshotDigest: created.setupBasis.sourceSnapshotDigest,
+                  },
+                  setupOperationReference: reference(),
+                  operationReference: reference(),
+                  auditReference: reference(),
+                  configurationReference: reference(),
+                  expectedVersion: stuck.expectedVersion,
+                  weeklySchedule: stuck.current.weeklySchedule,
+                  exceptions: stuck.current.exceptions,
+                  effectiveFrom: stuck.observedAt,
+                },
+              }),
+            ),
+          isCode("STORE_CONFIGURATION_LIFECYCLE_CONFLICT"),
+        );
+        // The Store Manager's ordinary change: saved, checked and sent; the Owner approves and
+        // publishes it (two people).
+        assert.equal((await ordinaryHours(people.manager, 600)).status, "Applied");
+        read = await (await hoursFor(people.manager)).read(people.manager.sessionCookie);
+        assert.equal(read.latest.supersedesConfigurationReference, created.configurationReference);
+        assert.equal(read.latest.setupBasis, undefined);
+        assert.equal(read.latestWithdrawal, null);
+        await act(people.manager, "Validate");
+        await act(people.manager, "Submit");
+        // v15 D3/D9: the Owner, reading the Store Manager's change, may decline it; the Store
+        // Manager, reading the Owner's change below, may not.
+        read = await (await hoursFor(people.owner)).read(people.owner.sessionCookie);
+        assert.equal(read.viewerMayDecline, true);
+        await act(people.owner, "Approve");
+        await act(people.owner, "Publish");
+        read = await (await hoursFor(people.owner)).read(people.owner.sessionCookie);
+        assert.equal(read.current.authoredByReference, people.manager.actor);
+        assert.equal(read.current.weeklySchedule[0].intervals[0].orderCutoffSeconds, 600);
+        // The Owner's own ordinary change, approved alone as sole operator and published.
+        const ownerWithdrawn = await (async () => {
+          // Another withdrawn change from Store setup first (the v15 shape again).
+          await publishStep(people.owner, "Materialize", {
+            setupSelector: {
+              setupDraftReference: revision1.setupDraftReference,
+              sourceRevision: revision1.revision,
+              sourceSnapshotDigest: digest(revision1),
+            },
+            reasonCode: "STORE_SETUP_PUBLICATION",
+          }).then(
+            () => assert.fail("the setup was saved on an older configuration"),
+            (error) => assert.match(String(error?.code ?? error?.message), /OUTDATED|CONFLICT/u),
+          );
+          return null;
+        })();
+        assert.equal(ownerWithdrawn, null);
+        // Recreate the v15 shape on the current published V1 configuration: the Owner saves the
+        // setup again (it builds on the latest configuration), creates and withdraws it.
+        const latestNow = read.current;
+        revision1 = await setupSave(
+          { ...setupContent, effectiveFrom: configured(now()) },
+          revision1,
+          latestNow.configurationReference,
+        );
+        await publishStep(people.owner, "Materialize", {
+          setupSelector: {
+            setupDraftReference: revision1.setupDraftReference,
+            sourceRevision: revision1.revision,
+            sourceSnapshotDigest: digest(revision1),
+          },
+          reasonCode: "STORE_SETUP_PUBLICATION",
+        });
+        const createdAgain = (await (await hoursFor(people.owner)).read(people.owner.sessionCookie))
+          .latest;
+        assert.notEqual(createdAgain.setupBasis, undefined);
+        await createMerchantStoreConfigurationWithdrawal({
+          persistence: people.owner.persistence,
+          authentication: people.owner.authentication,
+        })({
+          sessionCookie: people.owner.sessionCookie,
+          csrf: people.owner.csrf,
+          command: {
+            configurationReference: createdAgain.configurationReference,
+            configurationVersion: createdAgain.configurationVersion,
+            auditReference: reference(),
+          },
+        });
+        assert.equal((await ordinaryHours(people.owner, 300)).status, "Applied");
+        // The Store Manager sees the Owner's open change by the Owner's Store name, and is not
+        // offered to decline it.
+        read = await (await hoursFor(people.manager)).read(people.manager.sessionCookie);
+        assert.equal(read.latestAuthorName, "Test Owner");
+        assert.equal(read.viewerMayDecline, false);
+        await act(people.owner, "Validate");
+        await act(people.owner, "Submit");
+        await soleOperator("On");
+        const revoked = await revokeSecondOwnerApproval();
+        await verifyOwner();
+        read = await (await hoursFor(people.owner)).read(people.owner.sessionCookie);
+        assert.equal(read.soleOperator.status, "Effective");
+        assert.equal((await act(people.owner, "Approve", "SoleOperator")).status, "Applied");
+        await act(people.owner, "Publish");
+        read = await (await hoursFor(people.owner)).read(people.owner.sessionCookie);
+        assert.equal(read.current.authoredByReference, people.owner.actor);
+        assert.equal(read.current.approvedByReference, people.owner.actor);
+        assert.equal(read.current.weeklySchedule[0].intervals[0].orderCutoffSeconds, 300);
+        const running = await transactions.run((tx) =>
+          readPublishedStoreConfiguration(operating, tx, now(), async () => true),
+        );
+        assert.equal(
+          running.configuration.configurationReference,
+          read.current.configurationReference,
+        );
+        await soleOperator("Off");
+        await restoreSecondOwnerApproval(revoked);
+        // The setup is saved again on the configuration now published, for the journey below.
+        revision1 = await setupSave(
+          { ...setupContent, effectiveFrom: configured(now()) },
+          revision1,
+          read.current.configurationReference,
+        );
+      }
       await publishStep(people.owner, "Materialize", {
         setupSelector: {
           setupDraftReference: revision1.setupDraftReference,
-          sourceRevision: 1,
+          sourceRevision: revision1.revision,
           sourceSnapshotDigest: digest(revision1),
         },
         reasonCode: "STORE_SETUP_PUBLICATION",
@@ -662,7 +880,7 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
       // Before WP-2423 Q4 this refused to start (PILOT_STORE_CONFIGURATION_SETUP_BASIS_UNSUPPORTED).
       const managerHours = await hoursFor(people.manager);
       const view = await managerHours.read(people.manager.sessionCookie);
-      assert.equal(view.current.setupBasis.sourceRevision, 1);
+      assert.equal(view.current.setupBasis.sourceRevision, revision1.revision);
       assert.equal(view.current.lifecycle, "Published");
       const publishedX = view.current;
 
@@ -716,8 +934,8 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
         "SELECT revision,actor_id,snapshot_json,snapshot_digest FROM rms_store.store_setup_draft_revision WHERE store_id=$1 ORDER BY revision",
         [scope.storeReference],
       );
-      assert.equal(revisions.rows.length, 2);
-      const revision2 = revisions.rows[1];
+      assert.equal(revisions.rows.length, revision1.revision + 1);
+      const revision2 = revisions.rows[revision1.revision];
       assert.equal(revision2.actor_id, people.manager.actor);
       assert.deepEqual(revision2.snapshot_json.content.weeklySchedule, configured(newHours));
       assert.equal(
@@ -738,7 +956,7 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
         afterSave.latest.supersedesConfigurationReference,
         publishedX.configurationReference,
       );
-      assert.equal(afterSave.latest.setupBasis.sourceRevision, 2);
+      assert.equal(afterSave.latest.setupBasis.sourceRevision, revision1.revision + 1);
       assert.equal(afterSave.latest.setupBasis.sourceSnapshotDigest, revision2.snapshot_digest);
       assert.deepEqual(afterSave.latest.weeklySchedule, newHours);
       const audits = await admin.query(
@@ -762,7 +980,7 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
             [scope.storeReference],
           )
         ).rows[0].n,
-        2,
+        revision1.revision + 1,
       );
 
       // Front of House cannot change hours.
@@ -917,6 +1135,61 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
       );
       await soleOperator("Off");
       await restoreSecondOwnerApproval(revokedAgain);
+
+      // --- v15 (`8bd902e3` D2), published from Store setup: a withdrawn hours-only change does
+      // not block the next hours change; the browser continues from the latest setup revision (it
+      // changed nothing but hours) and the new change replaces its hours.
+      {
+        const withdrawFor = (person, latest) =>
+          createMerchantStoreConfigurationWithdrawal({
+            persistence: person.persistence,
+            authentication: person.authentication,
+          })({
+            sessionCookie: person.sessionCookie,
+            csrf: person.csrf,
+            command: {
+              configurationReference: latest.configurationReference,
+              configurationVersion: latest.configurationVersion,
+              auditReference: reference(),
+            },
+          });
+        const hoursOn = (v, closing) => ({
+          expectedSetup: {
+            setupDraftReference: (v.latest ?? v.current).setupBasis.setupDraftReference,
+            sourceRevision: (v.latest ?? v.current).setupBasis.sourceRevision,
+            sourceSnapshotDigest: (v.latest ?? v.current).setupBasis.sourceSnapshotDigest,
+          },
+          setupOperationReference: reference(),
+          operationReference: reference(),
+          auditReference: reference(),
+          configurationReference: reference(),
+          expectedVersion: v.expectedVersion,
+          weeklySchedule: newHours.map((day) => ({
+            ...day,
+            intervals: day.intervals.map((i) => ({ ...i, endLocalTime: closing })),
+          })),
+          exceptions: newExceptions,
+          effectiveFrom: v.observedAt,
+        });
+        let v = await managerHours.read(people.manager.sessionCookie);
+        assert.equal((await saveHours(people.manager, hoursOn(v, "19:00:00"))).status, "Applied");
+        v = await managerHours.read(people.manager.sessionCookie);
+        const first = v.latest;
+        assert.deepEqual(await withdrawFor(people.manager, first), {
+          status: "Applied",
+          kind: "Withdrawn",
+        });
+        v = await managerHours.read(people.manager.sessionCookie);
+        assert.equal(v.latestWithdrawal.kind, "Withdrawn");
+        assert.equal((await saveHours(people.manager, hoursOn(v, "18:00:00"))).status, "Applied");
+        v = await managerHours.read(people.manager.sessionCookie);
+        assert.equal(v.latestWithdrawal, null);
+        assert.equal(v.latest.supersedesConfigurationReference, first.configurationReference);
+        assert.equal(v.latest.weeklySchedule[0].intervals[0].endLocalTime, "18:00:00");
+        for (const field of ["taxConfigurationReference", "addressReference", "receiptReference"])
+          assert.equal(v.latest[field], v.current[field], field);
+        assert.equal((await withdrawFor(people.manager, v.latest)).status, "Applied");
+      }
       const latestRevision = (
         await admin.query(
           "SELECT revision,snapshot_json FROM rms_store.store_setup_draft_revision WHERE store_id=$1 ORDER BY revision DESC LIMIT 1",
@@ -949,6 +1222,59 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
         }),
         (error) => error?.code === "STORE_SETUP_OPERATION_UNPUBLISHED_CHANGES",
       );
+      // v15 (`8bd902e3` D2): the Owner creates a configuration from that setup and withdraws it.
+      // The withdrawn change carries Store setup changes beyond hours: an hours change neither
+      // continues from it nor carries them (they stay the Owner's to finish in Store setup).
+      {
+        const recorded = (await managerHours.read(people.manager.sessionCookie)).latest;
+        const revision4 = await setupSave(
+          { ...revision3.content, effectiveFrom: configured(now()) },
+          revision3,
+          recorded.configurationReference,
+        );
+        await publishStep(people.owner, "Materialize", {
+          setupSelector: {
+            setupDraftReference: revision4.setupDraftReference,
+            sourceRevision: revision4.revision,
+            sourceSnapshotDigest: digest(revision4),
+          },
+          reasonCode: "STORE_SETUP_PUBLICATION",
+        });
+        const created = (await managerHours.read(people.manager.sessionCookie)).latest;
+        assert.equal(created.setupBasis.sourceRevision, revision4.revision);
+        const withdrawn = await createMerchantStoreConfigurationWithdrawal({
+          persistence: people.owner.persistence,
+          authentication: people.owner.authentication,
+        })({
+          sessionCookie: people.owner.sessionCookie,
+          csrf: people.owner.csrf,
+          command: {
+            configurationReference: created.configurationReference,
+            configurationVersion: created.configurationVersion,
+            auditReference: reference(),
+          },
+        });
+        assert.equal(withdrawn.status, "Applied");
+        const v = await managerHours.read(people.manager.sessionCookie);
+        await refusedUnchanged(
+          () =>
+            saveHours(people.manager, {
+              ...hoursCommand,
+              expectedSetup: {
+                setupDraftReference: created.setupBasis.setupDraftReference,
+                sourceRevision: created.setupBasis.sourceRevision,
+                sourceSnapshotDigest: created.setupBasis.sourceSnapshotDigest,
+              },
+              setupOperationReference: reference(),
+              operationReference: reference(),
+              auditReference: reference(),
+              configurationReference: reference(),
+              expectedVersion: v.expectedVersion,
+              effectiveFrom: v.observedAt,
+            }),
+          (error) => error?.code === "STORE_SETUP_OPERATION_UNPUBLISHED_CHANGES",
+        );
+      }
 
       // --- Another Store sees none of it (row-level security under the API role).
       const otherStore = id(0x400);

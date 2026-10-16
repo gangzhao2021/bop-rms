@@ -165,3 +165,16 @@ it("history refuses changed reader, cursor, ordering, record tuple and extra aut
     expect(() => history(poisoned, scope, null)).toThrow();
   expect(() => history(page, scope, 4)).toThrow();
 });
+// WP-2423 v15 (`8bd902e3` D1): the Store's tax configuration in force travels with the workspace.
+it("carries the Store's tax configuration in force, or none, and refuses anything else", () => {
+  expect(
+    parse({ ...workspace(), storeTaxConfigurationReference: id(40) }, scope)
+      .storeTaxConfigurationReference,
+  ).toBe(id(40));
+  expect(
+    parse({ ...workspace(), storeTaxConfigurationReference: null }, scope)
+      .storeTaxConfigurationReference,
+  ).toBeNull();
+  expect(parse(workspace(), scope)).not.toHaveProperty("storeTaxConfigurationReference");
+  denied({ ...workspace(), storeTaxConfigurationReference: "DEMO_STORE_TAX" });
+});

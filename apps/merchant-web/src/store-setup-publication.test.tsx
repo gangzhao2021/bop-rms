@@ -93,6 +93,28 @@ describe("WP-2423 DEC-STORE-SETUP-PUBLICATION Store setup publication screens", 
     };
     expect(liveStoreSettingsChange(kept, live).exceptions).toBe(kept.exceptions);
     expect(liveStoreSettingsChange(kept, live)).not.toHaveProperty("timeZone");
+    // WP-2423 v15 (`8bd902e3` D1): an installed configuration may name the installer's tax
+    // reference; the Store's tax configuration in force (the one quotes use) is carried instead.
+    const inForce = { ...live, storeTaxConfigurationReference: id(40) };
+    expect(liveStoreSettingsChange(content, inForce).taxConfigurationReference).toEqual({
+      state: "Configured",
+      value: id(40),
+    });
+    const carried = {
+      ...content,
+      taxConfigurationReference: { state: "Configured" as const, value: id(40) },
+    };
+    const inForceHtml = renderToStaticMarkup(
+      <MemoryRouter>
+        <StoreSetupLiveSettings
+          content={carried}
+          live={inForce}
+          disabled={false}
+          onUse={() => undefined}
+        />
+      </MemoryRouter>,
+    );
+    expect(inForceHtml).toContain("Tax settings (see Tax review): same as the live Store");
     expect(
       renderToStaticMarkup(
         <StoreSetupLiveSettings

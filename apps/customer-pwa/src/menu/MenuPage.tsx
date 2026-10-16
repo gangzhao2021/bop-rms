@@ -5,6 +5,7 @@ import {
 } from "./option-configuration.js";
 import { createBrowserPickupCartClient } from "../cart/pickup-cart-client.js";
 import { CustomerPage } from "../journey/CustomerPage.js";
+import { formatDecimalMoney } from "../journey/format.js";
 import { cartIssueMessage } from "../journey/messages.js";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { FormEvent } from "react";
@@ -115,12 +116,12 @@ function choiceText(rule: MenuOptionRule): string {
   if (min === 0) return `optional, up to ${max}`;
   return `choose ${min} to ${max}`;
 }
-/** "+ CAD 0.75", "No extra charge", or a note that the quote will price it. */
+/** "+ $0.75", "No extra charge", or a note that the quote will price it. */
 function optionPriceText(price: MenuOptionRule["options"][number]["price"]): string {
   if (price === null) return "Price shown in your final quote";
-  return /^0+(\.0+)?$/u.test(price.amount)
-    ? "No extra charge"
-    : `+ ${price.currency} ${price.amount}`;
+  if (/^0+(\.0+)?$/u.test(price.amount)) return "No extra charge";
+  const amount = formatDecimalMoney(price.amount, price.currency);
+  return amount === null ? "Price shown in your final quote" : `+ ${amount}`;
 }
 
 export function MenuBrowsePage({ context, client, readOnlyNotice, cartCount }: MenuPageProps) {
@@ -618,9 +619,8 @@ function SellableCard({
 function priceLine(sellable: MenuSellable): string {
   if (sellable.price === null) return "Priced at checkout";
   // Decimal text from the server; never converted to a binary number.
-  const amount =
-    (sellable.price.currency === "CAD" ? "$" : sellable.price.currency + " ") +
-    sellable.price.amount;
+  const amount = formatDecimalMoney(sellable.price.amount, sellable.price.currency);
+  if (amount === null) return "Priced at checkout";
   return sellable.optionRules.length === 0 ? amount : `From ${amount}`;
 }
 function AvailabilityLine({ sellable }: { readonly sellable: MenuSellable }) {

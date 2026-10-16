@@ -3,6 +3,7 @@ import {
   endSentence,
   formatClockTime,
   formatDateTime,
+  formatDecimalMoney,
   formatMinutesUntil,
   formatMoney,
   percentOfMinor,
@@ -25,6 +26,22 @@ describe("customer money presentation", () => {
     for (const bad of ["", "1.20", "NaN", "1e3", " 100", "001"])
       expect(formatMoney(bad, "CAD")).toBe("Amount unavailable");
     expect(formatMoney("100", "cad")).toBe("Amount unavailable");
+  });
+  it.each([
+    ["0.75", "$0.75"],
+    ["5", "$5.00"],
+    ["4.5", "$4.50"],
+    ["4.5000", "$4.50"],
+    ["1284.6", "$1,284.60"],
+    ["0.125", "$0.125"],
+  ])("shows menu decimal CAD %s as %s without rounding", (amount, expected) => {
+    expect(formatDecimalMoney(amount, "CAD")).toBe(expected);
+  });
+  it("returns null for malformed menu decimals instead of guessing", () => {
+    expect(formatDecimalMoney("1.50", "USD")).toBe("USD 1.50");
+    for (const bad of ["", ".5", "1.", "01.00", "-1.00", "1e3", " 1.00", "NaN"])
+      expect(formatDecimalMoney(bad, "CAD"), bad).toBeNull();
+    expect(formatDecimalMoney("1.00", "cad")).toBeNull();
   });
 });
 

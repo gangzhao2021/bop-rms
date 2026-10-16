@@ -248,6 +248,8 @@ describe("WP-2423 Q13 observations", () => {
       stuckUpdates: { count: 3, oldestAgeMs: 3600_000 },
       // WP-2423: retries still running (4 tries or failing 10+ minutes), oldest failing 20 minutes.
       retryingUpdates: { count: 2, oldestAgeMs: 20 * 60_000 },
+      // No receipt template check composed: not checked (never reported as fine or failing).
+      receiptTemplate: null,
       reconciliationDifferences: { count: 2, oldestAgeMs: 24 * 3600_000 },
       settlementExceptions: { count: 2, oldestAgeMs: 32 * 3600_000 },
     });
@@ -259,6 +261,48 @@ describe("WP-2423 Q13 observations", () => {
       [expect.any(String), [4, "2026-10-16T15:50:00.000Z"]],
       [expect.any(String), [4, "2026-10-16T15:50:00.000Z"]],
     ]);
+  });
+  it("WP-2423: reports whether a receipt can be issued with the Store's published template", async () => {
+    const now = Date.parse("2026-10-15T16:00:00.000Z");
+    const resources = {
+      scope: { brandReference: "b", storeReference: "s" },
+      transactions: { run: async (work) => work({ query: async () => ({ rows: [] }) }) },
+      database: {
+        transactions: () => ({
+          run: async (work) => work({ query: async () => ({ rows: [] }) }),
+        }),
+      },
+    };
+    const read = (readReceiptTemplate) =>
+      readBusinessSignals({
+        resources,
+        installation: {},
+        now,
+        settlementExceptions: { count: 0, oldestAgeMs: 0 },
+        dependencies: {
+          createReconciliationExceptions: () => async () => ({
+            items: [],
+            nextAfterExceptionReference: null,
+          }),
+          readReceiptTemplate,
+        },
+      });
+    const ready = await read(async (r) => {
+      expect(r).toBe(resources);
+      return { ready: true, templateReference: "t", versionReference: "v", versionCode: "X" };
+    });
+    // Only the outcome leaves the check (no references).
+    expect(ready.receiptTemplate).toEqual({ ready: true });
+    expect(
+      (await read(async () => ({ ready: false, reason: "TemplateNotProven" }))).receiptTemplate,
+    ).toEqual({ ready: false, reason: "TemplateNotProven" });
+    expect(
+      (
+        await read(async () => {
+          throw Error("DIGITAL_RECEIPT_PERMISSION_DENIED");
+        })
+      ).receiptTemplate,
+    ).toBe("unreadable");
   });
   it("reports business signals as unreadable when the database cannot be reached, and retries", async () => {
     const load = vi.fn(async () => {

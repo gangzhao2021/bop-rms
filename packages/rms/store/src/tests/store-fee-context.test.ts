@@ -59,4 +59,47 @@ describe("shared Store fee context parser", () => {
       ]),
     ).toThrow();
   });
+  it("lets an enabled Tip carry no tax classification, never a service charge or delivery fee", () => {
+    const tip = {
+      chargeType: "Tip",
+      state: "Enabled",
+      taxClassificationReference: null,
+      orderTypes: ["Pickup"],
+    };
+    expect(parseStoreCompleteFeeContexts([...fees().slice(0, 2), tip])[2]).toEqual({
+      chargeType: "Tip",
+      state: "Enabled",
+      taxClassificationReference: null,
+      orderTypes: ["Pickup"],
+    });
+    // A classified Tip stays valid (data recorded before this decision).
+    expect(
+      parseStoreFeeContexts([...fees().slice(0, 2), { ...tip, taxClassificationReference: id }])[2],
+    ).toMatchObject({ taxClassificationReference: id });
+    expect(() =>
+      parseStoreFeeContexts([
+        { ...fees()[0], taxClassificationReference: null },
+        ...fees().slice(1),
+      ]),
+    ).toThrow();
+    expect(() =>
+      parseStoreFeeContexts([
+        fees()[0],
+        {
+          chargeType: "DeliveryFee",
+          state: "Enabled",
+          taxClassificationReference: null,
+          orderTypes: ["Pickup"],
+        },
+        fees()[2],
+      ]),
+    ).toThrow();
+    // Absent is not the same as none: the key stays, so recorded shapes keep four members.
+    expect(() =>
+      parseStoreFeeContexts([
+        ...fees().slice(0, 2),
+        { chargeType: "Tip", state: "Enabled", orderTypes: ["Pickup"] },
+      ]),
+    ).toThrow();
+  });
 });

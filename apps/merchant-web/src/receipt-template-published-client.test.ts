@@ -201,3 +201,60 @@ it("aborted in-flight response and foreign active version never survive final ob
     ),
   ).toThrow();
 });
+it("WP-2423: reads the receipt template the Store started with through installed=true", async () => {
+  const f = vi.fn<typeof fetch>().mockImplementation(async () => response(packet())),
+    result = await createReceiptTemplatePublishedClient(f).loadInstalled({
+      expectedScope: scope,
+      locale: "en",
+    });
+  expect(result?.templateReference).toBe(id(8));
+  expect(result?.currentVersion.templateReference).toBe(id(8));
+  expect(String(f.mock.calls[0]?.[0])).toBe(
+    `/merchant/store-setup/receipt-template-published?storeReference=${id(3)}&installed=true&locale=en`,
+  );
+  // A Store without one: nothing to offer.
+  const none = vi.fn<typeof fetch>().mockImplementation(
+    async () =>
+      new Response(JSON.stringify({ error: "receipt_template_installed_none" }), {
+        status: 404,
+        headers: { "content-type": "application/json", "cache-control": "no-store" },
+      }),
+  );
+  expect(
+    await createReceiptTemplatePublishedClient(none).loadInstalled({
+      expectedScope: scope,
+      locale: "en",
+    }),
+  ).toBeNull();
+  // A 404 for a named template is not "none".
+  await expect(createReceiptTemplatePublishedClient(none).load(input())).rejects.toMatchObject({
+    code: "Unavailable",
+  });
+  // A reply naming no template, or a version of another template, is refused.
+  const broken = vi
+    .fn<typeof fetch>()
+    .mockImplementation(async () => response({ ...packet(), templateReference: "RECEIPT_V1" }));
+  await expect(
+    createReceiptTemplatePublishedClient(broken).loadInstalled({
+      expectedScope: scope,
+      locale: "en",
+    }),
+  ).rejects.toMatchObject({ code: "Invalid" });
+  const foreign = vi
+    .fn<typeof fetch>()
+    .mockImplementation(async () => response({ ...packet(), templateReference: id(77) }));
+  await expect(
+    createReceiptTemplatePublishedClient(foreign).loadInstalled({
+      expectedScope: scope,
+      locale: "en",
+    }),
+  ).rejects.toMatchObject({ code: "Invalid" });
+  // The installed read takes no template of the caller's choosing.
+  await expect(
+    createReceiptTemplatePublishedClient(f).loadInstalled({
+      expectedScope: scope,
+      locale: "en",
+      templateReference: id(8),
+    } as Parameters<ReturnType<typeof createReceiptTemplatePublishedClient>["loadInstalled"]>[0]),
+  ).rejects.toMatchObject({ code: "Invalid" });
+});

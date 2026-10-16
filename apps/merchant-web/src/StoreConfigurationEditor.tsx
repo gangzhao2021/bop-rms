@@ -51,6 +51,29 @@ export function storeConfigurationEditBase(
 ): StoreConfigurationSnapshot | null {
   return view.latestWithdrawal ? (view.current ?? view.latest) : (view.latest ?? view.current);
 }
+/** WP-2423 (v15 `8bd902e3` D2): the Store setup revision an hours change continues from, or none
+ * for an ordinary hours change. The PUBLISHED configuration decides the kind of change: an installed
+ * (V1) one takes an ordinary change even when a withdrawn or declined change from Store setup is the
+ * latest; one from Store setup takes an hours-only setup revision continuing from the latest
+ * setup-based change (the server checks a withdrawn one carries nothing but hours). */
+export function storeHoursSetupBasis(
+  view: StoreConfigurationView,
+): StoreConfigurationSnapshot["setupBasis"] {
+  if (view.current?.setupBasis === undefined) return undefined;
+  return (view.latest ?? view.current).setupBasis;
+}
+/** WP-2423 (v15 `8bd902e3` D4): what happens next once a change is sent for approval — the
+ * Owner with sole operator in effect approves it alone; otherwise someone else approves it. */
+export function storeHoursSubmittedMessage(view: StoreConfigurationView): string {
+  const gate = view.soleOperator;
+  if (gate === undefined || gate === null)
+    return "Sent for approval. An Owner approves it; customers see the new hours once it is published.";
+  if (gate.status === "Effective")
+    return "Sent for approval. You are the sole operator: you can approve it yourself below, then publish it.";
+  if (gate.status === "NotSet")
+    return "Sent for approval. Another person with approval access must approve it. If you run the Store alone, turn on sole operator in Approvals to approve it yourself.";
+  return "Sent for approval. Another person with approval access must approve it before it is published.";
+}
 /** WP-2423 (v15 D2/D3): whose change is open (not published, not withdrawn), if any. */
 export function storeConfigurationOpenChange(
   view: StoreConfigurationView,
@@ -145,7 +168,7 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
     }
     // WP-2423 Q4: hours of a configuration from Store setup are saved as an hours-only Store setup
     // change; the server makes the draft configuration from it.
-    const setupBasis = (view.latest ?? view.current)?.setupBasis;
+    const setupBasis = storeHoursSetupBasis(view);
     if (!pending.current && command === "SaveDraft" && setupBasis)
       pending.current = {
         expectedSetup: {
@@ -227,7 +250,7 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
             : completedCommand === "Validate"
               ? "Saved draft validated."
               : completedCommand === "Submit"
-                ? "Draft submitted for independent approval."
+                ? storeHoursSubmittedMessage(next)
                 : "Draft saved. It takes effect only after approval and publication.",
       );
     } catch (error) {
@@ -364,6 +387,8 @@ export function StoreHoursDraftForm({
       view.latest?.lifecycle === "PendingApproval" &&
       (open === "Yours" || (view.soleOperator !== undefined && view.soleOperator !== null)),
     author = view.latestAuthorName ?? null,
+    // v15 D3: the author may be described by role ("the Owner"); capitalised to start a sentence.
+    Author = author === null ? null : author.charAt(0).toUpperCase() + author.slice(1),
     withdrawn = view.latestWithdrawal ?? null,
     // A withdrawn or declined change takes no further step.
     stepsClosed = withdrawn !== null;
@@ -412,25 +437,27 @@ export function StoreHoursDraftForm({
       {open === "SomeoneElse" && view.latest && (
         <section aria-label="Change waiting from someone else">
           <p>
-            {author === null ? "Someone else" : author}&rsquo;s change (version{" "}
+            {Author === null ? "Someone else" : Author}&rsquo;s change (version{" "}
             {view.latest.configurationVersion},{" "}
             {storeConfigurationStateLabel(view.latest.lifecycle).toLowerCase()}) is still open. It
             is shown below. A new change cannot be saved until it is approved and published, or
             declined. Only {author === null ? "the person who made it" : author} can check it or
-            send it for approval. If you are an Owner you can review it here; otherwise ask an
-            Owner.
+            send it for approval.{" "}
+            {view.viewerMayDecline === true
+              ? "You can approve it once it is sent, or decline it here."
+              : "Ask an Owner to approve or decline it."}
           </p>
-          {onWithdraw && !declining && (
+          {onWithdraw && view.viewerMayDecline === true && !declining && (
             <button type="button" disabled={disabled} onClick={() => setDeclining(true)}>
               Decline this change
             </button>
           )}
-          {onWithdraw && declining && (
+          {onWithdraw && view.viewerMayDecline === true && declining && (
             <div role="group" aria-label="Decline this change">
               <p>
                 Decline version {view.latest.configurationVersion}? It stays in the history and
                 cannot be approved or published.{" "}
-                {author === null ? "The person who made it" : author} sees that it was declined
+                {Author === null ? "The person who made it" : Author} sees that it was declined
                 {declineReason === "" ? "" : " and why"}, and can make a new change.
               </p>
               <label>
@@ -872,8 +899,11 @@ export function IntervalEditor({
 /** This display reports recorded content, not a new qualification or publication transition. */
 export function StoreConfigurationFeeBasisView({
   configuration,
+  withdrawal,
 }: {
   readonly configuration: StoreConfigurationSnapshot;
+  /** WP-2423 (v15 D6): this version was withdrawn or declined (read with it); never "Draft". */
+  readonly withdrawal?: "Withdrawn" | "Declined" | undefined;
 }) {
   const basis = configuration.setupBasis;
   return (
@@ -890,7 +920,12 @@ export function StoreConfigurationFeeBasisView({
           : "Fees in the recorded settings"}
       </h3>
       <p>
-        {storeConfigurationStateLabel(configuration.lifecycle)}.{" "}
+        {withdrawal === undefined
+          ? storeConfigurationStateLabel(configuration.lifecycle)
+          : withdrawal === "Withdrawn"
+            ? "Withdrawn, will not be published"
+            : "Declined, will not be published"}
+        .{" "}
         {configuration.lifecycle !== "Published" && "These settings do not change the live Store."}
       </p>
       {!basis ? (
@@ -920,8 +955,10 @@ export function StoreConfigurationFeeBasisView({
                 {entry.state === "Enabled" && (
                   <>
                     {" "}
-                    · {entry.orderTypes.map(serviceModeLabel).join(", ")} · tax classification
-                    chosen
+                    · {entry.orderTypes.map(serviceModeLabel).join(", ")} ·{" "}
+                    {entry.taxClassificationReference === null
+                      ? "no tax classification (tips are not taxed)"
+                      : "tax classification chosen"}
                   </>
                 )}
               </li>

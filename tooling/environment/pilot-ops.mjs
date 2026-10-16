@@ -167,13 +167,19 @@ function createIo(runtimeDirectory, opsDirectory, config, log) {
 
 async function loadBusiness(runtimeDirectory) {
   // Loaded lazily: these modules need the workspace TypeScript loader and the database.
-  const [{ loadPilotInstallation }, { createConfiguredPilotResources }, reconciliation, status] =
-    await Promise.all([
-      import("./pilot-installation.mjs"),
-      import("./pilot-configured-resources.mjs"),
-      import("./pilot-reconciliation-exceptions.mjs"),
-      import("./pilot-ops-settlement.mjs"),
-    ]);
+  const [
+    { loadPilotInstallation },
+    { createConfiguredPilotResources },
+    reconciliation,
+    status,
+    receipt,
+  ] = await Promise.all([
+    import("./pilot-installation.mjs"),
+    import("./pilot-configured-resources.mjs"),
+    import("./pilot-reconciliation-exceptions.mjs"),
+    import("./pilot-ops-settlement.mjs"),
+    import("./pilot-receipt.mjs"),
+  ]);
   const directory = path.resolve(runtimeDirectory);
   const installation = await loadPilotInstallation(directory);
   const resources = await createConfiguredPilotResources(directory);
@@ -183,6 +189,7 @@ async function loadBusiness(runtimeDirectory) {
     dependencies: {
       createReconciliationExceptions: reconciliation.createInternalReconciliationExceptions,
       readSettlementStatus: status.readPilotSettlementProblems,
+      readReceiptTemplate: receipt.readInternalReceiptTemplateReadiness,
     },
   };
 }

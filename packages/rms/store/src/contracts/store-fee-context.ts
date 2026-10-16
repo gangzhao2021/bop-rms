@@ -1,4 +1,7 @@
-/** Store fee intent is configuration, not a rate or current qualification. */
+/** Store fee intent is configuration, not a rate or current qualification.
+ * WP-2423 (v15 D7, coordinator decision 2026-10-16): a voluntary tip paid to staff is generally not
+ * subject to GST/HST in Canada (a mandatory service charge is), so an enabled Tip may carry no tax
+ * classification (`null`). A service charge or delivery fee that is On always names one. */
 export type StoreFeeOrderType = "DineIn" | "Pickup" | "Delivery";
 export type StoreFeeContext =
   | Readonly<{
@@ -8,7 +11,8 @@ export type StoreFeeContext =
   | Readonly<{
       chargeType: "ServiceCharge" | "DeliveryFee" | "Tip";
       state: "Enabled";
-      taxClassificationReference: string;
+      /** `null` only for a Tip (no tax classification: not taxed). */
+      taxClassificationReference: string | null;
       orderTypes: readonly StoreFeeOrderType[];
     }>;
 export type StoreCompleteFeeContext =
@@ -73,16 +77,18 @@ export function parseStoreFeeContexts(value: unknown): readonly StoreFeeContext[
         orders.length === 0 ||
         new Set(orders).size !== orders.length ||
         orders.some((v) => !modes.some((mode) => mode === v)) ||
-        typeof r.taxClassificationReference !== "string" ||
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
-          r.taxClassificationReference,
-        )
+        (r.taxClassificationReference === null
+          ? chargeType !== "Tip"
+          : typeof r.taxClassificationReference !== "string" ||
+            !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+              r.taxClassificationReference,
+            ))
       )
         return fail();
       return Object.freeze({
         chargeType,
         state: "Enabled",
-        taxClassificationReference: r.taxClassificationReference,
+        taxClassificationReference: r.taxClassificationReference as string | null,
         orderTypes: Object.freeze(modes.filter((mode) => orders.includes(mode))),
       });
     }),

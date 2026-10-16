@@ -4797,10 +4797,18 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       sessionCookie === null ||
       request.body !== undefined ||
       Object.keys(request.query).some(
-        (key) => key !== "storeReference" && key !== "templateReference" && key !== "locale",
+        (key) =>
+          key !== "storeReference" &&
+          key !== "templateReference" &&
+          key !== "installed" &&
+          key !== "locale",
       ) ||
       typeof request.query.storeReference !== "string" ||
-      typeof request.query.templateReference !== "string" ||
+      // WP-2423 (2026-10-16): either a template, or `installed=true` for the receipt template the
+      // Store started with (installer-published).
+      (request.query.installed === undefined
+        ? typeof request.query.templateReference !== "string"
+        : request.query.installed !== "true" || request.query.templateReference !== undefined) ||
       typeof request.query.locale !== "string" ||
       rawHeaderValues(request, "origin").length > 1 ||
       rawHeaderValues(request, "sec-fetch-site").length !== 1 ||
@@ -4843,10 +4851,13 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       return;
     }
 
-    let expectedStoreReference: string, templateReference: string, locale: string;
+    let expectedStoreReference: string, templateReference: string | undefined, locale: string;
     try {
       expectedStoreReference = parseStoreAdministrationReference(request.query.storeReference);
-      templateReference = parseStoreAdministrationReference(request.query.templateReference);
+      templateReference =
+        request.query.installed === "true"
+          ? undefined
+          : parseStoreAdministrationReference(request.query.templateReference);
       if (expectedStoreReference !== expectedScope.storeReference) throw new Error("invalid");
       if (
         typeof request.query.locale !== "string" ||
@@ -4866,9 +4877,23 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       receiptTemplatePublishedFailure(response, undefined);
       return;
     }
-    void port
-      .read({ sessionCookie, expectedStoreReference, expectedScope, templateReference, locale })
-      .then((value) => response.json(value))
+    void (
+      templateReference === undefined
+        ? port.readInstalled({ sessionCookie, expectedStoreReference, expectedScope, locale })
+        : port.read({
+            sessionCookie,
+            expectedStoreReference,
+            expectedScope,
+            templateReference,
+            locale,
+          })
+    )
+      .then((value) =>
+        // WP-2423: this Store has no installer-published receipt template to go back to.
+        value === null
+          ? response.status(404).json({ error: "receipt_template_installed_none" })
+          : response.json(value),
+      )
       .catch((error) => receiptTemplatePublishedFailure(response, error));
   });
 

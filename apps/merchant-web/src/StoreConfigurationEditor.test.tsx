@@ -8,6 +8,8 @@ import {
   StoreHoursDraftForm,
   StoreHoursOwnApproval,
   storeConfigurationEditBase,
+  storeHoursSetupBasis,
+  storeHoursSubmittedMessage,
   storeConfigurationOpenChange,
   storeConfigurationStateLabel,
 } from "./StoreConfigurationEditor.js";
@@ -292,7 +294,9 @@ it("shows another person's open change, blocks saving over it and offers to decl
     </MemoryRouter>,
   );
   expect(html).toContain("Someone else’s change (version 2, waiting for approval) is still open");
-  expect(html).toContain("Decline this change");
+  // v15 D9: no decline offered unless the server says you may decline.
+  expect(html).not.toContain("Decline this change");
+  expect(html).toContain("Ask an Owner to approve or decline it.");
   expect(html).toMatch(/<button type="submit" disabled="">Save hours draft<\/button>/u);
   expect(findInternalText([staticText(html)])).toEqual([]);
   // Your own open change: editing continues from it, and you may withdraw it.
@@ -461,4 +465,117 @@ it("WP-2423 DEC-SOLE-OPERATOR-APPROVAL: your own hours change is approved alone,
   expect(findInternalText([staticText(effective.own)])).toEqual([]);
   // Without the sole-operator offer (another deployment): your own change needs another person.
   expect(render(null).own).toContain("You cannot approve a change you made.");
+});
+
+// WP-2423 v15 (`8bd902e3` D2/D3/D4/D9).
+it("v15: the published configuration decides the hours path; a withdrawn setup change does not", () => {
+  const withdrawnSetup = parseStoreConfigurationView(
+    {
+      screenId: "STORE-HOURS-SERVICE",
+      storeReference: id(3),
+      current: configuration("Published"),
+      latest: {
+        ...configuration("Draft"),
+        configurationReference: id(20),
+        configurationVersion: 2,
+        supersedesConfigurationReference: id(1),
+        setupBasis: basis,
+      },
+      expectedVersion: 2,
+      observedAt: at,
+      viewerActorReference: id(10),
+      latestWithdrawal: { kind: "Withdrawn", withdrawnAt: at, byYou: true },
+    },
+    id(3),
+  );
+  // Installed (V1) published configuration: an ordinary hours change from the published hours.
+  expect(storeHoursSetupBasis(withdrawnSetup)).toBeUndefined();
+  expect(storeConfigurationEditBase(withdrawnSetup)?.configurationVersion).toBe(1);
+  expect(storeConfigurationEditBase(withdrawnSetup)?.setupBasis).toBeUndefined();
+  // Published from Store setup: an hours-only setup revision.
+  const fromSetup = parseStoreConfigurationView(
+    {
+      screenId: "STORE-HOURS-SERVICE",
+      storeReference: id(3),
+      current: { ...configuration("Published"), setupBasis: basis },
+      latest: null,
+      expectedVersion: 1,
+      observedAt: at,
+    },
+    id(3),
+  );
+  expect(storeHoursSetupBasis(fromSetup)?.sourceRevision).toBe(7);
+});
+
+it("v15: an Owner without a Store name is named by role; only people who may decline see Decline", () => {
+  const base = hoursView({ ...configuration("Draft"), authoredByReference: id(40) });
+  const render = (viewerMayDecline: boolean) => {
+    const view = parseStoreConfigurationView(
+      {
+        ...base,
+        viewerActorReference: id(10),
+        latestWithdrawal: null,
+        latestAuthorName: "the Owner",
+        soleOperator: null,
+        viewerMayDecline,
+      },
+      id(3),
+    );
+    return renderToStaticMarkup(
+      <MemoryRouter>
+        <StoreHoursDraftForm
+          view={view}
+          draft={storeConfigurationEditBase(view) as NonNullable<typeof view.current>}
+          disabled={false}
+          onDraftChange={() => undefined}
+          onCommand={() => undefined}
+          onWithdraw={() => undefined}
+        />
+      </MemoryRouter>,
+    );
+  };
+  const manager = render(false);
+  expect(manager).toContain("The Owner’s change (version 2");
+  expect(manager).toContain("Only the Owner can check it or send it for approval.");
+  expect(manager).not.toContain("Decline this change");
+  expect(findInternalText([staticText(manager)])).toEqual([]);
+  const owner = render(true);
+  expect(owner).toContain("Decline this change");
+  expect(() =>
+    parseStoreConfigurationView(
+      {
+        ...base,
+        viewerActorReference: id(10),
+        latestWithdrawal: null,
+        latestAuthorName: null,
+        soleOperator: null,
+        viewerMayDecline: "yes",
+      },
+      id(3),
+    ),
+  ).toThrow();
+});
+
+it("v15: after sending, the Owner with sole operator in effect is told they may approve alone", () => {
+  const base = hoursView({ ...configuration("PendingApproval"), authoredByReference: id(10) });
+  const view = (soleOperator: unknown) =>
+    parseStoreConfigurationView(
+      {
+        ...base,
+        viewerActorReference: id(10),
+        latestWithdrawal: null,
+        latestAuthorName: null,
+        soleOperator,
+      },
+      id(3),
+    );
+  const effective = storeHoursSubmittedMessage(
+    view({ status: "Effective", otherApprovers: [], verifiedUntil: null }),
+  );
+  expect(effective).toContain("you can approve it yourself");
+  expect(effective).not.toContain("independent");
+  expect(
+    storeHoursSubmittedMessage(view({ status: "NotSet", otherApprovers: [], verifiedUntil: null })),
+  ).toContain("turn on sole operator in Approvals");
+  expect(storeHoursSubmittedMessage(view(null))).toContain("An Owner approves it");
 });

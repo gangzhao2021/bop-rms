@@ -319,6 +319,18 @@ export async function createInternalStoreConfigurationOrdinary(
               occurredAt: input.audit.occurredAt,
             }),
           ),
+        // WP-2423 (v15 `8bd902e3` D1): the Pricing tax configuration governing the Store now.
+        storeTaxConfigurationReference: async () =>
+          (
+            await currentStoreTaxConfigurationReference(
+              tx,
+              {
+                brandReference: operating.brandReference,
+                storeReference: operating.storeReference,
+              },
+              resources.now(),
+            )
+          )?.configurationReference ?? null,
         publicationChecks: async (configuration) => {
           const at = resources.now();
           return storeConfigurationPublicationChecks(operating, tx, {

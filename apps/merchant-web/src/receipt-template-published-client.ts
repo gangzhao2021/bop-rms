@@ -102,23 +102,28 @@ export function parseReceiptTemplatePublishedCurrent(
 }
 export function createReceiptTemplatePublishedClient(fetcher: typeof fetch = fetch) {
   let epoch = 0;
-  return Object.freeze({
-    async load(input: {
-      expectedScope: StoreSetupScope;
-      templateReference: string;
-      locale: string;
-      signal?: AbortSignal;
-    }): Promise<ReceiptTemplatePublishedCurrent> {
+  const current = Object.freeze({
+    /** `installed`: the receipt template the Store started with (installer-published); the
+     * server finds it and proves it like any other published template (`null`: it has none). */
+    async read(
+      input: {
+        expectedScope: StoreSetupScope;
+        templateReference?: string;
+        locale: string;
+        signal?: AbortSignal;
+      },
+      installed: boolean,
+    ): Promise<ReceiptTemplatePublishedCurrent | null> {
       const r = safe(() =>
-        record(
-          input,
-          Object.getOwnPropertyDescriptor(input, "signal") === undefined
-            ? ["expectedScope", "templateReference", "locale"]
-            : ["expectedScope", "templateReference", "locale", "signal"],
-        ),
+        record(input, [
+          "expectedScope",
+          ...(installed ? [] : ["templateReference"]),
+          "locale",
+          ...(Object.getOwnPropertyDescriptor(input, "signal") === undefined ? [] : ["signal"]),
+        ]),
       );
       const scope = parseStoreSetupScope(r.expectedScope),
-        subject = safe(() => ref(r.templateReference)),
+        subject = installed ? null : safe(() => ref(r.templateReference)),
         language = localeValue(r.locale),
         scopeOwner = input.expectedScope,
         signal = input.signal,
@@ -128,7 +133,9 @@ export function createReceiptTemplatePublishedClient(fetcher: typeof fetch = fet
           e !== epoch ||
           input.expectedScope !== scopeOwner ||
           canonical(parseStoreSetupScope(input.expectedScope)) !== canonical(scope) ||
-          input.templateReference !== subject ||
+          (subject === null
+            ? Object.hasOwn(input, "templateReference")
+            : input.templateReference !== subject) ||
           input.locale !== language ||
           input.signal !== signal
         )
@@ -143,7 +150,7 @@ export function createReceiptTemplatePublishedClient(fetcher: typeof fetch = fet
       try {
         const query = new URLSearchParams({
           storeReference: scope.storeReference,
-          templateReference: subject,
+          ...(subject === null ? { installed: "true" } : { templateReference: subject }),
           locale: language,
         });
         const response = await fetcher(
@@ -165,6 +172,8 @@ export function createReceiptTemplatePublishedClient(fetcher: typeof fetch = fet
         );
         active();
         if (controller.signal.aborted) return fail("Unavailable");
+        // The Store has no installer-published receipt template (nothing to go back to).
+        if (subject === null && response.status === 404) return null;
         if (response.status === 403) return fail("Denied");
         if (response.status === 409) return fail("Conflict");
         if (response.status === 400) return fail("Invalid");
@@ -199,10 +208,18 @@ export function createReceiptTemplatePublishedClient(fetcher: typeof fetch = fet
         }
         active();
         if (controller.signal.aborted) return fail("Unavailable");
+        const raw: unknown = JSON.parse(text);
         const parsed = parseReceiptTemplatePublishedCurrent(
-          JSON.parse(text),
+          raw,
           scope,
-          subject,
+          subject ??
+            safe(() =>
+              ref(
+                raw !== null && typeof raw === "object"
+                  ? Object.getOwnPropertyDescriptor(raw, "templateReference")?.value
+                  : undefined,
+              ),
+            ),
           language,
         );
         active();
@@ -219,6 +236,25 @@ export function createReceiptTemplatePublishedClient(fetcher: typeof fetch = fet
         clearTimeout(timer);
         signal?.removeEventListener("abort", abort);
       }
+    },
+  });
+  return Object.freeze({
+    async load(input: {
+      expectedScope: StoreSetupScope;
+      templateReference: string;
+      locale: string;
+      signal?: AbortSignal;
+    }): Promise<ReceiptTemplatePublishedCurrent> {
+      return (await current.read(input, false)) ?? fail("Unavailable");
+    },
+    /** WP-2423 (2026-10-16): the receipt template the Store started with, as published today;
+     * `null` when the Store has none. */
+    async loadInstalled(input: {
+      expectedScope: StoreSetupScope;
+      locale: string;
+      signal?: AbortSignal;
+    }): Promise<ReceiptTemplatePublishedCurrent | null> {
+      return current.read(input, true);
     },
   });
 }

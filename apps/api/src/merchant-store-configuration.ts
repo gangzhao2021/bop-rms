@@ -1,4 +1,4 @@
-import { parseBusinessAction } from "@bop/permission";
+import { listStoreRoleAssignments, parseBusinessAction } from "@bop/permission";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import {
   createPersistentStoreConfigurationAdministration,
@@ -13,7 +13,7 @@ import {
   recordStoreConfigurationSoleOperatorApproval,
   StoreConfigurationAdministrationServiceError,
 } from "@rms/store";
-import { loadStoreMember } from "@bop/membership";
+import { loadStoreMember, MemberDirectoryError } from "@bop/membership";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import { bindMerchantStoreConfigurationCommand } from "./merchant-store-configuration-command.js";
@@ -357,6 +357,19 @@ export function createMerchantStoreConfiguration(options: {
                   }
                 : {}),
             });
+            // WP-2423 v15 (`8bd902e3` D2): the PUBLISHED configuration decides the kind of hours
+            // change; an ordinary change never follows a published configuration from Store setup
+            // (whatever the latest, possibly withdrawn, change is).
+            if (bound.method === "saveDraft") {
+              const published = await configured.publishedBaseline(tx);
+              if (
+                published !== null &&
+                createStoreConfigurationVersion(published).setupBasis !== undefined
+              )
+                throw new StoreConfigurationAdministrationServiceError(
+                  "STORE_CONFIGURATION_LIFECYCLE_CONFLICT",
+                );
+            }
             const baseOptions = storeConfigurationAdministrationOptions({
               configured,
               scope,
@@ -553,17 +566,52 @@ export function createMerchantStoreConfiguration(options: {
             brandReference = scope.context.brand.brandReference,
             storeReference = scope.store.storeReference;
           // WP-2423 (v15): staff see who made a change that is still open (by the name the Store
-          // keeps; none when they are no longer a member).
+          // keeps; none when they are no longer a member). v15 `8bd902e3` D3: a member the Store
+          // keeps no name for is described by their Store (or Brand) role ("the Owner"); the
+          // product holds no other workforce name, and a reference is never shown.
           let latestAuthorName: string | null = null;
-          if (open && String(latest.authoredByReference) !== viewer)
+          let viewerMayDecline = false;
+          if (open && String(latest.authoredByReference) !== viewer) {
+            const author = String(latest.authoredByReference);
             latestAuthorName = await loadStoreMember(
               tx as never,
               { brandReference, storeReference },
-              String(latest.authoredByReference),
+              author,
             ).then(
               (member) => member.displayName ?? null,
-              () => null,
+              // Not a member any more: no name. A database failure is not swallowed (the transaction
+              // would be unusable for the reads that follow).
+              (error: unknown) => {
+                if (error instanceof MemberDirectoryError) return null;
+                throw error;
+              },
             );
+            if (latestAuthorName === null)
+              for (const roleScope of [storeReference, null]) {
+                const named = (
+                  await listStoreRoleAssignments(
+                    tx as never,
+                    { brandReference, storeReference: roleScope },
+                    observedAt,
+                  )
+                ).assignments.find(
+                  (item) =>
+                    item.actorReference === author &&
+                    item.roleName !== item.roleCode &&
+                    item.roleName.length > 0 &&
+                    item.roleName.length <= 60,
+                );
+                if (named !== undefined) {
+                  latestAuthorName = "the " + named.roleName;
+                  break;
+                }
+              }
+            // v15 `8bd902e3` D9: only people who may decline (Store configuration approval) are
+            // offered "Decline this change".
+            viewerMayDecline =
+              (await scope.authorizeActions(["store.service.approve"])).get("store.service.approve")
+                ?.effect === "Allow";
+          }
           // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: the Owner who made or sent the change awaiting
           // approval sees whether they may approve it alone, and why not.
           let soleOperator: Awaited<ReturnType<typeof merchantStoreSoleOperatorGate>> | null = null;
@@ -607,6 +655,7 @@ export function createMerchantStoreConfiguration(options: {
             expectedVersion: latest?.configurationVersion ?? current?.configurationVersion ?? 0,
             observedAt,
             latestAuthorName,
+            viewerMayDecline,
             soleOperator:
               soleOperator === null
                 ? null

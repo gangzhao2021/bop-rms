@@ -96,6 +96,25 @@ describe("original receipt assembly from frozen owner facts", () => {
     );
     expect(result.operatingEntityDisplayName).toBe("Synthetic issuer");
   });
+  it("records the exact template version it was issued with, and reads older receipts without it (WP-2423)", () => {
+    const input = fixture();
+    expect(
+      Object.hasOwn(createOriginalReceiptSnapshotFromOrder(input), "templateVersionReference"),
+    ).toBe(false);
+    const versionReference = "0190ee00-0000-7000-8000-000000000003";
+    const result = createOriginalReceiptSnapshotFromOrder({
+      ...input,
+      template: { ...input.template, version: "RECEIPT_2", versionReference },
+    });
+    expect(result.templateVersion).toBe("RECEIPT_2");
+    expect(result.templateVersionReference).toBe(versionReference);
+    expect(() =>
+      createOriginalReceiptSnapshotFromOrder({
+        ...input,
+        template: { ...input.template, versionReference: "not-a-reference" },
+      }),
+    ).toThrow();
+  });
   it.each(["issuer", "store", "template", "financial"] as const)(
     "rejects foreign %s scope",
     (key) => {

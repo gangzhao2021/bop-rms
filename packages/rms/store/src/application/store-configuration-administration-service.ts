@@ -127,7 +127,11 @@ export function createStoreConfigurationAdministrationService(
   async function execute(
     command: StoreConfigurationAdministrationCommand,
     raw: unknown,
-    validate: (input: Input, current: StoreConfigurationVersion | null) => Promise<void>,
+    validate: (
+      input: Input,
+      current: StoreConfigurationVersion | null,
+      withdrawn: boolean,
+    ) => Promise<void>,
   ) {
     let input = parseInput(raw);
     const originalInput = input;
@@ -218,7 +222,7 @@ export function createStoreConfigurationAdministrationService(
       configuration = prepared;
       input = Object.freeze({ ...input, configuration });
     }
-    await validate(input, current);
+    await validate(input, current, withdrawn);
     const operation: StoreConfigurationOperation = Object.freeze({
       command,
       operationReference: input.operationReference,
@@ -260,8 +264,15 @@ export function createStoreConfigurationAdministrationService(
   };
   return Object.freeze({
     saveDraft: (raw: unknown) =>
-      execute("SaveDraft", raw, async ({ configuration }, current) => {
-        if (current?.setupBasis !== undefined && configuration.setupBasis === undefined)
+      execute("SaveDraft", raw, async ({ configuration }, current, withdrawn) => {
+        // A configuration from Store setup is followed by changes from Store setup. v15
+        // `8bd902e3` D2: a withdrawn or declined one decides nothing — the caller holds the
+        // published configuration and refuses an ordinary change over one from Store setup.
+        if (
+          current?.setupBasis !== undefined &&
+          configuration.setupBasis === undefined &&
+          !withdrawn
+        )
           fail("STORE_CONFIGURATION_LIFECYCLE_CONFLICT");
         if (
           configuration.lifecycle !== "Draft" ||

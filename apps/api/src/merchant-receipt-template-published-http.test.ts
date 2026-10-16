@@ -104,7 +104,10 @@ afterEach(async () => {
   );
 });
 function endpoints() {
-  return { read: vi.fn<Port["read"]>(async () => receipt()) };
+  return {
+    read: vi.fn<Port["read"]>(async () => receipt()),
+    readInstalled: vi.fn<Port["readInstalled"]>(async () => receipt()),
+  };
 }
 async function serve(port?: Port) {
   const unused = async (): Promise<never> => {
@@ -258,4 +261,38 @@ it("rejects selected Store/header disagreement before calling source", async () 
     ).status,
   ).toBe(400);
   expect(port.read).not.toHaveBeenCalled();
+});
+it("reads the receipt template the Store started with through installed=true (WP-2423)", async () => {
+  const port = endpoints();
+  const reply = await send(await serve(port), {
+    query: "?storeReference=" + id(3) + "&installed=true&locale=en-CA",
+  });
+  expect(reply.status).toBe(200);
+  expect(port.readInstalled).toHaveBeenCalledExactlyOnceWith({
+    sessionCookie: cookie,
+    expectedStoreReference: scope.storeReference,
+    expectedScope: scope,
+    locale,
+  });
+  expect(port.read).not.toHaveBeenCalled();
+});
+it("answers 404 when the Store has no receipt template it started with", async () => {
+  const port = endpoints();
+  port.readInstalled.mockResolvedValue(null);
+  const reply = await send(await serve(port), {
+    query: "?storeReference=" + id(3) + "&installed=true&locale=en-CA",
+  });
+  expect(reply.status).toBe(404);
+  expect(reply.body).toEqual({ error: "receipt_template_installed_none" });
+  expect(reply.headers.get("cache-control")).toBe("no-store");
+});
+it.each([
+  "?storeReference=" + id(3) + "&installed=yes&locale=en-CA",
+  "?storeReference=" + id(3) + "&installed=true&templateReference=" + id(13) + "&locale=en-CA",
+  "?storeReference=" + id(3) + "&installed=true&installed=true&locale=en-CA",
+])("rejects an inexact installed query %s", async (query) => {
+  const port = endpoints();
+  expect((await send(await serve(port), { query })).status).toBe(403);
+  expect(port.read).not.toHaveBeenCalled();
+  expect(port.readInstalled).not.toHaveBeenCalled();
 });

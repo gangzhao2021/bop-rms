@@ -1014,14 +1014,17 @@ test("someone else's open configuration is shown, cannot be replaced and can be 
   const confirm = theirs.getByRole("group", { name: "Decline this configuration" });
   await confirm.getByLabel("Reason (optional)").selectOption("TalkFirst");
   await confirm.getByRole("button", { name: "Decline version 1" }).click();
+  // WP-2423 (v15 D6): the result names only what happened; what to do next comes from the
+  // current state (never "a new configuration can now be created" when it cannot).
   await expect(panel(page).getByRole("status")).toHaveText(
-    "Version 1 declined. A new configuration can now be created from the saved setup.",
+    "Version 1 declined. It can no longer be approved or published.",
   );
   await expect(panel(page)).toContainText("Version 1 was declined by you");
   // The saved setup was made before that version: it must be saved again first (said plainly).
   await expect(panel(page)).toContainText(
-    "The Store’s configuration changed after this setup was saved. Save the setup again",
+    "To create a new configuration, save the setup again (Save setup draft, it then builds on the latest configuration), then create it.",
   );
+  await expect(panel(page)).not.toContainText("changed after this setup was saved");
   await expect(
     panel(page).getByRole("button", { name: "Approve configuration independently" }),
   ).toBeDisabled();

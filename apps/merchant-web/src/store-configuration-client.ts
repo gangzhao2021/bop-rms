@@ -10,7 +10,8 @@ export type StoreConfigurationFeeContext =
   | Readonly<{
       chargeType: "ServiceCharge" | "DeliveryFee" | "Tip";
       state: "Enabled";
-      taxClassificationReference: string;
+      /** `null` only for a Tip (WP-2423 v15 D7: a voluntary tip is not taxed). */
+      taxClassificationReference: string | null;
       orderTypes: readonly ServiceMode[];
     }>;
 export interface StoreSetupConfigurationBasis {
@@ -317,6 +318,9 @@ export interface StoreConfigurationView {
   readonly latestAuthorName?: string | null;
   /** WP-2423 DEC-SOLE-OPERATOR-APPROVAL: whether you may approve your own waiting change alone. */
   readonly soleOperator?: SoleOperatorGateView | null;
+  /** WP-2423 (v15 `8bd902e3` D9): you may decline someone else's open change (Store configuration
+   * approval). Absent from older servers: treated as not allowed. */
+  readonly viewerMayDecline?: boolean;
 }
 /** WP-2423 (v15): why an Owner declined someone else's change (optional). */
 export type StoreConfigurationDeclineReason = "NotRight" | "NotNeeded" | "TalkFirst";
@@ -331,6 +335,7 @@ export function parseStoreConfigurationView(raw: unknown, store: string): StoreC
   const extended =
     raw !== null && typeof raw === "object" && Object.hasOwn(raw, "viewerActorReference");
   const named = extended && Object.hasOwn(raw, "latestAuthorName");
+  const declinable = named && Object.hasOwn(raw, "viewerMayDecline");
   const v = exact(raw, [
     "screenId",
     "storeReference",
@@ -340,7 +345,9 @@ export function parseStoreConfigurationView(raw: unknown, store: string): StoreC
     "observedAt",
     ...(extended ? ["viewerActorReference", "latestWithdrawal"] : []),
     ...(named ? ["latestAuthorName", "soleOperator"] : []),
+    ...(declinable ? ["viewerMayDecline"] : []),
   ]);
+  if (declinable && typeof v.viewerMayDecline !== "boolean") return invalid();
   if (v.screenId !== "STORE-HOURS-SERVICE" || !reference(store) || v.storeReference !== store)
     return invalid();
   const current = v.current === null ? null : parseStoreConfigurationSnapshot(v.current, store);
@@ -426,6 +433,7 @@ export function parseStoreConfigurationView(raw: unknown, store: string): StoreC
           })(),
         }
       : {}),
+    ...(declinable ? { viewerMayDecline: v.viewerMayDecline as boolean } : {}),
   });
 }
 

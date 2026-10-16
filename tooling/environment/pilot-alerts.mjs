@@ -151,6 +151,20 @@ export const ALERT_CATALOG = Object.freeze({
       'Hand over ready orders in person: check the order number plus the guest\'s name or phone number. Compare the kitchen board with Orders. Ask the pilot operator to read the order processing log now; if it is not fixed, this becomes "Order or payment updates are stuck".',
     runbook: "alert-updates-retrying",
   },
+  // WP-2423 DEC-STORE-SETUP-PUBLICATION: the receipt template the Store's published settings
+  // name cannot be used (receipts are money documents: none is issued with a guessed template).
+  "receipts.template": {
+    severity: "critical",
+    raiseAfterMs: 2 * MINUTE,
+    title: () => "Receipts are not being issued",
+    summary: (p) =>
+      p.reason === "StoreConfigurationUnavailable"
+        ? "The Store's published settings could not be read, so guests who pay now do not get a receipt yet."
+        : "The receipt template chosen in Store setup cannot be used, so guests who pay now do not get a receipt. Orders, payments and the kitchen are not affected.",
+    action: () =>
+      "Tell guests who ask that their receipt will appear on their order page once this is fixed. Owner: in Store setup choose a receipt template that is published (step 5), then send, approve and publish the setup (step 8). Receipts for orders paid meanwhile then follow automatically; if this lasted over 30 minutes, ask the pilot operator to retry stuck updates.",
+    runbook: "alert-receipts-template",
+  },
   "reconciliation.differences": {
     severity: "warning",
     raiseAfterMs: 0,
@@ -265,6 +279,7 @@ const SOURCE_NAMES = Object.freeze({
   backup: "the backup status",
   certificate: "the certificate",
   disk: "disk space",
+  receipts: "the receipt template check",
 });
 
 const PROBE_KEYS = Object.freeze({
@@ -328,6 +343,15 @@ export function evaluateAlertConditions(observations, thresholds = DEFAULT_THRES
           ? "critical"
           : "warning",
       );
+    // Absent (null) when not checked; "unreadable" when the check itself failed.
+    if (business.receiptTemplate === "unreadable") unreadable.push("receipts");
+    else if (business.receiptTemplate?.ready === false)
+      raise("receipts.template", {
+        reason:
+          business.receiptTemplate.reason === "StoreConfigurationUnavailable"
+            ? "StoreConfigurationUnavailable"
+            : "TemplateNotProven",
+      });
     if (pick(business.reconciliationDifferences))
       raise(
         "reconciliation.differences",

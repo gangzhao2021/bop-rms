@@ -438,6 +438,22 @@ export async function verifyStoreSetupSchema(context) {
           ...feeContexts().value.slice(1),
         ],
       },
+      // 2000_065: only a Tip may be On without a tax classification (JSON null, key kept).
+      {
+        state: "Configured",
+        value: [
+          feeContexts().value[0],
+          { ...feeContexts().value[1], taxClassificationReference: null },
+          feeContexts().value[2],
+        ],
+      },
+      {
+        state: "Configured",
+        value: [
+          ...feeContexts().value.slice(0, 2),
+          { chargeType: "Tip", state: "Enabled", orderTypes: ["Pickup"] },
+        ],
+      },
       {
         state: "Configured",
         value: [{ ...feeContexts().value[0], orderTypes: [] }, ...feeContexts().value.slice(1)],
@@ -504,6 +520,35 @@ export async function verifyStoreSetupSchema(context) {
     await rejected(async () =>
       pair(v2State(4, ++feeOperation), {}, { digest: "sha256:" + "b".repeat(64) }),
     );
+    await transaction(async () => {
+      // 2000_065 (WP-2423 v15 D7): a voluntary Tip is On with no tax classification.
+      const untaxedTip = v2State(4, ++feeOperation, {
+        state: "Configured",
+        value: [
+          ...feeContexts().value.slice(0, 2),
+          {
+            chargeType: "Tip",
+            state: "Enabled",
+            taxClassificationReference: null,
+            orderTypes: ["Pickup"],
+          },
+        ],
+      });
+      await pair(untaxedTip);
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT snapshot_json->'content'->'feeContexts'->'value'->2 AS tip FROM rms_store.store_setup_draft_revision WHERE revision=4",
+          )
+        ).rows[0].tip,
+        {
+          chargeType: "Tip",
+          state: "Enabled",
+          taxClassificationReference: null,
+          orderTypes: ["Pickup"],
+        },
+      );
+    });
     await transaction(async () => {
       const explicit = v2State(4, ++feeOperation, {
         state: "Configured",

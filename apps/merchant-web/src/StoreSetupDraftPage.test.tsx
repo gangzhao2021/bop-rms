@@ -31,6 +31,7 @@ import {
   createUnconfiguredStoreSetupContent,
   createUnconfiguredStoreSetupContentV2,
   normalizeStoreSetupContentV2,
+  parseStoreSetupContent,
   parseStoreSetupWorkspace,
   StoreSetupClientError,
   type StoreSetupCursor,
@@ -39,6 +40,8 @@ import {
 } from "./store-setup-client.js";
 import { type StoreSetupPendingJournal } from "./store-setup-pending-journal.js";
 import { publicationValueDigest } from "./product-publication-command-client-v2.js";
+import { StoreConfigurationFeeBasisView } from "./StoreConfigurationEditor.js";
+import { storeSetupCreatedFromSaved } from "./StoreConfigurationOrdinaryPanel.js";
 const id = (n: number) => `01902501-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const at = "2026-10-05T10:00:00.000Z",
   until = "2026-10-05T10:00:05.000Z",
@@ -1138,4 +1141,126 @@ it("requires active, fresh actual classification choices for enabled entries wit
     }),
   ).toThrow();
   expect(() => validateStoreSetupFeeSelections(content, { ...choices, validUntil: at })).toThrow();
+});
+const tipOnly = (taxClassificationReference: string | null) => ({
+  ...createUnconfiguredStoreSetupContentV2(),
+  feeContexts: {
+    state: "Configured" as const,
+    value: [
+      { chargeType: "ServiceCharge" as const, state: "Disabled" as const },
+      { chargeType: "DeliveryFee" as const, state: "Disabled" as const },
+      {
+        chargeType: "Tip" as const,
+        state: "Enabled" as const,
+        taxClassificationReference,
+        orderTypes: ["Pickup" as const],
+      },
+    ],
+  },
+});
+it("WP-2423 v15 D7: a Tip may be On with no tax classification; a service charge may not", () => {
+  const choices = {
+    profile: "TaxConfigClassificationChoicesV1" as const,
+    ...scope,
+    registryReference: id(30),
+    versionReference: id(31),
+    registryVersion: 1,
+    snapshotDigest: "sha256:" + "a".repeat(64),
+    defaultLocale: "en-CA",
+    choices: [],
+    observedAt: at,
+    validUntil: until,
+    sourceQualification: "NotEvaluated" as const,
+  };
+  expect(() => validateStoreSetupFeeSelections(tipOnly(null), choices)).not.toThrow();
+  expect(parseStoreSetupContent(tipOnly(null)).feeContexts).toEqual(tipOnly(null).feeContexts);
+  const charged = tipOnly(null);
+  expect(() =>
+    parseStoreSetupContent({
+      ...charged,
+      feeContexts: {
+        state: "Configured",
+        value: [
+          {
+            chargeType: "ServiceCharge",
+            state: "Enabled",
+            taxClassificationReference: null,
+            orderTypes: ["Pickup"],
+          },
+          charged.feeContexts.value[1],
+          charged.feeContexts.value[2],
+        ],
+      },
+    }),
+  ).toThrow();
+  // A named classification on a Tip is still checked against the choices.
+  expect(() => validateStoreSetupFeeSelections(tipOnly(id(20)), choices)).toThrow();
+});
+it("WP-2423 v15 D5/D7: fee classification choices load on entry; a Tip needs none", () => {
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <StoreSetupFeeContextEditor
+        scope={scope}
+        csrf={csrf}
+        value={tipOnly(null).feeContexts}
+        disabled={false}
+        onChange={vi.fn()}
+        client={
+          {
+            classifications: () => new Promise(() => undefined),
+          } as unknown as ReturnType<typeof createStoreSetupClient>
+        }
+      />
+    </MemoryRouter>,
+  );
+  // Before the first answer: a loading state, never "press Refresh first".
+  expect(html).toContain("Loading tax classification choices");
+  expect(html).toContain("No tax classification (tips are not taxed)");
+  const tipSelect = /<select aria-label="Tip tax classification"[^>]*>/u.exec(html)?.[0] ?? "";
+  expect(tipSelect).not.toContain("disabled");
+  const serviceSelect =
+    /<select aria-label="Service charge tax classification"[^>]*>/u.exec(html)?.[0] ?? "";
+  expect(serviceSelect).toContain("disabled");
+  expect(html).toContain("generally not subject to GST/HST");
+  expect(findInternalText([staticText(html)])).toEqual([]);
+});
+it("WP-2423 v15 D6: step 8 texts come from the current configuration, not earlier actions", () => {
+  const saved = { setupDraftReference: id(50), revision: 3 };
+  const basis = {
+    profile: "StoreSetupConfigurationBasisV2" as const,
+    tenantReference: id(1),
+    setupDraftReference: id(50),
+    sourceRevision: 3,
+    sourceSnapshotDigest: "sha256:" + "b".repeat(64),
+    feeContexts: [
+      { chargeType: "ServiceCharge" as const, state: "Disabled" as const },
+      { chargeType: "DeliveryFee" as const, state: "Disabled" as const },
+      {
+        chargeType: "Tip" as const,
+        state: "Enabled" as const,
+        taxClassificationReference: null,
+        orderTypes: ["Pickup" as const],
+      },
+    ],
+  };
+  expect(storeSetupCreatedFromSaved(saved, { setupBasis: basis })).toBe(true);
+  expect(storeSetupCreatedFromSaved({ ...saved, revision: 4 }, { setupBasis: basis })).toBe(false);
+  expect(storeSetupCreatedFromSaved(saved, {})).toBe(false);
+  expect(storeSetupCreatedFromSaved(null, { setupBasis: basis })).toBe(false);
+  const configuration = {
+    lifecycle: "Draft",
+    storeReference: id(3),
+    setupBasis: basis,
+  } as unknown as Parameters<typeof StoreConfigurationFeeBasisView>[0]["configuration"];
+  const render = (withdrawal?: "Withdrawn" | "Declined") =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <StoreConfigurationFeeBasisView configuration={configuration} withdrawal={withdrawal} />
+      </MemoryRouter>,
+    );
+  expect(render()).toContain("Draft, not yet sent for approval");
+  expect(render("Withdrawn")).toContain("Withdrawn, will not be published");
+  expect(render("Withdrawn")).not.toContain("not yet sent");
+  expect(render("Declined")).toContain("Declined, will not be published");
+  expect(render()).toContain("no tax classification (tips are not taxed)");
 });

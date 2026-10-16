@@ -418,6 +418,72 @@ async function enabledFee(page: Page) {
 const save = (page: Page) => page.getByRole("button", { name: "Save setup draft", exact: true });
 const recover = (page: Page) =>
   page.getByRole("button", { name: "Recover original save", exact: true });
+test("@production WP-2423 v15 D5/D7: classification choices load on entry and stay choosable; a Tip is On without one", async ({
+  page,
+}) => {
+  const f = await install(page);
+  await open(page);
+  const panel = await feeStep(page);
+  // Loaded on entering the step, with no Refresh; still choosable after the read's own
+  // five-second answer window (Save reads the choices again).
+  await expect.poll(() => f.control.choicesStarted).toBe(1);
+  await expect(panel.getByRole("status")).toHaveCount(0);
+  await page.waitForTimeout(5500);
+  await panel
+    .getByRole("combobox", { name: "Service charge", exact: true })
+    .selectOption("Enabled");
+  const classification = panel.getByRole("combobox", {
+    name: "Service charge tax classification",
+    exact: true,
+  });
+  await expect(classification).toBeEnabled();
+  await classification.selectOption({ label: "Synthetic fee classification" });
+  await panel
+    .getByRole("group", { name: "Service charge order types", exact: true })
+    .getByLabel("Pickup", { exact: true })
+    .check();
+  await panel.getByRole("combobox", { name: "Delivery fee", exact: true }).selectOption("Disabled");
+  await panel.getByRole("combobox", { name: "Tip", exact: true }).selectOption("Enabled");
+  const tipClassification = panel.getByRole("combobox", {
+    name: "Tip tax classification",
+    exact: true,
+  });
+  await expect(tipClassification).toHaveValue("");
+  await expect(tipClassification.locator("option:checked")).toHaveText(
+    "No tax classification (tips are not taxed)",
+  );
+  await panel
+    .getByRole("group", { name: "Tip order types", exact: true })
+    .getByLabel("Pickup", { exact: true })
+    .check();
+  await expect(panel).toContainText("generally not subject to GST/HST");
+  await save(page).click();
+  await expect(
+    page.getByText("Setup draft saved. These settings have not been validated or published.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  expect(f.snapshot()?.content.feeContexts).toEqual({
+    state: "Configured",
+    value: [
+      {
+        chargeType: "ServiceCharge",
+        state: "Enabled",
+        taxClassificationReference: id(22),
+        orderTypes: ["Pickup"],
+      },
+      { chargeType: "DeliveryFee", state: "Disabled" },
+      {
+        chargeType: "Tip",
+        state: "Enabled",
+        taxClassificationReference: null,
+        orderTypes: ["Pickup"],
+      },
+    ],
+  });
+  await expectNoInternalText(page);
+  expect(f.control.errors).toEqual([]);
+});
 test("@production Store fee contexts ordinary entry explicit selections V2 current immutable revision and reload", async ({
   page,
 }) => {

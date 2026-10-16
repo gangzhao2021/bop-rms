@@ -7,6 +7,7 @@ import {
   digitalReceiptTemplateSubmissionRequiredFields,
   createPostgresReceiptTemplateContentPublicationProof,
   createPostgresInstalledReceiptTemplatePublicationProof,
+  readInstalledReceiptTemplateReference,
   resolveDigitalReceiptTemplate,
   type DigitalReceiptTemplateVersion,
   type DigitalReceiptTemplateAuthoredContent,
@@ -63,10 +64,14 @@ export function createMerchantReceiptTemplatePublished(options: {
   };
   const host = createMerchantCategoryTransactions(runner),
     resolveScope = createMerchantStoreScope(persistence);
-  return Object.freeze({
+  const current = Object.freeze({
+    /** WP-2423 (2026-10-16): `installed: true` instead of a template reference reads the receipt
+     * template the Store started with (installer-published), proved exactly as any other;
+     * `null` when the Store has none. */
     async read(input: {
       sessionCookie: unknown;
-      templateReference: unknown;
+      templateReference?: unknown;
+      installed?: true;
       expectedStoreReference?: unknown;
       expectedScope: unknown;
       locale: unknown;
@@ -84,18 +89,23 @@ export function createMerchantReceiptTemplatePublished(options: {
       };
       let locale: string;
       let template: string,
+        installed = false,
         expectedStore: string | undefined,
         expectedScope: Readonly<Record<string, string>> | undefined;
       let rawInput: Record<string, unknown>;
       try {
+        installed = Object.hasOwn(input, "installed");
         rawInput = readClosedRecord(input, [
           "sessionCookie",
-          "templateReference",
+          installed ? "installed" : "templateReference",
           "locale",
           ...(Object.hasOwn(input, "expectedStoreReference") ? ["expectedStoreReference"] : []),
           "expectedScope",
         ]);
-        template = parseDeviceReference(rawInput.templateReference);
+        if (installed) {
+          if (rawInput.installed !== true) return fail("RECEIPT_TEMPLATE_INPUT_INVALID");
+          template = "";
+        } else template = parseDeviceReference(rawInput.templateReference);
         if (
           typeof rawInput.locale !== "string" ||
           !/^[a-z]{2,3}(?:-[A-Z]{2})?$/u.test(rawInput.locale)
@@ -123,7 +133,8 @@ export function createMerchantReceiptTemplatePublished(options: {
         return fail("RECEIPT_TEMPLATE_INPUT_INVALID");
       }
       const cookie = rawInput.sessionCookie;
-      let finalized: (() => string) | undefined;
+      let finalized: (() => string) | undefined,
+        none = false;
       const result = await host.transactions.runRead(async (tx) => {
         const query = tx.query;
         const denied = (error: unknown): never => {
@@ -203,6 +214,29 @@ export function createMerchantReceiptTemplatePublished(options: {
         };
         await fresh();
         if (locale !== store.locale) return fail("RECEIPT_TEMPLATE_INPUT_INVALID");
+        if (installed) {
+          // The template the Store started with. A Store without one answers `null` (nothing to
+          // offer); one that cannot be proved current today is unavailable, as for any template.
+          const found = await readInstalledReceiptTemplateReference(tx, fixed);
+          await fresh();
+          if (found === null) {
+            // Final reread before the read completes: still none, under the same held scope.
+            host.registerBeforeCommit(
+              tx,
+              async () => {
+                await fresh();
+                if ((await readInstalledReceiptTemplateReference(tx, fixed)) !== null)
+                  fail("RECEIPT_TEMPLATE_CONFLICT");
+                await fresh();
+              },
+              () => {
+                none = true;
+              },
+            );
+            return null;
+          }
+          template = parseDeviceReference(found);
+        }
         const pubScope = createPublishingScope({
           kind: "Store",
           brandReference: parsePublishingReference(fixed.brandReference),
@@ -509,9 +543,30 @@ export function createMerchantReceiptTemplatePublished(options: {
           legalConclusion: "NotEvaluated",
         });
       });
-      if (!finalized) return fail();
+      if (installed && none && result === null) return null;
+      if (!finalized || result === null) return fail();
       const until = finalized();
       return parseDigitalReceiptTemplatePublishedCurrent({ ...result, validUntil: until });
+    },
+  });
+  return Object.freeze({
+    async read(input: {
+      sessionCookie: unknown;
+      templateReference: unknown;
+      expectedStoreReference?: unknown;
+      expectedScope: unknown;
+      locale: unknown;
+    }) {
+      return (await current.read(input)) ?? fail();
+    },
+    /** WP-2423 (2026-10-16): the receipt template the Store started with; `null` when none. */
+    async readInstalled(input: {
+      sessionCookie: unknown;
+      expectedStoreReference?: unknown;
+      expectedScope: unknown;
+      locale: unknown;
+    }) {
+      return current.read({ ...input, installed: true });
     },
   });
 }

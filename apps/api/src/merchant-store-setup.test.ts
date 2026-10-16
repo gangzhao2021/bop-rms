@@ -890,3 +890,59 @@ it("V1 and explicitly disabled V2 fresh saves do not invent registry qualificati
   }
   expect(mocks.classifications).not.toHaveBeenCalled();
 });
+it("saves a Tip that is On without a tax classification and never reads the registry for it (WP-2423 v15 D7)", async () => {
+  const f = fixture();
+  f.state.classificationDenied = true;
+  const content = {
+    ...createUnconfiguredStoreSetupDraftContentV2(),
+    feeContexts: {
+      state: "Configured",
+      value: [
+        { chargeType: "ServiceCharge", state: "Disabled" },
+        { chargeType: "DeliveryFee", state: "Disabled" },
+        {
+          chargeType: "Tip",
+          state: "Enabled",
+          taxClassificationReference: null,
+          orderTypes: ["Pickup"],
+        },
+      ],
+    },
+  };
+  const receipt = await f.service.write({
+    sessionCookie: "synthetic",
+    csrf: "synthetic",
+    expectedScope: scope4,
+    command: { ...body(), content },
+  });
+  expect(receipt.snapshot?.content).toMatchObject({ feeContexts: content.feeContexts });
+  expect(mocks.classifications).not.toHaveBeenCalled();
+  // A service charge On without one is still refused before any write.
+  const g = fixture();
+  await expect(
+    g.service.write({
+      sessionCookie: "synthetic",
+      csrf: "synthetic",
+      expectedScope: scope4,
+      command: {
+        ...body(),
+        content: {
+          ...content,
+          feeContexts: {
+            state: "Configured",
+            value: [
+              {
+                chargeType: "ServiceCharge",
+                state: "Enabled",
+                taxClassificationReference: null,
+                orderTypes: ["Pickup"],
+              },
+              content.feeContexts.value[1],
+              content.feeContexts.value[2],
+            ],
+          },
+        },
+      },
+    }),
+  ).rejects.toMatchObject({ code: "STORE_SETUP_OPERATION_INPUT_INVALID" });
+});

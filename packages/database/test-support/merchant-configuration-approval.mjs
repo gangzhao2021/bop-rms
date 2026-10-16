@@ -4,6 +4,8 @@ import { createMerchantStoreScope } from "../../../apps/api/src/merchant-store-s
 import {
   createPostgresStoreConfigurationAdministration,
   createStoreConfigurationVersion,
+  readStoreConfigurationWithdrawal,
+  recordStoreConfigurationWithdrawal,
 } from "../../rms/store/src/index.ts";
 import { appendAuditRecordInTransaction } from "../../bop/audit/src/index.ts";
 import * as f from "../../bop/permission/src/tests/current-policy.fixture.ts";
@@ -44,6 +46,15 @@ export async function verifyMerchantConfigurationApproval({
           approval: { validate: async () => false },
           publishing: { validate: async () => false },
           liveGate: { validate: async () => false },
+          // The Store's actual withdrawal record, as the merchant runtime reads it.
+          withdrawals: {
+            isWithdrawn: async (configuration) =>
+              (await readStoreConfigurationWithdrawal(tx, {
+                brandReference: f.BRAND,
+                storeReference: f.STORE,
+                configurationReference: configuration.configurationReference,
+              })) !== null,
+          },
         }),
         materializePublication: async () => {
           throw new Error("Synthetic setup never publishes");
@@ -70,11 +81,49 @@ export async function verifyMerchantConfigurationApproval({
         expectedVersion: seedDraft.configurationVersion,
       });
     });
+  // WP-2423 (v15 D2/D3, DEC-STORE-SETUP-PUBLICATION 11): another person's change never silently
+  // replaces this actor's open draft, so its author withdraws it first (append-only record and
+  // audit, pilot api grants in docs/spec/pilot-acl-additions.json).
+  await admin.query("GRANT SELECT,INSERT ON rms_store.store_configuration_withdrawal TO " + role);
+  await options.transactions.run(async (tx) => {
+    const withdrawnAt = new Date(options.now()).toISOString();
+    await recordStoreConfigurationWithdrawal(tx, {
+      brandReference: f.BRAND,
+      storeReference: f.STORE,
+      configurationReference: previous.configurationReference,
+      configurationVersion: previous.configurationVersion,
+      withdrawnLifecycle: previous.lifecycle,
+      kind: "Withdrawn",
+      actorReference: previous.authoredByReference,
+      reasonCode: "STORE_CONFIGURATION_WITHDRAWN",
+      auditReference: f.uuid("4032"),
+      withdrawnAt,
+    });
+    await appendAuditRecordInTransaction(tx, {
+      auditId: f.uuid("4032"),
+      brandId: f.BRAND,
+      storeId: f.STORE,
+      actor: { type: "User", reference: previous.authoredByReference },
+      actionCode: "STORE_CONFIGURATION_CHANGED",
+      targetType: "StoreConfiguration",
+      targetId: previous.configurationReference,
+      correlationId: f.uuid("4032"),
+      reasonCode: "STORE_CONFIGURATION_WITHDRAWN",
+      occurredAt: withdrawnAt,
+      sourceChannel: "MERCHANT_WEB",
+      dataClassification: "Internal",
+      retentionPolicyCode: "STORE_CONFIGURATION_AUDIT",
+      retentionPolicyVersion: 1,
+    });
+  });
   await seedPending(draft);
   await admin.query(
     "GRANT SELECT,INSERT,UPDATE ON rms_store.store_configuration_review_snapshot TO " + role,
   );
   await admin.query("GRANT INSERT ON bop_publishing.publishing_mutation_record TO " + role);
+  // Pilot api grant (docs/spec/pilot-acl-additions.json): the state read names who made an open
+  // change by the name the Store keeps.
+  await admin.query("GRANT SELECT ON bop_membership.member_profile_version TO " + role);
   const permissions = [
     "store.service.approve",
     "publishing.draft.create",

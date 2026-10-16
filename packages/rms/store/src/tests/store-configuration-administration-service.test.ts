@@ -473,6 +473,26 @@ describe("WP-2423 (v15 D2/D3) open changes and withdrawals", () => {
       }).saveDraft(withExpected(next(id(10)))),
     ).resolves.toMatchObject({ status: "Applied" });
   });
+  // v15 (`8bd902e3` D2): a withdrawn change from Store setup does not decide the next change's
+  // kind (the caller refuses an ordinary change over a published one from Store setup).
+  it("allows an ordinary change over a withdrawn change from Store setup, not an open one", async () => {
+    for (const withdrawn of [false, true]) {
+      const current = createStoreConfigurationVersion({
+        ...configuration("Draft"),
+        setupBasis: basis(),
+      });
+      const service = createStoreConfigurationAdministrationService({
+        ...ports(current).value,
+        withdrawals: { isWithdrawn: async () => withdrawn },
+      });
+      const saved = service.saveDraft(withExpected(next(id(10))));
+      if (withdrawn) await expect(saved).resolves.toMatchObject({ status: "Applied" });
+      else
+        await expect(saved).rejects.toMatchObject({
+          code: "STORE_CONFIGURATION_LIFECYCLE_CONFLICT",
+        });
+    }
+  });
   it("lets only the person who made a change check it or send it for approval", async () => {
     const draft = () => createStoreConfigurationVersion(configuration("Draft"));
     for (const step of ["validate", "submit"] as const) {

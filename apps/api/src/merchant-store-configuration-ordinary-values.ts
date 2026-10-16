@@ -47,6 +47,11 @@ export interface MerchantStoreConfigurationOrdinaryWorkspace {
     readonly withdrawnAt: string;
     readonly byYou: boolean;
   };
+  /** WP-2423 (v15 `8bd902e3` D1): the tax configuration that currently governs the Store (its
+   * Pricing record, the one quotes use), or null when none or several; absent when not read. The
+   * publication check "Tax" compares a configuration's tax reference with it, and "Use the live
+   * Store's settings" carries it (an installed configuration may name an installer reference). */
+  readonly storeTaxConfigurationReference?: string | null;
 }
 export interface MerchantStoreConfigurationSoleOperatorView {
   readonly status: "Effective" | "NotSet" | "OtherApprovers";
@@ -236,6 +241,12 @@ export function parseMerchantStoreConfigurationOrdinaryWorkspace(
       typeof value === "object" &&
       Object.hasOwn(value, "latestWithdrawal") &&
       (value as { latestWithdrawal?: unknown }).latestWithdrawal !== undefined;
+    const hasTax =
+      value !== null &&
+      typeof value === "object" &&
+      Object.hasOwn(value, "storeTaxConfigurationReference") &&
+      (value as { storeTaxConfigurationReference?: unknown }).storeTaxConfigurationReference !==
+        undefined;
     const r = readClosedRecord(value, [
       "profile",
       "scope",
@@ -249,6 +260,7 @@ export function parseMerchantStoreConfigurationOrdinaryWorkspace(
       ...(hasChecks ? ["publicationChecks"] : []),
       ...(hasSoleOperator ? ["soleOperator"] : []),
       ...(hasWithdrawal ? ["latestWithdrawal"] : []),
+      ...(hasTax ? ["storeTaxConfigurationReference"] : []),
     ]);
     if (
       r.profile !== "StoreConfigurationOrdinaryWorkspaceV1" ||
@@ -360,6 +372,14 @@ export function parseMerchantStoreConfigurationOrdinaryWorkspace(
       ...(publicationChecks === undefined ? {} : { publicationChecks }),
       ...(soleOperator === undefined ? {} : { soleOperator }),
       ...(latestWithdrawal === undefined ? {} : { latestWithdrawal }),
+      ...(hasTax
+        ? {
+            storeTaxConfigurationReference:
+              r.storeTaxConfigurationReference === null
+                ? null
+                : parseStoreAdministrationReference(r.storeTaxConfigurationReference),
+          }
+        : {}),
     });
   } catch {
     return invalid();

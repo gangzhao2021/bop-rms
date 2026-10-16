@@ -61,6 +61,10 @@ export const internalTextRules: readonly InternalTextRule[] = [
     pattern:
       /\bfee contexts?\b|\beffective policy\b|\bdraft configuration\b|\bbind Store configuration\b/giu,
   },
+  // An amount written with its currency code ("CAD 27.40", "CAD $1,284.60"): staff screens use
+  // the app's one money format ("$27.40"). Column units such as "Unit cost (CAD)" stay allowed;
+  // a screen that must name the currency next to an amount allowlists it in its spec.
+  { name: "currency code amount", pattern: /\b(?:CAD|USD)\s?\$?\d/gu },
   // A role written as a code-like proper noun mid-sentence ("ask Staff"); guests ask staff.
   { name: "capitalized role", pattern: /\b(?:[Aa]sk|[Tt]ell|[Ss]how|[Cc]all) Staff\b/gu },
 ];

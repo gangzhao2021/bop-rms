@@ -132,7 +132,9 @@ export type StoreSetupFeeContext =
   | Readonly<{
       chargeType: StoreSetupFeeCharge;
       state: "Enabled";
-      taxClassificationReference: string;
+      /** WP-2423 (v15 D7): `null` only for a Tip — a voluntary tip is not taxed, so it needs no
+       * tax classification. A service charge or delivery fee that is On names one. */
+      taxClassificationReference: string | null;
       orderTypes: readonly ServiceMode[];
     }>;
 export type StoreSetupContent = {
@@ -169,7 +171,10 @@ export function parseStoreSetupFeeContexts(value: unknown): readonly StoreSetupF
         return Object.freeze({
           chargeType,
           state: "Enabled",
-          taxClassificationReference: ref(r.taxClassificationReference),
+          taxClassificationReference:
+            r.taxClassificationReference === null && chargeType === "Tip"
+              ? null
+              : ref(r.taxClassificationReference),
           orderTypes: Object.freeze(
             (["DineIn", "Pickup", "Delivery"] as const).filter((v) => orderTypes.includes(v)),
           ),

@@ -25,5 +25,6 @@ export * from "./infrastructure/persistence/digital-receipt-template-sole-operat
 export {
   createPostgresReceiptTemplatePublicationProof,
   createPostgresInstalledReceiptTemplatePublicationProof,
+  readInstalledReceiptTemplateReference,
 } from "./infrastructure/template-publication-proof.js";
 export { createPostgresReceiptTemplateContentPublicationProof } from "./infrastructure/template-content-publication-proof.js";

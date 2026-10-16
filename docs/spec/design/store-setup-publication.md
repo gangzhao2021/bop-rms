@@ -80,10 +80,52 @@ v15 上 Store setup 第 8 步被隐藏：试点从未组合门店配置发布（
       审计，作者可见）；Approvals 页独营说明含门店配置（设置、营业时间、收据模板）；批准被拒（403）后营业时间编辑器
       不再收起。
 
+14. **出票跟随已发布门店配置的收据模板（2026-10-16，协调人决定、Owner 可推翻）**：试点出票（`pilot-receipt.mjs` →
+    `published-receipt-template-source.ts`）不再使用运营文件中的模板/系列引用，而取门店当前已发布配置的
+    `receiptReference`，逐个版本按其所有者证明：有送审记录（产品内编写、送审、他人批准或带独营标记的本人批准、发布）的
+    版本用内容发布证明（系列取自送审记录），无送审记录的安装器模板（如 RECEIPT_V1）用其当前 Publishing release 的安装
+    证明；被新版本取代（release 非当前）的版本不参与选择。无法证明时拒绝出票（`DIGITAL_RECEIPT_TEMPLATE_UNAVAILABLE`，
+    不写收据、不回退到其他模板，消费者照常重试，修复后自动补出）。新收据快照记录所用模板版本代码（`templateVersion`）
+    与确切版本引用（`templateVersionReference`，内部引用，不向顾客展示）；既有收据不变。运维监控每分钟只读检查"现在能否用
+    已发布模板出票"，不能且持续 2 分钟时在 Home 与外发渠道告警"Receipts are not being issued"（紧急；说明原因与店员、
+    店主的处理，runbook `alert-receipts-template`），检查本身失败报"Some checks could not run"。运营文件
+    `internal-test-receipt-template.json` 仅保留环境闸门作用。
+
+15. **小费不需要税务分类（2026-10-16，v15 D7，协调人决定、Owner 可推翻）**：加拿大顾客自愿给、归员工的小费一般不征
+    GST/HST（强制收取的服务费征税），因此第 5 步小费开启时可不选税务分类（数据为 `taxClassificationReference: null`，
+    键保留；仅 Tip 可为 null），服务费与外送费开启时仍须选仍在使用的分类；已选分类的小费照旧有效并照常复核。领域解析、
+    BFF 保存（不为无分类的小费读取分类登记）、数据库草稿触发器（`2000_065`）与界面一致。报价与付款不读取门店费用设置的
+    分类：小费由付款的小费选择单独计入、不计税，故不受影响。第 5 步进入即自动读取分类选项（显示读取中/失败与重试），
+    选择不再等待手动刷新；保存时重新读取并拒绝已停用的分类。第 8 步的说明取自当前状态（最新配置是否由本次保存的设置
+    创建、是否已撤回/驳回），不再沿用先前操作的结果文字。
+
+16. **v15 实测 `8bd902e3` 后的修正（2026-10-16，协调人决定、Owner 可推翻）**：
+    - **营业时间的修改类型由已发布配置决定（D2）**：已发布为安装配置（V1）时走普通营业时间修改，即使最新一份是已撤回/
+      驳回的设置来源配置；已发布来自设置时走"只改营业时间"的设置修订。领域层不再因已撤回/驳回的设置来源最新配置拒绝普通
+      修改（未撤回时仍拒绝）；服务端在已发布配置来自设置时拒绝普通修改（409）。设置来源已发布时，已撤回的最新改动只有在
+      除营业时间外与已发布设置相同时才可接续（其营业时间被新改动替换），否则答"Store setup has changes that are not
+      published yet"，不把被撤回的设置改动带入新改动。v15 部署后无需数据修复即恢复。
+    - **税务设置按本店当前生效的税务配置记录（D1）**：门店报价使用 Pricing 的税务配置（试点为
+      `0190fa24-…-00a`），安装配置记的是安装器引用（`0190ed19-…-008`，无 Pricing 记录）。发布检查"Tax"继续与本店
+      当前生效的 Pricing 税务配置比较（同类比较）；工作区返回 `storeTaxConfigurationReference`（无/多份时为 null），
+      "Use the live Store's settings"带入该引用（无时退回在营配置的引用），"Settings from the live Store"按其判断
+      "same as the live Store"。v15 上店主在第 8 步再点一次"Use the live Store's settings"并保存即可通过。
+    - **作者称呼（D3）**：门店未记员工名称时，以其门店（或品牌）角色的管理名称称呼（"the Owner"），产品中没有其他
+      员工身份名称来源；从不显示引用。查找成员只吞"非成员"错误，数据库错误不再被吞（否则事务失效）。
+    - **送审后说明（D4）**：店主送审后按独营状态说明——独营生效可自行批准；未开启时说明他人批准或到 Approvals 开启；
+      店长送审说明由 Owner 批准。
+    - **驳回按钮（D9）**：仅持有门店配置批准权限（`store.service.approve`）的人看到"Decline this change"（服务端在
+      营业时间视图返回 `viewerMayDecline`）；店长看到"Ask an Owner to approve or decline it."。
+
 ## 已知遗留
 
 - 试点报价仍由运营文件给出税务配置引用（与门店配置引用一致时无差异），列为既有缺口。
-- 试点运行时出票仍固定使用运营文件中的收据模板（`pilot-receipt.mjs` 的 `templateReference`/`familyReference`，仅 V1
-  发布证明）：门店配置改用其他模板（含产品内编写并独营自批的模板）后不会出票。切换模板前须让运行时按已发布门店配置的
-  `receiptReference` 取模板并按版本选择证明（无送审用安装证明、有送审用内容证明）；在此之前沿用现用模板。
+- ~~试点运行时出票固定使用运营文件中的收据模板（仅 V1 发布证明），门店配置改用其他模板后不会出票~~ 已按决定 14 修正
+  （2026-10-16）。
+- ~~第 5 步"Saved templates"只列产品内编写的模板；门店改用自编模板后，安装器发布的原模板不再出现在下拉中（"Receipt
+  template in use today"此时指自编模板），店主在界面上无法改回原安装模板（运行时与 BFF 均支持，验收经 BFF 改回）。
+  列为既有缺口，待补"门店最初使用的收据模板"选项。~~ 已修正（2026-10-16）：第 5 步提供"Receipt template the Store
+  started with"选项与"Use the receipt template the Store started with"按钮（仍在用时与"Receipt template in use
+  today"合并为一项）；BFF 公开读取 `installed=true` 找出本店最早发布、无送审记录的安装器模板，并按其当前 Publishing
+  release 以 V1 发布证明读取（与其他模板同一证明，不可用时说明可重试）。
 - ~~单人经营扩展到门店配置待 Owner 决定（见决定 5）~~ 已由 Owner 2026-10-16 决定并实现（见决定 5）。

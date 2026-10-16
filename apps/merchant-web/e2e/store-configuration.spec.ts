@@ -467,6 +467,8 @@ test("@production WP-2423 v15: someone else's open change names them; declining 
           : null,
         latestAuthorName: "Mia Chen",
         soleOperator: null,
+        // v15 D9: this reader holds Store configuration approval, so may decline.
+        viewerMayDecline: true,
       },
     }),
   );

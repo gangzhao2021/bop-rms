@@ -147,6 +147,7 @@ export interface StoreConfigurationOrdinaryPanelProps {
   readonly onLiveConfiguration?: (live: {
     readonly current: StoreConfigurationSnapshot | null;
     readonly observedAt: string;
+    readonly storeTaxConfigurationReference?: string | null;
   }) => void;
   readonly client?: ReturnType<typeof createStoreConfigurationOrdinaryClient>;
   readonly journalFactory?: (scope: StoreSetupScope) => StoreConfigurationPendingJournal;
@@ -252,6 +253,20 @@ const messages: Record<StoreSetupClientError["code"], string> = {
   OutcomeUnknown:
     "The result is unknown. Recover the original request before sending another command.",
 };
+/** WP-2423 (v15 D6): the latest configuration was created from exactly this saved setup (its
+ * setup revision), so step 8 says what became of it rather than "the configuration changed after
+ * this setup was saved". */
+export function storeSetupCreatedFromSaved(
+  saved: { readonly setupDraftReference: string; readonly revision: number } | null,
+  latest: Pick<StoreConfigurationSnapshot, "setupBasis"> | null,
+): boolean {
+  return (
+    saved !== null &&
+    latest?.setupBasis !== undefined &&
+    latest.setupBasis.setupDraftReference === saved.setupDraftReference &&
+    latest.setupBasis.sourceRevision === saved.revision
+  );
+}
 export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinaryPanelProps) {
   const client = useMemo(
     () => props.client ?? createStoreConfigurationOrdinaryClient(),
@@ -379,6 +394,8 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
     running.current = true;
     setBusy(true);
     setError(null);
+    // WP-2423 (v15 D6): an earlier action's result no longer describes the refreshed state.
+    setNotice(null);
     try {
       const next = await client.load(props.scope, { signal: c.signal });
       if (epoch === generation.current && !c.signal.aborted) setWorkspace(next);
@@ -500,9 +517,10 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
       if (current()) {
         setWorkspace(next);
         setNotice(
+          // WP-2423 (v15 D6): what to do next is said from the current state below, not here.
           kind === "Withdrawn"
-            ? `Version ${target.configurationVersion} withdrawn. You can create a new configuration from the saved setup.`
-            : `Version ${target.configurationVersion} declined. A new configuration can now be created from the saved setup.`,
+            ? `Version ${target.configurationVersion} withdrawn. It can no longer be approved or published.`
+            : `Version ${target.configurationVersion} declined. It can no longer be approved or published.`,
         );
       }
     } catch (e) {
@@ -551,10 +569,19 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
       }
     }
   }
+  // WP-2423 (v15 D6): saving the setup again makes an earlier action's result out of date.
+  const savedRevision = props.saved?.revision ?? 0;
+  useEffect(() => setNotice(null), [savedRevision]);
   const onLive = props.onLiveConfiguration;
   useEffect(() => {
     if (workspace && onLive)
-      onLive({ current: workspace.current, observedAt: workspace.observedAt });
+      onLive({
+        current: workspace.current,
+        observedAt: workspace.observedAt,
+        ...(workspace.storeTaxConfigurationReference === undefined
+          ? {}
+          : { storeTaxConfigurationReference: workspace.storeTaxConfigurationReference }),
+      });
   }, [workspace, onLive]);
   const latest = workspace?.latest,
     current = workspace?.current,
@@ -585,6 +612,9 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
       workspace !== null &&
       props.saved.baseConfigurationReference !==
         ((latest ?? current)?.configurationReference ?? null),
+    // WP-2423 (v15 D6): the latest configuration was created from exactly this saved setup — the
+    // setup did not "change after it was saved"; say what became of that configuration instead.
+    createdFromSaved = storeSetupCreatedFromSaved(props.saved, latest ?? null),
     ownChange =
       withdrawal === undefined &&
       latest?.lifecycle === "PendingApproval" &&
@@ -664,9 +694,12 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
                 : "Nothing published yet"}
             </dd>
           </dl>
-          {latest && <StoreConfigurationFeeBasisView configuration={latest} />}{" "}
+          {latest && (
+            <StoreConfigurationFeeBasisView configuration={latest} withdrawal={withdrawal?.kind} />
+          )}{" "}
           {checks && <StoreConfigurationPublicationChecklist checks={checks} />}
           {latest?.setupBasis !== undefined &&
+            withdrawal === undefined &&
             (latest.lifecycle === "Draft" ||
               latest.lifecycle === "PendingApproval" ||
               latest.lifecycle === "Approved") && (
@@ -685,8 +718,10 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
               Version {latest.configurationVersion} was{" "}
               {withdrawal.kind === "Withdrawn" ? "withdrawn" : "declined"}
               {withdrawal.byYou ? " by you" : ""} <StaffTime instant={withdrawal.withdrawnAt} />. It
-              can no longer be approved or published; create a new configuration from the saved
-              setup.
+              can no longer be approved or published.{" "}
+              {setupOutdated
+                ? "To create a new configuration, save the setup again (Save setup draft, it then builds on the latest configuration), then create it."
+                : "Create a new configuration from the saved setup."}
             </p>
           )}
           {openByAnother && latest && (
@@ -752,19 +787,27 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
             <section aria-label="Your configuration waiting">
               <p>
                 Your version {latest.configurationVersion} is{" "}
-                {storeConfigurationStateLabel(latest.lifecycle).toLowerCase()}. Creating a new
-                configuration from the saved setup replaces it; or withdraw it to stop it being
-                approved.
+                {storeConfigurationStateLabel(latest.lifecycle).toLowerCase()}.{" "}
+                {createdFromSaved
+                  ? `It was created from this saved setup. To change it, change the setup and save it, then create a new configuration (it replaces version ${latest.configurationVersion}); or withdraw it to stop it being approved.`
+                  : "Creating a new configuration from the saved setup replaces it; or withdraw it to stop it being approved."}
               </p>
               <button type="button" disabled={locked} onClick={() => void withdrawLatest()}>
                 Withdraw version {latest.configurationVersion}
               </button>
             </section>
           )}
-          {setupOutdated && !openByAnother && (
+          {setupOutdated && !openByAnother && !createdFromSaved && withdrawal === undefined && (
             <p>
               The Store&rsquo;s configuration changed after this setup was saved. Save the setup
               again (it then builds on the latest configuration) before creating a configuration.
+            </p>
+          )}
+          {createdFromSaved && !openLatest && withdrawal === undefined && latest && (
+            <p>
+              Version {latest.configurationVersion} was created from this saved setup and is{" "}
+              {storeConfigurationStateLabel(latest.lifecycle).toLowerCase()}. To change the Store
+              again, change the setup and save it, then create a new configuration.
             </p>
           )}
           {setupIncomplete && (

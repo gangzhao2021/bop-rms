@@ -97,6 +97,7 @@ async function install(page: Page) {
     denySetupResolve: false,
     setupPosts: [] as Record<string, unknown>[],
     publishedGets: 0,
+    installedGets: 0,
     lose: false,
     loseSubmit: false,
     loseLifecycle: false,
@@ -319,6 +320,18 @@ async function install(page: Page) {
         return route.abort("failed");
       }
       return respond(route, receipt);
+    }
+    if (
+      path === "/merchant/store-setup/receipt-template-published" &&
+      request.method() === "GET" &&
+      url.searchParams.get("installed") === "true"
+    ) {
+      // WP-2423: this synthetic Store has no installer-published receipt template.
+      state.installedGets++;
+      expect([...url.searchParams.keys()].sort()).toEqual(
+        ["storeReference", "installed", "locale"].sort(),
+      );
+      return respond(route, { error: "receipt_template_installed_none" }, 404);
     }
     if (path === "/merchant/store-setup/receipt-template-published" && request.method() === "GET") {
       state.publishedGets++;
