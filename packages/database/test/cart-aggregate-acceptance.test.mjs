@@ -36,6 +36,7 @@ async function prove(context) {
       { table_name: "cart_quote_attachment" },
       { table_name: "cart_quote_attachment_line" },
       { table_name: "cart_quote_expiry_record" },
+      { table_name: "checkout_contact_redaction" },
       { table_name: "checkout_details_record" },
       { table_name: "checkout_session_allocation" },
       { table_name: "checkout_session_record" },
@@ -43,6 +44,8 @@ async function prove(context) {
       { table_name: "digital_receipt_record" },
       { table_name: "dining_cart_operation" },
       { table_name: "dining_cart_replacement" },
+      { table_name: "order_acceptance_hold" },
+      { table_name: "order_acceptance_hold_resolution" },
       { table_name: "order_acceptance_record" },
       { table_name: "order_amendment" },
       { table_name: "order_amendment_change" },
@@ -70,6 +73,7 @@ async function prove(context) {
       { table_name: "order_status_projection_generation" },
       { table_name: "order_submission_record" },
       { table_name: "order_termination_record" },
+      { table_name: "staff_dining_round_entry" },
     ]);
     const forced = await admin.query(
       `SELECT relname, relforcerowsecurity FROM pg_class

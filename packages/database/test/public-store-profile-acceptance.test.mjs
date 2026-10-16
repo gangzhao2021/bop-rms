@@ -628,29 +628,40 @@ it.each(["Dining", "Pickup"])(
         const pickupAuthorization = channel === "Pickup";
         const clockFrom = new Date(Date.parse(at) - 60000).toISOString();
         const clockUntil = new Date(Date.parse(at) + 86400000).toISOString();
-        // The seeded Store's business day starts at 04:00 local, so between midnight and 04:00 the
-        // current Business Date is still the previous calendar day.
-        const toronto = new Intl.DateTimeFormat("en-CA", {
-          timeZone: "America/Toronto",
-          weekday: "short",
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-        }).formatToParts(new Date(Date.parse(at) - 4 * 60 * 60 * 1000));
-        const part = (type) => toronto.find((value) => value.type === type).value;
-        const weekdayIndex = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(
-          part("weekday"),
-        );
-        const businessDate = `${part("year")}-${part("month")}-${part("day")}`;
-        const fixtureClock = {
-          from: clockFrom,
-          at,
-          until: clockUntil,
-          businessWeekday: weekdayIndex === 0 ? 7 : weekdayIndex,
-          businessDate,
-          targetBusinessDate: businessDate,
-          initialServiceWindow: { start: "00:00:00", end: "23:59:59" },
-          targetServiceWindow: { start: "00:00:00", end: "00:01:00" },
+        // The merchant read runs on one controlled instant (`fixtureClock.at`, handed to the
+        // service as `now`), and every expected Business Date is derived from that same instant
+        // with each seeded Store's own business-day start: 04:00 for the initial Store and 09:00
+        // for the switch target (see persistent-merchant-bff.mjs). Deriving both from one instant
+        // keeps the assertions true at any time of day, including across either boundary.
+        const businessDay = (instant, startHour) => {
+          const parts = new Intl.DateTimeFormat("en-CA", {
+            timeZone: "America/Toronto",
+            weekday: "short",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            hourCycle: "h23",
+          }).formatToParts(new Date(instant));
+          const part = (type) => parts.find((value) => value.type === type).value;
+          // Before the start hour the local calendar day still belongs to the previous Business
+          // Date; step back one calendar day at local noon so DST shifts cannot skip a date.
+          const local = new Date(`${part("year")}-${part("month")}-${part("day")}T12:00:00Z`);
+          if (Number(part("hour")) < startHour) local.setUTCDate(local.getUTCDate() - 1);
+          return { date: local.toISOString().slice(0, 10), weekday: local.getUTCDay() || 7 };
+        };
+        const clockAt = (instant) => {
+          const initial = businessDay(instant, 4);
+          return {
+            from: clockFrom,
+            at: instant,
+            until: clockUntil,
+            businessWeekday: initial.weekday,
+            businessDate: initial.date,
+            targetBusinessDate: businessDay(instant, 9).date,
+            initialServiceWindow: { start: "00:00:00", end: "23:59:59" },
+            targetServiceWindow: { start: "00:00:00", end: "00:01:00" },
+          };
         };
         if (pickupAuthorization) {
           await client.query("INSERT INTO bop_permission.policy_state VALUES ($1,$2,1,$3)", [
@@ -746,7 +757,7 @@ it.each(["Dining", "Pickup"])(
                     admin: client,
                     client,
                     role,
-                    fixtureClock: { ...fixtureClock, at: new Date().toISOString() },
+                    fixtureClock: clockAt(new Date().toISOString()),
                     pickupReady,
                     existingOrganizationFacts: true,
                   }),

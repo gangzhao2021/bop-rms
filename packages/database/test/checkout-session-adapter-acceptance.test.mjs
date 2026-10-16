@@ -240,12 +240,20 @@ it("atomically creates checkout sessions and Audit, recovers contention and reje
         code: "INTENT_CONFLICT",
       });
       await allocations.allocate(allocation(40, 41), authority);
+      // Two concurrent requests for one create operation both carry the allocated candidate (a
+      // second request reads the same allocation); the operation lock lets exactly one create.
       const races = await Promise.all([
         store.create(candidate(40, 41), authority),
-        store.create(candidate(50, 41), authority),
+        store.create(candidate(40, 41), authority),
       ]);
       assert.deepEqual(races.map((r) => r.status).sort(), ["AlreadyCreated", "Created"]);
       assert.deepEqual(races[0].session, races[1].session);
+      // A late request for the same operation with another candidate converges on the created
+      // session. (Racing it instead was order-dependent: if it took the lock first it was
+      // correctly refused, because only the allocated candidate may be created.)
+      const late = await store.create(candidate(50, 41), authority);
+      assert.equal(late.status, "AlreadyCreated");
+      assert.deepEqual(late.session, races[0].session);
       await allocations.allocate(allocation(60, 61), authority);
       await assert.rejects(
         store.create({ ...candidate(60, 61), paymentOperationReference: id(69) }, authority),

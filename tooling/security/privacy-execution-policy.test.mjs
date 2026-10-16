@@ -49,7 +49,7 @@ function allowedCookie(policy, name, file) {
 }
 
 describe("WP-2051 privacy execution policy", () => {
-  it("allows only the five necessary host-only credential cookies", async () => {
+  it("allows only the six necessary host-only credential cookies", async () => {
     const value = await policy();
     expect(value.necessaryCookies.map(({ name }) => name)).toEqual([
       "__Host-bop-auth",
@@ -57,16 +57,24 @@ describe("WP-2051 privacy execution policy", () => {
       "__Host-bop-guest",
       "__Host-bop-platform-auth",
       "__Host-bop-platform",
+      "__Host-bop-store-device",
     ]);
     for (const cookie of value.necessaryCookies) {
       expect(cookie).toMatchObject({
         secure: true,
         httpOnly: true,
-        sameSite: "Lax",
+        // WP-2423 Q18: the registered-tablet secret is Strict (never sent cross-site).
+        sameSite: cookie.name === "__Host-bop-store-device" ? "Strict" : "Lax",
         path: "/",
         domain: null,
       });
     }
+    expect(
+      value.necessaryCookies.find(({ name }) => name === "__Host-bop-store-device"),
+    ).toMatchObject({
+      sourceFiles: ["apps/api/src/merchant-staff-pin-http.ts"],
+      webStorage: false,
+    });
   });
 
   it("finds no unregistered cookie or tracking integration in production source", async () => {

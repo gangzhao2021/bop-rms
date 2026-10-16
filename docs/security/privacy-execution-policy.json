@@ -53,6 +53,20 @@
       "sameSite": "Lax",
       "path": "/",
       "domain": null
+    },
+    {
+      "name": "__Host-bop-store-device",
+      "purpose": "registered-store-tablet-for-staff-pin-switch",
+      "secure": true,
+      "httpOnly": true,
+      "sameSite": "Strict",
+      "path": "/",
+      "domain": null,
+      "persistence": "400-days-browser-maximum",
+      "serverAuthority": "Identity store sign-in device registration; only an HMAC-SHA256 of the secret is stored and revocation is server-side",
+      "sourceFiles": ["apps/api/src/merchant-staff-pin-http.ts"],
+      "design": "docs/spec/design/staff-session-continuity.md",
+      "webStorage": false
     }
   ],
   "prohibitedTracking": [

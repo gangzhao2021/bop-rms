@@ -412,29 +412,35 @@ it.each([
   { args: ["--directory", "relative"] },
   { args: ["--directory", "/tmp", "--allow"] },
   { args: ["--cookie", "synthetic-argv"] },
-])("CLI refuses malformed invocation with only one fixed error %#", async ({ args }) => {
-  const root = fileURLToPath(new URL("../../", import.meta.url));
-  const result = await promisify(execFile)(
-    process.execPath,
-    [
-      "--import",
-      "./tooling/environment/register-workspace-typescript.mjs",
-      "./tooling/environment/brand-initial-provisioning.mjs",
-      ...args,
-    ],
-    {
-      cwd: root,
-      env: { ...process.env, NODE_ENV: "production" },
-      timeout: 30000,
-      encoding: "utf8",
-    },
-  ).then(
-    (value) => ({ ...value, code: 0 }),
-    (error) => ({ code: error.code, stdout: error.stdout, stderr: error.stderr }),
-  );
-  expect(result).toEqual({
-    code: 1,
-    stdout: "",
-    stderr: "INTERNAL_BRAND_INITIAL_PROVISIONING_UNAVAILABLE\n",
-  });
-});
+])(
+  "CLI refuses malformed invocation with only one fixed error %#",
+  async ({ args }) => {
+    const root = fileURLToPath(new URL("../../", import.meta.url));
+    const result = await promisify(execFile)(
+      process.execPath,
+      [
+        "--import",
+        "./tooling/environment/register-workspace-typescript.mjs",
+        "./tooling/environment/brand-initial-provisioning.mjs",
+        ...args,
+      ],
+      {
+        cwd: root,
+        env: { ...process.env, NODE_ENV: "production" },
+        timeout: 30000,
+        encoding: "utf8",
+      },
+    ).then(
+      (value) => ({ ...value, code: 0 }),
+      (error) => ({ code: error.code, stdout: error.stdout, stderr: error.stderr }),
+    );
+    expect(result).toEqual({
+      code: 1,
+      stdout: "",
+      stderr: "INTERNAL_BRAND_INITIAL_PROVISIONING_UNAVAILABLE\n",
+    });
+    // A cold Node start with the workspace TypeScript loader takes ~3 s alone; match the 30 s child
+    // timeout so the case cannot fail only because a parallel suite slows the host.
+  },
+  30000,
+);

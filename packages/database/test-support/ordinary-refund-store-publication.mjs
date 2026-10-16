@@ -3,8 +3,17 @@ import { createStoreConfigurationVersion } from "../../rms/store/src/index.ts";
 import { canonicalizeRfc8785, sha256Hex } from "../../bop/audit/src/index.ts";
 import { createMerchantOrdinaryRefundBusinessDate } from "../../../apps/api/src/merchant-ordinary-refund-business-date.ts";
 
-/** Synthetic Store configuration, actual published owner records/proof. */
-export async function seedOrdinaryRefundStorePublication({ client, scope, firstCapturedAt }) {
+/**
+ * Synthetic Store configuration, actual published owner records/proof. A fixture that seeds its
+ * timeline from the real clock passes `businessDayStartLocalTime` so that timeline stays inside one
+ * Business Date whatever time of day the test runs.
+ */
+export async function seedOrdinaryRefundStorePublication({
+  client,
+  scope,
+  firstCapturedAt,
+  businessDayStartLocalTime = "04:00:00",
+}) {
   const id = (n) =>
     n === 90
       ? scope.tenantReference
@@ -21,7 +30,7 @@ export async function seedOrdinaryRefundStorePublication({ client, scope, firstC
     defaultLocale: "en-CA",
     currencyCode: "CAD",
     timeZone: "America/Toronto",
-    businessDayStartLocalTime: "04:00:00",
+    businessDayStartLocalTime,
     addressReference: id(5),
     contactReference: id(6),
     receiptReference: id(7),
@@ -70,7 +79,7 @@ export async function seedOrdinaryRefundStorePublication({ client, scope, firstC
     default_locale: "en-CA",
     currency_code: "CAD",
     time_zone: "America/Toronto",
-    business_day_start_local_time: "04:00:00",
+    business_day_start_local_time: businessDayStartLocalTime,
     address_reference: id(5),
     contact_reference: id(6),
     receipt_reference: id(7),

@@ -127,6 +127,7 @@ it("manages which items a Store sells with Brand and Store authority", async () 
         sizeName: "Regular (12 oz)",
         status: "NotOffered",
         soldOutUntil: null,
+        stockSoldOut: null,
       });
       // Store authority never offers an item.
       scope.as(manager);

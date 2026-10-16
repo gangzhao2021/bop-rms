@@ -408,6 +408,15 @@ it("sole operator: set by the Brand Owner, self-approval with MFA, lapse on a se
           client: admin,
           scope,
           firstCapturedAt: seedOrder.paidAt,
+          // The fixture seeds its timeline from the real clock (roles from three hours ago, Orders
+          // paid 39 minutes ago, refunds now) and step 12 reads the current Business Date. A fixed
+          // 04:00 start split that timeline across two Business Dates between 04:00 and 07:00
+          // Toronto, so the Store's day starts on the hour four hours before `base` instead.
+          businessDayStartLocalTime: `${new Intl.DateTimeFormat("en-CA", {
+            timeZone: "America/Toronto",
+            hour: "2-digit",
+            hourCycle: "h23",
+          }).format(new Date(base - minutes(240)))}:00:00`,
         });
 
       // ── Simulated Stripe (InternalTest): the real refund adapter over a fake transport.
