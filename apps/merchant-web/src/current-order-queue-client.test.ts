@@ -48,6 +48,69 @@ it("preserves current version and validates newest-first pagination", () => {
     parseCurrentOrderQueue({ items: [row(2)], nextAfterOrderReference: null }, id(1)),
   ).toThrow();
 });
+it("WP-2423 (2026-10-16 v15): a full page with earlier-day Orders holding stock still reads", () => {
+  // The v15 answer that blanked the Orders page: 50 Orders of the page with a next page, plus 18
+  // Orders of earlier days whose stock is still set aside (listed first, under today).
+  const dated = (n: number, businessDate: string) => ({
+    ...row(n),
+    businessDate,
+    listedBusinessDate: businessDate,
+    heldStock: null,
+  });
+  const page = Array.from({ length: 50 }, (_, i) => dated(200 - i, "2026-10-14"));
+  const held = Array.from({ length: 18 }, (_, i) => ({
+    ...dated(300 + i, "2026-09-20"),
+    listedBusinessDate: "2026-10-15",
+    heldStock: {
+      since: "2026-09-20T04:09:28.342Z",
+      state: "Ended",
+      orderBatchReference: id(90),
+      productionStarted: false,
+    },
+  }));
+  const next = id(151);
+  const view = parseCurrentOrderQueue({
+    earlierDayItems: held,
+    items: page,
+    nextAfterOrderReference: next,
+  });
+  expect(view.items).toHaveLength(68);
+  expect(view.items.slice(0, 18).every((item) => item.heldStock?.state === "Ended")).toBe(true);
+  expect(view.items[18]?.orderReference).toBe(id(200));
+  expect(view.nextAfterOrderReference).toBe(next);
+  // An older server mixed them in one list (as captured on v15): still read, not blanked.
+  expect(
+    parseCurrentOrderQueue({ items: [...held, ...page], nextAfterOrderReference: next }).items,
+  ).toHaveLength(68);
+  // ... including a page it shortened by leaving earlier-day Orders out of it.
+  expect(
+    parseCurrentOrderQueue({
+      items: [...held, ...page.slice(0, 47)],
+      nextAfterOrderReference: id(154),
+    }).items,
+  ).toHaveLength(65);
+  // Genuinely broken answers still fail: a short page with a next page, a next page that does not
+  // continue after the page, an Order listed twice, earlier-day Orders on a later page.
+  for (const broken of [
+    { earlierDayItems: held, items: page.slice(0, 49), nextAfterOrderReference: id(152) },
+    { earlierDayItems: held, items: page, nextAfterOrderReference: id(150) },
+    { earlierDayItems: [page[0]], items: page, nextAfterOrderReference: next },
+    { earlierDayItems: held.concat(held[0] ?? []), items: page, nextAfterOrderReference: next },
+  ])
+    expect(() => parseCurrentOrderQueue(broken)).toThrow();
+  expect(() =>
+    parseCurrentOrderQueue(
+      { earlierDayItems: held, items: page, nextAfterOrderReference: null },
+      id(400),
+    ),
+  ).toThrow();
+  expect(
+    parseCurrentOrderQueue(
+      { earlierDayItems: [], items: page, nextAfterOrderReference: null },
+      id(400),
+    ).items,
+  ).toHaveLength(50);
+});
 it.each([
   { ...row(), canRequestAcceptance: true },
   { ...row(), canRequestAcceptance: "true" },

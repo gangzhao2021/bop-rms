@@ -1217,6 +1217,7 @@ export function StoreSetupDraftPage({
                   saved={workspace.setup.snapshot}
                   freshDisabled={disabled || dirty}
                   onLiveConfiguration={setLive}
+                  onSetupChanged={() => void refresh()}
                 />
               </>
             )}

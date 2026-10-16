@@ -7257,6 +7257,7 @@ body:has(.product-complete-draft) .bop-shell__header,
   color: var(--bop-color-text-muted);
 }
 .order-queue-awaiting,
+.order-queue-released,
 .order-queue-stale {
   margin: 0 0 12px;
   padding: 10px 12px;
@@ -7267,6 +7268,10 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .order-queue-stale {
   border-color: var(--bop-color-warning);
+}
+/* WP-2423 (2026-10-16 v15): ingredients of an ended order returned to stock. */
+.order-queue-released {
+  border-color: var(--bop-color-success);
 }
 /* WP-2423 Q9-G1: orders paid while the store was offline, waiting for a decision. */
 .order-hold-notice {
@@ -8917,4 +8922,20 @@ body:has(.product-complete-draft) .bop-shell__header,
 .order-staff-round {
   margin: 0 0 var(--bop-space-2);
   font-weight: 600;
+}
+/* WP-2423 (2026-10-16 v15): who turned sole operator on or off, when and why. */
+.sole-operator-history {
+  margin: 0 0 16px;
+}
+.sole-operator-history h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+.sole-operator-history ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.sole-operator-history li + li {
+  margin-top: 6px;
 }

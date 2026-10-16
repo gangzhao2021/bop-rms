@@ -281,11 +281,31 @@ function parseHeldStock(value: unknown): HeldStock | null {
   });
 }
 export function parseCurrentOrderQueue(value: unknown, after: string | null = null) {
-  const raw = exact(value, ["items", "nextAfterOrderReference"]);
-  // WP-2423 D4: up to 50 Orders of the page, plus (first page) older tables' Orders with a round today.
-  if (!Array.isArray(raw.items) || raw.items.length > 100) return fail();
+  // WP-2423 (2026-10-16 v15): earlier-day Orders listed with today's (older tables with a round
+  // today, Orders still holding stock) come apart from the page (absent from an older server).
+  const withEarlier =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "earlierDayItems");
+  const raw = exact(value, [
+    ...(withEarlier ? ["earlierDayItems"] : []),
+    "items",
+    "nextAfterOrderReference",
+  ]);
+  // The page holds up to 50 Orders; earlier-day Orders (first page only) up to 50 more. An older
+  // server mixed both in `items`.
+  if (
+    !Array.isArray(raw.items) ||
+    raw.items.length > (withEarlier ? 50 : 100) ||
+    (withEarlier &&
+      (!Array.isArray(raw.earlierDayItems) ||
+        raw.earlierDayItems.length > 50 ||
+        (after !== null && raw.earlierDayItems.length > 0)))
+  )
+    return fail();
   let previous = after;
-  const items = raw.items.map((value) => {
+  // Orders of the page in their newest-first sequence (earlier-day Orders are outside it).
+  let paged = 0;
+  const seen = new Set<string>();
+  const parseItem = (value: unknown, earlierDay: boolean) => {
     const withCounter =
       value !== null && typeof value === "object" && Object.hasOwn(value, "counter");
     const withHold =
@@ -339,10 +359,14 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
     // was opened (first, with today's orders); it is outside the newest-first sequence.
     const carriedOver =
       businessDate !== null && listedBusinessDate !== null && listedBusinessDate > businessDate;
+    // An Order listed twice is a broken answer.
+    if (seen.has(orderReference)) return fail();
+    seen.add(orderReference);
     // WP-2423: newest first; a following page continues with older Orders.
-    if (!carriedOver) {
+    if (!earlierDay && !carriedOver) {
       if (previous !== null && orderReference >= previous) return fail();
       previous = orderReference;
+      paged += 1;
     }
     if (
       typeof item.pickupNotCollected !== "boolean" ||
@@ -564,10 +588,26 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       currentPhase: item.currentPhase as string | null,
       currentVersion: item.currentVersion as number | null,
     });
-  });
+  };
+  const earlier = withEarlier
+    ? (raw.earlierDayItems as unknown[]).map((value) => parseItem(value, true))
+    : [];
+  const page = raw.items.map((value) => parseItem(value, false));
   const next = raw.nextAfterOrderReference === null ? null : reference(raw.nextAfterOrderReference);
-  if (next !== null && (items.length !== 50 || next !== previous)) return fail();
-  return Object.freeze({ items: Object.freeze(items), nextAfterOrderReference: next });
+  // A following page continues after the page's last Order. The current server answers exactly 50
+  // Orders then; an older one left earlier-day Orders out of a fetched page (fewer than 50).
+  if (
+    next !== null &&
+    (withEarlier
+      ? page.length !== 50 || paged !== 50 || next !== previous
+      : paged > 50 || previous === null || next > previous)
+  )
+    return fail();
+  // Earlier-day Orders are listed first, with today's.
+  return Object.freeze({
+    items: Object.freeze([...earlier, ...page]),
+    nextAfterOrderReference: next,
+  });
 }
 export type CurrentOrderQueue = ReturnType<typeof parseCurrentOrderQueue>;
 /**

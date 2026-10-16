@@ -329,7 +329,7 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
     const active = new AbortController();
     controller.current = active;
     try {
-      const kind = await withdrawStoreConfiguration(
+      const { kind, setupHoursRestored } = await withdrawStoreConfiguration(
         {
           configurationReference: latest.configurationReference,
           configurationVersion: latest.configurationVersion,
@@ -343,9 +343,11 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
       setView(next);
       setDraft(storeConfigurationEditBase(next));
       setMessage(
-        kind === "Withdrawn"
+        (kind === "Withdrawn"
           ? "Your change was withdrawn. The next change starts from the published hours."
-          : "The change was declined. The next change starts from the published hours.",
+          : "The change was declined. The next change starts from the published hours.") +
+          // WP-2423 (2026-10-16 v15): Store setup no longer holds the withdrawn hours either.
+          (setupHoursRestored ? " Store setup is back to the published opening hours too." : ""),
       );
     } catch (error) {
       if (!active.signal.aborted)

@@ -22,6 +22,17 @@ const others = (view: SoleOperatorView) => {
     : names.slice(0, -1).join(", ") + " and " + names.at(-1);
 };
 
+/** One recorded change in plain words: "Turned off by you · Someone else can now approve · <time>". */
+function soleOperatorChangeText(entry: SoleOperatorView["history"][number]) {
+  return (
+    <>
+      Turned {entry.state === "On" ? "on" : "off"} by{" "}
+      {entry.changedByYou ? "you" : (entry.changedByName ?? "the brand owner")} ·{" "}
+      {soleOperatorReasonLabel[entry.reasonCode]} · <SourceTime instant={entry.recordedAt} />
+    </>
+  );
+}
+
 /** Why sole operator is (or isn't) letting the Owner approve their own refunds right now. */
 function effectText(view: SoleOperatorView): string {
   if (view.state === "Off")
@@ -155,7 +166,6 @@ export function SoleOperatorSection({
       setBusy(false);
     }
   };
-  const latest = view.history[0];
   return (
     <section aria-labelledby="sole-operator-heading" className="sole-operator">
       <h2 id="sole-operator-heading">Sole operator</h2>
@@ -173,24 +183,33 @@ export function SoleOperatorSection({
           <dt>Sole operator</dt>
           <dd>
             <strong>{view.state}</strong>
+            {view.version > 0 ? ` · setting change ${view.version}` : ""}
           </dd>
         </div>
         <div>
           <dt>Refund approval</dt>
           <dd>{effectText(view)}</dd>
         </div>
-        {latest ? (
-          <div>
-            <dt>Last change</dt>
-            <dd>
-              Turned {latest.state === "On" ? "on" : "off"} by{" "}
-              {latest.changedByYou ? "you" : (latest.changedByName ?? "the brand owner")} ·{" "}
-              {soleOperatorReasonLabel[latest.reasonCode]} ·{" "}
-              <SourceTime instant={latest.recordedAt} />
-            </dd>
-          </div>
-        ) : null}
       </dl>
+      {/* WP-2423 (2026-10-16 v15): who turned it on or off, when and why — newest first. */}
+      {view.history.length > 0 ? (
+        <section aria-labelledby="sole-operator-history-heading" className="sole-operator-history">
+          <h3 id="sole-operator-history-heading">Recent changes</h3>
+          <ol>
+            {view.history.slice(0, 5).map((entry) => (
+              <li key={entry.version}>
+                Change {entry.version}: {soleOperatorChangeText(entry)}
+              </li>
+            ))}
+          </ol>
+          {view.history.length > 5 ? (
+            <p>
+              {view.history.length - 5} earlier{" "}
+              {view.history.length - 5 === 1 ? "change is" : "changes are"} kept in the record.
+            </p>
+          ) : null}
+        </section>
+      ) : null}
       {/* Not a form: the verification dialog holds its own form and must not nest in one. */}
       <div className="card-actions">
         <label htmlFor="sole-operator-reason">

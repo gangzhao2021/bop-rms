@@ -421,6 +421,106 @@ test("@production WP-2423 v15: your own hours change is approved alone; a refusa
   await expectNoInternalText(page);
 });
 
+test("@production WP-2423 v15: after a refused publication your change can still be withdrawn and reloaded", async ({
+  page,
+}) => {
+  const store = "018f8100-0000-7000-8000-000000000005";
+  const headers = await hoursPage(page, store);
+  const viewer = id(10);
+  const current = {
+    ...configuration("Published"),
+    storeReference: store,
+    enabledServiceModes: ["DineIn", "Pickup"],
+  };
+  // Approved by the viewer alone while Sole operator was on; it was turned off before publishing.
+  const latest = {
+    ...current,
+    configurationReference: id(22),
+    configurationVersion: 2,
+    lifecycle: "Approved",
+    supersedesConfigurationReference: current.configurationReference,
+    reasonCode: "STORE_HOURS_UPDATE",
+    authoredByReference: viewer,
+    approvedByReference: viewer,
+    approvalEvidenceReference: id(23),
+    publicationReference: null,
+    liveGateEvidenceReference: null,
+  };
+  let withdrawn = false;
+  let reads = 0;
+  const commands: Record<string, unknown>[] = [];
+  const withdrawals: Record<string, unknown>[] = [];
+  await page.route("**/merchant/store-configuration", async (route) => {
+    if (route.request().method() === "GET") {
+      reads += 1;
+      await route.fulfill({
+        headers,
+        json: {
+          screenId: "STORE-HOURS-SERVICE",
+          storeReference: store,
+          current,
+          latest,
+          expectedVersion: 2,
+          observedAt: new Date(Date.now() - 1000).toISOString(),
+          viewerActorReference: viewer,
+          latestWithdrawal: withdrawn
+            ? {
+                kind: "Withdrawn",
+                withdrawnAt: new Date().toISOString(),
+                byYou: true,
+                reason: null,
+              }
+            : null,
+          latestAuthorName: null,
+          soleOperator: null,
+        },
+      });
+      return;
+    }
+    commands.push(route.request().postDataJSON() as Record<string, unknown>);
+    await route.fulfill({
+      status: 409,
+      headers,
+      json: { error: "sole_operator_approval_invalid" },
+    });
+  });
+  await page.route("**/merchant/store-configuration/withdrawal", async (route) => {
+    withdrawals.push(route.request().postDataJSON() as Record<string, unknown>);
+    withdrawn = true;
+    // Its hours were an hours-only Store setup change: Store setup returns to the published hours.
+    await route.fulfill({
+      headers,
+      json: { status: "Applied", kind: "Withdrawn", setupHoursRestored: true },
+    });
+  });
+  await page.goto("/app/organization/stores/" + store + "/service");
+  const editor = page.getByRole("region", { name: "Operating hours draft" });
+  await editor.getByRole("button", { name: "Edit operating hours" }).click();
+  await editor.getByRole("button", { name: "Publish approved configuration" }).click();
+  await expect(
+    editor.getByText(/^This change was approved by you alone while Sole operator was off/u),
+  ).toBeVisible();
+  expect(commands).toHaveLength(1);
+  expect(commands[0]?.command).toBe("Publish");
+  // Nothing was published and nothing is in doubt: no retry, and both next steps stay usable.
+  await expect(editor.getByRole("button", { name: "Retry configuration request" })).toHaveCount(0);
+  await expect(editor.getByRole("button", { name: "Reload configuration" })).toBeEnabled();
+  const withdraw = editor.getByRole("button", { name: "Withdraw my change" });
+  await expect(withdraw).toBeEnabled();
+  await expectHoursLayout(page, "store-hours-publish-refused");
+  const readsBefore = reads;
+  await withdraw.click();
+  await expect(editor.getByText("Your change was withdrawn.", { exact: false })).toBeVisible();
+  await expect(
+    editor.getByText("Store setup is back to the published opening hours too.", { exact: false }),
+  ).toBeVisible();
+  expect(withdrawals).toHaveLength(1);
+  expect(withdrawals[0]?.configurationReference).toBe(id(22));
+  expect(reads).toBe(readsBefore + 1);
+  await expect(editor.getByRole("button", { name: "Reload configuration" })).toBeEnabled();
+  await expectNoInternalText(page);
+});
+
 test("@production WP-2423 v15: someone else's open change names them; declining is confirmed", async ({
   page,
 }) => {

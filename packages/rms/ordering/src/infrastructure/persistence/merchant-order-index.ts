@@ -70,8 +70,17 @@ export function createPostgresMerchantOrderIndex(options: {
       newestFirst?: boolean;
       /** WP-2423 OPS-ORDER-DETAIL: only this Order of the Store (an empty page when not here). */
       onlyOrderReference?: string;
+      /**
+       * WP-2423 (2026-10-16): Orders listed elsewhere on the page (earlier-day Orders shown with
+       * today's), left out here so each page still holds exactly `limit` other Orders.
+       */
+      excludeOrderReferences?: readonly string[];
     }) {
       const newest = input.newestFirst === true;
+      const excluded = (input.excludeOrderReferences ?? []).map((reference) =>
+        parseOrderingReference(reference),
+      );
+      if (excluded.length > 100) return unavailable();
       if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100)
         return unavailable();
       const after =
@@ -95,9 +104,9 @@ export function createPostgresMerchantOrderIndex(options: {
           "JOIN rms_ordering.order_batch b ON b.order_id=h.order_id AND b.brand_id=h.brand_id AND b.store_id=h.store_id AND b.submission_id=s.submission_id " +
           "WHERE h.brand_id=$1 AND h.store_id=$2 AND ($3::uuid IS NULL OR " +
           (newest ? "h.order_id<$3::uuid) " : "h.order_id>$3::uuid) ") +
-          "AND ($5::uuid IS NULL OR h.order_id=$5::uuid) " +
+          "AND ($5::uuid IS NULL OR h.order_id=$5::uuid) AND NOT (h.order_id=ANY($6::uuid[])) " +
           (newest ? "ORDER BY h.order_id DESC LIMIT $4" : "ORDER BY h.order_id LIMIT $4"),
-        [scope.brandReference, scope.storeReference, after, input.limit + 1, only],
+        [scope.brandReference, scope.storeReference, after, input.limit + 1, only, excluded],
       );
       if (result.rows.length > input.limit + 1) return unavailable();
       let previous = after;
@@ -106,6 +115,7 @@ export function createPostgresMerchantOrderIndex(options: {
         if (
           row.brand_id !== scope.brandReference ||
           row.store_id !== scope.storeReference ||
+          excluded.includes(orderReference) ||
           (previous !== null &&
             (newest ? orderReference >= previous : orderReference <= previous)) ||
           typeof row.order_number !== "string" ||

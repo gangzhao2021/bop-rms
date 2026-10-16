@@ -61,6 +61,7 @@ import {
   type RawBrowserCredential,
 } from "@bop/identity";
 import express from "express";
+import { MerchantStoreConfigurationWithdrawalError } from "./merchant-store-configuration-withdrawal.js";
 import { createApp } from "./app.js";
 import { request as httpRequest } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -951,8 +952,28 @@ it("protects current order queue reads and bounds cursor authority", async () =>
   const response = await request(root, "/merchant/orders?after=" + storeReference, { headers });
   expect(response.status).toBe(200);
   expect(response.headers.get("cache-control")).toBe("no-store");
-  expect(await response.json()).toEqual({ items: [], nextAfterOrderReference: null });
+  expect(await response.json()).toEqual({
+    earlierDayItems: [],
+    items: [],
+    nextAfterOrderReference: null,
+  });
   expect(queue).toHaveBeenCalledWith({ sessionCookie, afterOrderReference: storeReference });
+  // WP-2423 (2026-10-16 v15): earlier-day Orders come apart from the page, which keeps its size.
+  queue.mockResolvedValueOnce({
+    items: [
+      { orderReference: "earlier", earlierDay: true, batches: [] },
+      { orderReference: "paged", earlierDay: false, batches: [] },
+    ],
+    nextAfterOrderReference: null,
+  } as never);
+  const split = (await (
+    await request(root, "/merchant/orders?after=" + storeReference, { headers })
+  ).json()) as {
+    earlierDayItems: { orderReference: string }[];
+    items: { orderReference: string }[];
+  };
+  expect(split.earlierDayItems.map((item) => item.orderReference)).toEqual(["earlier"]);
+  expect(split.items.map((item) => item.orderReference)).toEqual(["paged"]);
   queue.mockRejectedValueOnce(new Error("synthetic-private-source"));
   const failed = await request(root, "/merchant/orders", { headers });
   expect(failed.status).toBe(403);
@@ -7034,4 +7055,93 @@ it("WP-2423 Q4: protects the hours draft transport and answers its refusals plai
     headers,
   });
   expect(unavailable.status).toBe(503);
+});
+
+describe("WP-2423 (2026-10-16 v15) Store configuration withdrawal", () => {
+  async function serveWithdrawal(options: Partial<MerchantBffRouterOptions>) {
+    const app = express();
+    app.use(
+      "/merchant",
+      createMerchantBffRouter({
+        service: fakeService(),
+        exactOrigin: "https://merchant.invalid",
+        acceptedHost: "merchant.invalid",
+        ...options,
+      }),
+    );
+    const server = app.listen(0, "127.0.0.1");
+    servers.push(server);
+    await new Promise<void>((resolve) => server.once("listening", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("listener unavailable");
+    return `http://127.0.0.1:${address.port}`;
+  }
+  const headers = {
+    ...safeHeaders,
+    Cookie: `__Host-bop-merchant=${sessionCookie}`,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const auditReference = "01a7e100-0000-7000-8000-000000000042";
+  const body = JSON.stringify({
+    configurationReference: "01a7e100-0000-7000-8000-000000000041",
+    configurationVersion: 3,
+    auditReference,
+  });
+  it("returns Store setup's hours to the published hours after the withdrawal, and says so", async () => {
+    const withdrawal = vi.fn<NonNullable<MerchantBffRouterOptions["storeConfigurationWithdrawal"]>>(
+      async () => ({ status: "Applied", kind: "Withdrawn" }) as never,
+    );
+    const restore = vi.fn<NonNullable<MerchantBffRouterOptions["storeHoursRestore"]>>(async () => ({
+      status: "Restored",
+    }));
+    const root = await serveWithdrawal({
+      storeConfigurationWithdrawal: withdrawal,
+      storeHoursRestore: restore,
+    });
+    const response = await request(root, "/merchant/store-configuration/withdrawal", {
+      method: "POST",
+      headers,
+      body,
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      status: "Applied",
+      kind: "Withdrawn",
+      setupHoursRestored: true,
+    });
+    expect(restore).toHaveBeenCalledWith({
+      sessionCookie,
+      csrf,
+      withdrawalReference: auditReference,
+    });
+    // The withdrawal stands when the restore fails or was not needed.
+    restore.mockRejectedValueOnce(new Error("synthetic-restore-failure"));
+    const failed = await request(root, "/merchant/store-configuration/withdrawal", {
+      method: "POST",
+      headers,
+      body,
+    });
+    expect(await failed.json()).toEqual({
+      status: "Applied",
+      kind: "Withdrawn",
+      setupHoursRestored: false,
+    });
+    restore.mockResolvedValueOnce({ status: "NotNeeded" });
+    const notNeeded = await request(root, "/merchant/store-configuration/withdrawal", {
+      method: "POST",
+      headers,
+      body,
+    });
+    expect(await notNeeded.json()).toMatchObject({ setupHoursRestored: false });
+    // A refused withdrawal restores nothing.
+    withdrawal.mockRejectedValueOnce(new MerchantStoreConfigurationWithdrawalError("Conflict"));
+    const refused = await request(root, "/merchant/store-configuration/withdrawal", {
+      method: "POST",
+      headers,
+      body,
+    });
+    expect(refused.status).toBe(409);
+    expect(restore).toHaveBeenCalledTimes(3);
+  });
 });

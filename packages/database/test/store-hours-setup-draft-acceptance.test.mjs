@@ -1208,14 +1208,103 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
         assert.equal((await saveHours(people.manager, hoursOn(v, "19:00:00"))).status, "Applied");
         v = await managerHours.read(people.manager.sessionCookie);
         const first = v.latest;
+        /** Store setup's latest revision (as the Owner's Store setup shows it). */
+        const setupHead = async () => {
+          const row = (
+            await admin.query(
+              "SELECT revision,actor_id,snapshot_json FROM rms_store.store_setup_draft_revision WHERE store_id=$1 ORDER BY revision DESC LIMIT 1",
+              [scope.storeReference],
+            )
+          ).rows[0];
+          return { ...row, revision: Number(row.revision) };
+        };
+        const withdrawnHead = await setupHead();
+        assert.equal(withdrawnHead.revision, first.setupBasis.sourceRevision);
+        assert.equal(
+          withdrawnHead.snapshot_json.content.weeklySchedule.value[0].intervals[0].endLocalTime,
+          "19:00:00",
+        );
+        // WP-2423 (2026-10-16 v15): nothing is restored while the change is still open.
+        const restoreFor = (person, withdrawalReference) =>
+          hoursFor(person).then((composition) =>
+            composition.hoursRestore({
+              sessionCookie: person.sessionCookie,
+              csrf: person.csrf,
+              withdrawalReference,
+            }),
+          );
+        assert.deepEqual(await restoreFor(people.manager, reference()), { status: "NotNeeded" });
+        assert.equal((await setupHead()).revision, withdrawnHead.revision);
         assert.deepEqual(await withdrawFor(people.manager, first), {
           status: "Applied",
           kind: "Withdrawn",
         });
+        // Withdrawn: Store setup's saved hours return to the published hours in a new revision
+        // (history kept), audited as a Store setup save by the person who withdrew, correlated to
+        // the withdrawal; a repeat changes nothing.
+        const withdrawalReference = reference();
+        assert.deepEqual(await restoreFor(people.manager, withdrawalReference), {
+          status: "Restored",
+        });
+        const restoredHead = await setupHead();
+        assert.equal(restoredHead.revision, withdrawnHead.revision + 1);
+        assert.equal(restoredHead.actor_id, people.manager.actor);
+        const liveSetup = (
+          await admin.query(
+            "SELECT snapshot_json FROM rms_store.store_setup_draft_revision WHERE store_id=$1 AND revision=$2",
+            [scope.storeReference, v.current.setupBasis.sourceRevision],
+          )
+        ).rows[0].snapshot_json;
+        for (const field of ["weeklySchedule", "exceptions", "effectiveFrom", "effectiveUntil"])
+          assert.deepEqual(
+            restoredHead.snapshot_json.content[field],
+            liveSetup.content[field],
+            field,
+          );
+        for (const field of Object.keys(withdrawnHead.snapshot_json.content).filter(
+          (field) =>
+            !["weeklySchedule", "exceptions", "effectiveFrom", "effectiveUntil"].includes(field),
+        ))
+          assert.deepEqual(
+            restoredHead.snapshot_json.content[field],
+            withdrawnHead.snapshot_json.content[field],
+            field,
+          );
+        // The revision with the withdrawn hours is kept unchanged.
+        const kept = (
+          await admin.query(
+            "SELECT snapshot_json FROM rms_store.store_setup_draft_revision WHERE store_id=$1 AND revision=$2",
+            [scope.storeReference, withdrawnHead.revision],
+          )
+        ).rows[0].snapshot_json;
+        assert.deepEqual(kept, withdrawnHead.snapshot_json);
+        const restoreAudit = await admin.query(
+          "SELECT action_code,reason_code,actor_reference FROM platform_audit.audit_record WHERE correlation_id=$1",
+          [withdrawalReference],
+        );
+        assert.deepEqual(
+          restoreAudit.rows.map((row) => [row.action_code, row.reason_code, row.actor_reference]),
+          [
+            [
+              "STORE_SETUP_DRAFT_SAVED",
+              "STORE_HOURS_RESTORED_AFTER_WITHDRAWAL",
+              people.manager.actor,
+            ],
+          ],
+        );
+        assert.deepEqual(await restoreFor(people.manager, reference()), { status: "NotNeeded" });
+        assert.equal((await setupHead()).revision, restoredHead.revision);
         v = await managerHours.read(people.manager.sessionCookie);
         assert.equal(v.latestWithdrawal.kind, "Withdrawn");
-        assert.equal((await saveHours(people.manager, hoursOn(v, "18:00:00"))).status, "Applied");
+        // The next hours change (the editor still shows the withdrawn change's revision) is saved
+        // on the restored revision; a retry returns the recorded result.
+        const next = hoursOn(v, "18:00:00");
+        assert.equal((await saveHours(people.manager, next)).status, "Applied");
+        const retried = await saveHours(people.manager, next);
+        assert.equal(retried.resultingVersion, v.expectedVersion + 1);
+        assert.equal((await setupHead()).revision, restoredHead.revision + 1);
         v = await managerHours.read(people.manager.sessionCookie);
+        assert.equal(v.latest.setupBasis.sourceRevision, restoredHead.revision + 1);
         assert.equal(v.latestWithdrawal, null);
         assert.equal(v.latest.supersedesConfigurationReference, first.configurationReference);
         assert.equal(v.latest.weeklySchedule[0].intervals[0].endLocalTime, "18:00:00");

@@ -137,6 +137,8 @@ export function StoreConfigurationPublicationChecklist({
     </section>
   );
 }
+/** WP-2423 (2026-10-16 v15): said after a withdrawal returned Store setup's hours. */
+export const RESTORED_HOURS_NOTE = " The saved Store setup is back to the published opening hours.";
 export interface StoreConfigurationOrdinaryPanelProps {
   readonly scope: StoreSetupScope;
   readonly csrf: string;
@@ -151,6 +153,8 @@ export interface StoreConfigurationOrdinaryPanelProps {
   }) => void;
   readonly client?: ReturnType<typeof createStoreConfigurationOrdinaryClient>;
   readonly journalFactory?: (scope: StoreSetupScope) => StoreConfigurationPendingJournal;
+  /** WP-2423 (2026-10-16 v15): Store setup's saved hours changed (restored after a withdrawal). */
+  readonly onSetupChanged?: () => void;
 }
 const denied = () => {
   throw new StoreSetupClientError("ScopeChanged");
@@ -506,7 +510,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
     setNotice(null);
     const current = () => epoch === generation.current && !c.signal.aborted;
     try {
-      const kind = await withdrawStoreConfiguration(
+      const { kind, setupHoursRestored } = await withdrawStoreConfiguration(
         {
           configurationReference: target.configurationReference,
           configurationVersion: target.configurationVersion,
@@ -521,9 +525,10 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
         setNotice(
           // WP-2423 (v15 D6): what to do next is said from the current state below, not here.
           kind === "Withdrawn"
-            ? `Version ${target.configurationVersion} withdrawn. It can no longer be approved or published.`
-            : `Version ${target.configurationVersion} declined. It can no longer be approved or published.`,
+            ? `Version ${target.configurationVersion} withdrawn. It can no longer be approved or published.${setupHoursRestored ? RESTORED_HOURS_NOTE : ""}`
+            : `Version ${target.configurationVersion} declined. It can no longer be approved or published.${setupHoursRestored ? RESTORED_HOURS_NOTE : ""}`,
         );
+        if (setupHoursRestored) props.onSetupChanged?.();
       }
     } catch (e) {
       if (current()) setError(e instanceof Error ? e.message : messages.Unavailable);

@@ -43,6 +43,17 @@ const outcomeText: Record<Exclude<Outcome, "Idle">, string> = {
 };
 
 /** The release request: intent only; staff identity, time and eligibility are server-owned. */
+/**
+ * WP-2423 (2026-10-16 v15): the confirmation the page keeps after a release, since the order leaves
+ * the list once its stock is back ("Ingredients for Order 7 (Sat, Oct 10) returned to stock.").
+ */
+export function heldStockReleasedText(
+  order: Pick<Order, "orderNumber">,
+  dayLabel: string | null,
+): string {
+  return `Ingredients for Order ${order.orderNumber}${dayLabel === null ? "" : ` (${dayLabel})`} returned to stock.`;
+}
+
 export function heldStockReleaseBody(order: Order, operationReference: string) {
   if (order.heldStock === null || order.heldStock.state !== "Ended")
     throw new Error("HELD_STOCK_RELEASE_UNAVAILABLE");
@@ -70,7 +81,8 @@ export function HeldStockReleaseAction({
 }: {
   readonly order: Order;
   readonly csrf: string;
-  readonly onSettled: () => void;
+  /** Released: the page confirms it (the order then leaves the list); NotReleasable: rereads. */
+  readonly onSettled: (outcome: "Released" | "NotReleasable") => void;
   readonly fetcher?: typeof fetch | undefined;
 }) {
   const operation = useRef<string | null>(null);
@@ -103,7 +115,7 @@ export function HeldStockReleaseAction({
     }
     if (next !== "Unknown") operation.current = null;
     setOutcome(next);
-    if (next === "Released" || next === "NotReleasable") onSettled();
+    if (next === "Released" || next === "NotReleasable") onSettled(next);
   };
   return (
     <div className="order-held-stock-action">

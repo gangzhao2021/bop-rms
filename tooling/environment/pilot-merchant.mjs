@@ -1289,6 +1289,11 @@ export async function createInternalMerchant(
         "INTERNAL_STORE_HOURS_DRAFT_UNAVAILABLE",
         storeConfiguration.hoursDraft,
       ),
+      // WP-2423 (2026-10-16 v15): withdrawn hours leave Store setup too.
+      storeHoursRestore: logUnexpected(
+        "INTERNAL_STORE_HOURS_RESTORE_UNAVAILABLE",
+        storeConfiguration.hoursRestore,
+      ),
       taxConfigAuthoring: createMerchantTaxConfigAuthoring({
         persistence,
         authentication: service,

@@ -339,7 +339,10 @@ import {
 } from "./merchant-order-acceptance-command.js";
 import type { createMerchantDiningItemService } from "./merchant-dining-item-service.js";
 import type { createMerchantStoreConfiguration } from "./merchant-store-configuration.js";
-import type { createMerchantStoreHoursSetupDraft } from "./merchant-store-hours-setup-draft.js";
+import type {
+  createMerchantStoreHoursSetupDraft,
+  createMerchantStoreHoursSetupRestore,
+} from "./merchant-store-hours-setup-draft.js";
 import type { createMerchantServiceControl } from "./merchant-service-control.js";
 import type { createMerchantOrderExceptionRead } from "./merchant-order-exception-read.js";
 import type { createMerchantSettlementRead } from "./merchant-settlement-read.js";
@@ -763,6 +766,11 @@ export interface MerchantBffRouterOptions {
   readonly storeConfigurationWithdrawal?: ReturnType<
     typeof createMerchantStoreConfigurationWithdrawal
   >;
+  /**
+   * WP-2423 (2026-10-16 v15): after a withdrawal or decline, Store setup's saved hours return to
+   * the published hours when the withdrawn change changed nothing but hours.
+   */
+  readonly storeHoursRestore?: ReturnType<typeof createMerchantStoreHoursSetupRestore>;
   readonly serviceControlState?: ReturnType<typeof createMerchantServiceControl>["read"];
   /** WP-2423 Q21: the selected Store's current business day (date, start, end). */
   readonly businessDay?: ReturnType<typeof createMerchantServiceControl>["businessDay"];
@@ -1906,65 +1914,69 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
     void retryTransactionConflict(() =>
       orderQueue({ sessionCookie, afterOrderReference: after ?? null }),
     )
-      .then((view) =>
-        response.json({
-          items: view.items.map((item) => ({
-            orderReference: item.orderReference,
-            orderNumber: item.orderNumber,
-            orderType: item.orderType,
-            sourceChannel: item.sourceChannel,
-            // WP-2423 Q21: the Store business day the Order belongs to (order numbers restart daily).
-            businessDate: item.businessDate,
-            // WP-2423 D4: the day it is listed under (today when an older table ordered today).
-            listedBusinessDate: item.listedBusinessDate,
-            // WP-2423 (2026-10-16): stock still set aside for an Order of an earlier day.
-            heldStock: item.heldStock,
-            submittedAt: item.submittedAt,
-            initialBatchReference: item.initialBatchReference,
-            canRequestAcceptance: item.canRequestAcceptance,
-            unfulfillable: item.unfulfillable,
-            pickupNotCollected: item.pickupNotCollected,
-            acceptBy: item.acceptBy,
-            // WP-2423 Q9-G1: paid while the Store was offline; held for a manager's decision.
-            acceptanceHold: item.acceptanceHold,
-            awaitingPayment: item.awaitingPayment,
-            // WP-2423 Q7: a staff-taken counter order and its card-machine payment.
-            counter: item.counter,
-            // WP-2423: what the Order was paid online (null for counter or unpaid orders).
-            paidOnline: item.paidOnline,
-            // WP-2423: refunds of that online payment (the detail's position) when it has any.
-            paymentPosition: item.paymentPosition,
-            batches: item.batches.map((batch) => ({
-              orderBatchReference: batch.orderBatchReference,
-              sequence: batch.sequence,
-              acceptanceStatus: batch.acceptanceStatus,
-              canRequestAcceptance: batch.canRequestAcceptance,
-              canCancel: batch.canCancel,
-              canCancelItems: batch.canCancelItems,
-              paymentDue:
-                batch.paymentDue === null
-                  ? null
-                  : { status: batch.paymentDue.status, cancelsAt: batch.paymentDue.cancelsAt },
-              staffCancellation:
-                batch.staffCancellation === null
-                  ? null
-                  : {
-                      reasonCode: batch.staffCancellation.reasonCode,
-                      cancelledAt: batch.staffCancellation.cancelledAt,
-                      refundStatus: batch.staffCancellation.refundStatus,
-                      refundMethod: batch.staffCancellation.refundMethod,
-                      refundAmountMinor: batch.staffCancellation.refundAmountMinor,
-                    },
-              // WP-2423 Q7 slice 2: a round staff entered for the table and its card-machine payment.
-              staffRound: batch.staffRound,
-            })),
-            currentPhase: item.currentPhase,
-            currentVersion: item.currentVersion,
-            observedAt: item.observedAt,
+      .then((view) => {
+        const row = (item: (typeof view.items)[number]) => ({
+          orderReference: item.orderReference,
+          orderNumber: item.orderNumber,
+          orderType: item.orderType,
+          sourceChannel: item.sourceChannel,
+          // WP-2423 Q21: the Store business day the Order belongs to (order numbers restart daily).
+          businessDate: item.businessDate,
+          // WP-2423 D4: the day it is listed under (today when an older table ordered today).
+          listedBusinessDate: item.listedBusinessDate,
+          // WP-2423 (2026-10-16): stock still set aside for an Order of an earlier day.
+          heldStock: item.heldStock,
+          submittedAt: item.submittedAt,
+          initialBatchReference: item.initialBatchReference,
+          canRequestAcceptance: item.canRequestAcceptance,
+          unfulfillable: item.unfulfillable,
+          pickupNotCollected: item.pickupNotCollected,
+          acceptBy: item.acceptBy,
+          // WP-2423 Q9-G1: paid while the Store was offline; held for a manager's decision.
+          acceptanceHold: item.acceptanceHold,
+          awaitingPayment: item.awaitingPayment,
+          // WP-2423 Q7: a staff-taken counter order and its card-machine payment.
+          counter: item.counter,
+          // WP-2423: what the Order was paid online (null for counter or unpaid orders).
+          paidOnline: item.paidOnline,
+          // WP-2423: refunds of that online payment (the detail's position) when it has any.
+          paymentPosition: item.paymentPosition,
+          batches: item.batches.map((batch) => ({
+            orderBatchReference: batch.orderBatchReference,
+            sequence: batch.sequence,
+            acceptanceStatus: batch.acceptanceStatus,
+            canRequestAcceptance: batch.canRequestAcceptance,
+            canCancel: batch.canCancel,
+            canCancelItems: batch.canCancelItems,
+            paymentDue:
+              batch.paymentDue === null
+                ? null
+                : { status: batch.paymentDue.status, cancelsAt: batch.paymentDue.cancelsAt },
+            staffCancellation:
+              batch.staffCancellation === null
+                ? null
+                : {
+                    reasonCode: batch.staffCancellation.reasonCode,
+                    cancelledAt: batch.staffCancellation.cancelledAt,
+                    refundStatus: batch.staffCancellation.refundStatus,
+                    refundMethod: batch.staffCancellation.refundMethod,
+                    refundAmountMinor: batch.staffCancellation.refundAmountMinor,
+                  },
+            // WP-2423 Q7 slice 2: a round staff entered for the table and its card-machine payment.
+            staffRound: batch.staffRound,
           })),
+          currentPhase: item.currentPhase,
+          currentVersion: item.currentVersion,
+          observedAt: item.observedAt,
+        });
+        // WP-2423 (2026-10-16 v15): earlier-day Orders listed with today's (first page only) are
+        // returned apart from the page, which holds exactly the page size whenever a next page follows.
+        response.json({
+          earlierDayItems: view.items.filter((item) => item.earlierDay === true).map(row),
+          items: view.items.filter((item) => item.earlierDay !== true).map(row),
           nextAfterOrderReference: view.nextAfterOrderReference,
-        }),
-      )
+        });
+      })
       .catch((error: unknown) => refundReadFailure(response, error));
   });
 
@@ -11521,8 +11533,29 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         response.status(503).json({ error: "store_configuration_unavailable" });
         return;
       }
+      const restore = options.storeHoursRestore;
       void port({ sessionCookie, csrf, command: request.body })
-        .then((result) => response.json({ status: result.status, kind: result.kind }))
+        .then(async (result) => {
+          // WP-2423 (2026-10-16 v15): the withdrawn hours leave Store setup too (its own
+          // transaction; repeated by a retried withdrawal). The withdrawal stands either way.
+          let setupHoursRestored = false;
+          if (restore !== undefined)
+            try {
+              setupHoursRestored =
+                (
+                  await restore({
+                    sessionCookie,
+                    csrf,
+                    withdrawalReference: String(
+                      (request.body as { auditReference?: unknown }).auditReference,
+                    ),
+                  })
+                ).status === "Restored";
+            } catch {
+              setupHoursRestored = false;
+            }
+          response.json({ status: result.status, kind: result.kind, setupHoursRestored });
+        })
         .catch((error: unknown) => {
           if (transactionConflictRetryLater(response, error)) return;
           if (!(error instanceof MerchantStoreConfigurationWithdrawalError)) {

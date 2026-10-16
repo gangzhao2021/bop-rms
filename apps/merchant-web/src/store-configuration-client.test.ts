@@ -3,6 +3,9 @@ import {
   createStoreConfigurationClient,
   parseStoreConfigurationView,
   parseStoreConfigurationSnapshot,
+  SOLE_OPERATOR_APPROVAL_INVALID_MESSAGE,
+  storeConfigurationKeptRefusals,
+  withdrawStoreConfiguration,
 } from "./store-configuration-client.js";
 const id = (n: number) => `018f9f40-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const at = "2026-08-15T14:00:00.000Z";
@@ -331,5 +334,38 @@ describe("WP-2423 Q4 hours draft of a configuration from Store setup", () => {
       .catch((reason: unknown) => reason);
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message.startsWith(message)).toBe(true);
+  });
+});
+
+describe("WP-2423 (2026-10-16 v15) withdrawal answers", () => {
+  const reply = (body: unknown) =>
+    (async () =>
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "content-type": "application/json", "cache-control": "no-store" },
+      })) as unknown as typeof fetch;
+  const input = { configurationReference: id(1), configurationVersion: 2, auditReference: id(9) };
+  it("says whether Store setup's hours went back to the published hours", async () => {
+    await expect(
+      withdrawStoreConfiguration(
+        input,
+        "csrf",
+        reply({ status: "Applied", kind: "Withdrawn", setupHoursRestored: true }),
+      ),
+    ).resolves.toEqual({ kind: "Withdrawn", setupHoursRestored: true });
+    // An older server says nothing about Store setup: nothing was restored.
+    await expect(
+      withdrawStoreConfiguration(input, "csrf", reply({ status: "Applied", kind: "Declined" })),
+    ).resolves.toEqual({ kind: "Declined", setupHoursRestored: false });
+    await expect(
+      withdrawStoreConfiguration(
+        input,
+        "csrf",
+        reply({ status: "Applied", kind: "Withdrawn", setupHoursRestored: "yes" }),
+      ),
+    ).rejects.toThrow("Configuration request unavailable.");
+  });
+  it("treats a refused publication of a change approved alone as definite (nothing in doubt)", () => {
+    expect(storeConfigurationKeptRefusals.has(SOLE_OPERATOR_APPROVAL_INVALID_MESSAGE)).toBe(true);
   });
 });

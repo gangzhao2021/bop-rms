@@ -704,21 +704,33 @@ test("@production WP-2423 v15: earlier-day orders still holding stock are listed
     acceptBy: null,
     awaitingPayment: false,
   });
+  // v15 (2026-10-16): a full page of today's and yesterday's orders with a next page, as on v15
+  // where 50 page rows plus 18 earlier-day rows blanked the whole Orders page.
+  const pageOrder = (i: number) => ({
+    ...order(400 - i, "B-" + (i + 1), "Open", "Accepted"),
+    businessDate: "2026-10-15",
+    listedBusinessDate: "2026-10-15",
+    heldStock: null,
+  });
+  const fullPage = Array.from({ length: 50 }, (_, i) => pageOrder(i));
   let ended = true;
+  let shape: "current" | "older" = "current";
   const releases: unknown[] = [];
   await page.route("**/merchant/orders?*", (route) => route.fallback());
-  await page.route("**/merchant/orders", (route) =>
-    route.fulfill({
+  await page.route("**/merchant/orders", (route) => {
+    const earlier = [
+      order(1, "2", "Open", "Accepted"),
+      ...(ended ? [order(2, "7", "Ended", "Cancelled")] : []),
+    ];
+    return route.fulfill({
       headers,
-      json: {
-        items: [
-          order(1, "2", "Open", "Accepted"),
-          ...(ended ? [order(2, "7", "Ended", "Cancelled")] : []),
-        ],
-        nextAfterOrderReference: null,
-      },
-    }),
-  );
+      json:
+        shape === "current"
+          ? { earlierDayItems: earlier, items: fullPage, nextAfterOrderReference: id(351) }
+          : // An older server mixed them in one list (the captured v15 answer's shape).
+            { items: [...earlier, ...fullPage], nextAfterOrderReference: id(351) },
+    });
+  });
   await page.route("**/merchant/orders/release-stock", (route) => {
     expect(route.request().headers()["x-bop-csrf"]).toBe("a".repeat(43));
     releases.push(route.request().postDataJSON());
@@ -751,10 +763,27 @@ test("@production WP-2423 v15: earlier-day orders still holding stock are listed
     await page.screenshot({ path: `test-results/orders-held-stock-${width}.png`, fullPage: true });
   }
   await page.setViewportSize({ width: 1440, height: 900 });
+  // The page itself is intact: its orders and the next page are there.
+  await expect(page.getByRole("heading", { name: "B-50", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Next page" })).toBeVisible();
   await page.getByRole("button", { name: "Release held ingredients" }).click();
   await expect(
     page.getByText("This order from an earlier day is finished, but ingredients"),
   ).toHaveCount(0);
+  // Staff are told plainly what happened, after the order has left the list.
+  await expect(
+    page.getByText("Ingredients for Order 7 (Sat, Oct 10) returned to stock."),
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "7", exact: true })).toHaveCount(0);
+  await page.screenshot({ path: "test-results/orders-held-stock-released.png", fullPage: true });
+  // An older server's mixed answer is read too, never "Orders unavailable".
+  shape = "older";
+  await page.getByRole("button", { name: "Refresh orders" }).click();
+  await expect(page.getByText("Orders unavailable")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "B-1", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Earlier days · still holding stock" }),
+  ).toBeVisible();
   expect(releases).toEqual([
     {
       orderReference: id(2),

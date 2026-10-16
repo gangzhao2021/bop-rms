@@ -222,7 +222,41 @@ it("WP-2423: reads one Order of the Store for its detail", async () => {
     null,
     2,
     id(4),
+    [],
   ]);
+});
+it("WP-2423 (2026-10-16): leaves out Orders listed elsewhere so a page keeps its full size", async () => {
+  const { tx, query } = fixture([row(5), row(3)]);
+  const index = createPostgresMerchantOrderIndex({ ...scope, authorize: async () => true });
+  const result = await index.list({
+    transaction: tx,
+    limit: 1,
+    afterOrderReference: null,
+    newestFirst: true,
+    excludeOrderReferences: [id(4)],
+  });
+  expect(result.items.map((item) => item.orderReference)).toEqual([id(5)]);
+  expect(result.nextAfterOrderReference).toBe(id(5));
+  expect(String(query.mock.calls[1]?.[0])).toContain("NOT (h.order_id=ANY($6::uuid[]))");
+  expect((query.mock.calls[1] as unknown[] | undefined)?.[1]).toEqual([
+    scope.brandReference,
+    scope.storeReference,
+    null,
+    2,
+    null,
+    [id(4)],
+  ]);
+  // A source row for an Order that was left out is a broken answer, never listed twice.
+  const leaked = fixture([row(4)]);
+  await expect(
+    index.list({
+      transaction: leaked.tx,
+      limit: 1,
+      afterOrderReference: null,
+      newestFirst: true,
+      excludeOrderReferences: [id(4)],
+    }),
+  ).rejects.toThrow("MERCHANT_ORDER_INDEX_UNAVAILABLE");
 });
 it("WP-2423: reads an Order's lines with option names, notes and totals", async () => {
   const { configuredOrderItemFixture } = await import("./configured-order-item.fixture.js");

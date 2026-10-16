@@ -36,11 +36,30 @@ test("@production a sole operator turns it on and approves their own refund afte
     canApprove: false,
     soleOperatorApproval: false,
   };
+  // It was on once and turned off when a second approver joined (who has since left).
+  const earlier = [
+    {
+      version: 2,
+      state: "Off",
+      reasonCode: "SECOND_APPROVER_AVAILABLE",
+      recordedAt: new Date(now - 86_400_000).toISOString(),
+      changedByYou: true,
+      changedByName: "Sam",
+    },
+    {
+      version: 1,
+      state: "On",
+      reasonCode: "OWNER_RUNS_STORE_ALONE",
+      recordedAt: new Date(now - 2 * 86_400_000).toISOString(),
+      changedByYou: true,
+      changedByName: "Sam",
+    },
+  ];
   let setting = {
     observedAt: new Date(now).toISOString(),
     state: "Off",
-    version: 0,
-    history: [] as unknown[],
+    version: 2,
+    history: earlier as unknown[],
     refundApproval: { status: "NotSet", youHoldApproval: true, otherApprovers: [] as unknown[] },
     verifiedUntil: null,
     reasons: {
@@ -102,23 +121,24 @@ test("@production a sole operator turns it on and approves their own refund afte
     setting = {
       ...setting,
       state: "On",
-      version: 1,
+      version: 3,
       history: [
         {
-          version: 1,
+          version: 3,
           state: "On",
           reasonCode: "OWNER_RUNS_STORE_ALONE",
           recordedAt: at,
           changedByYou: true,
           changedByName: "Sam",
         },
+        ...earlier,
       ],
       refundApproval: { status: "Effective", youHoldApproval: true, otherApprovers: [] },
     };
     soleOperator = "Effective";
     return route.fulfill({
       headers,
-      json: { status: "Created", state: "On", version: 1, recordedAt: at },
+      json: { status: "Created", state: "On", version: 3, recordedAt: at },
     });
   });
   // The server's own record: once verified, every read reports the same verification.
@@ -160,6 +180,13 @@ test("@production a sole operator turns it on and approves their own refund afte
   await page.goto("/app/approvals");
   const section = page.getByRole("region", { name: "Sole operator" });
   await expect(section).toContainText("Off. Refunds that need approval are approved by a second");
+  // WP-2423 (2026-10-16 v15): the setting's change number and who changed it, when and why.
+  await expect(section).toContainText("Off · setting change 2");
+  const history = section.getByRole("region", { name: "Recent changes" });
+  await expect(history.getByRole("listitem")).toHaveText([
+    /^Change 2: Turned off by you · Someone else can now approve · /u,
+    /^Change 1: Turned on by you · I run this business on my own · /u,
+  ]);
   const card = page.getByRole("listitem").filter({ hasText: "Order A-0051" });
   await expect(card).toContainText("An owner or finance member who did not ask for this refund");
   const turnOn = section.getByRole("button", { name: "Turn on sole operator" });
@@ -180,8 +207,12 @@ test("@production a sole operator turns it on and approves their own refund afte
   expect(JSON.parse(changes[0] ?? "{}")).toMatchObject({
     state: "On",
     reasonCode: "OWNER_RUNS_STORE_ALONE",
-    expectedVersion: 0,
+    expectedVersion: 2,
   });
+  await expect(section).toContainText("On · setting change 3");
+  await expect(history.getByRole("listitem").first()).toHaveText(
+    /^Change 3: Turned on by you · I run this business on my own · /u,
+  );
 
   // The list refreshes: the owner may now approve their own request after confirming it.
   const ownCard = page.getByRole("listitem").filter({ hasText: "Order A-0051" });

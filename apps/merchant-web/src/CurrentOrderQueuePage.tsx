@@ -12,7 +12,11 @@ import {
   staffCancellationReasonLabel,
   staffCancellationSummary,
 } from "./StaffOrderCancelAction.js";
-import { HeldStockNotice, HeldStockReleaseAction } from "./HeldStockNotice.js";
+import {
+  HeldStockNotice,
+  HeldStockReleaseAction,
+  heldStockReleasedText,
+} from "./HeldStockNotice.js";
 import {
   ItemRefundCheck,
   StaffItemCancelAction,
@@ -1186,6 +1190,11 @@ export function CurrentOrderQueuePage({
   const [phaseFilter, setPhaseFilter] = useState("All");
   const [now, setNow] = useState(() => Date.now());
   const [stale, setStale] = useState(false);
+  /** WP-2423 (2026-10-16 v15): the last held-stock release, confirmed until the page changes. */
+  const [released, setReleased] = useState<string | null>(null);
+  const today = useStoreBusinessDay()?.businessDate ?? null;
+  // A confirmation belongs to the page it was given on.
+  useEffect(() => setReleased(null), [after]);
   // WP-2423: opened list orders and the refund totals read for them outlive a refresh.
   const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
   const expanded = useMemo(() => ({ opened, setOpened }), [opened]);
@@ -1396,6 +1405,11 @@ export function CurrentOrderQueuePage({
       <>
         {state.kind === "Ready" ? (
           <>
+            {released !== null ? (
+              <p className="order-queue-released" role="status">
+                {released}
+              </p>
+            ) : null}
             {stale ? (
               <p className="order-queue-stale" role="status">
                 Orders could not be refreshed. Showing the last update; retrying automatically.
@@ -1561,7 +1575,20 @@ export function CurrentOrderQueuePage({
                       order={order}
                       csrf={csrf}
                       fetcher={fetcher}
-                      onSettled={() => reload(after)}
+                      onSettled={(outcome) => {
+                        // WP-2423 (2026-10-16 v15): confirm the release; the reread then drops
+                        // the order from "still holding stock".
+                        if (outcome === "Released")
+                          setReleased(
+                            heldStockReleasedText(
+                              order,
+                              order.businessDate === null
+                                ? null
+                                : businessDateLabel(order.businessDate, today),
+                            ),
+                          );
+                        reload(after);
+                      }}
                     />
                   </fieldset>
                 ) : // WP-2423 D5: an unpaid round staff entered is recorded as paid here too. The list

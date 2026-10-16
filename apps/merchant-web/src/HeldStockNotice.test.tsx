@@ -4,6 +4,7 @@ import { parseCurrentOrderQueue } from "./current-order-queue-client.js";
 import {
   HeldStockNotice,
   HeldStockReleaseAction,
+  heldStockReleasedText,
   heldStockReleaseBody,
   heldStockReleaseOutcome,
   heldStockText,
@@ -88,4 +89,11 @@ it("releases only an ended order's stock, with intent only, and maps answers to 
       <HeldStockReleaseAction order={ended} csrf="c" onSettled={() => undefined} />,
     ),
   ).toContain("Release held ingredients");
+  // WP-2423 (2026-10-16 v15): the page confirms the release in plain words.
+  expect(heldStockReleasedText({ orderNumber: "7" }, "Sat, Oct 10")).toBe(
+    "Ingredients for Order 7 (Sat, Oct 10) returned to stock.",
+  );
+  expect(heldStockReleasedText({ orderNumber: "7" }, null)).toBe(
+    "Ingredients for Order 7 returned to stock.",
+  );
 });

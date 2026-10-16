@@ -77,15 +77,6 @@ export function createMerchantOrderQueueRead(options: {
         ...ownerScope,
         authorize: allowed,
       });
-      const index = await orderIndex.list({
-        transaction,
-        afterOrderReference: input.afterOrderReference,
-        limit: input.limit,
-        newestFirst: true,
-        ...(input.onlyOrderReference === undefined
-          ? {}
-          : { onlyOrderReference: input.onlyOrderReference }),
-      });
       // WP-2423 D4: a table's Order opened on an earlier business day that had a round today is
       // today's work. A real floor reads the Orders page as "what is happening today", so such an
       // Order is listed first with today's orders (under today, latest round first) instead of
@@ -132,16 +123,30 @@ export function createMerchantOrderQueueRead(options: {
         ...carried.map((order) => order.orderReference),
         ...heldByOrder.keys(),
       ]);
-      const carriedList = [
-        ...carried.map((order) => order.orderReference),
-        ...[...heldByOrder.keys()].filter(
-          (reference) => !carried.some((order) => order.orderReference === reference),
-        ),
-      ];
-      const carriedItems = [];
-      if (input.afterOrderReference === null && input.onlyOrderReference === undefined)
-        for (const orderReference of carriedList.slice(0, input.limit))
-          carriedItems.push(
+      const listing = input.onlyOrderReference === undefined;
+      // WP-2423 (2026-10-16 v15): the earlier-day Orders listed with today's (first page only) are
+      // a separate part of the answer. The page itself leaves exactly those Orders out, so it still
+      // holds `limit` Orders whenever another page follows and the next page starts after its last
+      // Order. Earlier-day Orders beyond this count stay on the page of the day they were opened.
+      const earlierList = listing
+        ? [
+            ...new Set([...carried.map((order) => order.orderReference), ...heldByOrder.keys()]),
+          ].slice(0, input.limit)
+        : [];
+      const earlier = new Set(earlierList);
+      const index = await orderIndex.list({
+        transaction,
+        afterOrderReference: input.afterOrderReference,
+        limit: input.limit,
+        newestFirst: true,
+        ...(input.onlyOrderReference === undefined
+          ? { excludeOrderReferences: earlierList }
+          : { onlyOrderReference: input.onlyOrderReference }),
+      });
+      const earlierItems = [];
+      if (input.afterOrderReference === null && listing)
+        for (const orderReference of earlierList)
+          earlierItems.push(
             ...(
               await orderIndex.list({
                 transaction,
@@ -153,11 +158,8 @@ export function createMerchantOrderQueueRead(options: {
             ).items,
           );
       const listed = [
-        ...carriedItems,
-        ...index.items.filter(
-          (item) =>
-            input.onlyOrderReference !== undefined || !carriedOrders.has(item.orderReference),
-        ),
+        ...earlierItems.map((item) => ({ item, earlierDay: true })),
+        ...index.items.map((item) => ({ item, earlierDay: false })),
       ];
       // WP-2423: history may hold Orders priced with either Quote version; each is decoded with its own.
       const readers = {
@@ -173,7 +175,7 @@ export function createMerchantOrderQueueRead(options: {
         ),
       } as const;
       const items = [];
-      for (const item of listed) {
+      for (const { item, earlierDay } of listed) {
         // Match acceptance/payment writers: disposition fence before the header row lock.
         const initialAcceptance = await createPostgresOrderAcceptanceReader({
           ...ownerScope,
@@ -314,9 +316,15 @@ export function createMerchantOrderQueueRead(options: {
              * submitted today on an Order opened on an earlier day, otherwise its own day.
              */
             listedBusinessDate:
-              today !== null && carriedOrders.has(item.orderReference)
+              today !== null &&
+              (listing ? earlier.has(item.orderReference) : carriedOrders.has(item.orderReference))
                 ? today.businessDate
                 : item.businessDate,
+            /**
+             * WP-2423 (2026-10-16 v15): listed with today's orders from an earlier day (first page
+             * only), outside the page's newest-first sequence and its page size.
+             */
+            earlierDay,
             submittedAt: item.submittedAt,
             initialBatchReference: item.initialBatchReference,
             /** WP-2423 (2026-10-16): stock still set aside for this earlier-day Order, else null. */

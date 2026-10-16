@@ -1,5 +1,8 @@
 import { createMerchantStoreConfiguration } from "../../apps/api/dist/merchant-store-configuration.js";
-import { createMerchantStoreHoursSetupDraft } from "../../apps/api/dist/merchant-store-hours-setup-draft.js";
+import {
+  createMerchantStoreHoursSetupDraft,
+  createMerchantStoreHoursSetupRestore,
+} from "../../apps/api/dist/merchant-store-hours-setup-draft.js";
 import {
   createPersistentStoreConfigurationV2Preparation,
   createStoreConfigurationVersion,
@@ -296,5 +299,8 @@ export async function createInternalStoreConfiguration(resources, { persistence,
   // setup, through the same owner ports.
   return Object.assign(createMerchantStoreConfiguration(options), {
     hoursDraft: createMerchantStoreHoursSetupDraft(options),
+    // WP-2423 (2026-10-16 v15): after a withdrawal, Store setup's saved hours return to the
+    // published hours (an appended hours-only revision).
+    hoursRestore: createMerchantStoreHoursSetupRestore(options),
   });
 }

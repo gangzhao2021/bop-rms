@@ -500,6 +500,8 @@ export const storeConfigurationKeptRefusals: ReadonlySet<string> = new Set([
   SOLE_OPERATOR_OFF_MESSAGE,
   SOLE_OPERATOR_OTHERS_MESSAGE,
   SOLE_OPERATOR_VERIFY_MESSAGE,
+  // WP-2423 (2026-10-16 v15): a definite 409 (nothing published); withdraw and reload stay usable.
+  SOLE_OPERATOR_APPROVAL_INVALID_MESSAGE,
 ]);
 /** WP-2423 (v15 D2/D3): withdraw your own open change, or decline someone else's (Owner). */
 export async function withdrawStoreConfiguration(
@@ -512,7 +514,11 @@ export async function withdrawStoreConfiguration(
   },
   csrf: string,
   fetcher: typeof fetch = fetch,
-): Promise<"Withdrawn" | "Declined"> {
+): Promise<{
+  readonly kind: "Withdrawn" | "Declined";
+  /** WP-2423 (2026-10-16 v15): Store setup's saved hours went back to the published hours. */
+  readonly setupHoursRestored: boolean;
+}> {
   const response = await fetcher("/merchant/store-configuration/withdrawal", {
     method: "POST",
     credentials: "same-origin",
@@ -530,13 +536,21 @@ export async function withdrawStoreConfiguration(
   if (response.status === 409) throw new Error("Source changed. Refresh before trying again.");
   if (!response.ok || response.headers.get("cache-control") !== "no-store")
     throw new Error("Configuration request unavailable.");
-  const body = exact(await response.json(), ["status", "kind"]);
+  const raw: unknown = await response.json();
+  // Absent from an older server (nothing restored).
+  const withRestore =
+    raw !== null && typeof raw === "object" && Object.hasOwn(raw, "setupHoursRestored");
+  const body = exact(raw, ["status", "kind", ...(withRestore ? ["setupHoursRestored"] : [])]);
   if (
     !["Applied", "AlreadyApplied"].includes(String(body.status)) ||
-    (body.kind !== "Withdrawn" && body.kind !== "Declined")
+    (body.kind !== "Withdrawn" && body.kind !== "Declined") ||
+    (withRestore && typeof body.setupHoursRestored !== "boolean")
   )
     throw new Error("Configuration request unavailable.");
-  return body.kind;
+  return Object.freeze({
+    kind: body.kind,
+    setupHoursRestored: withRestore && body.setupHoursRestored === true,
+  });
 }
 /** WP-2423 Q4: Store setup holds saved changes the latest configuration does not include. */
 export const STORE_SETUP_UNPUBLISHED_MESSAGE =
