@@ -51,7 +51,9 @@ import { createMerchantPickupQuery } from "../../../apps/api/src/merchant-pickup
 import { createPersistentMerchantTaskInbox } from "../../../apps/api/src/persistent-merchant-task-inbox.ts";
 import { createMerchantDiningTaskSource } from "../../../apps/api/src/merchant-dining-task-source.ts";
 import { createTaskRecord } from "../../bop/task/src/index.ts";
-import { parseOrderStatusView } from "../../../apps/customer-pwa/src/order-status/order-status-controller.ts";
+import { createHttpOrderStatusClient } from "../../../apps/customer-pwa/src/order-status/order-status-client.ts";
+import { setCustomerCsrfCredential } from "../../../apps/customer-pwa/src/session/customer-transaction-context.ts";
+import { CustomerOrderStatusHandler } from "../../../apps/api/src/customer-order-status.ts";
 import { seedMerchantAcceptanceSession } from "../test-support/merchant-acceptance-session.mjs";
 import { createGuestSession } from "../../bop/identity/src/index.ts";
 import {
@@ -980,7 +982,57 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         status.sources.kitchen.batches.map((b) => b.orderBatchReference),
         [R1.batch.orderBatchReference],
       );
-      const view = parseOrderStatusView(status, orderReference);
+      // The guest's page reads the status as the PWA does: the actual HTTP handler's serialization
+      // (JSON on the wire), then the PWA client's decoder and parser. The internal read keeps
+      // `customerNote: null` and empty option lists, which only the wire form leaves out.
+      setCustomerCsrfCredential(guest.csrfCredential);
+      const statusHandler = new CustomerOrderStatusHandler({
+        allowedOrigin: "https://synthetic-journey.invalid",
+        port: { read: async () => status },
+      }).handler();
+      const view = await createHttpOrderStatusClient(async () => {
+        const wire = await new Promise((resolve, reject) => {
+          const response = {
+            statusCode: 0,
+            setHeader: () => undefined,
+            status(code) {
+              this.statusCode = code;
+              return this;
+            },
+            json(body) {
+              resolve({ status: this.statusCode, body: JSON.stringify(body) });
+              return this;
+            },
+          };
+          Promise.resolve(
+            statusHandler(
+              {
+                get: (name) => (name === "sec-fetch-site" ? "same-origin" : undefined),
+                query: {},
+                params: { order_id: orderReference },
+                body: undefined,
+                headers: {
+                  cookie: "__Host-bop-guest=" + guest.sessionCredential,
+                  "x-csrf-token": guest.csrfCredential,
+                },
+              },
+              response,
+              reject,
+            ),
+          ).catch(reject);
+        });
+        return new globalThis.Response(wire.body, { status: wire.status });
+      }).load(orderReference);
+      setCustomerCsrfCredential(null);
+      assert.equal(view.kind, undefined, "a status, not a received-only answer");
+      // Dine-in: each item shows its chosen options; a shared table's notes stay off this page.
+      assert.ok(
+        view.sources?.itemPrices?.every(
+          (entry) =>
+            entry.options?.[0]?.displayName === "No onions" &&
+            !Object.hasOwn(entry, "customerNote"),
+        ),
+      );
       const unpaid = new Set([
         ...(view.sources?.unpaidCancellations?.map((e) => e.orderBatchReference) ?? []),
         ...(view.sources?.batchPayments

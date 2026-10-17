@@ -143,7 +143,14 @@ it("explicit workload configuration reaches existing lifecycle and optional depe
     loadWorkflow: installation.loadCancellationWorkflow,
     expectedDatabaseName: "synthetic",
     systemActorReference: config.actors.paidOutcome,
+    // WP-2423 abandoned payment: the dispatcher resolves a still-open payment with the same
+    // (TEST-ONLY simulated) Provider and account the compensation service uses.
+    providerAccountReference: config.providerAccountReference,
+    createSimulatedProvider: expect.any(Function),
   });
+  expect(cancel.mock.calls[0][1].createSimulatedProvider).toBe(
+    compensate.mock.calls[0][0].createSimulatedProvider,
+  );
   expect(compensate.mock.calls[0][0]).toMatchObject({
     resources,
     providerAccountReference: config.providerAccountReference,
