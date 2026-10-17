@@ -77,6 +77,7 @@ export const commonText = Object.freeze({
   subtotal: "Subtotal",
   discount: "Discount",
   tax: "Tax",
+  tip: "Tip",
   fees: "Fees",
   total: "Total",
   notePrefix: "Note:",
@@ -408,6 +409,7 @@ export const orderStatusText = Object.freeze({
     `Served ${served ?? ""} of ${quantity}`,
   discountsAndFees: "Discounts and fees",
   totalIncludingTax: "Total including tax",
+  totalIncludingTaxAndTip: "Total including tax and tip",
   unpaidRoundsExcluded: "Rounds that weren’t paid aren’t included.",
   /** The visit on this browser has ended. */
   visitEnded: Object.freeze({

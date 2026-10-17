@@ -1,4 +1,8 @@
 import { expect, test } from "@playwright/test";
+// v15 aa3d9fac D3 (pilot rule "no reachable stubs"): the production workspace now sends this
+// address to a working screen until the screen has real sources (checked for every route by
+// pilot-routes.spec.ts); the layout it asserts stays in the local demo. Kept for the record.
+test.skip(true, "v15 aa3d9fac D3: this screen is hidden in the production workspace");
 const id = (n: number) => `019a0024-2421-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const store = {
   brandLabel: "Synthetic Brand",

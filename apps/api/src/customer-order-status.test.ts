@@ -339,6 +339,31 @@ it("WP-2423 D5: serializes each item's price before tax and its tax as exact dec
   ]);
   expect(JSON.stringify(body)).not.toContain("private");
 });
+it("WP-2423 (v15 aa3d9fac D2): serializes each paid round's tip as an exact decimal", async () => {
+  const f = await setup();
+  f.read.mockResolvedValue({
+    ...f.result,
+    sources: {
+      checkedAt: "2026-09-12T12:00:00.000Z",
+      kitchen: null,
+      payments: null,
+      tips: [
+        {
+          orderBatchReference: id(3),
+          amount: { amountMinor: 135n, currencyCode: "CAD" },
+          paymentIntentReference: "private",
+        },
+      ],
+    },
+  });
+  const body = (await (await f.send()).json()) as {
+    status: { sources: Record<string, unknown> };
+  };
+  expect(body.status.sources.tips).toEqual([
+    { orderBatchReference: id(3), amount: { amountMinor: "135", currencyCode: "CAD" } },
+  ]);
+  expect(JSON.stringify(body)).not.toContain("private");
+});
 it("WP-2423: serializes each item's chosen options with what they added, and the guest's note", async () => {
   const f = await setup();
   f.read.mockResolvedValue({

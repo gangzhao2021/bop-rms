@@ -19,6 +19,7 @@ import { formatCartMoney } from "../cart/format-money.js";
 import { checkoutInProgressMessage, orderProcessingMessage } from "../cart/types.js";
 import { describeConfiguration } from "../cart/CartPage.js";
 import { checkoutItemRefusalMessage } from "./item-refusal-message.js";
+import { checkoutSessionAlert } from "./session-message.js";
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import {
   currencySymbol,
@@ -196,6 +197,7 @@ export function CheckoutPage({
       quote.priceChange?.requiresReconfirmation === true && confirmedQuote !== quote.quoteReference
     ) &&
     detailsSelection !== null;
+  const sessionAlert = checkoutSessionAlert(sessionState, state.status === "offline");
   const canContinue = paymentOpen && !detailsLocked && (detailsReady || detailsSubmittable);
   const startPayment = () => {
     if (!detailsSelection || quoteExpired || tipAmount === null) return;
@@ -536,16 +538,8 @@ export function CheckoutPage({
             )}{" "}
             <Link to="/cart">{checkoutText.changeYourCart}</Link>
           </p>
-        ) : "canRetry" in sessionState ? (
-          <p role="alert">
-            {sessionState.status === "store_closed"
-              ? checkoutText.storeClosed
-              : sessionState.status === "checkout_in_progress"
-                ? checkoutInProgressMessage(sessionState.retryAfterSeconds)
-                : sessionState.canRetry
-                  ? checkoutText.checkoutUnconfirmed
-                  : checkoutText.checkoutRefused}
-          </p>
+        ) : sessionAlert !== null ? (
+          <p role="alert">{sessionAlert}</p>
         ) : null}
         {"canRetry" in sessionState && sessionState.canRetry ? (
           <button

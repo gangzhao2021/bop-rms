@@ -382,6 +382,56 @@ for (const viewport of [
       await noOverflowOrBlockingAxe(page);
     });
 
+    test("the order page's total includes the tip and equals what was paid and the receipt", async ({
+      page,
+    }) => {
+      // WP-2423 (v15 aa3d9fac D2): $8.50 + $1.11 tax + $1.35 tip = $10.96 paid. TEST-ONLY item.
+      const issued = receipt(false);
+      const snapshot = issued.receipt.records[0]?.snapshot;
+      const issuedLine = snapshot?.lines[0];
+      if (!snapshot || !issuedLine) throw new Error("fixture");
+      Object.assign(issuedLine, { lineTotal: money("961"), lineSubtotal: money("850") });
+      Object.assign(snapshot, {
+        subtotal: money("850"),
+        tax: money("111"),
+        tip: money("135"),
+        total: money("1096"),
+      });
+      snapshot.taxDetails.taxLines = [
+        { label: "HST", ratePercent: "13", included: false, amount: money("111") },
+      ];
+      const current = status("Stored");
+      const batch = current.status.order.batches[0];
+      const payment = current.status.sources.payments[0];
+      if (!batch?.items[0] || !payment) throw new Error("fixture");
+      batch.items[0].lineTotal = money("961");
+      payment.amount = money("1096");
+      Object.assign(current.status.sources, {
+        itemPrices: [{ orderItemReference: id(10), subtotal: money("850"), tax: money("111") }],
+        tips: [{ orderBatchReference: id(9), amount: money("135") }],
+      });
+      await bootstrap(page);
+      await page.route("**/api/v1/orders/*/receipt", (route) =>
+        route.fulfill({ headers: json, body: JSON.stringify(issued) }),
+      );
+      await page.route("**/api/v1/orders/*/status", (route) =>
+        route.fulfill({ headers: json, body: JSON.stringify(current) }),
+      );
+      await page.goto("/orders/" + orderReference + "/receipt");
+      await expect(page.locator(".receipt-page__totals div", { hasText: /^Total/u })).toHaveText(
+        "Total$10.96",
+      );
+      await page.goto("/orders/" + orderReference);
+      const summary = page.locator(".order-status__money");
+      await expect(summary).toContainText("Subtotal$8.50");
+      await expect(summary).toContainText("Tax$1.11");
+      await expect(summary).toContainText("Tip$1.35");
+      await expect(page.locator(".order-status__total")).toHaveText("Total$10.96");
+      await expect(page.getByText("Payment received $10.96")).toBeVisible();
+      await expectNoInternalText(page);
+      await noOverflowOrBlockingAxe(page);
+    });
+
     test("checkout links the privacy notice where contact details are collected", async ({
       page,
     }) => {

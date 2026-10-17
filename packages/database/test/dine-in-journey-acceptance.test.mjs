@@ -1044,6 +1044,15 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         .flatMap((batch) => batch.items)
         .reduce((sum, item) => sum + item.lineTotal.amountMinor, 0n);
       assert.equal(customerTotal, roundTotal);
+      // v15 aa3d9fac D2: under the restricted API role the read carries the paid round's tip from
+      // the Payment owner's intent (this seed pays without a tip), so the page's total is what
+      // was paid; the unpaid round has none.
+      assert.deepEqual(view.sources?.tips, [
+        {
+          orderBatchReference: R1.batch.orderBatchReference,
+          amount: { amountMinor: 0n, currencyCode: "CAD" },
+        },
+      ]);
       // WP-2423 D5: under the restricted API role the read carries every shown item's frozen
       // price before tax and its tax; items (pre-tax) + tax reconcile to the same total.
       const prices = new Map(view.sources?.itemPrices?.map((e) => [e.orderItemReference, e]));

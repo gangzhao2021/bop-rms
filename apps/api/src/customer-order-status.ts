@@ -266,6 +266,18 @@ export class CustomerOrderStatusHandler {
                             : {}),
                         })),
                       }),
+                  // WP-2423 (v15 aa3d9fac D2): each paid round's tip, so the total is what was paid.
+                  ...(sources.tips === undefined
+                    ? {}
+                    : {
+                        tips: sources.tips.map((tip) => ({
+                          orderBatchReference: tip.orderBatchReference,
+                          amount: {
+                            amountMinor: tip.amount.amountMinor.toString(),
+                            currencyCode: tip.amount.currencyCode,
+                          },
+                        })),
+                      }),
                   // WP-2423 Q6: dine-in rounds whose payment failed (with when they are cancelled)
                   // and rounds cancelled because their payment did not go through.
                   ...(sources.batchPayments === undefined

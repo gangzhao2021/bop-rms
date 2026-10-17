@@ -37,6 +37,11 @@ export interface OrderMoneySummary {
   readonly tax: bigint | null;
   /** Discounts and fees the items carried (zero unless the order had any). */
   readonly adjustments: bigint | null;
+  /**
+   * WP-2423 (v15 aa3d9fac D2): the tips paid with the charged rounds (zero when none), as the
+   * server recorded them; `total` includes them, so it is what was paid and what the receipt prints.
+   */
+  readonly tip: bigint;
   readonly total: bigint;
 }
 
@@ -50,7 +55,11 @@ export function orderMoneySummary(
   const items = view.order.batches
     .filter((batch) => charged(batch.orderBatchReference))
     .flatMap((batch) => batch.items);
-  const total = items.reduce((sum, item) => sum + item.lineTotal.amountMinor, 0n);
+  const itemsTotal = items.reduce((sum, item) => sum + item.lineTotal.amountMinor, 0n);
+  const tip = (view.sources?.tips ?? [])
+    .filter((entry) => charged(entry.orderBatchReference))
+    .reduce((sum, entry) => sum + entry.amount.amountMinor, 0n);
+  const total = itemsTotal + tip;
   const priced =
     prices.size > 0 &&
     view.order.batches.every((batch) =>
@@ -62,6 +71,7 @@ export function orderMoneySummary(
       subtotal: null,
       tax: null,
       adjustments: null,
+      tip,
       total,
     };
   const subtotal = items.reduce(
@@ -76,7 +86,8 @@ export function orderMoneySummary(
     itemAmount: (reference, lineTotal) => prices.get(reference)?.subtotal.amountMinor ?? lineTotal,
     subtotal,
     tax,
-    adjustments: total - subtotal - tax,
+    adjustments: itemsTotal - subtotal - tax,
+    tip,
     total,
   };
 }
@@ -891,27 +902,41 @@ function StatusContent({
             </article>
           );
         })}
-        {summary.subtotal === null ? null : (
+        {summary.subtotal === null && summary.tip === 0n ? null : (
           <dl className="order-status__money">
-            <div>
-              <dt>{commonText.subtotal}</dt>
-              <dd>{formatMoney(summary.subtotal, currency)}</dd>
-            </div>
+            {summary.subtotal === null ? null : (
+              <div>
+                <dt>{commonText.subtotal}</dt>
+                <dd>{formatMoney(summary.subtotal, currency)}</dd>
+              </div>
+            )}
             {summary.adjustments !== null && summary.adjustments !== 0n ? (
               <div>
                 <dt>{orderStatusText.discountsAndFees}</dt>
                 <dd>{formatMoney(summary.adjustments, currency)}</dd>
               </div>
             ) : null}
-            <div>
-              <dt>{commonText.tax}</dt>
-              <dd>{formatMoney(summary.tax ?? 0n, currency)}</dd>
-            </div>
+            {summary.subtotal === null ? null : (
+              <div>
+                <dt>{commonText.tax}</dt>
+                <dd>{formatMoney(summary.tax ?? 0n, currency)}</dd>
+              </div>
+            )}
+            {summary.tip === 0n ? null : (
+              <div>
+                <dt>{commonText.tip}</dt>
+                <dd>{formatMoney(summary.tip, currency)}</dd>
+              </div>
+            )}
           </dl>
         )}
         <p className="order-status__total">
           <span>
-            {summary.subtotal === null ? orderStatusText.totalIncludingTax : commonText.total}
+            {summary.subtotal !== null
+              ? commonText.total
+              : summary.tip === 0n
+                ? orderStatusText.totalIncludingTax
+                : orderStatusText.totalIncludingTaxAndTip}
           </span>
           <span>{formatMoney(summary.total, currency)}</span>
         </p>

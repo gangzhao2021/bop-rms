@@ -320,7 +320,12 @@ export function StoreAvailabilityPage({
                       {stockHeldByOrders(item.stockSoldOut) ? (
                         <Link to="/operations/orders">See Orders</Link>
                       ) : (
-                        <Link to="/operations/inventory">See Inventory</Link>
+                        // v15 aa3d9fac D3: stock comes back by recording the delivery or
+                        // correcting the count (there is no separate stock overview screen).
+                        <>
+                          <Link to="/operations/receiving">Record a delivery</Link> or{" "}
+                          <Link to="/operations/inventory/counts">count the stock</Link>
+                        </>
                       )}
                     </p>
                   ) : null}

@@ -15,7 +15,7 @@ for (const screen of [
       isMobile: screen.touch,
       serviceWorkers: "block",
     });
-    test("one tap saves the details, then continues to payment", async ({ page }) => {
+    test("one tap saves the details, then continues to payment", async ({ page, context }) => {
       const failures: string[] = [];
       page.on("pageerror", () => failures.push("page error"));
       page.on("console", (message) => {
@@ -179,6 +179,23 @@ for (const screen of [
       await page.getByLabel("Mobile number", { exact: true }).fill("416 555 0123");
       const proceed = page.getByRole("button", { name: /Continue to payment/u });
       await expect(proceed).toBeEnabled();
+      // v15 aa3d9fac D1: losing the connection is not a refusal. The page says it is offline,
+      // keeps the cart and the details, and never asks the guest to rescan the QR code.
+      await context.setOffline(true);
+      await expect(
+        page.getByText(
+          "You’re offline. Reconnect to continue; nothing will be submitted automatically.",
+        ),
+      ).toBeVisible();
+      await expect(
+        page.getByText("We couldn’t continue this checkout", { exact: false }),
+      ).toHaveCount(0);
+      await expect(page.getByText(/scan the QR code/u)).toHaveCount(0);
+      await expect(proceed).toBeDisabled();
+      await expect(page.getByLabel("Pickup name", { exact: true })).toHaveValue("Synthetic Guest");
+      await context.setOffline(false);
+      await expect(proceed).toBeEnabled();
+      await expect(page.getByRole("alert")).toHaveCount(0);
       await expectNoInternalText(page);
       if (screen.touch) await proceed.tap();
       else await proceed.click();

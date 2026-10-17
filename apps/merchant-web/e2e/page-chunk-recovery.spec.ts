@@ -12,10 +12,12 @@ test("@production a screen whose code does not arrive reloads once, then offers 
   page.on("request", (request) => {
     if (request.resourceType() === "document") documents += 1;
   });
-  await page.route(/\/assets\/ReportPages-[^/]+\.js$/u, async (route) =>
+  // A screen outside the first download that opens without a Store session (v15 aa3d9fac D3 hid
+  // the report layout review this used before).
+  await page.route(/\/assets\/PlatformTemplateWorkspace-[^/]+\.js$/u, async (route) =>
     blocked ? route.abort("failed") : route.continue(),
   );
-  await page.goto("/app/reports");
+  await page.goto("/platform/tenants");
   await expect(page.getByRole("heading", { name: "This page didn't load" })).toBeVisible({
     timeout: 15_000,
   });
@@ -28,7 +30,9 @@ test("@production a screen whose code does not arrive reloads once, then offers 
   await page.context().setOffline(false);
   blocked = false;
   await page.getByRole("button", { name: "Try again" }).click();
-  await expect(page.getByRole("heading", { name: "Reports", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Brand setup templates", exact: true }),
+  ).toBeVisible();
   expect(documents).toBe(3);
   await expect(page.getByRole("heading", { name: "This page didn't load" })).toHaveCount(0);
 });

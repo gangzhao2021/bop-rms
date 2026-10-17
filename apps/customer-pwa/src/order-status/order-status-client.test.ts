@@ -242,6 +242,42 @@ describe("order status source wire money", () => {
   );
 });
 
+describe("WP-2423 (v15 aa3d9fac D2): each paid round's tip", () => {
+  const withTips = (tips: unknown) => {
+    const body = payload();
+    Object.assign(body.status, {
+      sources: { checkedAt: "2026-08-11T14:00:00.000Z", kitchen: null, payments: null, tips },
+    });
+    return body;
+  };
+  it("decodes the tip as lossless money for a round of this order only", async () => {
+    setCustomerCsrfCredential("a".repeat(43));
+    const round = id(3);
+    const result = await createHttpOrderStatusClient(
+      responder(
+        withTips([
+          { orderBatchReference: round, amount: { amountMinor: "135", currencyCode: "CAD" } },
+        ]),
+      ),
+    ).load(id(1));
+    expect((result as OrderStatusView).sources?.tips).toEqual([
+      { orderBatchReference: round, amount: { amountMinor: 135n, currencyCode: "CAD" } },
+    ]);
+    for (const tips of [
+      [{ orderBatchReference: id(99), amount: { amountMinor: "135", currencyCode: "CAD" } }],
+      [{ orderBatchReference: round, amount: { amountMinor: "-1", currencyCode: "CAD" } }],
+      [{ orderBatchReference: round, amount: { amountMinor: "1.35", currencyCode: "CAD" } }],
+      [
+        { orderBatchReference: round, amount: { amountMinor: "1", currencyCode: "CAD" } },
+        { orderBatchReference: round, amount: { amountMinor: "1", currencyCode: "CAD" } },
+      ],
+    ])
+      await expect(
+        createHttpOrderStatusClient(responder(withTips(tips))).load(id(1)),
+      ).rejects.toThrow();
+  });
+});
+
 describe("WP-2423 D5: item prices before tax", () => {
   const withPrices = (itemPrices: unknown) => {
     const body = payload();

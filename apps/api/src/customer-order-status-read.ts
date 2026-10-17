@@ -297,6 +297,12 @@ export function createCustomerOrderStatusRead(
                 amount: { amountMinor: bigint; currencyCode: string } | null;
                 freshnessStatus: "Fresh" | "Stale" | "Rebuilding" | "Failed";
               }[] = null;
+          let tips:
+            | null
+            | {
+                orderBatchReference: string;
+                amount: { amountMinor: bigint; currencyCode: string };
+              }[] = null;
           if (options.paymentScope !== undefined) {
             if (
               options.paymentScope.brandReference !== options.scope.brandReference ||
@@ -323,11 +329,29 @@ export function createCustomerOrderStatusRead(
               const projected = new Set(
                 projections.map((projection) => String(projection.snapshot.paymentIntentReference)),
               );
-              for (const fact of await listOrderPaymentTerminalOutcomes(
+              const facts = await listOrderPaymentTerminalOutcomes(
                 transaction,
                 options.paymentScope,
                 orderReference,
-              ))
+              );
+              // WP-2423 (v15 aa3d9fac D2): the tip of each round's successful payment, so the
+              // order's total is what was paid (and what the receipt prints), not items only.
+              const tipByBatch = new Map<string, bigint>();
+              for (const fact of facts)
+                if (
+                  fact.outcome === "Succeeded" &&
+                  fact.tip !== null &&
+                  expectedBatches.has(fact.orderBatchReference)
+                )
+                  tipByBatch.set(
+                    fact.orderBatchReference,
+                    (tipByBatch.get(fact.orderBatchReference) ?? 0n) + fact.tip.amountMinor,
+                  );
+              tips = [...tipByBatch].map(([orderBatchReference, amountMinor]) => ({
+                orderBatchReference,
+                amount: { amountMinor, currencyCode: "CAD" },
+              }));
+              for (const fact of facts)
                 if (!projected.has(fact.paymentIntentReference))
                   payments.push({
                     status: fact.outcome,
@@ -591,6 +615,7 @@ export function createCustomerOrderStatusRead(
               ...(itemCancellations.length === 0 ? {} : { itemCancellations }),
               ...(remakes.length === 0 ? {} : { remakes }),
               ...(itemPrices === null ? {} : { itemPrices }),
+              ...(tips === null ? {} : { tips }),
               ...(batchPayments.length === 0 ? {} : { batchPayments }),
               ...(unpaidCancellations.length === 0 ? {} : { unpaidCancellations }),
               ...(storeContact === null ? {} : { storeContact }),

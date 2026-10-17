@@ -1280,6 +1280,115 @@ describe("WP-2423 D5: item prices before tax, then subtotal, tax and total", () 
     expect(html).not.toContain("Subtotal");
   });
 
+  it("adds the paid tip so the total is what was paid, like the receipt (v15 aa3d9fac D2)", () => {
+    const view = pricedView();
+    const sources = view.sources;
+    if (!sources) throw new Error("fixture");
+    const tipped = {
+      ...view,
+      sources: {
+        ...sources,
+        payments: [
+          {
+            status: "Succeeded",
+            occurredAt: "2026-08-11T13:56:00.000Z",
+            amount: money(2335n),
+            freshnessStatus: "Fresh",
+          },
+        ],
+        tips: [{ orderBatchReference: id(3), amount: money(300n) }],
+      },
+    } as OrderStatusView;
+    const summary = orderMoneySummary(tipped, () => true);
+    expect(summary.tip).toBe(300n);
+    // The receipt's rule: subtotal − discount + tax + fee + tip = total.
+    expect(
+      (summary.subtotal ?? 0n) + (summary.adjustments ?? 0n) + (summary.tax ?? 0n) + summary.tip,
+    ).toBe(summary.total);
+    expect(summary.total).toBe(2335n);
+    const html = render({
+      status: "ready",
+      realtime: "unavailable",
+      refreshing: false,
+      view: tipped,
+    });
+    expect(html).toMatch(/Tip<\/dt><dd>\$3\.00</u);
+    expect(html).toMatch(/Total<\/span><span>\$23\.35</u);
+    expect(html).toContain("Payment received $23.35");
+    // Without item prices the total still includes the tip, and says so.
+    const unpriced = Object.fromEntries(
+      Object.entries(tipped.sources ?? {}).filter(([key]) => key !== "itemPrices"),
+    );
+    const plain = render({
+      status: "ready",
+      realtime: "unavailable",
+      refreshing: false,
+      view: { ...tipped, sources: unpriced } as OrderStatusView,
+    });
+    expect(plain).toMatch(/Tip<\/dt><dd>\$3\.00</u);
+    expect(plain).toMatch(/Total including tax and tip<\/span><span>\$23\.35</u);
+    expect(plain).not.toContain("Subtotal");
+  });
+
+  it("adds each paid dine-in round's tip and leaves out a round that was never paid", () => {
+    const view = pricedView();
+    const sources = view.sources;
+    const first = view.order.batches[0];
+    if (!sources || !first) throw new Error("fixture");
+    const rounds = {
+      ...view,
+      order: {
+        ...view.order,
+        orderType: "DineIn",
+        batches: [
+          first,
+          {
+            orderBatchReference: id(6),
+            submittedAt: "2026-08-11T13:57:00.000Z",
+            items: [
+              {
+                orderItemReference: id(7),
+                displayName: "DEMO Tea",
+                quantity: 1,
+                lineTotal: money(339n),
+              },
+            ],
+          },
+          {
+            orderBatchReference: id(8),
+            submittedAt: "2026-08-11T13:58:00.000Z",
+            items: [
+              {
+                orderItemReference: id(9),
+                displayName: "DEMO Cake",
+                quantity: 1,
+                lineTotal: money(565n),
+              },
+            ],
+          },
+        ],
+      },
+      sources: {
+        ...sources,
+        itemPrices: [
+          ...(sources.itemPrices ?? []),
+          { orderItemReference: id(7), subtotal: money(300n), tax: money(39n) },
+          { orderItemReference: id(9), subtotal: money(500n), tax: money(65n) },
+        ],
+        tips: [
+          { orderBatchReference: id(3), amount: money(300n) },
+          { orderBatchReference: id(6), amount: money(50n) },
+        ],
+      },
+    } as OrderStatusView;
+    // Round 3 (id 8) was never paid: neither its items nor any tip count.
+    const summary = orderMoneySummary(rounds, (reference) => reference !== id(8));
+    expect(summary.subtotal).toBe(2101n);
+    expect(summary.tax).toBe(273n);
+    expect(summary.tip).toBe(350n);
+    expect(summary.total).toBe(2035n + 339n + 350n);
+  });
+
   it("shows discounts and fees when the frozen items carried any", () => {
     const view = pricedView();
     const sources = view.sources;

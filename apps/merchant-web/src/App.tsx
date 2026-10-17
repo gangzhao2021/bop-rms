@@ -19,6 +19,7 @@ import { StaffSessionGuard, StaffSignedOutPanel, StaffSwitchButton } from "./Sta
 import { OwnNamePrompt } from "./OwnNamePrompt.js";
 import { StaffPinControls } from "./StaffPinControls.js";
 import { StaffSwitchPage } from "./StaffSwitchPage.js";
+import { pilotHiddenRedirect } from "./pilot-routes.js";
 import { isOperationalScreen } from "./staff-session.js";
 import { StoreTimeZoneContext } from "./StoreTime.js";
 import { StoreBusinessDayProvider } from "./StoreBusinessDay.js";
@@ -1899,8 +1900,22 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
       </Routes>
     </Suspense>
   );
+  // v15 aa3d9fac D3 (pilot rule "no reachable stubs"): a screen still without real sources is a
+  // local-demo layout review; in the workspace its address goes to the nearest working screen.
+  const hiddenTo =
+    demo === null
+      ? pilotHiddenRedirect(
+          pathname,
+          state.kind === "Ready" ? state.workspace.navigation.map((item) => item.screenId) : null,
+        )
+      : null;
   // A screen whose code did not arrive offers "Try again" in place of the page.
-  const routes = <PageChunkBoundary resetKey={pathname}>{routeTree}</PageChunkBoundary>;
+  const routes =
+    hiddenTo !== null ? (
+      <Navigate replace to={hiddenTo} />
+    ) : (
+      <PageChunkBoundary resetKey={pathname}>{routeTree}</PageChunkBoundary>
+    );
   // WP-2423 Q18: a staff page opened without a Session offers the sign-in that works here.
   const staffPage = isOperationalScreen(pathname) || pathname.startsWith("/app/operations/");
   return (

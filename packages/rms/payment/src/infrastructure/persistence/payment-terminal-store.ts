@@ -367,6 +367,10 @@ export interface OrderPaymentTerminalOutcome {
   readonly outcome: "Succeeded" | "Failed";
   readonly amount: { readonly amountMinor: bigint; readonly currencyCode: string } | null;
   readonly occurredAt: string;
+  /** The order batch (dine-in round) this payment is for. */
+  readonly orderBatchReference: string;
+  /** WP-2423: the tip the guest chose for this payment (part of `amount`); null unless Succeeded. */
+  readonly tip: { readonly amountMinor: bigint; readonly currencyCode: string } | null;
 }
 
 /**
@@ -396,12 +400,16 @@ export async function listOrderPaymentTerminalOutcomes(
       [brand, store],
     );
     const result: unknown = await transaction.query(
-      "SELECT payment_intent_id::text AS payment_intent_id,terminal_outcome,amount_minor::text AS amount_minor,currency_code," +
-        "to_char(occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS occurred_at " +
+      "SELECT latest.payment_intent_id::text AS payment_intent_id,latest.terminal_outcome,latest.amount_minor::text AS amount_minor,latest.currency_code," +
+        "to_char(latest.occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS occurred_at," +
+        // WP-2423: the round and the tip frozen on the intent, so a page shows what was paid.
+        "i.order_batch_id::text AS order_batch_id,i.tip_minor::text AS tip_minor,i.currency_code AS intent_currency_code " +
         "FROM (SELECT DISTINCT ON (payment_intent_id) * FROM rms_payment.payment_terminal_fact " +
         "WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 AND provider_account_id=$4 AND provider_environment=$5 " +
         // WP-2423 Q20: a retry after a decline is a later outcome of the same intent.
         "ORDER BY payment_intent_id,occurred_at DESC,recorded_at DESC) latest " +
+        "JOIN rms_payment.payment_intent i ON i.brand_id=latest.brand_id AND i.store_id=latest.store_id " +
+        "AND i.payment_intent_id=latest.payment_intent_id AND i.order_id=latest.order_id " +
         "ORDER BY latest.occurred_at,latest.payment_intent_id LIMIT 101",
       [brand, store, order, account, scope.environment],
     );
@@ -418,6 +426,9 @@ export async function listOrderPaymentTerminalOutcomes(
           "amount_minor",
           "currency_code",
           "occurred_at",
+          "order_batch_id",
+          "tip_minor",
+          "intent_currency_code",
         ]);
         const outcome = row.terminal_outcome;
         if (outcome !== "Succeeded" && outcome !== "Failed") return fail();
@@ -431,11 +442,22 @@ export async function listOrderPaymentTerminalOutcomes(
             : row.amount_minor === null && row.currency_code === null
               ? null
               : fail();
+        const tip =
+          amount === null
+            ? null
+            : typeof row.tip_minor === "string" &&
+                /^(?:0|[1-9][0-9]{0,18})$/u.test(row.tip_minor) &&
+                row.intent_currency_code === amount.currencyCode &&
+                BigInt(row.tip_minor) <= amount.amountMinor
+              ? Object.freeze({ amountMinor: BigInt(row.tip_minor), currencyCode: "CAD" })
+              : fail();
         return Object.freeze({
           paymentIntentReference: String(parsePaymentReference(row.payment_intent_id)),
           outcome,
           amount,
           occurredAt: String(parsePaymentInstant(row.occurred_at)),
+          orderBatchReference: String(parsePaymentReference(row.order_batch_id)),
+          tip,
         });
       }),
     );

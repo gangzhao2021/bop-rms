@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import { pilotHiddenRedirect } from "../src/pilot-routes";
 
 const STORE_REFERENCE = "018f8100-0000-7000-8000-000000000001";
 const MENU_REFERENCE = "018f7600-0000-7000-8000-000000000001";
@@ -136,6 +137,13 @@ test.describe("@production production demo exclusion", () => {
       );
       await page.goto(route.path);
       await expect(page.getByRole("status", { name: "Local synthetic preview" })).toHaveCount(0);
+      // v15 aa3d9fac D3: a demo-only layout review is hidden in production; its address goes to
+      // a working screen, whose own requests are checked by that screen's specs.
+      const hiddenTo = pilotHiddenRedirect(route.path);
+      if (hiddenTo !== null) {
+        await expect(page).toHaveURL((url) => url.pathname === hiddenTo);
+        return;
+      }
       await expect(page.getByText(/Sign in required|unavailable/iu).first()).toBeVisible();
       const boundary = violations.filter(
         (violation) => violation !== "application request: GET /merchant/sign-in-entry",

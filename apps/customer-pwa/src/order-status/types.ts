@@ -61,6 +61,14 @@ export interface OrderStatusSources {
     /** WP-2423: the guest's own note for the kitchen (pickup orders; absent when none). */
     readonly customerNote?: string;
   }[];
+  /**
+   * WP-2423 (v15 aa3d9fac D2): the tip of each paid round (one entry per round with a successful
+   * payment), so the page's total is what was paid and matches the receipt.
+   */
+  readonly tips?: readonly {
+    readonly orderBatchReference: string;
+    readonly amount: { readonly amountMinor: bigint; readonly currencyCode: string };
+  }[];
   /** WP-2423 Q26: items the kitchen is remaking (open portions per Order item). */
   readonly remakes?: readonly {
     readonly orderItemReference: string;

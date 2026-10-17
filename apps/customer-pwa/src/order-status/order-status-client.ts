@@ -103,6 +103,18 @@ function decodeStatus(value: unknown, orderReference: string): OrderStatusView |
         }),
       };
     }
+    // WP-2423 (v15 aa3d9fac D2): each paid round's tip is money too.
+    if (Object.hasOwn(sources, "tips")) {
+      if (!Array.isArray(sources.tips) || sources.tips.length > 1000)
+        throw new Error("invalid status");
+      sources = {
+        ...sources,
+        tips: sources.tips.map((value: unknown) => {
+          const entry = record(value);
+          return { ...entry, amount: decodeMoney(entry.amount) };
+        }),
+      };
+    }
     if (sources.payments !== null) {
       if (!Array.isArray(sources.payments) || sources.payments.length > 100)
         throw new Error("invalid status");

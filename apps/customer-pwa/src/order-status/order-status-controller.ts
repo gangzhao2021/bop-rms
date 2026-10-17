@@ -190,6 +190,9 @@ function parseSources(
     ...(value !== null && typeof value === "object" && Object.hasOwn(value, "remakes")
       ? ["remakes"]
       : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "tips")
+      ? ["tips"]
+      : []),
     ...(value !== null && typeof value === "object" && Object.hasOwn(value, "itemPrices")
       ? ["itemPrices"]
       : []),
@@ -631,10 +634,33 @@ function parseSources(
       }),
     );
   }
+  // WP-2423 (v15 aa3d9fac D2): each paid round's tip, a round of this order at most once.
+  let tips: OrderStatusSources["tips"];
+  if (Object.hasOwn(raw, "tips")) {
+    const rounds = new Set(batches.map((batch) => batch.orderBatchReference));
+    if (!Array.isArray(raw.tips) || raw.tips.length > rounds.size) return invalid();
+    const seen = new Set<string>();
+    tips = Object.freeze(
+      raw.tips.map((value: unknown) => {
+        const entry = exact(value, ["orderBatchReference", "amount"]);
+        const orderBatchReference = parseReference(entry.orderBatchReference);
+        const amount = parseMoney(entry.amount);
+        if (
+          !rounds.has(orderBatchReference) ||
+          seen.has(orderBatchReference) ||
+          amount.amountMinor < 0n
+        )
+          return invalid();
+        seen.add(orderBatchReference);
+        return Object.freeze({ orderBatchReference, amount });
+      }),
+    );
+  }
   return Object.freeze({
     checkedAt,
     kitchen,
     payments,
+    ...(tips === undefined ? {} : { tips }),
     ...(remakes === undefined ? {} : { remakes }),
     ...(itemPrices === undefined ? {} : { itemPrices }),
     ...(dining ? { dining } : {}),
