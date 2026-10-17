@@ -1730,11 +1730,19 @@ keep serving.
 
 - `backup` takes one consistent online `pg_dump` (custom format) into a private directory (`0700`,
   files `0600`), writes `<file>.manifest.json` with its SHA-256 and the row count of every table
-  counted from the dump itself, and keeps the newest `--keep` backups (default 14).
+  counted from the dump itself, and keeps the newest `--keep` backups (default 14). With
+  `--media <runtime>/media/product-images` it also writes `<file>.media.tar` with every product
+  photo file published menus show, and records its SHA-256, file count and how many photos the
+  dump references that the folder lacks (`mediaMissing`). A store without photos yet (no folder)
+  gets an empty photo archive. Missing referenced photos do not stop the database backup; the
+  drill fails with `media missing` instead.
 - `drill` verifies the newest (or `--backup`) dump against its manifest, restores it into a new
   database `<db>_drill_<UTC time>` in the same server, requires every table's row count to equal the
   manifest, writes `drill-<UTC time>.json` and drops the drill database (`--keep-drill` keeps it).
-  A tampered or incomplete dump stops before any database is created.
+  A tampered or incomplete dump stops before any database is created. When the manifest names a
+  photo archive, the drill also checks its SHA-256, extracts it into a scratch folder, requires each
+  file's SHA-256 to equal its name, the count to match and every photo the dump references to be
+  present (`media checksum mismatch`, `media differs`, `media missing`).
 
 ```bash
 tooling/environment/pilot-backup.sh backup --container <postgres container> --port <port> --database <db> --user <migration role> --password-file <private password file> --dir <private backup dir>
@@ -1858,8 +1866,10 @@ docker compose -f compose.pilot.yaml exec ops node tooling/environment/pilot-ops
 
 Daily at `backup.localTime` in the Store's time zone (after the business day closes; 04:30 by
 default), the monitor runs `pilot-backup.sh backup` with the image's PostgreSQL 18.4 client
-(`--client local`), then `drill` (restore into a scratch database `<db>_drill_<time>`, every table's
-row count compared, scratch database dropped), then the encrypted off-site copy, keeping `keep`
+(`--client local`) including the runtime's product photos (`<runtime>/media/product-images`), then
+`drill` (restore into a scratch database `<db>_drill_<time>`, every table's row count compared, the
+photo archive restored and checked, scratch database dropped), then the encrypted off-site copy of
+the dump, its manifest and its photo archive, keeping `keep`
 local backups and `offsite.keep` off-site copies. A failed dump is retried after 30 minutes, up to 3
 tries a Store day. If the host was off at that time, the backup runs at the next start (online, while
 serving). Backups live in `<runtime>-backups` (a sibling of the runtime directory).
@@ -1883,11 +1893,14 @@ read when the host is lost. Restore from an off-site copy:
 ```bash
 node tooling/environment/pilot-ops.mjs decrypt-backup <runtime> <copy>.dump.enc <dir>/<name>.dump
 node tooling/environment/pilot-ops.mjs decrypt-backup <runtime> <copy>.dump.manifest.json.enc <dir>/<name>.dump.manifest.json
+node tooling/environment/pilot-ops.mjs decrypt-backup <runtime> <copy>.dump.media.tar.enc <dir>/<name>.dump.media.tar
 tooling/environment/pilot-backup.sh drill --container <postgres container> --port <port> --database <db> --user <migration role> --password-file <file> --dir <dir> --keep-drill
 ```
 
 A tampered or wrong-key copy is refused and nothing is written. `--keep-drill` keeps the restored
 database for inspection or cut-over (a cut-over is a maintenance step with the Owner's approval).
+A cut-over also restores the product photos the drill checked:
+`tar -xf <dir>/<name>.dump.media.tar -C <runtime>/media/product-images` (create the folder first).
 
 ### What each alert means and what to do
 
@@ -1910,7 +1923,7 @@ anything that stops ordering; the pilot operator fixes the cause.
 | <a id="alert-settlement-exceptions"></a>Day-end settlement has open problems         | A closed day has a difference, or no settlement 6 hours after close                                                                                                                                                                                         | Store Manager: `Settlement` for that day                                                                                                                                                                                                                                                                                     | If days are missing: `daily-settlement-worker.log` `daily_settlement_day_failed` lines name the day and safe code; that day is retried on its own (1 minute, doubling to 30) while later days settle; fix the cause, no restart needed    |
 | <a id="alert-backup-failed"></a>Last night's backup failed                           | The dump failed; retries follow (3 a day)                                                                                                                                                                                                                   | Nothing in store; service is unaffected                                                                                                                                                                                                                                                                                      | `ops/alerts.log` reason; free space; database reachable; `backup-now`                                                                                                                                                                     |
 | <a id="alert-backup-stale"></a>No recent backup                                      | No successful backup for 26 hours, or none configured yet                                                                                                                                                                                                   | Owner: ask for a backup today                                                                                                                                                                                                                                                                                                | Configure `backup` in `ops.json`, or find why the schedule did not run; `backup-now`                                                                                                                                                      |
-| <a id="alert-backup-restore-check"></a>The newest backup could not be restored       | The scratch restore or row comparison failed                                                                                                                                                                                                                | Nothing in store                                                                                                                                                                                                                                                                                                             | Keep older backups; run `drill` by hand on the newest and on the previous one; take a new backup                                                                                                                                          |
+| <a id="alert-backup-restore-check"></a>The newest backup could not be restored       | The scratch restore, row comparison or photo check failed (`media missing`: photos the menu uses are not in the photo folder)                                                                                                                               | Nothing in store                                                                                                                                                                                                                                                                                                             | Keep older backups; run `drill` by hand on the newest and on the previous one; take a new backup                                                                                                                                          |
 | <a id="alert-backup-offsite"></a>Off-site backup copy failed                         | The encrypted copy could not be written (drive missing, full, key missing)                                                                                                                                                                                  | Owner: reconnect the drive or check the sync folder                                                                                                                                                                                                                                                                          | Check the `/offsite` mount, free space and the key file                                                                                                                                                                                   |
 | <a id="alert-certificate-expiring"></a>Secure connection certificate expires soon    | Within 7 days ("Urgent" within 2 days or expired)                                                                                                                                                                                                           | Plan the renewal before it expires                                                                                                                                                                                                                                                                                           | `pilot-provision-tls.mjs renew` (see its README), restart, re-trust on staff devices                                                                                                                                                      |
 | <a id="alert-disk-low"></a>Disk space is running low                                 | Under 15% or 5 GB free ("Urgent" under 5% or 1 GB) on a named folder or the database disk                                                                                                                                                                   | Nothing in store until it is full                                                                                                                                                                                                                                                                                            | Remove old logs and old local backups beyond `keep`; `docker system df` for the database volume; add storage                                                                                                                              |

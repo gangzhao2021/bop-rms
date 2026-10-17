@@ -278,6 +278,29 @@ function publicSellable(
   });
 }
 
+type PublishedMenuSellable =
+  PublishedMenuProjection["snapshot"]["sections"][number]["sellables"][number];
+
+/**
+ * Search rank against the text the customer is shown: 0 for a name match, 1 for a match in the
+ * published customer description only, null for no match. Without a search everything ranks 0.
+ */
+function searchRank(
+  item: PublishedMenuSellable,
+  search: string | null,
+  locale: string,
+  snapshot: PublishedMenuProjection["snapshot"],
+): 0 | 1 | null {
+  if (search === null) return 0;
+  const name = localized(item.localizedNames, locale, snapshot.defaultLocale);
+  if (name.toLocaleLowerCase(locale).includes(search)) return 0;
+  const description =
+    item.presentation === undefined
+      ? null
+      : localizedOptional(item.presentation.localizedDescriptions, locale, snapshot.defaultLocale);
+  return description !== null && description.toLocaleLowerCase(locale).includes(search) ? 1 : null;
+}
+
 function found(
   projection: PublishedMenuProjection,
   input: CustomerMenuQueryInput,
@@ -301,14 +324,14 @@ function found(
             (facts === null ||
               (facts.get(item.sellableReference)?.availability ?? "NotOffered") !== "NotOffered"),
         )
-        .filter((item) => {
-          if (search === null) return true;
-          return localized(item.localizedNames, input.locale, snapshot.defaultLocale)
-            .toLocaleLowerCase(input.locale)
-            .includes(search);
-        })
-        .sort((left, right) => left.sortOrder - right.sortOrder)
-        .map((item) =>
+        .map((item) => ({ item, rank: searchRank(item, search, input.locale, snapshot) }))
+        .filter((entry) => entry.rank !== null)
+        // Name matches first, then description matches; menu order within each.
+        .sort(
+          (left, right) =>
+            (left.rank ?? 0) - (right.rank ?? 0) || left.item.sortOrder - right.item.sortOrder,
+        )
+        .map(({ item }) =>
           publicSellable(
             item,
             input.locale,

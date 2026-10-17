@@ -17,6 +17,15 @@ export const BACKUP_MAX_ATTEMPTS_PER_DAY = 3;
 export const BACKUP_RETRY_AFTER_MS = 30 * 60_000;
 const DUMP = /^[a-z][a-z0-9_]{0,40}-[0-9]{8}T[0-9]{6}Z\.dump$/u;
 
+/**
+ * The product photo directory of a pilot runtime: the same `<runtime>/media/product-images` the
+ * pilot storage adapter writes (pilot-merchant-composition.mjs) and the HTTPS entry serves
+ * (pilot-https-entry.mjs). Published menus reference these files, so every backup includes them.
+ */
+export function productImageDirectory(runtimeDirectory) {
+  return path.join(runtimeDirectory, "media", "product-images");
+}
+
 /** Store-local calendar date and minute of day for an instant (IANA zone, no host time zone). */
 export function storeLocalParts(now, timeZone) {
   const parts = Object.fromEntries(
@@ -333,6 +342,8 @@ export async function runBackupCycle({
     path.join(runtimeDirectory, backup.passwordFile),
     "--dir",
     backup.directory,
+    "--media",
+    productImageDirectory(runtimeDirectory),
   ];
   const dump = await script(["backup", ...common, "--keep", String(backup.keep)]);
   const file = /^PILOT_BACKUP_CREATED (\S+) /u.exec(dump.line)?.[1] ?? null;
@@ -388,7 +399,8 @@ export async function runBackupCycle({
       const target = await createTarget(backup.offsite.path, {
         forbidden: [runtimeDirectory, backup.directory],
       });
-      for (const name of [file, `${file}.manifest.json`])
+      // The dump, its manifest and its product photo archive, each encrypted the same way.
+      for (const name of [file, `${file}.manifest.json`, `${file}.media.tar`])
         await target.put(`${name}.enc`, (destination) =>
           encryptFile(path.join(backup.directory, name), destination, key, name),
         );
@@ -400,6 +412,7 @@ export async function runBackupCycle({
       for (const old of copies.slice(backup.offsite.keep)) {
         await target.remove(old);
         await target.remove(old.replace(/\.dump\.enc$/u, ".dump.manifest.json.enc"));
+        await target.remove(old.replace(/\.dump\.enc$/u, ".dump.media.tar.enc"));
       }
       next.offsite = { at: new Date().toISOString(), result: "Copied", file };
       log({ event: "offsite_copied", file });

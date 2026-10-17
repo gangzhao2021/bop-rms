@@ -233,6 +233,82 @@ describe("WP-1026 Customer Menu Query", () => {
     });
   });
 
+  it("also matches the published customer description, listing name matches first", async () => {
+    const base = projection();
+    const [section] = base.snapshot.sections;
+    if (section === undefined) throw new Error("expected section");
+    const [latte, hidden] = section.sellables;
+    if (latte === undefined || hidden === undefined) throw new Error("expected sellables");
+    const menu = projection({
+      snapshot: {
+        ...base.snapshot,
+        sections: [
+          {
+            ...section,
+            sellables: [
+              {
+                ...latte,
+                sortOrder: 1,
+                presentation: {
+                  localizedDescriptions: {
+                    "en-CA": "Espresso with steamed oat beverage. Vegan on request.",
+                    "fr-CA": "Espresso et boisson à l’avoine. Végétalien sur demande.",
+                  },
+                  photo: null,
+                },
+              },
+              {
+                ...latte,
+                placementReference: id(40) as never,
+                sellableReference: id(41) as never,
+                productVersionReference: id(42) as never,
+                localizedNames: { "en-CA": "Oat cookie", "fr-CA": "Biscuit à l’avoine" },
+                presentationRole: "Standard",
+                pinned: false,
+                sortOrder: 2,
+                optionRules: [],
+              },
+              {
+                ...latte,
+                placementReference: id(43) as never,
+                sellableReference: id(44) as never,
+                productVersionReference: id(45) as never,
+                localizedNames: { "en-CA": "Drip coffee", "fr-CA": "Café filtre" },
+                presentationRole: "Standard",
+                pinned: false,
+                sortOrder: 3,
+                optionRules: [],
+              },
+              {
+                ...hidden,
+                sortOrder: 4,
+                presentation: {
+                  localizedDescriptions: { "en-CA": "Oat milk chai" },
+                  photo: null,
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const { service } = fixture([menu]);
+    const names = async (searchTerm: string, locale = "en-CA") => {
+      const result = await service.getPublishedMenu(input({ searchTerm, locale }));
+      if (result.status !== "Found") throw new Error("expected menu");
+      return result.menu.sections.flatMap((entry) => entry.sellables.map((item) => item.name));
+    };
+    // The cookie matches by name and leads, even though the latte sits earlier on the menu.
+    await expect(names("OAT")).resolves.toEqual(["Oat cookie", "Latte"]);
+    await expect(names("vegan")).resolves.toEqual(["Latte"]);
+    // Matches the description in the customer's language; hidden items never surface.
+    await expect(names("végétalien", "fr-CA")).resolves.toEqual(["Café au lait"]);
+    await expect(names("chai")).resolves.toEqual([]);
+    // An item with no published description matches by name only.
+    await expect(names("drip")).resolves.toEqual(["Drip coffee"]);
+    await expect(names("steamed")).resolves.toEqual(["Latte"]);
+  });
+
   it("fails closed for stale, ambiguous, inactive or out-of-scope projections", async () => {
     await expect(
       fixture([projection({ freshnessStatus: "Stale" })]).service.getPublishedMenu(input()),

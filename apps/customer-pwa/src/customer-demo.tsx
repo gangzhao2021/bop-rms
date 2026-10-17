@@ -425,10 +425,18 @@ export const enabledCustomerDemo: CustomerDemoDependencies = Object.freeze({
         )
         .map((section) => ({
           ...section,
+          // Mirrors the published menu search: name matches first, then description matches.
           sellables: term
-            ? section.sellables.filter((item) =>
-                item.name.toLocaleLowerCase("en-CA").includes(term),
-              )
+            ? [
+                ...section.sellables.filter((item) =>
+                  item.name.toLocaleLowerCase("en-CA").includes(term),
+                ),
+                ...section.sellables.filter(
+                  (item) =>
+                    !item.name.toLocaleLowerCase("en-CA").includes(term) &&
+                    (item.description?.toLocaleLowerCase("en-CA").includes(term) ?? false),
+                ),
+              ]
             : section.sellables,
         }))
         .filter((section) => section.sellables.length > 0);

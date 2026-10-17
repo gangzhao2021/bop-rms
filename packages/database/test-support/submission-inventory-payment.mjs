@@ -24,6 +24,7 @@ import { createCustomerIntactReservationPaymentAction } from "../../../apps/api/
 import { buildCustomerPaymentPreparationSnapshot } from "../../../apps/api/src/customer-payment-preparation-snapshot.ts";
 import { createPostgresSubmissionFinalValidationStore } from "../../rms/inventory/src/index.ts";
 import { createCustomerCapacityPaymentClaimAdmission } from "../../../apps/api/src/customer-capacity-payment-admission.ts";
+import { grantPilotApiAcl } from "./pilot-api-acl.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
@@ -1535,6 +1536,11 @@ export async function exerciseSubmissionInventoryPayment({
               });
             }
             const statusServer = paymentRuntime.server;
+            // WP-2423: the guest status read merges the Order phase from Ordering's own records,
+            // consumed Kitchen facts and Dining's served reader. Hold exactly the rendered pilot API
+            // grants (matrix + Owner-approved additions) here, so the read cannot drift from the
+            // deployed ACL again (2026-10-17: order_pickup_not_collected_fact was missing).
+            await grantPilotApiAcl(admin, role);
             {
               const statusUrl =
                 "http://127.0.0.1:" +
@@ -1552,9 +1558,12 @@ export async function exerciseSubmissionInventoryPayment({
               assert.equal(response.headers.get("cache-control"), "no-store");
               const body = await response.json();
               assert.equal(body.status.order.orderReference, preparation.orderReference);
+              // DEC-PILOT-BATCH-PHASE-01: the phase is Ordering's merge of its own records and the
+              // Kitchen facts it consumed. The dine-in round was accepted above and no Kitchen event
+              // is consumed into Ordering here (covered by order-canonical-phase), so it reads Accepted.
               assert.equal(
                 body.status.order.canonicalPhase,
-                order.order.orderType === "Pickup" ? "Fulfilled" : "Submitted",
+                order.order.orderType === "Pickup" ? "Fulfilled" : "Accepted",
               );
               assert.equal(body.status.order.paymentStatus, "NotReported");
               assert.deepEqual(

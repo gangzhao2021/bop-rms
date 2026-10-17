@@ -158,6 +158,17 @@ describe("WP-2204 local Customer preview", () => {
     });
   });
 
+  it("also finds menu items by their published customer description", async () => {
+    const result = await enabledCustomerDemo.menuClient.load({ searchTerm: "CARROT" });
+    if (result.kind !== "Found") throw new Error("description match missing");
+    expect(
+      result.menu.sections.flatMap((section) => section.sellables.map((item) => item.name)),
+    ).toEqual(["Synthetic mushroom rice bowl"]);
+    await expect(enabledCustomerDemo.menuClient.load({ searchTerm: "oat" })).resolves.toEqual({
+      kind: "NotFound",
+    });
+  });
+
   it("renders the visible notice independently of route content", () => {
     const html = renderToStaticMarkup(<LocalCustomerDemoNotice />);
     expect(html).toContain('aria-label="Local synthetic preview"');

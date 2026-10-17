@@ -1,4 +1,5 @@
 import process from "node:process";
+import { grantPilotApiAcl } from "./pilot-api-acl.mjs";
 import { randomBytes } from "node:crypto";
 import { verifyEntryDiningBrowser } from "./entry-dining-browser.mjs";
 import { exerciseEntryDiningReceipt } from "./entry-dining-receipt.mjs";
@@ -632,6 +633,8 @@ export async function exercisePersistentProfileEntry({
         reference,
         orderType: "Pickup",
       });
+      // WP-2423: the guest status read merges the phase across owners; hold the pilot API ACL.
+      await grantPilotApiAcl(admin, role);
       const customerStatus = await exerciseEntryDiningStatus({
         base: "http://127.0.0.1:" + address.port,
         order,

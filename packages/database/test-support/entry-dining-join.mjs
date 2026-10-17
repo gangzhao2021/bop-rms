@@ -1,4 +1,5 @@
 import process from "node:process";
+import { grantPilotApiAcl } from "./pilot-api-acl.mjs";
 import { verifyEntryDiningBrowser } from "./entry-dining-browser.mjs";
 import { exerciseEntryDiningReceipt } from "./entry-dining-receipt.mjs";
 import { exerciseEntryDiningService, inspectEntryDiningDelivery } from "./entry-dining-service.mjs";
@@ -631,6 +632,8 @@ export async function exerciseEntryDiningJoin({
       });
       await admin.query("GRANT SELECT,INSERT ON rms_dining.dining_item_service_record TO " + role);
       await inspectEntryDiningDelivery({ run, scope, order, commitment });
+      // WP-2423: the guest status read merges the phase across owners; hold the pilot API ACL.
+      await grantPilotApiAcl(admin, role);
       const status = await exerciseEntryDiningStatus({
         http: statusHttp,
         result: paymentResult,

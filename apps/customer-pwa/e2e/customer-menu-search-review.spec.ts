@@ -57,6 +57,15 @@ test("CUST-MENU-SEARCH follows the Make search hierarchy @demo", async ({ page }
     });
   }
 
+  // Guests search by what is in the dish, not only its name: the published description matches.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByLabel("Search the menu").fill("carrot");
+  await main.getByRole("button", { name: "Search", exact: true }).click();
+  await expect(main.getByText("Matched term · carrot")).toBeVisible();
+  await expect(main.getByRole("heading", { name: "Synthetic mushroom rice bowl" })).toBeVisible();
+  await expect(main.getByText(/roasted mushrooms, pickled carrot/u)).toBeVisible();
+  await expect(main).not.toContainText("Synthetic iced tea");
+
   await main.getByRole("button", { name: "Clear", exact: true }).click();
   await expect(main.getByRole("heading", { name: "Search this menu" })).toBeVisible();
   await expect(main.getByLabel("Search the menu")).toHaveValue("");
