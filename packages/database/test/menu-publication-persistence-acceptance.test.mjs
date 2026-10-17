@@ -22,6 +22,7 @@ import {
   buildReviewedMenuContent,
   createPostgresMenuPublicationRepository,
   createPostgresMenuPublicationEvidenceSource,
+  listBrandMenus,
 } from "../../rms/catalog/src/index.ts";
 import { createPostgresCurrentMenuReleaseStore } from "../../rms/catalog/src/infrastructure/persistence/current-menu-release-store.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
@@ -1069,6 +1070,21 @@ it.each([
             ).rows.map((row) => row.presentation_json),
             [presentation],
           );
+          // WP-2423 menu review (v15 run of cb3f6f2a): the reviewer's "what customers see" reads the
+          // release customers see now through its frozen snapshot, under the restricted role.
+          const [listed] = await runner.run((tx) => listBrandMenus(tx, { brandReference: id(1) }));
+          assert.equal(listed.latestRelease.releaseReference, published.record.release.releaseId);
+          assert.equal(listed.latestRelease.snapshotDigest, digest);
+          assert.equal(listed.publication.snapshotDigest, digest);
+          const released = await runner.run((tx) =>
+            contentStore.read(
+              tx,
+              listed.latestRelease.menuVersionReference,
+              listed.latestRelease.snapshotDigest,
+              query.observedAt,
+            ),
+          );
+          assert.deepEqual(released.content.sections[0].sellables[0].presentation, presentation);
           bindingAvailable = false;
           // DEC-MENU-REVISION: the published version cannot be edited in place (a revision is needed).
           await assert.rejects(

@@ -9,6 +9,9 @@ import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
 import {
   MenuPageError,
   channelText,
+  customerViewChangeSummary,
+  descriptionChangeText,
+  photoChangeText,
   itemsNotOfferedHere,
   mayDiscardDraft,
   menuRevisionAction,
@@ -24,6 +27,8 @@ import {
   type MenuClient,
   type MenuCommand,
   type MenuErrorCode,
+  type MenuCustomerPhoto,
+  type MenuCustomerView,
   type MenuListView,
 } from "./store-menu-pages.js";
 
@@ -177,6 +182,109 @@ export function StoreMenuBuilderPage({
       csrf={csrf}
       availability={availability}
     />
+  );
+}
+
+function CustomerPhoto({ photo }: { readonly photo: MenuCustomerPhoto }) {
+  return (
+    <figure className="menu-customer-view__photo">
+      <img src={photo.url} alt={photo.altText} width={photo.width} height={photo.height} />
+      <figcaption>
+        {photo.altText === "" ? "Photo not described." : `Photo description: ${photo.altText}`}
+      </figcaption>
+    </figure>
+  );
+}
+
+/**
+ * WP-2423 (v15 run of cb3f6f2a): before approving, the reviewer sees exactly what customers will see
+ * for each item (frozen in the review snapshot), with changes against the published menu marked.
+ */
+function MenuCustomerViewSection({
+  view,
+  published,
+}: {
+  readonly view: MenuCustomerView;
+  readonly published: boolean;
+}) {
+  const summary = customerViewChangeSummary(view);
+  return (
+    <section className="detail-section menu-customer-view" aria-labelledby="menu-customer-view">
+      <h3 id="menu-customer-view">
+        {published ? "What customers see" : "What customers will see"}
+      </h3>
+      <p>
+        Each item's description and photo exactly as fixed for review on{" "}
+        <StaffTime instant={view.frozenAt} />. Changes made to products after that appear only in a
+        new version.
+      </p>
+      {view.comparedWithPublishedAt !== null ? (
+        <p className="menu-customer-view__summary">
+          Compared with the menu customers see now (published{" "}
+          <StaffTime instant={view.comparedWithPublishedAt} />
+          ): {summary}
+        </p>
+      ) : published ? null : (
+        <p className="menu-customer-view__summary">
+          Not published before: customers see all of this for the first time.
+        </p>
+      )}
+      <ul className="menu-customer-view__items">
+        {view.items.map((item) => {
+          const changes = [
+            item.newOnMenu ? "New on the menu" : null,
+            item.descriptionChange ? descriptionChangeText[item.descriptionChange] : null,
+            item.photoChange ? photoChangeText[item.photoChange] : null,
+          ].filter((change): change is string => change !== null);
+          return (
+            <li
+              key={item.placementReference}
+              className="menu-customer-view__item"
+              data-changed={changes.length > 0 ? "true" : undefined}
+            >
+              {item.photo ? (
+                <CustomerPhoto photo={item.photo} />
+              ) : (
+                <p className="menu-customer-view__no-photo">No photo</p>
+              )}
+              <div className="menu-customer-view__text">
+                <h4>{item.name}</h4>
+                <p className="menu-customer-view__section">{item.sectionName}</p>
+                {changes.length > 0 ? (
+                  <ul className="menu-customer-view__changes" aria-label="Changes">
+                    {changes.map((change) => (
+                      <li key={change}>{change}</li>
+                    ))}
+                  </ul>
+                ) : null}
+                <p>{item.description ?? "No description."}</p>
+                {item.before ? (
+                  <div className="menu-customer-view__before">
+                    <p className="menu-customer-view__before-label">Customers see now:</p>
+                    {item.descriptionChange ? (
+                      <p>{item.before.description ?? "No description."}</p>
+                    ) : null}
+                    {item.photoChange ? (
+                      item.before.photo ? (
+                        <CustomerPhoto photo={item.before.photo} />
+                      ) : (
+                        <p>No photo.</p>
+                      )
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      {view.removedFromMenu.length > 0 ? (
+        <p>
+          Removed from the menu (customers no longer see them):{" "}
+          {view.removedFromMenu.map((item) => item.name).join(", ")}.
+        </p>
+      ) : null}
+    </section>
   );
 }
 
@@ -593,6 +701,16 @@ function MenuBuilder({
           </p>
         ) : null}
       </form>
+      {view.customerView ? (
+        <MenuCustomerViewSection view={view.customerView} published={stage === "Published"} />
+      ) : stage === "InReview" || stage === "Approved" ? (
+        <StatePanel heading="Customer view not shown" tone="error" status>
+          <p>
+            What customers will see for this version could not be shown. Refresh before approving or
+            publishing.
+          </p>
+        </StatePanel>
+      ) : null}
       <section className="detail-section" aria-labelledby="publication">
         <h3 id="publication">Review and publication</h3>
         {stage === "Editing" ? (

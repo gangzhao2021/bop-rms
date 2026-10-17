@@ -37,6 +37,35 @@ export interface MenuReleaseSummary {
   readonly menuVersionReference: string;
   readonly createdAt: string;
 }
+/** WP-2423: a photo as customers see it (thumbnail of the reviewed photo, with its description). */
+export interface MenuCustomerPhoto {
+  readonly url: string;
+  readonly width: number;
+  readonly height: number;
+  readonly altText: string;
+}
+export interface MenuCustomerViewItem {
+  readonly placementReference: string;
+  readonly skuReference: string;
+  readonly sectionName: string;
+  readonly name: string;
+  readonly description: string | null;
+  readonly photo: MenuCustomerPhoto | null;
+  readonly newOnMenu: boolean | null;
+  readonly descriptionChange: "Added" | "Changed" | "Removed" | null;
+  readonly photoChange: "Added" | "Replaced" | "Removed" | "DescriptionChanged" | null;
+  readonly before: {
+    readonly description: string | null;
+    readonly photo: MenuCustomerPhoto | null;
+  } | null;
+}
+/** WP-2423: what customers will see, frozen in the review snapshot, against the published menu. */
+export interface MenuCustomerView {
+  readonly frozenAt: string;
+  readonly comparedWithPublishedAt: string | null;
+  readonly items: readonly MenuCustomerViewItem[];
+  readonly removedFromMenu: readonly { readonly skuReference: string; readonly name: string }[];
+}
 export interface MenuSummary {
   readonly menuReference: string;
   readonly internalCode: string;
@@ -104,6 +133,8 @@ export interface MenuBuilderView extends MenuViewBase {
   /** WP-2423: whether the viewer may offer items at this Store from the menu page. */
   readonly mayOfferHere?: boolean;
   readonly allergenRegistry: boolean;
+  /** WP-2423: present once the version is frozen for review; absent from older views. */
+  readonly customerView?: MenuCustomerView | null;
 }
 export interface MenuSectionInput {
   readonly sectionReference: string | null;
@@ -182,8 +213,116 @@ export function parseMenuBuilderView(value: unknown): MenuBuilderView {
   return {
     ...r,
     soleOperator: parseSoleOperatorGate(r.soleOperator),
+    customerView: parseMenuCustomerView(r.customerView),
   } as unknown as MenuBuilderView;
 }
+const photoPath = /^\/media\/images\/[0-9a-f]{64}\.(?:jpg|webp)$/u;
+const dimension = (value: unknown) =>
+  typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 20_000;
+const text = (value: unknown) => (typeof value === "string" ? value : null);
+function parseCustomerPhoto(value: unknown): MenuCustomerPhoto | null {
+  const photo = object(value);
+  if (
+    photo === null ||
+    typeof photo.url !== "string" ||
+    !photoPath.test(photo.url) ||
+    !dimension(photo.width) ||
+    !dimension(photo.height) ||
+    typeof photo.altText !== "string"
+  )
+    return null;
+  return {
+    url: photo.url,
+    width: photo.width as number,
+    height: photo.height as number,
+    altText: photo.altText,
+  };
+}
+const oneOf = <T extends string>(value: unknown, values: readonly T[]): T | null =>
+  values.includes(value as T) ? (value as T) : null;
+/** Lenient on display, strict on what reaches the DOM: only public photo paths are rendered. */
+export function parseMenuCustomerView(value: unknown): MenuCustomerView | null {
+  const view = object(value);
+  if (view === null || typeof view.frozenAt !== "string" || !Array.isArray(view.items)) return null;
+  const items = view.items.flatMap((candidate: unknown): MenuCustomerViewItem[] => {
+    const item = object(candidate);
+    if (
+      item === null ||
+      typeof item.placementReference !== "string" ||
+      typeof item.skuReference !== "string" ||
+      typeof item.name !== "string"
+    )
+      return [];
+    const before = object(item.before);
+    return [
+      {
+        placementReference: item.placementReference,
+        skuReference: item.skuReference,
+        sectionName: text(item.sectionName) ?? "",
+        name: item.name,
+        description: text(item.description),
+        photo: parseCustomerPhoto(item.photo),
+        newOnMenu: typeof item.newOnMenu === "boolean" ? item.newOnMenu : null,
+        descriptionChange: oneOf(item.descriptionChange, ["Added", "Changed", "Removed"] as const),
+        photoChange: oneOf(item.photoChange, [
+          "Added",
+          "Replaced",
+          "Removed",
+          "DescriptionChanged",
+        ] as const),
+        before:
+          before === null
+            ? null
+            : { description: text(before.description), photo: parseCustomerPhoto(before.photo) },
+      },
+    ];
+  });
+  return {
+    frozenAt: view.frozenAt,
+    comparedWithPublishedAt: text(view.comparedWithPublishedAt),
+    items,
+    removedFromMenu: (Array.isArray(view.removedFromMenu) ? view.removedFromMenu : []).flatMap(
+      (candidate: unknown) => {
+        const removed = object(candidate);
+        return removed !== null &&
+          typeof removed.skuReference === "string" &&
+          typeof removed.name === "string"
+          ? [{ skuReference: removed.skuReference, name: removed.name }]
+          : [];
+      },
+    ),
+  };
+}
+/** Plain words for what changed for customers, e.g. "1 new item, 2 photos changed". */
+export function customerViewChangeSummary(view: MenuCustomerView): string | null {
+  if (view.comparedWithPublishedAt === null) return null;
+  const count = (n: number, one: string, many: string) => (n === 1 ? `1 ${one}` : `${n} ${many}`);
+  const newItems = view.items.filter((item) => item.newOnMenu === true).length;
+  const descriptions = view.items.filter((item) => item.descriptionChange !== null).length;
+  const photos = view.items.filter((item) => item.photoChange !== null).length;
+  const parts = [
+    newItems ? count(newItems, "new item", "new items") : "",
+    descriptions ? count(descriptions, "description changed", "descriptions changed") : "",
+    photos ? count(photos, "photo changed", "photos changed") : "",
+    view.removedFromMenu.length
+      ? count(view.removedFromMenu.length, "item removed", "items removed")
+      : "",
+  ].filter(Boolean);
+  return parts.length === 0
+    ? "No changes to items, descriptions or photos."
+    : parts.join(", ") + ".";
+}
+export const descriptionChangeText = {
+  Added: "New description",
+  Changed: "Description changed",
+  Removed: "Description removed",
+} as const;
+export const photoChangeText = {
+  Added: "New photo",
+  Replaced: "Photo replaced",
+  Removed: "Photo removed",
+  DescriptionChanged: "Photo description changed",
+} as const;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 export const parseMenuRouteReference = (value: string | undefined): string | null =>
   value !== undefined && uuid.test(value) ? value : null;

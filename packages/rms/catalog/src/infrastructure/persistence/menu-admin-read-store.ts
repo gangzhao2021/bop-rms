@@ -25,6 +25,8 @@ export interface MenuReleaseSummary {
   readonly sequence: number;
   readonly menuVersionReference: string;
   readonly createdAt: string;
+  /** WP-2423: the released review snapshot, so a reviewer can compare against what customers see. */
+  readonly snapshotDigest: string;
 }
 export interface BrandMenuSummary {
   readonly menuReference: string;
@@ -55,6 +57,7 @@ const releaseOf = (value: unknown): MenuReleaseSummary | null => {
     sequence: Number(r.sequence),
     menuVersionReference: String(r.version),
     createdAt: String(r.createdAt),
+    snapshotDigest: String(r.digest),
   });
 };
 
@@ -78,7 +81,7 @@ export async function listBrandMenus(
           FROM rms_catalog.menu_publication_revision r WHERE r.brand_id=m.brand_id AND r.menu_id=m.menu_id
           AND r.menu_version_id=m.current_version_id ORDER BY r.lifecycle_version DESC LIMIT 1) publication,
         (SELECT jsonb_build_object('release',l.release_id,'sequence',l.release_sequence,'version',l.menu_version_id,
-          'createdAt',${iso("l.created_at")})
+          'createdAt',${iso("l.created_at")},'digest',l.snapshot_digest)
           FROM rms_catalog.menu_publication_release l WHERE l.brand_id=m.brand_id AND l.menu_id=m.menu_id
           ORDER BY l.release_sequence DESC LIMIT 1) latest_release
        FROM rms_catalog.menu m JOIN rms_catalog.menu_version v ON v.menu_version_id=m.current_version_id

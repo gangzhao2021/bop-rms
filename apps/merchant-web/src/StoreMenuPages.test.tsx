@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   channelText,
   createMenuClient,
+  customerViewChangeSummary,
   itemsNotOfferedHere,
   mayDiscardDraft,
   MenuPageError,
   orderTypeText,
   menuRevisionAction,
   menuStage,
+  parseMenuCustomerView,
   parseMenuRouteReference,
   priceText,
   sectionCode,
@@ -130,5 +132,49 @@ describe("WP-2423 menu page helpers", () => {
       throw new TypeError("network");
     });
     await expect(offline.load(null)).rejects.toBeInstanceOf(MenuPageError);
+  });
+  it("reads what customers will see, rendering only public photo paths, and summarizes changes", () => {
+    const photo = (url: string) => ({ url, width: 320, height: 240, altText: "Latte in a glass" });
+    const good = "/media/images/" + "a".repeat(64) + ".jpg";
+    const item = (change: Record<string, unknown>) => ({
+      placementReference: "p",
+      skuReference: "s",
+      sectionName: "Drinks",
+      name: "Latte",
+      description: "Espresso and steamed milk.",
+      photo: photo(good),
+      newOnMenu: false,
+      descriptionChange: null,
+      photoChange: null,
+      before: null,
+      ...change,
+    });
+    const view = parseMenuCustomerView({
+      frozenAt: "2026-10-17T14:00:00.000Z",
+      comparedWithPublishedAt: "2026-10-16T18:05:00.000Z",
+      items: [
+        item({ newOnMenu: true, photo: photo("https://elsewhere.example/x.jpg") }),
+        item({
+          descriptionChange: "Changed",
+          photoChange: "Replaced",
+          before: { description: "Old.", photo: photo(good) },
+        }),
+        item({ photoChange: "Added" }),
+        "not an item",
+      ],
+      removedFromMenu: [{ skuReference: "r", name: "Scone" }],
+    });
+    if (view === null) throw new Error("customer view not read");
+    expect(view.items).toHaveLength(3);
+    expect(view.items[0]?.photo).toBeNull();
+    expect(view.items[1]?.before).toEqual({ description: "Old.", photo: photo(good) });
+    expect(customerViewChangeSummary(view)).toBe(
+      "1 new item, 1 description changed, 2 photos changed, 1 item removed.",
+    );
+    expect(
+      customerViewChangeSummary({ ...view, items: [item({})] as never, removedFromMenu: [] }),
+    ).toBe("No changes to items, descriptions or photos.");
+    expect(customerViewChangeSummary({ ...view, comparedWithPublishedAt: null })).toBeNull();
+    expect(parseMenuCustomerView(undefined)).toBeNull();
   });
 });

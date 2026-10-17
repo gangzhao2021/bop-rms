@@ -20,6 +20,8 @@ import {
   parseCatalogReference,
   type MenuAggregate,
   type ProductLifecycleTransaction,
+  type PublishedSellablePresentation,
+  type ReviewedMenuContent,
 } from "@rms/catalog";
 import {
   createPostgresPriceBookRepository,
@@ -268,6 +270,152 @@ const catalogErrors: Partial<Record<CatalogError["code"], MerchantMenuError["cod
   CATALOG_INDEPENDENT_APPROVAL_REQUIRED: "ApprovalRequired",
 };
 
+/**
+ * WP-2423 (v15 run of cb3f6f2a): what customers will see for each item of a frozen review snapshot
+ * (description and photo, exactly as reviewed), and what changed against the snapshot customers
+ * see now. Built only from Catalog's frozen review content; nothing is re-read from live drafts.
+ */
+export type CustomerViewDescriptionChange = "Added" | "Changed" | "Removed";
+export type CustomerViewPhotoChange = "Added" | "Replaced" | "Removed" | "DescriptionChanged";
+export interface CustomerViewPhoto {
+  readonly url: string;
+  readonly width: number;
+  readonly height: number;
+  readonly altText: string;
+}
+export interface CustomerViewItem {
+  readonly placementReference: string;
+  readonly skuReference: string;
+  readonly sectionName: string;
+  readonly name: string;
+  readonly description: string | null;
+  readonly photo: CustomerViewPhoto | null;
+  /** Null when there is no published menu to compare with. */
+  readonly newOnMenu: boolean | null;
+  readonly descriptionChange: CustomerViewDescriptionChange | null;
+  readonly photoChange: CustomerViewPhotoChange | null;
+  /** What customers see now, for a changed or removed description or photo. */
+  readonly before: {
+    readonly description: string | null;
+    readonly photo: CustomerViewPhoto | null;
+  } | null;
+}
+export interface MenuCustomerView {
+  readonly frozenAt: string;
+  /** When the menu customers see now was published; null when nothing is published to compare. */
+  readonly comparedWithPublishedAt: string | null;
+  readonly items: readonly CustomerViewItem[];
+  readonly removedFromMenu: readonly { readonly skuReference: string; readonly name: string }[];
+}
+export function menuCustomerView(input: {
+  readonly locale: string;
+  readonly current: { readonly content: ReviewedMenuContent; readonly createdAt: string };
+  readonly published: {
+    readonly content: ReviewedMenuContent;
+    readonly publishedAt: string;
+  } | null;
+}): MenuCustomerView {
+  const pick = (values: Readonly<Record<string, string>>, defaultLocale: string) =>
+    values[input.locale] ?? values[defaultLocale] ?? Object.values(values)[0] ?? null;
+  const look = (presentation: PublishedSellablePresentation | undefined, defaultLocale: string) => {
+    const description =
+      presentation === undefined ? null : pick(presentation.localizedDescriptions, defaultLocale);
+    const photo = presentation?.photo ?? null;
+    const thumbnail = photo?.renditions.find(
+      (rendition) => rendition.width === 320 && rendition.contentType === "image/jpeg",
+    );
+    return {
+      description: description === null || description.trim() === "" ? null : description,
+      photo:
+        photo === null || thumbnail === undefined
+          ? null
+          : {
+              url: thumbnail.path,
+              width: thumbnail.width,
+              height: thumbnail.height,
+              altText: pick(photo.localizedAltText, defaultLocale) ?? "",
+            },
+      imageReference: photo === null ? null : String(photo.imageReference),
+    };
+  };
+  const published = new Map<
+    string,
+    { readonly name: string; readonly look: ReturnType<typeof look> }
+  >();
+  if (input.published !== null) {
+    const locale = input.published.content.defaultLocale;
+    for (const section of input.published.content.sections)
+      for (const item of section.sellables)
+        if (item.presentationRole !== "Hidden" && !published.has(String(item.sellableReference)))
+          published.set(String(item.sellableReference), {
+            name: pick(item.localizedNames, locale) ?? "",
+            look: look(item.presentation, locale),
+          });
+  }
+  const locale = input.current.content.defaultLocale;
+  const onMenu = new Set<string>();
+  const sections = [...input.current.content.sections].sort((a, b) => a.sortOrder - b.sortOrder);
+  const items = sections.flatMap((section) =>
+    [...section.sellables]
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .filter((item) => item.presentationRole !== "Hidden")
+      .map((item): CustomerViewItem => {
+        const sku = String(item.sellableReference);
+        onMenu.add(sku);
+        const now = look(item.presentation, locale);
+        const was = input.published === null ? undefined : published.get(sku);
+        const descriptionChange: CustomerViewDescriptionChange | null =
+          was === undefined || was.look.description === now.description
+            ? null
+            : was.look.description === null
+              ? "Added"
+              : now.description === null
+                ? "Removed"
+                : "Changed";
+        const photoChange: CustomerViewPhotoChange | null =
+          was === undefined
+            ? null
+            : was.look.photo === null
+              ? now.photo === null
+                ? null
+                : "Added"
+              : now.photo === null
+                ? "Removed"
+                : was.look.imageReference !== now.imageReference
+                  ? "Replaced"
+                  : was.look.photo.altText !== now.photo.altText
+                    ? "DescriptionChanged"
+                    : null;
+        return {
+          placementReference: String(item.placementReference),
+          skuReference: sku,
+          sectionName: pick(section.localizedNames, locale) ?? "",
+          name: pick(item.localizedNames, locale) ?? "",
+          description: now.description,
+          photo: now.photo,
+          newOnMenu: input.published === null ? null : was === undefined,
+          descriptionChange,
+          photoChange,
+          before:
+            was === undefined || (descriptionChange === null && photoChange === null)
+              ? null
+              : {
+                  description: descriptionChange === null ? null : was.look.description,
+                  photo: photoChange === null ? null : was.look.photo,
+                },
+        };
+      }),
+  );
+  return {
+    frozenAt: input.current.createdAt,
+    comparedWithPublishedAt: input.published?.publishedAt ?? null,
+    items,
+    removedFromMenu: [...published.entries()]
+      .filter(([sku]) => !onMenu.has(sku))
+      .map(([skuReference, value]) => ({ skuReference, name: value.name })),
+  };
+}
+
 export function createMerchantMenus(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
@@ -396,6 +544,46 @@ export function createMerchantMenus(options: {
       })),
   });
 
+  /**
+   * WP-2423: for a version frozen for review (in review, approved or published), what customers will
+   * see per item from its review snapshot, compared with the release customers see now when that is
+   * another version. Read through Catalog's review content store (Brand scope, read-only).
+   */
+  const customerViewOf = async (
+    tx: unknown,
+    s: Scope,
+    summary: Awaited<ReturnType<typeof listBrandMenus>>[number],
+  ): Promise<MenuCustomerView | null> => {
+    const publication = summary.publication;
+    if (publication === null || publication.state === "Archived") return null;
+    const store = createPostgresMenuReviewContentStore({
+      brandReference: s.owner.brandReference,
+      menuReference: summary.menuReference,
+      authorize: async () => true,
+    });
+    const at = options.persistence.now();
+    const current = await store.read(
+      ptx(tx),
+      summary.currentVersionReference,
+      publication.snapshotDigest,
+      at,
+    );
+    if (current === null) return null;
+    const release = summary.latestRelease;
+    const released =
+      release === null || release.menuVersionReference === summary.currentVersionReference
+        ? null
+        : await store.read(ptx(tx), release.menuVersionReference, release.snapshotDigest, at);
+    return menuCustomerView({
+      locale: options.locale,
+      current: { content: current.content, createdAt: current.createdAt },
+      published:
+        released === null || release === null
+          ? null
+          : { content: released.content, publishedAt: release.createdAt },
+    });
+  };
+
   const query = async (input: {
     sessionCookie: unknown;
     csrf: unknown;
@@ -443,6 +631,7 @@ export function createMerchantMenus(options: {
               : null;
           // Whether the viewer may offer items at this Store (Item availability) from here.
           const mayOfferHere = (await s.decision(availabilityPermission))?.effect === "Allow";
+          const customerView = await customerViewOf(tx, s, summary);
           await brandScope(tx, s.owner.brandReference);
           return {
             screenId: "CAT-MENU-BUILDER" as const,
@@ -461,6 +650,7 @@ export function createMerchantMenus(options: {
                   },
             sellables: await sellables(tx, s),
             mayOfferHere,
+            customerView,
             allergenRegistry: (await currentAllergenRegistry(ptx(tx) as never, s.owner)) !== null,
           };
         }),
