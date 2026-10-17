@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   advanceOrderStatusPoll,
   nextOrderStatusPollDelayMs,
+  orderAwaitingAcceptancePollIntervalMs,
   orderAwaitingCollectionPollIntervalMs,
   orderPreparingPollIntervalMs,
   orderReceivedPollIntervalMs,
@@ -296,13 +297,97 @@ describe("WP-2423 (v15 2026-10-17): pace from the status body the pilot actually
   });
 
   it.each([
-    ["awaiting-acceptance", orderStatusPollIntervalMs],
+    ["awaiting-acceptance", orderAwaitingAcceptancePollIntervalMs],
     ["queued", orderPreparingPollIntervalMs],
     ["preparing", orderPreparingPollIntervalMs],
     ["ready", orderAwaitingCollectionPollIntervalMs],
     ["collected", null],
   ] as const)("checks a %s pickup after %s ms", async (stage, delay) => {
     expect(delayFor(ready(await decoded(stage)))).toBe(delay);
+  });
+
+  it("checks a paid pickup every 5 s until the Store accepts (v15 ac46bf22: accepted showed up to 15 s late)", async () => {
+    expect(orderAwaitingAcceptancePollIntervalMs).toBe(5_000);
+    const waiting = await decoded("awaiting-acceptance");
+    const sources = waiting.sources;
+    if (sources === undefined) throw new Error("fixture has no sources");
+    // Not paid yet, held while the Store is offline, or not accepted: not this wait.
+    const unpaid = { ...waiting, sources: { ...sources, payments: [] } };
+    const offline = {
+      ...waiting,
+      sources: { ...sources, storeAcceptance: { state: "AwaitingStore" as const } },
+    };
+    const notAccepted = {
+      ...waiting,
+      sources: {
+        ...sources,
+        storeAcceptance: {
+          state: "NotAccepted" as const,
+          closedAt: "2026-10-17T01:49:10.000Z",
+          refundStatus: "Pending" as const,
+        },
+      },
+    };
+    expect(delayFor(ready(unpaid))).toBe(orderStatusPollIntervalMs);
+    expect(delayFor(ready(offline))).toBe(orderStatusPollIntervalMs);
+    expect(delayFor(ready(notAccepted))).toBe(orderStatusPollIntervalMs);
+    expect(delayFor(ready(waiting, "available"))).toBeNull();
+    // Failures back off from 5 s up to the normal 15 s pace; a success returns to 5 s.
+    let poll = advanceOrderStatusPoll(stoppedOrderStatusPoll, ready(waiting));
+    const delays: (number | null)[] = [];
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      poll = advanceOrderStatusPoll(poll, { status: "unavailable" });
+      delays.push(nextOrderStatusPollDelayMs(poll));
+    }
+    expect(delays).toEqual([10_000, 15_000, 15_000]);
+    expect(nextOrderStatusPollDelayMs(advanceOrderStatusPoll(poll, ready(waiting)))).toBe(5_000);
+  });
+
+  it("shows accepted within 5 s of the Store accepting, and skips checks while hidden", async () => {
+    vi.useFakeTimers();
+    try {
+      const waiting = ready(await decoded("awaiting-acceptance"));
+      const queued = ready(await decoded("queued"));
+      let state: OrderStatusState = waiting;
+      const reads = [waiting, queued];
+      const listeners = new Set<() => void>();
+      const refresh = vi.fn(async () => {
+        const next = reads.shift();
+        if (next) {
+          state = next;
+          listeners.forEach((listener) => listener());
+        }
+      });
+      let visible = true;
+      const stop = startOrderStatusPolling(
+        {
+          getState: () => state,
+          load: async () => undefined,
+          refresh,
+          setOnline: () => undefined,
+          dispose: () => undefined,
+          subscribe(listener) {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+          },
+        },
+        { isVisible: () => visible, onVisible: () => () => undefined },
+      );
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(refresh).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(state).toBe(waiting);
+      // The Store accepts just after this check; the next one, 5 s later, shows it.
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(state).toBe(queued);
+      expect(refresh).toHaveBeenCalledTimes(2);
+      visible = false;
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(refresh).toHaveBeenCalledTimes(2);
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows ready within 3 s of the kitchen finishing (v15: 13 s at the 15 s pace)", async () => {

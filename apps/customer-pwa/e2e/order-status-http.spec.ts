@@ -887,4 +887,60 @@ test.describe("@production order status HTTP continuity", () => {
     expect(Date.now() - (readyAt ?? 0)).toBeLessThan(5_000);
     await expectNoInternalText(page);
   });
+
+  // v15 ac46bf22 (2026-10-17): a paid pickup waiting for the Store was checked every 15 s, so
+  // "Order accepted" showed up to 15 s after the Store accepted. It is now checked every 5 s.
+  test("WP-2423: shows a paid pilot pickup accepted within about 5 s of the Store accepting", async ({
+    page,
+  }) => {
+    await page.route("**/bff/customer/entry", (route) =>
+      route.fulfill({
+        status: 201,
+        headers: { "cache-control": "no-store" },
+        json: {
+          schemaVersion: 2,
+          status: "Established",
+          brandDisplayName: "Synthetic Brand",
+          storeDisplayName: "Synthetic Status Store",
+          publicStoreReference: id(6),
+          publicTableReference: null,
+          channel: "Pickup",
+          operatingState: "Open",
+          availableServiceModes: ["Pickup"],
+          locale: "en-CA",
+          contextExpiresAt: new Date(Date.now() + 600_000).toISOString(),
+          csrfToken: "h".repeat(43),
+        },
+      }),
+    );
+    let acceptedAt: number | null = null;
+    let reads = 0;
+    await page.route("**/api/v1/orders/*/status", async (route) => {
+      reads += 1;
+      // The Store accepts just after the guest's first check.
+      if (reads === 1) acceptedAt = Date.now() + 200;
+      const accepted = acceptedAt !== null && Date.now() >= acceptedAt;
+      // Since the phase resolver (v15 live run of ac46bf22) the status API reads Accepted once the
+      // Store accepts; before that it is Submitted with no kitchen ticket.
+      const body = v15PickupStatusBody(accepted ? "queued" : "awaiting-acceptance");
+      if (accepted) body.status.order.canonicalPhase = "Accepted";
+      await route.fulfill({ headers: { "cache-control": "no-store" }, json: body });
+    });
+    await page.goto("/#qr=aaa.bbb.ccc");
+    await expect(
+      page.getByRole("heading", { name: "Synthetic Status Store", exact: true }),
+    ).toBeVisible();
+    await page.evaluate((reference) => {
+      history.pushState(null, "", "/orders/" + reference);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }, v15PickupOrderReference);
+    const main = page.getByRole("main");
+    await expect(main).toContainText("Order submitted");
+    await expect(main).toContainText("Order accepted", { timeout: 8_000 });
+    expect(acceptedAt).not.toBeNull();
+    // One 5 s check, against up to 15 s before.
+    expect(Date.now() - (acceptedAt ?? 0)).toBeLessThan(6_500);
+    expect(reads).toBe(2);
+    await expectNoInternalText(page);
+  });
 });

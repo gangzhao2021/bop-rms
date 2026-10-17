@@ -7,6 +7,13 @@ const tenant = (code: string, sqlState: string | null) =>
     code,
     diagnostic: { sqlState, constraint: null, table: null, closed: false },
   });
+/** An owner error that turned a failed query into its own code; the runner attaches the query's
+ * sanitized diagnostic under a registered symbol (packages/database transaction-runner). */
+const ownerOver = (code: string, sqlState: string) =>
+  Object.defineProperty(Error(code), Symbol.for("bop.database.failure"), {
+    value: { sqlState, constraint: null, table: null, closed: false },
+    enumerable: false,
+  });
 it.each([
   ["serialization", pg("40001")],
   ["deadlock", pg("40P01")],
@@ -28,6 +35,15 @@ it.each([
   ],
   ["wrapped kitchen refresh", Error("KITCHEN_QUEUE_REFRESH_UNAVAILABLE", { cause: pg("57014") })],
   ["wrapped timeout", Error("SOMETHING_TIMEOUT")],
+  // WP-2423 (v15 2026-10-17): what a short host stall during a deploy actually produced.
+  [
+    "tenant setup or commit on a lost connection",
+    tenant("TENANT_DATABASE_TRANSACTION_FAILED", "08006"),
+  ],
+  ["tenant idle-in-transaction timeout", tenant("TENANT_DATABASE_TRANSACTION_FAILED", "25P03")],
+  ["event consumer without a connection", Error("CONSUMER_TEMPORARY_FAILURE")],
+  ["event consumer commit lost", Error("COMMIT_OUTCOME_UNKNOWN")],
+  ["owner error over a lost query", ownerOver("INTERNAL_COMPENSATION_REPAIR_FAILED", "08006")],
 ])("transient: %s", (_name, error) => {
   expect(classifyCycleFailure(error)).toBe("Transient");
 });
@@ -38,6 +54,10 @@ it.each([
   ["permission", pg("42501")],
   ["concurrent query", tenant("TENANT_DATABASE_TRANSACTION_CONCURRENT_QUERY", null)],
   ["changed scope", Error("BUSINESS_WORKER_SCOPE_CHANGED")],
+  // Still a person's job: an unexplained tenant failure, and an owner error over bad data.
+  ["tenant failed without diagnostic", tenant("TENANT_DATABASE_TRANSACTION_FAILED", null)],
+  ["owner error over a constraint", ownerOver("INTERNAL_COMPENSATION_REPAIR_FAILED", "23505")],
+  ["owner error without a database cause", Error("INTERNAL_COMPENSATION_REPAIR_FAILED")],
   ["free text", Error("something odd happened")],
   ["non-error", "boom"],
   ["null", null],

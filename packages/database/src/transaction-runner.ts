@@ -85,8 +85,11 @@ export function createTenantTransactionRunner(
         try {
           // One round trip for the three limits (a parameterless multi-statement simple query).
           await client.query(transactionLimits);
-        } catch {
-          throw new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_FAILED");
+        } catch (error) {
+          throw new TenantContextDatabaseError(
+            "TENANT_DATABASE_TRANSACTION_FAILED",
+            tenantContextDatabaseDiagnostic(error),
+          );
         }
         let active = true;
         let failed = false;
@@ -156,7 +159,8 @@ export function createTenantTransactionRunner(
                 : conflicted
                   ? "TENANT_DATABASE_TRANSACTION_CONFLICT"
                   : "TENANT_DATABASE_TRANSACTION_FAILED",
-              conflicted ? conflictDiagnostic : null,
+              // The swallowed query's SQLSTATE, so a lost connection still reads as retryable.
+              conflicted ? conflictDiagnostic : concurrent ? null : failureDiagnostic,
             );
           return result;
         } catch (error) {

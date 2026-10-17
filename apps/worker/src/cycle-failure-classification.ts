@@ -53,14 +53,22 @@ const APPLICATION_CODE = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/u;
 function transientApplicationCode(code: string): boolean {
   return (
     code === "TENANT_DATABASE_ACQUIRE_FAILED" ||
+    // WP-2423 (v15 2026-10-17): the event consumer's own words for "no connection now"
+    // (acquire failed) and "the connection was lost at COMMIT". Delivery is idempotent per event
+    // and consumer, so the next cycle settles either outcome; one that keeps failing is still
+    // raised by the persistent-failure rule (two minutes).
+    code === "CONSUMER_TEMPORARY_FAILURE" ||
+    code === "COMMIT_OUTCOME_UNKNOWN" ||
     code.endsWith("_UNAVAILABLE") ||
     code.endsWith("_CONFLICT") ||
     code.endsWith("_TIMEOUT")
   );
 }
-function own(value: object, key: string): unknown {
+function own(value: object, key: string | symbol): unknown {
   return Object.getOwnPropertyDescriptor(value, key)?.value as unknown;
 }
+/** The database runner's sanitized diagnostic on an owner error that wrapped a failed query. */
+const databaseFailureKey = Symbol.for("bop.database.failure");
 
 export function classifyCycleFailure(error: unknown): CycleFailureDisposition {
   try {
@@ -73,7 +81,7 @@ export function classifyCycleFailure(error: unknown): CycleFailureDisposition {
       const value: object = current;
       const code = own(value, "code");
       const message = own(value, "message");
-      const diagnostic = own(value, "diagnostic");
+      const diagnostic = own(value, "diagnostic") ?? own(value, databaseFailureKey);
       const diagnosticState =
         diagnostic !== null && typeof diagnostic === "object" ? own(diagnostic, "sqlState") : null;
       if (sqlState === null && typeof code === "string" && SQLSTATE.test(code)) sqlState = code;

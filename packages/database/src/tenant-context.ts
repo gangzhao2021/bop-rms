@@ -178,9 +178,19 @@ export async function withTenantContextTransaction<T>(
     began = false;
   } catch (error) {
     failed = true;
-    primaryError = callbackActive
-      ? error
-      : new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_FAILED");
+    // WP-2423 (v15 2026-10-17): a setup or COMMIT failure keeps its safe diagnostic, so a lost or
+    // timed-out connection (08006/25P03/57014) reads as retryable instead of an unknown failure
+    // that pages staff ("A background service needs a person") after a short host stall.
+    if (callbackActive) primaryError = error;
+    else {
+      const diagnostic = tenantContextDatabaseDiagnostic(error);
+      primaryError = new TenantContextDatabaseError(
+        "TENANT_DATABASE_TRANSACTION_FAILED",
+        diagnostic.sqlState === null && connectionLost
+          ? Object.freeze({ ...diagnostic, sqlState: "08006" })
+          : diagnostic,
+      );
+    }
     if (began) await client.query("ROLLBACK").catch(() => undefined);
   }
 

@@ -86,6 +86,23 @@ async function prove(context) {
     );
     assert.equal((await runner.run(async (tx) => tx.query("SELECT 2 AS two", []))).rows[0].two, 2);
 
+    // 1c. WP-2423 (v15 2026-10-17): the host stalls after the last query, so the server ends the
+    // idle transaction before COMMIT. The COMMIT failure keeps a connection-loss SQLSTATE (it was
+    // reported without one and paged staff as "needs a person").
+    await assert.rejects(
+      runner.run(async (tx) => {
+        await tx.query("SET LOCAL idle_in_transaction_session_timeout = '200ms'", []);
+        await delay(700);
+      }),
+      (error) =>
+        error.code === "TENANT_DATABASE_TRANSACTION_FAILED" &&
+        ["25P03", "08006", "57P01"].includes(error.diagnostic?.sqlState),
+    );
+    assert.equal(
+      (await runner.run(async (tx) => tx.query("SELECT 3 AS three", []))).rows[0].three,
+      3,
+    );
+
     // 2. Bounded Snapshot reads with many observations of one attempt.
     const created = "2026-10-01T12:00:00.000Z";
     // Setup writes as the owner, scoped like the owner modules (tables force row-level security).

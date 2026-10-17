@@ -391,6 +391,36 @@ it("supervised: an invariant failure marks attention_required, keeps retrying sl
   await work.stop();
   await expect(work.completion).resolves.toBe("stopped");
 });
+it("WP-2423 (v15 2026-10-17): a short database stall during a deploy retries quickly and never asks for a person", async () => {
+  vi.useFakeTimers();
+  const lostAtCommit = Object.assign(Error("tenant database transaction failed"), {
+    code: "TENANT_DATABASE_TRANSACTION_FAILED",
+    diagnostic: { sqlState: "08006", constraint: null, table: null, closed: false },
+  });
+  for (const stall of [lostAtCommit, Error("CONSUMER_TEMPORARY_FAILURE")]) {
+    const runOnce = vi
+      .fn<() => Promise<number>>()
+      .mockResolvedValueOnce(0)
+      .mockRejectedValueOnce(stall)
+      .mockResolvedValue(0);
+    const snapshots: OutboxWorkloadSnapshot[] = [];
+    const work = createOutboxWorkload({
+      dispatcher: { runOnce, stop: async () => "drained" },
+      pollIntervalMs: 1000,
+      drainDeadlineMs: 1000,
+      supervision: {},
+      onSnapshot: (value) => snapshots.push(value),
+    });
+    await work.start();
+    await vi.advanceTimersByTimeAsync(1000); // the stalled cycle
+    // Retried after one poll interval, not the five-minute attention pace.
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(runOnce).toHaveBeenCalledTimes(3);
+    expect(snapshots.some((value) => value.state === "attention_required")).toBe(false);
+    expect(work.snapshot()).toMatchObject({ state: "running", consecutiveFailures: 0 });
+    await work.stop();
+  }
+});
 it("supervised: a failing sibling never stops the group (one workload's failure is isolated)", async () => {
   vi.useFakeTimers();
   const healthy = vi.fn(async () => 0);

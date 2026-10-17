@@ -97,16 +97,25 @@ export const orderAwaitingCollectionPollIntervalMs = 3_000;
  * this pace is the update path.
  */
 export const orderPreparingPollIntervalMs = 3_000;
+/**
+ * WP-2423 (v15 2026-10-17): a paid pickup the Store has not accepted yet. The guest has just paid and
+ * watches for "Order accepted"; at the 15 s pace it appeared up to 15 s after the Store accepted.
+ * Trade-off: one read every 5 s per waiting guest instead of every 15 s, only for the short window
+ * between payment and acceptance (the Store accepts within minutes or the order is refunded), with
+ * the same backoff on errors and no checks while the page is hidden. For one pilot Store that is a
+ * handful of reads a minute; many concurrent waiting guests would want the live channel instead.
+ */
+export const orderAwaitingAcceptancePollIntervalMs = 5_000;
 /** Longest wait between checks after repeated failures of a normally paced order. */
 export const orderStatusPollErrorCapMs = 60_000;
 
 /**
- * How the page re-reads an order: a just-received order, an accepted order the kitchen is making and
- * a ready pickup quickly, any other open order at the normal pace, and not at all once the order is
+ * How the page re-reads an order: a just-received order, a paid pickup waiting for the Store, an
+ * accepted order the kitchen is making and a ready pickup quickly, any other open order at the normal pace, and not at all once the order is
  * settled or live updates are on.
  */
 export type OrderStatusPollMode =
-  "received" | "preparing" | "awaiting-collection" | "active" | "stopped";
+  "received" | "awaiting-acceptance" | "preparing" | "awaiting-collection" | "active" | "stopped";
 export interface OrderStatusPoll {
   readonly mode: OrderStatusPollMode;
   /** Checks that failed in a row since the last successful read. */
@@ -145,6 +154,24 @@ export function isInPreparation(view: OrderStatusView): boolean {
   return kitchen === "Unknown" && (phase === "Accepted" || phase === "In Progress");
 }
 
+/**
+ * WP-2423 (v15 2026-10-17): a paid pickup still waiting for the Store to accept it — a successful
+ * payment, no kitchen ticket yet (`sources.kitchen` is null until the Store accepts) and no
+ * not-accepted or Store-offline outcome. A pickup held while the Store is offline keeps the normal
+ * pace: that wait can be long and the page already says the Store is offline.
+ */
+export function isAwaitingAcceptance(view: OrderStatusView): boolean {
+  const sources = view.sources;
+  return (
+    view.order.orderType === "Pickup" &&
+    !isOrderSettled(view) &&
+    sources !== undefined &&
+    sources.kitchen === null &&
+    sources.storeAcceptance === undefined &&
+    (sources.payments ?? []).some((payment) => payment.status === "Succeeded")
+  );
+}
+
 /** The next polling state after the order status changed. */
 export function advanceOrderStatusPoll(
   previous: OrderStatusPoll,
@@ -162,7 +189,9 @@ export function advanceOrderStatusPoll(
               ? "awaiting-collection"
               : isInPreparation(state.view)
                 ? "preparing"
-                : "active",
+                : isAwaitingAcceptance(state.view)
+                  ? "awaiting-acceptance"
+                  : "active",
         errors: 0,
       };
     // A check in flight keeps the current pace.
@@ -187,13 +216,15 @@ export function nextOrderStatusPollDelayMs(poll: OrderStatusPoll): number | null
   const base =
     poll.mode === "received"
       ? orderReceivedPollIntervalMs
-      : poll.mode === "awaiting-collection"
-        ? orderAwaitingCollectionPollIntervalMs
-        : poll.mode === "preparing"
-          ? orderPreparingPollIntervalMs
-          : poll.mode === "active"
-            ? orderStatusPollIntervalMs
-            : null;
+      : poll.mode === "awaiting-acceptance"
+        ? orderAwaitingAcceptancePollIntervalMs
+        : poll.mode === "awaiting-collection"
+          ? orderAwaitingCollectionPollIntervalMs
+          : poll.mode === "preparing"
+            ? orderPreparingPollIntervalMs
+            : poll.mode === "active"
+              ? orderStatusPollIntervalMs
+              : null;
   if (base === null) return null;
   const cap =
     base < orderStatusPollIntervalMs ? orderStatusPollIntervalMs : orderStatusPollErrorCapMs;

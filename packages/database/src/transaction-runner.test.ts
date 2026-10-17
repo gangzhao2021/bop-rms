@@ -81,6 +81,46 @@ describe("WP-2212 pooled transaction runner", () => {
     expect(f.release).toHaveBeenCalledTimes(1);
     if (failure !== "release") expect(f.release).toHaveBeenCalledWith(true);
   });
+  it.each([
+    ["COMMIT", "Connection terminated unexpectedly", "08006"],
+    [
+      "SET LOCAL statement_timeout = '5s'; SET LOCAL lock_timeout = '2s'; " +
+        "SET LOCAL idle_in_transaction_session_timeout = '5s'",
+      "Client has encountered a connection error and is not queryable",
+      "08006",
+    ],
+    ["COMMIT", "private SQL/bind failure", null],
+  ])(
+    "WP-2423 (v15 2026-10-17): %s failing with %j keeps SQLSTATE %s for retry decisions",
+    async (failure, message, sqlState) => {
+      const f = fixture();
+      f.query.mockImplementation(async (sql: string) => {
+        if (sql === failure) throw new Error(message);
+        return { rows: [] };
+      });
+      const error = await f.runner.run(async () => undefined).catch((e: unknown) => e);
+      expect(error).toMatchObject({
+        code: "TENANT_DATABASE_TRANSACTION_FAILED",
+        diagnostic: { sqlState, constraint: null, table: null, closed: false },
+      });
+      expect(JSON.stringify(error)).not.toContain(message);
+    },
+  );
+  it("WP-2423: a swallowed query failure keeps that query's SQLSTATE", async () => {
+    const f = fixture();
+    f.query.mockImplementation(async (sql: string) => {
+      if (sql === "SELECT lost") throw new Error("Connection terminated unexpectedly");
+      return { rows: [] };
+    });
+    await expect(
+      f.runner.run(async (t) => {
+        await t.query("SELECT lost", []).catch(() => undefined);
+      }),
+    ).rejects.toMatchObject({
+      code: "TENANT_DATABASE_TRANSACTION_FAILED",
+      diagnostic: { sqlState: "08006" },
+    });
+  });
   it("does not commit a caught query failure", async () => {
     const f = fixture("SELECT secret");
     await expect(

@@ -13,7 +13,7 @@ export type CycleFailureCategory =
   | "DependencyUnavailable"
   | "Unclassified";
 const SAFE_CODE =
-  /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*_(?:UNAVAILABLE|INVALID|DENIED|CONFLICT|FAILED|TIMEOUT|EXPIRED|REQUIRED|CHANGED|UNCONFIGURED|NOT_FOUND|MISMATCH|EXHAUSTED)$/u;
+  /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*_(?:UNAVAILABLE|INVALID|DENIED|CONFLICT|FAILED|TIMEOUT|EXPIRED|REQUIRED|CHANGED|UNCONFIGURED|NOT_FOUND|MISMATCH|EXHAUSTED|FAILURE|UNKNOWN)$/u;
 const SQLSTATE = /^[0-9A-Z]{5}$/u;
 function failureCategory(error: unknown, causeSqlState: string | null): CycleFailureCategory {
   try {
@@ -52,7 +52,9 @@ function failureDetail(error: unknown): { code: string | null; sqlState: string 
       const value: object = current;
       const ownCode = Object.getOwnPropertyDescriptor(value, "code")?.value as unknown,
         message = Object.getOwnPropertyDescriptor(value, "message")?.value as unknown,
-        diagnostic = Object.getOwnPropertyDescriptor(value, "diagnostic")?.value as unknown;
+        diagnostic = (Object.getOwnPropertyDescriptor(value, "diagnostic")?.value ??
+          Object.getOwnPropertyDescriptor(value, Symbol.for("bop.database.failure"))
+            ?.value) as unknown;
       // A tenant transaction error keeps the driver SQLSTATE on its safe diagnostic.
       const diagnosticState =
         diagnostic !== null && typeof diagnostic === "object"
