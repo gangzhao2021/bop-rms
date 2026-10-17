@@ -18,6 +18,7 @@ import { createBrowserCustomerCartClient } from "../cart/cart-client.js";
 import { formatCartMoney } from "../cart/format-money.js";
 import { checkoutInProgressMessage, orderProcessingMessage } from "../cart/types.js";
 import { describeConfiguration } from "../cart/CartPage.js";
+import { checkoutItemRefusalMessage } from "./item-refusal-message.js";
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import { formatMinutesUntil, formatMoney, percentOfMinor } from "../journey/format.js";
 import { lineEstimateLabel, quoteIssueMessage } from "../journey/messages.js";
@@ -508,7 +509,16 @@ export function CheckoutPage({
       <section className="checkout-continue" aria-label="Payment">
         {continueRequested ? <p role="status">Saving your details…</p> : null}
         {sessionState.status === "pending" ? <p role="status">Preparing secure payment…</p> : null}
-        {"canRetry" in sessionState ? (
+        {sessionState.status === "item_short" || sessionState.status === "item_unavailable" ? (
+          <p role="alert">
+            {checkoutItemRefusalMessage(
+              sessionState.status,
+              sessionState.line,
+              cart?.cart.items ?? [],
+            )}{" "}
+            <Link to="/cart">Change your cart</Link>
+          </p>
+        ) : "canRetry" in sessionState ? (
           <p role="alert">
             {sessionState.status === "store_closed"
               ? "The store isn’t taking orders right now, so you haven’t been charged. Try again when the store reopens, or ask staff."

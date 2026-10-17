@@ -278,7 +278,14 @@ export function createGuestOrderSteps(options: {
         customerNote: input.customerNote ?? null,
       });
       if (result.status === "Applied")
-        return { status: "Applied" as const, cartVersion: result.view.cart.version };
+        return {
+          status: "Applied" as const,
+          cartVersion: result.view.cart.version,
+          lines: result.view.cart.items.map((item) => ({
+            cartItemReference: item.cartItemReference,
+            quantity: item.quantity,
+          })),
+        };
       // Not on the menu now, sold out, or an option the item does not take.
       if (result.status === "SelectionInvalid") return { status: "NotAvailable" as const };
       // A table guest is paying for this table's Cart right now (dine-in only).
@@ -355,6 +362,19 @@ export function createGuestOrderSteps(options: {
       } catch (error) {
         if (error instanceof CheckoutSessionServiceError && error.code === "STORE_CLOSED")
           return { status: "StoreNotTakingOrders" as const };
+        // WP-2423: which item the Store's stock can't make (and how many it can); nothing created.
+        if (error instanceof CheckoutSessionServiceError && error.code === "ITEM_SHORT")
+          return {
+            status: "ItemShort" as const,
+            cartItemReference: String(error.line?.cartItemReference ?? ""),
+            available: error.line?.available ?? 0,
+            sharedStock: error.line?.sharedStock ?? false,
+          };
+        if (error instanceof CheckoutSessionServiceError && error.code === "ITEM_UNAVAILABLE")
+          return {
+            status: "ItemUnavailable" as const,
+            cartItemReference: error.line === null ? null : String(error.line.cartItemReference),
+          };
         throw error;
       }
     },

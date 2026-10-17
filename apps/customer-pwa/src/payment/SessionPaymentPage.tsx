@@ -64,6 +64,8 @@ function PreparedSessionPaymentPage({
     | "denied"
     | "retry"
     | "closed"
+    /** WP-2423: items ran out after checkout; no order was placed and nothing was charged. */
+    | "items_short"
     | "unavailable"
   >("loading");
   // WP-2423 Q10: a failed check of the checkout is retried in place, never a dead end.
@@ -153,10 +155,12 @@ function PreparedSessionPaymentPage({
         setStatus(
           error instanceof SessionPaymentClientError && error.code === "store_closed"
             ? "closed"
-            : error instanceof SessionPaymentClientError &&
-                (error.code === "denied" || error.code === "conflict")
-              ? "denied"
-              : "unknown",
+            : error instanceof SessionPaymentClientError && error.code === "items_short"
+              ? "items_short"
+              : error instanceof SessionPaymentClientError &&
+                  (error.code === "denied" || error.code === "conflict")
+                ? "denied"
+                : "unknown",
         );
     } finally {
       flight.current = false;
@@ -249,9 +253,20 @@ function PreparedSessionPaymentPage({
           the store’s hours or ask staff.
         </p>
       ) : null}
+      {status === "items_short" ? (
+        <section className="checkout-attention" role="alert">
+          <h2>Some items just ran out</h2>
+          <p>
+            Part of your order sold out while we were getting it ready, so we didn’t place it and
+            you haven’t been charged. Go back to your cart to change your order.
+          </p>
+          <Link to="/cart">Back to your cart</Link>
+        </section>
+      ) : null}
       {status !== "denied" &&
       status !== "retry" &&
       status !== "closed" &&
+      status !== "items_short" &&
       status !== "unavailable" &&
       status !== "loading" ? (
         <section className="payment-page__amount" aria-label="Amount">

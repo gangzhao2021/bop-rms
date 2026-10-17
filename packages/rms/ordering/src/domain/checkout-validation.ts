@@ -77,18 +77,36 @@ export const checkoutValidationErrorCodes = [
   "CHECKOUT_STORE_CLOSED",
   "CHECKOUT_CAPACITY_UNAVAILABLE",
   "CHECKOUT_FULFILLMENT_UNAVAILABLE",
+  /** WP-2423: the Store's stock cannot make this Cart as it stands (see `line`). */
+  "CHECKOUT_STOCK_SHORT",
   "CHECKOUT_DEPENDENCY_UNAVAILABLE",
 ] as const;
 
 export type CheckoutValidationErrorCode = (typeof checkoutValidationErrorCodes)[number];
 
+/**
+ * WP-2423: the Cart line a checkout refusal is about, so the guest (or staff member) is told which
+ * item to change. `available`: for CHECKOUT_STOCK_SHORT, how many of that item (with its options,
+ * all its lines together) the Store's stock covers with the rest of the Cart unchanged (0: none);
+ * null for CHECKOUT_ITEM_UNAVAILABLE. `sharedStock`: the item alone could be made in the quantity
+ * ordered; it is short only because other items in the Cart use the same stock.
+ */
+export interface CheckoutLineRefusal {
+  readonly cartItemReference: OrderingReference;
+  readonly available: number | null;
+  readonly sharedStock: boolean;
+}
+
 export class CheckoutValidationError extends Error {
   readonly code: CheckoutValidationErrorCode;
+  /** For CHECKOUT_STOCK_SHORT (always) and CHECKOUT_ITEM_UNAVAILABLE (when known). */
+  readonly line: CheckoutLineRefusal | null;
 
-  constructor(code: CheckoutValidationErrorCode) {
+  constructor(code: CheckoutValidationErrorCode, line: CheckoutLineRefusal | null = null) {
     super("checkout is unavailable");
     this.name = "CheckoutValidationError";
     this.code = code;
+    this.line = line === null ? null : Object.freeze({ ...line });
   }
 }
 

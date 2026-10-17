@@ -110,3 +110,56 @@ it("WP-2423: tells another guest's checkout apart from a conflict and keeps the 
     retryAfterSeconds: null,
   });
 });
+it("WP-2423: reads which cart line is short and how many are left (nothing was created)", async () => {
+  const line = id(70);
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(
+      Response.json(
+        {
+          schemaVersion: 1,
+          error: {
+            code: "checkout_session_item_short",
+            line: { cartItemReference: line, available: 1, sharedStock: true },
+          },
+        },
+        { status: 409 },
+      ),
+    )
+    .mockResolvedValueOnce(
+      Response.json(
+        {
+          schemaVersion: 1,
+          error: { code: "checkout_session_item_unavailable", line: { cartItemReference: line } },
+        },
+        { status: 409 },
+      ),
+    )
+    .mockResolvedValueOnce(
+      Response.json(
+        {
+          schemaVersion: 1,
+          error: {
+            code: "checkout_session_item_short",
+            line: { cartItemReference: "not-a-line", available: -1 },
+          },
+        },
+        { status: 409 },
+      ),
+    );
+  vi.stubGlobal("fetch", fetch);
+  const client = createCheckoutSessionClient();
+  await expect(client.create(selected, id(4))).rejects.toMatchObject({
+    code: "item_short",
+    line: { cartItemReference: line, available: 1, sharedStock: true },
+  });
+  await expect(client.create(selected, id(4))).rejects.toMatchObject({
+    code: "item_unavailable",
+    line: { cartItemReference: line, available: null, sharedStock: false },
+  });
+  // A malformed line is never trusted; the guest is still told an item is short.
+  await expect(client.create(selected, id(4))).rejects.toMatchObject({
+    code: "item_short",
+    line: null,
+  });
+});

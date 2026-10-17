@@ -430,4 +430,99 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
     await expect(placed.send()).resolves.toMatchObject({ status: "Placed" });
     expect(placed.pipeline.abandonTable).not.toHaveBeenCalled();
   });
+
+  it("WP-2423: names a short item, takes the round back out of the table's cart and frees a table it opened", async () => {
+    const f = setup();
+    f.pipeline.openTable.mockResolvedValueOnce({
+      status: "Opened",
+      diningSessionReference: id(31),
+      joinCredential: "123456",
+      started: true,
+      generation: 1,
+    });
+    let lines: { cartItemReference: string; quantity: number }[] = [];
+    f.pipeline.addItem.mockImplementation((async (_c: unknown, input: { quantity: number }) => {
+      lines = [...lines, { cartItemReference: id(40 + lines.length), quantity: input.quantity }];
+      return { status: "Applied", cartVersion: 3 + lines.length, lines };
+    }) as never);
+    f.pipeline.startCheckout.mockResolvedValueOnce({
+      status: "ItemShort",
+      cartItemReference: id(41),
+      available: 1,
+      sharedStock: true,
+    } as never);
+    const removeItems = vi.fn(async () => "Removed" as const);
+    Object.assign(f.pipeline, { removeItems });
+    await expect(
+      f.send({
+        lines: [
+          { sellableReference: id(2), quantity: 2, optionSelections: [], note: null },
+          { sellableReference: id(3), quantity: 2, optionSelections: [], note: null },
+        ],
+      }),
+    ).rejects.toMatchObject({
+      code: "STAFF_ROUND_STOCK_SHORT",
+      lineIndex: 1,
+      available: 1,
+      sharedStock: true,
+    });
+    expect(removeItems).toHaveBeenCalledWith(guest, {
+      cartReference: id(6),
+      cartVersion: 5,
+      cartItemReferences: [id(40), id(41)],
+    });
+    expect(f.pipeline.preparePayment).not.toHaveBeenCalled();
+    expect(f.pipeline.abandonTable).toHaveBeenCalledTimes(1);
+    expect(f.onUnexpected).not.toHaveBeenCalled();
+  });
+
+  it("WP-2423: keeps the table's cart and session when the round's items could not be taken back", async () => {
+    const f = setup();
+    f.pipeline.openTable.mockResolvedValueOnce({
+      status: "Opened",
+      diningSessionReference: id(31),
+      joinCredential: "123456",
+      started: true,
+      generation: 1,
+    });
+    f.pipeline.addItem.mockResolvedValue({
+      status: "Applied",
+      cartVersion: 4,
+      lines: [{ cartItemReference: id(40), quantity: 2 }],
+    } as never);
+    f.pipeline.startCheckout.mockResolvedValueOnce({
+      status: "ItemShort",
+      cartItemReference: id(40),
+      available: 0,
+      sharedStock: false,
+    } as never);
+    Object.assign(f.pipeline, { removeItems: vi.fn(async () => "Kept" as const) });
+    await expect(f.send()).rejects.toMatchObject({
+      code: "STAFF_ROUND_ITEM_UNAVAILABLE",
+      lineIndex: 0,
+    });
+    expect(f.pipeline.abandonTable).not.toHaveBeenCalled();
+  });
+
+  it("WP-2423: stock gone at submission is 'can't be sold', the round's items taken back", async () => {
+    const f = setup();
+    f.pipeline.addItem.mockResolvedValue({
+      status: "Applied",
+      cartVersion: 4,
+      lines: [{ cartItemReference: id(40), quantity: 2 }],
+    } as never);
+    f.pipeline.preparePayment.mockRejectedValueOnce(
+      Object.assign(new Error("order creation is unavailable"), {
+        code: "ORDER_CREATE_STOCK_SHORT",
+      }),
+    );
+    const removeItems = vi.fn(async () => "Removed" as const);
+    Object.assign(f.pipeline, { removeItems });
+    await expect(f.send()).rejects.toMatchObject({
+      code: "STAFF_ROUND_ITEM_UNAVAILABLE",
+      lineIndex: null,
+    });
+    expect(removeItems).toHaveBeenCalledTimes(1);
+    expect(f.onUnexpected).not.toHaveBeenCalled();
+  });
 });

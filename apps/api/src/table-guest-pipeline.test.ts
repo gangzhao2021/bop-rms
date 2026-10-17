@@ -336,6 +336,39 @@ describe("staff table guest pipeline", () => {
     ).toEqual({ status: "CheckoutInProgress" });
   });
 
+  it("WP-2423: takes a refused round's items back out of the table cart, one version at a time", async () => {
+    const { options, pipeline } = setup();
+    expect(pipeline.removeItems).toBeUndefined();
+    const removeItem = vi.fn(async (input: { expectedCartVersion: number }) => ({
+      status: "Applied",
+      view: { cart: { version: input.expectedCartVersion + 1 } },
+    }));
+    const withRemoval = createStaffTableGuestPipeline({
+      ...options,
+      cart: { ...options.cart, removeItem },
+    } as never);
+    expect(
+      await withRemoval.removeItems?.(credentials, {
+        cartReference: id(43),
+        cartVersion: 11,
+        cartItemReferences: [id(50), id(51)],
+      }),
+    ).toBe("Removed");
+    expect(removeItem.mock.calls.map(([input]) => input)).toEqual([
+      expect.objectContaining({ cartItemReference: id(50), expectedCartVersion: 11 }),
+      expect.objectContaining({ cartItemReference: id(51), expectedCartVersion: 12 }),
+    ]);
+    // A guest changed the cart meanwhile: what is left stays as it is.
+    removeItem.mockResolvedValueOnce({ status: "VersionConflict" } as never);
+    expect(
+      await withRemoval.removeItems?.(credentials, {
+        cartReference: id(43),
+        cartVersion: 11,
+        cartItemReferences: [id(50)],
+      }),
+    ).toBe("Kept");
+  });
+
   it("prepares the round's payment without a Provider, after the opening rule", async () => {
     const { options, pipeline } = setup();
     await pipeline.preparePayment(credentials, {

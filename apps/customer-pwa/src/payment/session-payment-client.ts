@@ -24,6 +24,8 @@ export class SessionPaymentClientError extends Error {
       | "retry_pending"
       | "already_paid"
       | "window_ended"
+      /** WP-2423: items ran out after checkout; no order was placed and nothing was charged. */
+      | "items_short"
       | "unknown",
   ) {
     super("Payment unavailable.");
@@ -64,6 +66,7 @@ export function createSessionPaymentClient() {
     payment_retry_pending: "retry_pending",
     payment_already_paid: "already_paid",
     payment_window_ended: "window_ended",
+    payment_items_short: "items_short",
   } as const;
   async function post(session: string, suffix: string, body: object, key?: string) {
     if (!uuid.test(session)) throw new SessionPaymentClientError("invalid");

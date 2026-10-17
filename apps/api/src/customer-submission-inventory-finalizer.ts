@@ -9,6 +9,7 @@ import {
   createPostgresSubmissionFinalValidationStore,
   parseInventoryReference,
   parseSubmissionInventoryFinalValidation,
+  StockReservationStoreError,
   type InventoryItemTransaction,
   type InventoryReservationSet,
   type SubmissionExpiryCutoff,
@@ -22,6 +23,7 @@ import {
   parseAdditionalDiningBatchSnapshot,
   parseCheckoutValidationEvidence,
   parseConfiguredCheckoutValidationEvidence,
+  OrderCreationError,
   type OrderSubmissionInventoryFinalizer,
 } from "@rms/ordering";
 import {
@@ -420,7 +422,14 @@ function createBatchInventoryFinalizer<V extends 1 | 2>(
             operation,
           ),
         });
-      } catch {
+      } catch (error) {
+        // WP-2423: stock ran out after checkout; Ordering rolls the submission back and the
+        // guest is told plainly (nothing is charged: payment starts only after submission).
+        if (
+          error instanceof StockReservationStoreError &&
+          error.code === "STOCK_RESERVATION_INSUFFICIENT"
+        )
+          throw new OrderCreationError("ORDER_CREATE_STOCK_SHORT");
         return fail();
       }
     },

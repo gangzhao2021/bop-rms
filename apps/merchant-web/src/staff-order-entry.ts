@@ -36,6 +36,11 @@ export class CounterOrderClientError extends Error {
     readonly pendingItems: readonly { readonly name: string; readonly quantity: number }[] = [],
     /** ItemShort: how many of the item the store's stock covers now. */
     readonly available: number | null = null,
+    /**
+     * WP-2423 ItemShort/ItemUnavailable: the item could be made on its own; other items in the
+     * order use the same stock (two drinks using the same milk).
+     */
+    readonly sharedStock = false,
   ) {
     super("Counter order request failed");
     this.name = "CounterOrderClientError";
@@ -44,6 +49,29 @@ export class CounterOrderClientError extends Error {
 const invalid = (): never => {
   throw new CounterOrderClientError("Unavailable");
 };
+/**
+ * WP-2423: the counter's or table round's refusal about one item (too few in stock, or not
+ * sellable now); nothing was placed or charged. Null for any other reply.
+ */
+function itemRefusal(body: Record<string, unknown>): CounterOrderClientError | null {
+  const { lineIndex, available } = body;
+  const line =
+    typeof lineIndex === "number" && Number.isSafeInteger(lineIndex) && lineIndex >= 0
+      ? lineIndex
+      : null;
+  const sharedStock = body.sharedStock === true;
+  if (
+    body.error === "item_short" &&
+    line !== null &&
+    typeof available === "number" &&
+    Number.isSafeInteger(available) &&
+    available > 0
+  )
+    return new CounterOrderClientError("ItemShort", line, null, [], available, sharedStock);
+  if (body.error === "item_unavailable")
+    return new CounterOrderClientError("ItemUnavailable", line, null, [], null, sharedStock);
+  return null;
+}
 function record(value: unknown, keys: readonly string[], optional: readonly string[] = []) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return invalid();
   const own = Object.keys(value);
@@ -389,11 +417,9 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
       const body = await errorOf(response);
       const code = body.error;
       if (response.status === 403) throw new CounterOrderClientError("PermissionDenied");
-      if (code === "item_unavailable")
-        throw new CounterOrderClientError(
-          "ItemUnavailable",
-          typeof body.lineIndex === "number" ? body.lineIndex : null,
-        );
+      // WP-2423: an item is short (or can't be sold); nothing was sent or charged.
+      const refusal = itemRefusal(body);
+      if (refusal !== null) throw refusal;
       if (code === "table_cart_has_items")
         throw new CounterOrderClientError(
           "TableCartHasItems",
@@ -435,22 +461,10 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
       const body = await errorOf(response);
       const code = body.error;
       if (response.status === 403) throw new CounterOrderClientError("PermissionDenied");
-      if (code === "item_unavailable")
-        throw new CounterOrderClientError(
-          "ItemUnavailable",
-          typeof body.lineIndex === "number" ? body.lineIndex : null,
-        );
-      // v15 run: too few in stock for the quantity ordered; nothing was placed or charged.
-      const { lineIndex, available } = body;
-      if (
-        code === "item_short" &&
-        typeof lineIndex === "number" &&
-        Number.isSafeInteger(lineIndex) &&
-        typeof available === "number" &&
-        Number.isSafeInteger(available) &&
-        available > 0
-      )
-        throw new CounterOrderClientError("ItemShort", lineIndex, null, [], available);
+      // v15 run: too few in stock for the quantity ordered (or not sellable now); nothing was
+      // placed or charged.
+      const refusal = itemRefusal(body);
+      if (refusal !== null) throw refusal;
       if (code === "store_not_taking_pickup_orders")
         throw new CounterOrderClientError("StoreNotTakingOrders");
       if (code === "order_not_priced") throw new CounterOrderClientError("NotPriced");

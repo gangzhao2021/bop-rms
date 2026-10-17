@@ -100,6 +100,23 @@ it("WP-2423 Q4: reports a Store that stopped taking orders before payment starte
   });
 });
 
+it("WP-2423: tells items ran out after checkout apart from other refusals", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          { schemaVersion: 1, error: { code: "payment_items_short" } },
+          { status: 409 },
+        ),
+      ),
+  );
+  await expect(createSessionPaymentClient().create(id(1), id(4), "200")).rejects.toMatchObject({
+    code: "items_short",
+  });
+});
+
 it("WP-2423 Q20: asks for another card on the same payment without a tip or selection", async () => {
   const payment = {
     checkoutSessionReference: id(1),

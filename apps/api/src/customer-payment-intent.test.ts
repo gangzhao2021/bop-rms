@@ -243,6 +243,24 @@ it("WP-2423 Q4: says the Store stopped taking orders when payment would start af
   });
 });
 
+it.each([
+  new OrderCreationError("ORDER_CREATE_STOCK_SHORT"),
+  new CheckoutValidationError("CHECKOUT_STOCK_SHORT", {
+    cartItemReference: "018f5400-0000-7000-8000-000000000070" as never,
+    available: 0,
+    sharedStock: true,
+  }),
+])("WP-2423: says items ran out after checkout (nothing placed or charged): %s", async (error) => {
+  const f = await setup();
+  f.create.mockRejectedValue(error);
+  const response = await f.send();
+  expect(response.status).toBe(409);
+  expect(await response.json()).toEqual({
+    schemaVersion: 1,
+    error: { code: "payment_items_short", messageKey: "customer.payment.items_short" },
+  });
+});
+
 it("WP-2423 abandoned payment: returns to the open payment for {resume:true} only", async () => {
   const f = await setup();
   const response = await f.sendRetry({ resume: true });

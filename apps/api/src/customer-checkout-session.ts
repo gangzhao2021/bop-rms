@@ -24,6 +24,22 @@ function protect(response: Response) {
   response.setHeader("Cache-Control", "no-store");
   response.setHeader("Referrer-Policy", "no-referrer");
 }
+/**
+ * WP-2423: the guest's own Cart line a refusal is about (its reference from the guest's Cart view),
+ * how many of that item can still be made with the rest of the Cart, and whether it is short only
+ * because other items in the Cart use the same stock.
+ */
+function refusedLine(error: CheckoutSessionServiceError) {
+  const line = error.line;
+  if (line === null) return null;
+  return error.code === "ITEM_SHORT"
+    ? {
+        cartItemReference: String(line.cartItemReference),
+        available: line.available ?? 0,
+        sharedStock: line.sharedStock,
+      }
+    : { cartItemReference: String(line.cartItemReference) };
+}
 function reject(
   response: Response,
   status: number,
@@ -137,9 +153,29 @@ export class CustomerCheckoutSessionHandler {
                   DEPENDENCY_UNAVAILABLE: 503,
                   STORE_CLOSED: 409,
                   CHECKOUT_IN_PROGRESS: 409,
+                  ITEM_UNAVAILABLE: 409,
+                  ITEM_SHORT: 409,
                 } as const
               )[error.code]
             : 503;
+        // WP-2423: say which item is short (or can't be sold) and how many are left; nothing was
+        // created or charged, and the guest's Cart stays as it is.
+        if (
+          error instanceof CheckoutSessionServiceError &&
+          (error.code === "ITEM_SHORT" || error.code === "ITEM_UNAVAILABLE")
+        ) {
+          const code = error.code === "ITEM_SHORT" ? "item_short" : "item_unavailable";
+          const line = refusedLine(error);
+          response.status(409).json({
+            schemaVersion: 1,
+            error: {
+              code: "checkout_session_" + code,
+              messageKey: "customer.checkoutSession." + code,
+              ...(line === null ? {} : { line }),
+            },
+          });
+          return;
+        }
         if (error instanceof CheckoutSessionServiceError && error.code === "CHECKOUT_IN_PROGRESS") {
           response.setHeader(
             "Retry-After",
@@ -249,6 +285,8 @@ export class CustomerCheckoutSessionReadHandler {
                   DEPENDENCY_UNAVAILABLE: 503,
                   STORE_CLOSED: 409,
                   CHECKOUT_IN_PROGRESS: 409,
+                  ITEM_UNAVAILABLE: 409,
+                  ITEM_SHORT: 409,
                 } as const
               )[error.code]
             : 503,

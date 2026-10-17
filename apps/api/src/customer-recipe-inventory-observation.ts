@@ -165,3 +165,148 @@ export function createCustomerRecipeInventoryObservation(options: {
     },
   });
 }
+
+/** WP-2423: one Cart line for {@link createCustomerRecipeInventoryCoverage}. */
+export interface CustomerRecipeInventoryCoverageLine extends Omit<
+  CustomerRecipeInventoryObservationInput,
+  "observedAt"
+> {
+  readonly cartItemReference: string;
+}
+export interface CustomerRecipeInventoryCoverageInput {
+  readonly lines: readonly CustomerRecipeInventoryCoverageLine[];
+  readonly observedAt: string;
+}
+
+/**
+ * WP-2423: whether the Store's current stock covers several Cart lines together, each line's
+ * recipe demand planned as the reservation at submission plans it (per line, on the same running
+ * availability), so two items using the same ingredient are counted against one stock. Read-only;
+ * the caller authorizes the actual Cart and provides a dedicated read-only transaction.
+ */
+export function createCustomerRecipeInventoryCoverage(
+  options: Omit<Parameters<typeof createCustomerRecipeInventoryObservation>[0], "authorize"> & {
+    authorize(
+      transaction: InventoryItemTransaction,
+      input: CustomerRecipeInventoryCoverageInput,
+    ): Promise<boolean>;
+  },
+) {
+  const scope = Object.freeze({
+    tenantReference: String(parseCatalogReference(options.scope.tenantReference)),
+    brandReference: String(parseCatalogReference(options.scope.brandReference)),
+    storeReference: String(parseCatalogReference(options.scope.storeReference)),
+  });
+  const stockSiteReference = String(parseCatalogReference(options.scope.stockSiteReference));
+  return Object.freeze({
+    async covers(value: CustomerRecipeInventoryCoverageInput): Promise<boolean> {
+      try {
+        const raw = readClosedRecord(value, ["lines", "observedAt"]);
+        if (
+          !Array.isArray(raw.lines) ||
+          raw.lines.length > 100 ||
+          Reflect.ownKeys(raw.lines).length !== raw.lines.length + 1
+        )
+          throw new Error("invalid lines");
+        const lines: CustomerRecipeInventoryCoverageLine[] = [];
+        const seen = new Set<string>();
+        for (let i = 0; i < raw.lines.length; i++) {
+          const entry = Object.getOwnPropertyDescriptor(raw.lines, String(i));
+          if (!entry || !("value" in entry) || !entry.enumerable) throw new Error("invalid line");
+          const line = readClosedRecord(entry.value, [
+            "cartItemReference",
+            "sellableReference",
+            "productVersionReference",
+            "quantity",
+            "selections",
+          ]);
+          if (
+            !Number.isSafeInteger(line.quantity) ||
+            Number(line.quantity) < 1 ||
+            Number(line.quantity) > 999 ||
+            !Array.isArray(line.selections) ||
+            line.selections.length > 100
+          )
+            throw new Error("invalid line");
+          const cartItemReference = String(parseCatalogReference(line.cartItemReference));
+          if (seen.has(cartItemReference)) throw new Error("repeated line");
+          seen.add(cartItemReference);
+          lines.push(
+            Object.freeze({
+              cartItemReference,
+              sellableReference: String(parseCatalogReference(line.sellableReference)),
+              productVersionReference: String(parseCatalogReference(line.productVersionReference)),
+              quantity: Number(line.quantity),
+              selections: Object.freeze(
+                (line.selections as unknown[]).map((selection) =>
+                  parseRecipeOptionSelection(selection),
+                ),
+              ),
+            }),
+          );
+        }
+        const input = Object.freeze({
+          lines: Object.freeze(lines),
+          observedAt: String(parseCatalogInstant(raw.observedAt)),
+        });
+        if (input.lines.length === 0) return true;
+        return await options.transactions.run(async (tx) => {
+          if ((await options.authorize(tx, input)) !== true) throw new Error("unauthorized");
+          const joined = {
+            run: async <T>(work: (tx: InventoryItemTransaction) => Promise<T>) => work(tx),
+          };
+          const skus = createPostgresCurrentSkuStore(joined, {
+            brandReference: scope.brandReference,
+          });
+          const recipes = createPostgresSaleRecipeDemandSource(joined, scope.brandReference);
+          const contributions = [];
+          for (const line of input.lines) {
+            const sku = await skus.load({
+              sellableReference: line.sellableReference,
+              productVersionReference: line.productVersionReference,
+              observedAt: input.observedAt,
+            });
+            // Not sellable as this version now: nothing of it can be made.
+            if (sku === null || !sku.catalogEligible) return false;
+            const recipe = await recipes.resolve({
+              storeReference: scope.storeReference,
+              skuReference: line.sellableReference,
+              occurredAt: input.observedAt,
+              saleUnitCode: sku.unitOfSale,
+              unitQuantity: sku.unitQuantity,
+              saleQuantity: line.quantity,
+              selections: line.selections,
+            });
+            for (const item of recipe.requirements)
+              contributions.push({
+                itemReference: item.itemReference,
+                configurationOperationReference: item.itemVersionReference,
+                unitDimension: item.unitDimension,
+                quantityNumerator: item.quantityNumerator,
+                quantityDenominator: item.quantityDenominator,
+                cartItemReference: line.cartItemReference,
+              });
+          }
+          let covered = true;
+          if (contributions.length > 0)
+            try {
+              await createPostgresRecipeStockPlanSource(joined, scope, {
+                resolveExpiryCutoff: options.resolveExpiryCutoff,
+              }).resolve({ ...scope, stockSiteReference, contributions }, input.observedAt);
+            } catch (error) {
+              if (
+                !(error instanceof StockReservationStoreError) ||
+                error.code !== "STOCK_RESERVATION_INSUFFICIENT"
+              )
+                throw error;
+              covered = false;
+            }
+          if ((await options.authorize(tx, input)) !== true) throw new Error("authority withdrawn");
+          return covered;
+        });
+      } catch {
+        throw new CustomerRecipeInventoryObservationError();
+      }
+    },
+  });
+}

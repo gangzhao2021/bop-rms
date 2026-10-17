@@ -192,7 +192,8 @@ export function createStaffTableGuestPipeline(options: {
       observedAt: string;
     }): Promise<{ readonly sessionReference: string }>;
   };
-  cart: Pick<CustomerCartPort, "createCart" | "addItem">;
+  cart: Pick<CustomerCartPort, "createCart" | "addItem"> &
+    Partial<Pick<CustomerCartPort, "removeItem">>;
   quote: CustomerQuotePort;
   details: Pick<CustomerCheckoutDetailsPort, "save">;
   checkout: { create(value: unknown): Promise<unknown> };
@@ -336,6 +337,28 @@ export function createStaffTableGuestPipeline(options: {
         ),
       });
     },
+    ...(options.cart.removeItem === undefined
+      ? {}
+      : {
+          async removeItems(credentials, input) {
+            const remove = options.cart.removeItem as NonNullable<CustomerCartPort["removeItem"]>;
+            let version = input.cartVersion;
+            for (const cartItemReference of input.cartItemReferences) {
+              const result = await remove({
+                guestCredential: credentials.sessionCredential,
+                csrfCredential: credentials.csrfCredential,
+                operationReference: options.nextReference(),
+                requestedAt: options.now(),
+                cartReference: input.cartReference,
+                cartItemReference,
+                expectedCartVersion: version,
+              });
+              if (result.status !== "Applied") return "Kept" as const;
+              version = result.view.cart.version;
+            }
+            return "Removed" as const;
+          },
+        }),
     async preparePayment(credentials, input) {
       if (!(await options.takesOrder({ recordedAfterOutage: input.recordedAfterOutage })))
         throw Object.assign(new Error("store closed"), { code: "STORE_CLOSED" });

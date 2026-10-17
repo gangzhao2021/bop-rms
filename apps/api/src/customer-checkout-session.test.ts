@@ -194,6 +194,45 @@ it("WP-2423 Q4: says the Store is not taking orders instead of a generic conflic
     },
   });
 });
+it("WP-2423: names the short cart line and how many are left (409, nothing created)", async () => {
+  const f = await setup();
+  const line = "018f5400-0000-7000-8000-000000000070";
+  f.create.mockRejectedValue(
+    new CheckoutSessionServiceError("ITEM_SHORT", null, {
+      cartItemReference: line as never,
+      available: 1,
+      sharedStock: true,
+    }),
+  );
+  const response = await f.send();
+  expect(response.status).toBe(409);
+  expect(response.headers.get("retry-after")).toBe(null);
+  expect(await response.json()).toEqual({
+    schemaVersion: 1,
+    error: {
+      code: "checkout_session_item_short",
+      messageKey: "customer.checkoutSession.item_short",
+      line: { cartItemReference: line, available: 1, sharedStock: true },
+    },
+  });
+  f.create.mockRejectedValue(
+    new CheckoutSessionServiceError("ITEM_UNAVAILABLE", null, {
+      cartItemReference: line as never,
+      available: null,
+      sharedStock: false,
+    }),
+  );
+  const unavailable = await f.send();
+  expect(unavailable.status).toBe(409);
+  expect(await unavailable.json()).toEqual({
+    schemaVersion: 1,
+    error: {
+      code: "checkout_session_item_unavailable",
+      messageKey: "customer.checkoutSession.item_unavailable",
+      line: { cartItemReference: line },
+    },
+  });
+});
 it("DEC-DINING-ANY-PARTICIPANT-SUBMIT: says another guest is checking out, with the wait", async () => {
   const f = await setup();
   f.create.mockRejectedValue(

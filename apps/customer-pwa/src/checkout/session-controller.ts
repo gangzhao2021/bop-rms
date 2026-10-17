@@ -2,6 +2,7 @@ import { v7 as uuidv7 } from "uuid";
 import { captureCustomerCsrfContext } from "../session/customer-transaction-context.js";
 import {
   CheckoutSessionClientError,
+  type CheckoutRefusedLine,
   type CheckoutSessionSelection,
   type CheckoutSessionView,
 } from "./session-client.js";
@@ -18,6 +19,16 @@ export type CheckoutSessionState =
       readonly status: "checkout_in_progress";
       readonly canRetry: boolean;
       readonly retryAfterSeconds: number | null;
+    }
+  | {
+      /**
+       * WP-2423: the store can't make the cart as it stands (too few left, or an item can't be
+       * sold now); nothing was created or charged. The guest changes the cart, then checks out
+       * again (a changed cart is a new checkout).
+       */
+      readonly status: "item_short" | "item_unavailable";
+      readonly canRetry: false;
+      readonly line: CheckoutRefusedLine | null;
     };
 export function createCheckoutSessionController(
   client: {
@@ -70,11 +81,23 @@ export function createCheckoutSessionController(
           });
           return;
         }
+        if (
+          attempt.current() &&
+          online &&
+          error instanceof CheckoutSessionClientError &&
+          (error.code === "item_short" || error.code === "item_unavailable")
+        ) {
+          publish({ status: error.code, canRetry: false, line: error.line });
+          return;
+        }
         const code = !attempt.current()
           ? "denied"
           : !online
             ? "offline"
-            : error instanceof CheckoutSessionClientError && error.code !== "checkout_in_progress"
+            : error instanceof CheckoutSessionClientError &&
+                error.code !== "checkout_in_progress" &&
+                error.code !== "item_short" &&
+                error.code !== "item_unavailable"
               ? error.code
               : "unknown";
         publish({

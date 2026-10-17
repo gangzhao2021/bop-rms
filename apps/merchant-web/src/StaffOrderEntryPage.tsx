@@ -109,9 +109,12 @@ export function placeErrorText(
       }`;
     case "ItemUnavailable": {
       const line = error.lineIndex === null ? undefined : lines[error.lineIndex];
+      // WP-2423: each item could be made on its own, but not together (they share an ingredient).
+      if (line && error.sharedStock)
+        return `There isn't enough left to make ${line.item.name} with the rest of this order (other items use the same ingredients). Remove ${line.item.name} or change the other items, then send again. Nothing was sent or charged.`;
       return line
-        ? `${line.item.name} can't be sold right now (sold out or off the menu). Remove it and send again.`
-        : "An item can't be sold right now. Check the order and send again.";
+        ? `${line.item.name} can't be sold right now (sold out or off the menu). Remove it and send again. Nothing was sent or charged.`
+        : "An item can't be sold right now (it may have just sold out). Check the order and send again. Nothing was sent or charged.";
     }
     case "ItemShort": {
       // v15 run: name the short item and how many are left; the order stays as entered.
@@ -119,6 +122,9 @@ export function placeErrorText(
       const left = error.available ?? 0;
       if (line === undefined)
         return `An item has only ${left} left. Remove it and add ${left} back, then send again. Nothing was sent or charged.`;
+      // WP-2423: short only because other items in the order use the same ingredients.
+      if (error.sharedStock)
+        return `Only ${left} ${line.item.name} can be made with the rest of this order (other items use the same ingredients). Lower ${line.item.name} to ${left} or change the other items, then send again. Nothing was sent or charged.`;
       const options = (entry: Line) =>
         JSON.stringify(
           entry.options.map((option) => [option.optionReference, option.quantity]).sort(),

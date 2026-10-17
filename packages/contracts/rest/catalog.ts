@@ -197,8 +197,21 @@ const CheckoutSessionErrorBody = z
           "checkout_session_not_found",
           "checkout_session_intent_conflict",
           "checkout_session_service_unavailable",
+          // WP-2423: 409, the Store's stock can't make the Cart as it stands (nothing created).
+          "checkout_session_item_short",
+          "checkout_session_item_unavailable",
         ]),
         messageKey: z.string().regex(/^customer\.checkoutSession\.[a-z_]+$/u),
+        // WP-2423: the guest's own Cart line the refusal is about; `available` (item_short only)
+        // is how many of that item can still be made with the rest of the Cart.
+        line: z
+          .object({
+            cartItemReference: QuoteReference,
+            available: z.number().int().min(0).optional(),
+            sharedStock: z.boolean().optional(),
+          })
+          .strict()
+          .optional(),
       })
       .strict(),
   })
@@ -236,6 +249,8 @@ const CustomerPaymentError = z
           "payment_intent_conflict",
           "payment_not_ready",
           "payment_service_unavailable",
+          // WP-2423: 409, items ran out after checkout; no order was placed, nothing charged.
+          "payment_items_short",
         ]),
         messageKey: z.string().regex(/^customer\.payment\.[a-z_]+$/u),
       })

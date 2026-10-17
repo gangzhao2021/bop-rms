@@ -2908,13 +2908,32 @@ it("WP-2423 Q7: protects counter order and card-machine transport and maps refus
   counterOrder.mockRejectedValueOnce(new CounterOrderError("COUNTER_ORDER_ITEM_UNAVAILABLE", 1));
   const soldOut = await submit("/counter/orders");
   expect(soldOut.status).toBe(409);
-  expect(await soldOut.json()).toEqual({ error: "item_unavailable", lineIndex: 1 });
+  expect(await soldOut.json()).toEqual({
+    error: "item_unavailable",
+    lineIndex: 1,
+    sharedStock: false,
+  });
   // v15 run: too few in stock is a specific answer naming the line and how many are left.
   counterOrder.mockRejectedValueOnce(new CounterOrderError("COUNTER_ORDER_STOCK_SHORT", 0, 1));
   const short = await submit("/counter/orders");
   expect(short.status).toBe(409);
   expect(short.headers.get("cache-control")).toBe("no-store");
-  expect(await short.json()).toEqual({ error: "item_short", lineIndex: 0, available: 1 });
+  expect(await short.json()).toEqual({
+    error: "item_short",
+    lineIndex: 0,
+    available: 1,
+    sharedStock: false,
+  });
+  // WP-2423: short only because another item in the order uses the same stock.
+  counterOrder.mockRejectedValueOnce(
+    new CounterOrderError("COUNTER_ORDER_STOCK_SHORT", 1, 2, true),
+  );
+  expect(await (await submit("/counter/orders")).json()).toEqual({
+    error: "item_short",
+    lineIndex: 1,
+    available: 2,
+    sharedStock: true,
+  });
 
   const paidResponse = await submit("/orders/card-machine-payment");
   expect(paidResponse.status).toBe(200);
@@ -3149,7 +3168,26 @@ it("WP-2423 Q7 slice 2: protects the staff table round transport and maps refusa
   staffDiningRound.mockRejectedValueOnce(
     new StaffDiningRoundError("STAFF_ROUND_ITEM_UNAVAILABLE", 1),
   );
-  expect(await (await submit()).json()).toEqual({ error: "item_unavailable", lineIndex: 1 });
+  expect(await (await submit()).json()).toEqual({
+    error: "item_unavailable",
+    lineIndex: 1,
+    sharedStock: false,
+  });
+  // WP-2423: the round's short item, how many are left and whether it shares stock.
+  staffDiningRound.mockRejectedValueOnce(
+    new StaffDiningRoundError("STAFF_ROUND_STOCK_SHORT", 0, [], {
+      available: 1,
+      sharedStock: true,
+    }),
+  );
+  const short = await submit();
+  expect(short.status).toBe(409);
+  expect(await short.json()).toEqual({
+    error: "item_short",
+    lineIndex: 0,
+    available: 1,
+    sharedStock: true,
+  });
   staffDiningRound.mockRejectedValueOnce(
     new StaffDiningRoundError("STAFF_ROUND_TABLE_CART_HAS_ITEMS", null, [
       { name: "Iced Latte", quantity: 1 },

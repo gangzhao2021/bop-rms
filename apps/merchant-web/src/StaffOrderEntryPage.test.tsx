@@ -165,6 +165,60 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
     );
   });
 
+  it("WP-2423: explains an item short only because other items use the same ingredients", () => {
+    const menu = parseCounterMenu(counterMenuResponse()).sections[0]?.items[0];
+    if (!menu) throw new Error("fixture");
+    const lines = [
+      { key: "a", item: menu, quantity: 2, options: [] },
+      { key: "b", item: { ...menu, name: "Mocha" }, quantity: 2, options: [] },
+    ];
+    const short = placeErrorText(
+      new CounterOrderClientError("ItemShort", 1, null, [], 1, true),
+      lines,
+    );
+    expect(short).toBe(
+      "Only 1 Mocha can be made with the rest of this order (other items use the same ingredients). Lower Mocha to 1 or change the other items, then send again. Nothing was sent or charged.",
+    );
+    const none = placeErrorText(
+      new CounterOrderClientError("ItemUnavailable", 1, null, [], null, true),
+      lines,
+    );
+    expect(none).toBe(
+      "There isn't enough left to make Mocha with the rest of this order (other items use the same ingredients). Remove Mocha or change the other items, then send again. Nothing was sent or charged.",
+    );
+    for (const text of [short, none]) expect(text).not.toMatch(/item_short|409|[0-9a-f]{8}-/u);
+  });
+
+  it("WP-2423: a table round's short item is read like the counter's", async () => {
+    const responses: [number, unknown][] = [
+      [409, { error: "item_short", lineIndex: 1, available: 2, sharedStock: true }],
+      [409, { error: "item_unavailable", lineIndex: 0, sharedStock: false }],
+    ];
+    const fetcher = vi.fn(async () => {
+      const [status, body] = responses.shift() ?? [500, {}];
+      return new Response(JSON.stringify(body), { status });
+    });
+    const client = createCounterOrderClient("a".repeat(43), fetcher as unknown as typeof fetch);
+    const round = {
+      operationReference: id(30),
+      tableReference: id(31),
+      lines: [],
+      tip: { kind: "None" } as const,
+      recordedAfterOutage: false,
+    };
+    await expect(client.placeTableRound(round)).rejects.toMatchObject({
+      code: "ItemShort",
+      lineIndex: 1,
+      available: 2,
+      sharedStock: true,
+    });
+    await expect(client.placeTableRound(round)).rejects.toMatchObject({
+      code: "ItemUnavailable",
+      lineIndex: 0,
+      sharedStock: false,
+    });
+  });
+
   it("accepts a paper order's paid time only within the last three days", () => {
     const now = Date.parse("2026-10-13T18:00:00");
     expect(paidAtInstant("2026-10-13T14:05", now)).toBe(new Date("2026-10-13T14:05").toISOString());

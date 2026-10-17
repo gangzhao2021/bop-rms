@@ -139,7 +139,8 @@
                   "payment_not_found",
                   "payment_intent_conflict",
                   "payment_not_ready",
-                  "payment_service_unavailable"
+                  "payment_service_unavailable",
+                  "payment_items_short"
                 ]
               },
               "messageKey": {
@@ -245,12 +246,34 @@
                   "checkout_session_request_invalid",
                   "checkout_session_not_found",
                   "checkout_session_intent_conflict",
-                  "checkout_session_service_unavailable"
+                  "checkout_session_service_unavailable",
+                  "checkout_session_item_short",
+                  "checkout_session_item_unavailable"
                 ]
               },
               "messageKey": {
                 "type": "string",
                 "pattern": "^customer\\.checkoutSession\\.[a-z_]+$/u"
+              },
+              "line": {
+                "type": "object",
+                "properties": {
+                  "cartItemReference": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+                  },
+                  "available": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "sharedStock": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "cartItemReference"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [

@@ -1,6 +1,8 @@
 import { beforeEach, expect, it, vi } from "vitest";
+import { OrderCreationError } from "@rms/ordering";
 import {
   parseInventoryReservationSet,
+  StockReservationStoreError,
   type InventoryItemTransaction,
   type StockReservationSetWrite,
 } from "@rms/inventory";
@@ -210,6 +212,16 @@ it("propagates reservation failure and never persists a final result", async () 
   await expect(
     createCustomerSubmissionInventoryFinalizer(f.options).finalize(f.input),
   ).rejects.toMatchObject({ code: "CUSTOMER_INVENTORY_SOURCE_UNAVAILABLE" });
+  expect(mocks.commit).not.toHaveBeenCalled();
+});
+it("WP-2423: reports stock that ran out after checkout as Ordering's stock refusal, writing nothing", async () => {
+  const f = fixture();
+  mocks.reserve.mockRejectedValue(new StockReservationStoreError("STOCK_RESERVATION_INSUFFICIENT"));
+  const error = await createCustomerSubmissionInventoryFinalizer(f.options)
+    .finalize(f.input)
+    .catch((caught: unknown) => caught);
+  expect(error).toBeInstanceOf(OrderCreationError);
+  expect(error).toMatchObject({ code: "ORDER_CREATE_STOCK_SHORT" });
   expect(mocks.commit).not.toHaveBeenCalled();
 });
 it("propagates final persistence failure to the outer transaction", async () => {

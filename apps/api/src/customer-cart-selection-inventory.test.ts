@@ -1,7 +1,15 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import type { CurrentCatalogSelectionSnapshot } from "@rms/catalog";
-import { createCustomerCartSelectionInventory } from "./customer-cart-selection-inventory.js";
-const f = vi.hoisted(() => ({ resolve: vi.fn(), observe: vi.fn(), authorizers: [] as unknown[] }));
+import {
+  createCustomerCartSelectionInventory,
+  createCustomerCartStockCoverage,
+} from "./customer-cart-selection-inventory.js";
+const f = vi.hoisted(() => ({
+  resolve: vi.fn(),
+  observe: vi.fn(),
+  covers: vi.fn(),
+  authorizers: [] as unknown[],
+}));
 vi.mock("@rms/catalog", async (original) => ({
   ...(await original<typeof import("@rms/catalog")>()),
   createPostgresCurrentSelectionFactsStore: () => ({ load: vi.fn() }),
@@ -13,6 +21,10 @@ vi.mock("./customer-recipe-inventory-observation.js", () => ({
   createCustomerRecipeInventoryObservation: (options: { authorize: unknown }) => {
     f.authorizers.push(options.authorize);
     return { observe: f.observe };
+  },
+  createCustomerRecipeInventoryCoverage: (options: { authorize: unknown }) => {
+    f.authorizers.push(options.authorize);
+    return { covers: f.covers };
   },
 }));
 const id = (n: number) => ("01902408-0000-7000-8000-" + n.toString(16).padStart(12, "0")) as never;
@@ -159,4 +171,63 @@ it("keeps overlapping requests attached to their own snapshot and Cart context",
   for (const fn of f.authorizers as ((tx: unknown, input: unknown) => Promise<boolean>)[])
     await fn({}, {});
   expect(authorize.mock.calls.map((call) => (call as unknown[])[2])).toEqual([other, context]);
+});
+
+it("WP-2423: asks Inventory about the Cart's lines together, with each item's current product and bindings", async () => {
+  const authorize = vi.fn(async () => true);
+  const runner = { run: vi.fn() };
+  const coverage = createCustomerCartStockCoverage(
+    runner,
+    scope,
+    { clock: { now: () => at }, killSwitch: {} as never, inventory: {} as never },
+    {
+      scope: {
+        tenantReference: id(12),
+        brandReference: id(1),
+        storeReference: id(2),
+        stockSiteReference: id(13),
+      },
+      transactions: runner,
+      authorize,
+      resolveExpiryCutoff: vi.fn(),
+    },
+  );
+  f.covers.mockResolvedValue(false);
+  const lines = [
+    {
+      cartItemReference: id(20),
+      sellableReference: id(4),
+      quantity: 2,
+      optionSelections: [{ optionReference: id(5), quantity: 1 }],
+    },
+    { cartItemReference: id(21), sellableReference: id(4), quantity: 1, optionSelections: [] },
+  ];
+  expect(await coverage.covers({ lines, observedAt: at })).toBe(false);
+  expect(f.covers).toHaveBeenCalledWith({
+    observedAt: at,
+    lines: [
+      {
+        cartItemReference: id(20),
+        sellableReference: id(4),
+        productVersionReference: id(7),
+        quantity: 2,
+        selections: [{ bindingReference: id(8), optionReference: id(5), quantity: 1 }],
+      },
+      {
+        cartItemReference: id(21),
+        sellableReference: id(4),
+        productVersionReference: id(7),
+        quantity: 1,
+        selections: [],
+      },
+    ],
+  });
+  // One Catalog snapshot per item for the whole checkout's questions.
+  expect(await coverage.covers({ lines, observedAt: at })).toBe(false);
+  expect(f.resolve).toHaveBeenCalledTimes(1);
+  // An item the Catalog no longer offers (sold out for even one) is not covered.
+  f.resolve.mockResolvedValueOnce(null);
+  const other = { ...lines[1], sellableReference: id(30) };
+  expect(await coverage.covers({ lines: [other] as never, observedAt: at })).toBe(false);
+  expect(f.covers).toHaveBeenCalledTimes(2);
 });

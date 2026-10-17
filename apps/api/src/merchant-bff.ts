@@ -11113,9 +11113,14 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           .set("Cache-Control", NO_STORE)
           .json(
             error.code === "COUNTER_ORDER_ITEM_UNAVAILABLE"
-              ? { error: code, lineIndex: error.lineIndex }
+              ? { error: code, lineIndex: error.lineIndex, sharedStock: error.sharedStock }
               : error.code === "COUNTER_ORDER_STOCK_SHORT"
-                ? { error: code, lineIndex: error.lineIndex, available: error.available }
+                ? {
+                    error: code,
+                    lineIndex: error.lineIndex,
+                    available: error.available,
+                    sharedStock: error.sharedStock,
+                  }
                 : { error: code },
           );
       });
@@ -11162,6 +11167,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             STAFF_ROUND_TABLE_CART_HAS_ITEMS: [409, "table_cart_has_items"],
             STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS: [409, "table_checkout_in_progress"],
             STAFF_ROUND_ITEM_UNAVAILABLE: [409, "item_unavailable"],
+            STAFF_ROUND_STOCK_SHORT: [409, "item_short"],
             STAFF_ROUND_NOT_PRICED: [409, "order_not_priced"],
             STAFF_ROUND_NOT_FINISHED: [409, "staff_round_not_finished"],
             STAFF_ROUND_IN_PROGRESS: [409, "staff_round_in_progress"],
@@ -11174,10 +11180,17 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           .set("Cache-Control", NO_STORE)
           .json(
             error.code === "STAFF_ROUND_ITEM_UNAVAILABLE"
-              ? { error: code, lineIndex: error.lineIndex }
-              : error.code === "STAFF_ROUND_TABLE_CART_HAS_ITEMS"
-                ? { error: code, items: error.pendingItems.slice(0, 30) }
-                : { error: code },
+              ? { error: code, lineIndex: error.lineIndex, sharedStock: error.sharedStock }
+              : error.code === "STAFF_ROUND_STOCK_SHORT"
+                ? {
+                    error: code,
+                    lineIndex: error.lineIndex,
+                    available: error.available,
+                    sharedStock: error.sharedStock,
+                  }
+                : error.code === "STAFF_ROUND_TABLE_CART_HAS_ITEMS"
+                  ? { error: code, items: error.pendingItems.slice(0, 30) }
+                  : { error: code },
           );
       });
   });

@@ -669,3 +669,93 @@ test("@production a table without a QR code can't take a staff order; staff are 
   await expectNoInternalText(page);
   expect(rounds).toHaveLength(0);
 });
+
+// WP-2423 (2026-10-17): a table round the store's stock can't make as entered — two Gyoza where the
+// filling left makes one with the Ramen also using it — names the item and how many are left, keeps
+// the round as entered and sends or charges nothing; staff lower it and send again.
+test("@production a table round short on stock names the item and how many are left, nothing charged", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.route("**/merchant/counter/menu**", (route) => route.fulfill({ headers, json: menu }));
+  const sent: { sellableReference: string; quantity: number }[][] = [];
+  await page.route("**/merchant/dining/staff-rounds", (route) => {
+    const body = route.request().postDataJSON() as {
+      lines: { sellableReference: string; quantity: number }[];
+    };
+    sent.push(body.lines);
+    if (sent.length === 1)
+      return route.fulfill({
+        status: 409,
+        headers,
+        json: { error: "item_short", lineIndex: 1, available: 1, sharedStock: true },
+      });
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Placed",
+        orderReference: id(20),
+        orderBatchReference: id(21),
+        orderNumber: "8",
+        orderVersion: 4,
+        tableLabel: "T4",
+        orderMinor: "2599",
+        tipMinor: "0",
+        totalMinor: "2599",
+        payBy: new Date(Date.now() + 30 * 60_000).toISOString(),
+        recordedAfterOutage: false,
+      },
+    });
+  });
+  const payments: unknown[] = [];
+  await page.route("**/merchant/orders/card-machine-payment", (route) => {
+    payments.push(route.request().postDataJSON());
+    return route.abort();
+  });
+
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T4", exact: true }).click();
+  await page.getByRole("link", { name: "Take order for table T4" }).click();
+  await page.getByRole("button", { name: "Add Shoyu Ramen" }).click();
+  await page.getByRole("button", { name: "Add to order" }).click();
+  await page.getByRole("button", { name: "Add Gyoza" }).click();
+  await page.getByRole("spinbutton", { name: "Quantity" }).fill("2");
+  await page.getByRole("button", { name: "Add to order" }).click();
+  await page.getByRole("button", { name: "Send order" }).click();
+  const alert = page.getByRole("alert");
+  await expect(alert).toHaveText(
+    "Only 1 Gyoza can be made with the rest of this order (other items use the same ingredients). Lower Gyoza to 1 or change the other items, then send again. Nothing was sent or charged.",
+  );
+  // The round stays as entered; nothing was charged and no payment can be recorded for it.
+  const ticket = page.getByRole("list", { name: "Items in this order" });
+  await expect(ticket.getByRole("listitem")).toHaveCount(2);
+  await expect(ticket).toContainText("2 × Gyoza");
+  await expect(page.getByRole("button", { name: /Paid on card machine/u })).toHaveCount(0);
+  await expect(page.getByText(/item_short|staff_round|409|503/u)).toHaveCount(0);
+  await expectNoInternalText(page);
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await expect(alert).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/staff-round-item-short-${width}.png`,
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  // Staff lower Gyoza to 1 and send again: the round goes through.
+  await page.getByRole("button", { name: "Remove Gyoza" }).click();
+  await page.getByRole("button", { name: "Add Gyoza" }).click();
+  await page.getByRole("button", { name: "Add to order" }).click();
+  await page.getByRole("button", { name: "Send order" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Charge $25.99 on the card machine" }),
+  ).toBeVisible();
+  expect(sent.map((lines) => lines.map((line) => line.quantity))).toEqual([
+    [1, 2],
+    [1, 1],
+  ]);
+  expect(payments).toEqual([]);
+});

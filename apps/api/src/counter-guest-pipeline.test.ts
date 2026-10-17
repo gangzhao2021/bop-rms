@@ -52,7 +52,14 @@ function pipeline(overrides: Record<string, unknown> = {}) {
       })),
       addItem: vi.fn(async () => ({
         status: "Applied",
-        view: { cart: { cartReference: id(6), version: 2, orderType: "Pickup" } },
+        view: {
+          cart: {
+            cartReference: id(6),
+            version: 2,
+            orderType: "Pickup",
+            items: [{ cartItemReference: id(40), quantity: 2 }],
+          },
+        },
       })),
     },
     quote: {
@@ -140,7 +147,12 @@ describe("counter guest pipeline — WP-2423 Q7", () => {
       optionSelections: [],
       requestedAt: "2026-10-13T18:00:00.000Z",
     };
-    expect(await p.addItem(guest, line)).toEqual({ status: "Applied", cartVersion: 2 });
+    expect(await p.addItem(guest, line)).toEqual({
+      status: "Applied",
+      cartVersion: 2,
+      // WP-2423: the Cart's lines, to name a line the checkout later finds short.
+      lines: [{ cartItemReference: id(40), quantity: 2 }],
+    });
     options.cart.addItem.mockResolvedValueOnce({
       status: "SelectionInvalid",
       issueCodes: ["CATALOG_SELECTION_REJECTED"],
@@ -221,6 +233,33 @@ describe("counter guest pipeline — WP-2423 Q7", () => {
         quoteReference: id(7),
       }),
     ).toEqual({ status: "StoreNotTakingOrders" });
+    // WP-2423: the checkout's answer that the stock can't make the Cart names the line.
+    const checkout = {
+      createOperationReference: id(13),
+      cartReference: id(6),
+      cartVersion: 2,
+      quoteReference: id(7),
+    };
+    options.checkout.create.mockRejectedValueOnce(
+      new CheckoutSessionServiceError("ITEM_SHORT", null, {
+        cartItemReference: id(40) as never,
+        available: 2,
+        sharedStock: true,
+      }),
+    );
+    expect(await p.startCheckout(guest, checkout)).toEqual({
+      status: "ItemShort",
+      cartItemReference: id(40),
+      available: 2,
+      sharedStock: true,
+    });
+    options.checkout.create.mockRejectedValueOnce(
+      new CheckoutSessionServiceError("ITEM_UNAVAILABLE", null, null),
+    );
+    expect(await p.startCheckout(guest, checkout)).toEqual({
+      status: "ItemUnavailable",
+      cartItemReference: null,
+    });
     options.takesOrder.mockResolvedValueOnce(false);
     await expect(
       p.preparePayment(guest, {

@@ -94,6 +94,9 @@ function failure(error: unknown): Failure {
       STORE_CLOSED: "order_store_closed",
       // Not raised by submission (only by checkout preparation); a changed Cart if it ever is.
       CHECKOUT_IN_PROGRESS: "order_version_conflict",
+      // Not raised by submission (only by checkout preparation); a changed Cart if it ever is.
+      ITEM_UNAVAILABLE: "order_requote_required",
+      ITEM_SHORT: "order_requote_required",
     } as const;
     return codes[error.code];
   }
@@ -121,6 +124,8 @@ function failure(error: unknown): Failure {
     ORDER_CREATE_VALIDATION_EXPIRED: "order_requote_required",
     CHECKOUT_REQUOTE_REQUIRED: "order_requote_required",
     CHECKOUT_ITEM_UNAVAILABLE: "order_requote_required",
+    CHECKOUT_STOCK_SHORT: "order_requote_required",
+    ORDER_CREATE_STOCK_SHORT: "order_requote_required",
     CHECKOUT_QUOTE_EXPIRED: "order_requote_required",
     CHECKOUT_QUOTE_MISSING: "order_requote_required",
     CHECKOUT_SELECTION_INVALID: "order_requote_required",

@@ -33,6 +33,11 @@ export const orderCreationErrorCodes = [
   "ORDER_CREATE_PERMISSION_DENIED",
   "ORDER_CREATE_IDEMPOTENCY_CONFLICT",
   "ORDER_CREATE_VALIDATION_EXPIRED",
+  /**
+   * WP-2423: the Store's stock could not be reserved for the Order's lines at submission (it ran
+   * out after checkout). Nothing was written; no payment was started.
+   */
+  "ORDER_CREATE_STOCK_SHORT",
   "ORDER_CREATE_DEPENDENCY_UNAVAILABLE",
 ] as const;
 

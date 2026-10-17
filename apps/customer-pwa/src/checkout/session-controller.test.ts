@@ -86,3 +86,14 @@ it("WP-2423: waits out another guest's checkout and retries with a new operation
     [selected, id(7)],
   ]);
 });
+it("WP-2423: keeps a short item's answer (no retry of the same cart; the guest changes it)", async () => {
+  const line = { cartItemReference: id(70), available: 1, sharedStock: false };
+  const create = vi
+    .fn()
+    .mockRejectedValueOnce(new CheckoutSessionClientError("item_short", null, line));
+  const c = createCheckoutSessionController({ create }, () => id(5));
+  await c.start(selected);
+  expect(c.getState()).toEqual({ status: "item_short", canRetry: false, line });
+  await c.retry();
+  expect(create).toHaveBeenCalledTimes(1);
+});

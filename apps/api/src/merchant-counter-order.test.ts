@@ -287,6 +287,65 @@ describe("counter order command — WP-2423 Q7", () => {
       });
     });
 
+    it("WP-2423: names a drink short only because another drink uses the same milk (checkout's answer)", async () => {
+      const { pipeline, send, onUnexpected } = setup();
+      let lines: { cartItemReference: string; quantity: number }[] = [];
+      pipeline.addItem.mockImplementation((async (_c: unknown, input: { quantity: number }) => {
+        lines = [...lines, { cartItemReference: id(40 + lines.length), quantity: input.quantity }];
+        return { status: "Applied" as const, cartVersion: 2 + lines.length, lines };
+      }) as never);
+      pipeline.startCheckout.mockResolvedValueOnce({
+        status: "ItemShort",
+        cartItemReference: id(41),
+        available: 1,
+        sharedStock: true,
+      } as never);
+      await expect(
+        send({
+          lines: [
+            { sellableReference: id(2), quantity: 2, optionSelections: [] },
+            { sellableReference: id(3), quantity: 2, optionSelections: [] },
+          ],
+        }),
+      ).rejects.toMatchObject({
+        code: "COUNTER_ORDER_STOCK_SHORT",
+        lineIndex: 1,
+        available: 1,
+        sharedStock: true,
+      });
+      expect(pipeline.preparePayment).not.toHaveBeenCalled();
+      expect(onUnexpected).not.toHaveBeenCalled();
+    });
+
+    it("WP-2423: nothing left beside the rest, or stock gone at submission, is 'can't be sold' (not an outage)", async () => {
+      const { pipeline, send, onUnexpected } = setup();
+      pipeline.addItem.mockResolvedValue({
+        status: "Applied",
+        cartVersion: 3,
+        lines: [{ cartItemReference: id(40), quantity: 1 }],
+      } as never);
+      pipeline.startCheckout.mockResolvedValueOnce({
+        status: "ItemShort",
+        cartItemReference: id(40),
+        available: 0,
+        sharedStock: false,
+      } as never);
+      await expect(send()).rejects.toMatchObject({
+        code: "COUNTER_ORDER_ITEM_UNAVAILABLE",
+        lineIndex: 0,
+      });
+      pipeline.preparePayment.mockRejectedValueOnce(
+        Object.assign(new Error("order creation is unavailable"), {
+          code: "ORDER_CREATE_STOCK_SHORT",
+        }),
+      );
+      await expect(send({ operationReference: id(33) })).rejects.toMatchObject({
+        code: "COUNTER_ORDER_ITEM_UNAVAILABLE",
+        lineIndex: null,
+      });
+      expect(onUnexpected).not.toHaveBeenCalled();
+    });
+
     it("never hides the refusal when the stock cannot be read", async () => {
       const { pipeline, send } = setup();
       Object.assign(pipeline, {

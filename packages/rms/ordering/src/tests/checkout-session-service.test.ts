@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  CheckoutSessionServiceError,
   createCheckoutSessionService,
   type CheckoutSessionPorts,
 } from "../application/checkout-session-service.js";
 import { parseCheckoutSession } from "../domain/checkout-session.js";
+import { CheckoutValidationError } from "../domain/checkout-validation.js";
 const id = (n: number) => `018f5400-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const at = "2026-08-02T15:00:00.000Z";
 const until = "2026-08-02T15:05:00.000Z";
@@ -183,6 +185,41 @@ describe("Checkout Session creation", () => {
     await expect(f.service.create(f.input)).rejects.toMatchObject({
       code: "DEPENDENCY_UNAVAILABLE",
     });
+    expect(f.counts().writes).toBe(0);
+  });
+  it("WP-2423: tells which item is short (and how many are left) without creating anything", async () => {
+    const f = setup();
+    const line = { cartItemReference: id(70) as never, available: 1, sharedStock: true };
+    const short = createCheckoutSessionService({
+      ...f.ports,
+      validate: async () => {
+        throw new CheckoutValidationError("CHECKOUT_STOCK_SHORT", line);
+      },
+    });
+    const error = await short.create(f.input).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(CheckoutSessionServiceError);
+    expect(error).toMatchObject({ code: "ITEM_SHORT", line });
+    const unavailable = createCheckoutSessionService({
+      ...f.ports,
+      validate: async () => {
+        throw new CheckoutValidationError("CHECKOUT_ITEM_UNAVAILABLE", {
+          ...line,
+          available: null,
+          sharedStock: false,
+        });
+      },
+    });
+    await expect(unavailable.create(f.input)).rejects.toMatchObject({
+      code: "ITEM_UNAVAILABLE",
+      line: { cartItemReference: id(70), available: null },
+    });
+    const other = createCheckoutSessionService({
+      ...f.ports,
+      validate: async () => {
+        throw new CheckoutValidationError("CHECKOUT_QUOTE_EXPIRED");
+      },
+    });
+    await expect(other.create(f.input)).rejects.toMatchObject({ code: "DEPENDENCY_UNAVAILABLE" });
     expect(f.counts().writes).toBe(0);
   });
   it("rejects extra client identities before authorization", async () => {

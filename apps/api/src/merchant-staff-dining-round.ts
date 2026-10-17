@@ -22,6 +22,9 @@ import {
   counterOrderPermission,
   counterTipMinor,
   parseCounterOrderCommand,
+  addedCartLine,
+  checkoutRefusalLineIndex,
+  type CounterCartLine,
   type CounterGuestCredentials,
   type CounterGuestPipeline,
   type CounterOrderLine,
@@ -46,6 +49,8 @@ export const staffDiningRoundErrorCodes = [
   "STAFF_ROUND_TABLE_CART_HAS_ITEMS",
   "STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS",
   "STAFF_ROUND_ITEM_UNAVAILABLE",
+  /** WP-2423: the Store's stock can't make the round as entered (which item, how many left). */
+  "STAFF_ROUND_STOCK_SHORT",
   "STAFF_ROUND_NOT_PRICED",
   "STAFF_ROUND_NOT_FINISHED",
   "STAFF_ROUND_IN_PROGRESS",
@@ -59,24 +64,35 @@ export class StaffDiningRoundError extends Error {
   readonly lineIndex: number | null;
   /** For STAFF_ROUND_TABLE_CART_HAS_ITEMS: what guests put in the table's Cart (names only). */
   readonly pendingItems: readonly { readonly name: string; readonly quantity: number }[];
+  /** WP-2423: for STAFF_ROUND_STOCK_SHORT, how many of the item the stock covers now (1 or more). */
+  readonly available: number | null;
+  /** WP-2423: the item is short only because other items in the round use the same stock. */
+  readonly sharedStock: boolean;
   constructor(
     code: StaffDiningRoundErrorCode,
     lineIndex: number | null = null,
     pendingItems: readonly { readonly name: string; readonly quantity: number }[] = [],
+    stock: { readonly available: number | null; readonly sharedStock: boolean } = {
+      available: null,
+      sharedStock: false,
+    },
   ) {
     super("staff dining round is unavailable");
     this.name = "StaffDiningRoundError";
     this.code = code;
     this.lineIndex = lineIndex;
     this.pendingItems = pendingItems;
+    this.available = stock.available;
+    this.sharedStock = stock.sharedStock;
   }
 }
 const fail = (
   code: StaffDiningRoundErrorCode,
   lineIndex: number | null = null,
   pendingItems: readonly { readonly name: string; readonly quantity: number }[] = [],
+  stock?: { readonly available: number | null; readonly sharedStock: boolean },
 ): never => {
-  throw new StaffDiningRoundError(code, lineIndex, pendingItems);
+  throw new StaffDiningRoundError(code, lineIndex, pendingItems, stock);
 };
 
 export interface StaffDiningRoundLine extends CounterOrderLine {
@@ -166,6 +182,19 @@ export interface StaffTableGuestPipeline extends Pick<
       }
     | { readonly status: "CheckoutInProgress" }
   >;
+  /**
+   * WP-2423: takes this round's items back out of the table's shared Cart when its checkout was
+   * refused (short stock), so guests' Cart is as it was and staff can send the round again.
+   * `Kept`: the Cart changed meanwhile (a guest edited it); it is left as it is.
+   */
+  removeItems?(
+    credentials: CounterGuestCredentials,
+    input: {
+      readonly cartReference: string;
+      readonly cartVersion: number;
+      readonly cartItemReferences: readonly string[];
+    },
+  ): Promise<"Removed" | "Kept">;
   /** Submits the round, records the tip choice and starts the payment clock (no Provider). */
   preparePayment(
     credentials: CounterGuestCredentials,
@@ -511,6 +540,9 @@ export function createMerchantStaffDiningRound(options: {
       if (cart.pendingItems.length > 0)
         return fail("STAFF_ROUND_TABLE_CART_HAS_ITEMS", null, cart.pendingItems);
       let cartVersion = cart.cartVersion;
+      // The Cart line each round line went to, to name a line the checkout finds short.
+      const cartLines: (string | undefined)[] = [];
+      let lines: readonly CounterCartLine[] = [];
       for (const [index, line] of command.lines.entries()) {
         const added = await options.pipeline.addItem(credentials, {
           operationReference: options.nextReference(),
@@ -526,7 +558,43 @@ export function createMerchantStaffDiningRound(options: {
           return fail("STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS");
         if (added.status !== "Applied") return fail("STAFF_ROUND_ITEM_UNAVAILABLE", index);
         cartVersion = added.cartVersion;
+        cartLines.push(addedCartLine(lines, added.lines));
+        lines = added.lines ?? lines;
       }
+      /**
+       * WP-2423: the round can't be made as entered (found before anything was ordered or
+       * charged). Its items come back out of the table's Cart (guests' items were never in it) and
+       * a table session this request started is closed again, so staff change the round and send
+       * it again.
+       */
+      const withdraw = async () => {
+        const references = [...new Set(cartLines)].filter(
+          (reference): reference is string => reference !== undefined,
+        );
+        let removed: "Removed" | "Kept" = "Kept";
+        try {
+          // Only when every round line is known to its Cart line (none of a guest's is touched).
+          if (
+            options.pipeline.removeItems !== undefined &&
+            references.length > 0 &&
+            cartLines.length === command.lines.length &&
+            cartLines.every((reference) => reference !== undefined)
+          )
+            removed = await options.pipeline.removeItems(credentials, {
+              cartReference: cart.cartReference,
+              cartVersion,
+              cartItemReferences: references,
+            });
+        } catch (error) {
+          try {
+            options.onUnexpected?.(error);
+          } catch {
+            // Reporting never changes the answer.
+          }
+        }
+        if (removed === "Removed") startedTable = tableStarted;
+        await abandonStartedTable();
+      };
       const quoted = await options.pipeline.quote(credentials, {
         operationReference: options.nextReference(),
         cartReference: cart.cartReference,
@@ -543,6 +611,7 @@ export function createMerchantStaffDiningRound(options: {
         quoteReference: quoted.quoteReference,
       });
       // From here the round may exist (checkout, submission): the session is never closed for it.
+      const tableStarted = startedTable;
       startedTable = null;
       const checkout = await options.pipeline.startCheckout(credentials, {
         createOperationReference: options.nextReference(),
@@ -550,13 +619,35 @@ export function createMerchantStaffDiningRound(options: {
         cartVersion,
         quoteReference: quoted.quoteReference,
       });
+      if (checkout.status === "ItemShort" || checkout.status === "ItemUnavailable") {
+        await withdraw();
+        const lineIndex = checkoutRefusalLineIndex(checkout, cartLines);
+        return checkout.status === "ItemShort" && checkout.available > 0
+          ? fail("STAFF_ROUND_STOCK_SHORT", lineIndex, [], {
+              available: checkout.available,
+              sharedStock: checkout.sharedStock,
+            })
+          : fail("STAFF_ROUND_ITEM_UNAVAILABLE", lineIndex, [], {
+              available: null,
+              sharedStock: checkout.status === "ItemShort" && checkout.sharedStock,
+            });
+      }
       if (checkout.status !== "Started") return fail("STAFF_ROUND_STORE_NOT_TAKING_ORDERS");
-      const preparation = await options.pipeline.preparePayment(credentials, {
-        checkoutSessionReference: checkout.checkoutSessionReference,
-        selectionReference: tipSelectionReference,
-        tip: { amountMinor: tip, currencyCode: "CAD" } as Money,
-        recordedAfterOutage: command.recordedAfterOutage,
-      });
+      let preparation: OrderPaymentPreparationEvidence;
+      try {
+        preparation = await options.pipeline.preparePayment(credentials, {
+          checkoutSessionReference: checkout.checkoutSessionReference,
+          selectionReference: tipSelectionReference,
+          tip: { amountMinor: tip, currencyCode: "CAD" } as Money,
+          recordedAfterOutage: command.recordedAfterOutage,
+        });
+      } catch (error) {
+        // WP-2423: stock ran out between checkout and submission; the submission rolled back, so
+        // nothing was ordered or charged and the round's items come back out of the table's Cart.
+        if ((error as { code?: unknown } | null)?.code !== "ORDER_CREATE_STOCK_SHORT") throw error;
+        await withdraw();
+        return fail("STAFF_ROUND_ITEM_UNAVAILABLE");
+      }
       if (preparation.tip.amountMinor !== tip) return fail("STAFF_ROUND_UNAVAILABLE");
       return await finished("Placed", entry.record);
     } catch (error) {

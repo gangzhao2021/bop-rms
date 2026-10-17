@@ -7,6 +7,7 @@ import { parseCheckoutDetailsSnapshot } from "../../domain/checkout-details.js";
 import { parseCheckoutSession } from "../../domain/checkout-session.js";
 import type { CartAggregate } from "../../domain/cart.js";
 import type { CheckoutValidationEvidence } from "../../domain/checkout-validation.js";
+import { OrderCreationError } from "../../domain/order-creation.js";
 import {
   parseOrderCapacityLink,
   type OrderCapacityLink,
@@ -502,9 +503,12 @@ export function createPostgresAdditionalDiningBatchStore(options: {
 
         if ((await options.authorize(tx, snapshot)) !== true) return fail();
         await tx.query("RELEASE SAVEPOINT ordering_additional_batch", []);
-      } catch {
+      } catch (error) {
         await tx.query("ROLLBACK TO SAVEPOINT ordering_additional_batch", []);
         await tx.query("RELEASE SAVEPOINT ordering_additional_batch", []);
+        // WP-2423: the stock ran out after checkout; the guest is told plainly, nothing charged.
+        if (error instanceof OrderCreationError && error.code === "ORDER_CREATE_STOCK_SHORT")
+          throw error;
         return fail();
       }
       return Object.freeze({ status: "Created" as const, snapshot });

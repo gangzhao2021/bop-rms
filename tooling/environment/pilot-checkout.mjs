@@ -10,7 +10,10 @@ import { createPostgresCatalogOrderSnapshotSource } from "../../packages/rms/cat
 import { createCustomerCheckoutSessionAuthorization } from "../../apps/api/dist/customer-checkout-session-authorization.js";
 import { createCustomerConfiguredPickupCapacitySources } from "../../apps/api/dist/customer-pickup-capacity-sources.js";
 import { createCustomerConfiguredPickupSessionValidation } from "../../apps/api/dist/customer-pickup-session-validation.js";
-import { createCustomerCartSelectionInventory } from "../../apps/api/dist/customer-cart-selection-inventory.js";
+import {
+  createCustomerCartSelectionInventory,
+  createCustomerCartStockCoverage,
+} from "../../apps/api/dist/customer-cart-selection-inventory.js";
 export function createInternalCheckout(resources, configuredEntry, catalogOptions) {
   const { scope, transactions, now, credentials } = resources,
     reference = credentials.reference;
@@ -164,8 +167,67 @@ export function createInternalCheckout(resources, configuredEntry, catalogOption
         });
       },
     };
+    // WP-2423: whether the Store's stock covers the Cart's lines together (items sharing an
+    // ingredient count against one stock), as the reservation at submission will take them.
+    // Ordering asks for the Cart's own lines only, some lowered or left out to find what is short.
+    const catalogScope = {
+      ...scope,
+      ...catalogOptions.catalogScope,
+      orderType,
+      orderTypeCode: orderType === "DineIn" ? "DINE_IN" : catalogOptions.catalogScope.orderTypeCode,
+    };
+    let coverage = null,
+      held = null;
+    const stock = {
+      async covers({ lines, observedAt }) {
+        const authority = await access.authorize(request, observedAt);
+        if (!authority) throw new Error("INTERNAL_CHECKOUT_AUTHORITY_UNAVAILABLE");
+        const cart = await carts.load(request.cartReference);
+        if (!cart || cart.aggregateVersion !== request.cartVersion)
+          throw new Error("INTERNAL_CHECKOUT_CART_CHANGED");
+        const own = new Map(cart.items.map((item) => [item.cartItemReference, item]));
+        const options = (selections) =>
+          JSON.stringify(
+            [...selections]
+              .map((option) => [option.optionReference, option.quantity])
+              .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+          );
+        for (const line of lines) {
+          const item = own.get(line.cartItemReference);
+          if (
+            item === undefined ||
+            item.sellableReference !== line.sellableReference ||
+            options(item.optionSelections) !== options(line.optionSelections) ||
+            !Number.isSafeInteger(line.quantity) ||
+            line.quantity < 1 ||
+            line.quantity > item.quantity
+          )
+            throw new Error("INTERNAL_CHECKOUT_STOCK_LINE_UNKNOWN");
+        }
+        // Ordering asks one question at a time; each holds the guest's Cart access open (as the
+        // selection check above does) while Inventory answers.
+        coverage ??= createCustomerCartStockCoverage(
+          catalogOptions.catalogTransactions,
+          catalogScope,
+          { ...catalogOptions.catalogSafety, clock: { now } },
+          {
+            ...catalogOptions.selectedInventory,
+            authorize: async (_tx, input) => (held === null ? false : held(input.observedAt)),
+          },
+        );
+        return transactions.run(async (authorityTx) => {
+          held = (at) => access.authorizeInTransaction(authorityTx, authority, at);
+          try {
+            return await coverage.covers({ lines, observedAt });
+          } finally {
+            held = null;
+          }
+        });
+      },
+    };
     return {
       catalog,
+      stock,
       repository: {
         loadCart: (ref) => carts.load(ref),
         loadQuote: (ref) =>

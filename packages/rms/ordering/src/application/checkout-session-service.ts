@@ -5,6 +5,10 @@ import {
 import { readClosedRecord } from "@bop/identity";
 import { parseOrderingInstant, parseOrderingReference } from "../domain/cart.js";
 import { parseCheckoutSession, type CheckoutSession } from "../domain/checkout-session.js";
+import {
+  CheckoutValidationError,
+  type CheckoutLineRefusal,
+} from "../domain/checkout-validation.js";
 
 export interface CheckoutSessionRequest {
   readonly createOperationReference: string;
@@ -60,12 +64,31 @@ export class CheckoutSessionServiceError extends Error {
       | "STORE_CLOSED"
       /** DEC-DINING-ANY-PARTICIPANT-SUBMIT: another guest at the table is checking out this Cart
        * version until heldUntil; nothing was created. */
-      | "CHECKOUT_IN_PROGRESS",
+      | "CHECKOUT_IN_PROGRESS"
+      /** WP-2423: an item in the Cart can't be sold now (`line` names it when known). */
+      | "ITEM_UNAVAILABLE"
+      /** WP-2423: the Store's stock can't make the Cart as it stands; `line` says which item and
+       * how many of it can still be made. Nothing was created or charged. */
+      | "ITEM_SHORT",
     readonly heldUntil: string | null = null,
+    readonly line: CheckoutLineRefusal | null = null,
   ) {
     super("checkout session is unavailable");
     this.name = "CheckoutSessionServiceError";
   }
+}
+
+/**
+ * WP-2423: the checkout refusal the guest (or staff member) is told for a validation refusal about
+ * the Cart's items; null for anything else.
+ */
+export function checkoutItemRefusal(error: unknown): CheckoutSessionServiceError | null {
+  if (!(error instanceof CheckoutValidationError)) return null;
+  if (error.code === "CHECKOUT_STOCK_SHORT" && error.line !== null)
+    return new CheckoutSessionServiceError("ITEM_SHORT", null, error.line);
+  if (error.code === "CHECKOUT_ITEM_UNAVAILABLE")
+    return new CheckoutSessionServiceError("ITEM_UNAVAILABLE", null, error.line);
+  return null;
 }
 const fail = (code: CheckoutSessionServiceError["code"]): never => {
   throw new CheckoutSessionServiceError(code);
@@ -215,6 +238,8 @@ export function createCheckoutSessionService(ports: CheckoutSessionPorts) {
         return Object.freeze({ status: result.status, session });
       } catch (error) {
         if (error instanceof CheckoutSessionServiceError) throw error;
+        const refusal = checkoutItemRefusal(error);
+        if (refusal !== null) throw refusal;
         return fail("DEPENDENCY_UNAVAILABLE");
       }
     },

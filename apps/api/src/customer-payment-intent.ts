@@ -43,7 +43,13 @@ function protect(response: Response) {
   response.setHeader("Referrer-Policy", "no-referrer");
 }
 type ExplicitRejection =
-  "store_closed" | "retry_limit" | "retry_pending" | "already_paid" | "window_ended";
+  | "store_closed"
+  | "retry_limit"
+  | "retry_pending"
+  | "already_paid"
+  | "window_ended"
+  /** WP-2423: items ran out after checkout; no order was placed and nothing was charged. */
+  | "items_short";
 function reject(response: Response, status: number, explicit?: ExplicitRejection) {
   const code =
     explicit ??
@@ -155,6 +161,8 @@ function failure(error: unknown) {
         DEPENDENCY_UNAVAILABLE: 503,
         STORE_CLOSED: 409,
         CHECKOUT_IN_PROGRESS: 409,
+        ITEM_UNAVAILABLE: 409,
+        ITEM_SHORT: 409,
       } as const
     )[error.code];
   if (error instanceof PaymentTipSelectionError)
@@ -183,6 +191,8 @@ function failure(error: unknown) {
       ORDER_CREATE_VALIDATION_EXPIRED: 422,
       CHECKOUT_REQUOTE_REQUIRED: 422,
       CHECKOUT_ITEM_UNAVAILABLE: 422,
+      CHECKOUT_STOCK_SHORT: 409,
+      ORDER_CREATE_STOCK_SHORT: 409,
       CHECKOUT_QUOTE_EXPIRED: 422,
       CHECKOUT_QUOTE_MISSING: 422,
       CHECKOUT_SELECTION_INVALID: 422,
@@ -217,6 +227,19 @@ function failure(error: unknown) {
       } as const
     )[error.code];
   return 503;
+}
+/**
+ * WP-2423: the Store's stock no longer covers the order (found again when the order is submitted,
+ * before any payment is started), so the guest changes their cart; nothing was charged.
+ */
+function stockRejection(error: unknown): ExplicitRejection | undefined {
+  if (
+    (error instanceof CheckoutValidationError && error.code === "CHECKOUT_STOCK_SHORT") ||
+    (error instanceof OrderCreationError && error.code === "ORDER_CREATE_STOCK_SHORT") ||
+    (error instanceof CheckoutSessionServiceError && error.code === "ITEM_SHORT")
+  )
+    return "items_short";
+  return undefined;
 }
 /** WP-2423 Q20: what the customer needs to know when another card cannot be tried. */
 function retryRejection(error: unknown): ExplicitRejection | undefined {
@@ -277,7 +300,7 @@ export class CustomerPaymentIntentHandler {
           reject(response, 409, "store_closed");
           return;
         }
-        const explicit = retry ? retryRejection(error) : undefined;
+        const explicit = retry ? retryRejection(error) : stockRejection(error);
         reject(response, failure(error), explicit);
         return;
       }

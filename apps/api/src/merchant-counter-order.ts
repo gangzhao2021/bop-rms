@@ -45,25 +45,87 @@ export class CounterOrderError extends Error {
   readonly lineIndex: number | null;
   /** For COUNTER_ORDER_STOCK_SHORT: how many of that item the Store's stock covers now (1 or more). */
   readonly available: number | null;
+  /**
+   * WP-2423: for COUNTER_ORDER_STOCK_SHORT and COUNTER_ORDER_ITEM_UNAVAILABLE, the item could be
+   * made on its own; it is short only because other items in the order use the same stock.
+   */
+  readonly sharedStock: boolean;
   constructor(
     code: CounterOrderErrorCode,
     lineIndex: number | null = null,
     available: number | null = null,
+    sharedStock = false,
   ) {
     super("counter order is unavailable");
     this.name = "CounterOrderError";
     this.code = code;
     this.lineIndex = lineIndex;
     this.available = available;
+    this.sharedStock = sharedStock;
   }
 }
 const fail = (
   code: CounterOrderErrorCode,
   lineIndex: number | null = null,
   available: number | null = null,
+  sharedStock = false,
 ): never => {
-  throw new CounterOrderError(code, lineIndex, available);
+  throw new CounterOrderError(code, lineIndex, available, sharedStock);
 };
+
+/** WP-2423: a guest Cart line as the command sees it after adding an item. */
+export interface CounterCartLine {
+  readonly cartItemReference: string;
+  readonly quantity: number;
+}
+/**
+ * WP-2423: the Cart line an added order line went to (a new line, or an existing line of the same
+ * item whose quantity grew); undefined when the Cart did not say.
+ */
+export function addedCartLine(
+  before: readonly CounterCartLine[],
+  after: readonly CounterCartLine[] | undefined,
+): string | undefined {
+  if (after === undefined) return undefined;
+  const earlier = new Map(before.map((line) => [line.cartItemReference, line.quantity]));
+  const grown = after.filter((line) => line.quantity > (earlier.get(line.cartItemReference) ?? 0));
+  return grown.length === 1 ? grown[0]?.cartItemReference : undefined;
+}
+/**
+ * WP-2423: the checkout's answer about one Cart line (short in stock, or not sellable now), as the
+ * staff command reports it: the first order line that went to that Cart line.
+ */
+export type CounterCheckoutItemRefusal =
+  | {
+      readonly status: "ItemShort";
+      readonly cartItemReference: string;
+      readonly available: number;
+      readonly sharedStock: boolean;
+    }
+  | { readonly status: "ItemUnavailable"; readonly cartItemReference: string | null };
+/** WP-2423: the first order line that went to the Cart line a checkout refusal names. */
+export function checkoutRefusalLineIndex(
+  refusal: CounterCheckoutItemRefusal,
+  cartLines: readonly (string | undefined)[],
+): number | null {
+  const index =
+    refusal.cartItemReference === null ? -1 : cartLines.indexOf(refusal.cartItemReference);
+  return index < 0 ? null : index;
+}
+function refusedAtCheckout(
+  refusal: CounterCheckoutItemRefusal,
+  cartLines: readonly (string | undefined)[],
+): never {
+  const lineIndex = checkoutRefusalLineIndex(refusal, cartLines);
+  return refusal.status === "ItemShort" && refusal.available > 0
+    ? fail("COUNTER_ORDER_STOCK_SHORT", lineIndex, refusal.available, refusal.sharedStock)
+    : fail(
+        "COUNTER_ORDER_ITEM_UNAVAILABLE",
+        lineIndex,
+        null,
+        refusal.status === "ItemShort" && refusal.sharedStock,
+      );
+}
 
 /** What the counter reads from the Store's current operating status. */
 export interface CounterStoreOperatingNow {
@@ -130,7 +192,12 @@ export interface CounterGuestPipeline {
       readonly requestedAt: string;
     },
   ): Promise<
-    | { readonly status: "Applied"; readonly cartVersion: number }
+    | {
+        readonly status: "Applied";
+        readonly cartVersion: number;
+        /** The Cart's lines after the item was added (WP-2423: to name a short line). */
+        readonly lines?: readonly CounterCartLine[];
+      }
     | { readonly status: "NotAvailable" }
     /** Another guest at the table is paying for the table's Cart (dine-in only). */
     | { readonly status: "CheckoutInProgress" }
@@ -193,6 +260,9 @@ export interface CounterGuestPipeline {
   ): Promise<
     | { readonly status: "Started"; readonly checkoutSessionReference: string }
     | { readonly status: "StoreNotTakingOrders" }
+    /** WP-2423: the Store's stock can't make the Cart as it stands, or an item can't be sold now;
+     * nothing was created or charged. */
+    | CounterCheckoutItemRefusal
   >;
   /** Submits the Order, records the tip choice and starts the payment clock. */
   preparePayment(
@@ -584,6 +654,9 @@ export function createMerchantCounterOrder(options: {
           ? fail("COUNTER_ORDER_STOCK_SHORT", short.lineIndex, short.available)
           : fail("COUNTER_ORDER_ITEM_UNAVAILABLE", short?.lineIndex ?? index);
       };
+      // The Cart line each order line went to, to name a line the checkout finds short.
+      const cartLines: (string | undefined)[] = [];
+      let lines: readonly CounterCartLine[] = [];
       for (const [index, line] of command.lines.entries()) {
         const added = await options.pipeline.addItem(credentials, {
           operationReference: options.nextReference(),
@@ -596,6 +669,8 @@ export function createMerchantCounterOrder(options: {
         });
         if (added.status !== "Applied") return await notSellable(index);
         cartVersion = added.cartVersion;
+        cartLines.push(addedCartLine(lines, added.lines));
+        lines = added.lines ?? lines;
       }
       // Each line was checked on its own as it was added; the same item on several lines is
       // checked again for the quantity of all of them together (as checkout does).
@@ -634,6 +709,8 @@ export function createMerchantCounterOrder(options: {
         cartVersion,
         quoteReference: quoted.quoteReference,
       });
+      if (checkout.status === "ItemShort" || checkout.status === "ItemUnavailable")
+        return refusedAtCheckout(checkout, cartLines);
       if (checkout.status !== "Started") return fail("COUNTER_ORDER_STORE_NOT_TAKING_ORDERS");
       const preparation = await options.pipeline.preparePayment(credentials, {
         checkoutSessionReference: checkout.checkoutSessionReference,
@@ -655,6 +732,8 @@ export function createMerchantCounterOrder(options: {
         return fail("COUNTER_ORDER_PERMISSION_DENIED");
       // The Store closed or paused pickup while the order was being sent.
       if (code === "STORE_CLOSED") return fail("COUNTER_ORDER_STORE_NOT_TAKING_ORDERS");
+      // WP-2423: stock ran out between checkout and submission; nothing was placed or charged.
+      if (code === "ORDER_CREATE_STOCK_SHORT") return fail("COUNTER_ORDER_ITEM_UNAVAILABLE");
       try {
         options.onUnexpected?.(error);
       } catch {

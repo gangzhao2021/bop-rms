@@ -219,7 +219,11 @@ async function readLinkedDetails(
 
 /** Internal authorized owner transaction. No Provider, Guest authorization or cross-owner capacity acquisition. */
 export interface OrderSubmissionInventoryFinalizer<V extends 1 | 2 = 1> {
-  /** Internal adapter must write durable owner evidence using this transaction. */
+  /**
+   * Internal adapter must write durable owner evidence using this transaction. WP-2423: throws
+   * `OrderCreationError("ORDER_CREATE_STOCK_SHORT")` when the Store's stock can't be reserved for
+   * the lines; the Order write then rolls back and that refusal reaches the caller.
+   */
   finalize(
     input: Readonly<{
       transaction: Parameters<Parameters<OrderCreationQueryTransactionRunner["run"]>[0]>[0];
@@ -815,6 +819,9 @@ export function createPostgresOrderCreationStore<V extends 1 | 2 = 1>(
       } catch (error) {
         if (error === conflict) throw new OrderCreationError("ORDER_CREATE_IDEMPOTENCY_CONFLICT");
         if (error === expired) throw new OrderCreationError("ORDER_CREATE_VALIDATION_EXPIRED");
+        // WP-2423: the Inventory finalizer found too little stock; the transaction rolled back.
+        if (error instanceof OrderCreationError && error.code === "ORDER_CREATE_STOCK_SHORT")
+          throw error;
         return fail();
       }
     },
