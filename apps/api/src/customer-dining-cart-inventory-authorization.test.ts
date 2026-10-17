@@ -78,3 +78,12 @@ it("does not infer a Dining session when it is missing", async () => {
   ).toBe(false);
   expect(f.load).not.toHaveBeenCalled();
 });
+it("allows a smaller stock probe for the same command but never a larger or empty one", async () => {
+  const authorize = createCustomerDiningCartInventoryAuthorization(scope, () => at);
+  const asked = { ...context, quantity: 5 };
+  expect(await authorize(tx, { ...input, quantity: 5 }, asked)).toBe(true);
+  expect(await authorize(tx, { ...input, quantity: 3 }, asked)).toBe(true);
+  expect(await authorize(tx, { ...input, quantity: 6 }, asked)).toBe(false);
+  expect(await authorize(tx, { ...input, quantity: 0 }, asked)).toBe(false);
+  expect(await authorize(tx, { ...input, quantity: 1.5 }, asked)).toBe(false);
+});

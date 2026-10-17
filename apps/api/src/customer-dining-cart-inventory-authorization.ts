@@ -22,7 +22,15 @@ export function createCustomerDiningCartInventoryAuthorization(
     try {
       const observedAt = parseOrderingInstant(input.observedAt);
       const startedAt = parseOrderingInstant(now());
-      if (observedAt > startedAt || input.quantity !== context.quantity) return false;
+      // WP-2423: the command's own quantity, or a smaller one when the stock refused it and the
+      // guest is told how many it can make; never more than this command asked for.
+      if (
+        observedAt > startedAt ||
+        !Number.isSafeInteger(input.quantity) ||
+        input.quantity < 1 ||
+        input.quantity > context.quantity
+      )
+        return false;
       if (context.diningSessionReference == null) return false;
       const cart = await createPostgresDiningCartCommandQueryStore(
         { run: (work) => work(transaction) },

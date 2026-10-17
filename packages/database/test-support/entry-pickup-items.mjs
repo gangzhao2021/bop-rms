@@ -113,7 +113,7 @@ export async function exerciseEntryPickupItems({ base, pickup, admin }) {
         "SELECT (SELECT count(*)::int FROM rms_ordering.cart_operation_record) operations,(SELECT count(*)::int FROM platform_audit.audit_record) audits,(SELECT count(*)::int FROM rms_inventory.stock_reservation_version) reservations",
       )
     ).rows[0];
-  const add = (quantity, operation, cookie = pickup.cookie) =>
+  const add = (quantity, operation, cookie = pickup.cookie, optionSelections = []) =>
     globalThis.fetch(base + "/api/v1/carts/" + pickup.cart.cartReference + "/items", {
       method: "POST",
       headers: {
@@ -125,14 +125,29 @@ export async function exerciseEntryPickupItems({ base, pickup, admin }) {
       body: JSON.stringify({
         sellableReference: id(70013),
         quantity,
-        optionSelections: [],
+        optionSelections,
         customerNote: null,
       }),
     });
   const before = await facts();
   const shortage = await add(100, id(59002));
   assert.equal(shortage.status, 422);
-  assert.equal((await shortage.json()).error.code, "cart_selection_invalid");
+  // WP-2423: the Store's stock (100 kg, 2 kg each) makes 50, and the guest is told so.
+  assert.deepEqual(stockAnswer(await shortage.json()), {
+    code: "cart_selection_invalid",
+    issueCodes: ["ITEM_SHORT"],
+    available: 50,
+  });
+  assert.deepEqual(await facts(), before);
+  // A refusal that is not about stock keeps its own answer.
+  const unoffered = await add(1, id(59005), pickup.cookie, [
+    { optionReference: id(79999), quantity: 1 },
+  ]);
+  assert.equal(unoffered.status, 422);
+  assert.deepEqual(stockAnswer(await unoffered.json()), {
+    code: "cart_selection_invalid",
+    issueCodes: ["CATALOG_SELECTION_REJECTED"],
+  });
   assert.deepEqual(await facts(), before);
   const accepted = await add(2, id(59003));
   assert.equal(accepted.status, 200);
@@ -149,9 +164,40 @@ export async function exerciseEntryPickupItems({ base, pickup, admin }) {
   assert.equal(replay.status, 200);
   assert.equal((await replay.json()).cart.version, body.cart.version);
   assert.deepEqual(await facts(), after);
+  // WP-2423: "+" on the line (a quantity change) past the stock says how many it can make.
+  const more = await globalThis.fetch(
+    base +
+      "/api/v1/carts/" +
+      pickup.cart.cartReference +
+      "/items/" +
+      body.cart.items[0].cartItemReference,
+    {
+      method: "PATCH",
+      headers: {
+        ...headers,
+        cookie: pickup.cookie,
+        "idempotency-key": id(59006),
+        "if-match": '"' + body.cart.version + '"',
+      },
+      body: JSON.stringify({ quantity: 51, optionSelections: [], customerNote: null }),
+    },
+  );
+  assert.equal(more.status, 422);
+  assert.deepEqual(stockAnswer(await more.json()), {
+    code: "cart_selection_invalid",
+    issueCodes: ["ITEM_SHORT"],
+    available: 50,
+  });
+  assert.deepEqual(await facts(), after);
   const denied = await add(1, id(59004), pickup.oldCookie);
   assert.equal(denied.status, 401);
   await denied.text();
   assert.deepEqual(await facts(), after);
   return { ...pickup, cart: body.cart };
+}
+
+/** The Cart refusal the guest's screen reads: error code, issue codes and (stock only) the count. */
+export function stockAnswer(body) {
+  const { code, issueCodes, available } = body.error;
+  return available === undefined ? { code, issueCodes } : { code, issueCodes, available };
 }

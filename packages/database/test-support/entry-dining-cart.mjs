@@ -17,6 +17,7 @@ import {
 } from "../../rms/catalog/src/index.ts";
 import { createCustomerDiningCartWithCatalogInventoryComposition } from "../../../apps/api/src/customer-dining-cart-composition.ts";
 import { CustomerCartHandler } from "../../../apps/api/src/customer-cart.ts";
+import { stockAnswer } from "./entry-pickup-items.mjs";
 import { createPersistentPublicStoreProfileReader } from "../../../apps/api/src/persistent-public-store-profile.ts";
 import { id } from "../../../apps/api/test-support/customer-entry-composition-fixture.ts";
 
@@ -287,7 +288,12 @@ export async function exerciseEntryDiningCart({
   const before = await facts();
   const shortage = await add(100, id(59002));
   assert.equal(shortage.status, 422);
-  assert.equal((await shortage.json()).error.code, "cart_selection_invalid");
+  // WP-2423: the Store's stock (100 kg, 2 kg each) makes 50, and the table guest is told so.
+  assert.deepEqual(stockAnswer(await shortage.json()), {
+    code: "cart_selection_invalid",
+    issueCodes: ["ITEM_SHORT"],
+    available: 50,
+  });
   assert.deepEqual(await facts(), before);
   const accepted = await add(2, id(59003));
   assert.equal(accepted.status, 200);
@@ -301,6 +307,33 @@ export async function exerciseEntryDiningCart({
   const replay = await add(2, id(59003));
   assert.equal(replay.status, 200);
   await replay.text();
+  assert.deepEqual(await facts(), committed);
+  // WP-2423: "+" on the table line (a quantity change) past the stock says how many it can make.
+  const more = await globalThis.fetch(
+    base +
+      "/api/v1/carts/" +
+      view.cart.cartReference +
+      "/items/" +
+      added.cart.items[0].cartItemReference,
+    {
+      method: "PATCH",
+      headers: {
+        ...headers,
+        cookie,
+        "content-type": "application/json",
+        "x-csrf-token": csrfToken,
+        "idempotency-key": id(59005),
+        "if-match": '"2"',
+      },
+      body: JSON.stringify({ quantity: 51, optionSelections: [], customerNote: null }),
+    },
+  );
+  assert.equal(more.status, 422);
+  assert.deepEqual(stockAnswer(await more.json()), {
+    code: "cart_selection_invalid",
+    issueCodes: ["ITEM_SHORT"],
+    available: 50,
+  });
   assert.deepEqual(await facts(), committed);
   const oldAdd = await add(1, id(59004), oldCookie, 2);
   assert.equal(oldAdd.status, 401);

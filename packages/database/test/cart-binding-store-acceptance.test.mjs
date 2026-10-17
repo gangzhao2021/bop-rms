@@ -1201,12 +1201,18 @@ it.each(["Qr", "Pos"])(
             { cartReference: id(976) },
             { cartVersion: 2 },
             { guestSessionReference: id(974) },
-            { quantity: 3 },
+            // More than this command asked for (2) is never observed for it.
+            { quantity: 1 },
           ])
             assert.equal(
               await checkInventoryCart(inventorySelection, { ...inventoryCartContext, ...patch }),
               false,
             );
+          // WP-2423: a smaller probe of the same command (how many the stock makes) is allowed.
+          assert.equal(
+            await checkInventoryCart(inventorySelection, { ...inventoryCartContext, quantity: 3 }),
+            true,
+          );
           assert.equal(
             await checkInventoryCart({ ...inventorySelection, observedAt: at(clock + 1) }),
             false,
