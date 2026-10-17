@@ -105,6 +105,9 @@ export interface StaffItemCancellationPreview {
     readonly includesTip: boolean;
     readonly netAmountMinor: string;
     readonly taxAmountMinor: string;
+    /** Items: the cancelled items' share of the tip (DEC-TIP-REFUND-PROPORTIONAL); Batch: "0"
+     * (the whole remaining payment is refunded, any tip left included). */
+    readonly tipAmountMinor: string;
   };
 }
 
@@ -147,6 +150,24 @@ export function createItemCancellationRefundAuthority(
   };
 }
 
+/**
+ * One item cancellation's refund from Payment's ordinary claim: its progress, the share of the
+ * tip it returns and what it returns for each cancelled line.
+ */
+export async function readItemCancellationRefund(
+  transaction: ConsumerTransaction,
+  scope: Scope & RefundConfiguration,
+  record: Pick<StaffItemCancellationRecord, "orderReference" | "refundRequestReference">,
+  authorize: () => Promise<boolean>,
+) {
+  return readCancellationRefundStatus(transaction, {
+    scope,
+    orderReference: String(record.orderReference),
+    requestReference: String(record.refundRequestReference),
+    authorize: async (tx) => tx === transaction && (await authorize()),
+  });
+}
+
 /** Refund progress of one item cancellation from Payment's ordinary claim outcome. */
 export async function readItemCancellationRefundStatus(
   transaction: ConsumerTransaction,
@@ -154,13 +175,7 @@ export async function readItemCancellationRefundStatus(
   record: Pick<StaffItemCancellationRecord, "orderReference" | "refundRequestReference">,
   authorize: () => Promise<boolean>,
 ): Promise<CancellationRefundStatus> {
-  const result = await readCancellationRefundStatus(transaction, {
-    scope,
-    orderReference: String(record.orderReference),
-    requestReference: String(record.refundRequestReference),
-    authorize: async (tx) => tx === transaction && (await authorize()),
-  });
-  return result.status;
+  return (await readItemCancellationRefund(transaction, scope, record, authorize)).status;
 }
 
 /**
@@ -169,7 +184,8 @@ export async function readItemCancellationRefundStatus(
  * permission and reason → Ordering fence (order version, Confirmed payment, lines of the Batch
  * not cancelled before) → Kitchen cancels the work of exactly those lines (not started, row locks)
  * → Ordering append-only item cancellation, revision and audit → Payment ordinary refund claim of
- * kind Cancellation for exactly those lines' net + tax (never the tip), approved by that record,
+ * kind Cancellation for exactly those lines' net + tax and their share of the tip by the ordinary
+ * refund allocation (DEC-TIP-REFUND-PROPORTIONAL, Owner 2026-10-17), approved by that record,
  * with its refund operation prepared → Fulfillment excludes the lines → Inventory releases those
  * lines' per-line reservations. After commit the refund is dispatched through the ordinary
  * dispatch journal (never submitted twice; an unknown result is only queried). Selecting every
@@ -412,7 +428,7 @@ export function createMerchantOrderItemStaffCancellation(options: {
   const itemsResult = (
     status: "Cancelled" | "AlreadyCancelled",
     record: StaffItemCancellationRecord,
-    refundStatus: CancellationRefundStatus,
+    refund: { status: CancellationRefundStatus; tipAmountMinor: bigint },
   ): StaffItemCancellationResult =>
     Object.freeze({
       status,
@@ -423,10 +439,10 @@ export function createMerchantOrderItemStaffCancellation(options: {
       orderItemReferences: Object.freeze(record.orderItemReferences.map(String)),
       cancelledAt: String(record.cancelledAt),
       refund: Object.freeze({
-        status: refundStatus,
+        status: refund.status,
         amountMinor: record.refundAmountMinor.toString(),
         currencyCode: "CAD" as const,
-        includesTip: false,
+        includesTip: refund.tipAmountMinor > 0n,
       }),
     });
 
@@ -482,6 +498,7 @@ export function createMerchantOrderItemStaffCancellation(options: {
               includesTip: position.tipMinor > 0n,
               netAmountMinor: "0",
               taxAmountMinor: "0",
+              tipAmountMinor: "0",
             }),
           });
         }
@@ -497,13 +514,14 @@ export function createMerchantOrderItemStaffCancellation(options: {
           refund: Object.freeze({
             amountMinor: preview.amountMinor.toString(),
             currencyCode: "CAD" as const,
-            includesTip: false,
+            includesTip: preview.components.tipAmountMinor > 0n,
             netAmountMinor: (
               preview.components.netAmountMinor + preview.components.serviceChargeAmountMinor
             ).toString(),
             taxAmountMinor: (
               preview.components.taxAmountMinor + preview.components.serviceChargeTaxAmountMinor
             ).toString(),
+            tipAmountMinor: preview.components.tipAmountMinor.toString(),
           }),
         });
       });
@@ -550,7 +568,13 @@ export function createMerchantOrderItemStaffCancellation(options: {
             prior.orderItemReferences.join(",") !== intent.orderItemReferences.join(",")
           )
             return fail("ORDER_CANCELLATION_NOT_CANCELLABLE");
-          return { kind: "Replay" as const, record: prior, refund: context.refund };
+          const { tipAmountMinor } = await readItemCancellationRefund(
+            tx,
+            context.refund,
+            prior,
+            guard,
+          );
+          return { kind: "Replay" as const, record: prior, refund: context.refund, tipAmountMinor };
         }
         // A replay of a command that ended the whole Batch goes through the whole cancellation.
         const whole = await createPostgresStaffOrderCancellationStore({
@@ -678,7 +702,15 @@ export function createMerchantOrderItemStaffCancellation(options: {
               ? "ORDER_ITEM_CANCELLATION_STOCK_LEGACY"
               : "ORDER_CANCELLATION_STOCK_NOT_RELEASABLE",
           );
-        return { kind: "Created" as const, record, refund: context.refund };
+        return {
+          kind: "Created" as const,
+          record,
+          refund: context.refund,
+          // The items' share of the tip the claim returns (DEC-TIP-REFUND-PROPORTIONAL).
+          tipAmountMinor: claim.request.payments
+            .flatMap((payment) => payment.items)
+            .reduce((sum, item) => sum + item.components.tipAmountMinor, 0n),
+        };
       });
       if (outcome.kind === "Whole") return cancelWhole(input, intent);
       // Dispatch after commit; the refund stays Pending (and can be followed up) on any failure.
@@ -692,7 +724,7 @@ export function createMerchantOrderItemStaffCancellation(options: {
       return itemsResult(
         outcome.kind === "Created" ? "Cancelled" : "AlreadyCancelled",
         outcome.record,
-        refundStatus,
+        { status: refundStatus, tipAmountMinor: outcome.tipAmountMinor },
       );
     },
 

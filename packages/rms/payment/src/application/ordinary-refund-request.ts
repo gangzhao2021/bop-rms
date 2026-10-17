@@ -154,14 +154,9 @@ export function parseOrdinaryRefundRequest(value: unknown) {
       })
       .sort((a, b) => a.paymentAttemptReference.localeCompare(b.paymentAttemptReference));
     const claim = hasClaim ? parseClaim(raw.claim) : null;
-    if (
-      claim !== null &&
-      (payments.length !== 1 ||
-        payments.some((payment) =>
-          payment.items.some((item) => item.components.tipAmountMinor !== 0n),
-        ))
-    )
-      return fail();
+    // A Cancellation claim refunds one payment. Since DEC-TIP-REFUND-PROPORTIONAL its items carry
+    // their share of the tip like any ordinary refund (earlier claims carry none).
+    if (claim !== null && payments.length !== 1) return fail();
     const total = amount(raw.amountMinor);
     if (
       total === 0n ||

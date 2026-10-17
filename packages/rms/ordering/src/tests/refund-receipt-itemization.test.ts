@@ -164,7 +164,7 @@ describe("refund receipt itemization", () => {
     expect(result?.lines).toEqual(parseDigitalReceiptSnapshot(snapshot()).lines);
   });
 
-  it("states an item cancellation (items and tax, no tip) as its own refund", () => {
+  it("states an item cancellation of an order without a tip (items and tax) as its own refund", () => {
     const result = createRefundReceiptSnapshot(
       original({ tip: cad(0n), total: cad(1328n) }),
       financial(650n, 1328n),
@@ -202,6 +202,43 @@ describe("refund receipt itemization", () => {
         total: cad(650n),
       }),
     ]);
+  });
+
+  it("DEC-TIP-REFUND-PROPORTIONAL: states an item cancellation's tip share, and the rest of the tip when the round is then returned", () => {
+    const cancellation = {
+      ...customerRefund,
+      refundReference: id(33),
+      kind: "ItemCancellation" as const,
+    };
+    const partly = createRefundReceiptSnapshot(original(), financial(736n), {
+      itemized: [cancellation],
+      rounds: [round(736n)],
+    });
+    expect(partly?.refunds).toEqual([
+      expect.objectContaining({
+        kind: "ItemCancellation",
+        lines: [expect.objectContaining({ lineReference: mocha, amount: cad(575n) })],
+        tax: cad(75n),
+        tip: cad(86n),
+        total: cad(736n),
+      }),
+    ]);
+    // The store then cancels the rest of the round: the flat white, its tax and the tip left.
+    const whole = createRefundReceiptSnapshot(original(), financial(1504n), {
+      itemized: [cancellation],
+      rounds: [round(1504n)],
+    });
+    expect(whole?.refunds?.[1]).toEqual(
+      expect.objectContaining({
+        kind: "RoundRefund",
+        tax: cad(78n),
+        tip: cad(90n),
+        total: cad(768n),
+      }),
+    );
+    expect((whole?.refunds ?? []).reduce((sum, refund) => sum + refund.tip.amountMinor, 0n)).toBe(
+      176n,
+    );
   });
 
   it("states what was left of a round returned in full after an earlier item refund", () => {

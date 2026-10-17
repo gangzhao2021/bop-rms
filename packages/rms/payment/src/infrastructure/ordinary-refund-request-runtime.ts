@@ -287,8 +287,9 @@ export function createPostgresOrdinaryRefundRequestRuntime(options: {
       )
         return fail();
       const allocation = allocateOrdinaryRefundFromQuote(quote, {
-        // Item cancellation refunds exclude tip: ordinary allocation with tip = 0.
-        tipAmountMinor: intent.claim === null ? preparation.tip.amountMinor : 0n,
+        // DEC-TIP-REFUND-PROPORTIONAL (Owner, 2026-10-17): a guest refund and a staff item
+        // cancellation return the refunded items' share of the tip by the same allocation.
+        tipAmountMinor: preparation.tip.amountMinor,
         items: basis.items.map((item) => ({
           orderItemReference: item.orderItemReference,
           quoteLineReference: item.quoteLineReference,

@@ -133,7 +133,7 @@ export interface StaffCancellation {
   readonly refundStatus: "Pending" | "Refunded";
 }
 
-/** Refund is the cancelled items' price and tax, never the tip. */
+/** Refund is the cancelled items' price, tax and share of the tip (DEC-TIP-REFUND-PROPORTIONAL). */
 export interface ItemCancellation {
   readonly orderBatchReference: string;
   readonly orderItemReferences: readonly string[];

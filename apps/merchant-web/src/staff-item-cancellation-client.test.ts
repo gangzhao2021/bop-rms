@@ -27,6 +27,7 @@ const itemsPreview = {
     includesTip: false,
     netAmountMinor: "1000",
     taxAmountMinor: "130",
+    tipAmountMinor: "0",
   },
 };
 const cancelled = (overrides: Record<string, unknown> = {}) => ({
@@ -74,9 +75,23 @@ it("WP-2423 Q6 step 2: previews the refund for the exact selection", async () =>
       },
     }).scope,
   ).toBe("Batch");
+  // DEC-TIP-REFUND-PROPORTIONAL: some items carry their share of the tip.
+  const withTip = {
+    ...itemsPreview,
+    refund: {
+      ...itemsPreview.refund,
+      amountMinor: "1316",
+      includesTip: true,
+      tipAmountMinor: "186",
+    },
+  };
+  expect(parseItemCancelPreview(withTip)).toEqual(withTip);
   for (const invalid of [
     { ...itemsPreview, scope: "Order" },
     { ...itemsPreview, refund: { ...itemsPreview.refund, includesTip: true } },
+    { ...withTip, refund: { ...withTip.refund, includesTip: false } },
+    { ...withTip, refund: { ...withTip.refund, tipAmountMinor: "185" } },
+    { ...itemsPreview, scope: "Batch", refund: { ...itemsPreview.refund, tipAmountMinor: "10" } },
     { ...itemsPreview, refund: { ...itemsPreview.refund, amountMinor: "1131" } },
     { ...itemsPreview, refund: { ...itemsPreview.refund, amountMinor: 1130 } },
     { ...itemsPreview, refund: { ...itemsPreview.refund, currencyCode: "USD" } },
@@ -188,7 +203,7 @@ it("WP-2423 Q6 step 2: an answer that does not match the command is an unknown r
     cancelled({ orderItemReferences: [id(201)] }),
     cancelled({ orderItemReferences: [id(201), id(201)] }),
     cancelled({
-      refund: { status: "Pending", amountMinor: "1130", currencyCode: "CAD", includesTip: true },
+      refund: { status: "Pending", amountMinor: "1130", currencyCode: "CAD", includesTip: "yes" },
     }),
     cancelled({
       refund: { status: "Failed", amountMinor: "1130", currencyCode: "CAD", includesTip: false },
@@ -218,6 +233,26 @@ it("WP-2423 Q6 step 2: an answer that does not match the command is an unknown r
       ),
     ),
   );
+  // DEC-TIP-REFUND-PROPORTIONAL: cancelled items' refund carries their share of the tip.
+  const items = createStaffItemCancellationClient(
+    csrf,
+    vi.fn<typeof fetch>().mockResolvedValue(
+      json(
+        cancelled({
+          refund: {
+            status: "Pending",
+            amountMinor: "1316",
+            currencyCode: "CAD",
+            includesTip: true,
+          },
+        }),
+      ),
+    ),
+  );
+  expect(await items.cancel(selection, "SOLD_OUT")).toMatchObject({
+    ok: true,
+    value: { scope: "Items", refund: { amountMinor: "1316", includesTip: true } },
+  });
   expect(await batch.cancel(selection, "CUSTOMER_REQUEST")).toMatchObject({
     ok: true,
     value: {

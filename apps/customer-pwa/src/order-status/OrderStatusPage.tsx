@@ -324,7 +324,7 @@ export function itemCancellationText(cancellation: ItemCancellation): string {
     amount,
   );
 }
-/** WP-2423 Q6 step 2: where the money for cancelled items is (tax included, tip not refunded). */
+/** WP-2423 Q6 step 2: where the money for cancelled items is (tax and their tip share included). */
 export function itemRefundSummary(cancellations: readonly ItemCancellation[]): string[] {
   const currency = cancellations[0]?.refundAmount.currencyCode;
   if (currency === undefined) return [];

@@ -55,17 +55,20 @@ it.each([
   ).toThrow("ORDINARY_REFUND_REQUEST_INVALID");
 });
 
-it("never refunds tip inside a Cancellation claim", () => {
+it("DEC-TIP-REFUND-PROPORTIONAL: a Cancellation claim carries the items' tip share", () => {
   const value = cancellationRequestFixture();
   const item = value.payments[0]?.items[0];
   if (!item) throw new Error("FIXTURE_MISSING");
   item.components.tipAmountMinor = 1n;
   value.amountMinor = 5501n;
-  expect(() => parseOrdinaryRefundRequest(value)).toThrow("ORDINARY_REFUND_REQUEST_INVALID");
+  expect(parseOrdinaryRefundRequest(value).amountMinor).toBe(5501n);
   // The same allocation is a valid Ordinary claim.
   const ordinary: Record<string, unknown> = { ...value };
   delete ordinary.claim;
   expect(parseOrdinaryRefundRequest(ordinary).amountMinor).toBe(5501n);
+  // The total still has to be exactly the components.
+  value.amountMinor = 5500n;
+  expect(() => parseOrdinaryRefundRequest(value)).toThrow("ORDINARY_REFUND_REQUEST_INVALID");
 });
 
 it("binds a Cancellation claim to exactly one batch payment", () => {

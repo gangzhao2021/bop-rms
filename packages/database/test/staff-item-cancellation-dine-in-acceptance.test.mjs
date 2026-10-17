@@ -98,7 +98,8 @@ const fresh = () =>
 
 // One table round with two lines (synthetic test-only prices and 13% exclusive tax):
 // line A 4 × CAD 20.00 = 80.00 + 10.40 tax = 90.40; line B 2 × CAD 10.00 = 20.00 + 2.60 = 22.60.
-// Tip CAD 3.00. Captured online CAD 116.00.
+// Tip CAD 3.00. Captured online CAD 116.00. DEC-TIP-REFUND-PROPORTIONAL (Owner, 2026-10-17): a
+// cancelled line returns its share of the tip by the ordinary refund allocation (B: 0.60 of 3.00).
 const LINES = [
   { unitAmountMinor: 2000, quantity: 4, stock: "2" },
   { unitAmountMinor: 1000, quantity: 2, stock: "1" },
@@ -106,7 +107,9 @@ const LINES = [
 const LINE_A_MINOR = 9040n,
   LINE_B_MINOR = 2260n,
   TIP_MINOR = 300n,
-  CAPTURED_MINOR = LINE_A_MINOR + LINE_B_MINOR + TIP_MINOR;
+  CAPTURED_MINOR = LINE_A_MINOR + LINE_B_MINOR + TIP_MINOR,
+  LINE_B_TIP_MINOR = 60n,
+  LINE_B_REFUND_MINOR = LINE_B_MINOR + LINE_B_TIP_MINOR;
 
 /**
  * WP-2423 Q6 step 2a, dine-in: a table's paid, accepted round has two lines; staff cancel the line
@@ -1122,9 +1125,9 @@ it("after staff cancel one line of a dine-in round, the kitchen completes the re
       assert.equal(cancelled.scope, "Items");
       assert.deepEqual(cancelled.refund, {
         status: "Refunded",
-        amountMinor: String(LINE_B_MINOR),
+        amountMinor: String(LINE_B_REFUND_MINOR),
         currencyCode: "CAD",
-        includesTip: false,
+        includesTip: true,
       });
       assert.deepEqual(
         await one(
@@ -1138,7 +1141,7 @@ it("after staff cancel one line of a dine-in round, the kitchen completes the re
       assert.deepEqual(await stock(), { onHand: "50", reserved: "2" });
       assert.deepEqual(
         providerRefunds.map((refund) => [refund.payment_intent, refund.amount]),
-        [[refs.providerIntent, Number(LINE_B_MINOR)]],
+        [[refs.providerIntent, Number(LINE_B_REFUND_MINOR)]],
       );
 
       // ── The kitchen completes line A. The pilot kitchen command's current-source check

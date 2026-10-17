@@ -819,7 +819,7 @@ it("WP-2423 Q6 step 2: marks items the store cancelled and where their refund is
   expect(html).toContain("order-status__item--cancelled");
   expect(html).toContain("Cancelled · Refund pending $4.52");
   expect(html).toContain(
-    "Cancelled items: a refund of $4.52 to your original payment is pending (tax included, tip not refunded).",
+    "Cancelled items: a refund of $4.52 to your original payment is pending (tax and their share of any tip included).",
   );
   // A cancelled item is not waiting to be served; the round is not cancelled.
   expect(html).toContain("Items served");
@@ -848,7 +848,7 @@ it("WP-2423 Q6 step 2: marks items the store cancelled and where their refund is
   // A cancellation of several items refunds them together: the amount is in the summary.
   expect(refunded.match(/Cancelled · Refunded</gu)).toHaveLength(2);
   expect(refunded).toContain(
-    "Cancelled items: $9.04 refunded to your original payment (tax included, tip not refunded).",
+    "Cancelled items: $9.04 refunded to your original payment (tax and their share of any tip included).",
   );
   // The last item cancelled turns the round into a store cancellation refunded in full, tip included:
   // every line is marked and the item summary's tip note no longer applies.
@@ -873,7 +873,7 @@ it("WP-2423 Q6 step 2: marks items the store cancelled and where their refund is
   });
   expect(whole.match(/order-status__item--cancelled/gu)).toHaveLength(3);
   expect(whole).toContain("Your payment was refunded in full.");
-  expect(whole).not.toContain("tip not refunded");
+  expect(whole).not.toContain("Cancelled items:");
 });
 
 describe("WP-2423: a dine-in round whose payment didn't go through", () => {

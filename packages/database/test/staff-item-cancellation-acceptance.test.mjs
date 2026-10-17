@@ -114,7 +114,8 @@ const fresh = () =>
 
 // Two lines per pickup Order (synthetic test-only prices and 13% exclusive tax):
 // line A 4 × CAD 20.00 = 80.00 + 10.40 tax = 90.40; line B 2 × CAD 10.00 = 20.00 + 2.60 = 22.60.
-// Tip CAD 3.00. Captured CAD 116.00.
+// Tip CAD 3.00. Captured CAD 116.00. DEC-TIP-REFUND-PROPORTIONAL (Owner, 2026-10-17): a cancelled
+// line returns its share of the tip by the ordinary refund allocation (by net: A 2.40, B 0.60).
 const LINES = [
   { unitAmountMinor: 2000, quantity: 4, stock: "2" },
   { unitAmountMinor: 1000, quantity: 2, stock: "1" },
@@ -122,7 +123,11 @@ const LINES = [
 const LINE_A_MINOR = 9040n,
   LINE_B_MINOR = 2260n,
   TIP_MINOR = 300n,
-  CAPTURED_MINOR = LINE_A_MINOR + LINE_B_MINOR + TIP_MINOR;
+  CAPTURED_MINOR = LINE_A_MINOR + LINE_B_MINOR + TIP_MINOR,
+  LINE_A_TIP_MINOR = 240n,
+  LINE_B_TIP_MINOR = 60n,
+  LINE_A_REFUND_MINOR = LINE_A_MINOR + LINE_A_TIP_MINOR,
+  LINE_B_REFUND_MINOR = LINE_B_MINOR + LINE_B_TIP_MINOR;
 
 /**
  * WP-2423 Q6 step 2a: a store manager cancels some item lines of a paid, accepted pickup Order
@@ -1224,16 +1229,17 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
       assert.equal(providerSends, 0);
       assert.ok(merchant.actions.every((action) => action === "ordering.order.cancel"));
 
-      // Preview: one line refunds exactly its net + tax, never the tip; every remaining line
-      // is the whole Order, whose refund is the remaining capture including tip. No writes.
+      // Preview: one line refunds exactly its net + tax and its share of the tip; every remaining
+      // line is the whole Order, whose refund is the remaining capture including tip. No writes.
       assert.deepEqual(await preview(pickup, [0]), {
         scope: "Items",
         refund: {
-          amountMinor: String(LINE_A_MINOR),
+          amountMinor: String(LINE_A_REFUND_MINOR),
           currencyCode: "CAD",
-          includesTip: false,
+          includesTip: true,
           netAmountMinor: "8000",
           taxAmountMinor: "1040",
+          tipAmountMinor: String(LINE_A_TIP_MINOR),
         },
       });
       assert.deepEqual(await preview(pickup, [0, 1]), {
@@ -1244,6 +1250,7 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
           includesTip: true,
           netAmountMinor: "0",
           taxAmountMinor: "0",
+          tipAmountMinor: "0",
         },
       });
       assert.deepEqual(await counts(), before);
@@ -1264,9 +1271,9 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
       assert.deepEqual(cancelled.orderItemReferences, [pickup.batch.items[0]]);
       assert.deepEqual(cancelled.refund, {
         status: "Refunded",
-        amountMinor: String(LINE_A_MINOR),
+        amountMinor: String(LINE_A_REFUND_MINOR),
         currencyCode: "CAD",
-        includesTip: false,
+        includesTip: true,
       });
       let after = await counts();
       assert.deepEqual(after, {
@@ -1300,7 +1307,7 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
           disposition: pickup.batch.disposition,
           request: record.request,
           refund_operation: record.refund_operation,
-          amount: String(LINE_A_MINOR),
+          amount: String(LINE_A_REFUND_MINOR),
           cancelled_at: undefined,
         },
       );
@@ -1385,7 +1392,7 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
       ).rows;
       assert.equal(claim.length, 1);
       assert.equal(claim[0].id, record.request);
-      assert.equal(claim[0].amount, String(LINE_A_MINOR));
+      assert.equal(claim[0].amount, String(LINE_A_REFUND_MINOR));
       assert.equal(claim[0].actor, staff);
       assert.deepEqual(claim[0].record_json.claim, {
         kind: "Cancellation",
@@ -1400,7 +1407,7 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
         [pickup.batch.items[0]],
       );
       assert.deepEqual(legs[0].items[0].refundUnitOrdinals, [1, 2, 3, 4]);
-      assert.equal(String(legs[0].items[0].components.tipAmountMinor), "0");
+      assert.equal(String(legs[0].items[0].components.tipAmountMinor), String(LINE_A_TIP_MINOR));
       assert.equal(String(legs[0].items[0].components.netAmountMinor), "8000");
       assert.equal(String(legs[0].items[0].components.taxAmountMinor), "1040");
       const operation = (
@@ -1412,7 +1419,7 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
       assert.deepEqual(operation, [
         {
           id: record.refund_operation,
-          amount: String(LINE_A_MINOR),
+          amount: String(LINE_A_REFUND_MINOR),
           approval_id: null,
           executor: staff,
           environment: "Test",
@@ -1423,7 +1430,7 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
       assert.equal(providerSends, 1);
       assert.deepEqual(
         providerRefunds.map((refund) => [refund.payment_intent, refund.amount]),
-        [[pickup.batch.providerIntent, Number(LINE_A_MINOR)]],
+        [[pickup.batch.providerIntent, Number(LINE_A_REFUND_MINOR)]],
       );
 
       // ── Scenario 5: replay of the same command returns the original outcome, writes nothing
@@ -1444,7 +1451,13 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
           ...session,
           command: { orderReference: pickup.order, cancellationReference: record.id },
         }),
-        { refund: { status: "Refunded", amountMinor: String(LINE_A_MINOR), currencyCode: "CAD" } },
+        {
+          refund: {
+            status: "Refunded",
+            amountMinor: String(LINE_A_REFUND_MINOR),
+            currencyCode: "CAD",
+          },
+        },
       );
       assert.deepEqual(await counts(), before);
       assert.equal(providerSends, 1);
@@ -1485,7 +1498,12 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
         assert.equal(ordinary.request.claim, undefined);
         const ordinaryMinor = ordinary.request.amountMinor;
         // Meaningful: counting the Cancellation would push the Order above CAD 100.
-        assert.ok(ordinaryMinor < 10000n && ordinaryMinor + LINE_A_MINOR > 10000n);
+        assert.ok(ordinaryMinor < 10000n && ordinaryMinor + LINE_A_REFUND_MINOR > 10000n);
+        const pricing = createPostgresOrdinaryRefundPricingSource({
+          scope,
+          authorize: async () => true,
+        });
+        let validated = null;
         const escalation = await scoped((tx) =>
           createPostgresOrdinaryRefundEscalationSource({
             scope,
@@ -1494,10 +1512,7 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
               scope: paymentScope,
               now: () => new Date().toISOString(),
               authorize: async () => true,
-              validatePricing: createPostgresOrdinaryRefundPricingSource({
-                scope,
-                authorize: async () => true,
-              }),
+              validatePricing: async (t, input) => ((validated = input), pricing(t, input)),
             }),
             businessDate: businessDatePort,
           })(tx, { orderReference: threshold.order, requestReference: ordinaryReference }),
@@ -1505,6 +1520,52 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
         assert.equal(escalation.claimVersion, 2);
         assert.equal(escalation.decision.cumulativeOrdinaryAmountMinor, ordinaryMinor);
         assert.ok(!escalation.decision.reasons.includes("OrderOrdinaryTotalAboveCad100"));
+        // The guest's unit refund of line B returns that unit's tip share (60 / 2 units).
+        assert.equal(
+          String(ordinary.request.payments[0].items[0].components.tipAmountMinor),
+          String(LINE_B_TIP_MINOR / 2n),
+        );
+
+        // DEC-TIP-REFUND-PROPORTIONAL: Payment's pricing check accepts the item cancellation with
+        // its tip share; one recorded before the decision (tip excluded) stays valid as recorded,
+        // while the same tip-less amounts are never valid for a guest refund, and a tip share off
+        // by a cent is refused.
+        const [itemClaim] = validated.history;
+        assert.equal(itemClaim.claim.kind, "Cancellation");
+        assert.equal(itemClaim.amountMinor, LINE_A_REFUND_MINOR);
+        const withItems = (request, change) => {
+          const items = request.payments[0].items.map((item) => ({
+            ...item,
+            components: { ...item.components, ...change },
+          }));
+          const payments = [{ ...request.payments[0], items }];
+          const amountMinor = items.reduce(
+            (sum, item) =>
+              sum + Object.values(item.components).reduce((total, part) => total + part, 0n),
+            0n,
+          );
+          return { ...request, amountMinor, payments };
+        };
+        const check = (request) =>
+          scoped((tx) =>
+            pricing(tx, {
+              request,
+              payment: request.payments[0],
+              preparation: validated.preparation,
+              history: [],
+            }),
+          );
+        assert.equal(await check(itemClaim), true);
+        const legacy = withItems(itemClaim, { tipAmountMinor: 0n });
+        assert.equal(legacy.amountMinor, LINE_A_MINOR);
+        assert.equal(await check(legacy), true);
+        const ordinaryShape = { ...legacy };
+        delete ordinaryShape.claim;
+        assert.equal(await check(ordinaryShape), false);
+        assert.equal(
+          await check(withItems(itemClaim, { tipAmountMinor: LINE_A_TIP_MINOR - 1n })),
+          false,
+        );
 
         // WP-2423 (v15 order 10): after the item cancellation advanced the Order to version 3,
         // the kitchen still accepts, starts and completes the remaining line through the real
@@ -1547,7 +1608,7 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
         assert.deepEqual(await itemStatuses(started.batch.ticket), ["In Progress", "Queued"]);
         const other = await cancel(started, [1]);
         assert.equal(other.status, "Cancelled");
-        assert.equal(other.refund.amountMinor, String(LINE_B_MINOR));
+        assert.equal(other.refund.amountMinor, String(LINE_B_REFUND_MINOR));
         assert.equal(other.refund.status, "Refunded");
         assert.deepEqual(await itemStatuses(started.batch.ticket), ["In Progress", "Cancelled"]);
         // The started line is finished after the other line's cancellation (real source check).
@@ -1653,8 +1714,9 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
         const reservedBefore = await stock();
         const lastOperation = fresh();
         const ended = await cancel(pickup, [1], { operationReference: lastOperation });
-        const remainingMinor = CAPTURED_MINOR - LINE_A_MINOR;
-        assert.equal(remainingMinor, LINE_B_MINOR + TIP_MINOR);
+        // What remains: line B and the rest of the tip; across both refunds the whole tip returns.
+        const remainingMinor = CAPTURED_MINOR - LINE_A_REFUND_MINOR;
+        assert.equal(remainingMinor, LINE_B_MINOR + (TIP_MINOR - LINE_A_TIP_MINOR));
         assert.equal(ended.status, "Cancelled");
         assert.equal(ended.scope, "Batch");
         assert.deepEqual(ended.orderItemReferences, [pickup.batch.items[1]]);
@@ -1733,7 +1795,7 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
         try {
           const captured = { amountMinor: CAPTURED_MINOR, currencyCode: "CAD" };
           const now = () => new Date().toISOString();
-          let refunded = LINE_A_MINOR,
+          let refunded = LINE_A_REFUND_MINOR,
             refundCalls = 0;
           const snapshot = (request) =>
             createPaymentProviderSnapshot({

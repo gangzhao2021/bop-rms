@@ -43,7 +43,7 @@ import {
   type StaffOrderRefundStatus,
 } from "./merchant-order-staff-cancellation.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
-import { readItemCancellationRefundStatus } from "./merchant-order-item-staff-cancellation.js";
+import { readItemCancellationRefund } from "./merchant-order-item-staff-cancellation.js";
 import { readCustomerReceiptFinancial } from "./customer-receipt-financial.js";
 import {
   resolveMerchantBatchPaymentDue,
@@ -390,6 +390,8 @@ export function createPersistentMerchantOrderQueue(options: {
               reasonCode: StaffOrderCancellationRecord["reasonCode"];
               cancelledAt: string;
               refundStatus: "Pending" | "Refunded";
+              /** What Payment's claim returns for this line (tip share included), when read. */
+              refundMinor: bigint | null;
             }
           >();
           /** Line → its batch, for lines whose kitchen work has not started. */
@@ -537,10 +539,10 @@ export function createPersistentMerchantOrderQueue(options: {
             for (const record of await createPostgresStaffItemCancellationReader(
               scoped,
             ).listByOrders(businessTransaction, orderReferences)) {
-              const refundStatus =
+              const refund =
                 options.resolveRefundConfiguration === undefined || tenantReference === null
-                  ? ("Pending" as const)
-                  : await readItemCancellationRefundStatus(
+                  ? null
+                  : await readItemCancellationRefund(
                       businessTransaction,
                       {
                         tenantReference,
@@ -559,7 +561,10 @@ export function createPersistentMerchantOrderQueue(options: {
                   reasonCode: record.reasonCode,
                   cancelledAt: String(record.cancelledAt),
                   // A Provider-failed refund stays "pending" here; "Check refund" shows the failure.
-                  refundStatus: refundStatus === "Refunded" ? "Refunded" : "Pending",
+                  refundStatus: refund?.status === "Refunded" ? "Refunded" : "Pending",
+                  refundMinor:
+                    refund?.items.find((item) => item.orderItemReference === String(line))
+                      ?.amountMinor ?? null,
                 });
             }
             if (cancelAllowed)
@@ -637,18 +642,22 @@ export function createPersistentMerchantOrderQueue(options: {
                         cancellation:
                           cancelled === null
                             ? null
-                            : Object.freeze({
-                                ...cancelled,
-                                // A whole line is refunded: its net (after discount) plus tax, no tip.
-                                refund: Object.freeze({
-                                  amountMinor: (
-                                    BigInt(line.subtotal.amountMinor) -
-                                    BigInt(line.discount.amountMinor) +
-                                    BigInt(line.tax.amountMinor)
-                                  ).toString(),
-                                  currencyCode: line.tax.currencyCode,
-                                }),
-                              }),
+                            : (({ refundMinor, ...shown }) =>
+                                Object.freeze({
+                                  ...shown,
+                                  // A whole line is refunded: what Payment's claim returns for it
+                                  // (net after discount, tax and its share of the tip,
+                                  // DEC-TIP-REFUND-PROPORTIONAL); unread, its net plus tax.
+                                  refund: Object.freeze({
+                                    amountMinor: (
+                                      refundMinor ??
+                                      BigInt(line.subtotal.amountMinor) -
+                                        BigInt(line.discount.amountMinor) +
+                                        BigInt(line.tax.amountMinor)
+                                    ).toString(),
+                                    currencyCode: line.tax.currencyCode,
+                                  }),
+                                }))(cancelled),
                       });
                     }),
                   ),

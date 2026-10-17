@@ -144,3 +144,54 @@ it.each([[1, 1], [0], [4], [1.5]].map((occupiedUnitOrdinals) => ({ occupiedUnitO
     expect(() => allocateOrdinaryRefund(f)).toThrow();
   },
 );
+it("DEC-TIP-REFUND-PROPORTIONAL: line and unit refunds return the tip pro rata, never more than paid", () => {
+  // Tip 100 over three lines whose nets do not divide it evenly; refunds come one at a time, mixing
+  // a guest's unit refund with whole-line staff cancellations, each against the units left.
+  const lines = [
+    { reference: id(10), quantity: 3, net: 333n, tax: 43n },
+    { reference: id(11), quantity: 1, net: 333n, tax: 43n },
+    { reference: id(12), quantity: 2, net: 334n, tax: 44n },
+  ];
+  const occupied = new Map<string, number[]>(lines.map((line) => [line.reference, []]));
+  const refund = (picks: Record<string, number>) => {
+    const result = allocateOrdinaryRefund({
+      sourceReference: id(1),
+      sourceDigest: "sha256:" + "a".repeat(64),
+      currencyCode: "CAD",
+      tipAmountMinor: 100n,
+      serviceChargeAmountMinor: 0n,
+      serviceChargeTaxAmountMinor: 0n,
+      items: lines.map((line) => ({
+        orderItemReference: line.reference,
+        quantity: line.quantity,
+        netAmountMinor: line.net,
+        taxAmountMinor: line.tax,
+        occupiedUnitOrdinals: [...(occupied.get(line.reference) ?? [])],
+        refundQuantity: picks[line.reference] ?? 0,
+      })),
+    });
+    for (const item of result.items)
+      occupied.set(item.orderItemReference, [
+        ...(occupied.get(item.orderItemReference) ?? []),
+        ...item.refundUnitOrdinals,
+      ]);
+    return result.items.reduce((sum, item) => sum + item.components.tipAmountMinor, 0n);
+  };
+  const steps = [
+    refund({ [id(10)]: 1 }), // guest refund: one of three units of line 10
+    refund({ [id(11)]: 1 }), // staff cancel: the whole of line 11
+    refund({ [id(10)]: 2 }), // the rest of line 10
+    refund({ [id(12)]: 2 }), // staff cancel: the whole of line 12 (the last tip cents)
+  ];
+  // Shares by net: 33.3 → 33 / 33 / 34 (largest remainder); line 10's 33 is 11 per unit.
+  expect(steps).toEqual([11n, 33n, 22n, 34n]);
+  let running = 0n;
+  for (const step of steps) {
+    running += step;
+    expect(running).toBeLessThanOrEqual(100n);
+  }
+  expect(running).toBe(100n);
+  // A cancellation of every line at once refunds the whole tip.
+  occupied.forEach((_, key) => occupied.set(key, []));
+  expect(refund({ [id(10)]: 3, [id(11)]: 1, [id(12)]: 2 })).toBe(100n);
+});

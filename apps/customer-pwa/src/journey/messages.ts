@@ -302,9 +302,9 @@ export const orderStatusText = Object.freeze({
   itemRefunded: "Refunded",
   itemRefundPending: "Refund pending",
   cancelledItemsRefunded: (amount: string) =>
-    `Cancelled items: ${amount} refunded to your original payment (tax included, tip not refunded).`,
+    `Cancelled items: ${amount} refunded to your original payment (tax and their share of any tip included).`,
   cancelledItemsRefundPending: (amount: string) =>
-    `Cancelled items: a refund of ${amount} to your original payment is pending (tax included, tip not refunded).`,
+    `Cancelled items: a refund of ${amount} to your original payment is pending (tax and their share of any tip included).`,
   /** The order's progress heading and sentence, per situation. */
   progress: Object.freeze({
     storeCancelledHeading: "Order cancelled by the store",

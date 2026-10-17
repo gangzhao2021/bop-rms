@@ -82,18 +82,23 @@ export function parseItemCancelPreview(value: unknown) {
     "includesTip",
     "netAmountMinor",
     "taxAmountMinor",
+    "tipAmountMinor",
   ]);
   const amountMinor = amount(refund.amountMinor);
   const netAmountMinor = amount(refund.netAmountMinor);
   const taxAmountMinor = amount(refund.taxAmountMinor);
+  const tipAmountMinor = amount(refund.tipAmountMinor);
   if (
     (raw.scope !== "Items" && raw.scope !== "Batch") ||
     refund.currencyCode !== "CAD" ||
     typeof refund.includesTip !== "boolean" ||
-    // Items: exactly the selected items' net + tax, never the tip.
+    // Items: exactly the selected items' net + tax and their share of the tip
+    // (DEC-TIP-REFUND-PROPORTIONAL); Batch: the whole remaining payment.
     (raw.scope === "Items" &&
-      (refund.includesTip ||
-        BigInt(netAmountMinor) + BigInt(taxAmountMinor) !== BigInt(amountMinor)))
+      (refund.includesTip !== BigInt(tipAmountMinor) > 0n ||
+        BigInt(netAmountMinor) + BigInt(taxAmountMinor) + BigInt(tipAmountMinor) !==
+          BigInt(amountMinor))) ||
+    (raw.scope === "Batch" && tipAmountMinor !== "0")
   )
     return invalid();
   return Object.freeze({
@@ -104,6 +109,7 @@ export function parseItemCancelPreview(value: unknown) {
       includesTip: refund.includesTip,
       netAmountMinor,
       taxAmountMinor,
+      tipAmountMinor,
     }),
   });
 }
@@ -135,8 +141,7 @@ export function parseItemCancelResult(value: unknown, sent: ReturnType<typeof se
     ) ||
     (refund.status !== "Pending" && refund.status !== "Refunded") ||
     refund.currencyCode !== "CAD" ||
-    typeof refund.includesTip !== "boolean" ||
-    (raw.scope === "Items" && refund.includesTip)
+    typeof refund.includesTip !== "boolean"
   )
     return invalid();
   return Object.freeze({

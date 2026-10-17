@@ -142,3 +142,129 @@ test("@production receipt navigation removes inaccessible history and fits commo
   await expect(page.getByText("Synthetic Operating Entity", { exact: true })).toHaveCount(0);
   expect(await page.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0);
 });
+
+test("@production DEC-TIP-REFUND-PROPORTIONAL: a receipt states cancelled items' share of the tip", async ({
+  page,
+}) => {
+  const csrf = "c".repeat(43);
+  const amount = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+  const lines = [
+    {
+      lineReference: id(4),
+      displayName: "Mocha",
+      quantity: 1,
+      lineTotal: amount("650"),
+      lineSubtotal: amount("575"),
+    },
+    {
+      lineReference: id(5),
+      displayName: "Synthetic croissant",
+      quantity: 1,
+      lineTotal: amount("650"),
+      lineSubtotal: amount("575"),
+    },
+  ];
+  const snapshot = {
+    receiptReference: id(3),
+    operatingEntityDisplayName: "Synthetic Operating Entity",
+    storeDisplayName: "Synthetic Store",
+    orderNumber: "20",
+    issuedAt: "2026-10-17T15:00:00.000Z",
+    locale: "en-CA",
+    lines,
+    subtotal: amount("1150"),
+    tax: amount("150"),
+    tip: amount("124"),
+    total: amount("1424"),
+    paymentStatus: "Paid",
+    refundedTotal: amount("0"),
+  };
+  const receipt = {
+    orderReference: id(1),
+    freshnessStatus: "Fresh",
+    deliveryStatus: "Unavailable",
+    supportEligible: false,
+    cancellationEligible: false,
+    records: [
+      {
+        recordReference: id(2),
+        version: 1,
+        kind: "Original",
+        recordedAt: "2026-10-17T15:00:00.000Z",
+        reasonCode: null,
+        snapshot,
+      },
+      {
+        recordReference: id(7),
+        version: 2,
+        kind: "Refund",
+        recordedAt: "2026-10-17T15:05:00.000Z",
+        reasonCode: "PAYMENT_REFUND_STATUS_CHANGED",
+        snapshot: {
+          ...snapshot,
+          paymentStatus: "PartiallyRefunded",
+          refundedTotal: amount("712"),
+          // The store cancelled the mocha: its price, tax and half of the tip (equal nets).
+          refunds: [
+            {
+              kind: "ItemCancellation",
+              lines: [
+                { lineReference: id(4), displayName: "Mocha", quantity: 1, amount: amount("575") },
+              ],
+              tax: amount("75"),
+              tip: amount("62"),
+              other: amount("0"),
+              total: amount("712"),
+              newInThisVersion: true,
+            },
+          ],
+        },
+      },
+    ],
+  };
+  await page.route("**/bff/customer/entry", (route) =>
+    route.fulfill({
+      status: 201,
+      headers: { "cache-control": "no-store" },
+      json: {
+        schemaVersion: 2,
+        status: "Established",
+        brandDisplayName: "Synthetic Brand",
+        storeDisplayName: "Synthetic Status Store",
+        publicStoreReference: id(6),
+        publicTableReference: null,
+        channel: "Pickup",
+        operatingState: "Open",
+        availableServiceModes: ["Pickup"],
+        locale: "en-CA",
+        contextExpiresAt: new Date(Date.now() + 600_000).toISOString(),
+        csrfToken: csrf,
+      },
+    }),
+  );
+  await page.route("**/api/v1/orders/*/receipt", (route) =>
+    route.fulfill({ json: { schemaVersion: 1, receipt } }),
+  );
+  await page.goto("/#qr=aaa.bbb.ccc");
+  await expect(
+    page.getByRole("heading", { name: "Synthetic Status Store", exact: true }),
+  ).toBeVisible();
+  await page.evaluate((reference) => {
+    history.pushState(null, "", "/orders/" + reference + "/receipt");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }, id(1));
+  const refunds = page.locator(".receipt-page__refunds").last();
+  await expect(refunds).toContainText("Cancelled items");
+  await expect(refunds.locator(".receipt-page__refund dl")).toContainText("Tax$0.75");
+  await expect(refunds.locator(".receipt-page__refund dl")).toContainText("Tip$0.62");
+  await expect(refunds.locator(".receipt-page__refund dl")).toContainText("Refunded$7.12");
+  await expect(refunds).toContainText("Total after refunds$7.12");
+  await expectNoInternalText(page);
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/receipt-item-cancel-tip-${width}.png` });
+  }
+});

@@ -130,10 +130,18 @@ it("WP-2423 Q6 step 2: explains the refund the server previewed", () => {
     includesTip: false,
     netAmountMinor: "1000",
     taxAmountMinor: "130",
+    tipAmountMinor: "0",
   };
   expect(itemCancelPreviewText(pickup, { scope: "Items", refund })).toBe(
-    "Refund $11.30 (items and tax; the tip is not refunded).",
+    "Refund $11.30 (items and tax).",
   );
+  // DEC-TIP-REFUND-PROPORTIONAL: the items' share of the tip is refunded with them.
+  expect(
+    itemCancelPreviewText(dining, {
+      scope: "Items",
+      refund: { ...refund, amountMinor: "1316", includesTip: true, tipAmountMinor: "186" },
+    }),
+  ).toBe("Refund $13.16 (items, tax and $1.86 of the tip).");
   const last = {
     ...refund,
     amountMinor: "1380",

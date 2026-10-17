@@ -85,7 +85,7 @@ export function createPostgresOrdinaryRefundPricingSource(options: {
       )
     )
       return false;
-    const mapping = [];
+    const mapping: Parameters<typeof allocateOrdinaryRefundFromQuote>[1]["items"][number][] = [];
     for (const item of basis.items) {
       const line = quote.lines.find(
         (entry) => String(entry.lineReference) === item.quoteLineReference,
@@ -115,28 +115,36 @@ export function createPostgresOrdinaryRefundPricingSource(options: {
         refundQuantity: requested.get(item.orderItemReference)?.refundUnitOrdinals.length ?? 0,
       });
     }
-    const allocation = allocateOrdinaryRefundFromQuote(quote, {
-      // Item cancellation refunds never include tip (allocated with tip = 0).
-      tipAmountMinor:
-        ordinaryRefundClaimKind(request) === "Cancellation" ? 0n : preparation.tip.amountMinor,
-      items: mapping,
-    });
-    if (
-      allocation.sourceReference !== payment.sourceReference ||
-      allocation.sourceDigest !== payment.sourceDigest
-    )
-      return false;
-    const selected = allocation.items.filter((item) => item.refundQuantity > 0);
-    if (selected.length !== payment.items.length) return false;
-    for (const expected of selected) {
-      const actual = requested.get(expected.orderItemReference);
+    /** The persisted request is exactly the original-quote allocation with this tip. */
+    const matches = (tipAmountMinor: bigint) => {
+      const allocation = allocateOrdinaryRefundFromQuote(quote, { tipAmountMinor, items: mapping });
       if (
-        !actual ||
-        actual.refundUnitOrdinals.join(",") !== expected.refundUnitOrdinals.join(",") ||
-        components.some((key) => actual.components[key] !== expected.components[key])
+        allocation.sourceReference !== payment.sourceReference ||
+        allocation.sourceDigest !== payment.sourceDigest
       )
         return false;
-    }
+      const selected = allocation.items.filter((item) => item.refundQuantity > 0);
+      if (selected.length !== payment.items.length) return false;
+      for (const expected of selected) {
+        const actual = requested.get(expected.orderItemReference);
+        if (
+          !actual ||
+          actual.refundUnitOrdinals.join(",") !== expected.refundUnitOrdinals.join(",") ||
+          components.some((key) => actual.components[key] !== expected.components[key])
+        )
+          return false;
+      }
+      return true;
+    };
+    // DEC-TIP-REFUND-PROPORTIONAL (Owner, 2026-10-17): guest refunds and staff item cancellations
+    // both return the refunded items' share of the tip. An item cancellation recorded before that
+    // decision (DEC-ORDER-CANCELLATION-PILOT decision 4: tip excluded, allocated with tip = 0)
+    // stays valid as recorded; history is never rewritten.
+    if (
+      !matches(preparation.tip.amountMinor) &&
+      !(ordinaryRefundClaimKind(request) === "Cancellation" && matches(0n))
+    )
+      return false;
     return (await options.authorize(tx, request)) === true;
   };
 }

@@ -140,7 +140,19 @@ function setup(whole = vi.fn()) {
     },
     items: [],
   });
-  d.record.mockResolvedValue({ status: "Created", amountMinor: 565n });
+  // DEC-TIP-REFUND-PROPORTIONAL: the claim returns the item's share of the tip (56 of 565).
+  d.record.mockResolvedValue({
+    status: "Created",
+    amountMinor: 565n,
+    request: { payments: [{ items: [{ components: { tipAmountMinor: 56n } }] }] },
+  });
+  d.status.mockResolvedValue({
+    status: "Refunded",
+    amountMinor: 565n,
+    confirmedMinor: 565n,
+    tipAmountMinor: 56n,
+    items: [{ orderItemReference: id(50), amountMinor: 565n }],
+  });
   d.followUp.mockReturnValue({ drive: d.drive });
   d.drive.mockResolvedValue({ status: "Refunded", amountMinor: 565n });
   d.fulfillment.mockReturnValue({ cancelItems: d.fulfillmentCancel });
@@ -190,7 +202,7 @@ it("WP-2423 Q6 step 2a: cancels kitchen, Ordering, the item refund claim, fulfil
     cancellationReference: id(100),
     orderItemReferences: [id(50)],
     cancelledAt: at,
-    refund: { status: "Refunded", amountMinor: "565", currencyCode: "CAD", includesTip: false },
+    refund: { status: "Refunded", amountMinor: "565", currencyCode: "CAD", includesTip: true },
   });
   expect(f.run).toHaveBeenCalledTimes(1);
   const order = [
@@ -328,7 +340,11 @@ it("refuses started work, legacy stock and stale versions without a partial outc
 it("replays the same operation without writing, and refuses a different intent under it", async () => {
   const f = setup();
   d.load.mockResolvedValue(record);
-  expect((await f.operation.cancel(f.input)).status).toBe("AlreadyCancelled");
+  expect(await f.operation.cancel(f.input)).toMatchObject({
+    status: "AlreadyCancelled",
+    // The replay reads the claim's tip share from Payment.
+    refund: { amountMinor: "565", includesTip: true },
+  });
   expect(d.prepare).not.toHaveBeenCalled();
   expect(d.cancelItems).not.toHaveBeenCalled();
   await expect(
@@ -377,7 +393,7 @@ it("hands the last remaining lines to the whole cancellation (refund incl. tip)"
   });
 });
 
-it("previews exactly the items' net and tax, or the remaining payment for the last items", async () => {
+it("previews exactly the items' net, tax and tip share, or the remaining payment for the last items", async () => {
   const f = setup();
   const command = {
     orderReference: f.input.command.orderReference,
@@ -393,7 +409,28 @@ it("previews exactly the items' net and tax, or the remaining payment for the la
       includesTip: false,
       netAmountMinor: "500",
       taxAmountMinor: "65",
+      tipAmountMinor: "0",
     },
+  });
+  // DEC-TIP-REFUND-PROPORTIONAL: the preview states the items' share of the tip.
+  d.preview.mockResolvedValueOnce({
+    amountMinor: 621n,
+    components: {
+      netAmountMinor: 500n,
+      taxAmountMinor: 65n,
+      tipAmountMinor: 56n,
+      serviceChargeAmountMinor: 0n,
+      serviceChargeTaxAmountMinor: 0n,
+    },
+    items: [],
+  });
+  expect((await f.operation.preview({ ...f.input, command })).refund).toEqual({
+    amountMinor: "621",
+    currencyCode: "CAD",
+    includesTip: true,
+    netAmountMinor: "500",
+    taxAmountMinor: "65",
+    tipAmountMinor: "56",
   });
   expect(d.commit).not.toHaveBeenCalled();
   d.prepare.mockResolvedValue({ status: "Ready", plan: plan([]) });

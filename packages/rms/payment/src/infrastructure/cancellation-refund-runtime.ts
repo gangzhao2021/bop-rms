@@ -260,8 +260,9 @@ function operationOptions(
 
 /** In-transaction Payment side of a staff item cancellation. The caller owns the
  * transaction and writes the Ordering cancellation record first; the refund goes
- * through the ordinary refund pipeline as a Cancellation claim (tip excluded,
- * no ordinary escalation, authorized by the cancellation record). No Provider I/O. */
+ * through the ordinary refund pipeline as a Cancellation claim (the ordinary allocation,
+ * the items' share of the tip included — DEC-TIP-REFUND-PROPORTIONAL; no ordinary
+ * escalation, authorized by the cancellation record). No Provider I/O. */
 export function createPostgresCancellationRefundRuntime(options: CancellationRefundRuntimeOptions) {
   const scope = normalizeScope(options.scope);
   if (
@@ -359,7 +360,7 @@ export function createPostgresCancellationRefundRuntime(options: CancellationRef
     authorize: (tx, query) => options.authorize(tx, query),
   });
   return Object.freeze({
-    /** No writes. Refunds every unit of each selected line, tip excluded. */
+    /** No writes. Refunds every unit of each selected line with its share of the tip. */
     async preview(tx: ConsumerTransaction, value: CancellationRefundPreviewInput) {
       const recorded =
         typeof value === "object" &&
@@ -389,7 +390,7 @@ export function createPostgresCancellationRefundRuntime(options: CancellationRef
         expectedClaimVersion: current.history.length,
         reasonCode: input.reasonCode,
         items,
-        // Placeholder binding: only selects the Cancellation allocation (tip = 0).
+        // Placeholder binding: only marks the request as a Cancellation claim.
         claim: cancellationClaim(ephemeralReference(), "sha256:" + "0".repeat(64)),
       });
       return summarize(result.request);
@@ -522,6 +523,11 @@ export async function readCancellationRefundStatus(
   readonly status: CancellationRefundStatus;
   readonly amountMinor: bigint;
   readonly confirmedMinor: bigint;
+  /** The share of the tip this refund returns (0 for claims recorded before
+   * DEC-TIP-REFUND-PROPORTIONAL). */
+  readonly tipAmountMinor: bigint;
+  /** What the refund returns for each cancelled line (net, tax, tip share and other charges). */
+  readonly items: readonly { readonly orderItemReference: string; readonly amountMinor: bigint }[];
 }> {
   const scope = normalizeScope(value.scope);
   const ownerScope = {
@@ -579,7 +585,21 @@ export async function readCancellationRefundStatus(
     else if (leg === "Pending" && status === "Refunded") status = "Pending";
   }
   if (!(await allowed())) return fail("CANCELLATION_REFUND_PERMISSION_DENIED");
-  return Object.freeze({ status, amountMinor: request.amountMinor, confirmedMinor });
+  const { components, items } = summarize(request);
+  return Object.freeze({
+    status,
+    amountMinor: request.amountMinor,
+    confirmedMinor,
+    tipAmountMinor: components.tipAmountMinor,
+    items: Object.freeze(
+      items.map((item) =>
+        Object.freeze({
+          orderItemReference: item.orderItemReference,
+          amountMinor: item.amountMinor,
+        }),
+      ),
+    ),
+  });
 }
 
 /** After-commit driver: first dispatch through the committed journal (never a
@@ -632,7 +652,11 @@ export function createPostgresCancellationRefundFollowUp(
       readonly orderReference: string;
       readonly requestReference: string;
       readonly operationReference: string;
-    }): Promise<{ readonly status: CancellationRefundStatus; readonly amountMinor: bigint }> {
+    }): Promise<{
+      readonly status: CancellationRefundStatus;
+      readonly amountMinor: bigint;
+      readonly tipAmountMinor: bigint;
+    }> {
       const raw = exactPaymentObject(value, [
         "orderReference",
         "requestReference",
@@ -690,11 +714,16 @@ export function createPostgresCancellationRefundFollowUp(
         return Object.freeze({
           status: before.current.status,
           amountMinor: before.current.amountMinor,
+          tipAmountMinor: before.current.tipAmountMinor,
         });
       const after = await options.transactions.run((tx) =>
         status(tx, orderReference, requestReference),
       );
-      return Object.freeze({ status: after.status, amountMinor: after.amountMinor });
+      return Object.freeze({
+        status: after.status,
+        amountMinor: after.amountMinor,
+        tipAmountMinor: after.tipAmountMinor,
+      });
     },
   });
 }

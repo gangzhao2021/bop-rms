@@ -33,8 +33,14 @@ export function itemCancellationStatus(
 /** What the server's preview means for the customer, in staff words. */
 export function itemCancelPreviewText(order: Order, preview: ItemCancelPreview) {
   const refund = orderMoney(preview.refund);
+  // DEC-TIP-REFUND-PROPORTIONAL: the items' share of the tip is refunded with them.
   if (preview.scope === "Items")
-    return `Refund ${refund} (items and tax; the tip is not refunded).`;
+    return preview.refund.includesTip
+      ? `Refund ${refund} (items, tax and ${orderMoney({
+          amountMinor: preview.refund.tipAmountMinor,
+          currencyCode: preview.refund.currencyCode,
+        })} of the tip).`
+      : `Refund ${refund} (items and tax).`;
   return order.orderType === "Pickup"
     ? `These are the last items: the whole order is cancelled and the remaining payment of ${refund} is refunded, including any tip.`
     : `These are the last items of this round: the whole round is cancelled and its remaining payment of ${refund} is refunded, including any tip.`;
@@ -109,8 +115,9 @@ export function ItemCancelStatus({
 
 /**
  * WP-2423 Q6 step 2: cancel some items of a paid batch before the kitchen starts them. Staff pick
- * the items and a reason; the server previews the refund for the exact selection (the items' net
- * and tax, or — when they are the last items — the whole remaining payment including any tip).
+ * the items and a reason; the server previews the refund for the exact selection (the items' net,
+ * tax and share of the tip, or — when they are the last items — the whole remaining payment
+ * including any tip).
  * One attempt keeps its operation reference so a lost answer is retried safely; any settled answer
  * refreshes the order.
  */
@@ -240,8 +247,8 @@ export function StaffItemCancelAction({
             : `Cancel items from round ${batch.sequence} of order ${order.orderNumber}`}
         </h2>
         <p>
-          Only items the kitchen has not started. The customer is refunded for the cancelled items
-          and their tax; the rest of the order continues.
+          Only items the kitchen has not started. The customer is refunded for the cancelled items,
+          their tax and their share of any tip; the rest of the order continues.
         </p>
         <form
           hidden={!formOpen}

@@ -94,8 +94,8 @@ export interface ReceiptRefundLine {
 /**
  * WP-2423 (v15 3cd0f8dd M4): what one confirmed refund returned, so a refund version states it:
  * - "Refund": a refund staff made at the customer's request (items, their tax, any tip share);
- * - "ItemCancellation": items the Store cancelled after payment (their price and tax, and any tip
- *   the refund returned);
+ * - "ItemCancellation": items the Store cancelled after payment (their price, tax and the share of
+ *   the tip the refund returned — DEC-TIP-REFUND-PROPORTIONAL);
  * - "RoundRefund": a whole paid round (or order) returned in full (what was left of its items,
  *   their tax and its tip);
  * - "Other": an amount refunded on a payment that its owner did not split into items.
