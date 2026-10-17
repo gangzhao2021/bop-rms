@@ -8,6 +8,7 @@ import {
   type StaffSwitchRead,
   type SwitchStaffChoice,
 } from "./staff-pin-client.js";
+import { announceStaffSignInEnded } from "./staff-session-reads.js";
 
 /**
  * WP-2423 (design "A"): "Switch staff" on a store's shared tablet. A staff member picks their
@@ -350,6 +351,8 @@ export function StaffSwitchPage({ client }: { readonly client?: StaffPinClient }
     setMessage(null);
     void source.unlock(person.choice, sent).then(
       (result) => {
+        // The PIN sign-in replaced this browser's sign-in: the other tabs cover at once.
+        announceStaffSignInEnded();
         setMessage({ kind: "SigningIn" });
         window.location.assign(result.next);
       },

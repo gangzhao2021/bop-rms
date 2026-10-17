@@ -882,3 +882,115 @@ test("@production a browser that is not a registered tablet says a signed-out co
   await page.setViewportSize({ width: 1440, height: 900 });
   await expectNoInternalText(page);
 });
+
+/** Every request that uses the staff sign-in (all `/merchant/…` but the sign-in plumbing). */
+function staffSignInRequests(page: Page) {
+  const seen = { count: 0, paths: [] as string[] };
+  const plumbing = /^\/merchant\/(?:session(?:\/|$)|sign-in-entry$|logout$|staff-switch(?:\/|$))/u;
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path.startsWith("/merchant/") && !plumbing.test(path)) {
+      seen.count++;
+      seen.paths.push(path);
+    }
+  });
+  return seen;
+}
+
+/** Home and Orders; Orders answers like the BFF: `403 request_denied` once the sign-in ended. */
+async function homeAnsweringLikeTheServer(page: Page) {
+  await page.clock.install({ time: T0 });
+  await workspace(page, [
+    { screenId: "HOME-OVERVIEW", label: "Overview", href: "/app", permission: "merchant.access" },
+    {
+      screenId: "OPS-ORDER-QUEUE",
+      label: "Orders",
+      href: "/operations/orders",
+      permission: "ordering.operate",
+    },
+  ]);
+  const server = await identity(page);
+  const orders = { denied: false };
+  await page.route("**/merchant/orders", (route) =>
+    server.ended || orders.denied
+      ? route.fulfill({ status: 403, json: { error: "request_denied" } })
+      : route.fulfill({ headers, json: { items: [], nextAfterOrderReference: null } }),
+  );
+  return { server, orders };
+}
+
+test("@production Switch staff in one tab covers the other tab at once and stops its reads", async ({
+  context,
+}) => {
+  const tabA = await context.newPage();
+  const tabB = await context.newPage();
+  const a = await homeAnsweringLikeTheServer(tabA);
+  const b = await homeAnsweringLikeTheServer(tabB);
+  const readsA = staffSignInRequests(tabA);
+  await tabA.goto("/app");
+  await tabB.goto("/app");
+  await expect(tabA.getByRole("heading", { level: 1, name: "Synthetic Store" })).toBeVisible();
+  await expect(tabB.getByRole("heading", { level: 1, name: "Synthetic Store" })).toBeVisible();
+  await advance(tabA, a.server, 20_000);
+  expect(readsA.count).toBeGreaterThan(0);
+  const expiryBefore = a.server.expiry;
+
+  await tabB
+    .locator(".workspace-sidebar__footer")
+    .getByRole("button", { name: "Switch staff" })
+    .click();
+  await expect(tabB).toHaveURL(/\/internal-test\/staff$/u);
+  expect(b.server.loggedOut).toBe(1);
+  // Both tabs used the one sign-in cookie of this browser.
+  a.server.ended = true;
+  // Tab A covers within about two seconds, without waiting for a read or a check of its own.
+  const signedOut = tabA.getByRole("dialog", { name: "You’ve been signed out" });
+  await expect(signedOut).toBeVisible({ timeout: 2_000 });
+  await expect(signedOut).toContainText("signed out here or on another screen");
+  expect(a.server.expiry).toBe(expiryBefore);
+  const atCover = readsA.count;
+  // Nothing in tab A reads with the ended sign-in any more: not Home, not Orders, not alerts.
+  await advance(tabA, a.server, 2 * minute);
+  expect(readsA.paths.slice(atCover)).toEqual([]);
+  // Closing the signed-out tab sends nothing with the sign-in either.
+  await tabA.close({ runBeforeUnload: true });
+  expect(readsA.paths.slice(atCover)).toEqual([]);
+});
+
+test("@production a refused read checks the sign-in at once; a genuine denial does not sign out", async ({
+  page,
+}) => {
+  const { server, orders } = await homeAnsweringLikeTheServer(page);
+  const reads = staffSignInRequests(page);
+  await page.goto("/app");
+  await expect(page.getByRole("heading", { level: 1, name: "Synthetic Store" })).toBeVisible();
+  await advance(page, server, 20_000);
+  const signedOut = page.getByRole("dialog", { name: "You’ve been signed out" });
+
+  // A genuine permission denial (sign-in still valid): checked, never covered, at most every 30 s.
+  const expiryBefore = server.expiry;
+  orders.denied = true;
+  await advance(page, server, 2 * minute);
+  await expect(signedOut).toHaveCount(0);
+  const checks = server.expiry - expiryBefore;
+  expect(checks).toBeGreaterThanOrEqual(1);
+  expect(checks).toBeLessThanOrEqual(5);
+  orders.denied = false;
+  await advance(page, server, 35_000);
+
+  // Signed out on another device: the next refused read (403, same body) confirms it at once.
+  server.ended = true;
+  const endedAt = await page.evaluate(() => Date.now());
+  let coveredAt: number | null = null;
+  for (let waited = 0; waited < 60_000 && coveredAt === null; waited += 1_000) {
+    await advance(page, server, 1_000, 1_000);
+    if (await signedOut.isVisible()) coveredAt = await page.evaluate(() => Date.now());
+  }
+  expect(coveredAt).not.toBeNull();
+  // Within one 15 s read cycle (plus the check), not at the next routine check a minute later.
+  expect((coveredAt ?? 0) - endedAt).toBeLessThanOrEqual(17_000);
+  const atCover = reads.count;
+  await advance(page, server, 2 * minute);
+  expect(reads.paths.slice(atCover)).toEqual([]);
+  await expectNoInternalText(page);
+});

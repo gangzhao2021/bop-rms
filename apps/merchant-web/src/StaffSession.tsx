@@ -1,7 +1,12 @@
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { storeTime } from "./StoreTime.js";
-import { setStaffSessionEnded } from "./staff-session-reads.js";
+import {
+  announceStaffSignInEnded,
+  setStaffSessionEnded,
+  subscribeSignedInRequestRefused,
+  subscribeStaffSignInEndedElsewhere,
+} from "./staff-session-reads.js";
 import {
   activityRecorded,
   activityRetryMs,
@@ -97,6 +102,8 @@ export function StaffSwitchButton({
           void (async () => {
             try {
               await source.signOut();
+              // The other tabs of this browser used the same sign-in: they cover at once.
+              announceStaffSignInEnded();
               const entry = await source.signInEntry();
               window.location.assign(entry.path);
             } catch {
@@ -115,6 +122,9 @@ export function StaffSwitchButton({
     </div>
   );
 }
+
+/** A screen whose reads are genuinely denied re-checks its sign-in at most this often. */
+export const REFUSAL_CHECK_INTERVAL_MS = 30_000;
 
 function useNow(fast: boolean): number {
   const [now, setNow] = useState(() => Date.now());
@@ -168,6 +178,8 @@ export function StaffSessionGuard({
   const inFlight = useRef(false);
   const verifying = useRef(false);
   const verifiedEnd = useRef(false);
+  const refusalCheckAt = useRef(Number.NEGATIVE_INFINITY);
+  const endedNow = useRef(false);
   const operational = isOperationalScreen(path) || awaitingAcceptance;
   const notice = current === null ? { kind: "None" as const } : sessionNotice(current, Date.now());
   const now = useNow(notice.kind !== "None");
@@ -309,8 +321,33 @@ export function StaffSessionGuard({
   }, [confirmEnded, csrf, current, ended, now, report, source]);
 
   useEffect(() => {
+    endedNow.current = ended !== null;
     if (ended !== null) dialog.current?.focus();
   }, [ended]);
+  // v15 37e0ecbe: a refused read may mean the sign-in ended elsewhere (the BFF answers that and a
+  // genuine permission denial with the same 403), so check the sign-in at once instead of waiting
+  // for the next routine check; the cover goes up only on the server's explicit "ended". A screen
+  // whose reads are genuinely denied re-checks at most every 30 s.
+  useEffect(
+    () =>
+      subscribeSignedInRequestRefused(() => {
+        if (endedNow.current) return;
+        const at = Date.now();
+        if (at - refusalCheckAt.current < REFUSAL_CHECK_INTERVAL_MS) return;
+        refusalCheckAt.current = at;
+        void confirmEnded("SignedOut");
+      }),
+    [confirmEnded],
+  );
+  // "Switch staff" or a PIN sign-in in another tab of this browser ended this sign-in (the server
+  // already confirmed the sign-out there): cover at once.
+  useEffect(
+    () =>
+      subscribeStaffSignInEndedElsewhere(() => {
+        setEnded((current) => current ?? "SignedOut");
+      }),
+    [],
+  );
   const [slot, setSlot] = useState<HTMLElement | null>(null);
   useEffect(() => {
     onCover?.(ended === null ? null : slot);
