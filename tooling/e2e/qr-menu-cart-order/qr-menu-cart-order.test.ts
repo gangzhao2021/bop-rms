@@ -221,6 +221,8 @@ function menuResult(): CustomerMenuQueryResult {
                 taxInclusive: null,
                 reason: "FINAL_QUOTE_REQUIRED",
               },
+              description: null,
+              photo: null,
             },
           ],
         },

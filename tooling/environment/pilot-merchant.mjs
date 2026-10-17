@@ -50,6 +50,7 @@ import { createMerchantOpeningCount } from "../../apps/api/dist/merchant-opening
 import { createMerchantStoreReceipts } from "../../apps/api/dist/merchant-store-receipts.js";
 import { createMerchantRecipes } from "../../apps/api/dist/merchant-recipes.js";
 import { createMerchantProducts } from "../../apps/api/dist/merchant-products.js";
+import { createPilotProductImages } from "../../apps/api/dist/product-image-route.js";
 import { createMerchantPrices } from "../../apps/api/dist/merchant-prices.js";
 import { createMerchantAllergens } from "../../apps/api/dist/merchant-allergens.js";
 import { createMerchantMenus } from "../../apps/api/dist/merchant-menus.js";
@@ -131,6 +132,7 @@ export async function createInternalMerchant(
     loadDailySettlementCoverage,
     refreshOrderReceiptObservations,
     createInternalUnpaidRoundCancellation,
+    productImageDirectory,
   },
 ) {
   const session = await createInternalMerchantSession(resources);
@@ -1158,6 +1160,10 @@ export async function createInternalMerchant(
     authentication: service,
     references: { next: () => resources.credentials.reference() },
     locale: "en-CA",
+    // WP-2423 menu descriptions and photos (pilot storage adapter in the runtime directory).
+    ...(productImageDirectory === undefined
+      ? {}
+      : { images: createPilotProductImages(productImageDirectory).service }),
   });
   const prices =
     loadPricingCurrencyMetadata === undefined

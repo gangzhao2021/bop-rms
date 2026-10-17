@@ -116,6 +116,8 @@ function found(): CustomerMenuQueryResult {
                 taxInclusive: null,
                 reason: "FINAL_QUOTE_REQUIRED",
               },
+              description: null,
+              photo: null,
             },
           ],
         },
@@ -222,6 +224,52 @@ describe("WP-1026 Customer Menu REST API", () => {
     const malformed = await fetch(url(port));
     expect(malformed.status).toBe(503);
     expect(JSON.stringify(await malformed.json())).not.toContain("raw-secret");
+  });
+
+  it("serializes the published description and photo sizes (WP-2423)", async () => {
+    const catalog = new MutablePort();
+    const value = found();
+    if (value.status !== "Found") throw new Error("fixture");
+    const sellable = value.menu.sections[0]?.sellables[0];
+    if (sellable === undefined) throw new Error("fixture");
+    const rendition = {
+      url: "/media/images/" + "b".repeat(64) + ".webp",
+      contentType: "image/webp" as const,
+      width: 640,
+      height: 480,
+    };
+    catalog.result = {
+      ...value,
+      menu: {
+        ...value.menu,
+        sections: [
+          {
+            ...value.menu.sections[0],
+            sellables: [
+              {
+                ...sellable,
+                description: "Espresso with steamed milk.",
+                photo: {
+                  altText: "Latte in a white cup",
+                  width: 1280,
+                  height: 960,
+                  renditions: [{ ...rendition, internalObjectKey: "raw-key" }],
+                },
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const response = await fetch(url(await listen(catalog)));
+    const body = (await response.json()) as {
+      menu: { sections: { sellables: Record<string, unknown>[] }[] };
+    };
+    expect(body.menu.sections[0]?.sellables[0]).toMatchObject({
+      description: "Espresso with steamed milk.",
+      photo: { altText: "Latte in a white cup", width: 1280, height: 960, renditions: [rendition] },
+    });
+    expect(JSON.stringify(body)).not.toContain("raw-key");
   });
 
   it("serializes an allowlisted DTO and drops unexpected internal adapter fields", async () => {

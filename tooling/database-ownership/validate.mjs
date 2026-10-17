@@ -441,6 +441,8 @@ async function scanUnsupported(root, module, diagnostics) {
             "image_processing_completion",
             "image_rendition",
           ],
+          // WP-2423 menu photos: Brand-scoped product image records only.
+          "src/infrastructure/persistence/product-image-store.ts": ["product_image"],
         }[moduleRelative];
         const acceptedMediaImageProcessingAsset =
           module.packageName === "@bop/media" &&

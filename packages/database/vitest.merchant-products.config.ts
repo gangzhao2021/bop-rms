@@ -2,7 +2,10 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    include: ["packages/database/test/merchant-products-acceptance.test.mjs"],
+    include: [
+      "packages/database/test/merchant-products-acceptance.test.mjs",
+      "packages/database/test/merchant-product-photo-acceptance.test.mjs",
+    ],
     fileParallelism: false,
     hookTimeout: 180_000,
     testTimeout: 180_000,

@@ -13,8 +13,10 @@ import {
   type MenuAllergenProvenanceSnapshot,
 } from "../contracts/allergen-provenance.js";
 import {
+  parsePublishedSellablePresentation,
   parseReviewedMenuContent,
   type PublishedOptionRule,
+  type PublishedSellablePresentation,
 } from "../contracts/published-menu-projection.js";
 
 export interface MenuReviewSellableFact {
@@ -25,6 +27,20 @@ export interface MenuReviewSellableFact {
   readonly skuLifecycle: ProductLifecycle;
   readonly localizedNames: Readonly<Record<string, string>>;
   readonly optionRules: readonly PublishedOptionRule[];
+  /** WP-2423: the Product's description and resolved photo (resolved by the composition through Media). */
+  readonly presentation?: PublishedSellablePresentation;
+}
+
+/** A presentation worth showing: a description or a photo; otherwise none is published. */
+function reviewedPresentation(
+  value: PublishedSellablePresentation | undefined,
+): { readonly presentation: PublishedSellablePresentation } | Record<string, never> {
+  if (
+    value === undefined ||
+    (value.photo === null && Object.keys(value.localizedDescriptions).length === 0)
+  )
+    return {};
+  return { presentation: parsePublishedSellablePresentation(value) };
 }
 
 /** Assemble owned current facts; never accept a caller-authored display snapshot.
@@ -139,6 +155,7 @@ export function buildReviewedMenuContent(input: {
               : "Unavailable",
           optionRules: fact.optionRules,
           allergenDisclosure,
+          ...reviewedPresentation(fact.presentation),
         };
       }),
     })),

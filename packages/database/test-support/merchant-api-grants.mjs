@@ -16,6 +16,12 @@ export const productApiGrants = [
   "GRANT SELECT ON rms_catalog.availability_rule TO ROLE_",
 ];
 
+/** WP-2423 menu descriptions and photos: product photo records (pilot-acl-additions.json). */
+export const productPhotoApiGrants = [
+  "GRANT USAGE ON SCHEMA bop_media TO ROLE_",
+  "GRANT SELECT,INSERT ON bop_media.product_image TO ROLE_",
+];
+
 /** The pilot API role's grants for Brand option sets and product bindings (pilot-acl-additions.json). */
 export const optionSetApiGrants = [
   "GRANT SELECT,INSERT,UPDATE ON rms_catalog.option_set,rms_catalog.option_set_version,rms_catalog.option TO ROLE_",

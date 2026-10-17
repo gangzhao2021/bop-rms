@@ -4,6 +4,7 @@ import process from "node:process";
 import { URL } from "node:url";
 import { CustomerPaymentResultHandler } from "../../apps/api/dist/customer-payment-result.js";
 import { createMerchantBffRouter } from "../../apps/api/dist/merchant-bff.js";
+import { createPilotProductImages } from "../../apps/api/dist/product-image-route.js";
 import { CustomerPaymentIntentHandler } from "../../apps/api/dist/customer-payment-intent.js";
 import { createServer } from "node:https";
 import { request } from "node:http";
@@ -29,6 +30,7 @@ export async function startInternalCustomerServer({
   loadProfile,
   keyFile,
   certificateFile,
+  productImageDirectory,
 }) {
   if (process.env.NODE_ENV !== "development") throw new Error("INTERNAL_TEST_ONLY");
   const profile = await loadProfile();
@@ -176,6 +178,9 @@ export async function startInternalCustomerServer({
     });
     // WP-2423 (v15 run): hashed build files are cached for a year and sent compressed; the app
     // pages and other unhashed files are revalidated so a deploy is picked up.
+    // WP-2423 menu descriptions and photos: published product photo sizes, named by content hash.
+    if (productImageDirectory !== undefined)
+      app.get("/media/images/:name", createPilotProductImages(productImageDirectory).fileHandler);
     const assets = resolve("apps/customer-pwa/dist");
     app.use(createPilotStaticAssets(assets));
     const merchantAssets = resolve("apps/merchant-web/dist");

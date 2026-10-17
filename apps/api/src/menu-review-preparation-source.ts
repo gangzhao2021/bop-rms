@@ -1,5 +1,6 @@
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import { readClosedRecord } from "@bop/identity";
+import { loadProductImages } from "@bop/media";
 import {
   createPostgresMenuDraftSource,
   createPostgresMenuReviewContentStore,
@@ -118,6 +119,57 @@ export function createMenuReviewPreparationSource(options: {
           brandReference: brand,
           authorize: async () => authorize("Catalog"),
         })(tx, { sellableReferences: references, observedAt: at });
+        // WP-2423 menu descriptions and photos: the review pins each product's description and the
+        // sizes of its photo (Media's immutable image record), so customers see exactly what was
+        // reviewed and a later draft edit changes the review's dependency digest.
+        const photoReferences = [
+          ...new Set(
+            products.flatMap((product) =>
+              product.customerPresentation?.photo
+                ? [String(product.customerPresentation.photo.imageReference)]
+                : [],
+            ),
+          ),
+        ].sort();
+        const images = photoReferences.length
+          ? await loadProductImages(tx, { brandReference: brand, imageReferences: photoReferences })
+          : new Map<string, never>();
+        const presentationOf = (product: (typeof products)[number]) => {
+          const presentation = product.customerPresentation;
+          if (
+            presentation === undefined ||
+            (Object.keys(presentation.localizedDescriptions).length === 0 &&
+              presentation.photo === null)
+          )
+            return {};
+          const reference = presentation.photo?.imageReference;
+          const image = reference === undefined ? undefined : images.get(String(reference));
+          if (
+            presentation.photo !== null &&
+            (image === undefined || image.productReference !== String(product.productReference))
+          )
+            return fail();
+          return {
+            presentation: {
+              localizedDescriptions: presentation.localizedDescriptions,
+              photo:
+                presentation.photo === null || image === undefined
+                  ? null
+                  : {
+                      imageReference: presentation.photo.imageReference,
+                      localizedAltText: presentation.photo.localizedAltText,
+                      width: image.width,
+                      height: image.height,
+                      renditions: image.renditions.map((rendition) => ({
+                        contentType: rendition.contentType,
+                        width: rendition.width,
+                        height: rendition.height,
+                        path: rendition.path,
+                      })),
+                    },
+            },
+          };
+        };
         const readOptions = createPostgresMenuReviewOptionSource({
           brandReference: brand,
           authorize: async () => authorize("Catalog"),
@@ -219,7 +271,7 @@ export function createMenuReviewPreparationSource(options: {
               ),
             ),
           });
-          sellables.push({ ...product, optionRules });
+          sellables.push({ ...product, optionRules, ...presentationOf(product) });
         }
         if (!registry) return fail();
         const provenance = {

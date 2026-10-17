@@ -5,6 +5,9 @@ import {
   parseCatalogLocale,
   parseCatalogReference,
   parseLocalizedNames,
+  parseLocalizedPlainText,
+  productDescriptionMaximumLength,
+  productPhotoAltTextMaximumLength,
 } from "./product.js";
 import { parseMenuCategoryBindings, type MenuCategoryBinding } from "./menu-category-bindings.js";
 import { parsePublishingDigest } from "@bop/publishing";
@@ -94,6 +97,123 @@ export function publishedDefaultOptionSelections(
   return Object.freeze([...selected.values()]);
 }
 
+export type PublishedImageContentType = "image/jpeg" | "image/webp";
+export interface PublishedImageRendition {
+  readonly contentType: PublishedImageContentType;
+  readonly width: 320 | 640 | 1280;
+  readonly height: number;
+  /** Content-addressed public path: /media/images/<sha256>.jpg|webp */
+  readonly path: string;
+}
+/**
+ * WP-2423: the reviewed description and photo of a sellable (shared by all sizes of its Product).
+ * Present only when there is a description or a photo, so older snapshots keep their digest.
+ */
+export interface PublishedSellablePresentation {
+  readonly localizedDescriptions: Readonly<Record<string, string>>;
+  readonly photo: {
+    readonly imageReference: CatalogReference;
+    readonly localizedAltText: Readonly<Record<string, string>>;
+    readonly width: number;
+    readonly height: number;
+    readonly renditions: readonly PublishedImageRendition[];
+  } | null;
+}
+export const publishedImagePathPattern = /^\/media\/images\/[0-9a-f]{64}\.(?:jpg|webp)$/u;
+const renditionOrder: readonly (readonly [320 | 640 | 1280, PublishedImageContentType])[] = [
+  [320, "image/jpeg"],
+  [320, "image/webp"],
+  [640, "image/jpeg"],
+  [640, "image/webp"],
+  [1280, "image/jpeg"],
+  [1280, "image/webp"],
+];
+function record(value: unknown, keys: readonly string[]): Readonly<Record<string, unknown>> {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  )
+    return invalid();
+  const own = Reflect.ownKeys(value);
+  if (
+    own.length !== keys.length ||
+    own.some((key) => typeof key !== "string" || !keys.includes(key))
+  )
+    return invalid();
+  const result: Record<string, unknown> = {};
+  for (const key of keys) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) return invalid();
+    result[key] = descriptor.value;
+  }
+  return result;
+}
+function positiveInteger(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > 100000)
+    return invalid();
+  return value as number;
+}
+/** Strict: exact keys, six renditions in order (320/640/1280 × JPEG then WebP), public paths. */
+export function parsePublishedSellablePresentation(value: unknown): PublishedSellablePresentation {
+  const raw = record(value, ["localizedDescriptions", "photo"]);
+  const localizedDescriptions = parseLocalizedPlainText(
+    raw.localizedDescriptions,
+    productDescriptionMaximumLength,
+    { requiredLocale: null, allowEmpty: true },
+  );
+  let photo: PublishedSellablePresentation["photo"] = null;
+  if (raw.photo !== null) {
+    const rawPhoto = record(raw.photo, [
+      "imageReference",
+      "localizedAltText",
+      "width",
+      "height",
+      "renditions",
+    ]);
+    if (!Array.isArray(rawPhoto.renditions) || rawPhoto.renditions.length !== renditionOrder.length)
+      return invalid();
+    const renditions = Object.freeze(
+      renditionOrder.map(([width, contentType], index) => {
+        const item = record((rawPhoto.renditions as unknown[])[index], [
+          "contentType",
+          "width",
+          "height",
+          "path",
+        ]);
+        if (
+          item.contentType !== contentType ||
+          item.width !== width ||
+          typeof item.path !== "string" ||
+          !publishedImagePathPattern.test(item.path) ||
+          !item.path.endsWith(contentType === "image/jpeg" ? ".jpg" : ".webp")
+        )
+          return invalid();
+        return Object.freeze({
+          contentType,
+          width,
+          height: positiveInteger(item.height),
+          path: item.path,
+        });
+      }),
+    );
+    photo = Object.freeze({
+      imageReference: parseCatalogReference(rawPhoto.imageReference),
+      localizedAltText: parseLocalizedPlainText(
+        rawPhoto.localizedAltText,
+        productPhotoAltTextMaximumLength,
+        { requiredLocale: null, allowEmpty: false },
+      ),
+      width: positiveInteger(rawPhoto.width),
+      height: positiveInteger(rawPhoto.height),
+      renditions,
+    });
+  }
+  if (photo === null && Object.keys(localizedDescriptions).length === 0) return invalid();
+  return Object.freeze({ localizedDescriptions, photo });
+}
+
 export interface PublishedSellableSnapshot {
   readonly placementReference: CatalogReference;
   readonly sellableReference: CatalogReference;
@@ -105,6 +225,8 @@ export interface PublishedSellableSnapshot {
   readonly configuredAvailability: "Available" | "Unavailable";
   readonly optionRules: readonly PublishedOptionRule[];
   readonly allergenDisclosure: SellableAllergenDisclosure;
+  /** WP-2423: reviewed description and photo; absent when the item has neither. */
+  readonly presentation?: PublishedSellablePresentation;
 }
 export interface PublishedMenuSectionSnapshot {
   readonly sectionReference: CatalogReference;
@@ -295,6 +417,13 @@ function sellable(value: PublishedSellableSnapshot, defaultLocale: string) {
     configuredAvailability: value.configuredAvailability,
     optionRules: Object.freeze(value.optionRules.map((rule) => optionRule(rule, defaultLocale))),
     allergenDisclosure: parseSellableAllergenDisclosure(value.allergenDisclosure, defaultLocale),
+    ...(Object.hasOwn(value, "presentation")
+      ? {
+          presentation: parsePublishedSellablePresentation(
+            Object.getOwnPropertyDescriptor(value, "presentation")?.value,
+          ),
+        }
+      : {}),
   });
 }
 

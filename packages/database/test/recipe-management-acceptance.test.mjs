@@ -44,12 +44,19 @@ import { createPostgresConfiguredRecipeDemandSource } from "../../rms/recipe/src
 import { createPostgresRecipeModifierSource } from "../../rms/recipe/src/index.ts";
 import { createPostgresBaseRecipeDemandSource } from "../../rms/recipe/src/index.ts";
 import { createHash } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import {
+  createLocalFilesystemMediaImageObjectStore,
+  createProductImageService,
+} from "../../bop/media/src/index.ts";
 import { createPostgresBaseRecipeSource } from "../../rms/recipe/src/index.ts";
 import { createRecipeService } from "../../rms/recipe/src/index.ts";
 import { createBrand, createTenantContext } from "../../bop/tenant/src/index.ts";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { URL, fileURLToPath } from "node:url";
 import pg from "pg";
 import { it, vi } from "vitest";
 import { createPostgresRecipeStore } from "../../rms/recipe/src/infrastructure/persistence/recipe-store.ts";
@@ -58,6 +65,8 @@ import { createPostgresRecipeQueryStore } from "../../rms/recipe/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 const { Client } = pg;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+// Test image generator only: sharp is a dependency of @bop/media, not of this package.
+const mediaSharp = createRequire(new URL("../../bop/media/package.json", import.meta.url))("sharp");
 const id = (n) => `018f9a00-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const digest = (c) => `sha256:${c.repeat(64)}`;
 const at = "2026-08-13T18:00:00.000Z";
@@ -1112,6 +1121,99 @@ async function prove(context) {
       await runner.run((tx) => menuStore.read(tx, id(801), prepared.record.snapshotDigest, at)),
       prepared.record,
     );
+    // WP-2423 menu descriptions and photos: the review pins the Product's description and the
+    // sizes of its Media photo (read under the restricted role with the pilot bop_media grants);
+    // a photo whose Media record is missing cannot be reviewed. Synthetic image.
+    await admin.query("RESET ROLE");
+    const photoRoot = await mkdtemp(path.join(tmpdir(), "bop-review-photo-"));
+    try {
+      const productRow = (
+        await admin.query(
+          "SELECT product_id,product_version_id FROM rms_catalog.sku WHERE sku_id=$1",
+          [id(206)],
+        )
+      ).rows[0];
+      await admin.query("BEGIN");
+      const photo = await createProductImageService({
+        objectStore: createLocalFilesystemMediaImageObjectStore({ directory: photoRoot }),
+      }).ingest(admin, {
+        imageReference: id(9930),
+        tenantReference: id(1),
+        brandReference: id(2),
+        productReference: productRow.product_id,
+        actorReference: id(3),
+        createdAt: at,
+        declaredContentType: "image/jpeg",
+        bytes: new Uint8Array(
+          await mediaSharp({
+            create: { width: 800, height: 600, channels: 3, background: { r: 90, g: 60, b: 30 } },
+          })
+            .jpeg()
+            .toBuffer(),
+        ),
+      });
+      await admin.query("COMMIT");
+      const presentationJson = {
+        localizedDescriptions: { "en-CA": "Synthetic reviewed description." },
+        photo: { imageReference: id(9930), localizedAltText: { "en-CA": "Synthetic photo" } },
+      };
+      await admin.query(
+        "UPDATE rms_catalog.product_version SET customer_presentation_json=$2 WHERE product_version_id=$1",
+        [productRow.product_version_id, JSON.stringify(presentationJson)],
+      );
+      await admin.query("GRANT USAGE ON SCHEMA bop_media TO " + role);
+      await admin.query("GRANT SELECT ON bop_media.product_image TO " + role);
+      await admin.query("SET ROLE " + role);
+      const withPhoto = await runner.run((tx) => menuSource.prepare(tx, menuInput));
+      assert.deepEqual(withPhoto.record.content.sections[0].sellables[0].presentation, {
+        localizedDescriptions: presentationJson.localizedDescriptions,
+        photo: {
+          imageReference: id(9930),
+          localizedAltText: { "en-CA": "Synthetic photo" },
+          width: photo.width,
+          height: photo.height,
+          renditions: photo.renditions.map(({ contentType, width, height, path: file }) => ({
+            contentType,
+            width,
+            height,
+            path: file,
+          })),
+        },
+      });
+      assert.equal(
+        withPhoto.record.content.sections[0].sellables[0].presentation.photo.renditions.length,
+        6,
+      );
+      assert.notEqual(withPhoto.record.dependencyDigest, changedMenu.record.dependencyDigest);
+      await admin.query("RESET ROLE");
+      await admin.query(
+        "UPDATE rms_catalog.product_version SET customer_presentation_json=$2 WHERE product_version_id=$1",
+        [
+          productRow.product_version_id,
+          JSON.stringify({
+            ...presentationJson,
+            photo: { ...presentationJson.photo, imageReference: id(9931) },
+          }),
+        ],
+      );
+      await admin.query("SET ROLE " + role);
+      await assert.rejects(
+        runner.run((tx) => menuSource.prepare(tx, menuInput)),
+        { code: "MENU_RECIPE_ALLERGEN_UNAVAILABLE" },
+      );
+      await admin.query("RESET ROLE");
+      await admin.query(
+        "UPDATE rms_catalog.product_version SET customer_presentation_json=NULL WHERE product_version_id=$1",
+        [productRow.product_version_id],
+      );
+      await admin.query("SET ROLE " + role);
+      assert.deepEqual(
+        (await runner.run((tx) => menuSource.prepare(tx, menuInput))).record.content,
+        changedMenu.record.content,
+      );
+    } finally {
+      await rm(photoRoot, { recursive: true, force: true });
+    }
     await admin.query("RESET ROLE");
     await admin.query("GRANT USAGE ON SCHEMA bop_publishing TO " + role);
     await admin.query(

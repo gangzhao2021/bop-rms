@@ -121,18 +121,23 @@ export function parseCounterMenu(value: unknown): CounterMenu {
           name: text(section.name),
           items: Object.freeze(
             section.sellables.map((value: unknown) => {
-              const item = record(value, [
-                "sellableReference",
-                "productVersionReference",
-                "name",
-                "presentationRole",
-                "pinned",
-                "availability",
-                "optionRules",
-                "allergenDisclosure",
-                "displayPrice",
-                "taxDisplayContext",
-              ]);
+              const item = record(
+                value,
+                [
+                  "sellableReference",
+                  "productVersionReference",
+                  "name",
+                  "presentationRole",
+                  "pinned",
+                  "availability",
+                  "optionRules",
+                  "allergenDisclosure",
+                  "displayPrice",
+                  "taxDisplayContext",
+                ],
+                // The customer description and photo; the counter does not show them.
+                ["description", "photo"],
+              );
               const price = record(item.displayPrice, ["status", "amount", "currency", "reason"]);
               if (
                 (item.availability !== "Available" && item.availability !== "SoldOut") ||

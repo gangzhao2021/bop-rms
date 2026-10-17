@@ -199,6 +199,22 @@ export function publicFound(value: CustomerMenuFound): CustomerMenuFound {
             taxInclusive: sellable.taxDisplayContext.taxInclusive,
             reason: sellable.taxDisplayContext.reason,
           },
+          // WP-2423 menu descriptions and photos: the published description and photo sizes.
+          description: sellable.description,
+          photo:
+            sellable.photo === null
+              ? null
+              : {
+                  altText: sellable.photo.altText,
+                  width: sellable.photo.width,
+                  height: sellable.photo.height,
+                  renditions: sellable.photo.renditions.map((rendition) => ({
+                    url: rendition.url,
+                    contentType: rendition.contentType,
+                    width: rendition.width,
+                    height: rendition.height,
+                  })),
+                },
         })),
       })),
     },

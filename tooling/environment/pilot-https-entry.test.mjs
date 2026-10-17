@@ -31,6 +31,8 @@ it("preserves existing table selectors and protected TLS paths without opening r
       expect(createResources).not.toHaveBeenCalled();
       expect(options.keyFile).toBe("/synthetic/customer-tls-key.pem");
       expect(options.certificateFile).toBe("/synthetic/customer-tls-cert.pem");
+      // WP-2423 menu descriptions and photos: pilot storage adapter under the runtime directory.
+      expect(options.productImageDirectory).toBe("/synthetic/media/product-images");
       expect(options.diningEntries[0].selector).toBe("table-1");
       expect(options.diningEntries[0].label).toBe("Synthetic table");
       expect(typeof options.createInternalMerchant).toBe("function");
@@ -144,6 +146,8 @@ it("preserves configured refund roles, provider and Pickup workstation without g
       "createInternalTableQr",
       // WP-2423 Q18 option A: TEST-ONLY derived staff PIN pepper and shared-tablet key.
       "createInternalStaffPinCredentials",
+      // WP-2423 menu descriptions and photos: product photo storage in the runtime directory.
+      "productImageDirectory",
     ].sort(),
   );
   expect(typeof dependencies.refundUnmatchedCapture).toBe("function");

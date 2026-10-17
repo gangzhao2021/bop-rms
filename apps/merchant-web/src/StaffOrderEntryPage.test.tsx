@@ -94,6 +94,21 @@ function counterMenuResponse() {
                 allergenDisclosure: {},
                 displayPrice: price("3.25"),
                 taxDisplayContext: {},
+                // Newer menus carry the customer description and photo; older ones omit them.
+                description: "Laminated butter croissant, baked each morning.",
+                photo: {
+                  altText: "Croissant on a white plate",
+                  width: 1280,
+                  height: 960,
+                  renditions: [
+                    {
+                      url: "/media/images/" + "a".repeat(64) + ".jpg",
+                      contentType: "image/jpeg",
+                      width: 640,
+                      height: 480,
+                    },
+                  ],
+                },
               },
             ],
           },

@@ -21,6 +21,7 @@ import {
   parseProductLifecycle,
   parseProductVersion,
   parseProductCategoryClassification,
+  parseProductCustomerPresentation,
   parseVariantSelections,
   transitionCatalogLifecycle,
   type CatalogInstant,
@@ -252,7 +253,7 @@ export function createCatalogProductService(ports: CatalogProductPorts) {
           "operationReference",
           "requestedAt",
         ],
-        ["categoryClassification", "editorContent"],
+        ["categoryClassification", "editorContent", "customerPresentation"],
       );
       const op = operationInput({
         operationReference: raw.operationReference,
@@ -266,6 +267,14 @@ export function createCatalogProductService(ports: CatalogProductPorts) {
         throw new CatalogError("CATALOG_INPUT_INVALID");
       const defaultLocale = parseCatalogLocale(raw.defaultLocale);
       const localizedNames = parseLocalizedNames(raw.localizedNames, defaultLocale);
+      const presentation = Object.hasOwn(raw, "customerPresentation")
+        ? {
+            customerPresentation: parseProductCustomerPresentation(
+              raw.customerPresentation,
+              defaultLocale,
+            ),
+          }
+        : {};
       const taxClassificationReference =
         raw.taxClassificationReference === null
           ? null
@@ -318,6 +327,7 @@ export function createCatalogProductService(ports: CatalogProductPorts) {
             skus: skuInputs,
             ...classification,
             ...completeContent,
+            ...presentation,
             requestedAt: op.requestedAt,
           })}`,
         ),
@@ -365,6 +375,7 @@ export function createCatalogProductService(ports: CatalogProductPorts) {
           skus,
           ...classification,
           ...completeContent,
+          ...presentation,
           optionBindings: [],
           createdAt: op.requestedAt,
           updatedAt: op.requestedAt,
@@ -481,9 +492,15 @@ export function createCatalogProductService(ports: CatalogProductPorts) {
         })
         .catch(failure);
       if (!available) throw new CatalogError("CATALOG_CODE_CONFLICT");
+      // WP-2423: a draft written without the customer description/photo (an editor that does not
+      // show them) keeps the current ones; an explicit empty value clears them.
+      const nextDraft =
+        draft.customerPresentation === undefined && current.draft.customerPresentation !== undefined
+          ? { ...draft, customerPresentation: current.draft.customerPresentation }
+          : draft;
       const next = parseProductAggregate({
         ...current,
-        draft,
+        draft: nextDraft,
         aggregateVersion: current.aggregateVersion + 1,
         updatedAt: op.requestedAt,
       });

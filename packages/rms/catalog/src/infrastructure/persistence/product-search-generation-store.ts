@@ -508,6 +508,10 @@ export function createPostgresProductSearchGenerationStore(options: {
           ...(Object.hasOwn(snapshot.draft as object, "categoryClassification")
             ? ["categoryClassification"]
             : []),
+          // WP-2423: customer description/photo are not list fields; their presence is allowed.
+          ...(Object.hasOwn(snapshot.draft as object, "customerPresentation")
+            ? ["customerPresentation"]
+            : []),
         ]);
         const createdAt = parseCatalogInstant(snapshot.createdAt),
           updatedAt = parseCatalogInstant(snapshot.updatedAt),

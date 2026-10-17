@@ -130,6 +130,8 @@ for (const screen of [
                         sellableReference: id(3),
                         productVersionReference: id(10),
                         name: "Synthetic tea",
+                        description: null,
+                        photo: null,
                         presentationRole: "Standard",
                         pinned: false,
                         availability: "Available",

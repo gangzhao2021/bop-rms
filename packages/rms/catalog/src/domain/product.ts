@@ -60,9 +60,24 @@ export interface ProductCategoryClassification {
   readonly primaryCategoryReference: CatalogReference | null;
 }
 
+/**
+ * WP-2423: what customers read about a Product on the menu (shared by all of its sizes). Omitted
+ * on legacy versions; `{ localizedDescriptions: {}, photo: null }` is an explicit "none".
+ */
+export interface ProductCustomerPresentation {
+  /** Plain text, 1..240 characters per language; may be empty. */
+  readonly localizedDescriptions: Readonly<Record<string, string>>;
+  /** A photo recorded by Media for this Product; alt text 1..160 characters incl. the default language. */
+  readonly photo: {
+    readonly imageReference: CatalogReference;
+    readonly localizedAltText: Readonly<Record<string, string>>;
+  } | null;
+}
+
 export interface ProductVersion {
   readonly editorContent?: ProductEditorContentDetails;
   readonly categoryClassification?: ProductCategoryClassification;
+  readonly customerPresentation?: ProductCustomerPresentation;
   readonly versionReference: CatalogReference;
   readonly baseVersionReference: CatalogReference | null;
   readonly status: "Draft";
@@ -201,6 +216,76 @@ export function parseProductCategoryClassification(value: unknown): ProductCateg
   } catch {
     return invalid();
   }
+}
+
+export const productDescriptionMaximumLength = 240;
+export const productPhotoAltTextMaximumLength = 160;
+/**
+ * WP-2423: customer-facing plain text (descriptions, photo alternative text). Whitespace is trimmed
+ * and collapsed to single spaces; control/format characters, markup braces and links are refused.
+ * Idempotent: a normalised value normalises to itself.
+ */
+export function normalizeCatalogPlainText(value: unknown, maximumLength: number): string {
+  if (typeof value !== "string") return invalid();
+  const text = value.replace(/\s+/gu, " ").trim();
+  if (
+    text.length < 1 ||
+    text.length > maximumLength ||
+    /[\p{Cc}\p{Cf}<>{}]|https?:\/\/|www\./iu.test(text)
+  )
+    return invalid();
+  return text;
+}
+/** Localized plain text keyed by locale; `requiredLocale` must be present when given. */
+export function parseLocalizedPlainText(
+  value: unknown,
+  maximumLength: number,
+  options: { readonly requiredLocale: string | null; readonly allowEmpty: boolean },
+): Readonly<Record<string, string>> {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  )
+    return invalid();
+  const keys = Reflect.ownKeys(value);
+  if (keys.length > 32 || (!options.allowEmpty && keys.length === 0)) return invalid();
+  const normalized: Record<string, string> = {};
+  for (const key of keys) {
+    if (typeof key !== "string" || !locale.test(key)) return invalid();
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) return invalid();
+    normalized[key] = normalizeCatalogPlainText(descriptor.value, maximumLength);
+  }
+  if (options.requiredLocale !== null && !Object.hasOwn(normalized, options.requiredLocale))
+    return invalid();
+  return Object.freeze(normalized);
+}
+export function parseProductCustomerPresentation(
+  value: unknown,
+  defaultLocale: unknown,
+): ProductCustomerPresentation {
+  const parsedDefaultLocale = parseCatalogLocale(defaultLocale);
+  const raw = exact(value, ["localizedDescriptions", "photo"]);
+  const localizedDescriptions = parseLocalizedPlainText(
+    raw.localizedDescriptions,
+    productDescriptionMaximumLength,
+    { requiredLocale: null, allowEmpty: true },
+  );
+  let photo: ProductCustomerPresentation["photo"] = null;
+  if (raw.photo !== null) {
+    const rawPhoto = exact(raw.photo, ["imageReference", "localizedAltText"]);
+    photo = Object.freeze({
+      imageReference: parseCatalogReference(rawPhoto.imageReference),
+      localizedAltText: parseLocalizedPlainText(
+        rawPhoto.localizedAltText,
+        productPhotoAltTextMaximumLength,
+        { requiredLocale: parsedDefaultLocale, allowEmpty: false },
+      ),
+    });
+  }
+  return Object.freeze({ localizedDescriptions, photo });
 }
 
 function positive(value: unknown): number {
@@ -457,7 +542,7 @@ export function parseProductVersion(value: unknown): ProductVersion {
       "createdAt",
       "updatedAt",
     ],
-    ["categoryClassification", "editorContent"],
+    ["categoryClassification", "editorContent", "customerPresentation"],
   );
   if (
     raw.status !== "Draft" ||
@@ -503,6 +588,14 @@ export function parseProductVersion(value: unknown): ProductVersion {
     optionBindings,
     ...(Object.hasOwn(raw, "categoryClassification")
       ? { categoryClassification: parseProductCategoryClassification(raw.categoryClassification) }
+      : {}),
+    ...(Object.hasOwn(raw, "customerPresentation")
+      ? {
+          customerPresentation: parseProductCustomerPresentation(
+            raw.customerPresentation,
+            raw.defaultLocale,
+          ),
+        }
       : {}),
     createdAt,
     updatedAt,

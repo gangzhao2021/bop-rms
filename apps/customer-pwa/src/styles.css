@@ -437,6 +437,8 @@
 }
 .menu-card__body {
   display: grid;
+  flex: 1 1 auto;
+  align-content: start;
   min-width: 0;
   gap: 0.125rem;
 }
@@ -446,6 +448,64 @@
   font-weight: 600;
   line-height: 1.3;
   overflow-wrap: anywhere;
+}
+.menu-card__description {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  color: var(--bop-color-text-default);
+  font-size: 0.875rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+/* Fixed square box: the card never shifts while the photo loads. */
+.menu-card__media {
+  display: block;
+  flex: 0 0 auto;
+  align-self: flex-start;
+  width: 88px;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-raised);
+}
+.menu-card__media img,
+.sellable-detail__media img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* With a photo, the price moves under the text so narrow screens keep a readable text column. */
+.menu-card--with-photo .menu-card__link {
+  display: grid;
+  grid-template-areas:
+    "body media"
+    "aside media";
+  grid-template-columns: minmax(0, 1fr) 88px;
+  grid-template-rows: auto 1fr;
+  gap: var(--bop-space-1) var(--bop-space-4);
+}
+.menu-card--with-photo .menu-card__body {
+  grid-area: body;
+}
+.menu-card--with-photo .menu-card__aside {
+  display: flex;
+  flex-wrap: wrap;
+  grid-area: aside;
+  align-items: baseline;
+  align-self: start;
+  justify-items: start;
+  gap: 0 var(--bop-space-2);
+  text-align: start;
+}
+.menu-card--with-photo .menu-card__media {
+  grid-area: media;
+}
+.menu-card--sold-out .menu-card__media img {
+  opacity: 0.5;
 }
 .menu-card__allergens,
 .menu-result-section {
@@ -623,6 +683,27 @@
   margin-bottom: var(--bop-space-3);
   color: inherit;
   font-weight: 500;
+}
+/* Fixed 4:3 box above the heading; removed entirely when there is no photo. */
+.sellable-detail__media {
+  display: block;
+  width: 100%;
+  max-width: 640px;
+  aspect-ratio: 4 / 3;
+  margin-bottom: var(--bop-space-4);
+  overflow: hidden;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-raised);
+}
+.sellable-detail__content {
+  min-width: 0;
+}
+.sellable-detail__description {
+  max-width: 640px;
+  margin: var(--bop-space-3) 0 0;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 .sellable-detail__heading {
   display: flex;
@@ -1596,6 +1677,22 @@
   }
   .menu-cart-bar a {
     width: 18rem;
+  }
+}
+/* Wide screens: the item photo sits beside its details instead of above them. */
+@media (min-width: 60rem) {
+  .sellable-detail--with-photo {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+    column-gap: var(--bop-space-8);
+  }
+  .sellable-detail--with-photo > .sellable-detail__back {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+  .sellable-detail--with-photo > .sellable-detail__media {
+    margin-bottom: 0;
   }
 }
 @media (min-width: 68rem) {

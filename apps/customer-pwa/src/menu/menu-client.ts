@@ -4,6 +4,7 @@ import type {
   MenuJourneyContext,
   MenuLoadResult,
   MenuOptionRule,
+  MenuPhoto,
   MenuSellable,
   MenuView,
 } from "./types.js";
@@ -14,6 +15,8 @@ const instant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const code = /^[A-Z][A-Z0-9_-]{0,63}$/u;
 const locale = /^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-[A-Z]{2}|\d{3})?$/u;
 const forbiddenLabel = /[\p{Cc}\p{Cf}<>{}[\]`*_#]/u;
+const forbiddenProse = /[\p{Cc}\p{Cf}<>{}]/u;
+const imagePath = /^\/media\/images\/[0-9a-f]{64}\.(?:jpg|webp)$/u;
 
 export interface CustomerMenuBoundary {
   readonly fetch: typeof globalThis.fetch;
@@ -55,6 +58,51 @@ function text(value: unknown): string {
   )
     throw new TypeError("safe public text required");
   return value;
+}
+
+/** Staff-written plain prose (descriptions, photo alt text); punctuation allowed, markup not. */
+function prose(value: unknown, maximum: number): string {
+  if (
+    typeof value !== "string" ||
+    value.length < 1 ||
+    value.length > maximum ||
+    value !== value.normalize("NFC") ||
+    value !== value.trim() ||
+    forbiddenProse.test(value)
+  )
+    throw new TypeError("safe public prose required");
+  return value;
+}
+
+function photo(value: unknown): MenuPhoto | null {
+  if (value === null) return null;
+  const raw = exact(value, ["altText", "width", "height", "renditions"]);
+  if (!Array.isArray(raw.renditions) || raw.renditions.length < 1 || raw.renditions.length > 6)
+    throw new TypeError("photo renditions invalid");
+  const renditions = Object.freeze(
+    raw.renditions.map((candidate) => {
+      const rendition = exact(candidate, ["url", "contentType", "width", "height"]);
+      if (
+        typeof rendition.url !== "string" ||
+        !imagePath.test(rendition.url) ||
+        (rendition.contentType !== "image/jpeg" && rendition.contentType !== "image/webp") ||
+        rendition.url.endsWith(".jpg") !== (rendition.contentType === "image/jpeg")
+      )
+        throw new TypeError("photo rendition invalid");
+      return Object.freeze({
+        url: rendition.url,
+        contentType: rendition.contentType as "image/jpeg" | "image/webp",
+        width: positiveInteger(rendition.width),
+        height: positiveInteger(rendition.height),
+      });
+    }),
+  );
+  return Object.freeze({
+    altText: prose(raw.altText, 160),
+    width: positiveInteger(raw.width),
+    height: positiveInteger(raw.height),
+    renditions,
+  });
 }
 
 function reference(value: unknown): string {
@@ -250,6 +298,8 @@ function sellable(value: unknown): MenuSellable {
     "sellableReference",
     "productVersionReference",
     "name",
+    "description",
+    "photo",
     "presentationRole",
     "pinned",
     "availability",
@@ -325,6 +375,8 @@ function sellable(value: unknown): MenuSellable {
   return Object.freeze({
     sellableReference: reference(raw.sellableReference),
     name: text(raw.name),
+    description: raw.description === null ? null : prose(raw.description, 240),
+    photo: photo(raw.photo),
     presentationRole: raw.presentationRole as MenuSellable["presentationRole"],
     pinned: raw.pinned,
     availability: raw.availability as MenuSellable["availability"],

@@ -133,6 +133,9 @@ export function composeMerchantDependencies(
     },
     // WP-2423 Q5: TEST-ONLY authenticator secrets in the private runtime directory.
     staffTotpVerifier: createInternalStaffTotpVerifier({ directory }),
+    // WP-2423 menu descriptions and photos: pilot storage adapter for product photos (production
+    // object storage is an external gate).
+    productImageDirectory: join(directory, "media", "product-images"),
     // WP-2423 P6: TEST-ONLY internal simulator for the unmatched capture refund.
     refundUnmatchedCapture: async (request) => {
       const simulator = await provider();

@@ -38,6 +38,7 @@ const moduleManifestInput = {
       "image_processing_completion",
       "image_rendition",
       "image_scan_admission",
+      "product_image",
     ],
   },
   ownedJobs: [],

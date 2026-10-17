@@ -1271,7 +1271,7 @@ function createPublicationStoreKernel(
                       const d = next.draft;
                       count(
                         await tx.query(
-                          "INSERT INTO rms_catalog.product_version(product_version_id,product_id,brand_id,base_product_version_id,status,default_locale,localized_names_json,tax_classification_id,created_at,updated_at,category_classification_known,primary_category_id,editor_content_json) VALUES($1,$2,$3,$4,'Draft',$5,$6,$7,$8,$8,$9,$10,$11)",
+                          "INSERT INTO rms_catalog.product_version(product_version_id,product_id,brand_id,base_product_version_id,status,default_locale,localized_names_json,tax_classification_id,created_at,updated_at,category_classification_known,primary_category_id,editor_content_json,customer_presentation_json) VALUES($1,$2,$3,$4,'Draft',$5,$6,$7,$8,$8,$9,$10,$11,$12)",
                           [
                             d.versionReference,
                             c.productReference,
@@ -1284,6 +1284,9 @@ function createPublicationStoreKernel(
                             d.categoryClassification !== undefined,
                             d.categoryClassification?.primaryCategoryReference ?? null,
                             d.editorContent === undefined ? null : JSON.stringify(d.editorContent),
+                            d.customerPresentation === undefined
+                              ? null
+                              : JSON.stringify(d.customerPresentation),
                           ],
                         ),
                       );

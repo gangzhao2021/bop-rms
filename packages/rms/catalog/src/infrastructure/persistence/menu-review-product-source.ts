@@ -4,6 +4,7 @@ import {
   parseCatalogInstant,
   parseCatalogLocale,
   parseLocalizedNames,
+  parseProductCustomerPresentation,
   parseProductLifecycle,
   sellableDisplayNames,
 } from "../../contracts/product.js";
@@ -12,6 +13,7 @@ import type { ProductLifecycleTransaction } from "./product-lifecycle-store.js";
 const select = `SELECT s.sku_id,s.product_id,s.product_version_id,s.brand_id,
   p.lifecycle AS product_lifecycle,s.lifecycle AS sku_lifecycle,
   v.default_locale,v.localized_names_json AS product_names,s.localized_names_json AS sku_names,
+  v.customer_presentation_json AS customer_presentation,
   to_char(p.updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS product_updated_at,
   to_char(v.updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS version_updated_at,
   (p.created_at <= $3::timestamptz AND p.updated_at <= $3::timestamptz
@@ -41,6 +43,7 @@ interface Row {
   default_locale: unknown;
   product_names: unknown;
   sku_names: unknown;
+  customer_presentation: unknown;
   product_updated_at: unknown;
   version_updated_at: unknown;
   coherent: boolean;
@@ -105,6 +108,15 @@ export function createPostgresMenuReviewProductSource(options: {
           localizedNames: names,
           productUpdatedAt: parseCatalogInstant(row.product_updated_at),
           versionUpdatedAt: parseCatalogInstant(row.version_updated_at),
+          // WP-2423: the Product's customer description/photo reference, omitted when never set.
+          ...(row.customer_presentation === null || row.customer_presentation === undefined
+            ? {}
+            : {
+                customerPresentation: parseProductCustomerPresentation(
+                  row.customer_presentation,
+                  defaultLocale,
+                ),
+              }),
         });
       });
       if (new Set(facts.map((fact) => fact.sellableReference)).size !== references.length)

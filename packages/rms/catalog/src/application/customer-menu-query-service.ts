@@ -2,6 +2,7 @@ import {
   customerMenuFreshnessTargetMilliseconds,
   type CustomerMenuFound,
   type CustomerMenuOptionRuleDto,
+  type CustomerMenuPhotoDto,
   type CustomerMenuQueryInput,
   type CustomerMenuSellableDto,
 } from "../contracts/customer-menu-query.js";
@@ -18,6 +19,7 @@ import {
   parsePublishedMenuProjection,
   publishedDefaultOptionSelections,
   type PublishedMenuProjection,
+  type PublishedSellablePresentation,
 } from "../domain/published-menu-projection.js";
 import type {
   CustomerMenuQueryPorts,
@@ -120,6 +122,47 @@ function localized(
   return selected;
 }
 
+/** Requested locale, else the menu default, else the first available (sorted) language; null when none. */
+function localizedOptional(
+  texts: Readonly<Record<string, string>>,
+  requestedLocale: string,
+  defaultLocale: string,
+): string | null {
+  const first = Object.keys(texts).sort()[0];
+  return (
+    texts[requestedLocale] ??
+    texts[defaultLocale] ??
+    (first === undefined ? null : texts[first]) ??
+    null
+  );
+}
+
+function publicPhoto(
+  presentation: PublishedSellablePresentation | undefined,
+  locale: string,
+  defaultLocale: string,
+): CustomerMenuPhotoDto | null {
+  const photo = presentation?.photo ?? null;
+  if (photo === null) return null;
+  const altText = localizedOptional(photo.localizedAltText, locale, defaultLocale);
+  if (altText === null) return dependencyFailure();
+  return Object.freeze({
+    altText,
+    width: photo.width,
+    height: photo.height,
+    renditions: Object.freeze(
+      photo.renditions.map((rendition) =>
+        Object.freeze({
+          url: rendition.path,
+          contentType: rendition.contentType,
+          width: rendition.width,
+          height: rendition.height,
+        }),
+      ),
+    ),
+  });
+}
+
 /** One option's current price at the Store, when the Store's facts were read. */
 function optionPrice(
   fact: CustomerMenuStoreFact | null,
@@ -185,6 +228,11 @@ function publicSellable(
           }),
         ),
     ),
+    description:
+      item.presentation === undefined
+        ? null
+        : localizedOptional(item.presentation.localizedDescriptions, locale, defaultLocale),
+    photo: publicPhoto(item.presentation, locale, defaultLocale),
     allergenDisclosure: Object.freeze({
       registryVersionReference: item.allergenDisclosure.registryVersionReference,
       items: Object.freeze(

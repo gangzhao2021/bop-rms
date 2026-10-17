@@ -36,6 +36,30 @@ const optionRules = [
   },
 ];
 const digest = `sha256:${"a".repeat(64)}`;
+// WP-2423 menu descriptions and photos: a reviewed description and photo (synthetic image paths).
+const presentation = {
+  localizedDescriptions: { "en-CA": "Espresso with steamed milk." },
+  photo: {
+    imageReference: id(60),
+    localizedAltText: { "en-CA": "A latte in a glass cup" },
+    width: 1280,
+    height: 960,
+    renditions: [320, 640, 1280].flatMap((width, index) => [
+      {
+        contentType: "image/jpeg",
+        width,
+        height: width * 0.75,
+        path: `/media/images/${String(index * 2).repeat(64)}.jpg`,
+      },
+      {
+        contentType: "image/webp",
+        width,
+        height: width * 0.75,
+        path: `/media/images/${String(index * 2 + 1).repeat(64)}.webp`,
+      },
+    ]),
+  },
+};
 async function prove(context) {
   const admin = new Client(context.clientConfig);
   const role = `wp2220_${context.runId}`;
@@ -95,6 +119,19 @@ async function prove(context) {
     await admin.query(
       `INSERT INTO rms_catalog.published_menu_projection_sellable (generation_id,brand_id,menu_id,section_id,placement_id,sellable_id,product_version_id,localized_names_json,presentation_role,sort_order,pinned,configured_availability,option_rules_json,allergen_disclosure_json) VALUES ($1,$2,$3,$4,$5,$6,$7,'{"en-CA":"Latte"}'::jsonb,'Standard',0,false,'Available',$8::jsonb,'{"registryVersionReference":"018f7300-0000-7000-8000-000000000019","items":[],"allergenFreeClaim":false,"assistanceCode":"ALLERGEN_ASSISTANCE_REQUIRED"}'::jsonb)`,
       [id(9), id(2), id(1), id(11), id(12), id(13), id(14), JSON.stringify(optionRules)],
+    );
+    // WP-2423: the presentation column holds one bounded JSON object or nothing.
+    for (const invalid of ["[]", '"text"', JSON.stringify({ text: "x".repeat(17000) })])
+      await assert.rejects(
+        admin.query(
+          `INSERT INTO rms_catalog.published_menu_projection_sellable (generation_id,brand_id,menu_id,section_id,placement_id,sellable_id,product_version_id,localized_names_json,presentation_role,sort_order,pinned,configured_availability,option_rules_json,allergen_disclosure_json,presentation_json) VALUES ($1,$2,$3,$4,$5,$6,$7,'{"en-CA":"Latte"}'::jsonb,'Standard',0,false,'Available',$8::jsonb,'{"registryVersionReference":"018f7300-0000-7000-8000-000000000019","items":[],"allergenFreeClaim":false,"assistanceCode":"ALLERGEN_ASSISTANCE_REQUIRED"}'::jsonb,$9::jsonb)`,
+          [id(9), id(2), id(1), id(11), id(61), id(62), id(14), "[]", invalid],
+        ),
+        /presentation_check/u,
+      );
+    await admin.query(
+      `INSERT INTO rms_catalog.published_menu_projection_sellable (generation_id,brand_id,menu_id,section_id,placement_id,sellable_id,product_version_id,localized_names_json,presentation_role,sort_order,pinned,configured_availability,option_rules_json,allergen_disclosure_json,presentation_json) VALUES ($1,$2,$3,$4,$5,$6,$7,'{"en-CA":"Latte"}'::jsonb,'Standard',1,false,'Available',$8::jsonb,'{"registryVersionReference":"018f7300-0000-7000-8000-000000000019","items":[],"allergenFreeClaim":false,"assistanceCode":"ALLERGEN_ASSISTANCE_REQUIRED"}'::jsonb,$9::jsonb)`,
+      [id(9), id(2), id(1), id(11), id(63), id(64), id(65), "[]", JSON.stringify(presentation)],
     );
     await admin.query(
       `INSERT INTO rms_catalog.published_menu_projection_checkpoint (consumer_name,brand_id,menu_id,active_generation_id,source_event_id,source_aggregate_version,projected_at) VALUES ('catalog.published-menu-projection',$1,$2,$3,$4,4,$5)`,
@@ -178,6 +215,8 @@ async function prove(context) {
     assert.equal(candidate.snapshot.effectiveFrom, at);
     assert.equal(candidate.snapshot.effectiveUntil, null);
     assert.deepEqual(candidate.snapshot.sections[0].sellables[0].optionRules, optionRules);
+    assert.equal(Object.hasOwn(candidate.snapshot.sections[0].sellables[0], "presentation"), false);
+    assert.deepEqual(candidate.snapshot.sections[0].sellables[1].presentation, presentation);
     assert.equal(
       candidate.snapshot.sections[0].sellables[0].allergenDisclosure.allergenFreeClaim,
       false,
@@ -222,6 +261,20 @@ async function prove(context) {
     assert.equal(found.status, "Found");
     assert.equal(found.menu.sections[0].sellables[0].name, "Latte");
     assert.equal(found.menu.sections[0].sellables[0].displayPrice.status, "Unavailable");
+    assert.equal(found.menu.sections[0].sellables[0].description, null);
+    assert.equal(found.menu.sections[0].sellables[0].photo, null);
+    assert.equal(found.menu.sections[0].sellables[1].description, "Espresso with steamed milk.");
+    assert.deepEqual(found.menu.sections[0].sellables[1].photo, {
+      altText: "A latte in a glass cup",
+      width: 1280,
+      height: 960,
+      renditions: presentation.photo.renditions.map((rendition) => ({
+        url: rendition.path,
+        contentType: rendition.contentType,
+        width: rendition.width,
+        height: rendition.height,
+      })),
+    });
     runtime = createApiServerRuntime({
       host: "127.0.0.1",
       port: 0,

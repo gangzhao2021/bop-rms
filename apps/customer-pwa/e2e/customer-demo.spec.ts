@@ -30,7 +30,9 @@ function monitorDemoBoundary(page: Page) {
   });
   page.on("request", (request) => {
     const url = new URL(request.url());
-    if (url.hostname !== "127.0.0.1") violations.push(`non-loopback request: ${request.url()}`);
+    // The synthetic menu photo is an in-memory object URL; its origin must still be loopback.
+    const host = url.protocol === "blob:" ? new URL(url.pathname).hostname : url.hostname;
+    if (host !== "127.0.0.1") violations.push(`non-loopback request: ${request.url()}`);
     if (["fetch", "xhr"].includes(request.resourceType()))
       violations.push(`application request: ${request.method()} ${url.pathname}`);
   });

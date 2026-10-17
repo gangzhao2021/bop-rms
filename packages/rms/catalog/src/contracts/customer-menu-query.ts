@@ -47,6 +47,19 @@ export interface CustomerMenuOptionRuleDto {
   }[];
 }
 
+export interface CustomerMenuPhotoDto {
+  readonly altText: string;
+  /** Aspect ratio of the photo. */
+  readonly width: number;
+  readonly height: number;
+  readonly renditions: readonly {
+    readonly url: string;
+    readonly contentType: "image/jpeg" | "image/webp";
+    readonly width: number;
+    readonly height: number;
+  }[];
+}
+
 export interface CustomerMenuSellableDto {
   readonly sellableReference: CatalogReference;
   readonly productVersionReference: CatalogReference;
@@ -56,6 +69,10 @@ export interface CustomerMenuSellableDto {
   /** WP-2423 8.6: SoldOut while the Store has marked the item sold out (ordering is refused). */
   readonly availability: "Available" | "SoldOut";
   readonly optionRules: readonly CustomerMenuOptionRuleDto[];
+  /** WP-2423: the published description in the customer's language (menu language otherwise). */
+  readonly description: string | null;
+  /** WP-2423: the published photo; renditions are content-addressed public image paths. */
+  readonly photo: CustomerMenuPhotoDto | null;
   readonly allergenDisclosure: {
     readonly registryVersionReference: CatalogReference;
     readonly items: readonly {

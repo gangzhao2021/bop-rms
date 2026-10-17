@@ -69,8 +69,26 @@ export interface ProductDetail {
   }[];
   /** The option sets on the product, in order, with the options it offers from each. */
   readonly optionSets?: readonly ProductOptionSetInput[];
+  /** What customers see on the menu under the product name, after the menu is next published. */
+  readonly presentation?: ProductPresentation;
   readonly createdAt: string;
   readonly updatedAt: string;
+}
+/** A product photo as recorded for the Brand; previewUrl is its 640-pixel JPEG. */
+export interface ProductPhoto {
+  readonly imageReference: string;
+  readonly width: number;
+  readonly height: number;
+  readonly previewUrl: string;
+}
+export interface ProductPresentation {
+  /** "" when the product has no description. */
+  readonly description: string;
+  readonly photo: (ProductPhoto & { readonly altText: string }) | null;
+}
+export interface ProductPresentationInput {
+  readonly description: string;
+  readonly photo: { readonly imageReference: string; readonly altText: string } | null;
 }
 export interface ProductListView extends ProductViewBase {
   readonly screenId: "CAT-PRODUCT-LIST";
@@ -128,6 +146,7 @@ export type ProductCommand =
       readonly taxClassificationReference: string;
       readonly sizes: readonly ProductSizeInput[];
       readonly optionSets?: readonly ProductOptionSetInput[];
+      readonly presentation?: ProductPresentationInput;
     }
   | {
       readonly action: "StartSelling";
@@ -138,6 +157,16 @@ export type ProductCommand =
 export interface ProductClient {
   load(productReference: string | null): Promise<unknown>;
   command?(command: ProductCommand): Promise<unknown>;
+  /**
+   * Records a photo for the product's draft; the same operation reference makes a retry of the
+   * same file safe. The photo reaches customers only once a draft naming it is saved and the menu
+   * is next published.
+   */
+  uploadPhoto?(
+    productReference: string,
+    file: Blob,
+    operationReference: string,
+  ): Promise<ProductPhoto>;
 }
 const object = (value: unknown) =>
   value !== null && typeof value === "object" && !Array.isArray(value)
@@ -158,6 +187,45 @@ export function parseProductListView(value: unknown): ProductListView {
     throw new Error("PRODUCT_PAGE_INVALID");
   return r as unknown as ProductListView;
 }
+/** The public path of a product photo rendition (content-hashed). */
+export const productPhotoPathPattern = /^\/media\/images\/[0-9a-f]{64}\.(?:jpg|webp)$/u;
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const dimension = (value: unknown) =>
+  typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 20_000;
+function parsePhoto(value: unknown): ProductPhoto | null {
+  const photo = object(value);
+  if (
+    photo === null ||
+    typeof photo.imageReference !== "string" ||
+    !uuid.test(photo.imageReference) ||
+    !dimension(photo.width) ||
+    !dimension(photo.height) ||
+    typeof photo.previewUrl !== "string" ||
+    !productPhotoPathPattern.test(photo.previewUrl)
+  )
+    return null;
+  return {
+    imageReference: photo.imageReference,
+    width: photo.width as number,
+    height: photo.height as number,
+    previewUrl: photo.previewUrl,
+  };
+}
+function parsePresentation(value: unknown): ProductPresentation | null {
+  const presentation = object(value);
+  if (
+    presentation === null ||
+    typeof presentation.description !== "string" ||
+    presentation.description.length > presentationLimits.description
+  )
+    return null;
+  if (presentation.photo === null) return { description: presentation.description, photo: null };
+  const photo = parsePhoto(presentation.photo);
+  const altText = object(presentation.photo)?.altText;
+  if (photo === null || typeof altText !== "string" || altText.length > presentationLimits.altText)
+    return null;
+  return { description: presentation.description, photo: { ...photo, altText } };
+}
 export function parseProductDetailView(value: unknown): ProductDetailView {
   const r = object(value);
   const product = object(r?.product);
@@ -168,9 +236,112 @@ export function parseProductDetailView(value: unknown): ProductDetailView {
     !Array.isArray(product.sizes)
   )
     throw new Error("PRODUCT_PAGE_INVALID");
-  return r as unknown as ProductDetailView;
+  if (product.presentation === undefined) return r as unknown as ProductDetailView;
+  const presentation = parsePresentation(product.presentation);
+  if (presentation === null) throw new Error("PRODUCT_PAGE_INVALID");
+  return {
+    ...(r as unknown as ProductDetailView),
+    product: { ...(product as unknown as ProductDetail), presentation },
+  };
 }
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+
+/** WP-2423: the customer description and photo being edited on the product page. */
+export const presentationLimits = { description: 240, altText: 160 } as const;
+export interface PresentationDraft {
+  readonly description: string;
+  readonly photo: ProductPhoto | null;
+  readonly altText: string;
+}
+export const presentationDraftFrom = (presentation: ProductPresentation): PresentationDraft => ({
+  description: presentation.description,
+  photo: presentation.photo
+    ? {
+        imageReference: presentation.photo.imageReference,
+        width: presentation.photo.width,
+        height: presentation.photo.height,
+        previewUrl: presentation.photo.previewUrl,
+      }
+    : null,
+  altText: presentation.photo?.altText ?? "",
+});
+/** Plain text as the server keeps it: trimmed, runs of whitespace as one space. */
+export const plainText = (value: string) => value.replace(/\s+/gu, " ").trim();
+export const presentationInput = (draft: PresentationDraft): ProductPresentationInput => ({
+  description: plainText(draft.description),
+  photo: draft.photo
+    ? { imageReference: draft.photo.imageReference, altText: plainText(draft.altText) }
+    : null,
+});
+export function presentationChanged(draft: PresentationDraft, saved: ProductPresentation) {
+  const input = presentationInput(draft);
+  return (
+    input.description !== saved.description ||
+    (input.photo?.imageReference ?? null) !== (saved.photo?.imageReference ?? null) ||
+    (input.photo !== null && input.photo.altText !== saved.photo?.altText)
+  );
+}
+/** Markup, braces, links, and control or invisible format characters are not plain text. */
+const notPlain = /[<>{}\p{Cc}\p{Cf}]|https?:\/\/|www\./iu;
+export type PresentationProblem = "NotPlain" | "TooLong" | "AltTextMissing";
+/** Why the draft cannot be saved, by field; empty when it can. */
+export function presentationProblems(draft: PresentationDraft): {
+  readonly description?: PresentationProblem;
+  readonly altText?: PresentationProblem;
+} {
+  const input = presentationInput(draft);
+  const check = (value: string, max: number) =>
+    value.length > max ? "TooLong" : notPlain.test(value) ? "NotPlain" : undefined;
+  const description = check(input.description, presentationLimits.description);
+  const altText =
+    input.photo === null
+      ? undefined
+      : input.photo.altText === ""
+        ? "AltTextMissing"
+        : check(input.photo.altText, presentationLimits.altText);
+  return {
+    ...(description ? { description } : {}),
+    ...(altText ? { altText } : {}),
+  };
+}
+
+export type ProductPhotoErrorCode =
+  | "PhotoTypeUnsupported"
+  | "PhotoTooLarge"
+  | "PhotoTooSmall"
+  | "PhotoUnreadable"
+  | "PhotoStorageUnavailable"
+  | "PermissionDenied"
+  | "NotFound"
+  | "Offline"
+  | "Unavailable";
+export class ProductPhotoError extends Error {
+  constructor(readonly code: ProductPhotoErrorCode) {
+    super("The photo was not recorded");
+    this.name = "ProductPhotoError";
+  }
+}
+export const photoContentTypes = ["image/jpeg", "image/png", "image/webp"] as const;
+export const photoMaximumBytes = 10 * 1024 * 1024;
+/** The checks the browser can make before sending; the server checks the photo itself again. */
+export function photoFileProblem(file: {
+  readonly type: string;
+  readonly size: number;
+}): "PhotoTypeUnsupported" | "PhotoTooLarge" | null {
+  if (!(photoContentTypes as readonly string[]).includes(file.type)) return "PhotoTypeUnsupported";
+  return file.size > photoMaximumBytes ? "PhotoTooLarge" : null;
+}
+/** Failures a retry of the same file may fix: nothing was recorded, or it is unknown. */
+export const photoRetryable = (code: ProductPhotoErrorCode) =>
+  code === "PhotoStorageUnavailable" || code === "Offline" || code === "Unavailable";
+const photoCodes = new Set<string>([
+  "PhotoTypeUnsupported",
+  "PhotoTooLarge",
+  "PhotoTooSmall",
+  "PhotoUnreadable",
+  "PhotoStorageUnavailable",
+  "PermissionDenied",
+  "NotFound",
+]);
 export const parseProductRouteReference = (value: string | undefined): string | null =>
   value !== undefined && uuid.test(value) ? value : null;
 /** Product and size codes: capital letters, digits, hyphen and underscore, starting with a letter. */
@@ -255,8 +426,49 @@ export function createProductClient(csrf: string, fetcher: typeof fetch = fetch)
     }
     return response.json() as Promise<unknown>;
   };
+  const uploadPhoto = async (
+    productReference: string,
+    file: Blob,
+    operationReference: string,
+  ): Promise<ProductPhoto> => {
+    let response: Response;
+    try {
+      response = await fetcher("/merchant/commerce/products/photo", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "content-type": file.type,
+          "x-bop-csrf": csrf,
+          "x-bop-product-reference": productReference,
+          "x-bop-operation-reference": operationReference,
+        },
+        body: file,
+      });
+    } catch {
+      throw new ProductPhotoError("Offline");
+    }
+    const payload = object(await response.json().catch(() => null));
+    if (!response.ok) {
+      const code = String(payload?.error);
+      throw new ProductPhotoError(
+        photoCodes.has(code)
+          ? (code as ProductPhotoErrorCode)
+          : code === "Invalid"
+            ? "PhotoUnreadable"
+            : response.status === 413
+              ? "PhotoTooLarge"
+              : response.status === 403
+                ? "PermissionDenied"
+                : "Unavailable",
+      );
+    }
+    const photo = payload?.status === "Recorded" ? parsePhoto(payload.photo) : null;
+    if (photo === null) throw new ProductPhotoError("Unavailable");
+    return photo;
+  };
   return {
     load: (productReference) => post("/merchant/commerce/products/query", { productReference }),
     command: (command) => post("/merchant/commerce/products/command", command),
+    uploadPhoto,
   };
 }

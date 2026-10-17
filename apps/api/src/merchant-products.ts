@@ -15,6 +15,11 @@ import {
   type ProductLifecycleTransaction,
   listStoreAvailabilityRules,
 } from "@rms/catalog";
+import {
+  MediaProductImageError,
+  type ProductImageRecord,
+  type createProductImageService,
+} from "@bop/media";
 import { listStoreTaxClassifications } from "@rms/pricing";
 import { itemAvailability } from "./merchant-availability.js";
 import { withRememberedBrandAuthorization } from "./merchant-brand-transaction-authorization.js";
@@ -34,6 +39,10 @@ import { retryTransactionConflict } from "./transaction-conflict-retry.js";
  * versioned. Pausing, discontinuing and archiving need the lifecycle review and are not offered yet.
  * WP-2423 slice 4: a product lists the Brand option sets customers choose from (in order) and, for
  * each, which of the set's options this product offers; the set's default choices are preselected.
+ * WP-2423 menu descriptions and photos: a product carries a short customer description and a photo
+ * (with alt text) in its draft; the photo is uploaded first (Media records the processed image and
+ * its sizes) and attached on save. Customers see both only after the next menu publication, which
+ * pins them into the reviewed menu snapshot.
  */
 export class MerchantProductError extends Error {
   constructor(
@@ -45,7 +54,12 @@ export class MerchantProductError extends Error {
       | "SizeInUse"
       | "TaxClassUnavailable"
       | "Lifecycle"
-      | "Invalid",
+      | "Invalid"
+      | "PhotoTypeUnsupported"
+      | "PhotoTooLarge"
+      | "PhotoTooSmall"
+      | "PhotoUnreadable"
+      | "PhotoStorageUnavailable",
   ) {
     super(code);
     this.name = "MerchantProductError";
@@ -68,6 +82,11 @@ const text = (value: unknown, max: number): string => {
     ? trimmed
     : fail("Invalid");
 };
+/** Plain customer text that may be empty ("" = none). */
+const optionalText = (value: unknown, max: number): string => {
+  if (typeof value !== "string") return fail("Invalid");
+  return value.trim() === "" ? "" : text(value, max);
+};
 const codeOf = (value: unknown): string => {
   const normalized = text(value, 64).toUpperCase();
   return code.test(normalized) ? normalized : fail("Invalid");
@@ -76,6 +95,12 @@ export const productTypes = ["PreparedFood", "NonAlcoholicBeverage"] as const;
 /** Units of sale the pilot sells; quantities are always one unit per sale line. */
 export const productSellingUnits = ["EACH"] as const;
 const maxSizes = 12;
+/** Longest customer description and photo alt text (Catalog enforces the same limits). */
+export const productDescriptionMaximum = 240;
+export const productPhotoAltTextMaximum = 160;
+/** Largest photo upload accepted (Media re-checks the bytes). */
+export const productPhotoBytesMaximum = 10 * 1024 * 1024;
+export const productPhotoContentTypes = ["image/jpeg", "image/png", "image/webp"] as const;
 
 export interface ProductSizeInput {
   readonly skuReference: string | null;
@@ -86,6 +111,11 @@ export interface ProductSizeInput {
 export interface ProductOptionSetInput {
   readonly optionSetReference: string;
   readonly enabledOptionReferences: readonly string[];
+}
+/** The customer-facing description ("" = none) and photo of a product, in the page locale. */
+export interface ProductPresentationInput {
+  readonly description: string;
+  readonly photo: { readonly imageReference: string; readonly altText: string } | null;
 }
 export type ProductCommandBody =
   | {
@@ -107,6 +137,8 @@ export type ProductCommandBody =
       readonly sizes: readonly ProductSizeInput[];
       /** Absent: the product's option sets stay as they are. */
       readonly optionSets?: readonly ProductOptionSetInput[];
+      /** Absent: the product's description and photo stay as they are. */
+      readonly presentation?: ProductPresentationInput;
     }
   | {
       readonly action: "StartSelling";
@@ -160,6 +192,33 @@ function optionSetInputs(value: unknown): readonly ProductOptionSetInput[] {
     return fail("Invalid");
   return parsed;
 }
+function presentationInput(value: unknown): ProductPresentationInput {
+  const r = value as Record<string, unknown> | null;
+  if (
+    r === null ||
+    typeof r !== "object" ||
+    Array.isArray(r) ||
+    Object.keys(r).sort().join(",") !== "description,photo"
+  )
+    return fail("Invalid");
+  const description = optionalText(r.description, productDescriptionMaximum);
+  if (r.photo === null) return { description, photo: null };
+  const photo = r.photo as Record<string, unknown> | null;
+  if (
+    photo === null ||
+    typeof photo !== "object" ||
+    Array.isArray(photo) ||
+    Object.keys(photo).sort().join(",") !== "altText,imageReference"
+  )
+    return fail("Invalid");
+  return {
+    description,
+    photo: {
+      imageReference: ref(photo.imageReference),
+      altText: text(photo.altText, productPhotoAltTextMaximum),
+    },
+  };
+}
 export function parseProductCommandBody(value: unknown): ProductCommandBody {
   const r = value as Record<string, unknown> | null;
   if (r === null || typeof r !== "object" || Array.isArray(r)) return fail("Invalid");
@@ -180,13 +239,20 @@ export function parseProductCommandBody(value: unknown): ProductCommandBody {
       sizes: sizes(r.sizes, true),
     };
   }
-  const saveKeys =
-    "action,expectedAggregateVersion,name,operationReference,productReference,sizes,taxClassificationReference";
+  const saveKeys = [
+    "action",
+    "expectedAggregateVersion",
+    "name",
+    "operationReference",
+    "productReference",
+    "sizes",
+    "taxClassificationReference",
+  ];
+  const own = Object.keys(r);
   if (
     r.action === "SaveDraft" &&
-    (keys === saveKeys ||
-      keys ===
-        "action,expectedAggregateVersion,name,operationReference,optionSets,productReference,sizes,taxClassificationReference")
+    saveKeys.every((key) => own.includes(key)) &&
+    own.every((key) => saveKeys.includes(key) || key === "optionSets" || key === "presentation")
   )
     return {
       action: "SaveDraft",
@@ -196,7 +262,8 @@ export function parseProductCommandBody(value: unknown): ProductCommandBody {
       name: text(r.name, 120),
       taxClassificationReference: ref(r.taxClassificationReference),
       sizes: sizes(r.sizes, false),
-      ...(keys === saveKeys ? {} : { optionSets: optionSetInputs(r.optionSets) }),
+      ...(own.includes("optionSets") ? { optionSets: optionSetInputs(r.optionSets) } : {}),
+      ...(own.includes("presentation") ? { presentation: presentationInput(r.presentation) } : {}),
     };
   if (
     r.action === "StartSelling" &&
@@ -238,7 +305,45 @@ const catalogErrors: Partial<Record<CatalogError["code"], MerchantProductError["
   CATALOG_UNAVAILABLE: "NotFound",
 };
 
-export function productView(product: ProductAggregate, locale: string) {
+function optionSetsView(product: ProductAggregate) {
+  return product.draft.optionBindings.map((binding) => ({
+    optionSetReference: binding.optionSetReference,
+    enabledOptionReferences: binding.enabledOptionReferences,
+  }));
+}
+/** The product's customer description and photo as the editor shows them (page locale first). */
+export function presentationView(
+  product: ProductAggregate,
+  locale: string,
+  images: ReadonlyMap<string, ProductImageRecord>,
+) {
+  const presentation = product.draft.customerPresentation;
+  const pick = (values: Readonly<Record<string, string>>) =>
+    values[locale] ?? values[product.draft.defaultLocale] ?? Object.values(values)[0] ?? "";
+  if (presentation === undefined) return { description: "", photo: null };
+  const photo = presentation.photo;
+  if (photo === null) return { description: pick(presentation.localizedDescriptions), photo: null };
+  const image = images.get(String(photo.imageReference));
+  const preview = image?.renditions.find(
+    (rendition) => rendition.width === 640 && rendition.contentType === "image/jpeg",
+  );
+  if (image === undefined || preview === undefined) return fail("PhotoStorageUnavailable");
+  return {
+    description: pick(presentation.localizedDescriptions),
+    photo: {
+      imageReference: String(photo.imageReference),
+      altText: pick(photo.localizedAltText),
+      width: image.width,
+      height: image.height,
+      previewUrl: preview.path,
+    },
+  };
+}
+export function productView(
+  product: ProductAggregate,
+  locale: string,
+  images: ReadonlyMap<string, ProductImageRecord> = new Map(),
+) {
   const name = (names: Readonly<Record<string, string>>) =>
     names[locale] ?? names[product.draft.defaultLocale] ?? Object.values(names)[0] ?? "";
   return {
@@ -256,10 +361,8 @@ export function productView(product: ProductAggregate, locale: string) {
       lifecycle: sku.lifecycle,
       unitOfSale: sku.unitOfSale,
     })),
-    optionSets: product.draft.optionBindings.map((binding) => ({
-      optionSetReference: binding.optionSetReference,
-      enabledOptionReferences: binding.enabledOptionReferences,
-    })),
+    optionSets: optionSetsView(product),
+    presentation: presentationView(product, locale, images),
     createdAt: product.createdAt,
     updatedAt: product.updatedAt,
   };
@@ -294,12 +397,32 @@ export function createMerchantProducts(options: {
   locale: string;
   /** Test seam: the Brand scope resolver (defaults to the current session's Brand scope). */
   resolveScope?: ReturnType<typeof createMerchantBrandScope>;
+  /** Media product images (pilot: local storage adapter). Absent: photos cannot be added or shown. */
+  images?: ReturnType<typeof createProductImageService>;
 }) {
   const resolveScope = options.resolveScope ?? createMerchantBrandScope(options.persistence);
   type Tx = Parameters<Parameters<typeof options.persistence.transactions.run>[0]>[0];
   type ReadTx = Parameters<typeof listBrandProducts>[0];
   const reads = (tx: Tx) => tx as unknown as ReadTx;
   const productTx = (tx: Tx) => tx as unknown as ProductLifecycleTransaction;
+  type MediaTx = Parameters<ReturnType<typeof createProductImageService>["load"]>[0];
+  const mediaTx = (tx: Tx) => tx as unknown as MediaTx;
+  /** The Media record of the product's photo (none without a photo). */
+  const imagesOf = async (
+    tx: Tx,
+    brand: string,
+    product: ProductAggregate,
+  ): Promise<ReadonlyMap<string, ProductImageRecord>> => {
+    const photo = product.draft.customerPresentation?.photo;
+    if (photo === undefined || photo === null) return new Map();
+    if (options.images === undefined) return fail("PhotoStorageUnavailable");
+    const images = options.images;
+    return images
+      .load(mediaTx(tx), { brandReference: brand, imageReferences: [String(photo.imageReference)] })
+      .catch(() => fail("PhotoStorageUnavailable"));
+  };
+  const view = async (tx: Tx, brand: string, product: ProductAggregate) =>
+    productView(product, options.locale, await imagesOf(tx, brand, product));
   const session = (input: { sessionCookie: unknown; csrf: unknown }) =>
     options.authentication
       .authorize({ sessionCookie: input.sessionCookie, csrf: input.csrf })
@@ -380,7 +503,7 @@ export function createMerchantProducts(options: {
             return {
               screenId: "CAT-PRODUCT-DETAIL" as const,
               ...base,
-              product: productView(product, options.locale),
+              product: await view(tx, s.brand, product),
               availabilityHere,
               optionSetChoices: mayReadOptions
                 ? optionSetChoices(
@@ -527,9 +650,7 @@ export function createMerchantProducts(options: {
             inputs: readonly ProductOptionSetInput[],
             operation: string,
           ) => {
-            const changed =
-              JSON.stringify(inputs) !==
-              JSON.stringify(productView(product, options.locale).optionSets);
+            const changed = JSON.stringify(inputs) !== JSON.stringify(optionSetsView(product));
             if (changed && (await s.decision("catalog.option_set.read"))?.effect !== "Allow")
               fail("PermissionDenied");
             const sets = await listBrandOptionSets(productTx, { brandReference: brand });
@@ -579,6 +700,56 @@ export function createMerchantProducts(options: {
               };
             });
           };
+          /**
+           * The draft's description and photo in the page locale; other locales are kept. A photo must
+           * be a Media image of this Brand uploaded for this product; its alt text is required.
+           */
+          const presentationFor = async (
+            product: ProductAggregate,
+            input: ProductPresentationInput,
+          ) => {
+            const current = product.draft.customerPresentation;
+            const descriptions: Record<string, string> = Object.fromEntries(
+              Object.entries(current?.localizedDescriptions ?? {}).filter(
+                ([locale]) => locale !== options.locale,
+              ),
+            );
+            if (input.description !== "") descriptions[options.locale] = input.description;
+            let photo: NonNullable<ProductAggregate["draft"]["customerPresentation"]>["photo"] =
+              null;
+            if (input.photo !== null) {
+              const image = (
+                await (options.images ?? fail("PhotoStorageUnavailable"))
+                  .load(mediaTx(tx), {
+                    brandReference: brand,
+                    imageReferences: [input.photo.imageReference],
+                  })
+                  .catch(() => fail("PhotoStorageUnavailable"))
+              ).get(input.photo.imageReference);
+              if (image === undefined || image.productReference !== product.productReference)
+                fail("Invalid");
+              const kept =
+                current?.photo !== null &&
+                current?.photo !== undefined &&
+                String(current.photo.imageReference) === input.photo.imageReference
+                  ? current.photo.localizedAltText
+                  : {};
+              photo = {
+                imageReference: parseCatalogReference(input.photo.imageReference),
+                localizedAltText: {
+                  ...kept,
+                  ...(Object.hasOwn(kept, product.draft.defaultLocale)
+                    ? {}
+                    : { [product.draft.defaultLocale]: input.photo.altText }),
+                  [options.locale]: input.photo.altText,
+                },
+              };
+            }
+            // Nothing to record on a product that never had a description or photo.
+            if (current === undefined && Object.keys(descriptions).length === 0 && photo === null)
+              return undefined;
+            return { localizedDescriptions: descriptions, photo };
+          };
           try {
             if (body.action === "Create") {
               if (!(await taxClassOffered(body.taxClassificationReference)))
@@ -614,7 +785,7 @@ export function createMerchantProducts(options: {
               });
               return {
                 status: result.status,
-                product: productView(result.aggregate, options.locale),
+                product: await view(tx, brand, result.aggregate),
               };
             }
             const product = await loadBrandProduct(
@@ -635,7 +806,7 @@ export function createMerchantProducts(options: {
                   fail("Conflict");
                 return {
                   status: "AlreadyApplied",
-                  product: productView(prior.aggregate, options.locale),
+                  product: await view(tx, brand, prior.aggregate),
                 };
               }
               if (product.aggregateVersion !== body.expectedAggregateVersion) fail("Conflict");
@@ -707,6 +878,10 @@ export function createMerchantProducts(options: {
                 body.optionSets === undefined
                   ? product.draft.optionBindings
                   : await bindingsFor(product, body.optionSets, body.operationReference);
+              const customerPresentation =
+                body.presentation === undefined
+                  ? product.draft.customerPresentation
+                  : await presentationFor(product, body.presentation);
               const result = await service(body.operationReference).replaceDraft({
                 productReference: product.productReference,
                 expectedAggregateVersion: body.expectedAggregateVersion,
@@ -718,12 +893,13 @@ export function createMerchantProducts(options: {
                   taxClassificationReference: body.taxClassificationReference,
                   skus,
                   optionBindings,
+                  ...(customerPresentation === undefined ? {} : { customerPresentation }),
                   updatedAt: at,
                 },
               });
               return {
                 status: result.status,
-                product: productView(result.aggregate, options.locale),
+                product: await view(tx, brand, result.aggregate),
               };
             }
             // StartSelling: the Product, then each size not yet selling, one recorded step each. A retry
@@ -760,7 +936,7 @@ export function createMerchantProducts(options: {
               });
               latest = result.aggregate;
             }
-            return { status: "Applied", product: productView(latest, options.locale) };
+            return { status: "Applied", product: await view(tx, brand, latest) };
           } catch (error) {
             if (error instanceof CatalogError) return fail(catalogErrors[error.code] ?? "Invalid");
             throw error;
@@ -769,5 +945,95 @@ export function createMerchantProducts(options: {
       ),
     );
   };
-  return { query, command };
+  const photoErrors: Partial<Record<MediaProductImageError["code"], MerchantProductError["code"]>> =
+    {
+      MEDIA_IMAGE_TYPE_UNSUPPORTED: "PhotoTypeUnsupported",
+      MEDIA_IMAGE_TOO_LARGE: "PhotoTooLarge",
+      MEDIA_IMAGE_TOO_SMALL: "PhotoTooSmall",
+      MEDIA_IMAGE_UNREADABLE: "PhotoUnreadable",
+      MEDIA_IMAGE_STORAGE_UNAVAILABLE: "PhotoStorageUnavailable",
+    };
+  /**
+   * Record one product photo: Media checks the bytes are the declared JPEG/PNG/WebP, removes the
+   * embedded metadata (camera, location) and stores the sizes customers are served. The photo is
+   * attached to the product draft by a later SaveDraft. A retry with the same operation returns the
+   * same image.
+   */
+  const uploadPhoto = async (input: {
+    sessionCookie: unknown;
+    csrf: unknown;
+    productReference: unknown;
+    operationReference: unknown;
+    contentType: unknown;
+    bytes: unknown;
+  }) => {
+    const productReference = ref(input.productReference);
+    const operationReference = ref(input.operationReference);
+    if (!(productPhotoContentTypes as readonly unknown[]).includes(input.contentType))
+      return fail("PhotoTypeUnsupported");
+    if (!(input.bytes instanceof Uint8Array) || input.bytes.byteLength < 1) return fail("Invalid");
+    if (input.bytes.byteLength > productPhotoBytesMaximum) return fail("PhotoTooLarge");
+    const bytes = input.bytes;
+    const images = options.images ?? fail("PhotoStorageUnavailable");
+    const current = await session(input);
+    const mediaFailure = (error: unknown): never => {
+      if (error instanceof MediaProductImageError)
+        return fail(photoErrors[error.code] ?? "Invalid");
+      throw error;
+    };
+    /** The editor may change this Brand product (checked before and again when recording). */
+    const editable = async (tx: Tx) => {
+      const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+      if (!s.permissions.mayEdit) fail("PermissionDenied");
+      const product = await loadBrandProduct(
+        reads(tx),
+        { brandReference: s.brand },
+        productReference,
+      );
+      if (product === null) return fail("NotFound");
+      return { s, product };
+    };
+    await retryTransactionConflict(() =>
+      options.persistence.transactions.run((tx) =>
+        withRememberedBrandAuthorization(tx, () => editable(tx)),
+      ),
+    );
+    // Decoding and resizing run outside any database transaction.
+    const prepared = await images
+      .prepare({ declaredContentType: input.contentType as string, bytes })
+      .catch(mediaFailure);
+    return retryTransactionConflict(() =>
+      options.persistence.transactions.run((tx) =>
+        withRememberedBrandAuthorization(tx, async () => {
+          const { s, product } = await editable(tx);
+          const image = await images
+            .record(mediaTx(tx), {
+              imageReference: derivedReference(operationReference, "product-photo"),
+              tenantReference: String(s.scope.tenantReference),
+              brandReference: s.brand,
+              productReference: product.productReference,
+              actorReference: s.actor,
+              createdAt: options.persistence.now(),
+              prepared,
+            })
+            .catch(mediaFailure);
+          const preview = image.renditions.find(
+            (rendition) => rendition.width === 640 && rendition.contentType === "image/jpeg",
+          );
+          if (image.productReference !== product.productReference || preview === undefined)
+            return fail("Invalid");
+          return {
+            status: "Recorded" as const,
+            photo: {
+              imageReference: image.imageReference,
+              width: image.width,
+              height: image.height,
+              previewUrl: preview.path,
+            },
+          };
+        }),
+      ),
+    );
+  };
+  return { query, command, uploadPhoto };
 }

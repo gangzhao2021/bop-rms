@@ -7,6 +7,14 @@ const databaseAccessManifestInput = {
   },
   tables: [
     {
+      table: "product_image",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@bop/media" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "image_scan_admission",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@bop/media" },
@@ -100,6 +108,24 @@ const databaseAccessManifestInput = {
     },
   ],
   accesses: [
+    {
+      id: "media-product-image.read.product_image",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_media", table: "product_image" },
+      principal: { kind: "module", id: "@bop/media" },
+      readPattern: "owner-repository",
+      source: "packages/bop/media/src/infrastructure/persistence/product-image-store.ts",
+    },
+    {
+      id: "media-product-image.write.product_image",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_media", table: "product_image" },
+      principal: { kind: "module", id: "@bop/media" },
+      readPattern: null,
+      source: "packages/bop/media/src/infrastructure/persistence/product-image-store.ts",
+    },
     {
       id: "media-publication-read.read.asset",
       operation: "read",

@@ -62,6 +62,8 @@ export async function startConfiguredPilotHttps(
     loadInternalPickupQr: qr.loadInternalPickupQr,
     diningEntries,
     loadProfile: installation.loadProfile,
+    // WP-2423 menu descriptions and photos: product photo sizes (pilot storage adapter).
+    productImageDirectory: path.join(directory, "media", "product-images"),
     keyFile: path.join(directory, "customer-tls-key.pem"),
     certificateFile: path.join(directory, "customer-tls-cert.pem"),
     createInternalTestResources: async () => {

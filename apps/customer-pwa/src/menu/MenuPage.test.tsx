@@ -17,6 +17,8 @@ const context: MenuJourneyContext = Object.freeze({
 const sellable: MenuSellable = Object.freeze({
   sellableReference: "018f7500-0000-7000-8000-000000000007",
   name: "Latte",
+  description: null,
+  photo: null,
   presentationRole: "Standard",
   pinned: false,
   availability: "Available",
@@ -64,6 +66,162 @@ function render(props: Omit<React.ComponentProps<typeof MenuScreen>, "onRetry">)
     </MemoryRouter>,
   );
 }
+
+const hash = (seed: string) => seed.repeat(64);
+const photographed: MenuSellable = Object.freeze({
+  ...sellable,
+  description:
+    "Double espresso with steamed milk and a thin layer of foam, served hot in a 12 oz cup. Ask for oat beverage at no extra charge.",
+  photo: Object.freeze({
+    altText: "Latte with leaf foam art in a white cup",
+    width: 1280,
+    height: 960,
+    renditions: Object.freeze([
+      {
+        url: `/media/images/${hash("a")}.jpg`,
+        contentType: "image/jpeg" as const,
+        width: 320,
+        height: 240,
+      },
+      {
+        url: `/media/images/${hash("b")}.webp`,
+        contentType: "image/webp" as const,
+        width: 320,
+        height: 240,
+      },
+      {
+        url: `/media/images/${hash("c")}.jpg`,
+        contentType: "image/jpeg" as const,
+        width: 640,
+        height: 480,
+      },
+      {
+        url: `/media/images/${hash("d")}.webp`,
+        contentType: "image/webp" as const,
+        width: 640,
+        height: 480,
+      },
+      {
+        url: `/media/images/${hash("e")}.jpg`,
+        contentType: "image/jpeg" as const,
+        width: 1280,
+        height: 960,
+      },
+      {
+        url: `/media/images/${hash("f")}.webp`,
+        contentType: "image/webp" as const,
+        width: 1280,
+        height: 960,
+      },
+    ]),
+  }),
+});
+const photographedMenu: MenuView = Object.freeze({
+  ...menu,
+  sections: Object.freeze([
+    Object.freeze({
+      sectionReference: "018f7500-0000-7000-8000-000000000006",
+      name: "Drinks",
+      sellables: Object.freeze([
+        photographed,
+        { ...sellable, sellableReference: "018f7500-0000-7000-8000-000000000017", name: "Tea" },
+      ]),
+    }),
+  ]),
+});
+
+function cards(html: string): string[] {
+  return html.split("<article").slice(1);
+}
+
+describe("WP-2423 menu descriptions and photos", () => {
+  it("shows a lazy, decorative, fixed-size thumbnail and a clamped description on the card", () => {
+    const html = render({
+      context,
+      mode: "browse",
+      state: { kind: "Found", menu: photographedMenu },
+    });
+    const [withPhoto, withoutPhoto] = cards(html);
+    expect(withPhoto).toContain('class="menu-card menu-card--with-photo"');
+    expect(withPhoto).toContain('class="menu-card__description"');
+    expect(withPhoto).toContain(photographed.description);
+    expect(withPhoto).toContain('<span class="menu-card__media" aria-hidden="true"><picture>');
+    expect(withPhoto).toContain(
+      `<source type="image/webp" srcSet="/media/images/${hash("b")}.webp 320w, /media/images/${hash("d")}.webp 640w" sizes="88px"/>`,
+    );
+    expect(withPhoto).toMatch(
+      /<img alt="" decoding="async" height="960" loading="lazy" sizes="88px"/u,
+    );
+    expect(withPhoto).toContain(`src="/media/images/${hash("a")}.jpg"`);
+    expect(withPhoto).toContain(
+      `srcSet="/media/images/${hash("a")}.jpg 320w, /media/images/${hash("c")}.jpg 640w"`,
+    );
+    expect(withPhoto).toContain('width="1280"');
+    expect(withPhoto).not.toContain("1280w");
+    expect(withPhoto).not.toContain(photographed.photo?.altText);
+    // The link keeps the product name as its accessible name.
+    expect(withPhoto).toContain('aria-label="View Latte"');
+    expect(withoutPhoto).toContain("Tea");
+    expect(withoutPhoto).not.toContain("<picture");
+    expect(withoutPhoto).not.toContain("menu-card--with-photo");
+    expect(withoutPhoto).not.toContain("menu-card__media");
+    expect(withoutPhoto).not.toContain("menu-card__description");
+    expect(html).not.toContain("Image not available");
+  });
+
+  it("uses the same card with photo in search results", () => {
+    const html = render({
+      context,
+      mode: "search",
+      searchTerm: "latte",
+      state: { kind: "Found", menu: photographedMenu },
+    });
+    expect(cards(html)[0]).toContain('class="menu-card__media"');
+    expect(cards(html)[0]).toContain("Section</span>Drinks");
+  });
+
+  it("shows the full description and an eager described photo at the top of the detail", () => {
+    const html = render({
+      context,
+      detail: photographed,
+      mode: "detail",
+      state: { kind: "Found", menu: photographedMenu },
+    });
+    expect(html.indexOf("sellable-detail__media")).toBeLessThan(
+      html.indexOf("sellable-detail__heading"),
+    );
+    expect(html).toContain(
+      `<p class="sellable-detail__description">${photographed.description}</p>`,
+    );
+    expect(html).not.toContain("menu-card__description");
+    expect(html).toContain(
+      `srcSet="/media/images/${hash("d")}.webp 640w, /media/images/${hash("f")}.webp 1280w"`,
+    );
+    expect(html).toContain(`alt="${photographed.photo?.altText}"`);
+    expect(html).toContain('loading="eager"');
+    expect(html).toContain('fetchPriority="high"');
+    expect(html).toContain(
+      'sizes="(min-width: 960px) 45vw, (min-width: 736px) 640px, calc(100vw - 64px)"',
+    );
+    expect(html).toContain(`src="/media/images/${hash("c")}.jpg"`);
+    expect(html).toMatch(/<img alt="[^"]+" decoding="async" height="960" loading="eager"/u);
+    expect(html).toMatch(/srcSet="[^"]+" width="1280"/u);
+    expect(html).not.toContain("aria-hidden");
+    expect(findInternalText([staticText(html)])).toEqual([]);
+  });
+
+  it("leaves no image area on a detail without a photo", () => {
+    const html = render({
+      context,
+      detail: sellable,
+      mode: "detail",
+      state: { kind: "Found", menu },
+    });
+    expect(html).not.toContain("sellable-detail__media");
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("sellable-detail__description");
+  });
+});
 
 describe("WP-1701 Customer Menu screens", () => {
   it("renders safe published cards without source identifiers or invented price", () => {

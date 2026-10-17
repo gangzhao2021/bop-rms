@@ -3357,6 +3357,33 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (WP-2423 Order phase, DEC-PILOT-BATCH-PHASE-01, defect 2026-10-17): the business worker records the PickupNotCollected closures Ordering consumes (ordering.pickup-not-collected:v1) and the guest order status read merges them into a terminal Order phase. Append-only; no update or delete; no actor or personal data"
+    },
+    {
+      "type": "schema",
+      "schema": "bop_media",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api",
+      "approval": "WP-2423 menu descriptions and photos: Owner standing approval 2026-10-14"
+    },
+    {
+      "type": "table",
+      "schema": "bop_media",
+      "object": "product_image",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 menu descriptions and photos: Owner standing approval 2026-10-14"
+    },
+    {
+      "type": "table",
+      "schema": "bop_media",
+      "object": "product_image",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 menu descriptions and photos: Owner standing approval 2026-10-14"
     }
   ]
 }

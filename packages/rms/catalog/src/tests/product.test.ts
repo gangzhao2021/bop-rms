@@ -353,6 +353,57 @@ describe("Product / SKU minimum aggregate", () => {
     });
   });
 
+  it("creates with a customer description/photo and keeps it when a later draft omits it", async () => {
+    const presentation = {
+      localizedDescriptions: { "en-CA": "Espresso with steamed milk." },
+      photo: { imageReference: id(70), localizedAltText: { "en-CA": "A latte" } },
+    };
+    const state = fixture();
+    const created = await state.service.create({
+      ...createInput(),
+      customerPresentation: presentation,
+    });
+    expect(created.aggregate.draft.customerPresentation).toEqual(presentation);
+    const current = state.current();
+    if (current === null) throw new Error("fixture did not persist the Product");
+    const { customerPresentation, ...withoutPresentation } = current.draft;
+    void customerPresentation;
+    const kept = await state.service.replaceDraft({
+      productReference: ids.product,
+      expectedAggregateVersion: 1,
+      draft: { ...withoutPresentation, localizedNames: { "en-CA": "Iced Latte" } },
+      operationReference: id(71),
+      requestedAt: at,
+    });
+    expect(kept.aggregate.draft.customerPresentation).toEqual(presentation);
+    const cleared = await state.service.replaceDraft({
+      productReference: ids.product,
+      expectedAggregateVersion: 2,
+      draft: {
+        ...kept.aggregate.draft,
+        customerPresentation: { localizedDescriptions: {}, photo: null },
+      },
+      operationReference: id(72),
+      requestedAt: at,
+    });
+    expect(cleared.aggregate.draft.customerPresentation).toEqual({
+      localizedDescriptions: {},
+      photo: null,
+    });
+    await expect(
+      state.service.replaceDraft({
+        productReference: ids.product,
+        expectedAggregateVersion: 3,
+        draft: {
+          ...cleared.aggregate.draft,
+          customerPresentation: { localizedDescriptions: { "en-CA": "<script>" }, photo: null },
+        },
+        operationReference: id(73),
+        requestedAt: at,
+      }),
+    ).rejects.toMatchObject({ code: "CATALOG_INPUT_INVALID" });
+  });
+
   it("replaces the complete Draft at the Product version and rejects stale versions", async () => {
     const state = fixture();
     await state.service.create(createInput());

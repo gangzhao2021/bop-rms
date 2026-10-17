@@ -27,6 +27,7 @@ import type {
   MenuJourneyContext,
   MenuLoadResult,
   MenuOptionRule,
+  MenuPhoto,
   MenuSellable,
   MenuView,
 } from "./types.js";
@@ -562,8 +563,11 @@ function SellableCard({
   readonly sectionName?: string | undefined;
 }) {
   const soldOut = sellable.availability === "SoldOut";
+  const [photo, photoFailed] = useShownPhoto(sellable.photo);
   return (
-    <article className={`menu-card${soldOut ? " menu-card--sold-out" : ""}`}>
+    <article
+      className={`menu-card${soldOut ? " menu-card--sold-out" : ""}${photo === null ? "" : " menu-card--with-photo"}`}
+    >
       <Link
         aria-label={`View ${sellable.name}`}
         className="menu-card__link"
@@ -580,6 +584,9 @@ function SellableCard({
                   : "Featured"}
             </span>
           ) : null}
+          {sellable.description === null ? null : (
+            <span className="menu-card__description">{sellable.description}</span>
+          )}
           {sectionName ? (
             <span className="menu-result-section">
               <span>Section</span>
@@ -610,8 +617,87 @@ function SellableCard({
           </span>
           {soldOut ? <span className="menu-sold-out">Sold out</span> : null}
         </span>
+        {photo === null ? null : (
+          <MenuPhotoPicture
+            className="menu-card__media"
+            decorative
+            onError={photoFailed}
+            photo={photo}
+            sizes="88px"
+            widths={[320, 640]}
+          />
+        )}
       </Link>
     </article>
+  );
+}
+
+function srcSet(photo: MenuPhoto, contentType: string, widths: readonly number[]): string {
+  return photo.renditions
+    .filter((item) => item.contentType === contentType && widths.includes(item.width))
+    .map((item) => `${item.url} ${item.width}w`)
+    .join(", ");
+}
+
+/**
+ * The photo to show, or null when there is none, it has no JPEG fallback, or it failed to load.
+ * A failed photo is dropped with its layout (no empty box, no broken-image icon); a menu reload
+ * brings new photo objects and so tries again.
+ */
+function useShownPhoto(photo: MenuPhoto | null): readonly [MenuPhoto | null, () => void] {
+  const [failed, setFailed] = useState<MenuPhoto | null>(null);
+  const shown =
+    photo !== null &&
+    photo !== failed &&
+    photo.renditions.some((item) => item.contentType === "image/jpeg")
+      ? photo
+      : null;
+  return [shown, () => setFailed(photo)];
+}
+
+/** The published product photo in a fixed aspect-ratio box, so nothing shifts while it loads. */
+function MenuPhotoPicture({
+  photo,
+  className,
+  sizes,
+  widths,
+  onError,
+  decorative = false,
+  priority = false,
+}: {
+  readonly photo: MenuPhoto;
+  readonly className: string;
+  readonly sizes: string;
+  readonly widths: readonly number[];
+  readonly onError: () => void;
+  readonly decorative?: boolean;
+  readonly priority?: boolean;
+}) {
+  const jpegs = photo.renditions.filter(
+    (item) => item.contentType === "image/jpeg" && widths.includes(item.width),
+  );
+  const fallback = jpegs[0] ?? photo.renditions.find((item) => item.contentType === "image/jpeg");
+  if (fallback === undefined) return null;
+  const webp = srcSet(photo, "image/webp", widths);
+  const jpeg = srcSet(photo, "image/jpeg", widths);
+  return (
+    <span className={className} {...(decorative ? { "aria-hidden": true } : {})}>
+      <picture>
+        {webp === "" ? null : <source type="image/webp" srcSet={webp} sizes={sizes} />}
+        <img
+          alt={decorative ? "" : photo.altText}
+          decoding="async"
+          height={photo.height}
+          loading={priority ? "eager" : "lazy"}
+          sizes={sizes}
+          src={fallback.url}
+          srcSet={jpeg === "" ? undefined : jpeg}
+          width={photo.width}
+          onError={onError}
+          {...(priority ? { fetchPriority: "high" as const } : {})}
+        />
+      </picture>
+    </span>
   );
 }
 
@@ -642,33 +728,49 @@ function SellableDetail({
   readonly headingRef?: React.RefObject<HTMLHeadingElement | null> | undefined;
   readonly readOnlyNotice?: React.ReactNode | undefined;
 }) {
+  const [photo, photoFailed] = useShownPhoto(sellable.photo);
   return (
-    <article className="sellable-detail">
+    <article className={`sellable-detail${photo === null ? "" : " sellable-detail--with-photo"}`}>
       <Link className="sellable-detail__back" to="/menu">
         ← Back to menu
       </Link>
-      <div className="sellable-detail__heading">
-        <Heading headingRef={headingRef}>{sellable.name}</Heading>
-        <p className="sellable-detail__price">
-          {priceLine(sellable)}
-          {sellable.price === null ? null : <span> plus tax</span>}
-        </p>
-      </div>
-      {sellable.availability === "SoldOut" ? <AvailabilityLine sellable={sellable} /> : null}
-      <AllergenSummary sellable={sellable} />
-      {readOnlyNotice ? (
-        <div className="menu-readonly-boundary" role="status">
-          {readOnlyNotice}
-        </div>
-      ) : sellable.availability === "SoldOut" ? (
-        <p role="status">Sold out at this store right now. Please choose another item.</p>
-      ) : (
-        <SellableConfigurator
-          channel={channel}
-          key={sellable.sellableReference}
-          sellable={sellable}
+      {photo === null ? null : (
+        <MenuPhotoPicture
+          className="sellable-detail__media"
+          onError={photoFailed}
+          photo={photo}
+          priority
+          sizes="(min-width: 960px) 45vw, (min-width: 736px) 640px, calc(100vw - 64px)"
+          widths={[640, 1280]}
         />
       )}
+      <div className="sellable-detail__content">
+        <div className="sellable-detail__heading">
+          <Heading headingRef={headingRef}>{sellable.name}</Heading>
+          <p className="sellable-detail__price">
+            {priceLine(sellable)}
+            {sellable.price === null ? null : <span> plus tax</span>}
+          </p>
+        </div>
+        {sellable.description === null ? null : (
+          <p className="sellable-detail__description">{sellable.description}</p>
+        )}
+        {sellable.availability === "SoldOut" ? <AvailabilityLine sellable={sellable} /> : null}
+        <AllergenSummary sellable={sellable} />
+        {readOnlyNotice ? (
+          <div className="menu-readonly-boundary" role="status">
+            {readOnlyNotice}
+          </div>
+        ) : sellable.availability === "SoldOut" ? (
+          <p role="status">Sold out at this store right now. Please choose another item.</p>
+        ) : (
+          <SellableConfigurator
+            channel={channel}
+            key={sellable.sellableReference}
+            sellable={sellable}
+          />
+        )}
+      </div>
     </article>
   );
 }

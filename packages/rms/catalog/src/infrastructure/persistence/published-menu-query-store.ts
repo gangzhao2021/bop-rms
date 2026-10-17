@@ -65,7 +65,9 @@ const select = `SELECT CASE WHEN
           'presentationRole', v.presentation_role, 'sortOrder', v.sort_order, 'pinned', v.pinned,
           'configuredAvailability', v.configured_availability,
           'optionRules', v.option_rules_json, 'allergenDisclosure', v.allergen_disclosure_json
-        ) ORDER BY v.sort_order, v.placement_id)
+        ) || CASE WHEN v.presentation_json IS NULL THEN '{}'::jsonb
+          ELSE jsonb_build_object('presentation', v.presentation_json) END
+        ORDER BY v.sort_order, v.placement_id)
         FROM rms_catalog.published_menu_projection_sellable v
         WHERE v.generation_id = s.generation_id AND v.section_id = s.section_id
           AND v.menu_id = s.menu_id AND v.brand_id = $1), '[]'::jsonb)
@@ -110,7 +112,9 @@ const selectVersion = `SELECT jsonb_build_object(
           'presentationRole', v.presentation_role, 'sortOrder', v.sort_order, 'pinned', v.pinned,
           'configuredAvailability', v.configured_availability,
           'optionRules', v.option_rules_json, 'allergenDisclosure', v.allergen_disclosure_json
-        ) ORDER BY v.sort_order, v.placement_id)
+        ) || CASE WHEN v.presentation_json IS NULL THEN '{}'::jsonb
+          ELSE jsonb_build_object('presentation', v.presentation_json) END
+        ORDER BY v.sort_order, v.placement_id)
         FROM rms_catalog.published_menu_projection_sellable v
         WHERE v.generation_id = s.generation_id AND v.section_id = s.section_id
           AND v.menu_id = s.menu_id AND v.brand_id = $1), '[]'::jsonb)
@@ -384,7 +388,7 @@ export function createPostgresPublishedMenuProjectionStore(options: {
         );
         for (const item of section.sellables)
           await tx.query(
-            "INSERT INTO rms_catalog.published_menu_projection_sellable (generation_id,brand_id,menu_id,section_id,placement_id,sellable_id,product_version_id,localized_names_json,presentation_role,sort_order,pinned,configured_availability,option_rules_json,allergen_disclosure_json) VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13::jsonb,$14::jsonb)",
+            "INSERT INTO rms_catalog.published_menu_projection_sellable (generation_id,brand_id,menu_id,section_id,placement_id,sellable_id,product_version_id,localized_names_json,presentation_role,sort_order,pinned,configured_availability,option_rules_json,allergen_disclosure_json,presentation_json) VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15::jsonb)",
             [
               generation,
               brand,
@@ -400,6 +404,7 @@ export function createPostgresPublishedMenuProjectionStore(options: {
               item.configuredAvailability,
               JSON.stringify(item.optionRules),
               JSON.stringify(item.allergenDisclosure),
+              item.presentation === undefined ? null : JSON.stringify(item.presentation),
             ],
           );
       }

@@ -64,6 +64,8 @@ function found() {
               sellableReference: references.sellable,
               productVersionReference: references.product,
               name: "Latte",
+              description: null as string | null,
+              photo: null as unknown,
               presentationRole: "Standard",
               pinned: false,
               availability: "Available",
@@ -159,6 +161,8 @@ describe("Customer Menu client", () => {
               {
                 sellableReference: references.sellable,
                 name: "Latte",
+                description: null,
+                photo: null,
                 presentationRole: "Standard",
                 pinned: false,
                 availability: "Available",
@@ -287,6 +291,139 @@ describe("Customer Menu client", () => {
       kind: "Unavailable",
     });
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+const jpegPath = (seed: string) => `/media/images/${seed.repeat(64)}.jpg`;
+const webpPath = (seed: string) => `/media/images/${seed.repeat(64)}.webp`;
+
+function photoWire() {
+  return {
+    altText: "Latte in a white cup on a wooden table",
+    width: 1280,
+    height: 960,
+    renditions: [
+      { url: jpegPath("a"), contentType: "image/jpeg", width: 320, height: 240 },
+      { url: webpPath("b"), contentType: "image/webp", width: 320, height: 240 },
+      { url: jpegPath("c"), contentType: "image/jpeg", width: 640, height: 480 },
+      { url: webpPath("d"), contentType: "image/webp", width: 640, height: 480 },
+      { url: jpegPath("e"), contentType: "image/jpeg", width: 1280, height: 960 },
+      { url: webpPath("f"), contentType: "image/webp", width: 1280, height: 960 },
+    ],
+  };
+}
+
+function withPresentation(description: unknown, photo: unknown) {
+  const value = found();
+  const item = value.menu.sections[0]?.sellables[0];
+  if (!item) throw new Error("fixture");
+  Object.assign(item, { description, photo });
+  return value;
+}
+
+async function loadBody(body: unknown) {
+  const client = createCustomerMenuClient(context, {
+    fetch: async () => response(200, body),
+    online: () => true,
+  });
+  return client.load();
+}
+
+describe("Customer Menu description and photo", () => {
+  it("accepts a published description and photo exactly as sent", async () => {
+    const description =
+      "Double espresso with steamed milk — smooth, 12 oz. Ask for oat (no charge)!";
+    const result = await loadBody(withPresentation(description, photoWire()));
+    if (result.kind !== "Found") throw new Error(`expected Found, got ${result.kind}`);
+    const item = result.menu.sections[0]?.sellables[0];
+    expect(item?.description).toBe(description);
+    expect(item?.photo).toEqual(photoWire());
+    expect(Object.isFrozen(item?.photo)).toBe(true);
+  });
+
+  it("accepts a 240-character description and a 160-character alt text", async () => {
+    const photo = { ...photoWire(), altText: "a".repeat(160) };
+    const result = await loadBody(withPresentation("d".repeat(240), photo));
+    expect(result.kind).toBe("Found");
+  });
+
+  it("accepts a menu item without description or photo", async () => {
+    const result = await loadBody(withPresentation(null, null));
+    if (result.kind !== "Found") throw new Error("expected Found");
+    expect(result.menu.sections[0]?.sellables[0]).toMatchObject({ description: null, photo: null });
+  });
+
+  it("requires both keys on every sellable", async () => {
+    const value = found();
+    const item = value.menu.sections[0]?.sellables[0] as Record<string, unknown> | undefined;
+    if (!item) throw new Error("fixture");
+    delete item.photo;
+    expect((await loadBody(value)).kind).toBe("Unavailable");
+    const second = found();
+    const other = second.menu.sections[0]?.sellables[0] as Record<string, unknown> | undefined;
+    if (!other) throw new Error("fixture");
+    delete other.description;
+    expect((await loadBody(second)).kind).toBe("Unavailable");
+  });
+
+  it.each([
+    ["empty", ""],
+    ["too long", "d".repeat(241)],
+    ["leading space", " Latte"],
+    ["markup", "<b>Latte</b>"],
+    ["template braces", "Latte {price}"],
+    ["control character", "Latte\u0007"],
+    ["line break", "Latte\nwith milk"],
+    ["format character", "Latte\u200b"],
+    ["not a string", 42],
+  ])("rejects a %s description", async (_label, description) => {
+    expect((await loadBody(withPresentation(description, null))).kind).toBe("Unavailable");
+  });
+
+  const renditions = photoWire().renditions;
+  it.each([
+    ["extra key", { ...photoWire(), imageReference: "018f7500-0000-7000-8000-000000000010" }],
+    ["missing alt text", { ...photoWire(), altText: "" }],
+    ["long alt text", { ...photoWire(), altText: "a".repeat(161) }],
+    ["markup in alt text", { ...photoWire(), altText: "<img onerror=x>" }],
+    ["zero width", { ...photoWire(), width: 0 }],
+    ["fractional height", { ...photoWire(), height: 1.5 }],
+    ["no renditions", { ...photoWire(), renditions: [] }],
+    ["seven renditions", { ...photoWire(), renditions: [...renditions, renditions[0]] }],
+    [
+      "external url",
+      { ...photoWire(), renditions: [{ ...renditions[0], url: "https://example.com/a.jpg" }] },
+    ],
+    [
+      "protocol-relative url",
+      { ...photoWire(), renditions: [{ ...renditions[0], url: `//evil${jpegPath("a")}` }] },
+    ],
+    [
+      "traversal url",
+      { ...photoWire(), renditions: [{ ...renditions[0], url: "/media/images/../secret.jpg" }] },
+    ],
+    [
+      "uppercase hash",
+      {
+        ...photoWire(),
+        renditions: [{ ...renditions[0], url: `/media/images/${"A".repeat(64)}.jpg` }],
+      },
+    ],
+    [
+      "query string",
+      { ...photoWire(), renditions: [{ ...renditions[0], url: `${jpegPath("a")}?x=1` }] },
+    ],
+    ["png type", { ...photoWire(), renditions: [{ ...renditions[0], contentType: "image/png" }] }],
+    [
+      "mismatched extension",
+      { ...photoWire(), renditions: [{ ...renditions[0], contentType: "image/webp" }] },
+    ],
+    ["rendition extra key", { ...photoWire(), renditions: [{ ...renditions[0], byteSize: 10 }] }],
+    ["rendition zero width", { ...photoWire(), renditions: [{ ...renditions[0], width: 0 }] }],
+    ["array", [photoWire()]],
+    ["string", "/media/images/a.jpg"],
+  ])("rejects a photo with %s", async (_label, photo) => {
+    expect((await loadBody(withPresentation(null, photo))).kind).toBe("Unavailable");
   });
 });
 

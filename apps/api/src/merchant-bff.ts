@@ -273,7 +273,12 @@ import {
   type createMerchantStoreReceipts,
 } from "./merchant-store-receipts.js";
 import { MerchantRecipeError, type createMerchantRecipes } from "./merchant-recipes.js";
-import { MerchantProductError, type createMerchantProducts } from "./merchant-products.js";
+import {
+  MerchantProductError,
+  productPhotoBytesMaximum,
+  type createMerchantProducts,
+} from "./merchant-products.js";
+import { Buffer } from "node:buffer";
 import { MerchantPriceError, type createMerchantPrices } from "./merchant-prices.js";
 import { MerchantAllergenError, type createMerchantAllergens } from "./merchant-allergens.js";
 import {
@@ -1376,6 +1381,32 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           .set("Cache-Control", NO_STORE)
           .json({ error: "store_configuration_ordinary_invalid" });
       });
+      return;
+    }
+    // WP-2423 menu descriptions and photos: a product photo is sent as the raw image bytes; a
+    // cross-site request is refused before its body is read.
+    if (request.method === "POST" && request.path === "/commerce/products/photo") {
+      sameOriginMutation(options)(request, response, () =>
+        express.raw({ type: () => true, limit: productPhotoBytesMaximum })(
+          request,
+          response,
+          (error?: unknown) => {
+            if (!error) {
+              next();
+              return;
+            }
+            const large =
+              typeof error === "object" &&
+              error !== null &&
+              "type" in error &&
+              error.type === "entity.too.large";
+            response
+              .status(large ? 413 : 400)
+              .set("Cache-Control", NO_STORE)
+              .json({ error: large ? "PhotoTooLarge" : "Invalid" });
+          },
+        ),
+      );
       return;
     }
     // WP-2423 / DEC-INV-OPENING: an opening count may carry up to 5000 lines.
@@ -7013,6 +7044,11 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
     TaxClassUnavailable: 422,
     Lifecycle: 409,
     Invalid: 400,
+    PhotoTypeUnsupported: 400,
+    PhotoTooLarge: 413,
+    PhotoTooSmall: 400,
+    PhotoUnreadable: 400,
+    PhotoStorageUnavailable: 503,
   } as const;
   const productFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof MerchantProductError)) {
@@ -7069,6 +7105,43 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
     }
     void options.products
       .command({ sessionCookie, csrf, body: request.body })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => productFailure(response, error));
+  });
+
+  router.post("/commerce/products/photo", sameOriginMutation(options), (request, response) => {
+    response.set("Cache-Control", NO_STORE);
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    const productReference = exactHeader(request, "x-bop-product-reference");
+    const operationReference = exactHeader(request, "x-bop-operation-reference");
+    const contentType = exactHeader(request, "content-type");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      productReference === null ||
+      operationReference === null ||
+      contentType === null ||
+      Object.keys(request.query).length !== 0 ||
+      !Buffer.isBuffer(request.body)
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.products) {
+      response.status(503).json({ error: "PhotoStorageUnavailable" });
+      return;
+    }
+    void options.products
+      .uploadPhoto({
+        sessionCookie,
+        csrf,
+        productReference,
+        operationReference,
+        contentType: contentType.toLowerCase(),
+        bytes: new Uint8Array(request.body),
+      })
       .then((result) => response.json(result))
       .catch((error: unknown) => productFailure(response, error));
   });

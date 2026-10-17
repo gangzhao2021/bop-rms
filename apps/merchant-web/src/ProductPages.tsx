@@ -1,11 +1,24 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type Ref } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./RoleAdministrationPages.js";
 import {
   ProductPageError,
+  ProductPhotoError,
   parseProductDetailView,
+  photoContentTypes,
+  photoFileProblem,
+  photoRetryable,
+  presentationChanged,
+  presentationDraftFrom,
+  presentationInput,
+  presentationLimits,
+  presentationProblems,
+  type PresentationDraft,
+  type PresentationProblem,
+  type ProductPhotoErrorCode,
+  type ProductPresentation,
   parseProductListView,
   parseProductRouteReference,
   productCodeValid,
@@ -208,6 +221,10 @@ function ProductEditor({
     { key: nextKey(), skuReference: null, lifecycle: "Draft", skuCode: "", name: "Regular" },
   ]);
   const [optionSets, setOptionSets] = useState<ProductOptionSetInput[]>([]);
+  const [presentation, setPresentation] = useState<PresentationDraft>(emptyPresentation);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [showPresentationProblems, setShowPresentationProblems] = useState(false);
+  const altTextRef = useRef<HTMLInputElement>(null);
   const [loadedVersion, setLoadedVersion] = useState<number | null>(null);
   const [pending, setPending] = useState<ProductCommand | null>(null);
   const [message, setMessage] = useState<{ tone: "error" | "neutral"; text: string } | null>(null);
@@ -242,6 +259,8 @@ function ProductEditor({
         })),
       );
       setOptionSets([...(current.optionSets ?? [])]);
+      if (current.presentation) setPresentation(presentationDraftFrom(current.presentation));
+      setShowPresentationProblems(false);
     } else if (taxClass === "" && view.taxClasses.length === 1) {
       setTaxClass(view.taxClasses[0]?.taxClassificationReference ?? "");
     }
@@ -323,6 +342,7 @@ function ProductEditor({
               taxClassificationReference: taxClass,
               sizes: sizeInputs,
               ...(optionChoices === null ? {} : { optionSets }),
+              ...(product.presentation ? { presentation: presentationInput(presentation) } : {}),
             },
     );
   const startSelling = () =>
@@ -356,7 +376,10 @@ function ProductEditor({
         size.skuReference !== product.sizes[index]?.skuReference ||
         size.name.trim() !== product.sizes[index]?.name,
     ) ||
-    optionSetsChanged;
+    optionSetsChanged ||
+    (product.presentation !== undefined && presentationChanged(presentation, product.presentation));
+  const problems = product?.presentation ? presentationProblems(presentation) : {};
+  const presentationBlocked = problems.description !== undefined || problems.altText !== undefined;
 
   return (
     <AppFrame
@@ -396,7 +419,13 @@ function ProductEditor({
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          if (valid && !busy && mayEdit && changed) save();
+          if (!valid || busy || !mayEdit || !changed || photoUploading) return;
+          if (presentationBlocked) {
+            setShowPresentationProblems(true);
+            if (problems.altText) altTextRef.current?.focus();
+            return;
+          }
+          save();
         }}
       >
         <fieldset disabled={!mayEdit || busy}>
@@ -553,8 +582,24 @@ function ProductEditor({
             onChange={setOptionSets}
           />
         ) : null}
+        {product?.presentation ? (
+          mayEdit ? (
+            <ProductCustomerMenuFieldset
+              disabled={busy}
+              client={client}
+              productReference={product.productReference}
+              value={presentation}
+              onChange={setPresentation}
+              onUploadingChange={setPhotoUploading}
+              problems={showPresentationProblems ? problems : {}}
+              altTextRef={altTextRef}
+            />
+          ) : (
+            <ProductCustomerMenuReadOnly presentation={product.presentation} />
+          )
+        ) : null}
         {mayEdit ? (
-          <button type="submit" disabled={!valid || busy || !changed}>
+          <button type="submit" disabled={!valid || busy || !changed || photoUploading}>
             {pending && pending.action !== "StartSelling"
               ? "Retry"
               : product
@@ -739,5 +784,293 @@ function ProductOptionSetsFieldset({
         </div>
       ) : null}
     </fieldset>
+  );
+}
+
+const emptyPresentation: PresentationDraft = { description: "", photo: null, altText: "" };
+const presentationNote =
+  "Customers see the description and photo after the menu is next published.";
+const photoErrorText: Record<ProductPhotoErrorCode, string> = {
+  PhotoTypeUnsupported: "Use a JPEG, PNG or WebP photo.",
+  PhotoTooLarge: "This photo is larger than 10 MB. Choose a smaller one.",
+  PhotoTooSmall:
+    "This photo is too small or too narrow. Use one at least 480 pixels on its shorter side.",
+  PhotoUnreadable: "This file couldn't be read as a photo. Try another one.",
+  PhotoStorageUnavailable: "The photo didn't upload. Check the connection and try again.",
+  Offline: "The photo didn't upload. Check the connection and try again.",
+  Unavailable: "The photo didn't upload. Check the connection and try again.",
+  PermissionDenied: copy.PermissionDenied,
+  NotFound: copy.NotFound,
+};
+/** Staff wording for a photo the page or the server refused. */
+export const photoUploadMessage = (code: ProductPhotoErrorCode) => photoErrorText[code];
+const presentationProblemText = (problem: PresentationProblem, field: "description" | "alt") =>
+  problem === "AltTextMissing"
+    ? "Describe the photo before saving. Customers who use a screen reader hear this description."
+    : problem === "TooLong"
+      ? field === "description"
+        ? `Keep the description to ${presentationLimits.description} characters.`
+        : `Keep the photo description to ${presentationLimits.altText} characters.`
+      : "Use plain words only: no links and none of these characters: < > { }";
+
+type PhotoUploadState =
+  | { readonly kind: "Idle" }
+  | { readonly kind: "Uploading"; readonly file: File; readonly operationReference: string }
+  | {
+      readonly kind: "Failed";
+      readonly code: ProductPhotoErrorCode;
+      readonly file: File | null;
+      readonly operationReference: string | null;
+    };
+
+/** WP-2423: the description and photo customers see under the product name on the menu. */
+export function ProductCustomerMenuFieldset({
+  disabled,
+  client,
+  productReference,
+  value,
+  onChange,
+  onUploadingChange,
+  problems,
+  altTextRef,
+  initialUpload = { kind: "Idle" },
+}: {
+  readonly disabled: boolean;
+  readonly client: ProductClient;
+  readonly productReference: string;
+  readonly value: PresentationDraft;
+  readonly onChange: (next: PresentationDraft) => void;
+  readonly onUploadingChange: (uploading: boolean) => void;
+  readonly problems: {
+    readonly description?: PresentationProblem;
+    readonly altText?: PresentationProblem;
+  };
+  readonly altTextRef?: Ref<HTMLInputElement>;
+  readonly initialUpload?: PhotoUploadState;
+}) {
+  const id = useId();
+  const [upload, setUpload] = useState<PhotoUploadState>(initialUpload);
+  const latestValue = useRef(value);
+  latestValue.current = value;
+  const fileInput = useRef<HTMLInputElement>(null);
+  const uploading = upload.kind === "Uploading";
+  const start = async (file: File, operationReference: string) => {
+    const problem = photoFileProblem(file);
+    if (problem) {
+      setUpload({ kind: "Failed", code: problem, file: null, operationReference: null });
+      return;
+    }
+    if (!client.uploadPhoto) {
+      setUpload({ kind: "Failed", code: "Unavailable", file, operationReference });
+      return;
+    }
+    setUpload({ kind: "Uploading", file, operationReference });
+    onUploadingChange(true);
+    try {
+      const photo = await client.uploadPhoto(productReference, file, operationReference);
+      // A new photo needs its own description; the previous one described another picture.
+      onChange({ ...latestValue.current, photo, altText: "" });
+      setUpload({ kind: "Idle" });
+    } catch (error) {
+      const code = error instanceof ProductPhotoError ? error.code : "Unavailable";
+      setUpload({ kind: "Failed", code, file, operationReference });
+    } finally {
+      onUploadingChange(false);
+    }
+  };
+  const descriptionLeft = presentationLimits.description - value.description.length;
+  const photoLabel = value.photo ? "Replace photo" : "Add photo";
+  const altMissing = value.photo !== null && value.altText.trim() === "";
+  const ids = {
+    description: `${id}-description`,
+    descriptionHelp: `${id}-description-help`,
+    descriptionCount: `${id}-description-count`,
+    descriptionError: `${id}-description-error`,
+    photo: `${id}-photo`,
+    photoHelp: `${id}-photo-help`,
+    photoError: `${id}-photo-error`,
+    alt: `${id}-alt`,
+    altHelp: `${id}-alt-help`,
+    altError: `${id}-alt-error`,
+  };
+  const photoError = upload.kind === "Failed" ? upload : null;
+  return (
+    <fieldset className="product-customer-menu" disabled={disabled}>
+      <legend>Customer menu</legend>
+      <p className="product-customer-menu__note">{presentationNote}</p>
+      <div className="product-customer-menu__field">
+        <label htmlFor={ids.description}>Description</label>
+        <textarea
+          id={ids.description}
+          value={value.description}
+          maxLength={presentationLimits.description}
+          rows={3}
+          aria-invalid={problems.description ? true : undefined}
+          aria-describedby={[
+            ids.descriptionHelp,
+            ids.descriptionCount,
+            problems.description ? ids.descriptionError : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          onChange={(event) => onChange({ ...value, description: event.target.value })}
+        />
+        <p id={ids.descriptionHelp} className="product-customer-menu__help">
+          Shown to customers under the product name. Plain text, up to{" "}
+          {presentationLimits.description} characters.
+        </p>
+        <p id={ids.descriptionCount} className="product-customer-menu__count">
+          {descriptionLeft === 1 ? "1 character left" : `${descriptionLeft} characters left`}
+        </p>
+        {problems.description ? (
+          <p id={ids.descriptionError} className="product-customer-menu__error" role="alert">
+            {presentationProblemText(problems.description, "description")}
+          </p>
+        ) : null}
+      </div>
+      <div className="product-customer-menu__field">
+        <span className="product-customer-menu__label">Photo</span>
+        {value.photo ? (
+          <figure className="product-customer-menu__preview">
+            <img
+              src={value.photo.previewUrl}
+              alt={altMissing ? "" : value.altText.trim()}
+              width={value.photo.width}
+              height={value.photo.height}
+              aria-describedby={altMissing ? `${id}-preview-pending` : undefined}
+            />
+            {altMissing ? (
+              <figcaption id={`${id}-preview-pending`} className="visually-hidden">
+                Photo preview, not described yet
+              </figcaption>
+            ) : null}
+          </figure>
+        ) : (
+          <p id={ids.photoHelp} className="product-customer-menu__help">
+            No photo. A clear photo helps customers choose. JPEG, PNG or WebP, up to 10 MB.
+          </p>
+        )}
+        <div className="product-customer-menu__actions">
+          <input
+            ref={fileInput}
+            id={ids.photo}
+            className="visually-hidden"
+            type="file"
+            accept={photoContentTypes.join(",")}
+            disabled={disabled || uploading}
+            aria-describedby={
+              [value.photo ? "" : ids.photoHelp, photoError ? ids.photoError : ""]
+                .filter(Boolean)
+                .join(" ") || undefined
+            }
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) void start(file, newOperationReference());
+            }}
+          />
+          <label
+            htmlFor={ids.photo}
+            className="product-customer-menu__button"
+            aria-disabled={disabled || uploading ? true : undefined}
+          >
+            {photoLabel}
+          </label>
+          {value.photo ? (
+            <button
+              type="button"
+              className="product-customer-menu__button"
+              disabled={uploading}
+              onClick={() => {
+                onChange({ ...value, photo: null, altText: "" });
+                setUpload({ kind: "Idle" });
+              }}
+            >
+              Remove photo
+            </button>
+          ) : null}
+        </div>
+        {uploading ? (
+          <p role="status" className="product-customer-menu__help">
+            Uploading photo…
+          </p>
+        ) : null}
+        {photoError ? (
+          <div id={ids.photoError} className="product-customer-menu__error" role="alert">
+            <p>{photoUploadMessage(photoError.code)}</p>
+            {photoRetryable(photoError.code) &&
+            photoError.file !== null &&
+            photoError.operationReference !== null ? (
+              <button
+                type="button"
+                className="product-customer-menu__button"
+                onClick={() => {
+                  if (photoError.file && photoError.operationReference)
+                    void start(photoError.file, photoError.operationReference);
+                }}
+              >
+                Retry
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+      {value.photo ? (
+        <div className="product-customer-menu__field">
+          <label htmlFor={ids.alt}>Photo description (alt text)</label>
+          <input
+            ref={altTextRef}
+            id={ids.alt}
+            value={value.altText}
+            maxLength={presentationLimits.altText}
+            aria-required="true"
+            aria-invalid={problems.altText ? true : undefined}
+            aria-describedby={[ids.altHelp, problems.altText ? ids.altError : ""]
+              .filter(Boolean)
+              .join(" ")}
+            onChange={(event) => onChange({ ...value, altText: event.target.value })}
+          />
+          <p id={ids.altHelp} className="product-customer-menu__help">
+            Describe the photo for customers who use a screen reader, e.g. 'Flat white in a white
+            ceramic cup'.
+          </p>
+          {problems.altText ? (
+            <p id={ids.altError} className="product-customer-menu__error" role="alert">
+              {presentationProblemText(problems.altText, "alt")}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </fieldset>
+  );
+}
+
+/** What customers see, for staff who may read the product but not change it. */
+export function ProductCustomerMenuReadOnly({
+  presentation,
+}: {
+  readonly presentation: ProductPresentation;
+}) {
+  return (
+    <section className="product-customer-menu" aria-labelledby="customer-menu-heading">
+      <h3 id="customer-menu-heading">Customer menu</h3>
+      <p className="product-customer-menu__note">{presentationNote}</p>
+      <h4>Description</h4>
+      <p>{presentation.description === "" ? "No description." : presentation.description}</p>
+      <h4>Photo</h4>
+      {presentation.photo ? (
+        <figure className="product-customer-menu__preview">
+          <img
+            src={presentation.photo.previewUrl}
+            alt={presentation.photo.altText}
+            width={presentation.photo.width}
+            height={presentation.photo.height}
+          />
+          <figcaption>Photo description: {presentation.photo.altText}</figcaption>
+        </figure>
+      ) : (
+        <p>No photo.</p>
+      )}
+    </section>
   );
 }

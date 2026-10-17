@@ -403,8 +403,26 @@ it("persists classified Product Versions atomically with held current Category f
         assert.deepEqual(await counts(), empty);
       }
       allowedLifecycles = ["Draft", "Active"];
-      const input = createInput(101, [11, 10], 10);
+      // WP-2423 menu descriptions and photos: the customer description/photo reference is written
+      // and read through the owner store under the restricted role.
+      const customerPresentation = {
+        localizedDescriptions: { "en-CA": "Synthetic customer description." },
+        photo: { imageReference: id(150), localizedAltText: { "en-CA": "Synthetic photo" } },
+      };
+      const input = { ...createInput(101, [11, 10], 10), customerPresentation };
       const original = await service.create(input);
+      assert.deepEqual(original.aggregate.draft.customerPresentation, customerPresentation);
+      const storedPresentation = async (version) =>
+        (
+          await admin.query(
+            "SELECT customer_presentation_json FROM rms_catalog.product_version WHERE product_version_id=$1",
+            [version],
+          )
+        ).rows[0].customer_presentation_json;
+      assert.deepEqual(
+        await storedPresentation(original.aggregate.draft.versionReference),
+        customerPresentation,
+      );
       assert.deepEqual(original.aggregate.draft.categoryClassification, {
         categoryReferences: [id(10), id(11)],
         primaryCategoryReference: id(10),
@@ -697,11 +715,15 @@ it("persists classified Product Versions atomically with held current Category f
         code: "CATALOG_DEPENDENCY_UNAVAILABLE",
       });
       corruptClassificationRead = false;
+      // A draft written without the description/photo keeps the current ones.
+      const { customerPresentation: omittedPresentation, ...draftWithoutPresentation } =
+        original.aggregate.draft;
+      assert.deepEqual(omittedPresentation, customerPresentation);
       const changed = await service.replaceDraft({
         productReference: original.aggregate.productReference,
         expectedAggregateVersion: 1,
         draft: {
-          ...original.aggregate.draft,
+          ...draftWithoutPresentation,
           categoryClassification: {
             categoryReferences: [id(11)],
             primaryCategoryReference: id(11),
@@ -714,6 +736,8 @@ it("persists classified Product Versions atomically with held current Category f
         categoryReferences: [id(11)],
         primaryCategoryReference: id(11),
       });
+      assert.deepEqual(changed.aggregate.draft.customerPresentation, customerPresentation);
+      assert.deepEqual(await creation.load(changed.aggregate.productReference), changed.aggregate);
       const changedPricingBindings = await exerciseProductPricingBindingSource({
         transactions,
         aggregate: changed.aggregate,
@@ -788,6 +812,7 @@ it("persists classified Product Versions atomically with held current Category f
         draft: {
           ...changed.aggregate.draft,
           categoryClassification: { categoryReferences: [], primaryCategoryReference: null },
+          customerPresentation: { localizedDescriptions: {}, photo: null },
         },
         operationReference: id(104),
         requestedAt: at,
@@ -796,6 +821,17 @@ it("persists classified Product Versions atomically with held current Category f
         categoryReferences: [],
         primaryCategoryReference: null,
       });
+      assert.deepEqual(await storedPresentation(cleared.aggregate.draft.versionReference), {
+        localizedDescriptions: {},
+        photo: null,
+      });
+      await assert.rejects(
+        admin.query(
+          "UPDATE rms_catalog.product_version SET customer_presentation_json='[]'::jsonb WHERE product_version_id=$1",
+          [cleared.aggregate.draft.versionReference],
+        ),
+        { code: "23514" },
+      );
       const clearedHistory = await exerciseProductReferenceHistorySource({
         transactions,
         aggregate: cleared.aggregate,

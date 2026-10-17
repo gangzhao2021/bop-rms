@@ -27,3 +27,19 @@ export {
   type MediaEditorReadAuthorityInput,
   type MediaEditorReadSourceOptions,
 } from "./infrastructure/persistence/media-publication-read-store.js";
+
+export * from "./contracts/product-image.js";
+export type { MediaImageObjectStore } from "./application/ports/media-image-object-store.js";
+export type {
+  IngestProductImageInput,
+  LoadProductImagesInput,
+  PreparedProductImage,
+  PrepareProductImageInput,
+  ProductImageService,
+  RecordProductImageInput,
+} from "./application/product-image-service.js";
+export {
+  createProductImageService,
+  loadProductImages,
+} from "./infrastructure/product-image-runtime.js";
+export { createLocalFilesystemMediaImageObjectStore } from "./infrastructure/storage/local-filesystem-image-object-store.js";

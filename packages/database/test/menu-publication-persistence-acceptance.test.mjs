@@ -240,6 +240,36 @@ it.each([
           assert.equal(product.localizedNames["fr-CA"], "Produit");
           assert.equal(product.productLifecycle, "Active");
           assert.equal(product.skuLifecycle, "Active");
+          // WP-2423 menu descriptions and photos: the review fact carries the Product's description and
+          // photo reference when set (read under the restricted role), and none when never set.
+          assert.equal(Object.hasOwn(product, "customerPresentation"), false);
+          const customerPresentation = {
+            localizedDescriptions: { "en-CA": "Synthetic reviewed description." },
+            photo: { imageReference: id(990), localizedAltText: { "en-CA": "Synthetic photo" } },
+          };
+          await admin.query(
+            "UPDATE rms_catalog.product_version SET customer_presentation_json=$2 WHERE product_version_id=$1",
+            [id(803), JSON.stringify(customerPresentation)],
+          );
+          assert.deepEqual(
+            (await runner.run((tx) => readProducts(tx, productRequest)))[0].customerPresentation,
+            customerPresentation,
+          );
+          await admin.query(
+            "UPDATE rms_catalog.product_version SET customer_presentation_json=$2 WHERE product_version_id=$1",
+            [
+              id(803),
+              JSON.stringify({
+                ...customerPresentation,
+                photo: { ...customerPresentation.photo, localizedAltText: { "fr-CA": "Photo" } },
+              }),
+            ],
+          );
+          await assert.rejects(runner.run((tx) => readProducts(tx, productRequest)));
+          await admin.query(
+            "UPDATE rms_catalog.product_version SET customer_presentation_json=NULL WHERE product_version_id=$1",
+            [id(803)],
+          );
           for (const sellableReferences of [[id(999)], [id(20), id(999)], [id(20), id(20)]])
             await assert.rejects(
               runner.run((tx) => readProducts(tx, { ...productRequest, sellableReferences })),
@@ -376,9 +406,33 @@ it.each([
               },
             ],
           };
+          // The composition resolves the photo through Media; the renditions here are synthetic.
+          const presentation = {
+            localizedDescriptions: { "en-CA": "Synthetic reviewed description." },
+            photo: {
+              imageReference: id(990),
+              localizedAltText: { "en-CA": "Synthetic photo" },
+              width: 1280,
+              height: 960,
+              renditions: [320, 640, 1280].flatMap((width, index) => [
+                {
+                  contentType: "image/jpeg",
+                  width,
+                  height: width * 0.75,
+                  path: "/media/images/" + String(index * 2).repeat(64) + ".jpg",
+                },
+                {
+                  contentType: "image/webp",
+                  width,
+                  height: width * 0.75,
+                  path: "/media/images/" + String(index * 2 + 1).repeat(64) + ".webp",
+                },
+              ]),
+            },
+          };
           const assembly = {
             menu: owner.aggregate,
-            sellables: [{ ...product, optionRules: [] }],
+            sellables: [{ ...product, optionRules: [], presentation }],
             provenance,
             checkedAt: at,
             validationEvidenceReference: id(951),
@@ -395,6 +449,7 @@ it.each([
           );
           assert.deepEqual(content.categoryBindings[0].categoryReferences, [id(850)]);
           assert.equal(content.sections[0].sellables[0].localizedNames["fr-CA"], "Produit");
+          assert.deepEqual(content.sections[0].sellables[0].presentation, presentation);
           assert.deepEqual(content.storeReferences, owner.aggregate.draft.storeReferences);
           for (const sellables of [
             [],
@@ -1004,6 +1059,16 @@ it.each([
             at: query.observedAt,
             generation: id(980),
           });
+          // The projection written by the restricted consumer keeps the reviewed description and photo.
+          assert.deepEqual(
+            (
+              await admin.query(
+                "SELECT presentation_json FROM rms_catalog.published_menu_projection_sellable WHERE generation_id=$1",
+                [id(980)],
+              )
+            ).rows.map((row) => row.presentation_json),
+            [presentation],
+          );
           bindingAvailable = false;
           // DEC-MENU-REVISION: the published version cannot be edited in place (a revision is needed).
           await assert.rejects(
