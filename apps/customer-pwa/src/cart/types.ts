@@ -90,6 +90,8 @@ export class CartClientError extends Error {
   readonly currentVersion: number | null;
   readonly issueCodes: readonly string[];
   readonly retryAfterSeconds: number | null;
+  /** WP-2423 (`ITEM_SHORT`): how many of the item the store can make (0: none). */
+  readonly available: number | null;
 
   constructor(
     code: CartErrorCode,
@@ -97,6 +99,7 @@ export class CartClientError extends Error {
       readonly currentVersion?: number;
       readonly issueCodes?: readonly string[];
       readonly retryAfterSeconds?: number;
+      readonly available?: number;
     } = {},
   ) {
     super("The cart request could not be completed.");
@@ -105,6 +108,7 @@ export class CartClientError extends Error {
     this.currentVersion = details.currentVersion ?? null;
     this.issueCodes = Object.freeze([...(details.issueCodes ?? [])]);
     this.retryAfterSeconds = details.retryAfterSeconds ?? null;
+    this.available = details.available ?? null;
   }
 }
 

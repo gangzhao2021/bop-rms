@@ -13,6 +13,7 @@ import {
   parseGuestSessionReference,
   parseGuestSelectorHash,
   type GuestRawCredential,
+  type GuestSelectorHash,
 } from "../contracts/guest-session.js";
 import {
   parseCanonicalInstant,
@@ -51,6 +52,24 @@ export function createGuestBindingService(options: GuestBindingServiceOptions) {
     parseGuestSelectorHash(options.credentials.hashCredential("Session", raw));
   const csrfHash = (raw: GuestRawCredential) =>
     parseGuestSelectorHash(options.credentials.hashCredential("Csrf", raw));
+  // WP-2423 D2: a reloaded page no longer holds the CSRF token issued at entry; it restores the
+  // foreground CSRF derived from the Session cookie. Accept exactly the two forms Session
+  // authorization accepts, so a guest who reloads before the first Add to cart can still bind.
+  function presentedCsrfBelongsTo(
+    issuedCsrfSelectorHash: GuestSelectorHash,
+    sessionCredential: GuestRawCredential,
+    csrfCredential: GuestRawCredential,
+  ) {
+    const presented = csrfHash(csrfCredential);
+    if (options.credentials.equals(issuedCsrfSelectorHash, presented)) return true;
+    if (!options.credentials.deriveForegroundCsrf) return false;
+    return options.credentials.equals(
+      csrfHash(
+        parseGuestRawCredential(options.credentials.deriveForegroundCsrf(sessionCredential)),
+      ),
+      presented,
+    );
+  }
   async function authorize(
     sessionCredential: GuestRawCredential,
     csrfCredential: GuestRawCredential,
@@ -139,7 +158,7 @@ export function createGuestBindingService(options: GuestBindingServiceOptions) {
             predecessor.sessionSelectorHash,
             sessionHash(sessionCredential),
           ) ||
-          !options.credentials.equals(predecessor.csrfSelectorHash, csrfHash(csrfCredential))
+          !presentedCsrfBelongsTo(predecessor.csrfSelectorHash, sessionCredential, csrfCredential)
         )
           return unavailable();
         const target = readClosedRecord(

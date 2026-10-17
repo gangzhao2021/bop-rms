@@ -79,6 +79,53 @@ describe("WP-2423 findCheckoutStockShortage", () => {
     ).toEqual({ cartItemReference: id(10), available: 2, sharedStock: false });
   });
 
+  it("v15 run: two Flat White lines and a Mocha sharing milk report Flat White's own count, not sold out", async () => {
+    // Milk 0.20 L in centilitres: Flat White 12 each, Mocha 14. One Flat White can be made on its
+    // own, none beside the Mocha; the guest removes one Flat White, then hears about the Mocha.
+    const answer = stock(20, { 1: 12, 2: 14 });
+    expect(
+      await findCheckoutStockShortage(
+        [line(10, 1, 1), line(11, 1, 1), line(12, 2, 1)],
+        answer.covers,
+      ),
+    ).toEqual({ cartItemReference: id(10), available: 1, sharedStock: false });
+    expect(
+      await findCheckoutStockShortage([line(10, 1, 1), line(12, 2, 1)], answer.covers),
+    ).toEqual({ cartItemReference: id(12), available: 0, sharedStock: true });
+    expect(await findCheckoutStockShortage([line(10, 1, 1)], answer.covers)).toBe(null);
+  });
+
+  it("reports an item short on its own with the lower count that fits beside the rest", async () => {
+    // Milk 10: A 2 each (6 ordered, 5 on its own), B 4. Beside B only 3 A fit, and 3 A + B fit.
+    const answer = stock(10, { 1: 2, 2: 4 });
+    const cart = [line(10, 1, 6), line(11, 2, 1)];
+    expect(await findCheckoutStockShortage(cart, answer.covers)).toEqual({
+      cartItemReference: id(10),
+      available: 3,
+      sharedStock: true,
+    });
+    expect(await findCheckoutStockShortage([line(10, 1, 3), line(11, 2, 1)], answer.covers)).toBe(
+      null,
+    );
+  });
+
+  it("reports an item short on its own with its own count when the rest uses other stock", async () => {
+    const answer = stock(10, { 1: 2, 2: 0 });
+    expect(
+      await findCheckoutStockShortage([line(10, 1, 6), line(11, 2, 3)], answer.covers),
+    ).toEqual({ cartItemReference: id(10), available: 5, sharedStock: false });
+  });
+
+  it("counts one item spread over three lines together and names its first line", async () => {
+    const answer = stock(2, { 1: 1 });
+    expect(
+      await findCheckoutStockShortage(
+        [line(10, 1, 1), line(11, 1, 1), line(12, 1, 1)],
+        answer.covers,
+      ),
+    ).toEqual({ cartItemReference: id(10), available: 2, sharedStock: false });
+  });
+
   it("says nothing is left of a sold-out item", async () => {
     const answer = stock(0, { 1: 1 });
     expect(await findCheckoutStockShortage([line(10, 1, 1)], answer.covers)).toEqual({

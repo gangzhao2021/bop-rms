@@ -3,7 +3,9 @@ import type { CurrentCatalogSelectionSnapshot } from "@rms/catalog";
 import {
   createCustomerCartSelectionInventory,
   createCustomerCartStockCoverage,
+  withCartItemStockShortage,
 } from "./customer-cart-selection-inventory.js";
+import type { CustomerCartPort } from "./customer-cart.js";
 const f = vi.hoisted(() => ({
   resolve: vi.fn(),
   observe: vi.fn(),
@@ -147,6 +149,39 @@ it("rejects stock shortage and propagates unavailable observations", async () =>
   });
   f.observe.mockRejectedValueOnce(new Error("unavailable"));
   await expect(service.validateSelection(input, context)).rejects.toThrow("unavailable");
+});
+it("WP-2423: a Cart change the stock can't make says how many it can (instead of a bare refusal)", async () => {
+  const { service } = setup();
+  f.observe.mockImplementation(async (value: { quantity: number }) => ({
+    status: value.quantity <= 3 ? "Available" : "Unavailable",
+  }));
+  const refused = { status: "SelectionInvalid", issueCodes: ["CATALOG_SELECTION_REJECTED"] };
+  const selectionInput = input;
+  const port = withCartItemStockShortage({
+    updateItem: async () => {
+      const result = await service.validateSelection(selectionInput, context);
+      return result.status === "Accepted" ? ({ status: "Unavailable" } as const) : refused;
+    },
+    addItem: async () => {
+      await service.validateSelection(
+        { ...selectionInput, optionSelections: [{ optionReference: id(99), quantity: 1 }] },
+        context,
+      );
+      return refused;
+    },
+  } as unknown as CustomerCartPort);
+  expect(await port.updateItem({} as never)).toEqual({
+    status: "SelectionInvalid",
+    issueCodes: ["ITEM_SHORT"],
+    available: 3,
+  });
+  // Quantities asked: 7, then halving below it.
+  expect(f.observe.mock.calls.map(([value]) => value.quantity)).toEqual([7, 3, 5, 4]);
+  // A refusal that isn't about stock stays as it was.
+  expect(await port.addItem({} as never)).toBe(refused);
+  // None at all: 0 can be made.
+  f.observe.mockResolvedValue({ status: "Unavailable" });
+  expect(await port.updateItem({} as never)).toMatchObject({ available: 0 });
 });
 it("keeps overlapping requests attached to their own snapshot and Cart context", async () => {
   const { service, authorize } = setup();

@@ -71,13 +71,18 @@ function refusal(group: Group, available: number, sharedStock: boolean): Checkou
 /**
  * WP-2423: when the Store's stock cannot make a Cart as it stands, which item to tell the guest
  * about and how many of it can still be made. Ordering decides; `covers` is Inventory's answer for
- * a set of lines. Null when the Cart is covered.
+ * a set of lines. Null when the Cart is covered. An item's lines with the same options count
+ * together (two lines of one Flat White are two Flat Whites).
  *
  * An item that cannot be made in its ordered quantity on its own is reported first (the most
- * recently added such item); otherwise the Cart is short only because items share stock (two
- * drinks using the same milk), and the most recently added item that, lowered, lets the rest of
- * the Cart through is reported with `sharedStock`. When no single item explains it, the most
- * recently added item is reported with nothing available beside the rest.
+ * recently added such item), with how many of it the stock makes on its own; when the rest of the
+ * Cart then still fits only with fewer of it, it is reported with that lower count and
+ * `sharedStock` (lowering it to that count makes the Cart). When none of it fits beside the rest,
+ * its own count is reported (it is not sold out; the guest changes it first and is then told what
+ * the rest shares). Otherwise the Cart is short only because items share stock (two drinks using
+ * the same milk), and the most recently added item that, lowered, lets the rest of the Cart through
+ * is reported with `sharedStock`. When no single item explains it, the most recently added item is
+ * reported with nothing available beside the rest.
  */
 export async function findCheckoutStockShortage(
   lines: readonly CheckoutStockLine[],
@@ -101,9 +106,12 @@ export async function findCheckoutStockShortage(
   const restOf = (group: Group) => lines.filter((line) => !group.lines.includes(line));
   for (const group of ordered) {
     if (await covers(group.lines)) continue;
+    const own = await most(group, [], covers);
     const rest = restOf(group);
-    const beside = rest.length > 0 && (await covers(rest)) ? rest : [];
-    return refusal(group, await most(group, beside, covers), false);
+    if (own === 0 || rest.length === 0 || !(await covers(rest))) return refusal(group, own, false);
+    if (await covers([...rest, ...lowered(group, own)])) return refusal(group, own, false);
+    const beside = await most(Object.freeze({ ...group, ordered: own }), rest, covers);
+    return beside > 0 ? refusal(group, beside, true) : refusal(group, own, false);
   }
   for (const group of all) {
     const rest = restOf(group);

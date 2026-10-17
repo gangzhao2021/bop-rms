@@ -314,6 +314,17 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
       );
   });
 
+  it("WP-2423: tells the guest how many of an item the stock can make (ITEM_SHORT)", async () => {
+    port.result = { status: "SelectionInvalid", issueCodes: ["ITEM_SHORT"], available: 2 };
+    const response = await request("/bff/customer/cart", { headers: headers() });
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({
+      error: { code: "cart_selection_invalid", issueCodes: ["ITEM_SHORT"], available: 2 },
+    });
+    port.result = { status: "SelectionInvalid", issueCodes: ["ITEM_SHORT"], available: -1 };
+    expect((await request("/bff/customer/cart", { headers: headers() })).status).toBe(503);
+  });
+
   it("WP-2423: answers a guest without an active Cart with an explicit empty Cart", async () => {
     port.result = { status: "NotFound" };
     const response = await request("/bff/customer/cart", { headers: headers() });

@@ -172,6 +172,22 @@ describe("CUST-CART page contract", () => {
     ).toContain("Prices have expired");
   });
 
+  it("WP-2423: names the item and how many the store can make when more was asked", () => {
+    const html = renderPage({
+      status: "validation",
+      cart: cart(),
+      issueCodes: ["ITEM_SHORT"],
+      retryAfterSeconds: null,
+      canRetrySameOperation: false,
+      shortItem: { cartItemReference: id(2), available: 2 },
+    });
+    expect(html).toContain("Not enough left");
+    expect(html).toContain(
+      "Only 2 Synthetic tea (Synthetic size) can be made right now, so we couldn’t add more. Your cart is unchanged.",
+    );
+    expect(html).not.toContain("can’t be ordered as selected");
+  });
+
   it.each([
     ["loading", "Loading cart"],
     ["empty", "Your cart is empty"],

@@ -480,6 +480,79 @@ it.each(["Qr", "Pos"])(
           issued.recoveryProof,
         ])
           assert.equal(stored.includes(raw), false);
+        // WP-2423 D2: a guest who reloads the menu before the first Add to cart no longer holds the
+        // CSRF token issued at entry; the page restores the foreground CSRF derived from the Session
+        // cookie (GET /api/v1/customer/session/csrf). Preparing the binding with it must succeed.
+        const reloadedCredential = credentials.generateCredential("Session");
+        const reloadedRecord = createGuestSessionRecord({
+          session: guest(520),
+          sessionSelectorHash: credentials.hashCredential("Session", reloadedCredential),
+          csrfSelectorHash: credentials.hashCredential(
+            "Csrf",
+            credentials.generateCredential("Csrf"),
+          ),
+          operationReference: id(521),
+          operationIntentHash: "b".repeat(64),
+        });
+        await sessions.create({ record: reloadedRecord });
+        clock = 302;
+        // The same restore the bootstrap read performs for a reloaded page.
+        const restoredCsrf = await new GuestSessionService({
+          credentials,
+          store: sessions,
+          binding: { validate: async () => "Current" },
+          admission: { consume: async () => null },
+          now: () => at(clock),
+        }).recoverForegroundCsrf({ sessionCredential: reloadedCredential });
+        assert.equal(restoredCsrf, credentials.deriveForegroundCsrf(reloadedCredential));
+        const reloadedInput = {
+          operationReference: id(522),
+          sessionCredential: reloadedCredential,
+          csrfCredential: restoredCsrf,
+        };
+        const reloadedService = createGuestBindingService({ ...serviceOptions, owner: owner() });
+        const reloadedIssued = await reloadedService.prepare(reloadedInput);
+        assert.equal(reloadedIssued.status, "Prepared");
+        clock = 303;
+        const reloadedActivated = await reloadedService.activate({
+          ...reloadedInput,
+          candidateSessionCredential: reloadedIssued.sessionCredential,
+          candidateCsrfCredential: reloadedIssued.csrfCredential,
+          recoveryProof: reloadedIssued.recoveryProof,
+        });
+        assert.equal(reloadedActivated.status, "Activated");
+        const reloadedCandidate = (
+          await sessions.resolve(
+            credentials.hashCredential("Session", reloadedIssued.sessionCredential),
+          )
+        ).session;
+        assert.equal(
+          (await owner().current(reloadedCandidate, at(clock))).createdByActorReference,
+          reloadedCandidate.sessionReference,
+        );
+        // A CSRF token that belongs to neither the issued nor the restored form is still refused.
+        const strangerCredential = credentials.generateCredential("Session");
+        await sessions.create({
+          record: createGuestSessionRecord({
+            session: guest(530),
+            sessionSelectorHash: credentials.hashCredential("Session", strangerCredential),
+            csrfSelectorHash: credentials.hashCredential(
+              "Csrf",
+              credentials.generateCredential("Csrf"),
+            ),
+            operationReference: id(531),
+            operationIntentHash: "d".repeat(64),
+          }),
+        });
+        await assert.rejects(
+          reloadedService.prepare({
+            operationReference: id(532),
+            sessionCredential: strangerCredential,
+            csrfCredential: credentials.deriveForegroundCsrf(reloadedCredential),
+          }),
+          { code: "GUEST_SESSION_UNAVAILABLE" },
+        );
+        clock = 301;
         // Real HTTP transport over the same real owner stores; browser cookies are supplied explicitly.
         const httpCredential = credentials.generateCredential("Session");
         const httpCsrf = credentials.generateCredential("Csrf");
@@ -729,7 +802,7 @@ it.each(["Qr", "Pos"])(
                 "SELECT count(*)::integer AS n FROM bop_identity.guest_binding_preparation",
               )
             ).rows[0].n,
-            6,
+            9,
           );
           // Additional coordinator scenario keeps all earlier owner/transport assertions intact.
           const creationCredential = credentials.generateCredential("Session");
@@ -854,7 +927,7 @@ it.each(["Qr", "Pos"])(
                   "SELECT count(*)::integer AS n FROM bop_identity.guest_binding_preparation",
                 )
               ).rows[0].n,
-              9,
+              12,
             );
           } finally {
             globalThis.fetch = networkFetch;

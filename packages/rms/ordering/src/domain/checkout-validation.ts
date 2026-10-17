@@ -87,9 +87,10 @@ export type CheckoutValidationErrorCode = (typeof checkoutValidationErrorCodes)[
 /**
  * WP-2423: the Cart line a checkout refusal is about, so the guest (or staff member) is told which
  * item to change. `available`: for CHECKOUT_STOCK_SHORT, how many of that item (with its options,
- * all its lines together) the Store's stock covers with the rest of the Cart unchanged (0: none);
- * null for CHECKOUT_ITEM_UNAVAILABLE. `sharedStock`: the item alone could be made in the quantity
- * ordered; it is short only because other items in the Cart use the same stock.
+ * all its lines together) can be made: without `sharedStock`, what the Store's stock makes of it
+ * (0: sold out); with `sharedStock`, how many fit beside the rest of the Cart unchanged (0: none).
+ * Null for CHECKOUT_ITEM_UNAVAILABLE. `sharedStock`: other items in the Cart use the same stock,
+ * so fewer of it fit beside them (see findCheckoutStockShortage).
  */
 export interface CheckoutLineRefusal {
   readonly cartItemReference: OrderingReference;

@@ -1,6 +1,7 @@
 import { createCustomerPickupCartInventoryAuthorization } from "./customer-pickup-cart-inventory-authorization.js";
 import {
   createCustomerCartSelectionInventory,
+  withCartItemStockShortage,
   type CustomerCartSelectionInventoryOptions,
 } from "./customer-cart-selection-inventory.js";
 import { createPostgresCatalogSelectionService } from "@rms/catalog";
@@ -275,7 +276,7 @@ export function createCustomerCartItemWithCatalogComposition(
             ...selectedInventory,
             authorize: createCustomerPickupCartInventoryAuthorization(cart.scope, cart.now),
           });
-  return createCustomerCartItemComposition({
+  const port = createCustomerCartItemComposition({
     ...cart,
     catalog: createCatalog(
       catalogTransactions,
@@ -292,4 +293,6 @@ export function createCustomerCartItemWithCatalogComposition(
       },
     ),
   });
+  // WP-2423: a quantity the stock can't make tells the guest how many it can.
+  return selectedInventory === undefined ? port : withCartItemStockShortage(port);
 }

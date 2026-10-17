@@ -186,6 +186,22 @@ it("names the short item and how many are left from the Store's real stock, befo
         available: 1,
         sharedStock: false,
       });
+      // v15 run of 8f655fc4: Flat White on two lines and a Mocha, with milk left for one drink. One
+      // Flat White can be made (it is not sold out); once the guest removes one, they are told the
+      // Mocha shares the milk with it.
+      const flatOne = cartLine(drinks.flatWhite, 1),
+        flatTwo = cartLine(drinks.flatWhite, 1),
+        lastMocha = cartLine(drinks.mocha, 1);
+      assert.deepEqual(await findCheckoutStockShortage([flatOne, flatTwo, lastMocha], covers), {
+        cartItemReference: flatOne.cartItemReference,
+        available: 1,
+        sharedStock: false,
+      });
+      assert.deepEqual(await findCheckoutStockShortage([flatOne, lastMocha], covers), {
+        cartItemReference: lastMocha.cartItemReference,
+        available: 0,
+        sharedStock: true,
+      });
       // Staff-entered table round (latte + mocha for guests without a phone): the same questions
       // through the same checkout ports as its table guest, so the same answer.
       const staffLatte = cartLine(drinks.latte, 1),

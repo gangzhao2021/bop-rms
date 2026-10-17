@@ -255,6 +255,25 @@ describe("uncertain Cart response transport", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
+  it("WP-2423: keeps how many of an item the store can make with an ITEM_SHORT refusal", async () => {
+    setCustomerCartCsrfCredential("c".repeat(43));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              error: { code: "cart_selection_invalid", issueCodes: ["ITEM_SHORT"], available: 1 },
+            }),
+            { status: 422 },
+          ),
+      ),
+    );
+    await expect(
+      createBrowserCustomerCartClient().createCart({ operationReference: id(20) }),
+    ).rejects.toMatchObject({ issueCodes: ["ITEM_SHORT"], available: 1 });
+  });
+
   it.each([
     [400, "cart_request_invalid"],
     [401, "cart_session_expired"],

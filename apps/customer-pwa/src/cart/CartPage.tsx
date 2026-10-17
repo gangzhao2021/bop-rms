@@ -13,6 +13,7 @@ import {
   type CartView,
 } from "./types.js";
 import { formatCartMoney } from "./format-money.js";
+import { cartItemShortMessage } from "../checkout/item-refusal-message.js";
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import { formatMinutesUntil } from "../journey/format.js";
 import {
@@ -250,6 +251,21 @@ function ErrorState({
   } as const;
   const message = messages[state.status as keyof typeof messages];
   if (message === undefined) return null;
+  // WP-2423: a quantity the store can't make names the item and how many it can.
+  const short =
+    state.shortItem === undefined || state.cart === null
+      ? null
+      : cartItemShortMessage(
+          state.shortItem.cartItemReference,
+          state.shortItem.available,
+          state.cart.cart.items,
+        );
+  if (short !== null)
+    return (
+      <StateMessage heading="Not enough left" tone="warning">
+        <p>{short}</p>
+      </StateMessage>
+    );
   const issues = state.issueCodes
     .map(cartIssueMessage)
     .filter((issue): issue is string => issue !== null);

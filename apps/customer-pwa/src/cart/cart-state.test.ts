@@ -281,6 +281,31 @@ describe("WP-1205 in-memory Cart state", () => {
     expect(state.controller.getState()).toMatchObject({ status: expected });
   });
 
+  it("WP-2423: a quantity the store can't make keeps the line and how many it can make", async () => {
+    const state = fixture();
+    await state.controller.load();
+    state.failUpdate(
+      new CartClientError("cart_selection_invalid", { issueCodes: ["ITEM_SHORT"], available: 2 }),
+    );
+    await state.controller.updateItem(id(2), {
+      quantity: 3,
+      optionSelections: [],
+      customerNote: null,
+    });
+    expect(state.controller.getState()).toMatchObject({
+      status: "validation",
+      shortItem: { cartItemReference: id(2), available: 2 },
+      canRetrySameOperation: false,
+    });
+    state.failUpdate(new CartClientError("cart_selection_invalid", { issueCodes: ["OTHER"] }));
+    await state.controller.updateItem(id(2), {
+      quantity: 3,
+      optionSelections: [],
+      customerNote: null,
+    });
+    expect(state.controller.getState()).not.toHaveProperty("shortItem");
+  });
+
   it("WP-2423: keeps the wait and offers no replay while another guest is checking out", async () => {
     const state = fixture();
     await state.controller.load();

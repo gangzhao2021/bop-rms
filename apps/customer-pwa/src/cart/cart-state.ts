@@ -24,6 +24,8 @@ export type CartState =
       readonly issueCodes: readonly string[];
       readonly retryAfterSeconds: number | null;
       readonly canRetrySameOperation: boolean;
+      /** WP-2423: the line whose asked quantity the store can't make, and how many it can. */
+      readonly shortItem?: { readonly cartItemReference: string; readonly available: number };
     }
   | { readonly status: "command-pending"; readonly cart: CartView };
 
@@ -112,7 +114,12 @@ export function createCartStateController({
     }
   };
 
-  const mapError = (error: unknown, cart: CartView | null, operationCanRetry: boolean) => {
+  const mapError = (
+    error: unknown,
+    cart: CartView | null,
+    operationCanRetry: boolean,
+    cartItemReference: string | null = null,
+  ) => {
     const parsed =
       error instanceof CartClientError ? error : new CartClientError("cart_service_unavailable");
     const status =
@@ -145,6 +152,12 @@ export function createCartStateController({
       issueCodes: parsed.issueCodes,
       retryAfterSeconds: parsed.retryAfterSeconds,
       canRetrySameOperation: operationCanRetry && parsed.code === "network_unknown",
+      ...(status === "validation" &&
+      cartItemReference !== null &&
+      parsed.issueCodes.includes("ITEM_SHORT") &&
+      parsed.available !== null
+        ? { shortItem: { cartItemReference, available: parsed.available } }
+        : {}),
     });
   };
 
@@ -184,7 +197,12 @@ export function createCartStateController({
           return;
         }
       }
-      mapError(parsed, cart, true);
+      mapError(
+        parsed,
+        cart,
+        true,
+        operation.kind === "update" ? operation.cartItemReference : null,
+      );
     }
   };
   const begin = (

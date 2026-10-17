@@ -75,6 +75,13 @@ export async function createRuntime(
       },
       ...createInternalTestCart(resources),
       ...items,
+      // WP-2423: guests remove an item from a pickup Cart with the same Cart writes, references
+      // and audit as adding one (without it removal fell back to a read-only port: always 503).
+      cartRemoval: {
+        writeTransactions: items.catalogCartItems.writeTransactions,
+        references: items.catalogCartItems.references,
+        audit: items.catalogCartItems.audit,
+      },
       channelOrderSubmission: {
         pickup: orders.orderSubmission,
         dining: diningOrders.orderSubmission,

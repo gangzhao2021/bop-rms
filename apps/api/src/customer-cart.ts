@@ -89,7 +89,12 @@ export type CustomerCartPortResult =
   | { readonly status: "Found" | "Applied" | "Current"; readonly view: CustomerCartView }
   | { readonly status: "SessionExpired" | "NotFound" | "IdempotencyConflict" }
   | { readonly status: "VersionConflict"; readonly currentVersion: number }
-  | { readonly status: "SelectionInvalid"; readonly issueCodes: readonly string[] }
+  | {
+      readonly status: "SelectionInvalid";
+      readonly issueCodes: readonly string[];
+      /** WP-2423 (`ITEM_SHORT`): how many of the item the Store's stock can make (0: none). */
+      readonly available?: number;
+    }
   | { readonly status: "LifecycleExpired" | "LifecycleAbandoned" }
   | { readonly status: "RateLimited"; readonly retryAfterSeconds: number }
   /** WP-2423: briefly unavailable (for example a table Cart expiry still being recorded). */
@@ -250,6 +255,12 @@ function canonicalInstant(value: unknown): string {
 function positive(value: unknown, maximum = 100): number {
   if (!Number.isSafeInteger(value) || Number(value) < 1 || Number(value) > maximum)
     throw new TypeError("positive integer required");
+  return Number(value);
+}
+
+function count(value: unknown, maximum: number): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 0 || Number(value) > maximum)
+    throw new TypeError("count required");
   return Number(value);
 }
 
@@ -483,7 +494,11 @@ function responseControls(response: Response): void {
 function sendError(
   response: Response,
   errorCode: ErrorCode,
-  details?: { readonly currentVersion?: number; readonly issueCodes?: readonly string[] },
+  details?: {
+    readonly currentVersion?: number;
+    readonly issueCodes?: readonly string[];
+    readonly available?: number;
+  },
 ): void {
   const contract = errors[errorCode];
   response.status(contract.status).json({
@@ -551,7 +566,12 @@ function handleResult(
     result.status === "VersionConflict"
       ? { currentVersion: positive(result.currentVersion, 999_999_999) }
       : result.status === "SelectionInvalid"
-        ? { issueCodes: codes(result.issueCodes) }
+        ? {
+            issueCodes: codes(result.issueCodes),
+            ...(result.available === undefined
+              ? {}
+              : { available: count(result.available, 999_999_999) }),
+          }
         : undefined,
   );
 }

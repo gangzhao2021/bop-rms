@@ -370,6 +370,55 @@ describe("WP-2236 credential handoff service", () => {
     ).rejects.toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
     expect(f.options.owner.activate).not.toHaveBeenCalled();
   });
+  // WP-2423 D2: after a reload the page restores the foreground CSRF derived from the Session
+  // cookie instead of the token issued at entry; the first Add to cart must still bind.
+  it("prepares and activates with the restored foreground CSRF of a reloaded page", async () => {
+    const f = fixture();
+    const derive = f.options.credentials.deriveForegroundCsrf;
+    if (!derive) throw new Error("synthetic provider lacks foreground CSRF");
+    const restored = derive(f.input.sessionCredential);
+    vi.mocked(f.options.authorization.authorize).mockImplementation(async (input) => {
+      const record = f.records.get(
+        f.options.credentials.hashCredential("Session", input.sessionCredential as never),
+      );
+      const csrf = input.csrfCredential as never;
+      if (
+        !record ||
+        (input.csrfCredential !== restored &&
+          !f.options.credentials.equals(
+            f.options.credentials.hashCredential("Csrf", csrf),
+            record.csrfSelectorHash,
+          ))
+      )
+        throw new Error("synthetic denied");
+      return assertGuestSessionUsable(record.session, input.observedAt);
+    });
+    const reloaded = { ...f.input, csrfCredential: restored };
+    const prepared = await f.service.prepare(reloaded);
+    expect(prepared.status).toBe("Prepared");
+    f.setTime(1);
+    const activated = await f.service.activate({
+      ...reloaded,
+      candidateSessionCredential: prepared.sessionCredential,
+      candidateCsrfCredential: prepared.csrfCredential,
+      recoveryProof: prepared.recoveryProof,
+    });
+    expect(activated.status).toBe("Activated");
+  });
+  it("refuses a CSRF that is neither issued to nor derived from the Session", async () => {
+    const f = fixture();
+    const derive = f.options.credentials.deriveForegroundCsrf;
+    if (!derive) throw new Error("synthetic provider lacks foreground CSRF");
+    const foreign = derive(f.options.credentials.generateCredential("Session"));
+    // Even if Session authorization were to pass, the preparation itself refuses the token.
+    vi.mocked(f.options.authorization.authorize).mockImplementation(async (input) =>
+      assertGuestSessionUsable(f.predecessor.session, input.observedAt),
+    );
+    await expect(f.service.prepare({ ...f.input, csrfCredential: foreign })).rejects.toMatchObject({
+      code: "GUEST_SESSION_UNAVAILABLE",
+    });
+    expect(f.options.owner.reserveTarget).not.toHaveBeenCalled();
+  });
   it.each([0, 901, 1.5])("rejects invalid server lifetime %s", (preparationLifetimeSeconds) => {
     const f = fixture();
     expect(() =>

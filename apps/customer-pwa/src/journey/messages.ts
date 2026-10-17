@@ -55,6 +55,8 @@ export function cartIssueMessage(code: string): string | null {
     OPTION_UNAVAILABLE: "One of the chosen options is no longer available.",
     SELLABLE_UNAVAILABLE: "This item is no longer available.",
     SOLD_OUT: "This item is sold out right now.",
+    // WP-2423: the store's stock can't make the quantity asked.
+    ITEM_SHORT: "We can’t make that many right now. Choose fewer.",
     NOTE_TOO_LONG: "Your note is too long.",
   };
   return known[code] ?? null;

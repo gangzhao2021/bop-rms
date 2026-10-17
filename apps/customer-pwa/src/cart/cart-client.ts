@@ -200,8 +200,16 @@ function parse(response: Response, payload: unknown): CartView | null {
   if (response.ok) return view(payload);
   const error =
     typeof payload === "object" && payload !== null
-      ? (payload as { error?: { code?: unknown; currentVersion?: unknown; issueCodes?: unknown } })
-          .error
+      ? (
+          payload as {
+            error?: {
+              code?: unknown;
+              currentVersion?: unknown;
+              issueCodes?: unknown;
+              available?: unknown;
+            };
+          }
+        ).error
       : undefined;
   const code =
     Object.hasOwn(errorStatuses, String(error?.code)) &&
@@ -220,6 +228,9 @@ function parse(response: Response, payload: unknown): CartView | null {
             (value): value is string => typeof value === "string",
           ),
         }
+      : {}),
+    ...(Number.isSafeInteger(error?.available) && Number(error?.available) >= 0
+      ? { available: Number(error?.available) }
       : {}),
     ...(retryHeader !== null && /^[1-9][0-9]{0,3}$/u.test(retryHeader)
       ? { retryAfterSeconds: Number(retryHeader) }

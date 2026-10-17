@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { createPostgresCatalogSelectionService } from "@rms/catalog";
 import {
   createCustomerCartSelectionInventory,
+  withCartItemStockShortage,
   type CustomerCartSelectionInventoryOptions,
 } from "./customer-cart-selection-inventory.js";
 import { createCustomerDiningCartInventoryAuthorization } from "./customer-dining-cart-inventory-authorization.js";
@@ -550,23 +551,26 @@ export function createCustomerDiningCartWithCatalogInventoryComposition(
 ): CustomerCartPort {
   const { catalogTransactions, catalogScope, catalogSafety, selectedInventory, items, ...cart } =
     options;
-  return createCustomerDiningCartComposition({
-    ...cart,
-    items: {
-      ...items,
-      catalog: createCustomerCartSelectionInventory(
-        catalogTransactions,
-        {
-          ...catalogScope,
-          ...cart.scope,
-          orderType: "DineIn",
-        },
-        { ...catalogSafety, clock: { now: cart.now } },
-        {
-          ...selectedInventory,
-          authorize: createCustomerDiningCartInventoryAuthorization(cart.scope, cart.now),
-        },
-      ),
-    },
-  });
+  // WP-2423: a quantity the stock can't make tells the guest how many it can.
+  return withCartItemStockShortage(
+    createCustomerDiningCartComposition({
+      ...cart,
+      items: {
+        ...items,
+        catalog: createCustomerCartSelectionInventory(
+          catalogTransactions,
+          {
+            ...catalogScope,
+            ...cart.scope,
+            orderType: "DineIn",
+          },
+          { ...catalogSafety, clock: { now: cart.now } },
+          {
+            ...selectedInventory,
+            authorize: createCustomerDiningCartInventoryAuthorization(cart.scope, cart.now),
+          },
+        ),
+      },
+    }),
+  );
 }
