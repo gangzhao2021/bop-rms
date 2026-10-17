@@ -8,6 +8,7 @@ const d = vi.hoisted(() => ({
   resolve: vi.fn(),
   workforce: vi.fn(),
   context: vi.fn(),
+  contextFence: vi.fn(),
   order: vi.fn(),
   capture: vi.fn(),
   member: vi.fn(),
@@ -27,12 +28,13 @@ vi.mock("@rms/payment", async (original) => ({
   // WP-2423 item 4: no card-machine payment unless a test says so.
   createPostgresCardMachinePaymentStore: () => d.cards(),
   // Without declines every recorded request occupies the Order (WP-2423 Q5).
-  createPostgresOrdinaryRefundRequestContextSource:
-    () =>
-    async (...args: unknown[]) => {
+  createPostgresOrdinaryRefundRequestContextSource: (options: { fence?: unknown }) => {
+    d.contextFence(options.fence);
+    return async (...args: unknown[]) => {
       const value = (await d.context(...args)) as { history: unknown[] };
       return { occupying: value.history, declines: new Map(), ...value };
-    },
+    };
+  },
   createPostgresCapturedBatchPaymentSource: () => ({ load: d.capture }),
   createPostgresOrdinaryRefundRequestStatusSource: () => d.status,
 }));
@@ -182,6 +184,9 @@ it("returns paid unclaimed units and current claim version without private facts
     operationReference: id(7),
     observedAt: at,
   });
+  // v15 2026-10-17 (40P01): read-only, the Order's refund fence alone (the request status reads
+  // that follow never take a request fence after it).
+  expect(d.contextFence.mock.calls).toEqual([["OrderOnly"]]);
 });
 it.each(["actorReference", "observedAt", "storeReference"])("rejects injected %s", async (key) => {
   const f = setup();

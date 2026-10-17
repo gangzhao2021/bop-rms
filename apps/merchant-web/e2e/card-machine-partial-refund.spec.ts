@@ -413,12 +413,227 @@ test("@production an owner approves a card-machine refund and is told to make it
   );
   await expect(card.getByRole("link", { name: "Record the card machine refund" })).toHaveAttribute(
     "href",
-    "/app/operations/payments/" + id(31) + "/refund",
+    "/app/operations/payments/" + id(31),
   );
   // Nothing more to send: the approve button is gone once approved.
   await expect(approve).toHaveCount(0);
   expect(approvals).toHaveLength(1);
   for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  }
+  await expectNoInternalText(page);
+});
+
+// v15 2026-10-17: after refunding on the card machine, staff record it from the payment page
+// itself. Each recorded refund of this payment still to be made on the machine is listed with an
+// obvious record action; a request of another payment of the same order is left to that payment.
+test("@production the payment page offers recording a pending card-machine refund directly", async ({
+  page,
+}) => {
+  let recorded = false;
+  const records: string[] = [];
+  const statusReads: string[] = [];
+  const request = (n: number, operation: number) => ({
+    requestReference: id(40 + n),
+    operationReference: id(operation),
+    claimVersion: n,
+    requestedAt: "2026-10-15T15:00:00.000Z",
+    reasonCode: "QUALITY_ISSUE",
+    currencyCode: "CAD",
+    amountMinor: n === 1 ? "480" : "300",
+    decline: null,
+    progress: n === 1 && recorded ? "Refunded" : "Recorded",
+    paymentMethod: "CardMachine",
+  });
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-10-15",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "OPS-ORDER-QUEUE",
+              label: "Orders",
+              href: "/operations/orders",
+              permission: "ordering.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  await page.route("**/merchant/payments/refunds/approvals", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        observedAt: new Date().toISOString(),
+        canApprove: false,
+        soleOperator: null,
+        entries: [],
+      },
+    }),
+  );
+  await page.route("**/merchant/payments/refunds/context", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        paymentIntentReference: id(31),
+        paymentAttemptReference: id(32),
+        orderReference: id(1),
+        orderBatchReference: id(90),
+        observedAt: new Date().toISOString(),
+        paymentState: "Captured",
+        paymentMethod: "CardMachine",
+        currencyCode: "CAD",
+        capturedAmountMinor: "2486",
+        confirmedRefundMinor: recorded ? "480" : "0",
+        pendingRefundMinor: recorded ? "0" : "480",
+        canRequest: true,
+      },
+    }),
+  );
+  await page.route("**/merchant/payments/refunds/items", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(1),
+        orderNumber: "T4-2",
+        canRequest: true,
+        claimVersion: 2,
+        // Request 2 refunds the order's other card-machine payment (another round).
+        recentRequests: [request(1, 51), request(2, 52)],
+        items: [
+          {
+            orderBatchReference: id(90),
+            orderItemReference: id(3),
+            label: "Pad thai",
+            quantity: 2,
+            unclaimedQuantity: 1,
+            paymentCaptured: true,
+            refundedByCancellation: false,
+            paymentIntentReference: id(31),
+            paymentMethod: "CardMachine",
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/merchant/payments/refunds/status", (route) => {
+    const body = JSON.parse(route.request().postData() ?? "{}") as { operationReference: string };
+    statusReads.push(body.operationReference);
+    const first = body.operationReference === id(51);
+    const done = first && recorded;
+    return route.fulfill({
+      headers,
+      json: {
+        orderReference: id(1),
+        requestReference: first ? id(41) : id(42),
+        operationReference: body.operationReference,
+        observedAt: new Date().toISOString(),
+        currencyCode: "CAD",
+        amountMinor: first ? "480" : "300",
+        payments: [
+          {
+            paymentAttemptReference: first ? id(32) : id(62),
+            paymentIntentReference: first ? id(31) : id(61),
+            state: done ? "Confirmed" : "NotDispatched",
+            method: "CardMachine",
+            refundedOnCardMachineAt: done ? "2026-10-15T15:02:00.000Z" : null,
+            cardMachineSlipReference: done ? "REF 7710" : null,
+            executionOperationReference: null,
+            executionApprovalReference: null,
+            amountMinor: first ? "480" : "300",
+            confirmedMinor: done ? "480" : "0",
+            pendingMinor: done ? "0" : first ? "480" : "300",
+          },
+        ],
+      },
+    });
+  });
+  await page.route("**/merchant/payments/refunds/card-machine-record", (route) => {
+    records.push(route.request().postData() ?? "");
+    recorded = true;
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Recorded",
+        orderReference: id(1),
+        requestReference: id(41),
+        amountMinor: "480",
+        refundedAt: "2026-10-15T15:02:00.000Z",
+        receipt: "NoDigitalReceipt",
+      },
+    });
+  });
+  const providerCalls: string[] = [];
+  for (const path of ["prepare", "send", "reconcile", "request", "preview"])
+    await page.route("**/merchant/payments/refunds/" + path, (route) => {
+      providerCalls.push(path);
+      return route.fulfill({ status: 500, headers, json: {} });
+    });
+
+  await page.goto("/app/operations/payments/" + id(31));
+  const summary = page.getByRole("region", { name: "Payment financial summary" });
+  await expect(summary).toContainText("$4.80");
+  const pending = page.getByRole("region", { name: "Refunds to make on the card machine" });
+  const action = pending.getByRole("button", {
+    name: "Record the card-machine refund for request 1 ($4.80)",
+  });
+  await expect(action).toBeVisible();
+  // The order's other card-machine payment is not offered on this payment's page.
+  await expect(pending).not.toContainText("Request 2");
+  await expect(pending.getByRole("button")).toHaveCount(1);
+  await expect(page.getByRole("link", { name: "Start refund request" })).toBeVisible();
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: test.info().outputPath("payment-page-card-machine-refund-" + width + ".png"),
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await action.click();
+  const slip = pending.getByRole("textbox", { name: "Slip reference (optional)" });
+  await slip.fill("REF 7710");
+  await expectNoInternalText(page);
+  const axe = await new AxeBuilder({ page }).analyze();
+  expect(axe.violations.filter((v) => v.impact === "critical" || v.impact === "serious")).toEqual(
+    [],
+  );
+  await pending.getByRole("button", { name: "Refunded $4.80 on card machine" }).click();
+  await expect(
+    pending.getByText(/^Card-machine refund recorded: \$4\.80 refunded on the card machine/u),
+  ).toBeVisible();
+  // The amounts are reread from the server; nothing is left to record on this payment.
+  await expect(summary).toContainText("Payment state: Partly refunded");
+  await expect(
+    pending.getByRole("button", { name: /Record the card-machine refund/u }),
+  ).toHaveCount(0);
+  expect(records).toHaveLength(1);
+  expect(JSON.parse(records[0] ?? "{}")).toMatchObject({
+    orderReference: id(1),
+    requestReference: id(41),
+    slipReference: "REF 7710",
+    refundedAt: null,
+  });
+  expect(statusReads).toContain(id(52));
+  expect(providerCalls).toEqual([]);
+  for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 });
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),

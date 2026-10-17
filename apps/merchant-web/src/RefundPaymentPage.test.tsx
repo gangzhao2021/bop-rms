@@ -3,6 +3,8 @@ import { expect, it, vi } from "vitest";
 import { cardMachineRefundRecordedText } from "./CardMachineRequestRefund.js";
 import {
   CardMachineRefundDone,
+  cardMachineRefundToRecord,
+  cardMachineRequestsToCheck,
   nextFinancialSummary,
   PaymentFinancialSummary,
   paymentRefundStateLabel,
@@ -163,4 +165,75 @@ it("WP-2423: after a refund is recorded the amounts stay shown while they are re
   expect(
     nextFinancialSummary(rereading, { kind: "Failed", message: "Unable to refresh." }),
   ).toEqual({ context: null, busy: false, message: "Unable to refresh." });
+});
+
+it("v15 2026-10-17: the payment page lists this payment's card-machine refunds still to record", () => {
+  const entry = (n: number, change: Record<string, unknown> = {}) => ({
+    requestReference: id(40 + n),
+    operationReference: id(50 + n),
+    claimVersion: n,
+    requestedAt: "2026-10-15T17:52:00.000Z",
+    reasonCode: "QUALITY_ISSUE",
+    currencyCode: "CAD" as const,
+    amountMinor: "480",
+    decline: null,
+    progress: "Recorded" as const,
+    paymentMethod: "CardMachine" as const,
+    ...change,
+  });
+  const items = {
+    orderReference: id(3),
+    orderNumber: "T4-2",
+    canRequest: true,
+    claimVersion: 4,
+    items: [],
+    recentRequests: [
+      entry(1),
+      entry(2, { progress: "Refunded" }),
+      entry(3, { paymentMethod: "Online" }),
+      entry(4, {
+        decline: {
+          reasonCode: "OTHER",
+          declinedAt: "2026-10-15T17:53:00.000Z",
+          declinerName: null,
+          declinedByYou: false,
+        },
+      }),
+    ],
+  } as unknown as Parameters<typeof cardMachineRequestsToCheck>[0];
+  expect(cardMachineRequestsToCheck(items).map((value) => value.claimVersion)).toEqual([1]);
+  const status = (state: "NotDispatched" | "Confirmed", intent = id(1)) =>
+    ({
+      orderReference: id(3),
+      requestReference: id(41),
+      operationReference: id(51),
+      observedAt: "2026-10-15T17:54:00.000Z",
+      currencyCode: "CAD",
+      amountMinor: "480",
+      payments: [
+        {
+          paymentAttemptReference: id(2),
+          paymentIntentReference: intent,
+          method: "CardMachine",
+          state,
+          executionOperationReference: null,
+          executionApprovalReference: null,
+          amountMinor: "480",
+          confirmedMinor: state === "Confirmed" ? "480" : "0",
+          pendingMinor: state === "Confirmed" ? "0" : "480",
+          refundedOnCardMachineAt: state === "Confirmed" ? "2026-10-15T17:53:00.000Z" : null,
+          cardMachineSlipReference: null,
+        },
+      ],
+    }) as unknown as Parameters<typeof cardMachineRefundToRecord>[2];
+  const [first] = cardMachineRequestsToCheck(items);
+  if (first === undefined) throw new Error("missing request");
+  expect(cardMachineRefundToRecord(id(1), first, status("NotDispatched"), null)).toEqual({
+    entry: first,
+    amountMinor: "480",
+    approval: null,
+  });
+  // Already recorded, or a request of another payment of the same order: not offered here.
+  expect(cardMachineRefundToRecord(id(1), first, status("Confirmed"), null)).toBeNull();
+  expect(cardMachineRefundToRecord(id(1), first, status("NotDispatched", id(9)), null)).toBeNull();
 });

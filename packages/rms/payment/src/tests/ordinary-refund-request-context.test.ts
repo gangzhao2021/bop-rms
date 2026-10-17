@@ -111,3 +111,38 @@ it("rejects extra query authority fields before accessing the transaction", asyn
   ).rejects.toThrow();
   expect(f.query).not.toHaveBeenCalled();
 });
+
+// v15 2026-10-17 (40P01): request operation fence, then the Order fence; read-only callers take
+// the Order fence alone, so they may read requests while already holding it.
+it("takes the request operation fence before the Order fence, or the Order fence alone", async () => {
+  const fences = (f: ReturnType<typeof setup>) =>
+    (f.query.mock.calls as unknown as [string, unknown[]][])
+      .filter(([sql]) => sql.includes("pg_advisory_xact_lock"))
+      .map(([, values]) => String(values[0]));
+  const prefix = (f: ReturnType<typeof setup>) =>
+    f.scope.brandReference + ":" + f.scope.storeReference + ":";
+  const writer = setup();
+  await writer.source(writer.tx, writer.input);
+  expect(fences(writer)).toEqual([
+    "OrdinaryRefundRequest:" + prefix(writer) + writer.input.operationReference,
+    "PaymentReceiptOrder:" + prefix(writer) + writer.input.orderReference,
+  ]);
+  const reader = setup();
+  reader.save();
+  const read = await createPostgresOrdinaryRefundRequestContextSource({
+    scope: reader.scope,
+    authorize: reader.authorize,
+    fence: "OrderOnly",
+  })(reader.tx, reader.input);
+  expect(read.existing).toEqual(reader.request);
+  expect(fences(reader)).toEqual([
+    "PaymentReceiptOrder:" + prefix(reader) + reader.input.orderReference,
+  ]);
+  expect(() =>
+    createPostgresOrdinaryRefundRequestContextSource({
+      scope: reader.scope,
+      authorize: reader.authorize,
+      fence: "Neither" as never,
+    }),
+  ).toThrow("ORDINARY_REFUND_REQUEST_CONFLICT");
+});

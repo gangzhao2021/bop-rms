@@ -7,6 +7,7 @@ import {
 import type { ConsumerTransaction } from "@bop/eventing";
 const d = vi.hoisted(() => ({
   context: vi.fn(),
+  contextOptions: vi.fn(),
   prepared: vi.fn(),
   outcome: vi.fn(),
   recovery: vi.fn(),
@@ -20,7 +21,10 @@ vi.mock("../infrastructure/persistence/card-machine-payment-store.js", () => ({
   }),
 }));
 vi.mock("../infrastructure/persistence/ordinary-refund-request-store.js", () => ({
-  createPostgresOrdinaryRefundRequestContextSource: () => d.context,
+  createPostgresOrdinaryRefundRequestContextSource: (options: unknown) => {
+    d.contextOptions(options);
+    return d.context;
+  },
 }));
 vi.mock("../infrastructure/persistence/ordinary-refund-operation-store.js", () => ({
   createPostgresOrdinaryRefundClaimOutcomeReader: () => d.outcome,
@@ -90,6 +94,8 @@ it("reads a recorded request as not dispatched with its amount still reserved", 
     },
   ]);
   expect(d.context).toHaveBeenCalledWith(tx, query);
+  // v15 2026-10-17 (40P01): read-only, so the Order fence alone (never a request fence after it).
+  expect(d.contextOptions).toHaveBeenCalledWith(expect.objectContaining({ fence: "OrderOnly" }));
   expect(d.outcome).toHaveBeenCalledWith(tx, {
     orderReference: id(4),
     requestReference: id(5),

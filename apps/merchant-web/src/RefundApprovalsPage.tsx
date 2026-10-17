@@ -262,8 +262,8 @@ function ApprovalCard({
   // WP-2423 item 4: a card-machine refund is made on the store's machine once approved.
   const onMachine = entry.paymentMethod === "CardMachine";
   const machineApproved = onMachine && (entry.state === "Approved" || outcome.kind === "OnMachine");
-  const paymentPage =
-    "/app/operations/payments/" + (entry.paymentIntentReferences[0] ?? "") + "/refund";
+  const paymentDetail = "/app/operations/payments/" + (entry.paymentIntentReferences[0] ?? "");
+  const paymentPage = paymentDetail + "/refund";
   return (
     <li className="refund-approval-card">
       <h3>
@@ -467,7 +467,8 @@ function ApprovalCard({
             card the customer paid with, then record it on the payment page with the slip reference.
             The refund counts on the day it is made on the machine.
           </p>
-          <Link to={paymentPage}>Record the card machine refund</Link>
+          {/* v15 2026-10-17: the payment page lists it with its record action straight away. */}
+          <Link to={paymentDetail}>Record the card machine refund</Link>
         </div>
       ) : null}
       {outcome.kind === "Sent" ? (

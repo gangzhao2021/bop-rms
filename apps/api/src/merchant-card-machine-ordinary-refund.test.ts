@@ -124,6 +124,8 @@ it("WP-2423: records resolving the caller and refund-handler role in full only a
   });
   // Prior record, request context (this Order, another Order), escalation, record.
   expect(f.during).toEqual([true, true, false, true, true]);
+  // v15 2026-10-17 (40P01): the request read takes the Order's refund fence alone.
+  expect(doubles.context.mock.calls[0]?.[0]).toMatchObject({ fence: "OrderOnly" });
   expect(doubles.scope).toHaveBeenCalledOnce();
   expect(f.allowed).toHaveBeenCalledTimes(2);
   expect(doubles.access).toHaveBeenCalledTimes(2);

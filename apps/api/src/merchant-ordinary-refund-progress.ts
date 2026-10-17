@@ -110,6 +110,8 @@ export function createMerchantOrdinaryRefundProgress(options: {
           const allowed = () => authorized.guard();
           const context = await createPostgresOrdinaryRefundRequestContextSource({
             scope,
+            // Read-only: the Order's refund fence only (canonical lock order, Payment request store).
+            fence: "OrderOnly",
             authorize: () => allowed(),
           })(tx, { orderReference, operationReference: ref(options.newReference()), observedAt });
           const request = context.history.find(

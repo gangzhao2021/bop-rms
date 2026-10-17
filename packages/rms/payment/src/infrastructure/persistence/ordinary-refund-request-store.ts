@@ -126,6 +126,33 @@ function occupyingAt(
   );
 }
 
+/**
+ * Canonical advisory-lock order for refund requests (v15 2026-10-17, 40P01):
+ *   1. `OrdinaryRefundRequest:<brand>:<store>:<request operation>` — only when appending (or
+ *      replaying) that request operation;
+ *   2. `PaymentReceiptOrder:<brand>:<store>:<order>` — the Order's refund fence.
+ * A transaction never requests a request-operation fence while it holds the Order fence. Every
+ * request append takes the Order fence before it writes, so a read-only path (request status,
+ * the refund item list, progress, recording a card-machine refund) takes the Order fence alone
+ * (`fence: "OrderOnly"`) and still sees a stable request set; it may then read any number of
+ * requests of that Order without taking a request-operation fence after the Order fence.
+ */
+export async function acquireOrdinaryRefundRequestFences(
+  tx: ConsumerTransaction,
+  scope: Pick<Scope, "brandReference" | "storeReference">,
+  operationReference: string | null,
+  orderReference: string,
+): Promise<void> {
+  const prefix = scope.brandReference + ":" + scope.storeReference + ":";
+  if (operationReference !== null)
+    await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+      "OrdinaryRefundRequest:" + prefix + operationReference,
+    ]);
+  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    "PaymentReceiptOrder:" + prefix + orderReference,
+  ]);
+}
+
 interface RequestContextQuery {
   readonly orderReference: string;
   readonly operationReference: string;
@@ -138,6 +165,9 @@ interface RequestContextQuery {
  */
 export function createPostgresOrdinaryRefundRequestContextSource(options: {
   readonly scope: Scope;
+  /** "OrderOnly" for read-only callers that never append this operation; see
+   * acquireOrdinaryRefundRequestFences for the canonical lock order. */
+  readonly fence?: "RequestOperationAndOrder" | "OrderOnly";
   readonly authorize: (
     tx: ConsumerTransaction,
     query: RequestContextQuery & Scope,
@@ -148,6 +178,9 @@ export function createPostgresOrdinaryRefundRequestContextSource(options: {
     brandReference: String(parsePaymentReference(options.scope.brandReference)),
     storeReference: String(parsePaymentReference(options.scope.storeReference)),
   };
+  const orderOnly = options.fence === "OrderOnly";
+  if (!orderOnly && options.fence !== undefined && options.fence !== "RequestOperationAndOrder")
+    return fail();
   return async (tx: ConsumerTransaction, value: RequestContextQuery) => {
     const raw = exactPaymentObject(value, ["orderReference", "operationReference", "observedAt"]);
     const query = Object.freeze({
@@ -165,21 +198,12 @@ export function createPostgresOrdinaryRefundRequestContextSource(options: {
       scope.brandReference,
       scope.storeReference,
     ]);
-    for (const key of [
-      "OrdinaryRefundRequest:" +
-        scope.brandReference +
-        ":" +
-        scope.storeReference +
-        ":" +
-        query.operationReference,
-      "PaymentReceiptOrder:" +
-        scope.brandReference +
-        ":" +
-        scope.storeReference +
-        ":" +
-        query.orderReference,
-    ])
-      await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [key]);
+    await acquireOrdinaryRefundRequestFences(
+      tx,
+      scope,
+      orderOnly ? null : query.operationReference,
+      query.orderReference,
+    );
     const records = await tx.query(
       "SELECT record_json::text AS record FROM rms_payment.ordinary_refund_request " +
         "WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3",
@@ -538,22 +562,12 @@ export function createPostgresOrdinaryRefundRequestStore(options: {
       scope.brandReference,
       scope.storeReference,
     ]);
-    await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
-      "OrdinaryRefundRequest:" +
-        scope.brandReference +
-        ":" +
-        scope.storeReference +
-        ":" +
-        request.operationReference,
-    ]);
-    await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
-      "PaymentReceiptOrder:" +
-        scope.brandReference +
-        ":" +
-        scope.storeReference +
-        ":" +
-        request.orderReference,
-    ]);
+    await acquireOrdinaryRefundRequestFences(
+      tx,
+      scope,
+      request.operationReference,
+      request.orderReference,
+    );
     const existing = await tx.query(
       "SELECT record_json::text AS record FROM rms_payment.ordinary_refund_request " +
         "WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3",

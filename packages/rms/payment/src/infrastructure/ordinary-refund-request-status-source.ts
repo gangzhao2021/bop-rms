@@ -15,7 +15,9 @@ const fail = (): never => {
   throw new Error("ORDINARY_REFUND_STATUS_UNAVAILABLE");
 };
 /** Read committed request/dispatch/observation facts. No execution grant or Provider I/O.
- * Caller must acquire request-operation before order fences, as the context source does. */
+ * Read-only: takes the Order's refund fence only (never the request-operation fence), so a caller
+ * may already hold that Order fence and read several requests in one transaction; see
+ * acquireOrdinaryRefundRequestFences for the canonical lock order. */
 export function createPostgresOrdinaryRefundRequestStatusSource(options: {
   scope: ContextOptions["scope"];
   providerAccountReference: string;
@@ -40,6 +42,7 @@ export function createPostgresOrdinaryRefundRequestStatusSource(options: {
     if ((await allowed()) !== true) return fail();
     const context = await createPostgresOrdinaryRefundRequestContextSource({
       scope,
+      fence: "OrderOnly",
       authorize: allowed,
     })(tx, query);
     const request = context.existing;

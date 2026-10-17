@@ -7747,6 +7747,26 @@ body:has(.product-complete-draft) .bop-shell__header,
   margin: 0;
   padding-left: 18px;
 }
+/* v15 2026-10-17: card-machine refunds still to record, on the payment page itself. */
+.card-machine-refunds-to-record {
+  margin: 16px 0 24px;
+}
+.card-machine-refunds-to-record ul {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.card-machine-refunds-to-record li {
+  padding: 16px;
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-surface);
+  background: var(--bop-color-surface-default);
+}
+.card-machine-refunds-to-record li > p:first-child {
+  margin: 0 0 12px;
+}
 .refund-escalation {
   margin: 12px 0;
   padding: 12px 16px;

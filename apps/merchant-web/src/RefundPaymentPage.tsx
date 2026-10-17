@@ -1124,6 +1124,186 @@ export function PaymentFinancialSummary({
     </>
   );
 }
+type RequestEntry = Items["recentRequests"][number];
+type RequestStatus = Awaited<ReturnType<typeof client.status>>;
+/** One recorded request of this payment still to be refunded on the store's card machine. */
+export interface CardMachineRefundToRecord {
+  readonly entry: RequestEntry;
+  readonly amountMinor: string;
+  readonly approval: RefundApprovalEntry | null;
+}
+/** Recorded, not declined card-machine requests that may still be owed (status decides). */
+export function cardMachineRequestsToCheck(items: Items): readonly RequestEntry[] {
+  return items.recentRequests.filter(
+    (entry) =>
+      entry.paymentMethod === "CardMachine" &&
+      entry.decline === null &&
+      entry.progress !== "Refunded",
+  );
+}
+/**
+ * WP-2423 item 4 (v15 2026-10-17): a request is to be recorded on this payment's page when the
+ * server's status names this payment, taken on the card machine, and no machine refund is recorded
+ * for it yet. Requests of other payments of the same order are left to their own payment page.
+ */
+export function cardMachineRefundToRecord(
+  paymentIntentReference: string,
+  entry: RequestEntry,
+  status: RequestStatus,
+  approval: RefundApprovalEntry | null,
+): CardMachineRefundToRecord | null {
+  if (status.requestReference !== entry.requestReference) return null;
+  const payment = status.payments.find(
+    (value) =>
+      value.method === "CardMachine" && value.paymentIntentReference === paymentIntentReference,
+  );
+  if (payment === undefined || payment.state === "Confirmed") return null;
+  return { entry, amountMinor: payment.amountMinor, approval };
+}
+/**
+ * WP-2423 item 4 (v15 2026-10-17): on the payment page itself, each recorded refund of this
+ * card-machine payment that is still to be made on the machine, with its record action. Staff who
+ * just refunded on the machine record it here without opening the refund wizard. The server
+ * decides who may record (refund handlers); someone who may not read refunds sees nothing here.
+ */
+export function PendingCardMachineRefunds({
+  context,
+  csrf,
+  onFinancialChange,
+}: {
+  readonly context: Context;
+  readonly csrf: string;
+  readonly onFinancialChange: () => void;
+}) {
+  const pendingMinor = context.pendingRefundMinor ?? "0";
+  const owed = context.paymentMethod === "CardMachine" && BigInt(pendingMinor) > 0n;
+  const [refunds, setRefunds] = useState<readonly CardMachineRefundToRecord[] | null>(null);
+  const [message, setMessage] = useState("");
+  const [hidden, setHidden] = useState(false);
+  const [open, setOpen] = useState<string | null>(null);
+  // The confirmation of the last recorded refund stays while the amounts are reread.
+  const [notice, setNotice] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
+  useEffect(() => {
+    if (!owed) {
+      setRefunds([]);
+      return;
+    }
+    const controller = new AbortController();
+    setMessage("");
+    void (async () => {
+      try {
+        const items = await client.items(context.orderReference, csrf, controller.signal);
+        const candidates = cardMachineRequestsToCheck(items);
+        const approvals =
+          candidates.length === 0
+            ? new Map<string, RefundApprovalEntry>()
+            : await approvalClient
+                .approvals(controller.signal)
+                .then(
+                  (view) =>
+                    new Map(
+                      view.entries
+                        .filter((value) => value.orderReference === context.orderReference)
+                        .map((value) => [value.requestReference, value] as const),
+                    ),
+                )
+                .catch(() => new Map<string, RefundApprovalEntry>());
+        const found: CardMachineRefundToRecord[] = [];
+        // One request at a time: each status read is small and the list stays short.
+        for (const entry of candidates) {
+          const status = await client.status(
+            context.orderReference,
+            entry.operationReference,
+            csrf,
+            controller.signal,
+          );
+          const refund = cardMachineRefundToRecord(
+            context.paymentIntentReference,
+            entry,
+            status,
+            approvals.get(entry.requestReference) ?? null,
+          );
+          if (refund !== null) found.push(refund);
+        }
+        if (!controller.signal.aborted) {
+          setHidden(false);
+          setRefunds(found);
+        }
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (error instanceof OrdinaryRefundClientError && error.code === "Denied") setHidden(true);
+        else setMessage(errorMessage(error));
+      }
+    })();
+    return () => controller.abort();
+  }, [owed, context.orderReference, context.paymentIntentReference, pendingMinor, csrf, reload]);
+  if (hidden || (notice === null && message === "" && (refunds === null || refunds.length === 0)))
+    return null;
+  return (
+    <section
+      aria-labelledby="card-machine-refunds-heading"
+      className="card-machine-refunds-to-record"
+    >
+      <h2 id="card-machine-refunds-heading">Refunds to make on the card machine</h2>
+      {notice !== null ? <p role="status">{notice}</p> : null}
+      {message !== "" ? (
+        <div role="status">
+          <p>{message}</p>
+          <button onClick={() => setReload((value) => value + 1)}>
+            Check refunds to record again
+          </button>
+        </div>
+      ) : null}
+      {refunds !== null && refunds.length > 0 ? (
+        <ul>
+          {refunds.map(({ entry, amountMinor, approval }) => {
+            const label = `Record the card-machine refund for request ${entry.claimVersion} (${amount(amountMinor)})`;
+            return (
+              <li key={entry.requestReference}>
+                <p>
+                  Request {entry.claimVersion}: {amount(amountMinor)} ·{" "}
+                  {describeRefundReason(entry.reasonCode)} · requested{" "}
+                  <SourceTime instant={entry.requestedAt} />
+                </p>
+                {approval?.state === "AwaitingApproval" ? (
+                  <p>
+                    Waiting for an owner&apos;s approval before it is refunded on the card machine.{" "}
+                    <Link to="/app/approvals">Open approvals</Link>
+                  </p>
+                ) : open === entry.requestReference ? (
+                  <CardMachineRequestRefund
+                    orderReference={context.orderReference}
+                    requestReference={entry.requestReference}
+                    amountMinor={amountMinor}
+                    amountLabel={amount(amountMinor)}
+                    csrf={csrf}
+                    onRecorded={(confirmation) => {
+                      setNotice(confirmation);
+                      setOpen(null);
+                      // The payment amounts and this list are reread from the server.
+                      onFinancialChange();
+                      setReload((value) => value + 1);
+                    }}
+                  />
+                ) : (
+                  <button
+                    onClick={() => {
+                      setNotice(null);
+                      setOpen(entry.requestReference);
+                    }}
+                  >
+                    {label}
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+    </section>
+  );
+}
 function PaymentContent({
   paymentIntentReference,
   csrf,
@@ -1170,6 +1350,13 @@ function PaymentContent({
             revision={financialRevision}
             onContext={setContext}
           />
+          {!wizard ? (
+            <PendingCardMachineRefunds
+              context={context}
+              csrf={csrf}
+              onFinancialChange={refreshFinancial}
+            />
+          ) : null}
           {context.paymentState !== "Captured" ? (
             <p>A refund can be requested once this payment is paid.</p>
           ) : !wizard && context.canRequest && refundableMinor(context) > 0n ? (

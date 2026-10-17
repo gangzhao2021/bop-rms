@@ -82,3 +82,24 @@ it("checks current caller authority before reading financial history", async () 
   expect(tx.query).not.toHaveBeenCalled();
   expect(o.cancellationAuthority).not.toHaveBeenCalled();
 });
+
+// v15 2026-10-17 (40P01): the staff item cancellation previews and then records in one
+// transaction; the preview takes the recorded request's fence before the Order's refund fence.
+it("takes the recorded request fence before the Order fence when previewing for a record", async () => {
+  const runtime = createPostgresCancellationRefundRuntime(options());
+  const query = vi.fn(async () => ({ rows: [], rowCount: 0 }));
+  const tx = { query } as unknown as ConsumerTransaction;
+  await runtime
+    .preview(tx, { ...preview(), requestOperationReference: id(21) })
+    .catch(() => undefined);
+  const fences = (query.mock.calls as unknown as [string, unknown[]][])
+    .filter(([sql]) => sql.includes("pg_advisory_xact_lock"))
+    .map(([, values]) => String(values[0]));
+  expect(fences.slice(0, 2)).toEqual([
+    "OrdinaryRefundRequest:" + id(2) + ":" + id(3) + ":" + id(21),
+    "PaymentReceiptOrder:" + id(2) + ":" + id(3) + ":" + id(10),
+  ]);
+  await expect(
+    runtime.preview(tx, { ...preview(), requestOperationReference: "not-a-reference" }),
+  ).rejects.toThrow("CANCELLATION_REFUND_INPUT_INVALID");
+});

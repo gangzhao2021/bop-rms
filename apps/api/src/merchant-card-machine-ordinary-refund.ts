@@ -219,6 +219,8 @@ export function createMerchantCardMachineOrdinaryRefund(options: {
             // The request, as recorded (history under the Order's refund fence).
             const context = await createPostgresOrdinaryRefundRequestContextSource({
               scope,
+              // Read-only: the Order's refund fence only (canonical lock order, Payment request store).
+              fence: "OrderOnly",
               authorize: (t, query) => byOrder(t, query),
             })(tx, {
               orderReference: command.orderReference,

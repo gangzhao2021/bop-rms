@@ -586,6 +586,8 @@ export function createMerchantOrderItemStaffCancellation(options: {
           orderItemReferences,
           actorReference,
           reasonCode: intent.reasonCode,
+          // The request the record below appends: its fence before the Order's refund fence.
+          requestOperationReference: operationReference,
         });
         const refundRequestReference = String(parseOrderingReference(options.nextReference()));
         const refundOperationReference = String(parseOrderingReference(options.nextReference()));

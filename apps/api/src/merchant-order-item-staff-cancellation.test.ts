@@ -209,6 +209,9 @@ it("WP-2423 Q6 step 2a: cancels kitchen, Ordering, the item refund claim, fulfil
     cancellationDigest: digest,
     orderItemReferences: [id(50)],
   });
+  // v15 2026-10-17 (40P01): the preview takes the recorded request's fence first.
+  expect(d.preview.mock.calls[0]?.[1]).toMatchObject({ requestOperationReference: id(20) });
+  expect(d.record.mock.calls[0]?.[1]).toMatchObject({ requestOperationReference: id(20) });
   expect(d.releaseLines.mock.calls[0]?.[1]).toMatchObject({ cartLineReferences: [id(60)] });
   expect(d.drive).toHaveBeenCalledWith({
     orderReference: id(5),

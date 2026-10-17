@@ -172,6 +172,8 @@ export function createMerchantOrdinaryRefundItems(options: {
           const observedAt = String(current.context.resolvedAt);
           const context = await createPostgresOrdinaryRefundRequestContextSource({
             scope,
+            // Read-only: the Order's refund fence only (canonical lock order, Payment request store).
+            fence: "OrderOnly",
             authorize: allowed,
           })(businessTransaction, {
             orderReference,

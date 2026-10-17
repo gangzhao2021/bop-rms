@@ -71,6 +71,10 @@ export interface CancellationRefundPreviewInput {
   readonly orderItemReferences: readonly string[];
   readonly actorReference: string;
   readonly reasonCode: string;
+  /** The request operation a following `record` in this transaction appends. Given, the preview
+   * takes that operation's request fence before the Order fence, so the transaction keeps the
+   * canonical refund lock order (acquireOrdinaryRefundRequestFences). */
+  readonly requestOperationReference?: string;
 }
 export interface CancellationRefundRecordInput extends CancellationRefundPreviewInput {
   readonly requestReference: string;
@@ -357,9 +361,18 @@ export function createPostgresCancellationRefundRuntime(options: CancellationRef
   return Object.freeze({
     /** No writes. Refunds every unit of each selected line, tip excluded. */
     async preview(tx: ConsumerTransaction, value: CancellationRefundPreviewInput) {
-      const { input } = previewInput(value);
+      const recorded =
+        typeof value === "object" &&
+        value !== null &&
+        Object.prototype.hasOwnProperty.call(value, "requestOperationReference");
+      const { raw, input } = previewInput(value, recorded ? ["requestOperationReference"] : []);
       const observedAt = parsePaymentInstant(options.now());
-      const operationReference = ephemeralReference();
+      let operationReference: string;
+      try {
+        operationReference = recorded ? ref(raw.requestOperationReference) : ephemeralReference();
+      } catch {
+        return fail("CANCELLATION_REFUND_INPUT_INVALID");
+      }
       const current = await context(tx, {
         orderReference: input.orderReference,
         operationReference,
