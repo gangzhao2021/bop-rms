@@ -265,7 +265,8 @@ test("@production workbench displays the full 500-row backlog", async ({ page })
   ).toHaveCount(500);
   // WP-2423: times in words, never the machine instant (no Store zone here, so labelled UTC).
   await expect(page.getByText(/^Aug 12, 2026, 4:00\sPM UTC$/u).first()).toBeVisible();
-  await expect(page.getByText(/due Aug 12, 2026, 4:15\sPM UTC/u).first()).toBeVisible();
+  // Projected at 4:30 PM, so each open case says it is overdue.
+  await expect(page.getByText(/overdue since Aug 12, 2026, 4:15\sPM UTC/u).first()).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Paid without a fulfillable order", exact: true }).last(),
   ).toBeAttached();
@@ -939,6 +940,13 @@ test("@production WP-2423 every open case first, resolved history a page at a ti
     exceptionReference: "018f0f58-767a-7f3b-a1d0-000000000932",
     orderNumber: "42",
   };
+  // Refunded and confirmed, but the store's check was due at 12:20 local and it is now 12:30.
+  const refundedOverdue = {
+    ...refunded,
+    exceptionReference: "018f0f58-767a-7f3b-a1d0-000000000933",
+    orderNumber: "43",
+    dueAt: "2026-08-12T16:20:00.000Z",
+  };
   const resolved = (n: number) => ({
     ...base,
     exceptionReference: "018f0f58-767a-7f3b-a1d0-00000000090" + n,
@@ -957,7 +965,7 @@ test("@production WP-2423 every open case first, resolved history a page at a ti
           ...view(0),
           freshnessStatus: "Fresh",
           olderResolvedBefore: "018f0f58-767a-7f3b-a1d0-000000000909",
-          items: [refunded, unconfirmed, resolved(9)],
+          items: [refunded, unconfirmed, refundedOverdue, resolved(9)],
         },
         headers,
       });
@@ -969,7 +977,7 @@ test("@production WP-2423 every open case first, resolved history a page at a ti
         ...view(0),
         freshnessStatus: "Fresh",
         olderResolvedBefore: null,
-        items: [refunded, unconfirmed, resolved(8)],
+        items: [refunded, unconfirmed, refundedOverdue, resolved(8)],
       },
       headers,
     });
@@ -982,15 +990,34 @@ test("@production WP-2423 every open case first, resolved history a page at a ti
     card("41").getByText("Refunded — check by end of day", { exact: true }),
   ).toBeVisible();
   await expect(card("41").getByText("Critical", { exact: false })).toHaveCount(0);
-  await expect(card("42").getByText(/^Critical · due Aug 12, 2026, 12:15\sPM$/u)).toBeVisible();
+  await expect(
+    card("42").getByText(/^Critical · overdue since Aug 12, 2026, 12:15\sPM$/u),
+  ).toBeVisible();
   await expect(card("42").getByText("Pending", { exact: true })).toBeVisible();
-  // At 12:30 local only the unconfirmed case is overdue.
+  // The card itself says the store's check is overdue, by the same rule as the filter.
+  await expect(
+    card("43").getByText(/^Refunded · check overdue since Aug 12, 2026, 12:20\sPM$/u),
+  ).toBeVisible();
+  await expect(
+    card("43").getByText("Refunded — store check overdue", { exact: true }),
+  ).toBeVisible();
+  await expect(card("43").getByText(/check by/u)).toHaveCount(0);
+  // At 12:30 local the unconfirmed case and the overdue refund check are overdue.
   await page.getByRole("checkbox", { name: "Overdue only" }).check();
   await expect(card("42")).toBeVisible();
+  await expect(card("43")).toBeVisible();
   await expect(card("41")).toBeHidden();
   await page.getByRole("checkbox", { name: "Overdue only" }).uncheck();
 
   await expect(card("39")).toBeVisible();
+  // A resolved case is history: no review action, no overdue wording.
+  await expect(card("39").getByRole("button")).toHaveCount(0);
+  await expect(card("39").getByText(/overdue|check by/u)).toHaveCount(0);
+  await expect(
+    card("39").getByText("Resolved: nothing more to do. It stays in the store's history.", {
+      exact: true,
+    }),
+  ).toBeVisible();
   await expect(card("38")).toHaveCount(0);
   await page.getByRole("button", { name: "Show older resolved exceptions" }).click();
   await expect(
@@ -999,7 +1026,7 @@ test("@production WP-2423 every open case first, resolved history a page at a ti
   await expect(card("39")).toBeVisible();
   await page.getByRole("button", { name: "Show older resolved exceptions" }).click();
   await expect(card("38")).toBeVisible();
-  await expect(page.locator("article:visible")).toHaveCount(4);
+  await expect(page.locator("article:visible")).toHaveCount(5);
   await expect(page.getByRole("button", { name: "Show older resolved exceptions" })).toHaveCount(0);
   await expectNoInternalText(page);
   for (const width of [1440, 1024, 390]) {
@@ -1008,6 +1035,10 @@ test("@production WP-2423 every open case first, resolved history a page at a ti
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
     await card("41").screenshot({ path: `test-results/exceptions-refund-check-${width}.png` });
+    await card("43").screenshot({
+      path: `test-results/exceptions-refund-check-overdue-${width}.png`,
+    });
+    await card("39").screenshot({ path: `test-results/exceptions-resolved-${width}.png` });
   }
   // Refresh starts over from the newest resolved page.
   await page.setViewportSize({ width: 1440, height: 900 });

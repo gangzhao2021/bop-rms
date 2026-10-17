@@ -38,6 +38,7 @@ export {
   type OrderExceptionView,
 } from "./order-exception-view.js";
 import {
+  isExceptionOverdue,
   isRefundedAwaitingCheck,
   parseOrderExceptionView,
   type OrderExceptionClient,
@@ -74,8 +75,7 @@ export function OrderExceptionScreen({
       (statusFilter === "All" || item.status === statusFilter) &&
       (ownerFilter === "All" || item.ownerStatus === ownerFilter) &&
       (providerFilter === "All" || item.providerState === providerFilter) &&
-      (!overdueOnly ||
-        (item.status !== "Resolved" && Date.parse(view.projectedAt) > Date.parse(item.dueAt))),
+      (!overdueOnly || isExceptionOverdue(item, view.projectedAt)),
   );
   const hasFilters =
     kindFilter !== "All" ||
@@ -213,7 +213,12 @@ export function OrderExceptionScreen({
               hidden={!visibleReferences.has(item.exceptionReference)}
               key={item.exceptionReference}
             >
-              <OrderExceptionCard item={item} csrf={csrf} readOnly={readOnly} />
+              <OrderExceptionCard
+                item={item}
+                overdue={isExceptionOverdue(item, view.projectedAt)}
+                csrf={csrf}
+                readOnly={readOnly}
+              />
             </article>
           ))}
         </div>
@@ -254,26 +259,33 @@ const settlementLink = (businessDate: string | null) =>
 /** WP-2423: one exception card, worded for what the exception is about. */
 function OrderExceptionCard({
   item,
+  overdue,
   csrf,
   readOnly,
 }: {
   readonly item: OrderExceptionItem;
+  /** WP-2423: past its due time and still open (same rule as the filter and Home). */
+  readonly overdue: boolean;
   readonly csrf: string | undefined;
   readonly readOnly: boolean;
 }) {
   const detail = item.reconciliation;
   const payment = item.kind === "PaymentReconciliationDifference" && item.sourceOwner === "Payment";
   const refundedAwaitingCheck = isRefundedAwaitingCheck(item);
+  // WP-2423: a resolved case is history; its actions are not offered again.
+  const resolved = item.status === "Resolved";
   const header = (title: string) => (
     <header>
       <div>
         {refundedAwaitingCheck ? (
           <p className="bop-eyebrow order-exception__severity" data-severity="High">
-            Refunded · check by <SourceTime instant={item.dueAt} />
+            {overdue ? "Refunded · check overdue since " : "Refunded · check by "}
+            <SourceTime instant={item.dueAt} />
           </p>
         ) : (
           <p className="bop-eyebrow order-exception__severity" data-severity={item.severity}>
-            {item.severity} · due <SourceTime instant={item.dueAt} />
+            {item.severity} · {resolved ? "was due " : overdue ? "overdue since " : "due "}
+            <SourceTime instant={item.dueAt} />
           </p>
         )}
         <h3>{title}</h3>
@@ -420,7 +432,9 @@ function OrderExceptionCard({
           <dt>Compensation</dt>
           <dd>
             {refundedAwaitingCheck
-              ? "Refunded — check by end of day"
+              ? overdue
+                ? "Refunded — store check overdue"
+                : "Refunded — check by end of day"
               : compensationLabel[item.compensationStatus]}
           </dd>
         </div>
@@ -430,6 +444,7 @@ function OrderExceptionCard({
         </div>
       </dl>
       {csrf &&
+      !resolved &&
       item.kind === "PaidWithoutFulfillableOrder" &&
       item.sourceOwner === "Payment" &&
       item.orderReference !== null ? (
@@ -450,7 +465,10 @@ function OrderExceptionCard({
           showChargeDetails={unmatched}
         />
       ) : null}
-      {item.orderReference === null ? (
+      {resolved && !(csrf && payment) ? (
+        <p role="note">Resolved: nothing more to do. It stays in the store&apos;s history.</p>
+      ) : null}
+      {item.orderReference === null && !resolved ? (
         <p>
           {detail?.type === "UnmatchedCharge"
             ? "The payment provider took this charge, but it matches no order or payment in this store. Review it below and refund it if no order was paid by it."
@@ -458,11 +476,13 @@ function OrderExceptionCard({
         </p>
       ) : null}
       {csrf && unmatched ? (
+        // A resolved charge keeps its read-only charge and refund review (v15 Oct 9), never a new
+        // refund request or approval.
         <UnmatchedCaptureRefundAction
           key={item.exceptionReference + ":refund:" + csrf}
           exceptionReference={item.exceptionReference}
           csrf={csrf}
-          readOnly={readOnly}
+          readOnly={readOnly || resolved}
         />
       ) : null}
     </>

@@ -8,7 +8,11 @@ import {
 } from "./current-order-queue-client.js";
 import { awaitingAcceptanceText, paidRoundUrgentMinutes } from "./paid-round-wait.js";
 import { createOrderExceptionClient } from "./order-exception-client.js";
-import { parseOrderExceptionView, type OrderExceptionView } from "./order-exception-view.js";
+import {
+  isExceptionOverdue,
+  parseOrderExceptionView,
+  type OrderExceptionView,
+} from "./order-exception-view.js";
 import { createPickupClient } from "./pickup-client.js";
 import { parsePickupQueueView } from "./pickup.js";
 import { storeTime } from "./StoreTime.js";
@@ -77,10 +81,9 @@ export function summarizePickups(view: {
 }
 export function summarizeExceptions(view: OrderExceptionView): ExceptionsSummary {
   const open = view.items.filter((item) => item.status !== "Resolved");
-  const now = Date.parse(view.projectedAt);
   return {
     open: open.length,
-    overdue: open.filter((item) => Date.parse(item.dueAt) < now).length,
+    overdue: open.filter((item) => isExceptionOverdue(item, view.projectedAt)).length,
   };
 }
 

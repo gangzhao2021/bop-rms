@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import { MemoryRouter } from "react-router";
 import { StoreTimeZoneContext } from "./StoreTime.js";
 import { findInternalText } from "../e2e/internal-text-patterns.js";
+import { isExceptionOverdue } from "./order-exception-view.js";
+import { summarizeExceptions } from "./StoreOverview.js";
 import {
   OrderExceptionPage,
   OrderExceptionScreen,
@@ -375,6 +377,75 @@ it("DEC-EXCEPTION-CONFIRMED-REFUND-DUE: a confirmed refund reads as refunded and
   expect(second).toContain("Critical · due");
   expect(second).toContain("<dd>Pending</dd>");
   expect(findInternalText([html.replace(/<[^>]+>/gu, " ")])).toEqual([]);
+});
+
+it("WP-2423: an overdue confirmed refund says so on the card, and a resolved case offers no actions", () => {
+  const input = fixture();
+  const overdue = {
+    ...input.items[0],
+    providerState: "Confirmed",
+    dueAt: "2026-08-12T16:10:00.000Z",
+  };
+  const resolved = {
+    ...overdue,
+    exceptionReference: "018f0f58-767a-7f3b-a1d0-000000000904",
+    status: "Resolved",
+    sourceFinal: true,
+  };
+  const view = parseOrderExceptionView({ ...input, items: [overdue, resolved] });
+  const html = renderToStaticMarkup(
+    <StoreTimeZoneContext.Provider value="America/Toronto">
+      <MemoryRouter>
+        <OrderExceptionScreen view={view} csrf={"a".repeat(43)} />
+      </MemoryRouter>
+    </StoreTimeZoneContext.Provider>,
+  );
+  const [first, second] = html.split("<article").slice(1);
+  expect(first).toContain("Refunded · check overdue since");
+  expect(first).toContain("Refunded — store check overdue");
+  expect(first).not.toContain("check by");
+  expect(first).toContain("Review confirmed refund");
+  expect(second).not.toContain("overdue");
+  expect(second).not.toContain("Review confirmed refund");
+  expect(second).not.toContain("<button");
+  expect(second).toContain("Resolved: nothing more to do.");
+  expect(view.items.map((item) => isExceptionOverdue(item, view.projectedAt))).toEqual([
+    true,
+    false,
+  ]);
+  expect(summarizeExceptions(view)).toEqual({ open: 1, overdue: 1 });
+  expect(findInternalText([html.replace(/<[^>]+>/gu, " ")])).toEqual([]);
+});
+
+it("WP-2423: a resolved charge that matches no order keeps only its read-only review", () => {
+  const input = fixture();
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <OrderExceptionScreen
+        view={parseOrderExceptionView({
+          ...input,
+          items: [
+            {
+              ...input.items[0],
+              kind: "PaymentReconciliationDifference",
+              orderReference: null,
+              providerState: "Confirmed",
+              compensationStatus: "NotRequested",
+              status: "Resolved",
+              sourceFinal: true,
+              reconciliation: { type: "UnmatchedCharge" },
+            },
+          ],
+        })}
+        csrf={"a".repeat(43)}
+      />
+    </MemoryRouter>,
+  );
+  const card = html.split("<article")[1] ?? "";
+  expect(card).toContain("Review unmatched charge");
+  expect(card).toContain("Follow-up closed: this difference is resolved.");
+  expect(card).not.toContain("refund it if no order");
+  expect(card).not.toContain("overdue");
 });
 
 it("WP-2423: offers older resolved exceptions only when the server has more", () => {

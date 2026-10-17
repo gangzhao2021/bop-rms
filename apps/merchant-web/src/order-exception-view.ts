@@ -63,6 +63,13 @@ export function isRefundedAwaitingCheck(item: OrderExceptionItem): boolean {
     item.status !== "Resolved"
   );
 }
+/**
+ * WP-2423: an open case is overdue once the projection's time is past its due time. The card,
+ * the "Overdue only" filter and Home all use this one rule.
+ */
+export function isExceptionOverdue(item: OrderExceptionItem, projectedAt: string): boolean {
+  return item.status !== "Resolved" && Date.parse(projectedAt) > Date.parse(item.dueAt);
+}
 const REF = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const SAFE = /^[^\p{Cc}\p{Cf}]{1,100}$/u;
