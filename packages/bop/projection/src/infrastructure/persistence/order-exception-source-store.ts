@@ -55,6 +55,45 @@ export function createPostgresOrderExceptionSourceStore(options: {
     if (!result.rows.length) return null;
     return decode(result.rows[0] ?? fail(), sourceReference);
   };
+  const page = (input: {
+    readonly afterSourceReference: string | null;
+    readonly limit: number;
+  }) => {
+    if (
+      !Number.isInteger(input.limit) ||
+      input.limit < 1 ||
+      input.limit > 100 ||
+      (input.afterSourceReference !== null && !ref.test(input.afterSourceReference))
+    )
+      fail();
+  };
+  /** Decoded rows, strictly ordered after (or before) the cursor. */
+  const ordered = (
+    rows: readonly Record<string, unknown>[],
+    cursor: string | null,
+    direction: "Ascending" | "Descending",
+  ) => {
+    let previous = cursor;
+    return rows.map((row) => {
+      if (
+        typeof row.source_id !== "string" ||
+        !ref.test(row.source_id) ||
+        (previous !== null &&
+          (direction === "Ascending" ? row.source_id <= previous : row.source_id >= previous))
+      )
+        return fail();
+      previous = row.source_id;
+      return decode(row, row.source_id);
+    });
+  };
+  const pageOf = (sources: readonly OrderExceptionSource[], limit: number) => {
+    if (sources.length > limit + 1) return fail();
+    const items = sources.slice(0, limit);
+    return Object.freeze({
+      items: Object.freeze(items),
+      next: sources.length > limit ? (items[items.length - 1] ?? fail()).sourceReference : null,
+    });
+  };
   const run = async <T>(
     tx: OrderExceptionTransaction,
     access: "Read" | "Write",
@@ -112,6 +151,95 @@ export function createPostgresOrderExceptionSourceStore(options: {
           items: Object.freeze(items),
           nextAfterSourceReference:
             sources.length > input.limit
+              ? (items[items.length - 1] ?? fail()).sourceReference
+              : null,
+        });
+      }),
+    /**
+     * WP-2423: the cases still open, whatever the Store's lifetime count. Final is terminal (write
+     * refuses Final -> Open), so a case is open while it has no Final version; both lookups use the
+     * partial open/final indexes (2000_081), never every version the Store ever recorded.
+     */
+    listOpen: (
+      tx: OrderExceptionTransaction,
+      input: { readonly afterSourceReference: string | null; readonly limit: number },
+    ) =>
+      run(tx, "Read", async () => {
+        page(input);
+        const result = await tx.query(
+          "SELECT DISTINCT ON (o.source_id) o.source_id,o.record_json::text AS record FROM platform_projection.order_exception_source o WHERE o.tenant_id=$1 AND o.brand_id=$2 AND o.store_id=$3 AND (o.record_json->>'sourceStatus')='Open' AND ($4::uuid IS NULL OR o.source_id>$4::uuid) AND NOT EXISTS (SELECT 1 FROM platform_projection.order_exception_source f WHERE f.tenant_id=o.tenant_id AND f.brand_id=o.brand_id AND f.store_id=o.store_id AND f.source_id=o.source_id AND (f.record_json->>'sourceStatus')='Final') ORDER BY o.source_id,o.source_version DESC LIMIT $5",
+          [...refs, input.afterSourceReference, input.limit + 1],
+        );
+        const sources = ordered(result.rows, input.afterSourceReference, "Ascending");
+        if (sources.some((source) => source.sourceStatus !== "Open")) return fail();
+        return pageOf(sources, input.limit);
+      }),
+    /**
+     * WP-2423: resolved history, most recently opened first (references are time-ordered), one
+     * page at a time; each case is read at its latest version.
+     */
+    listResolved: (
+      tx: OrderExceptionTransaction,
+      input: { readonly beforeSourceReference: string | null; readonly limit: number },
+    ) =>
+      run(tx, "Read", async () => {
+        page({ afterSourceReference: input.beforeSourceReference, limit: input.limit });
+        const result = await tx.query(
+          "SELECT f.source_id,(SELECT l.record_json::text FROM platform_projection.order_exception_source l WHERE l.tenant_id=$1 AND l.brand_id=$2 AND l.store_id=$3 AND l.source_id=f.source_id ORDER BY l.source_version DESC LIMIT 1) AS record FROM (SELECT DISTINCT source_id FROM platform_projection.order_exception_source WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND (record_json->>'sourceStatus')='Final' AND ($4::uuid IS NULL OR source_id<$4::uuid) ORDER BY source_id DESC LIMIT $5) f ORDER BY f.source_id DESC",
+          [...refs, input.beforeSourceReference, input.limit + 1],
+        );
+        const sources = ordered(result.rows, input.beforeSourceReference, "Descending");
+        if (sources.some((source) => source.sourceStatus !== "Final")) return fail();
+        return pageOf(sources, input.limit);
+      }),
+    /**
+     * WP-2423: every projected case's reference, kind and whether it is final, without records,
+     * for a coverage check of the open cases against their owners (up to 1000 a page).
+     */
+    listReferences: (
+      tx: OrderExceptionTransaction,
+      input: { readonly afterSourceReference: string | null; readonly limit: number },
+    ) =>
+      run(tx, "Read", async () => {
+        if (
+          !Number.isInteger(input.limit) ||
+          input.limit < 1 ||
+          input.limit > 1000 ||
+          (input.afterSourceReference !== null && !ref.test(input.afterSourceReference))
+        )
+          return fail();
+        const result = await tx.query(
+          "SELECT DISTINCT ON (source_id) source_id,record_json->>'kind' AS kind,record_json->>'sourceStatus' AS status FROM platform_projection.order_exception_source WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND ($4::uuid IS NULL OR source_id>$4::uuid) ORDER BY source_id,source_version DESC LIMIT $5",
+          [...refs, input.afterSourceReference, input.limit + 1],
+        );
+        if (result.rows.length > input.limit + 1) return fail();
+        let previous = input.afterSourceReference;
+        const references = result.rows.map((row) => {
+          if (
+            typeof row.source_id !== "string" ||
+            !ref.test(row.source_id) ||
+            (previous !== null && row.source_id <= previous) ||
+            ![
+              "DiningUnpaidBatch",
+              "PaymentReconciliationDifference",
+              "CaptureDeadlineExceeded",
+              "PaidWithoutFulfillableOrder",
+            ].includes(String(row.kind)) ||
+            (row.status !== "Open" && row.status !== "Final")
+          )
+            return fail();
+          previous = row.source_id;
+          return Object.freeze({
+            sourceReference: row.source_id,
+            kind: row.kind as OrderExceptionSource["kind"],
+            final: row.status === "Final",
+          });
+        });
+        const items = references.slice(0, input.limit);
+        return Object.freeze({
+          items: Object.freeze(items),
+          nextAfterSourceReference:
+            references.length > input.limit
               ? (items[items.length - 1] ?? fail()).sourceReference
               : null,
         });

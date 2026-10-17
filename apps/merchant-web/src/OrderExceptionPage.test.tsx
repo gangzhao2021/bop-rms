@@ -127,26 +127,32 @@ describe("WP-2402 workbench recovery states", () => {
   });
 });
 
-it("accepts the full 500-row server bound through the HTTP client and rejects 501", async () => {
-  const rows = Array.from({ length: 501 }, (_, index) => ({
+it("accepts the full 2000-row server bound through the HTTP client and rejects 2001", async () => {
+  const rows = Array.from({ length: 2001 }, (_, index) => ({
     ...fixture().items[0],
     exceptionReference: "018f0f58-767a-7f3b-a1d0-" + index.toString(16).padStart(12, "0"),
+    orderNumber: "A".repeat(40),
     kind: "PaymentReconciliationDifference",
     status: "Acknowledged",
     providerState: "NotApplicable",
     compensationStatus: "NotRequested",
   }));
-  const input = { ...fixture(), storeLabel: "S".repeat(100), items: rows.slice(0, 500) };
+  const input = {
+    ...fixture(),
+    storeLabel: "S".repeat(100),
+    olderResolvedBefore: "018f0f58-767a-7f3b-a1d0-000000009999",
+    items: rows.slice(0, 2000),
+  };
   const body = JSON.stringify(input);
-  // Longest enum spellings, full-length label, fixed-width references and instants.
-  expect(body.length).toBeLessThanOrEqual(262144);
+  // Longest enum spellings, full-length label and order number, fixed-width references and instants.
+  expect(body.length).toBeLessThanOrEqual(1048576);
   const result = await createOrderExceptionClient(
     async () =>
       new Response(body, {
         headers: { "content-type": "application/json", "cache-control": "no-store" },
       }),
   ).load();
-  expect(parseOrderExceptionView(result).items).toHaveLength(500);
+  expect(parseOrderExceptionView(result).items).toHaveLength(2000);
   expect(() => parseOrderExceptionView({ ...input, items: rows })).toThrow(
     "ORDER_EXCEPTION_INVALID",
   );
@@ -339,4 +345,63 @@ describe("WP-2423 reconciliation cards say what the difference is about", () => 
       }),
     ).toThrow("ORDER_EXCEPTION_INVALID");
   });
+});
+
+it("DEC-EXCEPTION-CONFIRMED-REFUND-DUE: a confirmed refund reads as refunded and checked by the day's end", () => {
+  const input = fixture();
+  const confirmed = {
+    ...input.items[0],
+    providerState: "Confirmed",
+    dueAt: "2026-08-13T04:00:00.000Z",
+  };
+  const unconfirmed = {
+    ...input.items[0],
+    exceptionReference: "018f0f58-767a-7f3b-a1d0-000000000903",
+  };
+  const html = renderToStaticMarkup(
+    <StoreTimeZoneContext.Provider value="America/Toronto">
+      <MemoryRouter>
+        <OrderExceptionScreen
+          view={parseOrderExceptionView({ ...input, items: [confirmed, unconfirmed] })}
+        />
+      </MemoryRouter>
+    </StoreTimeZoneContext.Provider>,
+  );
+  const [first, second] = html.split("<article").slice(1);
+  expect(first).toContain("Refunded · check by");
+  expect(first).toContain("Refunded — check by end of day");
+  expect(first).not.toContain("Critical · due");
+  expect(first).not.toContain("<dd>Pending</dd>");
+  expect(second).toContain("Critical · due");
+  expect(second).toContain("<dd>Pending</dd>");
+  expect(findInternalText([html.replace(/<[^>]+>/gu, " ")])).toEqual([]);
+});
+
+it("WP-2423: offers older resolved exceptions only when the server has more", () => {
+  const input = fixture();
+  const render = (olderResolvedBefore: string | null, older?: "Loading" | "Failed") =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <OrderExceptionScreen
+          view={parseOrderExceptionView({ ...input, olderResolvedBefore })}
+          onShowOlder={() => undefined}
+          {...(older ? { older } : {})}
+        />
+      </MemoryRouter>,
+    );
+  expect(render(null)).not.toContain("older resolved");
+  expect(render("018f0f58-767a-7f3b-a1d0-000000000990")).toContain(
+    "Show older resolved exceptions",
+  );
+  expect(render("018f0f58-767a-7f3b-a1d0-000000000990", "Loading")).toContain(
+    "Loading older resolved exceptions",
+  );
+  expect(render("018f0f58-767a-7f3b-a1d0-000000000990", "Failed")).toContain(
+    "Older resolved exceptions could not be loaded. Try again.",
+  );
+  expect(() => parseOrderExceptionView({ ...input, olderResolvedBefore: "older" })).toThrow(
+    "ORDER_EXCEPTION_INVALID",
+  );
+  // An older server without history paging still parses.
+  expect(parseOrderExceptionView(input).olderResolvedBefore).toBeNull();
 });

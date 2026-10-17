@@ -190,6 +190,25 @@ export interface OrderExceptionProjectionInput {
   readonly freshnessStatus: "Fresh" | "Stale";
   readonly sources: readonly unknown[];
   readonly deriveProjectionReference: (sourceReference: string) => string;
+  /**
+   * DEC-EXCEPTION-CONFIRMED-REFUND-DUE (WP-2423, 2026-10-17): when an open paid-without-fulfillable
+   * case's refund is already Provider-confirmed, only the store's reconciliation check remains, due
+   * by the end of the Store business day the case opened in. Keyed by source reference; the value
+   * is that day's end (trusted server resolution of the Store's time zone and business-day start).
+   * Any other case, or a case without an entry, keeps the 15-minute due time.
+   */
+  readonly refundCheckDueAt?: ReadonlyMap<string, string>;
+}
+
+/** An open paid-without-fulfillable case whose refund the Provider has already confirmed. */
+export function isConfirmedRefundAwaitingCheck(
+  source: Pick<OrderExceptionSource, "kind" | "providerState" | "sourceStatus">,
+): boolean {
+  return (
+    source.kind === "PaidWithoutFulfillableOrder" &&
+    source.providerState === "Confirmed" &&
+    source.sourceStatus === "Open"
+  );
 }
 
 /** Activation gate: a late Critical source cannot activate as a valid projection. */
@@ -231,12 +250,23 @@ function projectOrderExceptions(
     !/^\d{4}-\d{2}-\d{2}$/u.test(input.businessDate) ||
     !["Fresh", "Stale"].includes(input.freshnessStatus) ||
     !Array.isArray(input.sources) ||
-    input.sources.length > 500
+    input.sources.length > 2000
   )
     return fail("INPUT_INVALID");
   const sources = input.sources.map(parseOrderExceptionSource);
   if (new Set(sources.map((source) => source.sourceReference)).size !== sources.length)
     return fail("INPUT_INVALID");
+  const refundCheckDueAt = input.refundCheckDueAt ?? new Map<string, string>();
+  if (!(refundCheckDueAt instanceof Map)) return fail("INPUT_INVALID");
+  for (const [reference, dueAt] of refundCheckDueAt) {
+    const source = sources.find((candidate) => candidate.sourceReference === reference);
+    if (
+      !source ||
+      !isConfirmedRefundAwaitingCheck(source) ||
+      Date.parse(instant(dueAt)) <= Date.parse(source.createdAt)
+    )
+      return fail("INPUT_INVALID");
+  }
   const rows = sources.map((source) => {
     if (
       source.tenantReference !== tenantReference ||
@@ -261,7 +291,9 @@ function projectOrderExceptions(
       acknowledgedAt: null,
       assignedAt: null,
       resolvedAt: resolved ? source.updatedAt : null,
-      dueAt: new Date(Date.parse(source.createdAt) + 900_000).toISOString(),
+      dueAt:
+        refundCheckDueAt.get(source.sourceReference) ??
+        new Date(Date.parse(source.createdAt) + 900_000).toISOString(),
     });
   });
   return Object.freeze({

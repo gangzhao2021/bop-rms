@@ -2256,9 +2256,17 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
 
   router.get("/order-exceptions", safeRead(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");
+    // WP-2423: the only query is the cursor of an older page of resolved cases.
+    const queryKeys = Object.keys(request.query);
+    const resolvedBefore = request.query.resolvedBefore;
     if (
       request.method !== "GET" ||
-      Object.keys(request.query).length !== 0 ||
+      queryKeys.some((key) => key !== "resolvedBefore") ||
+      (resolvedBefore !== undefined &&
+        (typeof resolvedBefore !== "string" ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+            resolvedBefore,
+          ))) ||
       request.body !== undefined ||
       sessionCookie === null ||
       rawHeaderValues(request, "origin").length > 1 ||
@@ -2272,7 +2280,9 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       return;
     }
     void options
-      .orderExceptions(sessionCookie)
+      .orderExceptions(sessionCookie, {
+        resolvedBefore: typeof resolvedBefore === "string" ? resolvedBefore : null,
+      })
       .then((view) => {
         response.json({
           screenId: view.screenId,
@@ -2281,6 +2291,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           businessDate: view.businessDate,
           projectedAt: view.projectedAt,
           freshnessStatus: view.freshnessStatus,
+          olderResolvedBefore: view.olderResolvedBefore,
           items: view.items.map((item) => ({
             exceptionReference: item.exceptionReference,
             orderReference: item.orderReference,

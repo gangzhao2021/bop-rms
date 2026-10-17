@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   authorizeOrderExceptionAction,
   buildOrderExceptionProjection,
+  isConfirmedRefundAwaitingCheck,
   readOrderExceptionProjection,
   OrderExceptionProjectionError,
   type OrderExceptionSource,
@@ -189,4 +190,48 @@ it("recovers a current source-checked read without certifying initial activation
     expect(() =>
       readOrderExceptionProjection({ ...input, sources: [{ ...source(), ...changes }] }),
     ).toThrowError(new OrderExceptionProjectionError("INPUT_INVALID"));
+});
+it("DEC-EXCEPTION-CONFIRMED-REFUND-DUE: only an open confirmed refund takes its business day's end", () => {
+  const confirmed = { ...source(), providerState: "Confirmed" as const };
+  const dayEnd = "2026-08-13T04:00:00.000Z";
+  const input = {
+    tenantReference: refs[1],
+    brandReference: refs[2],
+    storeReference: refs[3],
+    businessDate: "2026-08-12",
+    checkpointReference: refs[6],
+    projectedAt: "2026-08-12T16:14:59.000Z",
+    freshnessStatus: "Fresh" as const,
+    sources: [confirmed],
+    deriveProjectionReference: () => refs[7],
+    refundCheckDueAt: new Map([[refs[0], dayEnd]]),
+  };
+  expect(buildOrderExceptionProjection(input).rows[0]?.dueAt).toBe(dayEnd);
+  expect(isConfirmedRefundAwaitingCheck(confirmed)).toBe(true);
+  // Not yet confirmed, already resolved, unknown or not after it opened: refused, never moved.
+  for (const sources of [
+    [source()],
+    [
+      {
+        ...confirmed,
+        sourceStatus: "Final" as const,
+        compensationStatus: "Completed" as const,
+        resolutionEvidenceReference: refs[9],
+      },
+    ],
+  ])
+    expect(() => buildOrderExceptionProjection({ ...input, sources })).toThrowError(
+      new OrderExceptionProjectionError("INPUT_INVALID"),
+    );
+  for (const refundCheckDueAt of [
+    new Map([[refs[10], dayEnd]]),
+    new Map([[refs[0], "2026-08-12T16:00:00.000Z"]]),
+    new Map([[refs[0], "tomorrow"]]),
+  ])
+    expect(() => buildOrderExceptionProjection({ ...input, refundCheckDueAt })).toThrowError(
+      new OrderExceptionProjectionError("INPUT_INVALID"),
+    );
+  expect(
+    buildOrderExceptionProjection({ ...input, refundCheckDueAt: new Map() }).rows[0]?.dueAt,
+  ).toBe("2026-08-12T16:15:00.000Z");
 });

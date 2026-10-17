@@ -902,3 +902,117 @@ test("@production WP-2423 a business day's totals difference resolved on re-chec
   );
   expect(writes).toEqual([]);
 });
+
+test("@production WP-2423 every open case first, resolved history a page at a time, confirmed refunds checked by day end", async ({
+  page,
+}) => {
+  const writes: string[] = [];
+  page.on("request", (request) => {
+    if (request.method() !== "GET" && !request.url().endsWith("/merchant/session/activity"))
+      writes.push(request.url());
+  });
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          ...workspace(0),
+          selectedScope: { ...stores[0], timeZone: "America/Toronto" },
+        },
+      },
+      headers,
+    }),
+  );
+  const base = view(0).items[0];
+  const refunded = {
+    ...base,
+    exceptionReference: "018f0f58-767a-7f3b-a1d0-000000000931",
+    orderNumber: "41",
+    providerState: "Confirmed",
+    // Opened 12:00 local on Aug 12; the business day ends 04:00 local on Aug 13.
+    createdAt: "2026-08-12T16:00:00.000Z",
+    dueAt: "2026-08-13T08:00:00.000Z",
+  };
+  const unconfirmed = {
+    ...base,
+    exceptionReference: "018f0f58-767a-7f3b-a1d0-000000000932",
+    orderNumber: "42",
+  };
+  const resolved = (n: number) => ({
+    ...base,
+    exceptionReference: "018f0f58-767a-7f3b-a1d0-00000000090" + n,
+    orderNumber: "3" + n,
+    providerState: "Confirmed",
+    compensationStatus: "Completed",
+    status: "Resolved",
+    sourceFinal: true,
+  });
+  let olderAttempts = 0;
+  await page.route(/\/merchant\/order-exceptions(\?.*)?$/u, (route) => {
+    const cursor = new URL(route.request().url()).searchParams.get("resolvedBefore");
+    if (cursor === null)
+      return route.fulfill({
+        json: {
+          ...view(0),
+          freshnessStatus: "Fresh",
+          olderResolvedBefore: "018f0f58-767a-7f3b-a1d0-000000000909",
+          items: [refunded, unconfirmed, resolved(9)],
+        },
+        headers,
+      });
+    expect(cursor).toBe("018f0f58-767a-7f3b-a1d0-000000000909");
+    if (olderAttempts++ === 0)
+      return route.fulfill({ status: 503, json: { error: "unavailable" }, headers });
+    return route.fulfill({
+      json: {
+        ...view(0),
+        freshnessStatus: "Fresh",
+        olderResolvedBefore: null,
+        items: [refunded, unconfirmed, resolved(8)],
+      },
+      headers,
+    });
+  });
+  await page.goto("/operations/order-exceptions");
+  const card = (number: string) =>
+    page.locator("article").filter({ has: page.getByText(`Order ${number}`, { exact: true }) });
+  await expect(card("41").getByText(/^Refunded · check by Aug 13, 2026, 4:00\sAM$/u)).toBeVisible();
+  await expect(
+    card("41").getByText("Refunded — check by end of day", { exact: true }),
+  ).toBeVisible();
+  await expect(card("41").getByText("Critical", { exact: false })).toHaveCount(0);
+  await expect(card("42").getByText(/^Critical · due Aug 12, 2026, 12:15\sPM$/u)).toBeVisible();
+  await expect(card("42").getByText("Pending", { exact: true })).toBeVisible();
+  // At 12:30 local only the unconfirmed case is overdue.
+  await page.getByRole("checkbox", { name: "Overdue only" }).check();
+  await expect(card("42")).toBeVisible();
+  await expect(card("41")).toBeHidden();
+  await page.getByRole("checkbox", { name: "Overdue only" }).uncheck();
+
+  await expect(card("39")).toBeVisible();
+  await expect(card("38")).toHaveCount(0);
+  await page.getByRole("button", { name: "Show older resolved exceptions" }).click();
+  await expect(
+    page.getByText("Older resolved exceptions could not be loaded. Try again."),
+  ).toBeVisible();
+  await expect(card("39")).toBeVisible();
+  await page.getByRole("button", { name: "Show older resolved exceptions" }).click();
+  await expect(card("38")).toBeVisible();
+  await expect(page.locator("article:visible")).toHaveCount(4);
+  await expect(page.getByRole("button", { name: "Show older resolved exceptions" })).toHaveCount(0);
+  await expectNoInternalText(page);
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await card("41").screenshot({ path: `test-results/exceptions-refund-check-${width}.png` });
+  }
+  // Refresh starts over from the newest resolved page.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(card("38")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Show older resolved exceptions" })).toBeVisible();
+  expect(writes).toEqual([]);
+});

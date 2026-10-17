@@ -83,3 +83,24 @@ it("certifies actual empty source only when the projection is empty too", async 
   });
   expect((await readInternalCompensationCoverage(options())).complete).toBe(false);
 });
+it("WP-2423: reads only shown cases; an unshown final case is counted, not re-read", async () => {
+  d.discover.mockResolvedValue({ items: ["case-0", "case-1"], nextAfterCaseReference: null });
+  const references = new Map([
+    ["case-0", { kind: "PaidWithoutFulfillableOrder", final: true }],
+    ["case-1", { kind: "PaidWithoutFulfillableOrder", final: false }],
+    ["dining", { kind: "DiningUnpaidBatch", final: false }],
+  ]);
+  expect(await readInternalCompensationCoverage({ ...options(), references })).toEqual({
+    complete: true,
+    sourceCount: 2,
+  });
+  expect(d.read).toHaveBeenCalledTimes(1);
+  references.set("case-0", { kind: "PaidWithoutFulfillableOrder", final: false });
+  expect((await readInternalCompensationCoverage({ ...options(), references })).complete).toBe(
+    false,
+  );
+  references.delete("case-0");
+  expect((await readInternalCompensationCoverage({ ...options(), references })).complete).toBe(
+    false,
+  );
+});

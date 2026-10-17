@@ -47,9 +47,17 @@ export function createInternalDiningExceptionPageRunner(resources, consume) {
           q.purpose === "ProjectOrderException",
       });
       try {
-        const page = await discover(tx, input),
+        // WP-2423: a coverage check may `select` the tasks it needs; the others are returned as
+        // skipped references without their Task and association reads.
+        const { select, ...query } = input;
+        if (select !== undefined && typeof select !== "function") return deny();
+        const page = await discover(tx, query),
           items = [];
         for (const reference of page.items) {
+          if (select && select(reference) !== true) {
+            items.push(Object.freeze({ reference, skipped: true }));
+            continue;
+          }
           const tasks = createPostgresTaskStore({
             scope: {
               kind: "Store",

@@ -1,4 +1,5 @@
 import { readInternalCompensationCoverage } from "./pilot-compensation-coverage.mjs";
+import { readProjectedExceptionReferences } from "./pilot-exception-references.mjs";
 import {
   createInternalDiningCoverage,
   createInternalReconciliationCoverage,
@@ -29,7 +30,12 @@ export async function readInternalExceptionCoverage({
   };
   const authorize = async (t) =>
     t === tx && resources.now() < resources.publicProfile.binding.validUntil;
-  const input = { tx, projected: sources, authorize };
+  // WP-2423: `sources` are the shown cases (every open one and a page of resolved ones); the
+  // projection's references let each owner check skip unshown final cases.
+  const references = await readProjectedExceptionReferences({ tx, scope, authorize });
+  if ([...references.values()].some((value) => value.kind === "CaptureDeadlineExceeded"))
+    return "Stale";
+  const input = { tx, projected: sources, references, authorize };
   const compensation = await readInternalCompensationCoverage({
     ...input,
     scope,

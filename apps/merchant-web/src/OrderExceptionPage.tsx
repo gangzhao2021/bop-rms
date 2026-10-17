@@ -38,6 +38,7 @@ export {
   type OrderExceptionView,
 } from "./order-exception-view.js";
 import {
+  isRefundedAwaitingCheck,
   parseOrderExceptionView,
   type OrderExceptionClient,
   type OrderExceptionItem,
@@ -48,11 +49,16 @@ export function OrderExceptionScreen({
   onRefresh,
   refreshButtonRef,
   csrf,
+  onShowOlder,
+  older = "Idle",
 }: {
   readonly view: OrderExceptionView;
   readonly onRefresh?: () => void;
   readonly refreshButtonRef?: Ref<HTMLButtonElement>;
   readonly csrf?: string | undefined;
+  /** WP-2423: reads the next older page of resolved cases (view.olderResolvedBefore). */
+  readonly onShowOlder?: () => void;
+  readonly older?: "Idle" | "Loading" | "Failed";
 }) {
   const [kindFilter, setKindFilter] = useState("All");
   const [severityFilter, setSeverityFilter] = useState("All");
@@ -211,6 +217,18 @@ export function OrderExceptionScreen({
             </article>
           ))}
         </div>
+        {view.olderResolvedBefore !== null && onShowOlder ? (
+          <div className="order-exception__older">
+            <button type="button" disabled={older === "Loading"} onClick={onShowOlder}>
+              {older === "Loading"
+                ? "Loading older resolved exceptions…"
+                : "Show older resolved exceptions"}
+            </button>
+            {older === "Failed" ? (
+              <p role="status">Older resolved exceptions could not be loaded. Try again.</p>
+            ) : null}
+          </div>
+        ) : null}
       </>
     </WorkspacePage>
   );
@@ -245,12 +263,19 @@ function OrderExceptionCard({
 }) {
   const detail = item.reconciliation;
   const payment = item.kind === "PaymentReconciliationDifference" && item.sourceOwner === "Payment";
+  const refundedAwaitingCheck = isRefundedAwaitingCheck(item);
   const header = (title: string) => (
     <header>
       <div>
-        <p className="bop-eyebrow order-exception__severity" data-severity={item.severity}>
-          {item.severity} · due <SourceTime instant={item.dueAt} />
-        </p>
+        {refundedAwaitingCheck ? (
+          <p className="bop-eyebrow order-exception__severity" data-severity="High">
+            Refunded · check by <SourceTime instant={item.dueAt} />
+          </p>
+        ) : (
+          <p className="bop-eyebrow order-exception__severity" data-severity={item.severity}>
+            {item.severity} · due <SourceTime instant={item.dueAt} />
+          </p>
+        )}
         <h3>{title}</h3>
       </div>
       <strong className="order-exception__status" data-status={item.status}>
@@ -393,7 +418,11 @@ function OrderExceptionCard({
         </div>
         <div>
           <dt>Compensation</dt>
-          <dd>{compensationLabel[item.compensationStatus]}</dd>
+          <dd>
+            {refundedAwaitingCheck
+              ? "Refunded — check by end of day"
+              : compensationLabel[item.compensationStatus]}
+          </dd>
         </div>
         <div>
           <dt>Owner</dt>
@@ -472,6 +501,52 @@ export function OrderExceptionPage({
       controller.abort();
     };
   }, [client, generation]);
+  // WP-2423: older resolved cases, a page at a time, kept until the next refresh.
+  const [older, setOlder] = useState<{
+    readonly view: OrderExceptionView;
+    readonly items: readonly OrderExceptionItem[];
+    readonly cursor: string | null;
+    readonly status: "Idle" | "Loading" | "Failed";
+  } | null>(null);
+  const olderRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => olderRequest.current?.abort(), []);
+  const currentView =
+    state?.client === client && state.generation === generation ? state.view : null;
+  const showOlder = () => {
+    if (!currentView || olderRequest.current) return;
+    const base = older?.view === currentView ? older : null;
+    const cursor = base ? base.cursor : currentView.olderResolvedBefore;
+    if (cursor === null) return;
+    const controller = new AbortController();
+    olderRequest.current = controller;
+    setOlder({ view: currentView, items: base?.items ?? [], cursor, status: "Loading" });
+    void client
+      .load(controller.signal, cursor)
+      .then(parseOrderExceptionView)
+      .then((page) => {
+        if (controller.signal.aborted) return;
+        const shown = new Set([
+          ...currentView.items.map((item) => item.exceptionReference),
+          ...(base?.items ?? []).map((item) => item.exceptionReference),
+        ]);
+        const added = page.items.filter(
+          (item) => item.status === "Resolved" && !shown.has(item.exceptionReference),
+        );
+        setOlder({
+          view: currentView,
+          items: [...(base?.items ?? []), ...added],
+          cursor: page.olderResolvedBefore,
+          status: "Idle",
+        });
+      })
+      .catch(() => {
+        if (!controller.signal.aborted)
+          setOlder({ view: currentView, items: base?.items ?? [], cursor, status: "Failed" });
+      })
+      .finally(() => {
+        if (olderRequest.current === controller) olderRequest.current = null;
+      });
+  };
   useEffect(() => {
     if (
       generation > 0 &&
@@ -489,12 +564,28 @@ export function OrderExceptionPage({
         </StatePanel>
       </WorkspacePage>
     );
+  const olderPage = older?.view === state.view ? older : null;
   return state.view ? (
     <OrderExceptionScreen
-      view={state.view}
-      onRefresh={refresh}
+      view={
+        olderPage
+          ? {
+              ...state.view,
+              items: [...state.view.items, ...olderPage.items],
+              olderResolvedBefore: olderPage.cursor,
+            }
+          : state.view
+      }
+      onRefresh={() => {
+        olderRequest.current?.abort();
+        olderRequest.current = null;
+        setOlder(null);
+        refresh();
+      }}
       refreshButtonRef={recoveryButton}
       csrf={csrf}
+      onShowOlder={showOlder}
+      older={olderPage?.status ?? "Idle"}
     />
   ) : (
     <WorkspacePage className="order-exception-page" title="Exceptions">

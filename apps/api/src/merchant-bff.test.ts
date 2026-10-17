@@ -498,6 +498,7 @@ describe("merchant order exception read route", () => {
       businessDate: "2026-09-12",
       projectedAt: "2026-09-12T15:00:00.000Z",
       freshnessStatus: "Stale" as const,
+      olderResolvedBefore: null,
       items: [],
     }));
     const root = await serve(fakeService(), read);
@@ -509,8 +510,43 @@ describe("merchant order exception read route", () => {
       },
     });
     expect(result.status).toBe(200);
-    expect(read).toHaveBeenCalledExactlyOnceWith(sessionCookie);
+    expect(read).toHaveBeenCalledExactlyOnceWith(sessionCookie, { resolvedBefore: null });
     expect(result.headers.get("cache-control")).toBe("no-store");
+    expect(await result.json()).toMatchObject({ olderResolvedBefore: null });
+  });
+  it("WP-2423: passes only an older-resolved cursor through", async () => {
+    const cursor = "0190fa86-0000-7000-8000-000000000030";
+    const read = vi.fn(async () => ({
+      screenId: "OPS-ORDER-EXCEPTION" as const,
+      projectionName: "merchant_order_exception_v1" as const,
+      storeLabel: "Synthetic Store",
+      businessDate: "2026-09-12",
+      projectedAt: "2026-09-12T15:00:00.000Z",
+      freshnessStatus: "Fresh" as const,
+      olderResolvedBefore: "0190fa86-0000-7000-8000-000000000020",
+      items: [],
+    }));
+    const root = await serve(fakeService(), read);
+    const headers = {
+      host: "merchant.invalid",
+      cookie: "__Host-bop-merchant=" + sessionCookie,
+      "sec-fetch-site": "same-origin",
+    };
+    const result = await request(root, "/merchant/order-exceptions?resolvedBefore=" + cursor, {
+      headers,
+    });
+    expect(result.status).toBe(200);
+    expect(read).toHaveBeenCalledExactlyOnceWith(sessionCookie, { resolvedBefore: cursor });
+    expect(await result.json()).toMatchObject({
+      olderResolvedBefore: "0190fa86-0000-7000-8000-000000000020",
+    });
+    for (const path of [
+      "/merchant/order-exceptions?resolvedBefore=x",
+      `/merchant/order-exceptions?resolvedBefore=${cursor}&resolvedBefore=${cursor}`,
+      `/merchant/order-exceptions?resolvedBefore=${cursor}&limit=500`,
+    ])
+      expect((await request(root, path, { headers })).status).toBe(403);
+    expect(read).toHaveBeenCalledTimes(1);
   });
   it("D3: returns what each payment reconciliation difference is about", async () => {
     const item = {
@@ -543,6 +579,7 @@ describe("merchant order exception read route", () => {
       businessDate: "2026-10-15",
       projectedAt: "2026-10-15T15:00:00.000Z",
       freshnessStatus: "Fresh" as const,
+      olderResolvedBefore: null,
       items: [
         { ...item, reconciliation: day },
         {

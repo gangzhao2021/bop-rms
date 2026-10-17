@@ -54,7 +54,38 @@ export function createInternalReconciliationExceptionPageRunner(resources, consu
         },
       });
       try {
-        const result = await reader(tx, input);
+        // WP-2423: a coverage check may `select` the exceptions it needs: the page is listed
+        // without per-exception payment links and only the selected ones are read in full.
+        const { select, ...query } = input;
+        if (select !== undefined && typeof select !== "function") return deny();
+        let result;
+        if (!select) result = await reader(tx, query);
+        else {
+          const listed = await createPostgresPaymentReconciliationExceptionSource({
+            scope,
+            authorize: async (t, q) => sameScope(t, q) && q.purpose === "ProjectOrderException",
+          })(tx, query);
+          const items = [];
+          let previous = query.afterExceptionReference;
+          for (const source of listed.items) {
+            if (select(source.exceptionReference) !== true)
+              items.push(Object.freeze({ reference: source.exceptionReference, skipped: true }));
+            else {
+              const one = await reader(tx, { afterExceptionReference: previous, limit: 1 });
+              if (
+                one.items.length !== 1 ||
+                one.items[0].exceptionReference !== source.exceptionReference
+              )
+                return deny();
+              items.push(one.items[0]);
+            }
+            previous = source.exceptionReference;
+          }
+          result = Object.freeze({
+            items: Object.freeze(items),
+            nextAfterExceptionReference: listed.nextAfterExceptionReference,
+          });
+        }
         if (!active()) return deny();
         const output = await consume({
           tx,
@@ -63,7 +94,7 @@ export function createInternalReconciliationExceptionPageRunner(resources, consu
           authorize: () => open && active(),
           reread: async () => {
             if (!open || !active()) return deny();
-            return reader(tx, input);
+            return reader(tx, query);
           },
         });
         if (!active()) return deny();

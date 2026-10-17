@@ -118,7 +118,8 @@ export function createInternalDiningExceptionEpisodePageRunner(
         return Object.freeze({ task, association, episode, source });
       };
       const items = [];
-      for (const item of page.items) items.push(await resolveItem(item));
+      for (const item of page.items)
+        items.push(item.skipped === true ? item : await resolveItem(item));
       const resolvedPage = Object.freeze({ ...page, items: Object.freeze(items) });
       const output = await consume({
         tx,
@@ -127,7 +128,9 @@ export function createInternalDiningExceptionEpisodePageRunner(
         authorize,
         rereadSource: async (reference) => {
           if (!authorize()) return deny();
-          const item = page.items.find((value) => value.association.taskReference === reference);
+          const item = page.items.find(
+            (value) => value.skipped !== true && value.association.taskReference === reference,
+          );
           if (!item) return deny();
           return (await resolveItem(item)).source;
         },

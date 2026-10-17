@@ -129,3 +129,44 @@ it("retains the transaction only during projection consumption and propagates co
   await expect(retained.reread()).rejects.toThrow();
   expect(d.read).toHaveBeenCalledTimes(2);
 });
+it("WP-2423: with select, lists the page without payment links and reads only the selected ones", async () => {
+  const f = setup();
+  const listed = vi.fn(async () => ({
+    items: [{ exceptionReference: id(10) }, { exceptionReference: id(11) }],
+    nextAfterExceptionReference: id(11),
+  }));
+  const full = vi.fn(async (_tx, input) => {
+    expect(input).toEqual({ afterExceptionReference: id(10), limit: 1 });
+    return {
+      items: [{ exceptionReference: id(11), linked: true }],
+      nextAfterExceptionReference: id(11),
+    };
+  });
+  d.source.mockImplementation((options) => (options.resolveIntent ? full : listed));
+  const pages = [];
+  const run = createInternalReconciliationExceptionPageRunner(f.resources, async ({ page }) => {
+    pages.push(page);
+    return page;
+  });
+  await run({
+    afterExceptionReference: id(9),
+    limit: 2,
+    select: (reference) => reference === id(11),
+  });
+  expect(listed).toHaveBeenCalledWith(f.tx, { afterExceptionReference: id(9), limit: 2 });
+  expect(full).toHaveBeenCalledTimes(1);
+  expect(pages[0]).toEqual({
+    items: [
+      { reference: id(10), skipped: true },
+      { exceptionReference: id(11), linked: true },
+    ],
+    nextAfterExceptionReference: id(11),
+  });
+  full.mockResolvedValueOnce({
+    items: [{ exceptionReference: id(12) }],
+    nextAfterExceptionReference: null,
+  });
+  await expect(
+    run({ afterExceptionReference: id(9), limit: 2, select: (reference) => reference === id(11) }),
+  ).rejects.toThrow();
+});

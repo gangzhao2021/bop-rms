@@ -41,8 +41,12 @@ function setup(dining = false) {
   };
   return {
     run: dining
-      ? createInternalDiningCoverage({ resources, providerAccountReference: "account" })
-      : createInternalReconciliationCoverage(resources),
+      ? createInternalDiningCoverage({
+          resources,
+          providerAccountReference: "account",
+          pageSize: 5,
+        })
+      : createInternalReconciliationCoverage(resources, { pageSize: 5 }),
     input: {
       tx: { query: vi.fn(async () => ({ rows: [{ isolation: "repeatable read" }] })) },
       authorize: vi.fn(async () => true),
@@ -115,5 +119,56 @@ it("empty source proves coverage only for an empty projection", async () => {
   expect(await f.run(f.input)).toEqual({ complete: true, sourceCount: 0 });
   f.input.projected = [source(1)];
   d.pages = [{ items: [], nextAfterExceptionReference: null }];
+  expect((await f.run(f.input)).complete).toBe(false);
+});
+it("WP-2423: reads only the shown cases and leaves unshown final cases unread", async () => {
+  const f = setup(),
+    open = source(3);
+  f.input.projected = [open];
+  f.input.references = new Map([
+    ["001", { kind: "PaymentReconciliationDifference", final: true }],
+    ["002", { kind: "PaymentReconciliationDifference", final: true }],
+    ["003", { kind: "PaymentReconciliationDifference", final: false }],
+    ["900", { kind: "DiningUnpaidBatch", final: false }],
+  ]);
+  d.pages = [
+    {
+      items: [{ reference: "001", skipped: true }, { reference: "002", skipped: true }, open],
+      nextAfterExceptionReference: null,
+    },
+  ];
+  expect(await f.run(f.input)).toEqual({ complete: true, sourceCount: 3 });
+  expect(d.called[0].select("003")).toBe(true);
+  expect(d.called[0].select("001")).toBe(false);
+});
+it.each([
+  ["an owner case the projection lacks", "004", true],
+  ["an unshown case that is still open", "002", false],
+])("WP-2423: does not certify %s", async (_name, reference, final) => {
+  const f = setup();
+  f.input.projected = [];
+  f.input.references = new Map([
+    ["001", { kind: "PaymentReconciliationDifference", final: true }],
+    ["002", { kind: "PaymentReconciliationDifference", final }],
+  ]);
+  d.pages = [
+    {
+      items: [
+        { reference: "001", skipped: true },
+        { reference, skipped: true },
+      ],
+      nextAfterExceptionReference: null,
+    },
+  ];
+  expect((await f.run(f.input)).complete).toBe(false);
+});
+it("WP-2423: does not certify a projected case its owner no longer lists", async () => {
+  const f = setup();
+  f.input.projected = [];
+  f.input.references = new Map([
+    ["001", { kind: "PaymentReconciliationDifference", final: true }],
+    ["002", { kind: "PaymentReconciliationDifference", final: true }],
+  ]);
+  d.pages = [{ items: [{ reference: "001", skipped: true }], nextAfterExceptionReference: null }];
   expect((await f.run(f.input)).complete).toBe(false);
 });

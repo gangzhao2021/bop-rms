@@ -471,3 +471,28 @@ it("retains projection consumer transaction, rereads changed owner evidence and 
   expect(retained.authorize()).toBe(false);
   await expect(retained.rereadSource(id(10))).rejects.toThrow();
 });
+it("WP-2423: with select, unselected tasks are returned as skipped references without reads", async () => {
+  const f = setup();
+  d.discover.mockResolvedValue({ items: [id(9), id(10)], nextAfterTaskReference: null });
+  const page = await f.read({
+    afterTaskReference: null,
+    limit: 100,
+    select: (reference) => reference === id(10),
+  });
+  expect(d.discover).toHaveBeenCalledWith(f.tx, { afterTaskReference: null, limit: 100 });
+  expect(page.items).toEqual([
+    { reference: id(9), skipped: true },
+    { task: f.task, association: f.association },
+  ]);
+  expect(d.task).toHaveBeenCalledTimes(1);
+  // The episode runner passes skipped references through unresolved.
+  const episodes = await createInternalDiningExceptionEpisodes({
+    resources: f.resources,
+    providerAccountReference: id(20),
+  })({ afterTaskReference: null, limit: 100, select: () => false });
+  expect(episodes.items).toEqual([
+    { reference: id(9), skipped: true },
+    { reference: id(10), skipped: true },
+  ]);
+  await expect(f.read({ afterTaskReference: null, limit: 5, select: "all" })).rejects.toThrow();
+});

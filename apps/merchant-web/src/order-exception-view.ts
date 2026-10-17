@@ -43,10 +43,25 @@ export interface OrderExceptionView {
   readonly businessDate: string;
   readonly projectedAt: string;
   readonly freshnessStatus: "Fresh" | "Stale";
+  /** WP-2423: the cursor of the next older page of resolved cases (null: no older ones). */
+  readonly olderResolvedBefore: string | null;
   readonly items: readonly OrderExceptionItem[];
 }
 export interface OrderExceptionClient {
-  load(signal?: AbortSignal): Promise<unknown>;
+  /** `resolvedBefore` reads an older page of resolved cases (every open case comes each time). */
+  load(signal?: AbortSignal, resolvedBefore?: string): Promise<unknown>;
+}
+
+/**
+ * DEC-EXCEPTION-CONFIRMED-REFUND-DUE (WP-2423): the guest's refund is already confirmed by the
+ * payment provider; only the store's check remains, due by the end of the business day.
+ */
+export function isRefundedAwaitingCheck(item: OrderExceptionItem): boolean {
+  return (
+    item.kind === "PaidWithoutFulfillableOrder" &&
+    item.providerState === "Confirmed" &&
+    item.status !== "Resolved"
+  );
 }
 const REF = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
@@ -124,7 +139,10 @@ function reconciliation(value: unknown): OrderExceptionReconciliation {
   });
 }
 export function parseOrderExceptionView(value: unknown): OrderExceptionView {
+  const paged =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "olderResolvedBefore");
   const input = exact(value, [
+    ...(paged ? ["olderResolvedBefore"] : []),
     "screenId",
     "projectionName",
     "storeLabel",
@@ -141,7 +159,7 @@ export function parseOrderExceptionView(value: unknown): OrderExceptionView {
     !SAFE.test(input.storeLabel) ||
     !["Fresh", "Stale"].includes(String(input.freshnessStatus)) ||
     !Array.isArray(input.items) ||
-    input.items.length > 500
+    input.items.length > 2000
   )
     throw new Error("ORDER_EXCEPTION_INVALID");
   const items = Object.freeze(
@@ -210,6 +228,8 @@ export function parseOrderExceptionView(value: unknown): OrderExceptionView {
     businessDate: parsedBusinessDate,
     projectedAt: instant(input.projectedAt),
     freshnessStatus: input.freshnessStatus as "Fresh" | "Stale",
+    olderResolvedBefore:
+      !paged || input.olderResolvedBefore === null ? null : ref(input.olderResolvedBefore),
     items,
   });
 }

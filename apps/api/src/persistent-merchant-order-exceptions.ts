@@ -55,7 +55,7 @@ export function createPersistentMerchantOrderExceptions(options: {
 }) {
   const persistence = options.persistence,
     resolve = createMerchantStoreScope(persistence);
-  return async (cookie: unknown) => {
+  return async (cookie: unknown, request: { readonly resolvedBefore?: string | null } = {}) => {
     const unavailable = (): never => {
       throw new Error("MERCHANT_ORDER_EXCEPTION_UNAVAILABLE");
     };
@@ -252,11 +252,50 @@ export function createPersistentMerchantOrderExceptions(options: {
           }
         return result;
       },
+      refundCheckDueAt: async (tx, scope, sources) => {
+        if (!matches(await authorize(tx), scope)) return unavailable();
+        const days = createMerchantBusinessDayWindows({
+          persistence,
+          scope,
+          timeZone: (await current(tx)).store.timeZone,
+          authorize: async (t) => t === tx && matches(await authorize(t), scope),
+        });
+        const ownRefusal = (error: unknown) =>
+          error instanceof Error && error.message === "MERCHANT_ORDER_EXCEPTION_UNAVAILABLE";
+        const due = new Map<string, string>();
+        let today: Awaited<ReturnType<typeof days.dayOf>>;
+        try {
+          today = await days.dayOf(tx, persistence.now());
+        } catch (error) {
+          // The business day cannot be read: these cases keep the 15-minute due time.
+          if (ownRefusal(error)) throw error;
+          options.onUnexpected?.(error);
+          return due;
+        }
+        for (const source of sources) {
+          if (Date.parse(source.createdAt) >= Date.parse(today.startsAt)) {
+            due.set(source.sourceReference, today.endsAt);
+            continue;
+          }
+          // Opened on an earlier business day: due at that day's end. If that day can no longer be
+          // read, today's start is the latest it could have ended (it is overdue either way).
+          let endsAt = today.startsAt;
+          try {
+            endsAt = (await days.dayOf(tx, source.createdAt)).endsAt;
+          } catch (error) {
+            if (ownRefusal(error)) throw error;
+            options.onUnexpected?.(error);
+          }
+          if (Date.parse(endsAt) > Date.parse(source.createdAt))
+            due.set(source.sourceReference, endsAt);
+        }
+        return due;
+      },
       metadata: async (tx, scope, sources) => {
         if (!matches(await authorize(tx), scope)) return unavailable();
         const value = await current(tx);
         return options.metadata(tx, { scope, storeLabel: value.store.displayName, sources });
       },
-    })(cookie);
+    })(cookie, request);
   };
 }

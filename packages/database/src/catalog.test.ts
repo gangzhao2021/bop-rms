@@ -722,6 +722,7 @@ describe("migration catalog", () => {
       "2000_078_create_order_pickup_not_collected_fact",
       "2000_079_create_media_product_image",
       "2000_080_alter_catalog_product_presentation",
+      "2000_081_create_order_exception_open_index",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

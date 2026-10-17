@@ -5,6 +5,7 @@ import {
   createPostgresStoreBusinessDateConfigurationSource,
   createPostgresStoreClosedBusinessDateWindowSource,
   resolveStoreBusinessDate,
+  resolveStoreBusinessDay,
 } from "@rms/store";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 
@@ -111,6 +112,21 @@ export function createMerchantBusinessDayWindows(options: {
   };
   return Object.freeze({
     today,
+    /**
+     * WP-2423: the business day an instant falls in, with its end, by the configuration in force
+     * at that instant (DEC-EXCEPTION-CONFIRMED-REFUND-DUE: a case is due when its day ends).
+     */
+    async dayOf(tx: ConsumerTransaction, at: string) {
+      const day = resolveStoreBusinessDay({
+        occurredAt: at,
+        configuration: await source()(tx, at),
+      });
+      return {
+        businessDate: String(day.businessDate),
+        startsAt: String(day.startsAt),
+        endsAt: String(day.endsAt),
+      };
+    },
     /** A business day's window; null asks for the last closed day. Refuses a future date. */
     async window(
       tx: ConsumerTransaction,

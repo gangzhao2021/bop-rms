@@ -5,6 +5,10 @@ const d = vi.hoisted(() => ({
   list: vi.fn(),
   followUp: vi.fn(),
   detail: vi.fn(),
+  day: vi.fn(),
+}));
+vi.mock("./merchant-business-day-window.js", () => ({
+  createMerchantBusinessDayWindows: () => ({ dayOf: d.day }),
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => d.scope }));
 vi.mock("@bop/projection", async (original) => ({
@@ -38,7 +42,11 @@ function fixture(onUnexpected?: Options["onUnexpected"]) {
   d.scope.mockImplementation(async () => ({
     selected: { tenantReference: id(1) },
     context: { brand: { brandReference: id(2) } },
-    store: { storeReference: state.store, displayName: "Synthetic Store" },
+    store: {
+      storeReference: state.store,
+      displayName: "Synthetic Store",
+      timeZone: "America/Toronto",
+    },
     sessionReference: state.session,
     allowed: async () => state.allowed,
   }));
@@ -53,6 +61,8 @@ function fixture(onUnexpected?: Options["onUnexpected"]) {
   const read = createPersistentMerchantOrderExceptions({
     persistence: {
       transactions: { run: async (work: (tx: object) => Promise<unknown>) => work(original) },
+      now: () => "2026-09-21T10:00:00.000Z",
+      publication: {},
     } as unknown as Options["persistence"],
     metadata,
     ...(onUnexpected ? { onUnexpected } : {}),
@@ -61,12 +71,16 @@ function fixture(onUnexpected?: Options["onUnexpected"]) {
 }
 beforeEach(() => {
   vi.resetAllMocks();
-  d.list.mockResolvedValue({ items: [], nextAfterSourceReference: null });
+  d.list.mockResolvedValue({ items: [], next: null });
   d.detail.mockResolvedValue(new Map());
   d.store.mockImplementation((options) => ({
-    list: async (tx: unknown, input: unknown) => {
+    listOpen: async (tx: unknown, input: unknown) => {
       if (!(await options.authorize(tx, "Read"))) throw new Error("denied");
       return d.list(tx, input);
+    },
+    listResolved: async (tx: unknown) => {
+      if (!(await options.authorize(tx, "Read"))) throw new Error("denied");
+      return { items: [], next: null };
     },
   }));
 });
@@ -103,7 +117,7 @@ it("denies unavailable authority and scope changed during source read", async ()
   f.state.allowed = true;
   d.list.mockImplementationOnce(async () => {
     f.state.store = id(99);
-    return { items: [], nextAfterSourceReference: null };
+    return { items: [], next: null };
   });
   // WP-2423: the owner reads only confirm the authorized transaction; the full re-check before
   // the reply refuses the changed Store.
@@ -151,7 +165,7 @@ it("uses scoped Payment assignment without changing financial status and fails c
     updatedAt: "2026-09-21T00:00:00.000Z",
     resolutionEvidenceReference: null,
   };
-  d.list.mockResolvedValue({ items: [source], nextAfterSourceReference: null });
+  d.list.mockResolvedValue({ items: [source], next: null });
   d.followUp.mockResolvedValue({ assigned: true });
   expect((await f.read("synthetic-cookie")).items[0]).toMatchObject({
     ownerStatus: "Assigned",
@@ -194,7 +208,7 @@ it("D3: reads each difference's detail on its own after a failure and never gues
     updatedAt: "2026-09-21T00:00:00.000Z",
     resolutionEvidenceReference: null,
   });
-  d.list.mockResolvedValue({ items: [source(7), source(8)], nextAfterSourceReference: null });
+  d.list.mockResolvedValue({ items: [source(7), source(8)], next: null });
   d.followUp.mockResolvedValue({ assigned: false });
   const failure = Object.assign(Error("PAYMENT_COMPENSATION_SOURCE_UNAVAILABLE"), {
     code: "PAYMENT_COMPENSATION_SOURCE_UNAVAILABLE",
@@ -222,5 +236,62 @@ it("D3: reads each difference's detail on its own after a failure and never gues
   expect(onUnexpected).toHaveBeenCalledTimes(2);
   expect((onUnexpected.mock.calls[0]?.[0] as Error).message).toBe(
     "PAYMENT_RECONCILIATION_DETAIL_MISSING",
+  );
+});
+
+it("DEC-EXCEPTION-CONFIRMED-REFUND-DUE: a confirmed refund is due when its Store business day ends", async () => {
+  const onUnexpected = vi.fn();
+  const f = fixture(onUnexpected);
+  const source = (n: number, createdAt: string, providerState = "Confirmed") => ({
+    sourceReference: id(n),
+    tenantReference: id(1),
+    brandReference: id(2),
+    storeReference: id(3),
+    orderReference: id(n + 100),
+    paymentReference: id(n + 200),
+    diningReference: null,
+    kind: "PaidWithoutFulfillableOrder",
+    severity: "Critical",
+    sourceOwner: "Payment",
+    sourceStatus: "Open",
+    providerState,
+    compensationStatus: "Pending",
+    sourceVersion: 1n,
+    sourceDigest: `sha256:${"a".repeat(64)}`,
+    createdAt,
+    updatedAt: createdAt,
+    resolutionEvidenceReference: null,
+  });
+  d.list.mockResolvedValue({
+    items: [
+      source(11, "2026-09-21T09:00:00.000Z"),
+      source(12, "2026-09-20T20:00:00.000Z"),
+      source(13, "2026-09-19T20:00:00.000Z"),
+      source(14, "2026-09-21T09:30:00.000Z", "Unknown"),
+    ],
+    next: null,
+  });
+  d.day.mockImplementation(async (_tx: unknown, at: string) => {
+    if (at === "2026-09-21T10:00:00.000Z")
+      return { startsAt: "2026-09-21T04:00:00.000Z", endsAt: "2026-09-22T04:00:00.000Z" };
+    if (at === "2026-09-20T20:00:00.000Z")
+      return { startsAt: "2026-09-20T04:00:00.000Z", endsAt: "2026-09-21T04:00:00.000Z" };
+    throw new Error("STORE_BUSINESS_DATE_CONFIGURATION_NOT_EFFECTIVE");
+  });
+  const due = new Map(
+    (await f.read("synthetic-cookie")).items.map((item) => [item.exceptionReference, item.dueAt]),
+  );
+  expect(due.get(id(11))).toBe("2026-09-22T04:00:00.000Z");
+  expect(due.get(id(12))).toBe("2026-09-21T04:00:00.000Z");
+  // That day can no longer be read: it ended by the start of today at the latest.
+  expect(due.get(id(13))).toBe("2026-09-21T04:00:00.000Z");
+  expect(onUnexpected).toHaveBeenCalledTimes(1);
+  // Not yet confirmed: still urgent, 15 minutes after it opened.
+  expect(due.get(id(14))).toBe("2026-09-21T09:45:00.000Z");
+  // Today cannot be read: the page still loads and the cases keep the 15-minute due time.
+  d.day.mockRejectedValue(new Error("STORE_BUSINESS_DATE_UNAVAILABLE"));
+  const fallback = await f.read("synthetic-cookie");
+  expect(fallback.items.find((item) => item.exceptionReference === id(11))?.dueAt).toBe(
+    "2026-09-21T09:15:00.000Z",
   );
 });
