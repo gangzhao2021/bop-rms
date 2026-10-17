@@ -3,7 +3,8 @@
 # fixed 127.0.0.1 database, API (4300) and Customer HTTPS (4443) addresses keep working.
 # Services bind to loopback; the proxy forwards the published host ports to them.
 #
-#   PILOT_UID=$(id -u) PILOT_GID=$(id -g) docker compose -f compose.pilot.yaml up -d --build
+#   PILOT_UID=$(id -u) PILOT_GID=$(id -g) PILOT_RUNTIME_DIRECTORY=.local/pilot-v15 \
+#     PILOT_OFFSITE_DIR=$HOME/bop-rms-pilot-offsite docker compose -f compose.pilot.yaml up -d --build
 name: bop-rms-pilot
 
 services:
@@ -53,7 +54,7 @@ services:
     volumes:
       - ${PILOT_RUNTIME_ROOT:-./.local/pilot-runtime}:/app/.local
     environment:
-      PILOT_RUNTIME_DIRECTORY: ${PILOT_RUNTIME_DIRECTORY:-.local/pilot-v14}
+      PILOT_RUNTIME_DIRECTORY: ${PILOT_RUNTIME_DIRECTORY:?Set PILOT_RUNTIME_DIRECTORY, e.g. .local/pilot-v15}
     stop_grace_period: 60s
 
   # WP-2423 Q13 (DEC-PILOT-ALERTS-BACKUP): operations monitor and scheduled backups. A separate
@@ -76,10 +77,11 @@ services:
       # Free space of the database volume only (read-only; the monitor never reads its files).
       - pilot-data:/pilot-data:ro
       # Off-site copy target: an external drive or a folder a sync client copies off this host.
-      # Copies are encrypted before they are written. Unset = a local folder (not off-site).
-      - ${PILOT_OFFSITE_DIR:-./.local/pilot-offsite}:/offsite
+      # Copies are encrypted before they are written. Required, so a redeploy cannot silently
+      # fall back to a folder on the same disk (WP-2423 2026-10-17).
+      - ${PILOT_OFFSITE_DIR:?Set PILOT_OFFSITE_DIR to the off-site folder}:/offsite
     environment:
-      PILOT_RUNTIME_DIRECTORY: ${PILOT_RUNTIME_DIRECTORY:-.local/pilot-v14}
+      PILOT_RUNTIME_DIRECTORY: ${PILOT_RUNTIME_DIRECTORY:?Set PILOT_RUNTIME_DIRECTORY, e.g. .local/pilot-v15}
     command: [sh, tooling/environment/pilot-ops-container-start.sh]
     stop_grace_period: 90s
 

@@ -498,7 +498,7 @@ customer menu or `Orders` loads on mobile data, the host is up and only the stor
    "View only on this screen"; press "Start kitchen display here" (it signs that staff member out)
    and choose "Start kitchen display as …" so Accept, Start and Mark ready work on that device.
 7. **Host down**: call the pilot operator. Operator restarts the pilot (v15:
-   `PILOT_UID=… PILOT_GID=… PILOT_RUNTIME_DIRECTORY=.local/pilot-v15 docker compose -f compose.pilot.yaml up -d pilot`,
+   `PILOT_UID=… PILOT_GID=… PILOT_RUNTIME_DIRECTORY=.local/pilot-v15 PILOT_OFFSITE_DIR=<off-site folder> docker compose -f compose.pilot.yaml up -d pilot`,
    then confirm `/ready` returns 200; details in
    [Existing runtime configuration and recovery](#existing-runtime-configuration-and-recovery), which
    still describes the v14 WSL host).
@@ -1882,8 +1882,9 @@ contains data values. pg_restore's full messages are kept beside the backups in
 
 Off-site copies are AES-256-GCM encrypted on this host before they are written, so the target may
 be any folder that leaves the host: an external drive, or a folder a cloud sync client uploads.
-Mount it with `PILOT_OFFSITE_DIR=<host folder>` (create it first, owned by the pilot user). Unset, it
-is `.local/pilot-offsite` on the same disk, which is **not** off-site. An S3-compatible bucket with a
+Mount it with `PILOT_OFFSITE_DIR=<host folder>` (create it first, owned by the pilot user). Compose
+refuses to start without it (and without `PILOT_RUNTIME_DIRECTORY`): a silent local default once sent
+off-site copies to `.local/pilot-offsite` on the same disk after redeploys (2026-10-17). An S3-compatible bucket with a
 managed key is the P4 target (external gate: bucket, credentials, region).
 
 Key custody: create the key once with `pilot-ops.mjs generate-offsite-key <runtime>`. **Copy the
