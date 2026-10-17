@@ -20,7 +20,12 @@ import { checkoutInProgressMessage, orderProcessingMessage } from "../cart/types
 import { describeConfiguration } from "../cart/CartPage.js";
 import { checkoutItemRefusalMessage } from "./item-refusal-message.js";
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
-import { formatMinutesUntil, formatMoney, percentOfMinor } from "../journey/format.js";
+import {
+  currencySymbol,
+  formatMinutesUntil,
+  formatMoney,
+  percentOfMinor,
+} from "../journey/format.js";
 import {
   checkoutText,
   commonText,
@@ -495,7 +500,7 @@ export function CheckoutPage({
           </button>
         </div>
         <label htmlFor="checkout-tip" className={tipChoice === "custom" ? "" : "sr-only"}>
-          {checkoutText.tipCustomLabel}
+          {checkoutText.tipCustomLabel(currencySymbol(quote?.subtotal.currency ?? "CAD"))}
         </label>
         <input
           id="checkout-tip"

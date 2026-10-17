@@ -431,7 +431,7 @@ for (const viewport of [
       await expectNoInternalText(page);
       await noOverflowOrBlockingAxe(page);
       await section.getByRole("button", { name: "Remove my contact details" }).click();
-      await expect(section.getByText(/won't be able to call or email you/u)).toBeVisible();
+      await expect(section.getByText(/won’t be able to call or email you/u)).toBeVisible();
       await section.getByRole("button", { name: "Keep them" }).click();
       expect(removals).toHaveLength(0);
       await section.getByRole("button", { name: "Remove my contact details" }).click();

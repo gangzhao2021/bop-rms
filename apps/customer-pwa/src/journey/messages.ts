@@ -1,3 +1,5 @@
+import type { CartState } from "../cart/cart-state.js";
+
 /** Customer sentences for server codes. Raw codes never reach the page; unknown codes get one safe sentence. */
 
 const cartItemWarnings: Readonly<Record<string, string>> = Object.freeze({
@@ -16,8 +18,8 @@ const quoteIssues: Readonly<Record<string, string>> = Object.freeze({
   OPTION_PRICE_MISSING: "One of your choices has no current price. Ask staff for help.",
   STOCK_RESERVATION_INSUFFICIENT: "An item is no longer available in the quantity you chose.",
   CATALOG_SELECTION_REJECTED: "An item or choice in your order is no longer available.",
-  TAX_CONFIGURATION_NOT_EFFECTIVE: "Tax cannot be calculated right now. Ask staff for help.",
-  PROMOTION_STACKING_CONFLICT: "Two discounts cannot be combined on this order.",
+  TAX_CONFIGURATION_NOT_EFFECTIVE: "Tax can’t be calculated right now. Ask staff for help.",
+  PROMOTION_STACKING_CONFLICT: "Two discounts can’t be combined on this order.",
 });
 
 const lineEstimateReasons: Readonly<Record<string, string>> = Object.freeze({
@@ -65,9 +67,9 @@ export function cartIssueMessage(code: string): string | null {
 /*
  * WP-2423 C5 text catalog. Every sentence a guest reads on the cart, checkout and order status
  * pages lives here under a stable key, so a second language is one more catalog of the same shape
- * (the components only read keys). Wording that needs a value is a function of that value; the
- * text is exactly what the pages showed before, nothing is reworded here. Guarded by
- * `inline-text-guard.test.ts`.
+ * (the components only read keys). Wording that needs a value is a function of that value. One
+ * voice throughout: plain words with contractions ("You’re offline", "We couldn’t") and the
+ * typographic apostrophe. Guarded by `inline-text-guard.test.ts`.
  */
 
 /** Words shared by the order summaries and navigation of several pages. */
@@ -101,8 +103,27 @@ export const cartText = Object.freeze({
   actionsLabel: "Cart actions",
   continueShopping: "Continue shopping",
   checkout: "Checkout",
-  changePendingAnnouncement: "Cart change pending",
-  stateAnnouncement: (status: string) => `Cart state ${status}`,
+  /** What a screen reader hears when the cart changes state; never the state's internal name. */
+  stateAnnouncement: Object.freeze({
+    loading: "Loading your cart…",
+    empty: "Your cart is empty.",
+    ready: "Your cart is up to date.",
+    "command-pending": "Updating your cart…",
+    "offline-readonly": "You’re offline. Your cart can’t be changed until you reconnect.",
+    "replacement-forbidden":
+      "Your cart can’t be changed from this session. See the message on this page.",
+    "session-expired": "Your session ended. Scan the location QR code again to continue.",
+    "not-found": "This cart isn’t available. See the message on this page.",
+    conflict: "Your cart changed. Review it before trying again.",
+    validation: "Couldn’t update your cart. Review this item and try again.",
+    "rate-limited": "Couldn’t update your cart. Wait a moment, then try again.",
+    "order-processing": "Your order is still processing.",
+    "checkout-in-progress": "Another guest is checking out.",
+    expired: "Your cart expired. See the message on this page.",
+    abandoned: "Your cart is closed. See the message on this page.",
+    "command-failed": "Couldn’t confirm your change. Try again.",
+    unavailable: "Couldn’t update your cart. Try again.",
+  } satisfies Readonly<Record<CartState["status"], string>>),
   line: Object.freeze({
     addedByAnotherGuest: "Added by another guest. Only they can change this item.",
     quantityGroupLabel: (item: string) => `Quantity for ${item}`,
@@ -113,7 +134,7 @@ export const cartText = Object.freeze({
   }),
   summary: Object.freeze({
     heading: "Order summary",
-    checkoutUnavailable: "Checkout is unavailable for this cart.",
+    checkoutUnavailable: "This cart can’t be checked out right now.",
     totalAtCheckout: "Your total, including tax, is calculated at checkout.",
     pricesExpired: "These prices have expired. Checkout will price your order again.",
   }),
@@ -127,7 +148,7 @@ export const cartText = Object.freeze({
       "Session expired",
       "Scan the location QR code again to continue your order.",
     ] as const,
-    notFound: ["Cart unavailable", "This cart is not available in your current session."] as const,
+    notFound: ["Cart not found", "This cart isn’t available in your current session."] as const,
     conflict: [
       "Cart changed",
       "The latest cart was loaded. Review your change before submitting again.",
@@ -139,14 +160,14 @@ export const cartText = Object.freeze({
     expiredHeading: "Cart expired",
     expiredDineIn:
       "This cart timed out. Return to the menu and add an item; your table continues with a new cart.",
-    expiredOther: "This cart cannot accept more items. Ask staff for help continuing your order.",
-    abandoned: ["Cart closed", "This cart was abandoned and cannot be changed."] as const,
+    expiredOther: "This cart can’t accept more items. Ask staff for help continuing your order.",
+    abandoned: ["Cart closed", "This cart was abandoned and can’t be changed."] as const,
     commandFailed: [
       "Outcome not confirmed",
       "The connection dropped before we could confirm your change.",
     ] as const,
     unavailable: [
-      "Cart temporarily unavailable",
+      "We couldn’t load your cart",
       "Nothing was changed. Try loading it again.",
     ] as const,
     notEnoughLeftHeading: "Not enough left",
@@ -159,17 +180,17 @@ export const cartText = Object.freeze({
     paused: "You’re offline. Changes and checkout are paused; nothing will replay on reconnect.",
   }),
   featureDisabled: Object.freeze({
-    heading: "Cart unavailable",
-    body: "Cart ordering is not enabled at this location right now.",
+    heading: "Ordering is paused",
+    body: "Cart ordering isn’t enabled at this location right now.",
   }),
   closed: Object.freeze({
     expiredHeading: "Cart expired",
     closedHeading: "Cart closed",
-    body: "This cart cannot accept more items. Your previously paid orders remain unchanged.",
+    body: "This cart can’t accept more items. Your previously paid orders remain unchanged.",
     anyoneCanRestart:
-      "Anyone at your table can start an empty cart to keep ordering. Items that weren’t ordered are not copied.",
+      "Anyone at your table can start an empty cart to keep ordering. Items that weren’t ordered aren’t copied.",
     starterCanRestart:
-      "The person who started the table can start an empty cart to continue ordering. Previous items will not be copied.",
+      "The person who started the table can start an empty cart to continue ordering. Previous items won’t be copied.",
     startEmptyCart: "Start an empty cart",
     askStaff: "Ask staff for help continuing your order.",
   }),
@@ -212,7 +233,7 @@ export const checkoutText = Object.freeze({
   noTip: "No tip",
   tipPercent: (percent: number) => `${percent}%`,
   tipOther: "Other",
-  tipCustomLabel: "Tip (CAD)",
+  tipCustomLabel: (symbol: string) => `Tip (${symbol})`,
   tipInvalid: "Enter a valid amount with up to two decimal places.",
   tipHelp: "Enter an amount in dollars. Your tip is fixed when you continue to payment.",
   paymentLabel: "Payment",
@@ -221,7 +242,7 @@ export const checkoutText = Object.freeze({
   changeYourCart: "Change your cart",
   storeClosed:
     "The store isn’t taking orders right now, so you haven’t been charged. Try again when the store reopens, or ask staff.",
-  checkoutUnconfirmed: "We could not confirm checkout. Retry to recover the same checkout.",
+  checkoutUnconfirmed: "We couldn’t confirm checkout. Retry to recover the same checkout.",
   checkoutRefused:
     "We couldn’t continue this checkout. Review your cart and scan the QR code again if needed.",
   retryCheckout: "Retry checkout",
@@ -237,7 +258,7 @@ export const checkoutText = Object.freeze({
   receipt: "Receipt",
   pickupContactLegend: "Pickup contact",
   pickupContactPurpose:
-    "The store uses this only to contact you about this order, for example if an item sold out. It is deleted 30 days after your order, and you can remove it sooner from your order page.",
+    "The store uses this only to contact you about this order, for example if an item sold out. It’s deleted 30 days after your order, and you can remove it sooner from your order page.",
   pickupName: "Pickup name",
   contactMethod: "Contact method",
   contactMethodPhone: "Phone",
@@ -246,17 +267,17 @@ export const checkoutText = Object.freeze({
   pickupEmail: "Pickup email",
   dineInNoContact: "No contact details are required for your dine-in order.",
   receiptOnOrderPage: "Your receipt appears on your order page, where you can print or save it.",
-  agreePolicies: "I have read and agree to the policies above",
+  agreePolicies: "I’ve read and agree to the policies above",
   detailsExpired:
     "Checkout information expired. Get a current quote and reload details before saving.",
-  detailsOffline: "You are offline. Your details will not be submitted automatically.",
+  detailsOffline: "You’re offline. Your details won’t be submitted automatically.",
   savingDetails: "Saving checkout details…",
   detailsSaved: "Checkout details saved.",
   detailsInvalid:
     "Check your contact and receipt fields. Enter a mobile number such as 416 555 0123, or include the country code for numbers outside North America.",
   detailsCheckoutChanged: "Your checkout changed. Reload details before trying again.",
   detailsSaveUnconfirmed:
-    "The save result is not confirmed. Retry the same request before changing these details.",
+    "We couldn’t confirm your details were saved. Retry saving before changing them.",
   retrySavingDetails: "Retry saving details",
   saveDetails: "Save details",
 });
@@ -271,7 +292,7 @@ export const orderStatusText = Object.freeze({
   cancelReason: Object.freeze({
     CustomerRequest: "The store cancelled it at your request.",
     SoldOut: "An item you ordered sold out.",
-    StoreError: "The store couldn't prepare it.",
+    StoreError: "The store couldn’t prepare it.",
     DuplicateOrder: "It was a duplicate of another order.",
     GuestLeft: "The table was closed after your party left, before this was made.",
   }),
@@ -289,34 +310,34 @@ export const orderStatusText = Object.freeze({
     storeCancelledHeading: "Order cancelled by the store",
     notAcceptedHeading: "Order not accepted",
     notAcceptedRefunded:
-      "The store couldn't accept your order, so your payment was refunded to your original payment method.",
+      "The store couldn’t accept your order, so your payment was refunded to your original payment method.",
     notAcceptedRefunding:
-      "The store couldn't accept your order, so your payment is being refunded to your original payment method.",
+      "The store couldn’t accept your order, so your payment is being refunded to your original payment method.",
     awaitingStoreHeading: "Waiting for the store",
-    awaitingStore: "The store hasn't confirmed your order yet. Please wait or contact the store.",
+    awaitingStore: "The store hasn’t confirmed your order yet. Please wait or contact the store.",
     cancelledHeading: "Order cancelled",
     unpaidPickupCancelled:
-      "Payment wasn't completed within 30 minutes, so this order was cancelled. If a payment still goes through, it will be refunded automatically.",
+      "Payment wasn’t completed within 30 minutes, so this order was cancelled. If a payment still goes through, it will be refunded automatically.",
     collectedHeading: "Order collected",
     collected: "Your order has been collected. Enjoy!",
     notCollectedHeading: "Not collected",
     notCollected:
       "The store closed this pickup after the pickup time ended. Contact the store about your order or a refund.",
     cancelled: "Your order has been cancelled.",
-    rejected: "Your order was not accepted.",
+    rejected: "Your order wasn’t accepted.",
     remakingPickupHeading: "Remaking part of your order",
     remakingPickup:
-      "We're remaking part of your order. We'll have it ready shortly — please wait before collecting it.",
+      "We’re remaking part of your order. We’ll have it ready shortly — please wait before collecting it.",
     remakingDineInHeading: "Remaking an item",
-    remakingDineIn: "We're remaking an item for you. It will be brought to your table shortly.",
+    remakingDineIn: "We’re remaking an item for you. It will be brought to your table shortly.",
     servedHeading: "Items served",
     served: "All listed items have been served.",
     completeHeading: "Order complete",
     complete: "Your order is complete. Thank you for visiting!",
     awaitingPaymentHeading: "Waiting for payment",
     awaitingPaymentSomeServed:
-      "Everything paid for has been served. The kitchen starts the next round once it's paid.",
-    awaitingPayment: "The kitchen starts your order once it's paid.",
+      "Everything paid for has been served. The kitchen starts the next round once it’s paid.",
+    awaitingPayment: "The kitchen starts your order once it’s paid.",
     servingHeading: "Serving your order",
     serving: "Some items have been served. Check the remaining items below.",
     readyPickupHeading: "Ready for pickup",
@@ -360,19 +381,19 @@ export const orderStatusText = Object.freeze({
   paymentDelayedHeading: "Payment update may be delayed",
   paymentDelayed: "This payment update may be out of date. Refresh to check again.",
   statusDelayedHeading: "Status may be delayed",
-  statusRebuilding: "We are updating your order status. Check again shortly.",
-  statusFailed: "We could not update your order status. The details below may be out of date.",
+  statusRebuilding: "We’re updating your order status. Check again shortly.",
+  statusFailed: "We couldn’t update your order status. The details below may be out of date.",
   statusStale: "The details below may be out of date. Refresh to check for an update.",
   itemsHeading: "Your items",
   roundHeading: (round: number) => `Round ${round}`,
   roundCancelledByStoreUnpaid: "This round was cancelled by the store. Nobody was charged for it.",
   orderCancelledByStoreUnpaid: "This order was cancelled by the store. Nobody was charged for it.",
   roundCancelledUnpaid:
-    "This round was cancelled because its payment didn't go through. You were not charged for it.",
+    "This round was cancelled because its payment didn’t go through. You weren’t charged for it.",
   orderCancelledUnpaid:
-    "This order was cancelled because its payment didn't go through. You were not charged for it.",
-  roundPaymentFailed: "Payment for this round didn't go through. ",
-  orderPaymentFailed: "Payment for your order didn't go through. ",
+    "This order was cancelled because its payment didn’t go through. You weren’t charged for it.",
+  roundPaymentFailed: "Payment for this round didn’t go through. ",
+  orderPaymentFailed: "Payment for your order didn’t go through. ",
   cancelsAt: (time: string) =>
     `It will be cancelled at ${time} Ask a staff member if you need help.`,
   roundCancelledByStore: "This round was cancelled by the store. ",
@@ -387,7 +408,7 @@ export const orderStatusText = Object.freeze({
     `Served ${served ?? ""} of ${quantity}`,
   discountsAndFees: "Discounts and fees",
   totalIncludingTax: "Total including tax",
-  unpaidRoundsExcluded: "Rounds that weren't paid are not included.",
+  unpaidRoundsExcluded: "Rounds that weren’t paid aren’t included.",
   /** The visit on this browser has ended. */
   visitEnded: Object.freeze({
     heading: "Your visit on this phone has ended",
@@ -404,14 +425,14 @@ export const orderStatusText = Object.freeze({
   receivedNoChange: "If nothing changes after a minute, give your order number to a staff member.",
   invalidHeading: "Order link is invalid",
   invalid: "Use the exact link provided after checkout.",
-  notFoundHeading: "We can't show this order here yet",
+  notFoundHeading: "We can’t show this order here yet",
   notFoundJustPaid:
     "If you just paid, your order can take a few seconds to appear. Try again in a moment.",
   notFoundThisPhone:
-    "This page only opens orders placed on this phone or browser. If it still doesn't open, ask a staff member with your order number.",
+    "This page only opens orders placed on this phone or browser. If it still doesn’t open, ask a staff member with your order number.",
   disabledHeading: "Order tracking is disabled",
-  unavailableHeading: "Order status is not available",
-  unavailable: "We could not load your order status. Please try again.",
+  unavailableHeading: "Order status isn’t available",
+  unavailable: "We couldn’t load your order status. Please try again.",
   tryLoadingStatus: "Try loading status",
   offlineShowingLast: "Showing the last status loaded on this page.",
   offlineConnect: "Connect to the internet to load your order status.",
@@ -435,9 +456,9 @@ export const orderStatusText = Object.freeze({
       NotGiven: "There were no contact details on this order.",
     }),
     visitEnded:
-      "Your visit on this phone has ended, so this can't be changed here. Ask a staff member to remove your contact details.",
+      "Your visit on this phone has ended, so this can’t be changed here. Ask a staff member to remove your contact details.",
     removalFailed:
-      "Your contact details could not be removed right now. Check your connection and try again.",
+      "Your contact details couldn’t be removed right now. Check your connection and try again.",
     defaultStoreName: "The store",
     heading: "Your contact details",
     storeKeeps: (store: string) =>
@@ -445,7 +466,7 @@ export const orderStatusText = Object.freeze({
     remove: "Remove my contact details",
     confirmLabel: "Confirm removal",
     confirm:
-      "Remove them now? The store won't be able to call or email you about this order. You can still collect it by showing your order number.",
+      "Remove them now? The store won’t be able to call or email you about this order. You can still collect it by showing your order number.",
     removing: "Removing…",
     removeNow: "Remove now",
     keep: "Keep them",

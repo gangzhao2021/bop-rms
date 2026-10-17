@@ -229,9 +229,7 @@ test.describe("@production order status HTTP continuity", () => {
       window.dispatchEvent(new PopStateEvent("popstate"));
     }, id(99));
     const main = page.getByRole("main");
-    await expect(
-      main.getByRole("heading", { name: "Order status is not available" }),
-    ).toBeVisible();
+    await expect(main.getByRole("heading", { name: "Order status isn’t available" })).toBeVisible();
     await expect(main.getByRole("button", { name: "Try loading status" })).toBeVisible();
     await expect(main.getByRole("link", { name: "Back to menu" })).toBeVisible();
     await expect(main).not.toContainText("Synthetic tea");
@@ -714,7 +712,7 @@ test.describe("@production order status HTTP continuity", () => {
     const main = page.getByRole("main");
     await expect(main.getByRole("heading", { name: "Order received" })).toBeVisible();
     await expect(main).toContainText("Order 1001 is in");
-    await expect(main).not.toContainText("can't show this order");
+    await expect(main).not.toContainText("can’t show this order");
     await expect(main).not.toContainText("can’t show this order");
     await expectNoInternalText(page);
     // The page checks again by itself every couple of seconds; no tap needed.

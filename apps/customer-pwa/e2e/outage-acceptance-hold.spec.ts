@@ -98,7 +98,7 @@ test.describe("@production order paid while the store was offline", () => {
       await page.getByRole("button", { name: "Refresh now", exact: true }).click();
       await expect(
         page.getByText(
-          "The store hasn't confirmed your order yet. Please wait or contact the store.",
+          "The store hasn’t confirmed your order yet. Please wait or contact the store.",
         ),
       ).toBeVisible();
       await page.screenshot({ path: `test-results/outage-awaiting-${width}.png`, fullPage: true });
@@ -110,7 +110,7 @@ test.describe("@production order paid while the store was offline", () => {
       await page.getByRole("button", { name: "Refresh now", exact: true }).click();
       await expect(
         page.getByText(
-          "The store couldn't accept your order, so your payment was refunded to your original payment method.",
+          "The store couldn’t accept your order, so your payment was refunded to your original payment method.",
         ),
       ).toBeVisible();
       await expect(page.getByText("Refunded $15.00", { exact: true })).toBeVisible();

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { CartPage } from "./CartPage.js";
 import type { CartState, CartStateController } from "./cart-state.js";
 import { checkoutInProgressMessage, type CartView } from "./types.js";
+import { cartText } from "../journey/messages.js";
 
 const id = (n: number) => `018f5300-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 
@@ -162,7 +163,7 @@ describe("CUST-CART page contract", () => {
         status: "ready",
         cart: { ...disabled, cart: { ...disabled.cart, warnings: ["FEATURE_DISABLED"] } },
       }),
-    ).toContain("Cart ordering is not enabled");
+    ).toContain("Cart ordering isn’t enabled");
     const expired = cart();
     expect(
       renderPage({
@@ -193,14 +194,14 @@ describe("CUST-CART page contract", () => {
     ["empty", "Your cart is empty"],
     ["replacement-forbidden", "Cart replacement not permitted"],
     ["session-expired", "Session expired"],
-    ["not-found", "Cart unavailable"],
+    ["not-found", "Cart not found"],
     ["conflict", "Cart changed"],
     ["validation", "Review this item"],
     ["rate-limited", "Please wait"],
     ["expired", "Cart expired"],
     ["abandoned", "Cart closed"],
     ["command-failed", "Outcome not confirmed"],
-    ["unavailable", "Cart temporarily unavailable"],
+    ["unavailable", "We couldn’t load your cart"],
   ] as const)("renders the %s state", (status, message) => {
     const state: CartState =
       status === "loading" || status === "empty"
@@ -212,7 +213,11 @@ describe("CUST-CART page contract", () => {
             retryAfterSeconds: status === "rate-limited" ? 5 : null,
             canRetrySameOperation: status === "command-failed",
           };
-    expect(renderPage(state)).toContain(message);
+    const html = renderPage(state);
+    expect(html).toContain(message);
+    // The screen-reader status says what happened in plain words, never the state's name.
+    expect(html).toContain(`aria-live="polite">${cartText.stateAnnouncement[status]}</div>`);
+    expect(html).not.toContain("Cart state");
   });
 });
 
@@ -259,7 +264,7 @@ it.each(["FEATURE_DISABLED", "PROJECTION_STALE"])(
     });
     expect(html).not.toContain("Your cart is empty");
     expect(html).toContain(
-      warning === "FEATURE_DISABLED" ? "Cart unavailable" : "may be out of date",
+      warning === "FEATURE_DISABLED" ? "Ordering is paused" : "may be out of date",
     );
   },
 );
@@ -326,7 +331,7 @@ it("shows terminal Dining continuation with offline and unknown-outcome guards",
     expect(html).toContain("Start an empty cart");
     // WP-2423: anyone at the table may continue past a timed-out cart.
     expect(html).toContain("Anyone at your table can start an empty cart to keep ordering.");
-    expect(html).toContain("Items that weren’t ordered are not copied.");
+    expect(html).toContain("Items that weren’t ordered aren’t copied.");
     expect(html).not.toContain("table host");
     if (status !== "ready")
       expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Start an empty cart/);

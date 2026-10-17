@@ -15,6 +15,11 @@ export function formatMoney(amountMinor: string | bigint, currency: string): str
   return currency === "CAD" ? `${sign}$${amount}` : `${sign}${currency} ${amount}`;
 }
 
+/** The sign a guest reads beside an amount they type: "$" for CAD, otherwise the ISO code. */
+export function currencySymbol(currency: string): string {
+  return currency === "CAD" ? "$" : currency;
+}
+
 /**
  * Menu prices arrive as exact decimal text ("0.75", "4.5000"): "$0.75" / "$4.50" in the same style
  * as {@link formatMoney}. Digits past the cents are kept only when they are not zero, so nothing is

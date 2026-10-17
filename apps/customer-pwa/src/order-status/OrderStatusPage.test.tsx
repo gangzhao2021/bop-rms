@@ -137,8 +137,8 @@ describe("CUST-ORDER-STATUS screen contract", () => {
   });
 
   it.each([
-    ["Rebuilding", "We are updating your order status."],
-    ["Failed", "We could not update your order status."],
+    ["Rebuilding", "We’re updating your order status."],
+    ["Failed", "We couldn’t update your order status."],
   ] as const)("explains %s without exposing projection internals", (freshness, message) => {
     const html = render(readyState(freshness));
     expect(html).toContain(message);
@@ -176,9 +176,9 @@ describe("CUST-ORDER-STATUS screen contract", () => {
     [{ status: "loading" }, "Loading order status"],
     [{ status: "invalid-reference" }, "Order link is invalid"],
     [{ status: "permission-denied" }, "Your visit on this phone has ended"],
-    [{ status: "not-found" }, "We can&#x27;t show this order here yet"],
+    [{ status: "not-found" }, "We can’t show this order here yet"],
     [{ status: "feature-disabled" }, "Order tracking is disabled"],
-    [{ status: "unavailable" }, "Order status is not available"],
+    [{ status: "unavailable" }, "Order status isn’t available"],
     [{ status: "offline", view: null }, "You’re offline"],
   ] as const)("renders the bounded state %#", (state, message) => {
     expect(render(state)).toContain(message);
@@ -420,7 +420,7 @@ const phaseTable = [
   ["Pickup", "In Progress", "Preparing your order", "The kitchen is preparing your order.", false],
   ["Pickup", "Ready", "Ready for pickup", "Your order is ready. Collect it at the counter.", false],
   ["Pickup", "Fulfilled", "Order collected", "Your order has been collected. Enjoy!", true],
-  ["Pickup", "Rejected", "Order not accepted", "Your order was not accepted.", true],
+  ["Pickup", "Rejected", "Order not accepted", "Your order wasn’t accepted.", true],
   ["Pickup", "Cancelled", "Order cancelled", "Your order has been cancelled.", true],
   [
     "DineIn",
@@ -447,7 +447,7 @@ const phaseTable = [
   // DEC-PILOT-BATCH-PHASE-01: every remaining item served. The table can still order another
   // round, so the page keeps checking.
   ["DineIn", "Fulfilled", "Items served", "All listed items have been served.", false],
-  ["DineIn", "Rejected", "Order not accepted", "Your order was not accepted.", true],
+  ["DineIn", "Rejected", "Order not accepted", "Your order wasn’t accepted.", true],
   ["DineIn", "Cancelled", "Order cancelled", "Your order has been cancelled.", true],
 ] as const;
 
@@ -575,7 +575,7 @@ it("WP-2423 Q12: says an unpaid pickup was cancelled and stops offering the pick
   };
   const html = render({ ...state, view });
   expect(html).toContain("Order cancelled");
-  expect(html).toContain("Payment wasn&#x27;t completed within 30 minutes");
+  expect(html).toContain("Payment wasn’t completed within 30 minutes");
   expect(html).toContain("Not paid");
   expect(html).not.toContain("pickup code");
   expect(html).not.toContain("Order submitted");
@@ -611,7 +611,7 @@ it("WP-2423 Q9-G1: says a paid pickup the store couldn't accept is refunded, and
   });
   let html = render({ ...state, view: refunded });
   expect(html).toContain(
-    "The store couldn&#x27;t accept your order, so your payment was refunded to your original payment method.",
+    "The store couldn’t accept your order, so your payment was refunded to your original payment method.",
   );
   expect(html).toContain("Refunded $15.00");
   expect(html).not.toContain("Payment received");
@@ -629,7 +629,7 @@ it("WP-2423 Q9-G1: says a paid pickup the store couldn't accept is refunded, and
   const waiting = at({ state: "AwaitingStore" });
   html = render({ ...state, view: waiting });
   expect(html).toContain(
-    "The store hasn&#x27;t confirmed your order yet. Please wait or contact the store.",
+    "The store hasn’t confirmed your order yet. Please wait or contact the store.",
   );
   expect(html).not.toContain("Hold");
   expect(isOrderSettled(waiting)).toBe(false);
@@ -930,16 +930,16 @@ describe("WP-2423: a dine-in round whose payment didn't go through", () => {
     const at = formatClockTime("2026-08-11T14:25:00.000Z");
     // One sentence end, even when the time itself ends with a period ("9:46 p.m.").
     expect(html).toContain(
-      `Payment for this round didn&#x27;t go through. It will be cancelled at ${endSentence(at)} Ask a staff member if you need help.`,
+      `Payment for this round didn’t go through. It will be cancelled at ${endSentence(at)} Ask a staff member if you need help.`,
     );
     expect(html).not.toContain("..");
     // The unpaid round is not waiting to be served and is not counted as owed.
     expect(html).toContain("Not paid");
     expect(html).not.toContain("Served 0 of 1");
     expect(html).toMatch(/Total including tax<\/span><span>\$11\.30<\/span>/u);
-    expect(html).toContain("Rounds that weren&#x27;t paid are not included.");
+    expect(html).toContain("Rounds that weren’t paid aren’t included.");
     // Only the failed round carries the note; the paid round's kitchen state is not hidden by it.
-    expect(html.match(/didn&#x27;t go through/gu)).toHaveLength(1);
+    expect(html.match(/didn’t go through/gu)).toHaveLength(1);
     expect(html).toContain("Your order is ready");
     expect(html).not.toContain("order-status__item--cancelled");
   });
@@ -956,14 +956,14 @@ describe("WP-2423: a dine-in round whose payment didn't go through", () => {
     });
     const html = render({ ...state, view });
     expect(html).toContain(
-      "This round was cancelled because its payment didn&#x27;t go through. You were not charged for it.",
+      "This round was cancelled because its payment didn’t go through. You weren’t charged for it.",
     );
     expect(html.match(/class="order-status__item--cancelled"/gu)).toHaveLength(1);
     expect(html).toContain("Synthetic dish 41");
     // The total agrees with the payment received.
     expect(html).toMatch(/Total including tax<\/span><span>\$11\.30<\/span>/u);
     expect(html).toContain("Payment received $11.30");
-    expect(html).toContain("Rounds that weren&#x27;t paid are not included.");
+    expect(html).toContain("Rounds that weren’t paid aren’t included.");
     expect(html).not.toContain("It will be cancelled at");
     expect(html).not.toContain("cancelled by the store");
     expect(isOrderSettled(view)).toBe(false);
@@ -981,7 +981,7 @@ describe("WP-2423: a dine-in round whose payment didn't go through", () => {
     });
     const html = render({ ...state, view });
     expect(html).toContain("This round was cancelled by the store. Nobody was charged for it.");
-    expect(html).not.toContain("didn&#x27;t go through");
+    expect(html).not.toContain("didn’t go through");
     expect(html).toMatch(/Total including tax<\/span><span>\$11\.30<\/span>/u);
   });
 
@@ -1101,7 +1101,7 @@ describe("WP-2423 Q10 plain guidance when the visit has ended", () => {
     expect(html).toContain("Order 1001 is in");
     expect(html).toContain("this page updates by itself");
     expect(html).toContain("give your order number to a staff member");
-    expect(html).not.toContain("We can&#x27;t show this order here yet");
+    expect(html).not.toContain("We can’t show this order here yet");
     expect(html).not.toContain(id(1));
     expect(findInternalText([staticText(html)])).toEqual([]);
   });
@@ -1159,9 +1159,7 @@ it("WP-2423 Q26: a ready pickup with a dish being remade says to wait, not that 
     },
   });
   expect(html).toContain("Remaking part of your order");
-  expect(html).toContain(
-    "We&#x27;re remaking part of your order. We&#x27;ll have it ready shortly",
-  );
+  expect(html).toContain("We’re remaking part of your order. We’ll have it ready shortly");
   expect(html).toContain("Being remade");
   expect(html).not.toContain("Your order is ready. Collect it at the counter.");
   // The pickup code stays available.

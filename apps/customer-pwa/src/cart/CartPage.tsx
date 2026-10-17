@@ -479,9 +479,7 @@ export function CartPage({
         <CartContent state={state} controller={controller} now={now} />
       </div>
       <div className="sr-only" role="status" aria-live="polite">
-        {state.status === "command-pending"
-          ? cartText.changePendingAnnouncement
-          : cartText.stateAnnouncement(state.status)}
+        {cartText.stateAnnouncement[state.status]}
       </div>
     </CustomerPage>
   );

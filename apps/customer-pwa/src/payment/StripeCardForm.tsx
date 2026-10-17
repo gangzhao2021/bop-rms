@@ -130,7 +130,7 @@ export function StripeCardForm({
       <div ref={host} />
       {!ready && !error ? <p role="status">Loading secure card form…</p> : null}
       {error ? (
-        <p role="alert">We could not prepare your card payment. Check the form and try again.</p>
+        <p role="alert">We couldn’t prepare your card payment. Check the form and try again.</p>
       ) : null}
       {!online ? <p role="alert">Reconnect to continue payment.</p> : null}
       <button type="button" disabled={!ready || busy || !online} onClick={() => void confirm()}>

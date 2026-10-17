@@ -65,6 +65,16 @@ export const internalTextRules: readonly InternalTextRule[] = [
   // the app's one money format ("$27.40"). Column units such as "Unit cost (CAD)" stay allowed;
   // a screen that must name the currency next to an amount allowlists it in its spec.
   { name: "currency code amount", pattern: /\b(?:CAD|USD)\s?\$?\d/gu },
+  // The Store's currency code shown as a word, as in the custom tip label "Tip (CAD)": guests read
+  // "$" amounts and plain labels ("Tip ($)"). Mirrors the merchant "currency code" rule.
+  { name: "currency code", pattern: /\bCAD\b/gu },
+  // A record's internal state named to the reader, as in the cart's screen-reader status "Cart
+  // state ready": guests and staff hear what happened ("Your cart is up to date"), not a state.
+  {
+    name: "state name",
+    pattern:
+      /\b(?:[Cc]art|[Oo]rder|[Pp]ayment|[Cc]heckout|[Ss]ession|[Rr]ound|[Kk]itchen|[Tt]able|[Qq]uote) state\b/gu,
+  },
   // A role written as a code-like proper noun mid-sentence ("ask Staff"); guests ask staff.
   { name: "capitalized role", pattern: /\b(?:[Aa]sk|[Tt]ell|[Ss]how|[Cc]all) Staff\b/gu },
 ];

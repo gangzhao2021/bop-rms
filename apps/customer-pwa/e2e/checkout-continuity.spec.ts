@@ -284,7 +284,7 @@ for (const screen of [
           ).toBe(true);
           const name = page.getByLabel("Pickup name", { exact: true });
           const confirm = page.getByRole("checkbox", {
-            name: "I have read and agree to the policies above",
+            name: "I’ve read and agree to the policies above",
           });
           const save = page.getByRole("button", { name: "Save details", exact: true });
           await expect(name).toHaveValue("Synthetic Guest");
@@ -469,7 +469,7 @@ for (const screen of [
             const proceed = page.getByRole("button", { name: /Continue to payment/u });
             await expect(proceed).toBeEnabled();
             await page.getByRole("button", { name: "Other", exact: true }).click();
-            const tip = page.getByLabel("Tip (CAD)", { exact: true });
+            const tip = page.getByLabel("Tip ($)", { exact: true });
             await tip.fill("1.251");
             await expect(tip).toHaveAttribute("aria-invalid", "true");
             await expect(proceed).toBeDisabled();
@@ -491,7 +491,7 @@ for (const screen of [
             expect(sessionCalls).toHaveLength(2);
             expect(sessionCalls[1]).toEqual(sessionCalls[0]);
             await expect(page.getByText("$1.25", { exact: true })).toBeVisible();
-            await expect(page.getByLabel("Tip (CAD)", { exact: true })).toHaveCount(0);
+            await expect(page.getByLabel("Tip ($)", { exact: true })).toHaveCount(0);
             // U1: the page prepares the payment itself; the lost response leaves one retry.
             const retryPayment = page.getByRole("button", {
               name: "Check payment readiness",
