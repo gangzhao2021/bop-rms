@@ -179,7 +179,18 @@ export function createHttpOrderStatusClient(
         if (!contextCurrent()) throw new OrderStatusClientError("permission_denied");
         if (response.status === 401 || response.status === 403)
           throw new OrderStatusClientError("permission_denied");
-        if (response.status === 404) throw new OrderStatusClientError("not_found");
+        if (response.status === 404) {
+          // WP-2423 (46940b76 L5): the order of this guest's open table, placed by another guest.
+          const body: unknown = await response.json().catch(() => null);
+          const code =
+            body !== null && typeof body === "object" && "error" in body
+              ? (body.error as { code?: unknown } | null)?.code
+              : undefined;
+          if (!contextCurrent()) throw new OrderStatusClientError("permission_denied");
+          throw new OrderStatusClientError(
+            code === "order_status_table_order" ? "table_order" : "not_found",
+          );
+        }
         if (response.status !== 200) throw new OrderStatusClientError("service_unavailable");
         const payload: unknown = await response.json();
         if (!contextCurrent()) throw new OrderStatusClientError("permission_denied");

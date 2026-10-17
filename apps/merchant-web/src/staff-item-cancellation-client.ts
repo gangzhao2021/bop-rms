@@ -93,12 +93,17 @@ export function parseItemCancelPreview(value: unknown) {
     refund.currencyCode !== "CAD" ||
     typeof refund.includesTip !== "boolean" ||
     // Items: exactly the selected items' net + tax and their share of the tip
-    // (DEC-TIP-REFUND-PROPORTIONAL); Batch: the whole remaining payment.
+    // (DEC-TIP-REFUND-PROPORTIONAL); Batch: the whole remaining payment, with what is left of the
+    // tip (46940b76 L3; an older server sends "0" and says only whether a tip is included).
     (raw.scope === "Items" &&
       (refund.includesTip !== BigInt(tipAmountMinor) > 0n ||
         BigInt(netAmountMinor) + BigInt(taxAmountMinor) + BigInt(tipAmountMinor) !==
           BigInt(amountMinor))) ||
-    (raw.scope === "Batch" && tipAmountMinor !== "0")
+    (raw.scope === "Batch" &&
+      (netAmountMinor !== "0" ||
+        taxAmountMinor !== "0" ||
+        BigInt(tipAmountMinor) > BigInt(amountMinor) ||
+        (BigInt(tipAmountMinor) > 0n && refund.includesTip !== true)))
   )
     return invalid();
   return Object.freeze({

@@ -75,6 +75,24 @@ it("WP-2423 Q6 step 2: previews the refund for the exact selection", async () =>
       },
     }).scope,
   ).toBe("Batch");
+  // 46940b76 L3: the whole remaining payment with the tip left on it, as an amount.
+  const lastWithTip = {
+    scope: "Batch",
+    refund: {
+      ...itemsPreview.refund,
+      amountMinor: "1177",
+      includesTip: true,
+      netAmountMinor: "0",
+      taxAmountMinor: "0",
+      tipAmountMinor: "138",
+    },
+  };
+  expect(parseItemCancelPreview(lastWithTip)).toEqual(lastWithTip);
+  for (const invalid of [
+    { ...lastWithTip, refund: { ...lastWithTip.refund, includesTip: false } },
+    { ...lastWithTip, refund: { ...lastWithTip.refund, tipAmountMinor: "1178" } },
+  ])
+    expect(() => parseItemCancelPreview(invalid)).toThrow();
   // DEC-TIP-REFUND-PROPORTIONAL: some items carry their share of the tip.
   const withTip = {
     ...itemsPreview,

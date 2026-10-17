@@ -761,6 +761,55 @@ it("enters a dine-in round by staff, takes its card-machine payment and marks it
         0,
       );
 
+      // WP-2423 (46940b76 L6): the staff command's own authorization is one current-fact read for
+      // both its permissions (staff ordering and the table operation), not two full ones. Measured
+      // on the command's first transaction (authorize, then the retry lookup, which refuses the
+      // recorded operation's different intent before anything touches the table).
+      // Before → after (statements): 42 → 27; each staff round runs three such transactions
+      // (retry lookup, staff record, reply), so about 45 fewer statements per round.
+      const touchedOnReplay = [];
+      const replayBefore = restricted.statements;
+      await assert.rejects(
+        createMerchantStaffDiningRound({
+          persistence: { ...staffSession.persistence, now },
+          authentication: staffSession.authentication,
+          pipeline: new Proxy(
+            {},
+            {
+              get: (_target, name) => async () => {
+                touchedOnReplay.push(String(name));
+                throw new Error("the table must not be touched");
+              },
+            },
+          ),
+          nextReference: fresh,
+        })({
+          sessionCookie: staffSession.sessionCookie,
+          csrf: staffSession.csrf,
+          command: {
+            operationReference: operation,
+            tableReference: dining.table.tableReference,
+            lines: [
+              { sellableReference: id(0x900), quantity: 1, optionSelections: [], note: null },
+            ],
+            tip: { kind: "None" },
+            recordedAfterOutage: false,
+          },
+        }),
+        { code: "STAFF_ROUND_IDEMPOTENCY_CONFLICT" },
+      );
+      const replayStatements = restricted.statements - replayBefore;
+      if (process.env.WP2423_COST_LOG)
+        await appendFile(
+          process.env.WP2423_COST_LOG,
+          "staff round retry lookup " + JSON.stringify({ statements: replayStatements }) + "\n",
+        );
+      assert.deepEqual(touchedOnReplay, []);
+      assert.ok(
+        replayStatements <= 35,
+        "staff round retry lookup ran " + replayStatements + " statements (budget 35)",
+      );
+
       // ── What staff charge: the round's quote total plus the tip, from owner records only.
       const prepared = await transactions().run((tx) =>
         readStaffDiningRoundPaymentPreparation(
@@ -1485,6 +1534,9 @@ async function exerciseCardMachinePartialRefund({
         return (await decide(action))?.effect === "Allow";
       },
       authorizeAction: decide,
+      // 46940b76 L6: several permissions at one checkpoint, each decided as authorizeAction would.
+      authorizeActions: async (actions) =>
+        new Map(await Promise.all(actions.map(async (a) => [a, await decide(a)]))),
     };
   };
   const session = (who) => ({ sessionCookie: who, csrf: "synthetic-csrf" });

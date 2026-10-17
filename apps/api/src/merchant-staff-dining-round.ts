@@ -339,9 +339,17 @@ export function createMerchantStaffDiningRound(options: {
                 staffDiningRoundPermission,
                 session.sessionReference,
               ).catch(() => fail("STAFF_ROUND_PERMISSION_DENIED"));
-              if ((await resolved.allowed()) !== true) return fail("STAFF_ROUND_PERMISSION_DENIED");
-              const table = await resolved.authorizeAction(staffDiningRoundTablePermission);
-              if (table?.effect !== "Allow") return fail("STAFF_ROUND_PERMISSION_DENIED");
+              // WP-2423 (46940b76 L6): both permissions from one current-fact read (Session,
+              // selection, membership, store assignment, permission policy), not two full ones.
+              const decisions = await resolved.authorizeActions([
+                staffDiningRoundPermission,
+                staffDiningRoundTablePermission,
+              ]);
+              if (
+                decisions.get(staffDiningRoundPermission)?.effect !== "Allow" ||
+                decisions.get(staffDiningRoundTablePermission)?.effect !== "Allow"
+              )
+                return fail("STAFF_ROUND_PERMISSION_DENIED");
               return resolved;
             },
             recheck: async (resolved) => (await resolved.allowed()) === true,

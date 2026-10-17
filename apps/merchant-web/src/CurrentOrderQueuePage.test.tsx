@@ -23,6 +23,7 @@ import {
   storeCancelledBatches,
   unpaidCancelledBatches,
   unpaidCancelledTotal,
+  orderRefundRows,
 } from "./CurrentOrderQueuePage.js";
 import {
   ordersAwaitingAcceptance,
@@ -687,6 +688,82 @@ it("WP-2423 Q6 step 2: marks cancelled items, their refund and the refund total"
   );
   expect(failed.match(/Payment failed · don&#x27;t prepare/gu)).toHaveLength(1);
 });
+it("46940b76 L2: lists every refund on the order so they add up to what was refunded", () => {
+  const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" as const });
+  const lines = {
+    items: [
+      {
+        cancellation: {
+          refund: money("608"),
+        },
+      },
+    ],
+    totals: { total: money("1785") },
+  } as unknown as Parameters<typeof orderRefundRows>[1];
+  const cancellation = {
+    reasonCode: "SOLD_OUT",
+    cancelledAt: "2026-10-17T22:05:00.000Z",
+    refundStatus: "Refunded",
+    refundMethod: "Online",
+    refundAmountMinor: "1177",
+  } as const;
+  const order = (staffCancellation: unknown, orderType = "Pickup") =>
+    ({
+      orderType,
+      batches: [{ sequence: 1, staffCancellation }],
+    }) as unknown as Parameters<typeof orderRefundRows>[0];
+  const position = { refundedMinor: "1785", refundPendingMinor: "0" };
+  // Order 23 of the 46940b76 run: one item cancelled, then the rest of the order.
+  expect(orderRefundRows(order(cancellation), lines, position)).toEqual([
+    { label: "Cancelled items refund", amount: money("608") },
+    { label: "Order cancellation refund", amount: money("1177") },
+    { label: "Total refunded", amount: money("1785") },
+  ]);
+  // A refund at the customer's request on top is listed too; a dine-in round is named.
+  expect(
+    orderRefundRows(order(cancellation, "DineIn"), lines, {
+      refundedMinor: "2000",
+      refundPendingMinor: "100",
+    }).map((row) => [row.label, row.amount?.amountMinor]),
+  ).toEqual([
+    ["Cancelled items refund", "608"],
+    ["Round 1 cancellation refund", "1177"],
+    ["Other refunds", "315"],
+    ["Total refunded", "2100"],
+  ]);
+  // Before Payment opens the cancellation's refund its amount is not guessed.
+  expect(
+    orderRefundRows(order({ ...cancellation, refundAmountMinor: null }), lines, position),
+  ).toEqual([
+    { label: "Cancelled items refund", amount: money("608") },
+    { label: "Order cancellation refund", amount: null },
+  ]);
+  const html = renderToStaticMarkup(
+    <CurrentOrderLines
+      lines={
+        parseCurrentOrderDetailFixtureLines() as Parameters<typeof CurrentOrderLines>[0]["lines"]
+      }
+      refundRows={orderRefundRows(order(cancellation), lines, position)}
+    />,
+  );
+  expect(html).toMatch(/Cancelled items refund<\/dt><dd>−\$6\.08<\/dd>/u);
+  expect(html).toMatch(/Order cancellation refund<\/dt><dd>−\$11\.77<\/dd>/u);
+  expect(html).toMatch(/Total refunded<\/dt><dd>−\$17\.85<\/dd>/u);
+});
+function parseCurrentOrderDetailFixtureLines() {
+  const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+  return {
+    items: [],
+    totals: {
+      subtotal: money("1576"),
+      discount: money("0"),
+      tax: money("0"),
+      fee: money("0"),
+      total: money("1576"),
+      tip: money("209"),
+    },
+  };
+}
 const unpaidId = (n: number) => `01909968-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 it("WP-2423: warns staff before an unpaid dine-in round is cancelled and says so in plain words", () => {
   const base = {

@@ -196,6 +196,8 @@ export type OrderStatusState =
   | { readonly status: "invalid-reference" }
   | { readonly status: "permission-denied" }
   | { readonly status: "not-found" }
+  /** WP-2423 (46940b76 L5): another guest at this guest's open table placed the order. */
+  | { readonly status: "table-order" }
   | { readonly status: "feature-disabled" }
   | { readonly status: "unavailable" }
   | { readonly status: "offline"; readonly view: OrderStatusView | null }

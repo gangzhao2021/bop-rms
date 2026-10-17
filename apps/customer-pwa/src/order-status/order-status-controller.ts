@@ -13,7 +13,12 @@ const reference = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a
 const instant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/u;
 
 export type OrderStatusClientErrorCode =
-  "permission_denied" | "not_found" | "feature_disabled" | "service_unavailable";
+  | "permission_denied"
+  | "not_found"
+  /** WP-2423 (46940b76 L5): the Order of this guest's open table, placed by another guest. */
+  | "table_order"
+  | "feature_disabled"
+  | "service_unavailable";
 
 export class OrderStatusClientError extends Error {
   readonly code: OrderStatusClientErrorCode;
@@ -1006,9 +1011,11 @@ export function createOrderStatusController(
             ? "permission-denied"
             : error.code === "not_found"
               ? "not-found"
-              : error.code === "feature_disabled"
-                ? "feature-disabled"
-                : "unavailable";
+              : error.code === "table_order"
+                ? "table-order"
+                : error.code === "feature_disabled"
+                  ? "feature-disabled"
+                  : "unavailable";
         publish({ status: mapped });
       } else publish({ status: "unavailable" });
     }

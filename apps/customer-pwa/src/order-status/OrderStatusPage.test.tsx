@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { setEndedVisitReceiptAccess } from "../session/customer-transaction-context.js";
 import {
   OrderStatusPage,
   VisitEndedNotice,
@@ -180,7 +181,8 @@ describe("CUST-ORDER-STATUS screen contract", () => {
   it.each([
     [{ status: "loading" }, "Loading order status"],
     [{ status: "invalid-reference" }, "Order link is invalid"],
-    [{ status: "permission-denied" }, "Your visit on this phone has ended"],
+    [{ status: "permission-denied" }, "This order isn’t available on this phone"],
+    [{ status: "table-order" }, "Another guest at your table placed this order"],
     [{ status: "not-found" }, "We can’t show this order here yet"],
     [{ status: "feature-disabled" }, "Order tracking is disabled"],
     [{ status: "unavailable" }, "Order status isn’t available"],
@@ -1082,7 +1084,43 @@ describe("WP-2423: a dine-in round whose payment didn't go through", () => {
 });
 
 describe("WP-2423 Q10 plain guidance when the visit has ended", () => {
+  afterEach(() => setEndedVisitReceiptAccess(null));
+  const endedVisit = () =>
+    setEndedVisitReceiptAccess({
+      csrfToken: "A".repeat(43),
+      orderReference: id(1),
+      orderNumber: "1001",
+      orderType: "DineIn",
+      receiptAvailableUntil: new Date(Date.now() + 3_600_000).toISOString(),
+    });
+  it("46940b76 L5: a browser that never placed the order is told plainly it isn't here", () => {
+    const html = render({ status: "permission-denied" });
+    expect(html).toContain("This order isn’t available on this phone");
+    expect(html).toContain("give your order number to a staff member");
+    expect(html).not.toContain("Your visit on this phone has ended");
+    expect(html).not.toContain("View your receipt");
+    expect(findInternalText([staticText(html)])).toEqual([]);
+    // Another order's ended visit on this browser does not make this one "yours".
+    setEndedVisitReceiptAccess({
+      csrfToken: "A".repeat(43),
+      orderReference: id(2),
+      orderNumber: "1002",
+      orderType: "DineIn",
+      receiptAvailableUntil: new Date(Date.now() + 3_600_000).toISOString(),
+    });
+    expect(render({ status: "permission-denied" })).toContain(
+      "This order isn’t available on this phone",
+    );
+  });
+  it("46940b76 L5: another guest at the open table is sent to their table's page", () => {
+    const html = render({ status: "table-order" });
+    expect(html).toContain("Another guest at your table placed this order");
+    expect(html).toContain('href="/dine-in/session"');
+    expect(html).not.toContain("If you just paid");
+    expect(findInternalText([staticText(html)])).toEqual([]);
+  });
   it("explains the expired table visit, the way back and the pickup counter, without internal wording", () => {
+    endedVisit();
     const html = render({ status: "permission-denied" });
     expect(html).toContain("Scan the table QR code again");
     expect(html).toContain("the store still has your order");
@@ -1555,5 +1593,91 @@ describe("WP-2423 (v15 3cd0f8dd) payments and refunds the guest sees", () => {
     expect(html).toContain("<dt>Refunded</dt><dd>$5.37</dd>");
     expect(html).toContain("Cancelled items: $5.37 refunded");
     expect(html).not.toContain("Refund: $5.37 returned");
+  });
+  it("46940b76 L4: a pickup the store cancelled item by item, then in full, states each refund", () => {
+    const state = readyState();
+    if (state.status !== "ready") throw new Error("fixture");
+    const cad = (amountMinor: bigint) => ({ amountMinor, currencyCode: "CAD" });
+    const view = {
+      ...state.view,
+      order: {
+        ...state.view.order,
+        canonicalPhase: "Cancelled" as const,
+        batches: [
+          {
+            orderBatchReference: id(3),
+            submittedAt: "2026-08-11T13:55:00.000Z",
+            items: [
+              {
+                orderItemReference: id(4),
+                displayName: "Mocha",
+                quantity: 1,
+                lineTotal: cad(537n),
+              },
+              {
+                orderItemReference: id(7),
+                displayName: "Latte",
+                quantity: 1,
+                lineTotal: cad(486n),
+              },
+              { orderItemReference: id(8), displayName: "Tea", quantity: 1, lineTotal: cad(553n) },
+            ],
+          },
+        ],
+      },
+      sources: {
+        checkedAt: "2026-08-11T14:00:00.000Z",
+        kitchen: null,
+        payments: [],
+        itemCancellations: [
+          {
+            orderBatchReference: id(3),
+            orderItemReferences: [id(4)],
+            cancelledAt: "2026-08-11T13:57:00.000Z",
+            reason: "SoldOut" as const,
+            refundStatus: "Refunded" as const,
+            refundAmount: cad(608n),
+          },
+        ],
+        staffCancellations: [
+          {
+            orderBatchReference: id(3),
+            cancelledAt: "2026-08-11T13:58:00.000Z",
+            reason: "SoldOut" as const,
+            refundStatus: "Refunded" as const,
+          },
+        ],
+        refunds: {
+          refunded: cad(1785n),
+          entries: [
+            {
+              kind: "ItemCancellation" as const,
+              orderItemReferences: [id(4)],
+              total: cad(608n),
+              tip: cad(71n),
+            },
+            {
+              kind: "RoundRefund" as const,
+              orderItemReferences: [id(7), id(8)],
+              total: cad(1177n),
+              tip: cad(138n),
+            },
+          ],
+        },
+      },
+    };
+    const html = render({ ...state, view });
+    // Every cancelled item shows what it returned, not only the first one.
+    expect(html).toContain("Cancelled · Refunded $6.08");
+    expect(html).toContain("Cancelled · Refunded $4.86");
+    expect(html).toContain("Cancelled · Refunded $5.53");
+    // Each refund and the tip it returned.
+    expect(html).toContain(
+      "Refund: $6.08 returned to your original payment, including $0.71 of the tip.",
+    );
+    expect(html).toContain(
+      "Refund: $11.77 returned to your original payment, including $1.38 of the tip.",
+    );
+    expect(findInternalText([staticText(html)])).toEqual([]);
   });
 });

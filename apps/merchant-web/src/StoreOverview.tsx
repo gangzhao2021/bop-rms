@@ -72,6 +72,8 @@ export interface TablesRead {
   /** The staff member may close tables (Owner, Store Manager). */
   readonly canClose: boolean;
   readonly more: boolean;
+  /** When the tables were read (each table's elapsed minutes count up to this instant). */
+  readonly readAt?: string;
 }
 export interface TablesSummary {
   /** Tables with a party (an open session). */
@@ -82,10 +84,29 @@ export interface TablesSummary {
    * close tables (the Tables page tells them who does).
    */
   readonly toClose: number | null;
+  /**
+   * WP-2423 (46940b76 L1): open tables whose party was seated before the Store's current business
+   * day began (left open overnight). Null until the business day and the read time are known.
+   */
+  readonly earlierDays: number | null;
   readonly more: boolean;
 }
-export function summarizeTables(read: TablesRead, servedDineIn: ReadonlySet<string> | null) {
+export function summarizeTables(
+  read: TablesRead,
+  servedDineIn: ReadonlySet<string> | null,
+  /** Start of the Store's current business day (Store time zone and day start, from the shell). */
+  dayStartsAt: string | null = null,
+) {
   const open = read.tables.filter((table) => table.currentDiningSessionReference !== null);
+  const readAt = read.readAt === undefined ? Number.NaN : Date.parse(read.readAt);
+  const dayStart = dayStartsAt === null ? Number.NaN : Date.parse(dayStartsAt);
+  const earlierDays =
+    Number.isFinite(readAt) && Number.isFinite(dayStart)
+      ? open.filter(
+          (table) =>
+            table.elapsedMinutes !== null && readAt - table.elapsedMinutes * 60_000 < dayStart,
+        ).length
+      : null;
   const toClose = open.filter(
     (table) =>
       (table.elapsedMinutes ?? 0) > longOpenSessionMinutes ||
@@ -98,6 +119,7 @@ export function summarizeTables(read: TablesRead, servedDineIn: ReadonlySet<stri
   return {
     open: open.length,
     toClose: read.canClose ? toClose : null,
+    earlierDays,
     more: read.more,
   } satisfies TablesSummary;
 }
@@ -186,13 +208,17 @@ export const initialOverviewState: OverviewTodayState = {
   updatedAt: null,
 };
 /** WP-2423 (3cd0f8dd M7): the tables summary once both the tables and the orders are read. */
-export function tablesSummary(state: OverviewTodayState): OverviewRead<TablesSummary> {
+export function tablesSummary(
+  state: OverviewTodayState,
+  dayStartsAt: string | null = null,
+): OverviewRead<TablesSummary> {
   if (state.tables.kind !== "Ready") return state.tables;
   return {
     kind: "Ready",
     value: summarizeTables(
       state.tables.value,
       state.orders.kind === "Ready" ? state.orders.value.servedDineIn : null,
+      dayStartsAt,
     ),
   };
 }
@@ -390,8 +416,10 @@ export function dayChecklist(
   state: OverviewTodayState,
   settlement: SettlementStatusRead,
   serviceHref: string | null,
+  /** Start of the Store's current business day; tables seated before it were left open. */
+  dayStartsAt: string | null = null,
 ): { readonly opening: readonly ChecklistItem[]; readonly closing: readonly ChecklistItem[] } {
-  const tables = tablesSummary(state);
+  const tables = tablesSummary(state, dayStartsAt);
   const item = (
     key: string,
     text: string,
@@ -452,7 +480,9 @@ export function dayChecklist(
     ...item(
       "tables-left-open",
       "Tables still open from before",
-      readStatus(tables, (t) => left(t.open, t.more)),
+      readStatus(tables, (t) =>
+        t.earlierDays === null ? { status: "Reading…", done: false } : left(t.earlierDays, t.more),
+      ),
       "/operations/dining",
       "Tables",
     ),
@@ -546,7 +576,8 @@ export function DayChecklist({
   readonly settlement: SettlementStatusRead;
   readonly serviceHref: string | null;
 }) {
-  const { opening, closing } = dayChecklist(state, settlement, serviceHref);
+  const dayStartsAt = useStoreBusinessDay()?.startsAt ?? null;
+  const { opening, closing } = dayChecklist(state, settlement, serviceHref, dayStartsAt);
   if (opening.length === 0 && closing.length === 0) return null;
   return (
     <section
@@ -685,6 +716,7 @@ export function StoreOverview({
                   tables: page.items,
                   canClose: page.canCloseSessions,
                   more: page.next !== null,
+                  readAt: new Date().toISOString(),
                 };
               },
               (tables) => setState((s) => ({ ...s, tables })),

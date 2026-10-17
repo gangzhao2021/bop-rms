@@ -25,6 +25,10 @@ import { StoreContactCard } from "../journey/StoreContact.js";
 import { commonText, orderStatusText } from "../journey/messages.js";
 import { ContactDetailsSection } from "./ContactDetailsSection.js";
 import type { ContactRemovalClient } from "./contact-removal-client.js";
+import {
+  getCustomerCsrfCredential,
+  getEndedVisitReceiptAccess,
+} from "../session/customer-transaction-context.js";
 
 /**
  * WP-2423 D5: the order's money as a receipt prints it — each item at its price before tax, then
@@ -324,6 +328,24 @@ export function itemCancellationText(cancellation: ItemCancellation): string {
     amount,
   );
 }
+/**
+ * WP-2423 (46940b76 L4): an item of a round (or order) the store cancelled as a whole: "Cancelled ·
+ * Refunded $5.63" — its price with tax, returned with the rest of the payment (the round's
+ * remaining tip is stated in the refund sentence). Without a store refund (a round cancelled
+ * unpaid, or an item already refunded before) only "Cancelled".
+ */
+export function storeCancelledItemText(
+  cancellation: StaffCancellation | undefined,
+  lineTotal: { readonly amountMinor: bigint; readonly currencyCode: string } | null,
+): string {
+  if (cancellation === undefined || lineTotal === null) return orderStatusText.itemCancelledLabel;
+  return orderStatusText.itemCancelled(
+    cancellation.refundStatus === "Refunded"
+      ? orderStatusText.itemRefunded
+      : orderStatusText.itemRefundPending,
+    " " + formatMoney(lineTotal.amountMinor, lineTotal.currencyCode),
+  );
+}
 /** WP-2423 Q6 step 2: where the money for cancelled items is (tax and their tip share included). */
 export function itemRefundSummary(cancellations: readonly ItemCancellation[]): string[] {
   const currency = cancellations[0]?.refundAmount.currencyCode;
@@ -519,9 +541,18 @@ export function paymentReceivedText(
  * cancellations and whole-round refunds already say so where they happened; a refund staff made
  * (or an amount refunded without items) gets its own line, with any share of the tip it returned.
  */
-export function refundLines(view: OrderStatusView): string[] {
+export function refundLines(view: OrderStatusView, withItemCancellations = false): string[] {
+  // WP-2423 (46940b76 L4): a whole round (or order) the store cancelled returns what was left of
+  // it and of its tip; say how much of the tip. When the store cancelled the whole order, the
+  // item-cancellation summary is not shown, so each item cancellation's refund is stated here too.
   return (view.sources?.refunds?.entries ?? [])
-    .filter((entry) => entry.kind === "Refund" || entry.kind === "Other")
+    .filter(
+      (entry) =>
+        entry.kind === "Refund" ||
+        entry.kind === "Other" ||
+        entry.kind === "RoundRefund" ||
+        (withItemCancellations && entry.kind === "ItemCancellation"),
+    )
     .map((entry) =>
       entry.tip.amountMinor > 0n
         ? orderStatusText.refundReturnedWithTip(
@@ -678,6 +709,13 @@ function StatusContent({
   const refundedItems = new Set(
     (view.sources?.refunds?.entries ?? [])
       .filter((entry) => entry.kind === "Refund" || entry.kind === "RoundRefund")
+      .flatMap((entry) => entry.orderItemReferences),
+  );
+  // WP-2423 (46940b76 L4): items partly or wholly refunded before their round was cancelled (their
+  // line price is no longer what the cancellation returned for them).
+  const refundedBefore = new Set(
+    (view.sources?.refunds?.entries ?? [])
+      .filter((entry) => entry.kind === "Refund")
       .flatMap((entry) => entry.orderItemReferences),
   );
   const paymentLabel =
@@ -935,7 +973,15 @@ function StatusContent({
                         </span>
                       ) : batchCancelled ? (
                         <span className="order-status__item-cancelled">
-                          {orderStatusText.itemCancelledLabel}
+                          {storeCancelledItemText(
+                            staffCancellations.find(
+                              (entry) => entry.orderBatchReference === batch.orderBatchReference,
+                            ),
+                            unpaidCancelled.has(batch.orderBatchReference) ||
+                              refundedBefore.has(item.orderItemReference)
+                              ? null
+                              : item.lineTotal,
+                          )}
                         </span>
                       ) : notPaid.has(batch.orderBatchReference) ? (
                         <span className="order-status__item-cancelled">
@@ -1015,7 +1061,7 @@ function StatusContent({
             {line}
           </p>
         ))}
-        {(storeCancelled || notAccepted ? [] : refundLines(view)).map((line, index) => (
+        {(notAccepted ? [] : refundLines(view, storeCancelled !== null)).map((line, index) => (
           <p key={`refund-${index}`} className="order-status__item-refund">
             {line}
           </p>
@@ -1073,6 +1119,8 @@ export function OrderStatusPage({
     controller.getState,
     controller.getState,
   );
+  // WP-2423 (46940b76 L5): whether this browser had a visit when the page opened.
+  const [openedWithVisit] = useState(() => getCustomerCsrfCredential() !== null);
   useEffect(() => {
     void controller.load();
     const offline = () => controller.setOnline(false);
@@ -1120,7 +1168,29 @@ export function OrderStatusPage({
         </section>
       ) : null}
       {state.status === "permission-denied" ? (
-        <VisitEndedNotice orderReference={orderReference} />
+        // WP-2423 (46940b76 L5): a browser that had a visit when the page opened (it ended
+        // meanwhile), or whose ended visit placed this order, is told its visit ended (with its
+        // receipt); any other browser is told plainly the order isn't available here.
+        openedWithVisit || getEndedVisitReceiptAccess(orderReference) !== null ? (
+          <VisitEndedNotice orderReference={orderReference} />
+        ) : (
+          <section className="order-status__card order-status__visit-ended" role="alert">
+            <h2>{orderStatusText.notThisPhone.heading}</h2>
+            <p>{orderStatusText.notThisPhone.body}</p>
+            <Link className="order-status__retry" to="/">
+              {orderStatusText.notThisPhone.start}
+            </Link>
+          </section>
+        )
+      ) : null}
+      {state.status === "table-order" ? (
+        <section className="order-status__card order-status__visit-ended" role="alert">
+          <h2>{orderStatusText.tableOrder.heading}</h2>
+          <p>{orderStatusText.tableOrder.body}</p>
+          <Link className="order-status__retry" to="/dine-in/session">
+            {orderStatusText.tableOrder.seeTable}
+          </Link>
+        </section>
       ) : null}
       {state.status === "not-found" ? (
         <section className="order-status__unavailable" role="alert">

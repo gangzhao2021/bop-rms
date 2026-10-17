@@ -41,9 +41,19 @@ export function itemCancelPreviewText(order: Order, preview: ItemCancelPreview) 
           currencyCode: preview.refund.currencyCode,
         })} of the tip).`
       : `Refund ${refund} (items and tax).`;
+  // 46940b76 L3: the tip left on the payment, stated as an amount (an older server: "any tip").
+  const tip =
+    preview.refund.tipAmountMinor !== "0"
+      ? `, including ${orderMoney({
+          amountMinor: preview.refund.tipAmountMinor,
+          currencyCode: preview.refund.currencyCode,
+        })} of the tip`
+      : preview.refund.includesTip
+        ? ", including any tip"
+        : "";
   return order.orderType === "Pickup"
-    ? `These are the last items: the whole order is cancelled and the remaining payment of ${refund} is refunded, including any tip.`
-    : `These are the last items of this round: the whole round is cancelled and its remaining payment of ${refund} is refunded, including any tip.`;
+    ? `These are the last items: the whole order is cancelled and the remaining payment of ${refund} is refunded${tip}.`
+    : `These are the last items of this round: the whole round is cancelled and its remaining payment of ${refund} is refunded${tip}.`;
 }
 
 /** Why a preview or cancellation did not go through, and what to do next. */

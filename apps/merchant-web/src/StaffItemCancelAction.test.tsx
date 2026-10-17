@@ -155,6 +155,23 @@ it("WP-2423 Q6 step 2: explains the refund the server previewed", () => {
   expect(itemCancelPreviewText(dining, { scope: "Batch", refund: last })).toBe(
     "These are the last items of this round: the whole round is cancelled and its remaining payment of $13.80 is refunded, including any tip.",
   );
+  // 46940b76 L3: the tip left on the payment is stated as an amount; none left, none mentioned.
+  expect(
+    itemCancelPreviewText(pickup, {
+      scope: "Batch",
+      refund: { ...last, amountMinor: "1177", tipAmountMinor: "138" },
+    }),
+  ).toBe(
+    "These are the last items: the whole order is cancelled and the remaining payment of $11.77 is refunded, including $1.38 of the tip.",
+  );
+  expect(
+    itemCancelPreviewText(dining, {
+      scope: "Batch",
+      refund: { ...last, includesTip: false, tipAmountMinor: "0" },
+    }),
+  ).toBe(
+    "These are the last items of this round: the whole round is cancelled and its remaining payment of $13.80 is refunded.",
+  );
 });
 
 it("WP-2423 Q6 step 2: says what to do for every refusal", () => {

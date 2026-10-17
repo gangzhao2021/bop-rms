@@ -456,4 +456,16 @@ describe("WP-2423: an order received before its status is ready", () => {
     await controller.refresh();
     expect(controller.getState()).toEqual({ status: "not-found" });
   });
+
+  it("46940b76 L5: says the order belongs to another guest at the table when the server says so", async () => {
+    setCustomerCsrfCredential("a".repeat(43));
+    const controller = createOrderStatusController(
+      id(1),
+      createHttpOrderStatusClient(
+        responder({ schemaVersion: 1, error: { code: "order_status_table_order" } }, 404),
+      ),
+    );
+    await controller.refresh();
+    expect(controller.getState()).toEqual({ status: "table-order" });
+  });
 });

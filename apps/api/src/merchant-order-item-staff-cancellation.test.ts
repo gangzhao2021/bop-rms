@@ -14,6 +14,7 @@ const d = vi.hoisted(() => ({
   refunds: vi.fn(),
   preview: vi.fn(),
   record: vi.fn(),
+  refundedTip: vi.fn(),
   followUp: vi.fn(),
   drive: vi.fn(),
   status: vi.fn(),
@@ -128,7 +129,8 @@ function setup(whole = vi.fn()) {
     workItemCount: 1,
     evidenceDigest: "sha256:" + "a".repeat(64),
   });
-  d.refunds.mockReturnValue({ preview: d.preview, record: d.record });
+  d.refunds.mockReturnValue({ preview: d.preview, record: d.record, refundedTip: d.refundedTip });
+  d.refundedTip.mockResolvedValue(0n);
   d.preview.mockResolvedValue({
     amountMinor: 565n,
     components: {
@@ -444,6 +446,34 @@ it("previews exactly the items' net, tax and tip share, or the remaining payment
   expect((await f.operation.preview({ ...f.input, command })).refund).toMatchObject({
     amountMinor: "1380",
     includesTip: false,
+    tipAmountMinor: "0",
+  });
+  // 46940b76 L3: the last items return what is left of the tip after earlier items' shares.
+  d.remaining.mockResolvedValue({
+    capturedMinor: 1785n,
+    claimedMinor: 608n,
+    remainingMinor: 1177n,
+    tipMinor: 209n,
+    compensationMinor: 0n,
+  });
+  d.refundedTip.mockResolvedValue(71n);
+  expect((await f.operation.preview({ ...f.input, command })).refund).toEqual({
+    amountMinor: "1177",
+    currencyCode: "CAD",
+    includesTip: true,
+    netAmountMinor: "0",
+    taxAmountMinor: "0",
+    tipAmountMinor: "138",
+  });
+  expect(d.refundedTip.mock.calls.at(-1)?.[1]).toEqual({
+    orderReference: f.input.command.orderReference,
+    paymentIntentReference: expect.any(String),
+  });
+  // Every share already returned: no tip is left to mention.
+  d.refundedTip.mockResolvedValue(209n);
+  expect((await f.operation.preview({ ...f.input, command })).refund).toMatchObject({
+    includesTip: false,
+    tipAmountMinor: "0",
   });
 });
 

@@ -38,7 +38,7 @@ import { pickupAcceptanceDeadline } from "./pickup-acceptance-deadline.js";
 import { createMerchantBusinessDayWindows } from "./merchant-business-day-window.js";
 import {
   readCardMachineCancellationRefund,
-  readStaffCancellationRefundStatus,
+  readStaffCancellationRefundPosition,
   staffOrderCancellationPermission,
   type StaffOrderRefundStatus,
 } from "./merchant-order-staff-cancellation.js";
@@ -406,19 +406,35 @@ export function createPersistentMerchantOrderQueue(options: {
                 record,
                 stillAllowed,
               );
-              cancellations.set(String(record.orderBatchReference), {
-                reasonCode: record.reasonCode,
-                cancelledAt: String(record.cancelledAt),
-                refundStatus:
-                  card?.status ??
-                  (await readStaffCancellationRefundStatus(
+              // WP-2423 (46940b76 L2): an online refund's amount is what Payment's compensation
+              // returns (null until its case opens; "0" when an earlier refund had returned it).
+              let online: { status: StaffOrderRefundStatus; amountMinor: string | null } | null =
+                null;
+              if (card === null)
+                if (record.refundDisposition === "AlreadyRefunded")
+                  online = { status: "Refunded", amountMinor: "0" };
+                else {
+                  const position = await readStaffCancellationRefundPosition(
                     businessTransaction,
                     scoped,
                     record,
                     stillAllowed,
-                  )),
+                  );
+                  const total = position.confirmedMinor + position.pendingMinor;
+                  online = {
+                    status:
+                      position.confirmedMinor > 0n && position.pendingMinor === 0n
+                        ? "Refunded"
+                        : "Pending",
+                    amountMinor: total > 0n ? total.toString() : null,
+                  };
+                }
+              cancellations.set(String(record.orderBatchReference), {
+                reasonCode: record.reasonCode,
+                cancelledAt: String(record.cancelledAt),
+                refundStatus: card?.status ?? online?.status ?? "Pending",
                 refundMethod: card === null ? "Online" : "CardMachine",
-                refundAmountMinor: card?.amountMinor ?? null,
+                refundAmountMinor: card?.amountMinor ?? online?.amountMinor ?? null,
               });
             }
             const entries = await createPostgresCounterOrderEntryStore({

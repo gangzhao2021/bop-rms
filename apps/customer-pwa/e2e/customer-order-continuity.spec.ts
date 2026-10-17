@@ -168,8 +168,73 @@ for (const viewport of [
       expect(entries).toBe(1);
     });
 
-    test("an ended visit explains the way back instead of 'access denied'", async ({ page }) => {
+    test("46940b76 L5: a browser that never placed the order is told plainly it isn't here", async ({
+      page,
+    }) => {
       await bootstrap(page, null);
+      let statusCalls = 0;
+      await page.route("**/api/v1/orders/*/status", (route) => {
+        statusCalls += 1;
+        return route.fulfill({ status: 404, headers: json, body: "{}" });
+      });
+      await page.goto("/orders/" + orderReference);
+      await expect(
+        page.getByRole("heading", {
+          name: "This order isn’t available on this phone",
+          exact: true,
+        }),
+      ).toBeVisible();
+      await expect(page.getByText("give your order number to a staff member")).toBeVisible();
+      await expect(page.getByText("Your visit on this phone has ended")).toHaveCount(0);
+      await expect(page.getByRole("link", { name: "View your receipt" })).toHaveCount(0);
+      expect(statusCalls).toBe(0);
+      await expectNoInternalText(page);
+      await noHorizontalOverflow(page);
+    });
+
+    test("46940b76 L5: another guest at the open table is sent to the table's page", async ({
+      page,
+    }) => {
+      await bootstrap(page, { schemaVersion: 1, csrfToken: csrf, menuContext });
+      await page.route("**/api/v1/orders/*/status", (route) =>
+        route.fulfill({
+          status: 404,
+          headers: json,
+          body: JSON.stringify({
+            schemaVersion: 1,
+            error: {
+              code: "order_status_table_order",
+              messageKey: "customer.order.status.table_order",
+            },
+          }),
+        }),
+      );
+      await page.goto("/orders/" + orderReference);
+      await expect(
+        page.getByRole("heading", {
+          name: "Another guest at your table placed this order",
+          exact: true,
+        }),
+      ).toBeVisible();
+      await expect(page.getByRole("link", { name: "See your table", exact: true })).toHaveAttribute(
+        "href",
+        "/dine-in/session",
+      );
+      await expect(page.getByText("If you just paid")).toHaveCount(0);
+      await expectNoInternalText(page);
+      await noHorizontalOverflow(page);
+    });
+
+    test("an ended visit explains the way back instead of 'access denied'", async ({ page }) => {
+      // The visit that placed this order ended; its receipt stays readable for a while.
+      await bootstrap(page, {
+        schemaVersion: 1,
+        endedVisit: {
+          csrfToken: csrf,
+          order: { orderReference, orderNumber: "12", orderType: "Pickup" },
+          receiptAvailableUntil: new Date(Date.now() + 3_600_000).toISOString(),
+        },
+      });
       let statusCalls = 0;
       await page.route("**/api/v1/orders/*/status", (route) => {
         statusCalls += 1;

@@ -17,6 +17,21 @@ vi.mock("./merchant-store-scope.js", () => ({
     actorReference: "0198a7c0-0000-7000-8000-000000000004",
     allowed: async () => state.allowed,
     authorizeAction: async () => ({ effect: state.tablePermission }),
+    // 46940b76 L6: the command reads both of its permissions at once.
+    authorizeActions: async (actions: readonly string[]) =>
+      new Map(
+        actions.map((action) => [
+          action,
+          {
+            effect:
+              action === "dining.operate"
+                ? state.tablePermission
+                : state.allowed
+                  ? "Allow"
+                  : "Deny",
+          },
+        ]),
+      ),
   }),
 }));
 vi.mock("./staff-dining-round-payment-preparation.js", () => ({

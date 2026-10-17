@@ -193,6 +193,131 @@ test.describe("@production order status HTTP continuity", () => {
     expect(await page.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0);
   });
 
+  test("46940b76 L4: a pickup cancelled item by item and then in full states every refund and the tip", async ({
+    page,
+  }) => {
+    const csrf = "d".repeat(43);
+    await page.route("**/bff/customer/entry", (route) =>
+      route.fulfill({
+        status: 201,
+        headers: { "cache-control": "no-store" },
+        json: {
+          schemaVersion: 2,
+          status: "Established",
+          brandDisplayName: "Synthetic Brand",
+          storeDisplayName: "Synthetic Status Store",
+          publicStoreReference: id(6),
+          publicTableReference: null,
+          channel: "Pickup",
+          operatingState: "Open",
+          availableServiceModes: ["Pickup"],
+          locale: "en-CA",
+          contextExpiresAt: new Date(Date.now() + 600_000).toISOString(),
+          csrfToken: csrf,
+        },
+      }),
+    );
+    const cad = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+    const body = status(id(23), "23", "537");
+    body.status.order.canonicalPhase = "Cancelled";
+    const [batch] = body.status.order.batches;
+    if (batch === undefined) throw new Error("fixture");
+    batch.items = [
+      { orderItemReference: id(4), displayName: "Mocha", quantity: 1, lineTotal: cad("537") },
+      { orderItemReference: id(5), displayName: "Latte", quantity: 1, lineTotal: cad("486") },
+      { orderItemReference: id(7), displayName: "Tea", quantity: 1, lineTotal: cad("553") },
+    ];
+    const sources = {
+      ...body.status.sources,
+      kitchen: null,
+      payments: [
+        {
+          status: "Succeeded",
+          occurredAt: "2026-08-11T13:56:00.000Z",
+          amount: cad("1785"),
+          freshnessStatus: "Fresh",
+        },
+      ],
+      itemCancellations: [
+        {
+          orderBatchReference: id(3),
+          orderItemReferences: [id(4)],
+          cancelledAt: "2026-08-11T13:57:00.000Z",
+          reason: "SoldOut",
+          refundStatus: "Refunded",
+          refundAmount: cad("608"),
+        },
+      ],
+      staffCancellations: [
+        {
+          orderBatchReference: id(3),
+          cancelledAt: "2026-08-11T13:58:00.000Z",
+          reason: "SoldOut",
+          refundStatus: "Refunded",
+        },
+      ],
+      refunds: {
+        refunded: cad("1785"),
+        entries: [
+          {
+            kind: "ItemCancellation",
+            orderItemReferences: [id(4)],
+            total: cad("608"),
+            tip: cad("71"),
+          },
+          {
+            kind: "RoundRefund",
+            orderItemReferences: [id(5), id(7)],
+            total: cad("1177"),
+            tip: cad("138"),
+          },
+        ],
+      },
+    };
+    await page.route("**/api/v1/orders/*/status", (route) =>
+      route.fulfill({
+        headers: { "cache-control": "no-store" },
+        json: { ...body, status: { ...body.status, sources } },
+      }),
+    );
+    await page.goto("/#qr=aaa.bbb.ccc");
+    await expect(
+      page.getByRole("heading", { name: "Synthetic Status Store", exact: true }),
+    ).toBeVisible();
+    await page.evaluate((reference) => {
+      history.pushState(null, "", "/orders/" + reference);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }, id(23));
+    const main = page.getByRole("main");
+    await expect(main.getByText("Cancelled · Refunded $6.08")).toBeVisible();
+    await expect(main.getByText("Cancelled · Refunded $4.86")).toBeVisible();
+    await expect(main.getByText("Cancelled · Refunded $5.53")).toBeVisible();
+    await expect(
+      main.getByText(
+        "Refund: $6.08 returned to your original payment, including $0.71 of the tip.",
+      ),
+    ).toBeVisible();
+    await expect(
+      main.getByText(
+        "Refund: $11.77 returned to your original payment, including $1.38 of the tip.",
+      ),
+    ).toBeVisible();
+    await expectNoInternalText(page);
+    for (const viewport of [
+      { width: 1440, height: 900 },
+      { width: 390, height: 844 },
+    ]) {
+      await page.setViewportSize(viewport);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await page.screenshot({
+        path: `test-results/order-status-store-cancelled-refunds-${viewport.width}.png`,
+        fullPage: true,
+      });
+    }
+  });
+
   test("renders the unavailable state cleanly at desktop and compact widths", async ({ page }) => {
     const csrf = "d".repeat(43);
     await page.route("**/bff/customer/entry", (route) =>

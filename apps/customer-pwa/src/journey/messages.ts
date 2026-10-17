@@ -433,6 +433,18 @@ export const orderStatusText = Object.freeze({
       "For a pickup order: the store still has your order. Give your name or order number at the counter.",
     start: "Go to the start",
   }),
+  /** WP-2423 (46940b76 L5): this browser never placed the order (or its receipt time ended). */
+  notThisPhone: Object.freeze({
+    heading: "This order isn’t available on this phone",
+    body: "An order opens only on the phone or browser that placed it. If it’s your order, give your order number to a staff member.",
+    start: "Go to the start",
+  }),
+  /** WP-2423 (46940b76 L5): another guest at the same open table placed the order. */
+  tableOrder: Object.freeze({
+    heading: "Another guest at your table placed this order",
+    body: "You can follow your table’s order, and what has been served, on your table’s page.",
+    seeTable: "See your table",
+  }),
   loadingHeading: "Loading order status",
   receivedHeading: "Order received",
   received: (orderNumber: string) =>

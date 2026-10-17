@@ -39,6 +39,7 @@ import {
   loadPickupPaymentWindowClosure,
   createPostgresOrderStatusProjectionStore,
   createPostgresDigitalReceiptStore,
+  createPostgresDiningSessionOrderLookup,
   findGuestSessionOrder,
   loadOrderCanonicalPhase,
   OrderStatusProjectionError,
@@ -798,6 +799,78 @@ export function createCustomerOrderStatusRead(
         if (error instanceof OrderStatusProjectionError) throw error;
         if (error instanceof GuestSessionError)
           throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
+        throw withFailureCause(
+          new OrderStatusProjectionError("ORDER_STATUS_DEPENDENCY_UNAVAILABLE"),
+          error,
+        );
+      }
+    },
+    /**
+     * WP-2423 (46940b76 L5): called only when this guest may not read the Order on its status page.
+     * True when the Order is the current Order of the open table this guest has joined (another
+     * guest at the table placed it), so the page can send them to their table's view instead of
+     * "not found". Same guest authorization and lock order as `read`; never reveals anything for an
+     * Order of another table, another party or another Store.
+     */
+    async tableOrder(value: unknown): Promise<boolean> {
+      let credentials: { sessionCredential: string; csrfCredential: string };
+      let orderReference: string;
+      try {
+        const raw = readClosedRecord(value, [
+          "sessionCredential",
+          "csrfCredential",
+          "orderReference",
+        ]);
+        credentials = {
+          sessionCredential: parseGuestRawCredential(raw.sessionCredential),
+          csrfCredential: parseGuestRawCredential(raw.csrfCredential),
+        };
+        orderReference = String(parseOrderingReference(raw.orderReference));
+      } catch {
+        return false;
+      }
+      try {
+        return await retryTransactionConflict(() =>
+          options.transactions.run(async (transaction) => {
+            await acquireOrderDispositionFence(transaction, { ...options.scope, orderReference });
+            const runner: CartQueryTransactionRunner = { run: async (work) => work(transaction) };
+            const now = () => String(parseCanonicalInstant(options.now()));
+            const service = new GuestSessionService({
+              store: createPostgresGuestSessionEntryStore(runner, options.scope),
+              credentials: options.credentials,
+              binding: options.binding(transaction),
+              now,
+              admission: { consume: async () => null },
+            });
+            const guest = await service.authorize({ ...credentials, observedAt: now() });
+            const fingerprint = JSON.stringify(guest);
+            if (
+              guest.brandReference !== options.scope.brandReference ||
+              guest.storeReference !== options.scope.storeReference ||
+              guest.channel !== "DineIn" ||
+              guest.diningSessionReference === null
+            )
+              return false;
+            const diningSessionReference = String(guest.diningSessionReference);
+            const guestSessionReference = String(guest.sessionReference);
+            const tableOrder = await createPostgresDiningSessionOrderLookup({
+              ...options.scope,
+              authorize: async (_tx, query) =>
+                String(query.diningSessionReference) === diningSessionReference &&
+                String(query.guestSessionReference) === guestSessionReference &&
+                JSON.stringify(await service.authorize({ ...credentials, observedAt: now() })) ===
+                  fingerprint,
+            }).load(transaction, {
+              diningSessionReference,
+              guestSessionReference,
+              observedAt: now(),
+            });
+            return tableOrder === orderReference;
+          }),
+        );
+      } catch (error) {
+        if (error instanceof OrderStatusProjectionError || error instanceof GuestSessionError)
+          return false;
         throw withFailureCause(
           new OrderStatusProjectionError("ORDER_STATUS_DEPENDENCY_UNAVAILABLE"),
           error,

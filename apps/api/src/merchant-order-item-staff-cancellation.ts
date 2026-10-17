@@ -105,8 +105,8 @@ export interface StaffItemCancellationPreview {
     readonly includesTip: boolean;
     readonly netAmountMinor: string;
     readonly taxAmountMinor: string;
-    /** Items: the cancelled items' share of the tip (DEC-TIP-REFUND-PROPORTIONAL); Batch: "0"
-     * (the whole remaining payment is refunded, any tip left included). */
+    /** Items: the cancelled items' share of the tip (DEC-TIP-REFUND-PROPORTIONAL); Batch: what is
+     * left of the tip, refunded with the whole remaining payment (WP-2423 46940b76 L3). */
     readonly tipAmountMinor: string;
   };
 }
@@ -490,15 +490,28 @@ export function createMerchantOrderItemStaffCancellation(options: {
             paymentIntentReference: String(plan.payment.paymentIntentReference),
             paymentAttemptReference: String(plan.payment.paymentAttemptReference),
           });
+          // WP-2423 (46940b76 L3): what is left of the tip after the shares earlier item
+          // cancellations and refunds returned (never more than what is left of the payment).
+          const refundedTip = await refundRuntime(context).refundedTip(context.tx, {
+            orderReference: intent.orderReference,
+            paymentIntentReference: String(plan.payment.paymentIntentReference),
+          });
+          const leftTip = position.tipMinor - refundedTip;
+          const tip =
+            leftTip <= 0n
+              ? 0n
+              : leftTip > position.remainingMinor
+                ? position.remainingMinor
+                : leftTip;
           return Object.freeze({
             scope: "Batch" as const,
             refund: Object.freeze({
               amountMinor: position.remainingMinor.toString(),
               currencyCode: "CAD" as const,
-              includesTip: position.tipMinor > 0n,
+              includesTip: tip > 0n,
               netAmountMinor: "0",
               taxAmountMinor: "0",
-              tipAmountMinor: "0",
+              tipAmountMinor: tip.toString(),
             }),
           });
         }

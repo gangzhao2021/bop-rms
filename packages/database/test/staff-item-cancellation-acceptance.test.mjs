@@ -1250,7 +1250,8 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
           includesTip: true,
           netAmountMinor: "0",
           taxAmountMinor: "0",
-          tipAmountMinor: "0",
+          // 46940b76 L3: nothing refunded yet, so the whole tip.
+          tipAmountMinor: String(TIP_MINOR),
         },
       });
       assert.deepEqual(await counts(), before);
@@ -1713,6 +1714,19 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
         pickup.version = 3;
         const reservedBefore = await stock();
         const lastOperation = fresh();
+        // 46940b76 L3: the preview states what is left of the tip after line A's share, read from
+        // Payment's own refund claims under the restricted role.
+        assert.deepEqual(await preview(pickup, [1]), {
+          scope: "Batch",
+          refund: {
+            amountMinor: String(CAPTURED_MINOR - LINE_A_REFUND_MINOR),
+            currencyCode: "CAD",
+            includesTip: true,
+            netAmountMinor: "0",
+            taxAmountMinor: "0",
+            tipAmountMinor: String(TIP_MINOR - LINE_A_TIP_MINOR),
+          },
+        });
         const ended = await cancel(pickup, [1], { operationReference: lastOperation });
         // What remains: line B and the rest of the tip; across both refunds the whole tip returns.
         const remainingMinor = CAPTURED_MINOR - LINE_A_REFUND_MINOR;

@@ -569,9 +569,18 @@ it("WP-2423 Q6: reads staff cancellation and refuses inconsistent cancel capabil
     counter: { recordedAfterOutage: true, paidOnCardMachine: { amountMinor: "1280" } },
     batches: [{ staffCancellation: machine }],
   });
+  // 46940b76 L2: an online refund carries its amount once Payment has opened it.
+  const onlineAmount = { ...cancellation, refundMethod: "Online", refundAmountMinor: "1177" };
+  expect(
+    parseCurrentOrderQueue({
+      items: [{ ...pickup, batches: [{ ...batch, staffCancellation: onlineAmount }] }],
+      nextAfterOrderReference: null,
+    }).items[0]?.batches[0]?.staffCancellation,
+  ).toEqual(onlineAmount);
   for (const bad of [
     { ...cancellation, refundMethod: "CardMachine", refundAmountMinor: null },
-    { ...cancellation, refundMethod: "Online", refundAmountMinor: "1280" },
+    { ...cancellation, refundMethod: "Online", refundAmountMinor: "-1" },
+    { ...cancellation, refundMethod: "Online", refundAmountMinor: 1280 },
     { ...cancellation, refundMethod: "Cash", refundAmountMinor: "1" },
   ])
     expect(() =>

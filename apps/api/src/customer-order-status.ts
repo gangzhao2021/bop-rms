@@ -47,6 +47,8 @@ function reject(response: Response, status: number) {
 interface CustomerOrderStatusPort {
   read(input: CustomerOrderStatusInput): Promise<CustomerStatusResponse>;
   received?(input: CustomerOrderStatusInput): Promise<CustomerOrderReceived | null>;
+  /** WP-2423 (46940b76 L5): the Order is the current Order of the open table this guest joined. */
+  tableOrder?(input: CustomerOrderStatusInput): Promise<boolean>;
 }
 export class CustomerOrderStatusHandler {
   readonly #origin: string;
@@ -385,6 +387,28 @@ export class CustomerOrderStatusHandler {
             }
           } catch (receivedError) {
             error = receivedError;
+          }
+        }
+        // WP-2423 (46940b76 L5): another guest at this guest's open table placed the Order; the
+        // page sends them to their table's view instead of "not found". Nothing else is revealed.
+        if (
+          error instanceof OrderStatusProjectionError &&
+          ["ORDER_STATUS_PERMISSION_DENIED", "ORDER_STATUS_NOT_FOUND"].includes(error.code) &&
+          this.#port.tableOrder !== undefined
+        ) {
+          try {
+            if (await this.#port.tableOrder(input)) {
+              response.status(404).json({
+                schemaVersion: 1,
+                error: {
+                  code: "order_status_table_order",
+                  messageKey: "customer.order.status.table_order",
+                },
+              });
+              return;
+            }
+          } catch (tableError) {
+            error = tableError;
           }
         }
         const status =

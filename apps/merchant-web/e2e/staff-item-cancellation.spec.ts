@@ -46,6 +46,8 @@ test("@production cancelling paid items previews and refunds their share of the 
     }),
   );
   let cancelled = false;
+  // 46940b76 L2/L3: then the last item is cancelled, which cancels the whole order.
+  let ended = false;
   const order = () => ({
     orderReference: id(20),
     orderNumber: "20",
@@ -60,14 +62,22 @@ test("@production cancelling paid items previews and refunds their share of the 
         sequence: 1,
         acceptanceStatus: "Accepted",
         canRequestAcceptance: false,
-        canCancel: true,
-        staffCancellation: null,
-        canCancelItems: true,
+        canCancel: !ended,
+        staffCancellation: ended
+          ? {
+              reasonCode: "SOLD_OUT",
+              cancelledAt: "2026-10-17T15:07:00.000Z",
+              refundStatus: "Refunded",
+              refundMethod: "Online",
+              refundAmountMinor: "712",
+            }
+          : null,
+        canCancelItems: !ended,
       },
     ],
     canRequestAcceptance: false,
-    currentPhase: "Accepted",
-    currentVersion: cancelled ? 3 : 2,
+    currentPhase: ended ? "Cancelled" : "Accepted",
+    currentVersion: ended ? 4 : cancelled ? 3 : 2,
     unfulfillable: null,
     pickupNotCollected: false,
     acceptBy: null,
@@ -87,7 +97,7 @@ test("@production cancelling paid items previews and refunds their share of the 
     tax: money(tax),
     fee: money("0"),
     total: money(total),
-    canCancel: !cancelled || n === 2,
+    canCancel: !ended && (!cancelled || n === 2),
     cancellation:
       cancelled && n === 1
         ? {
@@ -110,6 +120,10 @@ test("@production cancelling paid items previews and refunds their share of the 
         screenId: "OPS-ORDER-DETAIL",
         pickupContact: null,
         order: order(),
+        paymentPosition: {
+          refundedMinor: ended ? "1424" : cancelled ? "712" : "0",
+          refundPendingMinor: "0",
+        },
         lines: {
           items: [
             line(1, "Mocha", "575", "75", "650"),
@@ -130,6 +144,22 @@ test("@production cancelling paid items previews and refunds their share of the 
   const previews: unknown[] = [];
   await page.route("**/merchant/orders/cancel-items/preview", (route) => {
     previews.push(route.request().postDataJSON());
+    // The last item: the whole remaining payment, with the tip left on it (the other half).
+    if (cancelled)
+      return route.fulfill({
+        headers,
+        json: {
+          scope: "Batch",
+          refund: {
+            amountMinor: "712",
+            currencyCode: "CAD",
+            includesTip: true,
+            netAmountMinor: "0",
+            taxAmountMinor: "0",
+            tipAmountMinor: "62",
+          },
+        },
+      });
     return route.fulfill({
       headers,
       json: {
@@ -149,6 +179,22 @@ test("@production cancelling paid items previews and refunds their share of the 
   await page.route("**/merchant/orders/cancel-items", (route) => {
     const command = route.request().postDataJSON() as Record<string, unknown>;
     commands.push(command);
+    if (cancelled) {
+      ended = true;
+      return route.fulfill({
+        headers,
+        json: {
+          status: "Cancelled",
+          scope: "Batch",
+          orderReference: id(20),
+          orderBatchReference: id(90),
+          cancellationReference: id(701),
+          orderItemReferences: [id(202)],
+          cancelledAt: "2026-10-17T15:07:00.000Z",
+          refund: { status: "Pending", amountMinor: "712", currencyCode: "CAD", includesTip: true },
+        },
+      });
+    }
     cancelled = true;
     return route.fulfill({
       headers,
@@ -198,12 +244,36 @@ test("@production cancelling paid items previews and refunds their share of the 
   await expect(page.getByText("−$7.12")).toBeVisible();
   await page.screenshot({ path: "test-results/item-cancel-tip-after.png" });
   await expectNoInternalText(page);
+
+  // 46940b76 L3: cancelling the last item says how much of the tip the rest of the payment returns.
+  await page.getByRole("button", { name: "Cancel items" }).click();
+  await dialog.getByRole("checkbox", { name: /1 × Synthetic croissant/u }).check();
+  await expect(dialog.locator(".order-item-cancel-refund")).toHaveText(
+    "These are the last items: the whole order is cancelled and the remaining payment of $7.12 is refunded, including $0.62 of the tip.",
+  );
+  await dialog.getByRole("combobox", { name: "Reason" }).selectOption("SOLD_OUT");
+  await dialog.getByRole("button", { name: "Cancel order and refund" }).click();
+  await expect(dialog).toBeHidden();
+  // 46940b76 L2: every refund is listed and they add up to what was refunded.
+  const refunds = page.locator(".order-lines-cancelled-refund");
+  await expect(refunds).toContainText("Cancelled items refund−$7.12");
+  await expect(refunds).toContainText("Order cancellation refund−$7.12");
+  await expect(refunds).toContainText("Total refunded−$14.24");
+  await expect(page.getByText("Refunded $14.24 of the online payment.")).toBeVisible();
+  await page.screenshot({ path: "test-results/item-cancel-whole-after.png" });
+  await expectNoInternalText(page);
   expect(previews).toEqual([
     {
       orderReference: id(20),
       orderBatchReference: id(90),
       orderItemReferences: [id(201)],
       expectedOrderVersion: 2,
+    },
+    {
+      orderReference: id(20),
+      orderBatchReference: id(90),
+      orderItemReferences: [id(202)],
+      expectedOrderVersion: 3,
     },
   ]);
   expect(commands).toEqual([
@@ -212,6 +282,14 @@ test("@production cancelling paid items previews and refunds their share of the 
       orderBatchReference: id(90),
       orderItemReferences: [id(201)],
       expectedOrderVersion: 2,
+      operationReference: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+      reasonCode: "SOLD_OUT",
+    },
+    {
+      orderReference: id(20),
+      orderBatchReference: id(90),
+      orderItemReferences: [id(202)],
+      expectedOrderVersion: 3,
       operationReference: expect.stringMatching(/^[0-9a-f-]{36}$/u),
       reasonCode: "SOLD_OUT",
     },

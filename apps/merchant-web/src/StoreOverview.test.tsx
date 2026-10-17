@@ -410,7 +410,12 @@ describe("WP-2423 3cd0f8dd: tables to close, earlier-day pickups and the day che
   });
   it("M7: a served table with nothing waiting is to be closed; only for staff who close tables", () => {
     const served = new Set([order]);
-    expect(summarizeTables(read([table()]), served)).toEqual({ open: 1, toClose: 1, more: false });
+    expect(summarizeTables(read([table()]), served)).toEqual({
+      open: 1,
+      toClose: 1,
+      earlierDays: null,
+      more: false,
+    });
     // Still eating (order not served), a round waiting for payment, or no session: not to close.
     expect(summarizeTables(read([table()]), new Set()).toClose).toBe(0);
     expect(
@@ -424,7 +429,7 @@ describe("WP-2423 3cd0f8dd: tables to close, earlier-day pickups and the day che
         read([table({ currentDiningSessionReference: null, elapsedMinutes: null, session: null })]),
         served,
       ),
-    ).toEqual({ open: 0, toClose: 0, more: false });
+    ).toEqual({ open: 0, toClose: 0, earlierDays: null, more: false });
     // Open so long the guests most likely left.
     expect(summarizeTables(read([table({ elapsedMinutes: 13 * 60 })]), null).toClose).toBe(1);
     expect(summarizeTables(read([table()], false), served).toClose).toBeNull();
@@ -487,6 +492,42 @@ describe("WP-2423 3cd0f8dd: tables to close, earlier-day pickups and the day che
       more: false,
     });
   });
+  it("46940b76 L1: only tables seated before the business day began count as left from before", () => {
+    const readAt = "2026-10-17T15:00:00.000Z";
+    const dayStartsAt = "2026-10-17T08:00:00.000Z"; // 04:00 Store time
+    const tables = [
+      table({ elapsedMinutes: 40 }), // seated today
+      table({ elapsedMinutes: 7 * 60 }), // seated 08:00Z: the day's first minute is today
+      table({ elapsedMinutes: 7 * 60 + 1 }), // seated 07:59Z: the previous business day
+      table({ currentDiningSessionReference: null, elapsedMinutes: null, session: null }),
+    ];
+    expect(summarizeTables({ ...read(tables), readAt }, null, dayStartsAt)).toMatchObject({
+      open: 3,
+      earlierDays: 1,
+    });
+    // Without the read time or the business day the split is unknown, never guessed.
+    expect(summarizeTables(read(tables), null, dayStartsAt).earlierDays).toBeNull();
+    expect(summarizeTables({ ...read(tables), readAt }, null).earlierDays).toBeNull();
+    const state: OverviewTodayState = {
+      ...initialOverviewState,
+      orders: { kind: "Hidden" },
+      pickups: { kind: "Hidden" },
+      exceptions: { kind: "Hidden" },
+      tables: { kind: "Ready", value: { ...read(tables), readAt } },
+    };
+    const hidden = { kind: "Hidden" } as const;
+    const status = (starts: string | null) =>
+      Object.fromEntries(
+        dayChecklist(state, hidden, null, starts).opening.map((item) => [item.key, item.status]),
+      );
+    expect(status(dayStartsAt)["tables-left-open"]).toBe("1 left");
+    expect(status(null)["tables-left-open"]).toBe("Reading…");
+    // Before you close still counts every open table.
+    expect(
+      dayChecklist(state, hidden, null, dayStartsAt).closing.find((i) => i.key === "tables")
+        ?.status,
+    ).toBe("3 left");
+  });
   it("M6: the opening and closing checklist reads the same sources and leaves out hidden ones", () => {
     const state: OverviewTodayState = {
       orders: {
@@ -504,14 +545,25 @@ describe("WP-2423 3cd0f8dd: tables to close, earlier-day pickups and the day che
       },
       pickups: { kind: "Ready", value: { waiting: 1, earlierDays: 3, remaking: 0, more: false } },
       exceptions: { kind: "Ready", value: { open: 0, overdue: 0 } },
-      tables: { kind: "Ready", value: read([table()]) },
+      tables: {
+        kind: "Ready",
+        value: {
+          ...read([table({ elapsedMinutes: 20 * 60 })]),
+          readAt: "2026-10-17T15:00:00.000Z",
+        },
+      },
       updatedAt: null,
     };
     const settlement = {
       kind: "Ready",
       value: { businessDate: "2026-10-16", text: "Matches the payment provider" },
     } as const;
-    const list = dayChecklist(state, settlement, "/app/organization/stores/x/service");
+    const list = dayChecklist(
+      state,
+      settlement,
+      "/app/organization/stores/x/service",
+      "2026-10-17T08:00:00.000Z",
+    );
     const status = (items: typeof list.opening) =>
       Object.fromEntries(items.map((item) => [item.key, item.status]));
     expect(status(list.opening)).toEqual({

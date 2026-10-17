@@ -77,8 +77,10 @@ function parseStaffCancellation(value: unknown, submittedAt: string) {
     (raw.refundStatus !== "Pending" && raw.refundStatus !== "Refunded") ||
     cancelledAt < submittedAt ||
     (refundMethod !== "Online" && refundMethod !== "CardMachine") ||
+    // 46940b76 L2: an online refund's amount once Payment's compensation case is open (else null).
     (refundMethod === "Online"
-      ? refundAmountMinor !== null
+      ? refundAmountMinor !== null &&
+        (typeof refundAmountMinor !== "string" || !minorPattern.test(refundAmountMinor))
       : typeof refundAmountMinor !== "string" || !minorPattern.test(refundAmountMinor))
   )
     return fail();
@@ -86,7 +88,9 @@ function parseStaffCancellation(value: unknown, submittedAt: string) {
     reasonCode: raw.reasonCode as StaffCancellationReason,
     cancelledAt,
     refundStatus: raw.refundStatus as "Pending" | "Refunded",
-    /** WP-2423 Q7: CardMachine — staff refund it on the Store's card machine and record it. */
+    /** WP-2423 Q7: CardMachine — staff refund it on the Store's card machine and record it.
+     * refundAmountMinor: the card-machine amount; online, what the refund returns (46940b76 L2),
+     * null until Payment opens its refund. */
     refundMethod: refundMethod as "Online" | "CardMachine",
     refundAmountMinor: refundAmountMinor as string | null,
   });

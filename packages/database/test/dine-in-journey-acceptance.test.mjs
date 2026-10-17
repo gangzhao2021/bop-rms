@@ -1115,6 +1115,32 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         roundsOf(hostTable).map(([n, , st, pay]) => [n, "AnotherGuest", st, pay]),
       );
       assert.deepEqual(otherTable.summary, hostTable.summary);
+      // WP-2423 (46940b76 L5): the other guest at the table may not open the host's order page,
+      // but is told it is their table's order (and sent to the table view), under the restricted
+      // API role; any other order reads as before (no answer about it).
+      await assert.rejects(
+        statusRead.read({
+          sessionCredential: tableGuestP.sessionCredential,
+          csrfCredential: tableGuestP.csrfCredential,
+          orderReference,
+        }),
+      );
+      assert.equal(
+        await statusRead.tableOrder({
+          sessionCredential: tableGuestP.sessionCredential,
+          csrfCredential: tableGuestP.csrfCredential,
+          orderReference,
+        }),
+        true,
+      );
+      assert.equal(
+        await statusRead.tableOrder({
+          sessionCredential: tableGuestP.sessionCredential,
+          csrfCredential: tableGuestP.csrfCredential,
+          orderReference: id(0x7fe),
+        }),
+        false,
+      );
       // No guest, participant or session reference leaves the composition.
       const tableJson = JSON.stringify(otherTable, (_k, v) =>
         typeof v === "bigint" ? String(v) : v,

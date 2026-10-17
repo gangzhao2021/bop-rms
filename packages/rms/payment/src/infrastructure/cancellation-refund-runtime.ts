@@ -360,6 +360,35 @@ export function createPostgresCancellationRefundRuntime(options: CancellationRef
     authorize: (tx, query) => options.authorize(tx, query),
   });
   return Object.freeze({
+    /**
+     * WP-2423 (46940b76 L3): no writes. The tip share every refund request still occupying the
+     * Order (declined ones excluded) returns from one payment — item cancellations and refunds at
+     * the customer's request — so a whole cancellation can say how much of the tip it returns.
+     */
+    async refundedTip(
+      tx: ConsumerTransaction,
+      value: { readonly orderReference: string; readonly paymentIntentReference: string },
+    ): Promise<bigint> {
+      let orderReference: string, paymentIntentReference: string;
+      try {
+        orderReference = ref(value.orderReference);
+        paymentIntentReference = ref(value.paymentIntentReference);
+      } catch {
+        return fail("CANCELLATION_REFUND_INPUT_INVALID");
+      }
+      const current = await context(tx, {
+        orderReference,
+        operationReference: ephemeralReference(),
+        observedAt: parsePaymentInstant(options.now()),
+      });
+      if (current.existing) return fail();
+      let tip = 0n;
+      for (const request of current.occupying)
+        for (const payment of request.payments)
+          if (String(payment.paymentIntentReference) === paymentIntentReference)
+            for (const item of payment.items) tip += item.components.tipAmountMinor;
+      return tip;
+    },
     /** No writes. Refunds every unit of each selected line with its share of the tip. */
     async preview(tx: ConsumerTransaction, value: CancellationRefundPreviewInput) {
       const recorded =

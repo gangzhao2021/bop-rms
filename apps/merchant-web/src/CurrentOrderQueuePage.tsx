@@ -131,6 +131,7 @@ export function CurrentOrderLines({
   cancelledBatches,
   unpaidCancelledBatches,
   failedPaymentBatches,
+  refundRows,
 }: {
   readonly lines: CurrentOrderDetail["lines"];
   readonly refundCheck?: ItemRefundCheckContext | undefined;
@@ -140,9 +141,19 @@ export function CurrentOrderLines({
   readonly unpaidCancelledBatches?: ReadonlySet<string> | undefined;
   /** WP-2423: rounds whose payment failed and that are about to be cancelled automatically. */
   readonly failedPaymentBatches?: ReadonlySet<string> | undefined;
+  /**
+   * 46940b76 L2: every refund on the order (items, whole order or round cancellations, others),
+   * from orderRefundRows. Absent: only the cancelled items' refund is listed.
+   */
+  readonly refundRows?: readonly OrderRefundRow[] | undefined;
 }) {
   const t = lines.totals;
   const cancelledRefund = cancelledItemsRefund(lines.items);
+  const refunds: readonly OrderRefundRow[] =
+    refundRows ??
+    (cancelledRefund === null
+      ? []
+      : [{ label: "Cancelled items refund", amount: cancelledRefund }]);
   const unpaid = unpaidCancelledTotal(lines, unpaidCancelledBatches);
   const unpaidLine = (item: CurrentOrderDetail["lines"]["items"][number]) =>
     item.cancellation === null && unpaidCancelledBatches?.has(item.orderBatchReference) === true;
@@ -268,16 +279,72 @@ export function CurrentOrderLines({
           </div>
         </dl>
       ) : null}
-      {cancelledRefund !== null ? (
+      {refunds.length > 0 ? (
         <dl className="order-lines-totals order-lines-cancelled-refund">
-          <div>
-            <dt>Cancelled items refund</dt>
-            <dd>−{orderMoney(cancelledRefund)}</dd>
-          </div>
+          {refunds.map((row) => (
+            <div key={row.label}>
+              <dt>{row.label}</dt>
+              <dd>{row.amount === null ? "Amount not known yet" : `−${orderMoney(row.amount)}`}</dd>
+            </div>
+          ))}
         </dl>
       ) : null}
     </section>
   );
+}
+
+export interface OrderRefundRow {
+  readonly label: string;
+  /** Null: the refund has started but Payment has not opened it yet (amount not known). */
+  readonly amount: { readonly amountMinor: string; readonly currencyCode: string } | null;
+}
+/**
+ * WP-2423 (46940b76 L2): every refund on the order, so the lines add up to what the payment line
+ * says was refunded: the cancelled items' refunds, each whole-order (pickup) or round (dine-in)
+ * cancellation's refund, and — when every amount is known — any other online refund (a refund at
+ * the customer's request, or an automatic one), then the total when there is more than one.
+ */
+export function orderRefundRows(
+  order: CurrentOrderQueue["items"][number],
+  lines: CurrentOrderDetail["lines"],
+  position: CurrentOrderDetail["paymentPosition"],
+): readonly OrderRefundRow[] {
+  const currencyCode = lines.totals.total.currencyCode;
+  const money = (minor: bigint) => ({ amountMinor: minor.toString(), currencyCode });
+  const rows: OrderRefundRow[] = [];
+  const items = cancelledItemsRefund(lines.items);
+  if (items !== null && items.amountMinor !== "0")
+    rows.push({ label: "Cancelled items refund", amount: items });
+  let online = items === null ? 0n : BigInt(items.amountMinor),
+    known = true,
+    total = online;
+  for (const batch of [...order.batches].sort((a, b) => a.sequence - b.sequence)) {
+    const cancellation = batch.staffCancellation;
+    if (cancellation === null || cancellation.refundAmountMinor === "0") continue;
+    const label =
+      (order.orderType === "Pickup"
+        ? "Order cancellation refund"
+        : `Round ${batch.sequence} cancellation refund`) +
+      (cancellation.refundMethod === "CardMachine" ? " (card machine)" : "");
+    if (cancellation.refundAmountMinor === null) {
+      known = false;
+      rows.push({ label, amount: null });
+      continue;
+    }
+    const amount = BigInt(cancellation.refundAmountMinor);
+    if (cancellation.refundMethod === "Online") online += amount;
+    total += amount;
+    rows.push({ label, amount: money(amount) });
+  }
+  if (position !== null && known) {
+    const other = BigInt(position.refundedMinor) + BigInt(position.refundPendingMinor) - online;
+    if (other > 0n) {
+      rows.push({ label: "Other refunds", amount: money(other) });
+      total += other;
+    }
+  }
+  if (rows.length > 1 && known) rows.push({ label: "Total refunded", amount: money(total) });
+  return rows;
 }
 
 /**
@@ -665,6 +732,11 @@ function QueuedOrderLines({
         cancelledBatches={storeCancelledBatches(state.detail.view)}
         unpaidCancelledBatches={unpaidCancelledBatches(state.detail.view)}
         failedPaymentBatches={failedPaymentBatches(state.detail.view)}
+        refundRows={orderRefundRows(
+          state.detail.order,
+          state.detail.lines,
+          state.detail.paymentPosition,
+        )}
       />
     </>
   ) : (
@@ -1087,9 +1159,21 @@ export function CurrentOrderQueueRows({
                                 amountMinor: batch.staffCancellation.refundAmountMinor ?? "0",
                                 currencyCode: "CAD",
                               })} on the store's card machine, then record it here.`
-                          : batch.staffCancellation.refundStatus === "Refunded"
-                            ? "The payment, including any tip, was refunded in full."
-                            : "The payment, including any tip, is being refunded in full."}
+                          : batch.staffCancellation.refundAmountMinor !== null &&
+                              batch.staffCancellation.refundAmountMinor !== "0"
+                            ? // 46940b76 L2: what is left of the payment (items refunded earlier
+                              // are listed with the order's refunds).
+                              `${
+                                batch.staffCancellation.refundStatus === "Refunded"
+                                  ? "Refunded"
+                                  : "Refunding"
+                              } ${orderMoney({
+                                amountMinor: batch.staffCancellation.refundAmountMinor,
+                                currencyCode: "CAD",
+                              })}: everything left of the payment, including any tip left.`
+                            : batch.staffCancellation.refundStatus === "Refunded"
+                              ? "The payment, including any tip, was refunded in full."
+                              : "The payment, including any tip, is being refunded in full."}
                       </span>
                     </p>
                   ) : batch.acceptanceStatus === "Cancelled" ? (
@@ -1555,6 +1639,11 @@ export function CurrentOrderQueuePage({
                           cancelledBatches={storeCancelledBatches(detail.view)}
                           unpaidCancelledBatches={unpaidCancelledBatches(detail.view)}
                           failedPaymentBatches={failedPaymentBatches(detail.view)}
+                          refundRows={orderRefundRows(
+                            detail.order,
+                            detail.lines,
+                            detail.paymentPosition,
+                          )}
                           refundCheck={{
                             orderReference: order.orderReference,
                             csrf,

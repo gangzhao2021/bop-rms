@@ -48,13 +48,14 @@ async function setup(enabled = true) {
   };
   const read = vi.fn().mockResolvedValue(result);
   const received = vi.fn().mockResolvedValue(null);
+  const tableOrder = vi.fn().mockResolvedValue(false);
   const server = createServer(
     createApp(
       enabled
         ? {
             customerOrderStatus: new CustomerOrderStatusHandler({
               allowedOrigin: "https://pilot.example",
-              port: { read, received },
+              port: { read, received, tableOrder },
             }),
           }
         : {},
@@ -71,6 +72,7 @@ async function setup(enabled = true) {
   return {
     read,
     received,
+    tableOrder,
     result,
     send: (headers: Record<string, string> = {}, query = "") =>
       fetch(url + query, {
@@ -536,4 +538,30 @@ it("WP-2423: still refuses an unknown order, another guest's order and failed au
   f.read.mockRejectedValue(new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED"));
   expect((await f.send()).status).toBe(404);
   expect(f.received).not.toHaveBeenCalled();
+});
+it("46940b76 L5: tells a guest at the open table that another guest there placed the order", async () => {
+  const f = await setup();
+  f.read.mockRejectedValue(new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED"));
+  f.tableOrder.mockResolvedValue(true);
+  const response = await f.send();
+  expect(response.status).toBe(404);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual({
+    schemaVersion: 1,
+    error: { code: "order_status_table_order", messageKey: "customer.order.status.table_order" },
+  });
+  expect(f.tableOrder).toHaveBeenCalledWith({
+    sessionCredential: "s".repeat(43),
+    csrfCredential: "c".repeat(43),
+    orderReference: id(31),
+  });
+  // Not the table's order: refused exactly as before; a failing check is a 503 without detail.
+  f.tableOrder.mockResolvedValue(false);
+  let refused = await f.send();
+  expect(refused.status).toBe(404);
+  expect(await refused.text()).toContain("order_status_not_found");
+  f.tableOrder.mockRejectedValue(new Error("private SQL credentials"));
+  refused = await f.send();
+  expect(refused.status).toBe(503);
+  expect(await refused.text()).not.toContain("private");
 });
