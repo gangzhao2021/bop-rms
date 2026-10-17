@@ -3303,6 +3303,24 @@
       "privilege": "SELECT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (WP-2423 feature control read): the api evaluates Store capability decisions (session navigation, Store capability page) with the owning Feature Control read; without the read every staff session read logged 42501 (v15 run 2026-10-16). Read only; no feature control rows are written"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_kitchen_progress_fact",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Order phase, DEC-PILOT-BATCH-PHASE-01, defect 2026-10-17): the business worker records the Kitchen preparation facts Ordering consumes (ordering.kitchen-progress:v1) and the guest order status read merges them into the Order phase (Accepted / In Progress / Ready). Append-only; no update or delete; no actor or personal data"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_kitchen_progress_fact",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Order phase, DEC-PILOT-BATCH-PHASE-01, defect 2026-10-17): the business worker records the Kitchen preparation facts Ordering consumes (ordering.kitchen-progress:v1) and the guest order status read merges them into the Order phase (Accepted / In Progress / Ready). Append-only; no update or delete; no actor or personal data"
     }
   ]
 }

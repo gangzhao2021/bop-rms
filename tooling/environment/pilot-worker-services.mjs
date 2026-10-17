@@ -15,6 +15,7 @@ export async function createInternalWorkerServices(
     createInternalPickupFulfillment,
     createInternalKitchen,
     createInternalKitchenConsumers,
+    createInternalOrderProgressConsumers,
     createInternalInventoryConsumers,
     createInternalPickupReadiness,
     createInternalPickupProofConsumer,
@@ -41,6 +42,10 @@ export async function createInternalWorkerServices(
     createInternalPickupFulfillment(resources).worker,
     createInternalKitchen(resources).worker,
     ...createInternalKitchenConsumers(resources),
+    // WP-2423 / DEC-PILOT-BATCH-PHASE-01: Kitchen progress into the Ordering Order phase.
+    ...(createInternalOrderProgressConsumers
+      ? createInternalOrderProgressConsumers(resources)
+      : []),
     ...createInternalInventoryConsumers(resources),
     createInternalPickupReadiness(resources).worker,
     createInternalPickupProofConsumer(resources),

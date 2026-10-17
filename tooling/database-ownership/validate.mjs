@@ -2194,6 +2194,22 @@ async function scanUnsupported(root, module, diagnostics) {
               "order_payment_disposition_record",
             ],
           },
+          // WP-2423 / DEC-PILOT-BATCH-PHASE-01: Ordering's Kitchen progress inbox record and the
+          // Order phase merged from its own records.
+          "src/infrastructure/persistence/order-progress-store.ts": {
+            owner: "ordering",
+            tables: [
+              "order_kitchen_progress_fact",
+              "order_item",
+              "order_batch",
+              "order_acceptance_record",
+              "order_batch_checkout_cancellation",
+              "order_staff_cancellation",
+              "order_item_staff_cancellation",
+              "order_termination_record",
+              "order_fulfillment_completion_record",
+            ],
+          },
           // WP-2423 Q6 step 2a: staff cancel item lines of a paid, accepted Batch before preparation.
           "src/infrastructure/persistence/staff-item-cancellation-store.ts": {
             owner: "ordering",

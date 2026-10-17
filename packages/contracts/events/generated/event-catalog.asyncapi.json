@@ -3116,7 +3116,7 @@
         },
         "title": "KitchenItemReady v1",
         "x-bop-compatibility": "additive",
-        "x-bop-consumers": ["fulfillment.kitchen-item-ready:v1"],
+        "x-bop-consumers": ["fulfillment.kitchen-item-ready:v1", "ordering.kitchen-progress:v1"],
         "x-bop-data-classification": "indirect_identifier",
         "x-bop-event-type": "KitchenItemReady",
         "x-bop-owner-module": "@rms/kitchen",
@@ -3174,7 +3174,7 @@
         },
         "title": "KitchenOrderReady v1",
         "x-bop-compatibility": "additive",
-        "x-bop-consumers": ["fulfillment.kitchen-order-ready:v1"],
+        "x-bop-consumers": ["fulfillment.kitchen-order-ready:v1", "ordering.kitchen-progress:v1"],
         "x-bop-data-classification": "indirect_identifier",
         "x-bop-event-type": "KitchenOrderReady",
         "x-bop-owner-module": "@rms/kitchen",
@@ -3358,7 +3358,8 @@
         "x-bop-compatibility": "additive",
         "x-bop-consumers": [
           "inventory.kitchen-ticket-closed-consumption:v1",
-          "kitchen.queue-ticket-closed-projection:v1"
+          "kitchen.queue-ticket-closed-projection:v1",
+          "ordering.kitchen-progress:v1"
         ],
         "x-bop-data-classification": "personal",
         "x-bop-event-type": "KitchenTicketClosed",
@@ -3652,7 +3653,7 @@
         },
         "title": "KitchenWorkStarted v1",
         "x-bop-compatibility": "additive",
-        "x-bop-consumers": ["kitchen.queue-work-started-projection:v1"],
+        "x-bop-consumers": ["kitchen.queue-work-started-projection:v1", "ordering.kitchen-progress:v1"],
         "x-bop-data-classification": "personal",
         "x-bop-event-type": "KitchenWorkStarted",
         "x-bop-owner-module": "@rms/kitchen",

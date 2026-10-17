@@ -302,7 +302,6 @@ describe("Event Catalog source", () => {
       ["KitchenItemProgressRecorded", "kitchen.queue-item-progress-projection:v1"],
       ["KitchenWorkAccepted", "kitchen.queue-work-accepted-projection:v1"],
       ["KitchenWorkCancelled", "kitchen.queue-work-cancelled-projection:v1"],
-      ["KitchenWorkStarted", "kitchen.queue-work-started-projection:v1"],
     ] as const) {
       expect(byType.get(eventType)).toMatchObject({
         eventType,
@@ -320,6 +319,14 @@ describe("Event Catalog source", () => {
         replacement: null,
       });
     }
+    // WP-2423 / DEC-PILOT-BATCH-PHASE-01: Ordering merges Kitchen progress into the Order phase.
+    expect(byType.get("KitchenWorkStarted")).toMatchObject({
+      ownerModule: "@rms/kitchen",
+      consumers: ["kitchen.queue-work-started-projection:v1", "ordering.kitchen-progress:v1"],
+      tenantScope: "store",
+      dataClassification: "personal",
+      replaySemantics: "idempotent",
+    });
     for (const [eventType, consumer] of [
       ["KitchenItemReady", "fulfillment.kitchen-item-ready:v1"],
       ["KitchenOrderReady", "fulfillment.kitchen-order-ready:v1"],
@@ -330,7 +337,7 @@ describe("Event Catalog source", () => {
         ownerModule: "@rms/kitchen",
         producerModule: "@rms/kitchen",
         stability: "stable",
-        consumers: [consumer],
+        consumers: [consumer, "ordering.kitchen-progress:v1"],
         tenantScope: "store",
         dataClassification: "indirect_identifier",
         compatibility: "additive",
@@ -837,6 +844,7 @@ describe("Event Catalog source", () => {
       consumers: [
         "inventory.kitchen-ticket-closed-consumption:v1",
         "kitchen.queue-ticket-closed-projection:v1",
+        "ordering.kitchen-progress:v1",
       ],
       tenantScope: "store",
       dataClassification: "personal",
@@ -1307,7 +1315,7 @@ describe("Event consumer compatibility", () => {
   if (firstConsumer === undefined) throw new Error("EVENT_CONSUMER_FIXTURE_MISSING");
 
   it("covers every accepted producer-to-consumer relation exactly", () => {
-    expect(eventConsumerContracts).toHaveLength(153);
+    expect(eventConsumerContracts).toHaveLength(157);
     expect(() =>
       assertEventConsumerCompatibility(eventCatalog, eventConsumerContracts),
     ).not.toThrow();

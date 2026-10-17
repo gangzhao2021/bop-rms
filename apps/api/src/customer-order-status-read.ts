@@ -31,6 +31,7 @@ import {
   loadPickupPaymentWindowClosure,
   createPostgresOrderStatusProjectionStore,
   findGuestSessionOrder,
+  loadOrderCanonicalPhase,
   OrderStatusProjectionError,
   parseOrderingReference,
   readCheckoutContactPresence,
@@ -174,6 +175,15 @@ export function createCustomerOrderStatusRead(
               load: (reference) => store.load({ transaction, orderReference: reference }),
               list: async () => {
                 throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
+              },
+            },
+            // WP-2423 / DEC-PILOT-BATCH-PHASE-01: the current phase Ordering merges from its own
+            // records and the Kitchen facts it consumed (accepted, preparing, ready, collected).
+            phases: {
+              load: async (reference) => {
+                if (reference !== orderReference || !(await stillAuthorized()))
+                  throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
+                return loadOrderCanonicalPhase(transaction, options.scope, reference);
               },
             },
           });

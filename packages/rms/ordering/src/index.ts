@@ -459,3 +459,30 @@ export {
 } from "./infrastructure/persistence/order-acceptance-hold-store.js";
 // WP-2423 Q14: the priced items of the Store's Orders behind the Store sales reports.
 export * from "./infrastructure/persistence/store-sales-order-source.js";
+
+// WP-2423 / DEC-PILOT-BATCH-PHASE-01: the Order phase merged from Ordering records and the
+// Kitchen facts Ordering consumes into its own inbox record.
+export {
+  resolveOrderCanonicalPhase,
+  orderKitchenProgressFactKinds,
+  OrderCanonicalPhaseError,
+  type OrderKitchenProgressFact,
+  type OrderKitchenProgressFactKind,
+  type OrderCanonicalPhaseOwnerFacts,
+} from "./domain/order-canonical-phase.js";
+export {
+  orderKitchenProgressEventTypes,
+  parseOrderKitchenProgressEnvelope,
+  OrderKitchenProgressEventError,
+  type OrderKitchenProgressEvent,
+  type OrderKitchenProgressEventType,
+} from "./application/kitchen-progress-event.js";
+export {
+  createOrderKitchenProgressConsumerService,
+  orderKitchenProgressConsumerName,
+  type OrderKitchenProgressConsumerPorts,
+} from "./application/kitchen-progress-event-consumer-service.js";
+export {
+  createPostgresOrderKitchenProgressFactStore,
+  loadOrderCanonicalPhase,
+} from "./infrastructure/persistence/order-progress-store.js";

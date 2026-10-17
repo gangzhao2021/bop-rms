@@ -5,6 +5,7 @@ import {
   OrderStatusProjectionError,
   parseOrderStatusProjection,
   parseOrderStatusSourceSnapshot,
+  type OrderStatusCanonicalPhase,
 } from "../domain/order-status-projection.js";
 import type {
   OrderStatusProjectionPorts,
@@ -154,7 +155,24 @@ export function createOrderStatusProjector(ports: OrderStatusProjectionPorts) {
   });
 }
 
-function customerView(projection: ReturnType<typeof parseOrderStatusProjection>) {
+/**
+ * WP-2423 / DEC-PILOT-BATCH-PHASE-01: the projection snapshot keeps the phase bound to its Order
+ * revision; the current overall phase is Ordering's merge of its own records and consumed Kitchen
+ * facts. The collected state stays tied to the recorded completion (Fulfilled iff Completed).
+ */
+function currentPhase(
+  snapshot: ReturnType<typeof parseOrderStatusProjection>["snapshot"],
+  merged: { readonly canonicalPhase: OrderStatusCanonicalPhase } | null,
+): OrderStatusCanonicalPhase {
+  if (snapshot.fulfillmentStatus === "Completed") return "Fulfilled";
+  if (merged === null) return snapshot.canonicalPhase;
+  return merged.canonicalPhase === "Fulfilled" ? "Ready" : merged.canonicalPhase;
+}
+
+function customerView(
+  projection: ReturnType<typeof parseOrderStatusProjection>,
+  merged: { readonly canonicalPhase: OrderStatusCanonicalPhase } | null = null,
+) {
   const snapshot = projection.snapshot;
   return Object.freeze({
     projectionName: projection.projectionName,
@@ -166,7 +184,7 @@ function customerView(projection: ReturnType<typeof parseOrderStatusProjection>)
       orderReference: snapshot.orderReference,
       orderNumber: snapshot.orderNumber,
       orderType: snapshot.orderType,
-      canonicalPhase: snapshot.canonicalPhase,
+      canonicalPhase: currentPhase(snapshot, merged),
       paymentStatus: snapshot.paymentStatus,
       kitchenStatus: snapshot.kitchenStatus,
       fulfillmentStatus: snapshot.fulfillmentStatus,
@@ -179,6 +197,10 @@ function customerView(projection: ReturnType<typeof parseOrderStatusProjection>)
 }
 
 export function createOrderStatusQueryService(ports: OrderStatusQueryPorts) {
+  const mergedPhase = async (orderReference: string) => {
+    if (ports.phases === undefined) return null;
+    return ports.phases.load(parseOrderingReference(orderReference)).catch(dependency);
+  };
   return Object.freeze({
     async getCustomer(value: unknown) {
       const raw = exact(value, ["orderReference", "observedAt"]);
@@ -208,7 +230,7 @@ export function createOrderStatusQueryService(ports: OrderStatusQueryPorts) {
         parsed.snapshot.storeReference !== parseOrderingReference(guest.storeReference)
       )
         return fail("ORDER_STATUS_PERMISSION_DENIED");
-      return customerView(parsed);
+      return customerView(parsed, await mergedPhase(orderReference));
     },
     /**
      * WP-2423 Q8: the table's shared view of its dine-in Order for any current participant of that
@@ -251,7 +273,7 @@ export function createOrderStatusQueryService(ports: OrderStatusQueryPorts) {
         parsed.snapshot.storeReference !== parseOrderingReference(guest.storeReference)
       )
         return fail("ORDER_STATUS_PERMISSION_DENIED");
-      return customerView(parsed);
+      return customerView(parsed, await mergedPhase(orderReference));
     },
     async listMerchant(value: unknown) {
       const raw = exact(value, [
@@ -342,12 +364,16 @@ export function createOrderStatusQueryService(ports: OrderStatusQueryPorts) {
         )
           return fail("ORDER_STATUS_DEPENDENCY_UNAVAILABLE");
       }
+      const phases: ({ readonly canonicalPhase: OrderStatusCanonicalPhase } | null)[] = [];
+      for (const parsed of parsedRows)
+        phases.push(await mergedPhase(parsed.snapshot.orderReference));
       return Object.freeze(
-        parsedRows.map((parsed) => {
+        parsedRows.map((parsed, index) => {
+          const view = customerView(parsed, phases[index] ?? null);
           return Object.freeze({
-            ...customerView(parsed),
+            ...view,
             order: Object.freeze({
-              ...customerView(parsed).order,
+              ...view.order,
               brandReference: parsed.snapshot.brandReference,
               storeReference: parsed.snapshot.storeReference,
               sourceChannel: parsed.snapshot.sourceChannel,

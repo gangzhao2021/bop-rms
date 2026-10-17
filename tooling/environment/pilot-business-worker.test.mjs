@@ -45,6 +45,7 @@ it("preserves the complete enabled consumer registration set and scoped workflow
       "createInternalPickupFulfillment",
       "createInternalKitchen",
       "createInternalKitchenConsumers",
+      "createInternalOrderProgressConsumers",
       "createInternalInventoryConsumers",
       "createInternalPickupReadiness",
       "createInternalPickupProofConsumer",

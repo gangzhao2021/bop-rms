@@ -43,6 +43,10 @@ const moduleManifestInput =
     ],
     consumedEvents: [
       "rms.fulfillment.fulfillment-completed.v1",
+      "rms.kitchen.kitchen-item-ready.v1",
+      "rms.kitchen.kitchen-order-ready.v1",
+      "rms.kitchen.kitchen-ticket-closed.v1",
+      "rms.kitchen.kitchen-work-started.v1",
       "rms.ordering.order-created.v1",
       "rms.payment.payment-failed.v1",
       "rms.payment.payment-succeeded.v1",
@@ -102,6 +106,7 @@ const moduleManifestInput =
         "order_amendment_operation_record",
         "order_status_projection_generation",
         "order_status_projection",
+        "order_kitchen_progress_fact",
       ],
     },
     ownedJobs: [],

@@ -1,6 +1,9 @@
 import type { GuestSession } from "@bop/identity";
 import type { OrderingInstant, OrderingReference } from "../../domain/cart.js";
-import type { OrderStatusProjection } from "../../domain/order-status-projection.js";
+import type {
+  OrderStatusCanonicalPhase,
+  OrderStatusProjection,
+} from "../../domain/order-status-projection.js";
 
 export interface OrderStatusProjectionPorts {
   readonly references: {
@@ -17,6 +20,15 @@ export interface OrderStatusProjectionPorts {
 }
 
 export interface OrderStatusQueryPorts {
+  /**
+   * WP-2423 / DEC-PILOT-BATCH-PHASE-01: Ordering's merged current phase for an Order (own records
+   * plus consumed Kitchen facts), read in the caller's transaction. Absent: the snapshot phase.
+   */
+  readonly phases?: {
+    load(
+      orderReference: OrderingReference,
+    ): Promise<{ readonly canonicalPhase: OrderStatusCanonicalPhase } | null>;
+  };
   readonly authorization: {
     authorizeCustomer(input: {
       orderReference: OrderingReference;
