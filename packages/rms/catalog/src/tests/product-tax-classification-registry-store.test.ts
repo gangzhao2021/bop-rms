@@ -88,6 +88,7 @@ function harness(seed = true, kind: "User" | "System" = "User") {
     statements: [] as string[],
     holds: [] as Parameters<Options["authority"]["holdUntilTransactionCompletes"]>[1][],
     afterHold: undefined as undefined | (() => void),
+    duringCount: undefined as undefined | (() => void),
     afterWork: undefined as undefined | ((tx: Transaction) => void),
     afterRunner: undefined as undefined | (() => void),
     doubleRunner: false,
@@ -107,11 +108,12 @@ function harness(seed = true, kind: "User" | "System" = "User") {
     state.statements.push(sql);
     let result: { rows: readonly unknown[]; rowCount?: number } = { rows: [] };
     if (sql.includes("transaction_isolation")) result = { rows: [{ isolation: "read committed" }] };
-    else if (sql.startsWith("SELECT count(*)::text"))
+    else if (sql.startsWith("SELECT count(*)::text")) {
+      state.duringCount?.();
       result = {
         rows: [{ n: String(state.records.length), bytes: String(state.records.length * 2048) }],
       };
-    else if (sql.startsWith("SELECT command_json"))
+    } else if (sql.startsWith("SELECT command_json"))
       result = {
         rows:
           values.length === 3
@@ -403,6 +405,43 @@ it.each(["missing", "coherence", "digest", "gap", "foreign"])(
       await expect(refusal).rejects.not.toMatchObject({
         code: "CATALOG_TAX_CLASSIFICATION_NOT_REGISTERED",
       });
+    expect(consumer).not.toHaveBeenCalled();
+  },
+);
+// 2026-10-16 regression triage: a Brand with no registry must only read as "not
+// registered" after the empty read itself succeeded. A dependency failure on that
+// read (connection loss, statement timeout, lease expiry while the query is in
+// flight) tells staff to try again, never that tax classifications are missing.
+it.each(["connection", "timeout", "expiry"])(
+  "reports a failed empty-registry read as unavailable, not unregistered: %s",
+  async (fault) => {
+    const h = harness(false);
+    h.state.duringCount = () => {
+      if (fault === "connection") throw new Error("Connection terminated unexpectedly");
+      if (fault === "timeout")
+        throw Object.assign(new Error("canceling statement due to statement timeout"), {
+          code: "57014",
+        });
+      h.state.at = time(5000);
+    };
+    const consumer = vi.fn();
+    await expect(
+      h.store.withCurrentResolution(
+        { ...observation(), classificationReference: id(10) },
+        consumer,
+      ),
+    ).rejects.toMatchObject({ code: "CATALOG_DEPENDENCY_UNAVAILABLE" });
+    expect(consumer).not.toHaveBeenCalled();
+    expect(h.state.outerCommitted).toBe(false);
+    // The same empty Brand, once the dependency answers, says "not registered".
+    h.state.duringCount = undefined;
+    h.state.at = at;
+    await expect(
+      h.store.withCurrentResolution(
+        { ...observation(), classificationReference: id(10) },
+        consumer,
+      ),
+    ).rejects.toMatchObject({ code: "CATALOG_TAX_CLASSIFICATION_NOT_REGISTERED" });
     expect(consumer).not.toHaveBeenCalled();
   },
 );
