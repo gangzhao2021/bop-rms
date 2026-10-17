@@ -8154,6 +8154,22 @@ body:has(.product-complete-draft) .bop-shell__header,
   border-radius: var(--bop-radius-card);
   background: var(--bop-color-surface-default);
 }
+/* v15 c9b377cb: an order about to be refunded stays readable on the signed-out cover. */
+.staff-session__urgent:empty {
+  display: none;
+}
+.staff-session__urgent .refund-deadline-warning {
+  position: static;
+  border: 1px solid var(--bop-color-border-default);
+  border-left-width: 6px;
+  border-left-color: var(--bop-color-warning);
+  border-radius: var(--bop-radius-card);
+  box-shadow: none;
+}
+.staff-session__urgent .refund-deadline-warning[data-tier="urgent"],
+.staff-session__urgent .refund-deadline-warning[data-tier="final"] {
+  border-left-color: var(--bop-color-danger);
+}
 .staff-session__dialog h2 {
   margin: 0;
   font-size: 22px;

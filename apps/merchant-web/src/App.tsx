@@ -2,6 +2,7 @@ import { CurrentOrderDetailRoute, CurrentOrderQueuePage } from "./CurrentOrderQu
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import {
   Suspense,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -31,7 +32,7 @@ import { createKitchenBoardClient } from "./kitchen-board-client.js";
 import { parseKitchenBoardView } from "./kitchen-board.js";
 import { createCurrentOrderQueueClient } from "./current-order-queue-client.js";
 import { RefundDeadlineWatch, refundDeadlinesFromOrders } from "./RefundDeadlineWatch.js";
-import type { RefundDeadline } from "./refund-deadline-warning.js";
+import { loadLastKnownRefundDeadlines, type RefundDeadline } from "./refund-deadline-warning.js";
 import type { MerchantDemoClients } from "./merchant-demo.js";
 import type { MerchantBrandWorkspaceClient } from "./merchant-brand-workspace.js";
 import { FULL_SIGN_IN_REQUIRED, needsFullSignIn } from "./full-sign-in.js";
@@ -533,6 +534,31 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           );
     };
   }, [watchCsrf, watchStoreReference, watchStoreLabel, watchOrdersHref, watchKitchen]);
+
+  // v15 c9b377cb: a visible screen counts as in use while a paid order waits for acceptance, and
+  // the signed-out cover keeps the refund countdown in view.
+  const [awaitingAcceptance, setAwaitingAcceptance] = useState(false);
+  const [coverSlot, setCoverSlot] = useState<HTMLElement | null>(null);
+  const onRefundDeadlines = useCallback((deadlines: readonly RefundDeadline[]) => {
+    const now = Date.now();
+    setAwaitingAcceptance(deadlines.some((deadline) => Date.parse(deadline.acceptBy) > now));
+  }, []);
+  // Without a sign-in (the PIN screen, a signed-out staff page) the screen shows what this tab
+  // last knew, labelled with when it was checked; nothing is read without a Session.
+  const remembered = useMemo(
+    () =>
+      demo === null && (pathname === "/operations/switch-staff" || state.kind === "SignedOut")
+        ? loadLastKnownRefundDeadlines(Date.now())
+        : null,
+    [demo, pathname, state.kind],
+  );
+  const rememberedRead = useMemo(
+    () =>
+      remembered === null
+        ? null
+        : async (): Promise<readonly RefundDeadline[]> => remembered.deadlines,
+    [remembered],
+  );
 
   useEffect(() => {
     let active = true;
@@ -1977,6 +2003,21 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
             read={refundRead}
             ordersHref={watchOrdersHref}
             onOrdersPage={pathname === "/operations/orders"}
+            signedOut={coverSlot !== null}
+            portal={coverSlot}
+            timeZone={state.kind === "Ready" ? state.workspace.selectedScope.timeZone : undefined}
+            remember
+            onDeadlines={onRefundDeadlines}
+          />
+        ) : remembered !== null && rememberedRead !== null ? (
+          <RefundDeadlineWatch
+            read={rememberedRead}
+            ordersHref={null}
+            onOrdersPage={false}
+            signedOut
+            canAccept={remembered.canAccept}
+            lastCheckedAt={remembered.checkedAt}
+            timeZone={remembered.timeZone ?? undefined}
           />
         ) : null}
         {state.kind === "Ready" && usesWorkspaceLayout(pathname) && !soldOutFromKitchen ? (
@@ -2012,6 +2053,8 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
             csrf={state.csrf}
             path={pathname}
             timeZone={state.workspace.selectedScope.timeZone}
+            awaitingAcceptance={refundRead !== null && awaitingAcceptance}
+            onCover={setCoverSlot}
           />
         ) : null}
       </StoreBusinessDayProvider>

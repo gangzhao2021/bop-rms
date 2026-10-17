@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { expectNoInternalText } from "./internal-text-guard";
 
 /**
  * WP-2423 Q18 (DEC-STAFF-SESSION-CONTINUITY): staff stay signed in while they work, are warned
@@ -73,6 +74,11 @@ async function identity(page: Page, absoluteAt = T0 + 12 * 60 * minute) {
     activityFailure: null as null | { status: number; error: string },
     /** Deadline reads answer "ended" although the Session is live (must be re-checked). */
     expiryEnded: false,
+    /**
+     * v15 c9b377cb: this many due writes are skipped because the page's own reads hold the
+     * Session row; the server then answers 200 with the unchanged deadlines.
+     */
+    busyWrites: 0,
   };
   const now = () => page.evaluate(() => Date.now());
   const body = (at: number) => ({
@@ -95,7 +101,8 @@ async function identity(page: Page, absoluteAt = T0 + 12 * 60 * minute) {
         });
       const at = await now();
       if (!live(at)) return await route.fulfill({ status: 401, json: { error: "session_ended" } });
-      if (at - server.lastSeen >= minute) {
+      if (at - server.lastSeen >= minute && server.busyWrites > 0) server.busyWrites--;
+      else if (at - server.lastSeen >= minute) {
         server.lastSeen = at;
         server.idle = Math.min(at + 30 * minute, server.absolute);
       }
@@ -405,4 +412,229 @@ test("@production a wrongly shown sign-out can be re-checked and leaves the page
   await expect(signedOut).toHaveCount(0);
   await page.getByRole("link", { name: "Orders" }).first().click();
   await expect(page).toHaveURL(/\/operations\/orders$/u);
+});
+
+test("@production using Home extends the idle deadline even when the first reports find the Session busy", async ({
+  page,
+}) => {
+  await page.clock.install({ time: T0 });
+  await workspace(page, [
+    { screenId: "HOME-OVERVIEW", label: "Overview", href: "/app", permission: "merchant.access" },
+  ]);
+  const server = await identity(page);
+  await page.goto("/app");
+  await expect(page.getByRole("heading", { level: 1, name: "Synthetic Store" })).toBeVisible();
+  await expect.poll(() => server.activity).toBe(1);
+  await advance(page, server, 2 * minute);
+  // The v15 defect: the report after this tap met the page's own reads every time, the server
+  // skipped the write, and the screen still signed out 30 minutes after sign-in.
+  server.busyWrites = 2;
+  await page.mouse.click(5, 5);
+  await advance(page, server, 2 * minute);
+  expect(server.busyWrites).toBe(0);
+  expect(server.activity).toBeGreaterThanOrEqual(4);
+  expect(server.lastSeen).toBeGreaterThan(T0 + 2 * minute);
+  expect(server.idle).toBe(server.lastSeen + 30 * minute);
+  const reported = server.activity;
+  // Nothing else touched: no further reports from Home, and no warning before the new deadline.
+  await advance(page, server, 25 * minute + 30_000);
+  expect(server.activity).toBe(reported);
+  await expect(page.getByRole("alert", { name: "Signing out soon" })).toHaveCount(0);
+  // 90 seconds before the moved deadline: warned, still signed in (the old code had signed out).
+  await advance(page, server, server.idle - 90_000 - (await page.evaluate(() => Date.now())));
+  await expect(page.getByRole("dialog", { name: "You’ve been signed out" })).toHaveCount(0);
+  await expect(page.getByRole("alert", { name: "Signing out soon" })).toBeVisible();
+});
+
+test("@production an order waiting for acceptance keeps Home signed in, and a sign-out keeps its countdown in view", async ({
+  page,
+}) => {
+  // Counts the chime's tones instead of playing them.
+  await page.addInitScript(() => {
+    const tones = { count: 0 };
+    (window as unknown as { __tones: typeof tones }).__tones = tones;
+    const ignore = () => undefined;
+    const node = () => ({
+      connect: (next: unknown) => next ?? node(),
+      frequency: { value: 0 },
+      gain: { setValueAtTime: ignore, exponentialRampToValueAtTime: ignore },
+      type: "sine",
+      start: ignore,
+      stop: ignore,
+    });
+    class FakeAudioContext {
+      state = "running";
+      currentTime = 0;
+      destination = {};
+      createOscillator() {
+        tones.count += 1;
+        return node();
+      }
+      createGain() {
+        return node();
+      }
+      resume() {
+        return Promise.resolve();
+      }
+    }
+    (window as unknown as { AudioContext: unknown }).AudioContext = FakeAudioContext;
+  });
+  const chimes = async () =>
+    (await page.evaluate(
+      () => (window as unknown as { __tones: { count: number } }).__tones.count,
+    )) / 2;
+  await page.clock.install({ time: T0 });
+  await workspace(page, [
+    { screenId: "HOME-OVERVIEW", label: "Overview", href: "/app", permission: "merchant.access" },
+    {
+      screenId: "OPS-ORDER-QUEUE",
+      label: "Orders",
+      href: "/operations/orders",
+      permission: "ordering.operate",
+    },
+  ]);
+  // On a registered shared tablet the sign-in is the PIN screen.
+  await page.route("**/merchant/sign-in-entry", (route) =>
+    route.fulfill({ headers, json: { path: "/operations/switch-staff", testOnly: false } }),
+  );
+  const server = await identity(page);
+  // Order 15: paid, nobody accepted it, refunded automatically at 18:08Z (14:08 in the Store).
+  const acceptBy = new Date(T0 + 8 * minute).toISOString();
+  await page.route("**/merchant/orders", (route) =>
+    server.ended
+      ? route.fulfill({ status: 401, json: { error: "session_ended" } })
+      : route.fulfill({
+          headers,
+          json: {
+            items: [
+              {
+                orderReference: id(15),
+                orderNumber: "15",
+                orderType: "Pickup",
+                sourceChannel: "Web",
+                submittedAt: new Date(T0 - 22 * minute).toISOString(),
+                observedAt: new Date(T0).toISOString(),
+                initialBatchReference: id(65),
+                batches: [
+                  {
+                    orderBatchReference: id(65),
+                    sequence: 1,
+                    acceptanceStatus: "NotAccepted",
+                    canRequestAcceptance: true,
+                    canCancel: false,
+                    staffCancellation: null,
+                    canCancelItems: false,
+                  },
+                ],
+                canRequestAcceptance: true,
+                currentPhase: "Submitted",
+                currentVersion: 1,
+                unfulfillable: null,
+                pickupNotCollected: false,
+                acceptBy,
+                acceptanceHold: null,
+                awaitingPayment: false,
+              },
+            ],
+            nextAfterOrderReference: null,
+          },
+        }),
+  );
+  await page.goto("/app");
+  await expect(page.getByRole("heading", { level: 1, name: "Synthetic Store" })).toBeVisible();
+  await expect.poll(() => server.activity).toBe(1);
+  // Nobody touches Home, but an order is waiting: the screen counts as in use (about once a minute).
+  await advance(page, server, 3 * minute + 30_000);
+  expect(server.activity).toBeGreaterThanOrEqual(4);
+  expect(server.idle).toBeGreaterThan(T0 + 32 * minute);
+  const warning = page.getByRole("region", { name: "Orders about to be refunded" });
+  await expect(warning).toContainText(
+    "Order 15 will be refunded automatically in 5 min unless someone accepts it.",
+  );
+  await expect(warning.getByRole("link", { name: "Accept on Orders" })).toBeVisible();
+
+  // The sign-in ends (signed out on another screen) inside the warning window.
+  server.ended = true;
+  await advance(page, server, 70_000);
+  const signedOut = page.getByRole("dialog", { name: "You’ve been signed out" });
+  await expect(signedOut).toBeVisible();
+  const kept = signedOut.getByRole("region", { name: "Orders about to be refunded" });
+  await expect(kept).toContainText(
+    "Order 15 will be refunded automatically in 4 min unless someone accepts it.",
+  );
+  await expect(kept).toContainText("Sign in to accept it.");
+  await expect(kept).toContainText(/Last checked at 14:0\d, before this screen signed out\./u);
+  // No link that cannot work without a sign-in; the cover's own sign-in goes to the PIN screen.
+  await expect(kept.getByRole("link")).toHaveCount(0);
+  await expect(signedOut.getByRole("link", { name: "Sign in again" })).toHaveAttribute(
+    "href",
+    "/operations/switch-staff",
+  );
+  await expect(page.getByRole("region", { name: "Orders about to be refunded" })).toHaveCount(1);
+  const onTop = () =>
+    page.evaluate(() => {
+      const box = document
+        .querySelector(".staff-session__cover .refund-deadline-warning li")
+        ?.getBoundingClientRect();
+      if (!box) return false;
+      const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      return top?.closest(".refund-deadline-warning") !== null;
+    });
+  expect(await onTop()).toBe(true);
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await expect(kept).toBeVisible();
+    expect(await onTop()).toBe(true);
+    await noOverflow(page);
+    await page.screenshot({ path: `test-results/staff-session-signed-out-refund-${width}.png` });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expectNoInternalText(page);
+
+  // Two minutes left: the chime sounds only with the words in view on the cover.
+  expect(await chimes()).toBe(0);
+  await advance(page, server, 2 * minute);
+  await expect(kept).toContainText(
+    "Order 15 will be refunded automatically in 2 min unless someone accepts it.",
+  );
+  await expect.poll(chimes).toBe(1);
+  expect(await onTop()).toBe(true);
+  await expect(signedOut.getByRole("alert").filter({ hasText: "in 2 min" })).toHaveCount(1);
+
+  // Sign in again: the PIN screen shows the same countdown (last known, labelled) while the next
+  // person enters their PIN.
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({ status: 401, json: { error: "session_required" } }),
+  );
+  await page.route("**/merchant/staff-switch", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        storeLabel: "Synthetic Store",
+        timeZone: "America/Toronto",
+        staff: [{ choice: "ch-ana", name: "Ana Lopez" }],
+        fullSignIn: { path: "/internal-test/staff", testOnly: true },
+      },
+    }),
+  );
+  await signedOut.getByRole("link", { name: "Sign in again" }).click();
+  await expect(page).toHaveURL(/\/operations\/switch-staff$/u);
+  await expect(page.getByRole("button", { name: "Ana Lopez" })).toBeVisible();
+  const pinScreen = page.getByRole("region", { name: "Orders about to be refunded" });
+  await expect(pinScreen).toContainText(
+    "Order 15 will be refunded automatically in 2 min unless someone accepts it.",
+  );
+  await expect(pinScreen).toContainText("Sign in to accept it.");
+  await expect(pinScreen).toContainText(/Last checked at 14:0\d, before this screen signed out\./u);
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await expect(pinScreen).toBeVisible();
+    await noOverflow(page);
+    await page.screenshot({ path: `test-results/staff-switch-refund-${width}.png` });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expectNoInternalText(page);
+  // Past the deadline the remembered countdown is gone; nothing sounds without it.
+  await page.clock.runFor(3 * minute);
+  await expect(pinScreen).toHaveCount(0);
 });

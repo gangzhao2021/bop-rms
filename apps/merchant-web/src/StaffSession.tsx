@@ -2,7 +2,8 @@ import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { storeTime } from "./StoreTime.js";
 import {
-  ACTIVITY_INTERVAL_MS,
+  activityRecorded,
+  activityRetryMs,
   createStaffSessionClient,
   isOperationalScreen,
   remaining,
@@ -132,11 +133,24 @@ export function StaffSessionGuard({
   path,
   timeZone,
   client,
+  awaitingAcceptance = false,
+  onCover,
 }: {
   readonly csrf: string;
   readonly path: string;
   readonly timeZone: string | undefined;
   readonly client?: StaffSessionClient;
+  /**
+   * A paid order is waiting for acceptance with a refund deadline (v15 c9b377cb decision): while
+   * the screen is visible it counts as in use, like Orders, so the sign-in does not lapse in the
+   * middle of an acceptance window. Still bounded by visibility and the 12-hour limit.
+   */
+  readonly awaitingAcceptance?: boolean;
+  /**
+   * The signed-out cover's slot for urgent store warnings (the refund countdown), or null when
+   * there is no cover. What sounds must stay readable on the screen staff see.
+   */
+  readonly onCover?: (slot: HTMLElement | null) => void;
 }) {
   const source = useMemo(() => client ?? createStaffSessionClient(), [client]);
   const [current, setCurrent] = useState<SessionDeadlines | null>(null);
@@ -146,11 +160,14 @@ export function StaffSessionGuard({
   const [checking, setChecking] = useState(false);
   const lastInput = useRef(Date.now());
   const lastReport = useRef(Number.NEGATIVE_INFINITY);
+  // An unrecorded or failed report is retried from this time without losing the staff input.
+  const nextAttempt = useRef(Number.NEGATIVE_INFINITY);
+  const misses = useRef(0);
   const lastVerify = useRef(Number.NEGATIVE_INFINITY);
   const inFlight = useRef(false);
   const verifying = useRef(false);
   const verifiedEnd = useRef(false);
-  const operational = isOperationalScreen(path);
+  const operational = isOperationalScreen(path) || awaitingAcceptance;
   const notice = current === null ? { kind: "None" as const } : sessionNotice(current, Date.now());
   const now = useNow(notice.kind !== "None");
   const dialog = useRef<HTMLHeadingElement>(null);
@@ -196,6 +213,7 @@ export function StaffSessionGuard({
     async (force = false) => {
       if (inFlight.current) return;
       const at = Date.now();
+      if (!force && at < nextAttempt.current) return;
       if (
         !force &&
         !shouldReportActivity({
@@ -209,12 +227,20 @@ export function StaffSessionGuard({
         return;
       inFlight.current = true;
       try {
-        apply(await source.activity(csrf));
-        lastReport.current = at;
+        const read = await source.activity(csrf);
+        apply(read);
+        if (read === "Ended" || activityRecorded(read, Date.now())) {
+          lastReport.current = at;
+          misses.current = 0;
+        } else {
+          // The server skipped the write (the Session row was busy with this page's own reads):
+          // keep the input pending and try again shortly, off the page's read timers.
+          misses.current += 1;
+          nextAttempt.current = Date.now() + activityRetryMs(misses.current);
+        }
       } catch {
-        // Busy, refused or offline: keep the last known deadlines and retry on a later tick
-        // (allow the next attempt after 15 s rather than a full minute).
-        lastReport.current = at - ACTIVITY_INTERVAL_MS + 15_000;
+        // Refused or offline: keep the last known deadlines and the pending input; retry in 15 s.
+        nextAttempt.current = Date.now() + 15_000;
       } finally {
         inFlight.current = false;
       }
@@ -284,6 +310,11 @@ export function StaffSessionGuard({
   useEffect(() => {
     if (ended !== null) dialog.current?.focus();
   }, [ended]);
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    onCover?.(ended === null ? null : slot);
+  }, [ended, onCover, slot]);
+  useEffect(() => () => onCover?.(null), [onCover]);
 
   const checkAgain = async () => {
     setChecking(true);
@@ -296,6 +327,7 @@ export function StaffSessionGuard({
         verifiedEnd.current = false;
         lastVerify.current = Date.now();
         lastReport.current = Number.NEGATIVE_INFINITY;
+        nextAttempt.current = Number.NEGATIVE_INFINITY;
         setEnded(null);
       }
     } catch {
@@ -314,6 +346,8 @@ export function StaffSessionGuard({
           aria-modal="true"
           aria-labelledby="staff-session-ended"
         >
+          {/* An order about to be refunded stays in view here (filled by the refund warning). */}
+          <div className="staff-session__urgent" ref={setSlot} />
           <h2 id="staff-session-ended" tabIndex={-1} ref={dialog}>
             You’ve been signed out
           </h2>

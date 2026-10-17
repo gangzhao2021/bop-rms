@@ -1,11 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { findInternalText } from "../e2e/internal-text-patterns.js";
 import {
+  loadLastKnownRefundDeadlines,
   refundAlertsDue,
   refundClockMs,
   refundWarningText,
   refundWarnings,
   refundWarningTier,
+  saveLastKnownRefundDeadlines,
 } from "./refund-deadline-warning.js";
 
 const now = Date.parse("2026-10-17T13:50:00.000Z");
@@ -79,5 +81,81 @@ describe("WP-2423 warn before an unaccepted paid order is refunded", () => {
     expect(refundClockMs([{ orderNumber: "9", acceptBy: at(900) }], now)).toBeNull();
     expect(refundClockMs([{ orderNumber: "9", acceptBy: at(310) }], now)).toBe(1_000);
     expect(refundClockMs([{ orderNumber: "9", acceptBy: at(-1) }], now)).toBeNull();
+  });
+});
+
+describe("v15 c9b377cb: the last known countdown for a signed-out or PIN screen", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const stubStorage = () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal("sessionStorage", {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => void values.set(key, value),
+    });
+    return values;
+  };
+
+  it("keeps only order numbers, deadlines and when they were checked, and drops past deadlines", () => {
+    const values = stubStorage();
+    saveLastKnownRefundDeadlines({
+      deadlines: [
+        { orderNumber: "15", acceptBy: at(120) },
+        { orderNumber: "14", acceptBy: at(-5) },
+      ],
+      checkedAt: now - 30_000,
+      canAccept: true,
+      timeZone: "America/Toronto",
+    });
+    expect(JSON.parse([...values.values()][0] ?? "null")).toEqual({
+      deadlines: [
+        { orderNumber: "15", acceptBy: at(120) },
+        { orderNumber: "14", acceptBy: at(-5) },
+      ],
+      checkedAt: now - 30_000,
+      canAccept: true,
+      timeZone: "America/Toronto",
+    });
+    expect(loadLastKnownRefundDeadlines(now)).toEqual({
+      deadlines: [{ orderNumber: "15", acceptBy: at(120) }],
+      checkedAt: now - 30_000,
+      canAccept: true,
+      timeZone: "America/Toronto",
+    });
+    // Nothing left ahead: nothing to show.
+    expect(loadLastKnownRefundDeadlines(now + 121_000)).toBeNull();
+  });
+
+  it("ignores anything malformed and works without storage", () => {
+    const values = stubStorage();
+    for (const raw of [
+      "not json",
+      "[]",
+      JSON.stringify({ deadlines: [], checkedAt: 1, canAccept: true, timeZone: null }),
+      JSON.stringify({
+        deadlines: [{ orderNumber: "<b>", acceptBy: at(60) }],
+        checkedAt: 1,
+        canAccept: true,
+        timeZone: null,
+      }),
+      JSON.stringify({
+        deadlines: [{ orderNumber: "1", acceptBy: at(60) }],
+        checkedAt: "x",
+        canAccept: true,
+        timeZone: null,
+      }),
+    ]) {
+      values.set("bop-merchant-refund-deadlines", raw);
+      expect(loadLastKnownRefundDeadlines(now)).toBeNull();
+    }
+    vi.stubGlobal("sessionStorage", undefined);
+    expect(loadLastKnownRefundDeadlines(now)).toBeNull();
+    expect(() =>
+      saveLastKnownRefundDeadlines({
+        deadlines: [],
+        checkedAt: now,
+        canAccept: false,
+        timeZone: null,
+      }),
+    ).not.toThrow();
   });
 });

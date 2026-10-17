@@ -3,6 +3,8 @@ import { createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import {
   ACTIVITY_INTERVAL_MS,
+  activityRecorded,
+  activityRetryMs,
   createStaffSessionClient,
   isOperationalScreen,
   remaining,
@@ -53,6 +55,31 @@ describe("WP-2423 Q18 staff activity rule", () => {
     // No input since the last report: only an operational screen keeps the Session alive.
     expect(report({ lastInputAt: now - 2 * ACTIVITY_INTERVAL_MS })).toBe(false);
     expect(report({ lastInputAt: now - 2 * ACTIVITY_INTERVAL_MS, operational: true })).toBe(true);
+  });
+});
+
+describe("v15 c9b377cb activity that the server skipped", () => {
+  it("counts a report only when the answer shows the idle deadline moved", () => {
+    const now = base + 20 * 60_000;
+    // Written: idle deadline is now + 30 min.
+    expect(activityRecorded(deadlines(50), now)).toBe(true);
+    // Within the one-minute write interval of the last write: nothing to do.
+    expect(activityRecorded(deadlines(49), now)).toBe(true);
+    // The row was busy and the server answered with the old deadline (signed in at minute 0).
+    expect(activityRecorded(deadlines(30), now)).toBe(false);
+    // The 12-hour cap: the deadline cannot move further.
+    expect(activityRecorded(deadlines(725, 725), base + 710 * 60_000)).toBe(true);
+    // Server clock 5 minutes ahead of the tablet.
+    expect(activityRecorded(deadlines(55, 720, 5 * 60_000), now)).toBe(true);
+    expect(activityRecorded(deadlines(50, 720, 5 * 60_000), now)).toBe(false);
+  });
+
+  it("retries a skipped report soon, backing off to a minute, off the page's read timers", () => {
+    expect(activityRetryMs(1, () => 0)).toBe(5_000);
+    expect(activityRetryMs(2, () => 0)).toBe(10_000);
+    expect(activityRetryMs(3, () => 0.5)).toBe(21_000);
+    expect(activityRetryMs(10, () => 0)).toBe(ACTIVITY_INTERVAL_MS);
+    expect(activityRetryMs(1, () => 0.999)).toBeLessThan(7_000);
   });
 });
 

@@ -94,3 +94,87 @@ export function refundClockMs(deadlines: readonly RefundDeadline[], now: number)
     ? 1_000
     : null;
 }
+
+/**
+ * v15 c9b377cb defect 2: what this screen last knew, kept for this browser tab only so a signed-out
+ * or PIN screen can still show the countdown (with the time it was last checked) instead of losing
+ * it. Order numbers and deadlines only — never customer details. A newer read replaces it; past
+ * deadlines are ignored.
+ */
+export interface LastKnownRefundDeadlines {
+  readonly deadlines: readonly RefundDeadline[];
+  readonly checkedAt: number;
+  /** Whether the person signed in here could accept orders (false on the kitchen display). */
+  readonly canAccept: boolean;
+  readonly timeZone: string | null;
+}
+
+const LAST_KNOWN_KEY = "bop-merchant-refund-deadlines";
+const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/u;
+const ORDER_NUMBER = /^[A-Za-z0-9-]{1,20}$/u;
+const TIME_ZONE = /^[A-Za-z_]+(\/[A-Za-z0-9_+-]+){0,2}$/u;
+
+function tabStorage(): Storage | null {
+  try {
+    return globalThis.sessionStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveLastKnownRefundDeadlines(value: LastKnownRefundDeadlines): void {
+  try {
+    tabStorage()?.setItem(
+      LAST_KNOWN_KEY,
+      JSON.stringify({
+        deadlines: value.deadlines.map((deadline) => ({
+          orderNumber: deadline.orderNumber,
+          acceptBy: deadline.acceptBy,
+        })),
+        checkedAt: value.checkedAt,
+        canAccept: value.canAccept,
+        timeZone: value.timeZone,
+      }),
+    );
+  } catch {
+    // Storage full or blocked: the live screen still warns; only the signed-out copy is lost.
+  }
+}
+
+/** The last known deadlines still ahead of `now`, or null when there are none. */
+export function loadLastKnownRefundDeadlines(now: number): LastKnownRefundDeadlines | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(tabStorage()?.getItem(LAST_KNOWN_KEY) ?? "null");
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const body = parsed as Record<string, unknown>;
+  if (
+    !Array.isArray(body.deadlines) ||
+    !Number.isSafeInteger(body.checkedAt) ||
+    typeof body.canAccept !== "boolean" ||
+    (body.timeZone !== null &&
+      (typeof body.timeZone !== "string" || !TIME_ZONE.test(body.timeZone)))
+  )
+    return null;
+  const deadlines = body.deadlines.flatMap((item: unknown) => {
+    if (item === null || typeof item !== "object") return [];
+    const { orderNumber, acceptBy } = item as Record<string, unknown>;
+    return typeof orderNumber === "string" &&
+      ORDER_NUMBER.test(orderNumber) &&
+      typeof acceptBy === "string" &&
+      INSTANT.test(acceptBy) &&
+      Date.parse(acceptBy) > now
+      ? [{ orderNumber, acceptBy }]
+      : [];
+  });
+  if (deadlines.length === 0) return null;
+  return {
+    deadlines,
+    checkedAt: body.checkedAt as number,
+    canAccept: body.canAccept,
+    timeZone: body.timeZone as string | null,
+  };
+}

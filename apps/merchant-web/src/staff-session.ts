@@ -39,7 +39,11 @@ const SIGN_IN_PATH = /^\/(?!\/)[A-Za-z0-9/_?=&.-]{0,200}$/u;
 
 const operationalScreens = [/^\/operations\/(orders|kitchen|pickup|dining)(\/|$)/u];
 
-/** Screens staff keep open to watch live work; while visible they count as activity. */
+/**
+ * Screens staff keep open to watch live work; while visible they count as activity. A visible
+ * staff screen also counts while a paid order is waiting for acceptance with a refund deadline
+ * (the guard's `awaitingAcceptance`): the screen is then alerting staff to live work.
+ */
 export function isOperationalScreen(path: string): boolean {
   return operationalScreens.some((pattern) => pattern.test(path));
 }
@@ -55,6 +59,33 @@ export function shouldReportActivity(input: {
   if (input.now - input.lastReportAt < ACTIVITY_INTERVAL_MS) return false;
   return input.operational || input.lastInputAt > input.lastReportAt;
 }
+
+/**
+ * v15 c9b377cb defect 1: the server records activity at most once a minute, and skips the write
+ * (answering 200 with the unchanged deadlines) while the page's own reads hold the Session row.
+ * Those reads run on 15/30-second timers started with the page, so a report due on the same
+ * minute collided every time and staff were signed out 30 minutes after sign-in although they had
+ * used the screen. A report counts only when the answer shows the idle deadline was moved (or is
+ * already within the write interval of "now + idle time", or capped at the 12-hour limit).
+ */
+export function activityRecorded(deadlines: SessionDeadlines, browserNow: number): boolean {
+  const serverNow = browserNow + deadlines.serverOffsetMs;
+  const expected = Math.min(
+    serverNow + deadlines.idleTimeoutMinutes * 60_000 - ACTIVITY_INTERVAL_MS - 30_000,
+    Date.parse(deadlines.absoluteExpiresAt),
+  );
+  return Date.parse(deadlines.idleExpiresAt) >= expected;
+}
+
+/** Retry delay after an unrecorded (busy) report: 5 s doubling to 60 s, with up to 2 s jitter. */
+export function activityRetryMs(misses: number, random: () => number = Math.random): number {
+  return (
+    Math.min(ACTIVITY_RETRY_MS * 2 ** Math.max(0, misses - 1), ACTIVITY_INTERVAL_MS) +
+    Math.floor(random() * 2_000)
+  );
+}
+
+export const ACTIVITY_RETRY_MS = 5_000;
 
 export type SessionNotice =
   | { readonly kind: "None" }
