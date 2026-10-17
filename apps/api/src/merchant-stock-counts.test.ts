@@ -159,6 +159,8 @@ const d = vi.hoisted(() => ({
   ports: vi.fn(),
   execute: vi.fn(),
   list: vi.fn(),
+  members: vi.fn(async (): Promise<unknown[]> => []),
+  names: vi.fn(async (): Promise<Map<string, string>> => new Map()),
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => d.resolve }));
 vi.mock("./merchant-stock-catalog.js", () => ({
@@ -166,7 +168,8 @@ vi.mock("./merchant-stock-catalog.js", () => ({
 }));
 vi.mock("@bop/membership", async (original) => ({
   ...(await original<object>()),
-  listStoreMembers: async () => [],
+  listStoreMembers: d.members,
+  memberDisplayNames: d.names,
 }));
 vi.mock("@rms/inventory", async (original) => ({
   ...(await original<object>()),
@@ -212,6 +215,40 @@ function setup() {
   const submit = { ...input, body: { action: "Submit", ...base } };
   return { tx, allowed, authorizeActions, service, input, submit };
 }
+describe("v15 run: stock count people", () => {
+  beforeEach(() => vi.clearAllMocks());
+  it("names counters from the staff list and the Brand directory, never an identifier fragment", async () => {
+    const f = setup();
+    d.members.mockResolvedValue([
+      { actorReference: id(10), displayName: "Ana", membershipLifecycle: "Active" },
+      { actorReference: id(11), displayName: null, membershipLifecycle: "Active" },
+    ]);
+    d.names.mockResolvedValue(new Map([[id(256), "Mina Chen"]]));
+    d.list.mockResolvedValue({
+      counts: [
+        { assigneeReference: id(256) },
+        { assigneeReference: id(257) },
+        { assigneeReference: id(10) },
+        { assigneeReference: null },
+      ],
+      hasMore: false,
+    });
+    const view = (await f.service.query({ ...f.input, countReference: null, before: null })) as {
+      staff: unknown;
+      people: unknown;
+    };
+    expect(view.staff).toEqual([
+      { actorReference: id(10), label: "You" },
+      { actorReference: id(11), label: "Unnamed staff member" },
+    ]);
+    expect(d.names).toHaveBeenCalledWith(expect.anything(), expect.anything(), [id(256), id(257)]);
+    expect(view.people).toEqual([
+      { actorReference: id(256), label: "Mina Chen" },
+      { actorReference: id(257), label: "Unnamed staff member" },
+    ]);
+    expect(JSON.stringify(view)).not.toMatch(/Staff [0-9a-f]{4}/u);
+  });
+});
 describe("WP-2423 stock count authorization", () => {
   beforeEach(() => vi.clearAllMocks());
   it("lists counts with one start resolution (every count permission) and one recheck", async () => {

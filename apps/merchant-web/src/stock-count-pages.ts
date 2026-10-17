@@ -84,6 +84,8 @@ interface Base {
     readonly name: string;
   }[];
   readonly staff: readonly { readonly actorReference: string; readonly label: string }[];
+  /** People a count names who are not on the Store's staff list (a Brand Owner, a past member). */
+  readonly people?: readonly { readonly actorReference: string; readonly label: string }[];
 }
 export interface StockCountListView extends Base {
   readonly screenId: "INV-COUNT-LIST";

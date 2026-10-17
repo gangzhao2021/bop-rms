@@ -1,3 +1,4 @@
+import { Link } from "react-router";
 import { StatePanel } from "@bop-rms/ui";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
@@ -241,9 +242,9 @@ export function OperationalDashboard({ view }: { readonly view: OperationalDashb
               {view.permissions.mayDrill &&
               item.drillTarget !== null &&
               item.status !== "Unavailable" ? (
-                <a className="shell-action" href={item.drillTarget}>
+                <Link className="shell-action" to={item.drillTarget}>
                   Open authorized source facts
-                </a>
+                </Link>
               ) : null}
             </article>
           ))}

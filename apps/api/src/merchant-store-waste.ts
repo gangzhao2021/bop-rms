@@ -157,7 +157,7 @@ export function createMerchantStoreWaste(options: {
             member.actorReference,
             member.actorReference === scope.actor
               ? "You"
-              : (member.displayName ?? "Staff " + member.actorReference.slice(-4)),
+              : (member.displayName ?? "Unnamed staff member"),
           ]),
         );
         const base = {

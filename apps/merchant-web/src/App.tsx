@@ -10,7 +10,11 @@ import {
   type ReactNode,
 } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router";
-import { usesWorkspaceLayout, WorkspaceLayout } from "./WorkspaceLayout.js";
+import {
+  usesWorkspaceLayout,
+  WorkspaceLayout,
+  workspaceNavigationLinks,
+} from "./WorkspaceLayout.js";
 import { StaffSessionGuard, StaffSignedOutPanel, StaffSwitchButton } from "./StaffSession.js";
 import { StaffPinControls } from "./StaffPinControls.js";
 import { StaffSwitchPage } from "./StaffSwitchPage.js";
@@ -1683,15 +1687,10 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                         (item) => item.screenId === "CAT-AVAILABILITY",
                       )?.href
                     }
-                    navigation={state.workspace.navigation.map((item) => (
-                      <a
-                        key={item.screenId}
-                        href={item.href}
-                        aria-current={item.screenId === "KIT-KITCHEN-QUEUE" ? "page" : undefined}
-                      >
-                        {item.label}
-                      </a>
-                    ))}
+                    navigation={workspaceNavigationLinks(
+                      state.workspace.navigation,
+                      (item) => item.screenId === "KIT-KITCHEN-QUEUE",
+                    )}
                   />
                 ) : (
                   <StatePanel heading="Kitchen unavailable">
@@ -1720,15 +1719,10 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                     state.workspace.navigation.find((item) => item.screenId === "DIN-TABLE-LIST")
                       ?.href
                   }
-                  navigation={state.workspace.navigation.map((item) => (
-                    <a
-                      key={item.screenId}
-                      href={item.href}
-                      aria-current={item.screenId === "DIN-FLOOR-BOARD" ? "page" : undefined}
-                    >
-                      {item.label}
-                    </a>
-                  ))}
+                  navigation={workspaceNavigationLinks(
+                    state.workspace.navigation,
+                    (item) => item.screenId === "DIN-FLOOR-BOARD",
+                  )}
                 />
               ) : (
                 <StatePanel heading="Dining unavailable">
@@ -1756,15 +1750,10 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                     csrf={state.csrf}
                     storeReference={state.workspace.selectedScope.storeReference}
                     storeLabel={state.workspace.selectedScope.storeLabel}
-                    navigation={state.workspace.navigation.map((item) => (
-                      <a
-                        key={item.screenId}
-                        href={item.href}
-                        aria-current={item.href === "/operations/kitchen" ? "page" : undefined}
-                      >
-                        {item.label}
-                      </a>
-                    ))}
+                    navigation={workspaceNavigationLinks(
+                      state.workspace.navigation,
+                      (item) => item.href === "/operations/kitchen",
+                    )}
                   />
                 ) : (
                   <StatePanel heading="Kitchen work item unavailable">

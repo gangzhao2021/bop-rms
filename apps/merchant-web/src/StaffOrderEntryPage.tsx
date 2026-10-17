@@ -1,5 +1,5 @@
 import { StatePanel } from "@bop-rms/ui";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { createDiningSessionClient } from "./dining-session-client.js";
 import { validSlipReference } from "./CardMachineRefundAction.js";
@@ -153,6 +153,8 @@ export function placeErrorText(
 
 /** WP-2423 item 5: minutes before the payment time ends when staff are warned urgently. */
 export const paymentUrgentMinutes = 10;
+/** v15 run: how often the counter menu re-reads what the store can sell while staff build an order. */
+export const MENU_REFRESH_MS = 30_000;
 
 /**
  * WP-2423 item 5 ("warn before timeouts"): what staff are told about the time left to record a
@@ -309,6 +311,42 @@ export function StaffOrderEntryPage({
     if (phase === "Charge") chargeHeading.current?.focus();
   }, [phase]);
 
+  // v15 run: what the store can sell changes with every order (stock used, items sold out), so
+  // the menu is re-read quietly after each send or payment, every 30 s while staff build an
+  // order, and when the screen comes back into view. A failed re-read keeps the last menu (the
+  // server still refuses an item that ran out, naming it); it never blanks the order in progress.
+  const menuRefresh = useRef<AbortController | null>(null);
+  const refreshMenu = useCallback(() => {
+    menuRefresh.current?.abort();
+    const controller = new AbortController();
+    menuRefresh.current = controller;
+    client
+      .loadMenu(controller.signal, tableMode ? "DineIn" : "Pickup")
+      .then((value) => {
+        if (!controller.signal.aborted)
+          setMenu((current) =>
+            current.kind === "Ready" ? { kind: "Ready", menu: value } : current,
+          );
+      })
+      .catch(() => undefined);
+  }, [client, tableMode]);
+  useEffect(() => () => menuRefresh.current?.abort(), []);
+  const menuReady = menu.kind === "Ready";
+  useEffect(() => {
+    if (!menuReady || phase !== "Building") return;
+    const timer = setInterval(refreshMenu, MENU_REFRESH_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refreshMenu();
+    };
+    window.addEventListener("focus", refreshMenu);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", refreshMenu);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [menuReady, phase, refreshMenu]);
+
   // Any change to what is ordered is a new order intent.
   const changeLines = (next: readonly Line[]) => {
     placeOperation.current = null;
@@ -371,6 +409,7 @@ export function StaffOrderEntryPage({
       setPlaced(order);
       payOperation.current = null;
       setPhase("Charge");
+      refreshMenu();
     } catch (error) {
       const failure =
         error instanceof CounterOrderClientError
@@ -389,6 +428,7 @@ export function StaffOrderEntryPage({
         ),
       );
       setProblemNeedsTableCode(failure.code === "TableHasNoQr");
+      if (failure.code === "ItemUnavailable" || failure.code === "ItemShort") refreshMenu();
       setPhase("Building");
     }
   };
@@ -422,6 +462,7 @@ export function StaffOrderEntryPage({
       setPhase("Charge");
       return;
     }
+    refreshMenu();
     // WP-2423 D1: the server accepts the paid order or round with the payment record (at the
     // Order's current version), so it reaches the kitchen even if this page is closed now.
     if (recorded.acceptance === "Accepted") {
@@ -476,7 +517,7 @@ export function StaffOrderEntryPage({
     );
   if (menu.kind === "Error") {
     const [heading, text] = menuError[menu.code] ?? (menuError.Unavailable as [string, string]);
-    const createCode = menu.code === "TableHasNoQr" && tableQrHref !== undefined;
+    const createCode = menu.code === "TableHasNoQr" ? tableQrHref : undefined;
     return (
       <WorkspacePage title={pageTitle} meta={storeLabel}>
         <StatePanel heading={heading} tone="error" status>
@@ -484,7 +525,7 @@ export function StaffOrderEntryPage({
             // Same rule as the Tables page: staff who can create codes get the link.
             <p>
               Orders for a table use its code. Create one on{" "}
-              <a href={tableQrHref}>Table QR codes</a> (it can be printed later), then take the
+              <Link to={createCode}>Table QR codes</Link> (it can be printed later), then take the
               order.
             </p>
           ) : (
@@ -795,7 +836,7 @@ export function StaffOrderEntryPage({
           {problem !== null && ordering ? <p role="alert">{problem}</p> : null}
           {problem !== null && ordering && problemNeedsTableCode && tableQrHref !== undefined ? (
             <p>
-              <a href={tableQrHref}>Table QR codes</a>
+              <Link to={tableQrHref}>Table QR codes</Link>
             </p>
           ) : null}
           {ordering ? (

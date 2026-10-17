@@ -69,6 +69,9 @@ export const internalTextRules: readonly InternalTextRule[] = [
   { name: "currency code", pattern: /\bCAD\b/gu },
   // A role written as a code-like proper noun mid-sentence ("ask Staff"); guests ask staff.
   { name: "capitalized role", pattern: /\b(?:[Aa]sk|[Tt]ell|[Ss]how|[Cc]all) Staff\b/gu },
+  // A person named by an identifier fragment, as in the v15 stock count "counted by Staff 0100";
+  // staff read a name ("You", "Mina Chen") or "Unnamed staff member".
+  { name: "identifier fragment", pattern: /\b(?:Staff|Member|Actor|User) [0-9a-f]{4}\b/gu },
 ];
 
 /** Reviewed business language that the rules above would otherwise flag. */

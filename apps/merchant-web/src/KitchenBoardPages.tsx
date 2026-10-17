@@ -277,21 +277,21 @@ export function KitchenDisplayNavigation({
 }) {
   return (
     <>
-      <a
+      <Link
         className="kitchen-display-nav-link"
-        href="/operations/kitchen"
+        to="/operations/kitchen"
         aria-current={current === "Kitchen" ? "page" : undefined}
       >
         Kitchen
-      </a>
+      </Link>
       {soldOutHref ? (
-        <a
+        <Link
           className="kitchen-display-nav-link"
-          href={kitchenSoldOutHref(soldOutHref)}
+          to={kitchenSoldOutHref(soldOutHref)}
           aria-current={current === "SoldOut" ? "page" : undefined}
         >
           Mark an item sold out
-        </a>
+        </Link>
       ) : null}
     </>
   );
@@ -1317,9 +1317,9 @@ export function KitchenBoardScreen({
           </div>
           <div className="kitchen-board-heading__actions">
             {soldOutHref ? (
-              <a className="kitchen-sold-out-link" href={soldOutHref}>
+              <Link className="kitchen-sold-out-link" to={soldOutHref}>
                 Mark an item sold out
-              </a>
+              </Link>
             ) : null}
             {onSoundToggle ? (
               <button

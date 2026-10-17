@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router";
 import { MerchantShell } from "./MerchantShell.js";
 import { ShowcaseOverview } from "./merchant-demo-ui.js";
 import type { MerchantWorkspaceSnapshot } from "./merchant-workspace.js";
@@ -118,11 +119,13 @@ describe("HOME-OVERVIEW Merchant shell", () => {
 
   it("renders the visibly synthetic showcase without changing normal workspace contracts", () => {
     const html = renderToStaticMarkup(
-      <MerchantShell
-        overview={<ShowcaseOverview />}
-        state={{ kind: "Ready", switching: false, switchFailed: false, workspace }}
-        onSwitchStore={vi.fn()}
-      />,
+      <MemoryRouter>
+        <MerchantShell
+          overview={<ShowcaseOverview />}
+          state={{ kind: "Ready", switching: false, switchFailed: false, workspace }}
+          onSwitchStore={vi.fn()}
+        />
+      </MemoryRouter>,
     );
     for (const value of [
       "Synthetic daily summary",
@@ -145,7 +148,6 @@ describe("HOME-OVERVIEW Merchant shell", () => {
 describe("WP-2423 session-gated pages", () => {
   it("show a neutral loading state, not a refusal, while the session answer is in flight", async () => {
     const { App } = await import("./App.js");
-    const { MemoryRouter } = await import("react-router");
     const pending = {
       bootstrap: () => new Promise<never>(() => undefined),
       switchStore: () => new Promise<never>(() => undefined),

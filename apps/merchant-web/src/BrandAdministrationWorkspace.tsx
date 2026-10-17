@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router";
+import { Link, useParams } from "react-router";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import {
   createMerchantBrandWorkspaceClient,
@@ -87,9 +87,9 @@ export function BrandAdministrationView({
       navigation={
         current
           ? current.workspace.navigation.map((item) => (
-              <a key={item.screenId} href={item.href} aria-current="page">
+              <Link key={item.screenId} to={item.href} aria-current="page">
                 {item.label}
-              </a>
+              </Link>
             ))
           : undefined
       }
@@ -179,7 +179,7 @@ export function BrandAdministrationView({
             <section aria-labelledby="brand-store-assignments-heading">
               <h2 id="brand-store-assignments-heading">Store assignments</h2>
               <p>Store assignment management requires an authorized Store workspace.</p>
-              <a href="/app">Open Store workspace</a>
+              <Link to="/app">Open Store workspace</Link>
             </section>
           )}
         </>

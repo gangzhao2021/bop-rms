@@ -537,20 +537,28 @@ describe("WP-2423 kitchen display search and chrome", () => {
   });
   it("offers the kitchen display marking an item sold out in its own navigation (Q17)", () => {
     const board = renderToStaticMarkup(
-      <KitchenDisplayNavigation current="Kitchen" soldOutHref="/app/commerce/availability" />,
+      <MemoryRouter>
+        <KitchenDisplayNavigation current="Kitchen" soldOutHref="/app/commerce/availability" />
+      </MemoryRouter>,
     );
-    expect(board).toContain('href="/operations/kitchen" aria-current="page">Kitchen</a>');
-    expect(board).toContain('href="/app/commerce/availability?from=kitchen">Mark an item sold out');
+    expect(board).toContain('aria-current="page" href="/operations/kitchen"');
+    expect(board).toContain('href="/app/commerce/availability?from=kitchen"');
     expect(board).not.toMatch(/Approvals|Orders|Settlement|Item availability/u);
     const soldOut = renderToStaticMarkup(
-      <KitchenDisplayNavigation current="SoldOut" soldOutHref="/app/commerce/availability" />,
+      <MemoryRouter>
+        <KitchenDisplayNavigation current="SoldOut" soldOutHref="/app/commerce/availability" />
+      </MemoryRouter>,
     );
-    expect(soldOut).toContain('aria-current="page">Mark an item sold out');
-    expect(soldOut).not.toContain('aria-current="page">Kitchen');
+    expect(soldOut).toMatch(/aria-current="page"[^>]*>Mark an item sold out/u);
+    expect(soldOut).not.toMatch(/aria-current="page"[^>]*>Kitchen/u);
     // Without the sold-out permission the kitchen display shows the board alone.
-    expect(renderToStaticMarkup(<KitchenDisplayNavigation current="Kitchen" />)).not.toContain(
-      "sold out",
-    );
+    expect(
+      renderToStaticMarkup(
+        <MemoryRouter>
+          <KitchenDisplayNavigation current="Kitchen" />
+        </MemoryRouter>,
+      ),
+    ).not.toContain("sold out");
   });
   it("renders the handover as a styled header control next to the screen-awake status", () => {
     const html = renderToStaticMarkup(

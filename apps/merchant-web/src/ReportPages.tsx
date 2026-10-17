@@ -1,7 +1,7 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
-import { useParams } from "react-router";
+import { Link, useParams } from "react-router";
 import {
   parseReportBuilderView,
   parseReportCatalogView,
@@ -117,7 +117,9 @@ export function ReportCatalog({ view }: { readonly view: ReportCatalogView }) {
                 <tr key={report.reportReference}>
                   <td data-label="Report">
                     <strong>{report.nameCode}</strong>
-                    {view.permissions.mayEdit ? <a href={report.editTarget}>Open builder</a> : null}
+                    {view.permissions.mayEdit ? (
+                      <Link to={report.editTarget}>Open builder</Link>
+                    ) : null}
                     {view.permissions.mayCertify && report.certificationStatus === "InReview" ? (
                       <button
                         disabled

@@ -1,3 +1,4 @@
+import { Link } from "react-router";
 export function LocalDemoNotice() {
   return (
     <aside className="local-demo-notice" role="status" aria-label="Local synthetic preview">
@@ -88,7 +89,7 @@ export function ShowcaseOverview() {
         </div>
         <div className="showcase-module-grid">
           {modules.map((module) => (
-            <a className="showcase-module-card" href={module.href} key={module.href}>
+            <Link className="showcase-module-card" to={module.href} key={module.href}>
               <span className="bop-eyebrow">{module.eyebrow}</span>
               <span className="showcase-module-title">{module.title}</span>
               <span className="bop-muted">{module.detail}</span>
@@ -96,7 +97,7 @@ export function ShowcaseOverview() {
                 <span>{module.status}</span>
                 <span aria-hidden="true">Open →</span>
               </span>
-            </a>
+            </Link>
           ))}
         </div>
       </section>

@@ -1,7 +1,13 @@
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderToStaticMarkup as renderStatic } from "react-dom/server";
+import type { ReactElement } from "react";
+import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import { BrandAdministrationView } from "./BrandAdministrationWorkspace.js";
 import { parseMerchantBrandWorkspace } from "./merchant-brand-workspace.js";
+
+// v15 run: in-app links are router links, so pages render inside a router as in the app.
+const renderToStaticMarkup = (element: ReactElement) =>
+  renderStatic(<MemoryRouter>{element}</MemoryRouter>);
 const brand = "018f7f9a-ad3e-7a11-8d01-000000000001",
   actor = "018f7f9a-ad3e-7a11-8d01-000000000002";
 const actions = { onRefresh: vi.fn(), onRotate: vi.fn(), onLogout: vi.fn() };

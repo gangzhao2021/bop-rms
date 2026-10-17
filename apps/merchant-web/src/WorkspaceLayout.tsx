@@ -27,6 +27,23 @@ export function currentNavigationItem(
 }
 
 /**
+ * v15 run (738b4c8b): the navigation that full-screen pages (Kitchen, kitchen work item, Dining,
+ * Brand administration) pass to their own frame. Router links, like the workspace sidebar, so a
+ * click stays inside the loaded app (no document reload, and no browser "No internet" page when
+ * the screen was already fetched); the real href stays for new tabs and assistive technology.
+ */
+export function workspaceNavigationLinks(
+  items: readonly MerchantNavigationItem[],
+  isCurrent: (item: MerchantNavigationItem) => boolean,
+): ReactNode[] {
+  return items.map((item) => (
+    <Link key={item.screenId} to={item.href} aria-current={isCurrent(item) ? "page" : undefined}>
+      {item.label}
+    </Link>
+  ));
+}
+
+/**
  * WP-2423 M1: one persistent, permission-trimmed workspace navigation beside every back-office
  * page (bop-rms-figma-make-brief.md §3); collapses into a disclosure on narrow screens.
  */

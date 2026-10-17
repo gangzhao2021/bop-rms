@@ -1,7 +1,13 @@
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderToStaticMarkup as renderStatic } from "react-dom/server";
+import type { ReactElement } from "react";
+import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 import { OperationalDashboard, OperationalDashboardState } from "./OperationalDashboardPage.js";
 import { parseOperationalDashboardView } from "./operational-dashboard-page.js";
+
+// v15 run: in-app links are router links, so pages render inside a router as in the app.
+const renderToStaticMarkup = (element: ReactElement) =>
+  renderStatic(<MemoryRouter>{element}</MemoryRouter>);
 
 const r = (n: number) => `018f0f58-767a-7f3b-a1d0-${String(n).padStart(12, "0")}`;
 const view = (overrides: Record<string, unknown> = {}) => ({

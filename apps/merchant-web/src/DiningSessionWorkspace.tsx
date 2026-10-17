@@ -746,7 +746,7 @@ export function DiningSessionWorkspace({
                         table QR code.{" "}
                         {tableQrHref !== undefined ? (
                           <>
-                            Create one on <a href={tableQrHref}>Table QR codes</a> (it can be
+                            Create one on <Link to={tableQrHref}>Table QR codes</Link> (it can be
                             printed later), then take the order.
                           </>
                         ) : (
@@ -773,7 +773,7 @@ export function DiningSessionWorkspace({
                       it has no table QR code, so guests can&apos;t join.{" "}
                       {tableQrHref !== undefined ? (
                         <>
-                          Create one on <a href={tableQrHref}>Table QR codes</a> first.
+                          Create one on <Link to={tableQrHref}>Table QR codes</Link> first.
                         </>
                       ) : (
                         "Ask a manager to create one on the Table QR codes page."

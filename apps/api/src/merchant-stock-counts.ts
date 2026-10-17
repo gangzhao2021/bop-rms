@@ -1,4 +1,8 @@
-import { listStoreMembers, type MemberDirectoryTransaction } from "@bop/membership";
+import {
+  listStoreMembers,
+  memberDisplayNames,
+  type MemberDirectoryTransaction,
+} from "@bop/membership";
 import {
   createPostgresStockCountPorts,
   executeStockCountCommand,
@@ -333,15 +337,33 @@ export function createMerchantStockCounts(options: {
             tx as unknown as MemberDirectoryTransaction,
             scope.owner,
           );
+          const names = new Map<string, string | null>(
+            members.map((member) => [member.actorReference, member.displayName]),
+          );
+          // v15 run: staff read a person's name ("You" for themselves), never an identifier
+          // fragment such as "Staff 0100" (same rule as recipe authors).
+          const label = (actor: string) =>
+            actor === scope.actor ? "You" : (names.get(actor) ?? "Unnamed staff member");
           const staff = members
             .filter((member) => member.membershipLifecycle === "Active")
             .map((member) => ({
               actorReference: member.actorReference,
-              label:
-                member.actorReference === scope.actor
-                  ? "You"
-                  : (member.displayName ?? "Staff " + member.actorReference.slice(-4)),
+              label: label(member.actorReference),
             }));
+          // People a count names who are not on the Store's staff list (a Brand Owner, or someone
+          // whose Store membership ended) are named from the Brand's member directory.
+          const people = async (actors: readonly (string | null)[]) => {
+            const named = [
+              ...new Set(actors.filter((actor): actor is string => actor !== null)),
+            ].filter((actor) => !staff.some((item) => item.actorReference === actor));
+            for (const [actor, displayName] of await memberDisplayNames(
+              tx as unknown as MemberDirectoryTransaction,
+              scope.owner,
+              named.filter((actor) => actor !== scope.actor && !names.get(actor)),
+            ))
+              names.set(actor, displayName);
+            return named.map((actor) => ({ actorReference: actor, label: label(actor) }));
+          };
           const base = {
             sourceAsOf: options.persistence.now(),
             viewer: scope.actor,
@@ -362,6 +384,7 @@ export function createMerchantStockCounts(options: {
             return {
               screenId: "INV-COUNT-WORKBENCH" as const,
               ...base,
+              people: await people([count.assigneeReference, count.submittedBy, count.approvedBy]),
               count: redactStockCount(count, permissions.mayApprove, scope.actor),
               lots: Object.fromEntries(lots),
             };
@@ -370,7 +393,12 @@ export function createMerchantStockCounts(options: {
             before: input.before,
             limit: 30,
           });
-          return { screenId: "INV-COUNT-LIST" as const, ...base, ...page };
+          return {
+            screenId: "INV-COUNT-LIST" as const,
+            ...base,
+            ...page,
+            people: await people(page.counts.map((count) => count.assigneeReference)),
+          };
         }),
       ),
     );

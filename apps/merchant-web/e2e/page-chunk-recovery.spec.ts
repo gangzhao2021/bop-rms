@@ -103,3 +103,108 @@ test("@production offline, a workspace link opens an already-fetched screen with
   expect(documents).toBe(1);
   await page.context().setOffline(false);
 });
+
+// v15 run (738b4c8b): the Kitchen and Dining pages built their own navigation from plain links,
+// so each click reloaded the whole app (and offline showed the browser's "No internet" page).
+test("@production the Kitchen and Dining navigation moves between screens without reloading the app", async ({
+  page,
+}) => {
+  const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const scope = {
+    brandLabel: "Training Brand",
+    storeLabel: "Training Store",
+    storeReference: id(99),
+    timeZone: "America/Toronto",
+  };
+  const headers = { "cache-control": "no-store" };
+  let documents = 0;
+  page.on("request", (request) => {
+    if (request.resourceType() === "document") documents += 1;
+  });
+  await page.route("**/merchant/**", (route) =>
+    route.fulfill({ status: 503, json: { error: "unavailable" } }),
+  );
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-09-19",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "KIT-KITCHEN-QUEUE",
+              label: "Kitchen",
+              href: "/operations/kitchen",
+              permission: "kitchen.operate",
+            },
+            {
+              screenId: "DIN-FLOOR-BOARD",
+              label: "Tables",
+              href: "/operations/dining",
+              permission: "dining.operate",
+            },
+            {
+              screenId: "FUL-PICKUP-QUEUE",
+              label: "Pickup",
+              href: "/operations/pickup",
+              permission: "fulfillment.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  await page.route("**/merchant/kitchen/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        storeReference: scope.storeReference,
+        operatorStatus: "Unverified",
+        projectionName: "kitchen_work_queue_v1",
+        projectionVersion: 1,
+        projectionGenerationReference: id(6),
+        projectedAt: "2026-09-19T12:00:00.000Z",
+        partial: false,
+        stale: false,
+        freshnessStatus: "Fresh",
+        items: [],
+        nextCursor: null,
+      },
+    }),
+  );
+  await page.route("**/merchant/dining/tables", (route) =>
+    route.fulfill({ headers, json: { canOperateTables: true, items: [] } }),
+  );
+  await page.goto("/operations/kitchen");
+  const navigation = page.getByRole("navigation", { name: "Primary" });
+  const tables = navigation.getByRole("link", { name: "Tables", exact: true });
+  await expect(tables).toHaveAttribute("href", "/operations/dining");
+  await expect(navigation.getByRole("link", { name: "Kitchen", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+  await tables.click();
+  await expect(page).toHaveURL(/\/operations\/dining$/u);
+  await expect(navigation.getByRole("link", { name: "Tables", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+  await navigation.getByRole("link", { name: "Kitchen", exact: true }).click();
+  await expect(page).toHaveURL(/\/operations\/kitchen$/u);
+  await expect(navigation.getByRole("link", { name: "Kitchen", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+  await navigation.getByRole("link", { name: "Pickup", exact: true }).click();
+  await expect(page).toHaveURL(/\/operations\/pickup$/u);
+  await expect(page.getByRole("heading", { level: 1, name: "Pickup" })).toBeVisible();
+  expect(documents).toBe(1);
+});

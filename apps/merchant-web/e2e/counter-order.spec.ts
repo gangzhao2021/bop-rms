@@ -530,3 +530,78 @@ test("@production a short item names how many are left and the order stays edita
   ).toBeVisible();
   expect(sent.map((lines) => lines.length)).toEqual([3, 2]);
 });
+
+// v15 run (738b4c8b): right after an order was sent the counter menu still offered Flat White
+// although the milk left could not make one. The menu is re-read after each send and payment,
+// and every 30 s while staff build an order.
+test("@production the counter menu re-reads what the store can sell after a send and while building", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.clock.install();
+  const soldOut = new Set<string>();
+  let menuReads = 0;
+  await page.route("**/merchant/counter/menu", (route) => {
+    menuReads += 1;
+    const current = structuredClone(menu);
+    for (const sellable of current.menu.menu.sections[0]?.sellables ?? [])
+      if (soldOut.has(sellable.name)) sellable.availability = "SoldOut";
+    return route.fulfill({ headers, json: current });
+  });
+  await page.route("**/merchant/counter/orders", (route) => {
+    // The order uses the last of the milk.
+    soldOut.add("Flat White");
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Placed",
+        orderReference: id(20),
+        orderBatchReference: id(21),
+        orderNumber: "15",
+        orderVersion: 1,
+        orderMinor: "450",
+        tipMinor: "0",
+        totalMinor: "450",
+        payBy: new Date(Date.now() + 30 * 60_000).toISOString(),
+        recordedAfterOutage: false,
+      },
+    });
+  });
+  await page.route("**/merchant/orders/card-machine-payment", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        status: "Recorded",
+        orderReference: id(20),
+        orderBatchReference: id(21),
+        amountMinor: "450",
+        recordingReason: "AtCounter",
+        takenAt: new Date().toISOString(),
+        recordedAt: new Date().toISOString(),
+        acceptance: "Accepted",
+      },
+    }),
+  );
+  await page.goto("/operations/order-entry");
+  await page.getByRole("button", { name: "Add Flat White" }).click();
+  await page.getByRole("button", { name: "Add to order" }).click();
+  await page.getByRole("button", { name: "Send order" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Charge $4.50 on the card machine" }),
+  ).toBeVisible();
+  await expect.poll(() => menuReads).toBeGreaterThanOrEqual(2);
+  await page.getByRole("button", { name: "Paid on card machine · $4.50" }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Paid and sent to the kitchen." }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "New counter order" }).click();
+  await expect(page.getByRole("button", { name: "Add Flat White" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Add Banana Bread" })).toBeEnabled();
+
+  // Banana Bread sells out at another till while staff build the next order.
+  soldOut.add("Banana Bread");
+  const before = menuReads;
+  await page.clock.runFor(30_000);
+  await expect.poll(() => menuReads).toBeGreaterThan(before);
+  await expect(page.getByRole("button", { name: "Add Banana Bread" })).toBeDisabled();
+});

@@ -1,5 +1,6 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
-import { SourceTime } from "./StoreTime.js";
+import { SourceTime, StaffTime, StoreDate } from "./StoreTime.js";
+import { unitText } from "./recipe-pages.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./RoleAdministrationPages.js";
@@ -32,6 +33,11 @@ const copy: Record<StockCountErrorCode | "Loading", string> = {
   Invalid: "The request is not valid.",
   Offline: "Offline. Nothing was confirmed; retry sends the same request again.",
   Unavailable: "Stock counts are unavailable.",
+};
+const countTypeText: Record<"Full" | "Cycle" | "Spot", string> = {
+  Cycle: "Cycle count",
+  Full: "Full count",
+  Spot: "Spot check",
 };
 const statusText: Record<string, string> = {
   Draft: "Draft",
@@ -72,6 +78,24 @@ function useView<V>(
   }, [client, reference, parse, generation]);
   return { state, reload };
 }
+/**
+ * v15 run: a person's name as staff know it ("You" for themselves), never an identifier fragment
+ * such as "Staff 0100". People who are not on the Store's staff list come in `people`.
+ */
+export function staffName(
+  view: {
+    readonly staff: readonly { readonly actorReference: string; readonly label: string }[];
+    readonly people?: readonly { readonly actorReference: string; readonly label: string }[];
+  },
+  reference: string | null,
+): string {
+  if (reference === null) return "—";
+  return (
+    [...view.staff, ...(view.people ?? [])].find((item) => item.actorReference === reference)
+      ?.label ?? "Unnamed staff member"
+  );
+}
+
 function Failure({ code }: { code: StockCountErrorCode | "Loading" }) {
   return (
     <StatePanel heading="Stock counts" tone={code === "Loading" ? "neutral" : "error"} status>
@@ -97,11 +121,7 @@ export function StockCountListPage({
   const view: StockCountListView = state.view;
   const place = (reference: string) =>
     view.locations.find((item) => item.locationReference === reference)?.name ?? "Location";
-  const person = (reference: string | null) =>
-    reference === null
-      ? "—"
-      : (view.staff.find((item) => item.actorReference === reference)?.label ??
-        "Staff " + reference.slice(-4));
+  const person = (reference: string | null) => staffName(view, reference);
   const create = async () => {
     if (!client.command) return;
     setBusy(true);
@@ -206,11 +226,11 @@ export function StockCountListPage({
               <tr key={count.countReference}>
                 <td>
                   <Link to={`/operations/inventory/counts/${count.countReference}`}>
-                    {count.createdAt}
+                    <StaffTime instant={count.createdAt} />
                   </Link>
                 </td>
                 <td>{place(count.locationReference)}</td>
-                <td>{count.countType}</td>
+                <td>{countTypeText[count.countType]}</td>
                 <td>{person(count.assigneeReference)}</td>
                 <td>
                   {count.countedLines} / {count.lineCount}
@@ -275,11 +295,7 @@ export function StockCountWorkbenchPage({
   const location =
     view.locations.find((item) => item.locationReference === count.stockScope.scopeReference)
       ?.name ?? "Location";
-  const person = (reference: string | null) =>
-    reference === null
-      ? "—"
-      : (view.staff.find((item) => item.actorReference === reference)?.label ??
-        "Staff " + reference.slice(-4));
+  const person = (reference: string | null) => staffName(view, reference);
   const isAssignee = count.assigneeReference === view.viewer;
   const counting = count.status === "InProgress" && isAssignee && view.permissions.mayCount;
   const reviewing =
@@ -319,7 +335,7 @@ export function StockCountWorkbenchPage({
     <AppFrame title={`Count · ${location}`} description="Stock count">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">Stock count · {count.countType}</p>
+          <p className="bop-eyebrow">Stock count · {countTypeText[count.countType]}</p>
           <h2>Count · {location}</h2>
           <p>
             {statusText[count.status]} · counted by {person(count.assigneeReference)} · {counted} of{" "}
@@ -368,9 +384,21 @@ export function StockCountWorkbenchPage({
               >
                 <td>{item?.name ?? "Item"}</td>
                 <td>
-                  {lot ? `${lot.lotCode}${lot.expiryDate ? ` (exp. ${lot.expiryDate})` : ""}` : "—"}
+                  {lot ? (
+                    <>
+                      {lot.lotCode}
+                      {lot.expiryDate ? (
+                        <>
+                          {" "}
+                          (exp. <StoreDate value={lot.expiryDate} />)
+                        </>
+                      ) : null}
+                    </>
+                  ) : (
+                    "—"
+                  )}
                 </td>
-                <td>{line.unitCode}</td>
+                <td>{unitText(line.unitCode)}</td>
                 {count.lines.some((other) => other.expectedQuantity !== null) ? (
                   <td>{line.expectedQuantity ?? ""}</td>
                 ) : null}

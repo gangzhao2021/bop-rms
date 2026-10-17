@@ -153,3 +153,18 @@ it("flags the currency code staff met as a word on the v15 recipe and price book
     ]),
   ).toEqual([]);
 });
+
+it("v15 run: flags a person named by an identifier fragment, as on the stock count pages", () => {
+  expect(
+    findInternalText(["Counting · counted by Staff 0100 · 0 of 3 lines counted"]).map(
+      (finding) => finding.rule,
+    ),
+  ).toContain("identifier fragment");
+  expect(
+    findInternalText([
+      "Counting · counted by You · 0 of 3 lines counted",
+      "Counted by Unnamed staff member",
+      "Staff 2 of 4 on shift",
+    ]),
+  ).toEqual([]);
+});

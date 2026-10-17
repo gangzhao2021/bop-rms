@@ -1,4 +1,6 @@
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderToStaticMarkup as renderStatic } from "react-dom/server";
+import type { ReactElement } from "react";
+import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 import { StoreAvailabilityPage } from "./StoreAvailabilityPage.js";
 import { KitchenDisplayHeaderControls, kitchenHandoverOffered } from "./KitchenBoardPages.js";
@@ -13,6 +15,10 @@ import {
   stockHeldByOrders,
   stockSoldOutText,
 } from "./store-availability-page.js";
+
+// v15 run: in-app links are router links, so pages render inside a router as in the app.
+const renderToStaticMarkup = (element: ReactElement) =>
+  renderStatic(<MemoryRouter>{element}</MemoryRouter>);
 
 describe("WP-2423 item availability page helpers", () => {
   it("shows when a sold-out mark ends in the Store's time zone", () => {

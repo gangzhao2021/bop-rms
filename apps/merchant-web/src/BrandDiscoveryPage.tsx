@@ -1,3 +1,4 @@
+import { Link } from "react-router";
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import {
@@ -288,9 +289,9 @@ export function BrandDiscoveryView({
         ) : null}
         {session?.selectedBrandReference && status === "Ready" ? (
           <p>
-            <a href={`/app/organization/brands/${session.selectedBrandReference}`}>
+            <Link to={`/app/organization/brands/${session.selectedBrandReference}`}>
               Continue with the selected Brand
-            </a>
+            </Link>
           </p>
         ) : null}
       </section>
