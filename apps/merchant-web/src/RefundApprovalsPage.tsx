@@ -15,8 +15,8 @@ import {
   declineReasonLabel,
   describeRefundReason,
   escalationReasonLabel,
-  formatCad,
 } from "./refund-reasons.js";
+import { formatCad } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { createOrdinaryRefundClient } from "./ordinary-refund-client.js";
 import { SoleOperatorSection } from "./SoleOperatorSection.js";

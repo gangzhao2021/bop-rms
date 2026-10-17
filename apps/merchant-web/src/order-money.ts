@@ -23,3 +23,6 @@ export function orderMoney(value: { readonly amountMinor: string; readonly curre
     (negative ? "−" : "") + (value.currencyCode === "CAD" ? "$" : value.currencyCode + " ") + amount
   );
 }
+
+/** The Store's CAD in the app's one money format ("$125.05"), from integer minor units. */
+export const formatCad = (amountMinor: string) => orderMoney({ amountMinor, currencyCode: "CAD" });

@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { newOperationReference } from "./RoleAdministrationPages.js";
+import { newOperationReference } from "./operation-reference.js";
 
 /**
  * WP-2423: Home (HOME-OVERVIEW) asks a signed-in staff member who has no recorded name to add one,

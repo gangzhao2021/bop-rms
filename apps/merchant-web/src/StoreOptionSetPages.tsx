@@ -2,7 +2,7 @@ import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { newOperationReference } from "./RoleAdministrationPages.js";
+import { newOperationReference } from "./operation-reference.js";
 import {
   OptionSetPageError,
   choiceRule,

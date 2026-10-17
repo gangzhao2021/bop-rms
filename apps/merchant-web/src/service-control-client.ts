@@ -233,24 +233,8 @@ export interface ServiceControlCommand {
     | { effectiveUntil: string; serviceModes: readonly ServiceMode[] | null }
     | { pauseOperationReference: string };
 }
-export function serviceOperationReference() {
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  let time = Date.now();
-  for (let index = 5; index >= 0; index--) {
-    bytes[index] = time % 256;
-    time = Math.floor(time / 256);
-  }
-  bytes[6] = 0x70 | ((bytes[6] ?? 0) & 15);
-  bytes[8] = 0x80 | ((bytes[8] ?? 0) & 63);
-  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-  return [
-    hex.slice(0, 8),
-    hex.slice(8, 12),
-    hex.slice(12, 16),
-    hex.slice(16, 20),
-    hex.slice(20),
-  ].join("-");
-}
+/** The app's one UUIDv7 generator, under the name the service-control commands use. */
+export { newOperationReference as serviceOperationReference } from "./operation-reference.js";
 export function createServiceControlClient(fetcher: typeof fetch = fetch) {
   async function request(signal: AbortSignal, command?: ServiceControlCommand, csrf?: string) {
     const controller = new AbortController();

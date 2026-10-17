@@ -1,5 +1,6 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
+import { newOperationReference } from "./operation-reference.js";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
 import { FULL_SIGN_IN_REQUIRED_TEXT, needsFullSignIn } from "./full-sign-in.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -54,16 +55,6 @@ const reasonCodes: Record<RoleAdministrationOperation, string> = {
   Activate: "ROLE_ACTIVATED",
   Deactivate: "ROLE_DEACTIVATED",
 };
-/** UUIDv7 operation reference; one is kept per pending command so a retry stays idempotent. */
-export function newOperationReference(
-  now = Date.now(),
-  random = crypto.getRandomValues(new Uint8Array(10)),
-) {
-  const time = now.toString(16).padStart(12, "0"),
-    hex = Array.from(random, (byte) => byte.toString(16).padStart(2, "0")).join("");
-  const variant = ((parseInt(hex.slice(3, 4), 16) & 0x3) | 0x8).toString(16);
-  return `${time.slice(0, 8)}-${time.slice(8, 12)}-7${hex.slice(0, 3)}-${variant}${hex.slice(4, 7)}-${hex.slice(7, 19)}`;
-}
 function Status({ state }: { readonly state: Exclude<State["kind"], "Found"> }) {
   return (
     <StatePanel

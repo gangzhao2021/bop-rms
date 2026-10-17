@@ -1,7 +1,7 @@
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
-import { formatSettlementMoney } from "./SettlementPage.js";
+import { formatCad } from "./order-money.js";
 import {
   createStoreReportsClient,
   StoreReportsClientError,
@@ -11,11 +11,11 @@ import {
   type StoreReportSummary,
   type StoreReportsView,
 } from "./store-reports-client.js";
-import { useStoreBusinessDay } from "./StoreBusinessDay.js";
+import { businessDateText, useStoreBusinessDay } from "./StoreBusinessDay.js";
 import { Freshness, storeTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 
-const money = (amountMinor: string) => formatSettlementMoney(amountMinor);
+const money = formatCad;
 export const channelLabel: Record<StoreReportChannel, string> = {
   Online: "Online (card)",
   CardMachine: "Store card machine",
@@ -33,19 +33,10 @@ export function shiftDate(date: string, days: number): string {
     .toISOString()
     .slice(0, 10);
 }
-/** "Wed, Oct 14" for a business date, independent of the device's time zone. */
-function dayLabel(date: string): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "UTC",
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  }).format(new Date(date + "T12:00:00.000Z"));
-}
 function rangeLabel(view: StoreReportsView): string {
   return view.from === view.to
-    ? `Business day ${dayLabel(view.from)}`
-    : `${dayLabel(view.from)} – ${dayLabel(view.to)}`;
+    ? `Business day ${businessDateText(view.from)}`
+    : `${businessDateText(view.from)} – ${businessDateText(view.to)}`;
 }
 
 function Table({
@@ -304,7 +295,7 @@ export function StoreReports({
               columns={["Day", "Payments", "Net sales", "Tax", "Tips", "Refunds", "Net collected"]}
               empty="No days."
               rows={view.days.map((day) => [
-                dayLabel(day.businessDate) + (day.status === "Open" ? " (so far)" : ""),
+                businessDateText(day.businessDate) + (day.status === "Open" ? " (so far)" : ""),
                 day.summary.paymentCount,
                 money(day.summary.netSalesMinor),
                 money(day.summary.taxMinor),
@@ -387,7 +378,7 @@ export function StoreReports({
             day.channels
               .filter((entry) => entry.tipsMinor !== "0" || entry.refundedMinor !== "0")
               .map((entry) => [
-                dayLabel(day.businessDate),
+                businessDateText(day.businessDate),
                 channelLabel[entry.channel],
                 money(entry.tipsMinor),
                 money(entry.refundedMinor),

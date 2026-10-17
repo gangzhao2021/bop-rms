@@ -21,7 +21,12 @@ import { describeConfiguration } from "../cart/CartPage.js";
 import { checkoutItemRefusalMessage } from "./item-refusal-message.js";
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import { formatMinutesUntil, formatMoney, percentOfMinor } from "../journey/format.js";
-import { lineEstimateLabel, quoteIssueMessage } from "../journey/messages.js";
+import {
+  checkoutText,
+  commonText,
+  lineEstimateLabel,
+  quoteIssueMessage,
+} from "../journey/messages.js";
 import {
   createCheckoutClient,
   createCheckoutController,
@@ -231,28 +236,28 @@ export function CheckoutPage({
   const remaining = quote === null ? null : formatMinutesUntil(quote.expiresAt, now());
   return (
     <CustomerPage step="checkout" store={resolvedStore} className="checkout-page">
-      <PageHeading title="Checkout" />
-      <ol className="checkout-progress" aria-label="Checkout progress">
-        <li aria-current="step">1 Review</li>
-        <li>2 Pay</li>
-        <li>3 Done</li>
+      <PageHeading title={checkoutText.pageTitle} />
+      <ol className="checkout-progress" aria-label={checkoutText.progressLabel}>
+        <li aria-current="step">{checkoutText.progressReview}</li>
+        <li>{checkoutText.progressPay}</li>
+        <li>{checkoutText.progressDone}</li>
       </ol>
       {state.status === "loading" ? (
         <section role="status">
-          <h2>Loading checkout</h2>
-          <p>Checking your cart…</p>
+          <h2>{checkoutText.loadingHeading}</h2>
+          <p>{commonText.checkingYourCart}</p>
         </section>
       ) : null}
       {state.status === "empty" ? (
         <section>
-          <h2>Your cart is empty</h2>
-          <p>Add something from the menu before checking out.</p>
-          <Link to="/menu">Browse menu</Link>
+          <h2>{commonText.emptyCartHeading}</h2>
+          <p>{checkoutText.emptyCartBody}</p>
+          <Link to="/menu">{commonText.browseMenu}</Link>
         </section>
       ) : null}
       {cart ? (
         <section className="checkout-summary" aria-labelledby="checkout-items">
-          <h2 id="checkout-items">Your order</h2>
+          <h2 id="checkout-items">{checkoutText.orderHeading}</h2>
           <ul className="checkout-items">
             {cart.cart.items.map((item) => (
               <li key={item.cartItemReference}>
@@ -263,7 +268,9 @@ export function CheckoutPage({
                     <span className="checkout-items__options">{describeConfiguration(item)}</span>
                   ) : null}
                   {item.customerNote ? (
-                    <span className="checkout-items__note">Note: {item.customerNote}</span>
+                    <span className="checkout-items__note">
+                      {commonText.notePrefix} {item.customerNote}
+                    </span>
                   ) : null}
                 </span>
                 <span className="checkout-items__amount">
@@ -275,43 +282,43 @@ export function CheckoutPage({
             ))}
           </ul>
           <Link className="checkout-edit-link" to="/cart">
-            Edit cart
+            {checkoutText.editCart}
           </Link>
         </section>
       ) : null}
-      {state.status === "pending" ? <p role="status">Calculating your total…</p> : null}
+      {state.status === "pending" ? <p role="status">{checkoutText.calculatingTotal}</p> : null}
       {quote ? (
         <section className="checkout-summary checkout-totals" aria-labelledby="quote-heading">
-          <h2 id="quote-heading">Total</h2>
+          <h2 id="quote-heading">{commonText.total}</h2>
           <dl>
             <div>
-              <dt>Subtotal</dt>
+              <dt>{commonText.subtotal}</dt>
               <dd>{formatCartMoney(quote.subtotal)}</dd>
             </div>
             {quote.discount.amountMinor !== "0" ? (
               <div>
-                <dt>Discount</dt>
+                <dt>{commonText.discount}</dt>
                 <dd>{formatCartMoney(quote.discount)}</dd>
               </div>
             ) : null}
             <div>
-              <dt>Tax</dt>
+              <dt>{commonText.tax}</dt>
               <dd>{formatCartMoney(quote.tax)}</dd>
             </div>
             {quote.fee.amountMinor !== "0" ? (
               <div>
-                <dt>Fees</dt>
+                <dt>{commonText.fees}</dt>
                 <dd>{formatCartMoney(quote.fee)}</dd>
               </div>
             ) : null}
             {tipAmount !== null && tipAmount !== "0" ? (
               <div>
-                <dt>Tip</dt>
+                <dt>{checkoutText.tip}</dt>
                 <dd>{formatMoney(tipAmount, quote.total.currency)}</dd>
               </div>
             ) : null}
             <div className="checkout-totals__total">
-              <dt>Total</dt>
+              <dt>{commonText.total}</dt>
               <dd>
                 {tipAmount === null
                   ? formatCartMoney(quote.total)
@@ -324,23 +331,23 @@ export function CheckoutPage({
           </dl>
           {quoteExpired ? (
             <div role="alert">
-              <p>These prices expired. Refresh to price your order again.</p>
+              <p>{checkoutText.pricesExpired}</p>
               <button
                 type="button"
                 disabled={detailsLocked || sessionState.status !== "idle"}
                 onClick={() => void controller.quote()}
               >
-                Refresh prices
+                {checkoutText.refreshPrices}
               </button>
             </div>
           ) : (
             <p className="checkout-totals__validity">
-              {remaining === null ? "" : `Prices confirmed for ${remaining}.`}
+              {remaining === null ? "" : commonText.pricesConfirmedFor(remaining)}
             </p>
           )}
           {quote.priceChange?.requiresReconfirmation ? (
             <div role="alert">
-              <p>Price changed. Confirm the new total before continuing.</p>
+              <p>{checkoutText.priceChanged}</p>
               <label>
                 <input
                   type="checkbox"
@@ -350,7 +357,7 @@ export function CheckoutPage({
                     setConfirmedQuote(event.target.checked ? quote.quoteReference : null)
                   }
                 />{" "}
-                I confirm the changed price
+                {checkoutText.confirmChangedPrice}
               </label>
             </div>
           ) : null}
@@ -368,15 +375,15 @@ export function CheckoutPage({
       quote === null &&
       ["conflict", "validation", "unavailable", "quote-expired"].includes(state.status) ? (
         <section role="alert" className="checkout-attention">
-          <h2>Prices need a refresh</h2>
+          <h2>{checkoutText.pricesNeedRefreshHeading}</h2>
           <p>
             {state.status === "quote-expired"
-              ? "Your previous prices expired. Refresh to price your order again."
+              ? checkoutText.previousPricesExpired
               : state.status === "conflict"
-                ? "Your cart changed. Refresh to price the current cart."
+                ? checkoutText.cartChanged
                 : state.status === "validation"
-                  ? "Something in your cart can’t be ordered as selected. Review your cart, then refresh."
-                  : "We couldn’t price your order just now. Try again in a moment."}
+                  ? checkoutText.cartValidation
+                  : checkoutText.pricingUnavailable}
           </p>
           <button
             ref={quoteAction}
@@ -384,7 +391,7 @@ export function CheckoutPage({
             type="button"
             onClick={() => void controller.quote()}
           >
-            Refresh prices
+            {checkoutText.refreshPrices}
           </button>
         </section>
       ) : null}
@@ -392,8 +399,8 @@ export function CheckoutPage({
         <section role="alert" className="checkout-attention">
           <h2>
             {state.status === "order-processing"
-              ? "Order still processing"
-              : "Another guest is checking out"}
+              ? commonText.orderProcessingHeading
+              : commonText.checkoutInProgressHeading}
           </h2>
           <p>
             {state.status === "order-processing"
@@ -405,19 +412,19 @@ export function CheckoutPage({
             type="button"
             onClick={() => void controller.retry()}
           >
-            Try again
+            {commonText.tryAgain}
           </button>
         </section>
       ) : null}
       {["offline", "session-expired", "outcome-unknown"].includes(state.status) ? (
         <section role="alert" className="checkout-attention">
-          <h2>Checkout needs attention</h2>
+          <h2>{checkoutText.attentionHeading}</h2>
           <p>
             {state.status === "offline"
-              ? "You’re offline. Reconnect to continue; nothing will be submitted automatically."
+              ? checkoutText.offline
               : state.status === "outcome-unknown"
-                ? "We couldn’t confirm your prices. Retry to continue without creating a second order."
-                : "Your session ended. Scan the location QR code again to continue."}
+                ? checkoutText.pricingOutcomeUnknown
+                : checkoutText.sessionEnded}
           </p>
           {"canRetry" in state && state.canRetry ? (
             <button
@@ -425,7 +432,7 @@ export function CheckoutPage({
               disabled={state.status === "offline"}
               onClick={() => void controller.retry()}
             >
-              Retry pricing
+              {checkoutText.retryPricing}
             </button>
           ) : null}
         </section>
@@ -448,8 +455,12 @@ export function CheckoutPage({
         />
       ) : null}
       <section className="checkout-boundary checkout-tip" aria-labelledby="checkout-tip-heading">
-        <h2 id="checkout-tip-heading">Tip</h2>
-        <div className="checkout-tip__choices" role="group" aria-label="Tip amount">
+        <h2 id="checkout-tip-heading">{checkoutText.tip}</h2>
+        <div
+          className="checkout-tip__choices"
+          role="group"
+          aria-label={checkoutText.tipAmountLabel}
+        >
           {tipPresets.map((percent) => {
             const amount =
               quote === null ? null : percentOfMinor(quote.subtotal.amountMinor, percent);
@@ -461,7 +472,7 @@ export function CheckoutPage({
                 disabled={sessionState.status !== "idle" || state.status !== "ready"}
                 onClick={() => setTipChoice(percent)}
               >
-                {percent === 0 ? "No tip" : `${percent}%`}
+                {percent === 0 ? checkoutText.noTip : checkoutText.tipPercent(percent)}
                 {amount !== null && percent !== 0 ? (
                   <span>{formatMoney(amount, quote?.subtotal.currency ?? "CAD")}</span>
                 ) : null}
@@ -480,11 +491,11 @@ export function CheckoutPage({
                 );
             }}
           >
-            Other
+            {checkoutText.tipOther}
           </button>
         </div>
         <label htmlFor="checkout-tip" className={tipChoice === "custom" ? "" : "sr-only"}>
-          Tip (CAD)
+          {checkoutText.tipCustomLabel}
         </label>
         <input
           id="checkout-tip"
@@ -502,13 +513,15 @@ export function CheckoutPage({
         />
         <p id="checkout-tip-help" className={tipChoice === "custom" ? "" : "sr-only"}>
           {tipChoice === "custom" && customTip !== "" && tipAmount === null
-            ? "Enter a valid amount with up to two decimal places."
-            : "Enter an amount in dollars. Your tip is fixed when you continue to payment."}
+            ? checkoutText.tipInvalid
+            : checkoutText.tipHelp}
         </p>
       </section>
-      <section className="checkout-continue" aria-label="Payment">
-        {continueRequested ? <p role="status">Saving your details…</p> : null}
-        {sessionState.status === "pending" ? <p role="status">Preparing secure payment…</p> : null}
+      <section className="checkout-continue" aria-label={checkoutText.paymentLabel}>
+        {continueRequested ? <p role="status">{checkoutText.savingYourDetails}</p> : null}
+        {sessionState.status === "pending" ? (
+          <p role="status">{checkoutText.preparingPayment}</p>
+        ) : null}
         {sessionState.status === "item_short" || sessionState.status === "item_unavailable" ? (
           <p role="alert">
             {checkoutItemRefusalMessage(
@@ -516,17 +529,17 @@ export function CheckoutPage({
               sessionState.line,
               cart?.cart.items ?? [],
             )}{" "}
-            <Link to="/cart">Change your cart</Link>
+            <Link to="/cart">{checkoutText.changeYourCart}</Link>
           </p>
         ) : "canRetry" in sessionState ? (
           <p role="alert">
             {sessionState.status === "store_closed"
-              ? "The store isn’t taking orders right now, so you haven’t been charged. Try again when the store reopens, or ask staff."
+              ? checkoutText.storeClosed
               : sessionState.status === "checkout_in_progress"
                 ? checkoutInProgressMessage(sessionState.retryAfterSeconds)
                 : sessionState.canRetry
-                  ? "We could not confirm checkout. Retry to recover the same checkout."
-                  : "We couldn’t continue this checkout. Review your cart and scan the QR code again if needed."}
+                  ? checkoutText.checkoutUnconfirmed
+                  : checkoutText.checkoutRefused}
           </p>
         ) : null}
         {"canRetry" in sessionState && sessionState.canRetry ? (
@@ -535,7 +548,7 @@ export function CheckoutPage({
             onClick={() => void sessionController.retry()}
             disabled={state.status === "offline"}
           >
-            Retry checkout
+            {checkoutText.retryCheckout}
           </button>
         ) : (
           <button
@@ -545,16 +558,16 @@ export function CheckoutPage({
             onClick={() => void requestContinue()}
           >
             {quote && tipAmount !== null
-              ? `Continue to payment · ${formatMoney(
-                  (BigInt(quote.total.amountMinor) + BigInt(tipAmount)).toString(),
-                  quote.total.currency,
-                )}`
-              : "Continue to payment"}
+              ? checkoutText.continueToPaymentWithTotal(
+                  formatMoney(
+                    (BigInt(quote.total.amountMinor) + BigInt(tipAmount)).toString(),
+                    quote.total.currency,
+                  ),
+                )
+              : checkoutText.continueToPayment}
           </button>
         )}
-        <p className="checkout-continue__note">
-          You’ll enter your card on the next step. Nothing is charged until you confirm.
-        </p>
+        <p className="checkout-continue__note">{checkoutText.continueNote}</p>
       </section>
     </CustomerPage>
   );

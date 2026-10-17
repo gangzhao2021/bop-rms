@@ -3,7 +3,7 @@ import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
-import { newOperationReference } from "./RoleAdministrationPages.js";
+import { newOperationReference } from "./operation-reference.js";
 import { FULL_SIGN_IN_REQUIRED, FULL_SIGN_IN_REQUIRED_TEXT } from "./full-sign-in.js";
 import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
 import {

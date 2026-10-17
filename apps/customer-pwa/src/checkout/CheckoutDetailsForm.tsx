@@ -1,4 +1,5 @@
 import { PrivacyNoticeLink } from "../journey/PrivacyNotice.js";
+import { checkoutText } from "../journey/messages.js";
 import {
   useCallback,
   useEffect,
@@ -226,18 +227,16 @@ export function CheckoutDetailsForm({
   useImperativeHandle(ref, () => ({ save: submit }));
   if (loading)
     return (
-      <section className="checkout-details-form" aria-label="Checkout details">
-        <p role="status">Loading checkout details…</p>
+      <section className="checkout-details-form" aria-label={checkoutText.detailsLabel}>
+        <p role="status">{checkoutText.detailsLoading}</p>
       </section>
     );
   if (failed || !authorized || draft === null || policy === null)
     return (
-      <section className="checkout-details-form" aria-label="Checkout details">
-        <p role="alert">
-          We couldn’t load your checkout details. Refresh your checkout to try again.
-        </p>
+      <section className="checkout-details-form" aria-label={checkoutText.detailsLabel}>
+        <p role="alert">{checkoutText.detailsLoadFailed}</p>
         <button type="button" disabled={!online || busy} onClick={() => void load()}>
-          Reload checkout details
+          {checkoutText.reloadDetails}
         </button>
       </section>
     );
@@ -245,7 +244,9 @@ export function CheckoutDetailsForm({
   return (
     <section aria-labelledby="checkout-details-heading">
       <h2 id="checkout-details-heading">
-        {selection.orderType === "Pickup" ? "Your details" : "Receipt"}
+        {selection.orderType === "Pickup"
+          ? checkoutText.detailsHeadingPickup
+          : checkoutText.receipt}
       </h2>
       <form
         className="checkout-details-form"
@@ -256,12 +257,14 @@ export function CheckoutDetailsForm({
         }}
       >
         <fieldset disabled={busy || !online || expired}>
-          <legend>{selection.orderType === "Pickup" ? "Pickup contact" : "Receipt"}</legend>
+          <legend>
+            {selection.orderType === "Pickup"
+              ? checkoutText.pickupContactLegend
+              : checkoutText.receipt}
+          </legend>
           {selection.orderType === "Pickup" ? (
             <p className="checkout-details-form__hint">
-              The store uses this only to contact you about this order, for example if an item sold
-              out. It is deleted 30 days after your order, and you can remove it sooner from your
-              order page.
+              {checkoutText.pickupContactPurpose}
               {policy.privacyNoticeUrl ? (
                 <>
                   {" "}
@@ -273,7 +276,7 @@ export function CheckoutDetailsForm({
           {draft.pickupContact !== null ? (
             <>
               <label>
-                Pickup name
+                {checkoutText.pickupName}
                 <input
                   required
                   maxLength={120}
@@ -289,7 +292,7 @@ export function CheckoutDetailsForm({
                 />
               </label>
               <label>
-                Contact method
+                {checkoutText.contactMethod}
                 <select
                   value={draft.pickupContact.channel}
                   onChange={(event) =>
@@ -302,12 +305,14 @@ export function CheckoutDetailsForm({
                     })
                   }
                 >
-                  <option value="Phone">Phone</option>
-                  <option value="Email">Email</option>
+                  <option value="Phone">{checkoutText.contactMethodPhone}</option>
+                  <option value="Email">{checkoutText.contactMethodEmail}</option>
                 </select>
               </label>
               <label>
-                {draft.pickupContact.channel === "Phone" ? "Mobile number" : "Pickup email"}
+                {draft.pickupContact.channel === "Phone"
+                  ? checkoutText.mobileNumber
+                  : checkoutText.pickupEmail}
                 <input
                   required
                   type={draft.pickupContact.channel === "Phone" ? "tel" : "email"}
@@ -331,11 +336,9 @@ export function CheckoutDetailsForm({
               </label>
             </>
           ) : (
-            <p>No contact details are required for your dine-in order.</p>
+            <p>{checkoutText.dineInNoContact}</p>
           )}
-          <p className="checkout-details-form__hint">
-            Your receipt appears on your order page, where you can print or save it.
-          </p>
+          <p className="checkout-details-form__hint">{checkoutText.receiptOnOrderPage}</p>
           {policy.documents.map((document) => (
             <details key={document.documentReference}>
               <summary>{document.title}</summary>
@@ -352,35 +355,23 @@ export function CheckoutDetailsForm({
                   setDirty(true);
                 }}
               />
-              I have read and agree to the policies above
+              {checkoutText.agreePolicies}
             </label>
           ) : null}
         </fieldset>
-        {expired ? (
-          <p role="alert">
-            Checkout information expired. Get a current quote and reload details before saving.
-          </p>
+        {expired ? <p role="alert">{checkoutText.detailsExpired}</p> : null}
+        {!online ? <p role="status">{checkoutText.detailsOffline}</p> : null}
+        {save.status === "pending" ? <p role="status">{checkoutText.savingDetails}</p> : null}
+        {save.status === "saved" && !dirty ? (
+          <p role="status">{checkoutText.detailsSaved}</p>
         ) : null}
-        {!online ? (
-          <p role="status">You are offline. Your details will not be submitted automatically.</p>
-        ) : null}
-        {save.status === "pending" ? <p role="status">Saving checkout details…</p> : null}
-        {save.status === "saved" && !dirty ? <p role="status">Checkout details saved.</p> : null}
-        {save.status === "invalid" ? (
-          <p role="alert">
-            Check your contact and receipt fields. Enter a mobile number such as 416 555 0123, or
-            include the country code for numbers outside North America.
-          </p>
-        ) : null}
+        {save.status === "invalid" ? <p role="alert">{checkoutText.detailsInvalid}</p> : null}
         {["conflict", "policy", "requote", "denied"].includes(save.status) ? (
-          <p role="alert">Your checkout changed. Reload details before trying again.</p>
+          <p role="alert">{checkoutText.detailsCheckoutChanged}</p>
         ) : null}
         {uncertain ? (
           <>
-            <p role="alert">
-              The save result is not confirmed. Retry the same request before changing these
-              details.
-            </p>
+            <p role="alert">{checkoutText.detailsSaveUnconfirmed}</p>
             <button
               type="button"
               disabled={!online}
@@ -388,7 +379,7 @@ export function CheckoutDetailsForm({
                 void saver.retry().then(savedRevision);
               }}
             >
-              Retry saving details
+              {checkoutText.retrySavingDetails}
             </button>
           </>
         ) : null}
@@ -400,7 +391,7 @@ export function CheckoutDetailsForm({
               busy || !online || expired || !dirty || (policy.documents.length > 0 && !confirmed)
             }
           >
-            Save details
+            {checkoutText.saveDetails}
           </button>
         )}
         <button
@@ -409,7 +400,7 @@ export function CheckoutDetailsForm({
           disabled={busy || !online}
           onClick={() => void load()}
         >
-          Reload checkout details
+          {checkoutText.reloadDetails}
         </button>
       </form>
     </section>

@@ -6,7 +6,7 @@ import { StatePanel } from "@bop-rms/ui";
 import { Freshness, SourceTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { businessDateText } from "./StoreBusinessDay.js";
-import { formatSettlementMoney } from "./SettlementPage.js";
+import { formatCad } from "./order-money.js";
 import { Link } from "react-router";
 
 /** Staff labels for the exception kinds and states the projection carries. */
@@ -247,7 +247,7 @@ function totalsDifference(
     return `${label}: the payment provider's figure could not be read`;
   const gap = BigInt(pair.providerMinor) - BigInt(pair.storeMinor);
   if (gap === 0n) return null;
-  return `${label}: the payment provider has ${formatSettlementMoney(
+  return `${label}: the payment provider has ${formatCad(
     (gap < 0n ? -gap : gap).toString(),
   )} ${gap > 0n ? "more" : "less"} than the store`;
 }
@@ -342,19 +342,19 @@ function OrderExceptionCard({
           <div>
             <dt>Payments taken (store / payment provider)</dt>
             <dd>
-              {formatSettlementMoney(detail.captured.storeMinor)} /{" "}
+              {formatCad(detail.captured.storeMinor)} /{" "}
               {detail.captured.providerMinor === null
                 ? "could not be read"
-                : formatSettlementMoney(detail.captured.providerMinor)}
+                : formatCad(detail.captured.providerMinor)}
             </dd>
           </div>
           <div>
             <dt>Refunds (store / payment provider)</dt>
             <dd>
-              {formatSettlementMoney(detail.refunded.storeMinor)} /{" "}
+              {formatCad(detail.refunded.storeMinor)} /{" "}
               {detail.refunded.providerMinor === null
                 ? "could not be read"
-                : formatSettlementMoney(detail.refunded.providerMinor)}
+                : formatCad(detail.refunded.providerMinor)}
             </dd>
           </div>
           <div>

@@ -4,7 +4,7 @@ import { SourceTime, StaffTime } from "./StoreTime.js";
 import type { AvailabilityClient } from "./store-availability-page.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
-import { newOperationReference } from "./RoleAdministrationPages.js";
+import { newOperationReference } from "./operation-reference.js";
 import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
 import {
   MenuPageError,

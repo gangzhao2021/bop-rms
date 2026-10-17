@@ -1,4 +1,3 @@
-import { orderMoney } from "./order-money.js";
 import type { EscalationReason } from "./ordinary-refund-client.js";
 
 /** WP-2423 Q5: refund reasons staff choose from (codes stay server-owned). */
@@ -42,5 +41,3 @@ export const escalationReasonLabel: Readonly<Record<EscalationReason, string>> =
   OrderOrdinaryTotalAboveCad100: "Refunds on this order would total more than $100",
   ManualAllocationOverride: "The tip or service charge was changed by hand",
 };
-/** The app's one money format ("$125.05"), for refund amounts in the Store's CAD. */
-export const formatCad = (minor: string) => orderMoney({ amountMinor: minor, currencyCode: "CAD" });

@@ -22,6 +22,7 @@ import {
   formatMoney,
 } from "../journey/format.js";
 import { StoreContactCard } from "../journey/StoreContact.js";
+import { commonText, orderStatusText } from "../journey/messages.js";
 import { ContactDetailsSection } from "./ContactDetailsSection.js";
 import type { ContactRemovalClient } from "./contact-removal-client.js";
 
@@ -288,17 +289,12 @@ function browserPollingEnvironment() {
 }
 
 /** WP-2423 Q6: why the store cancelled, in words for the customer (never internal codes). */
-export const staffCancellationReasonText: Readonly<Record<StaffCancellationReason, string>> = {
-  CustomerRequest: "The store cancelled it at your request.",
-  SoldOut: "An item you ordered sold out.",
-  StoreError: "The store couldn't prepare it.",
-  DuplicateOrder: "It was a duplicate of another order.",
-  GuestLeft: "The table was closed after your party left, before this was made.",
-};
+export const staffCancellationReasonText: Readonly<Record<StaffCancellationReason, string>> =
+  orderStatusText.cancelReason;
 export function staffRefundText(cancellation: StaffCancellation): string {
   return cancellation.refundStatus === "Refunded"
-    ? "Your payment was refunded in full."
-    : "Refund pending — your payment is being returned in full.";
+    ? orderStatusText.staffRefunded
+    : orderStatusText.staffRefundPending;
 }
 /**
  * WP-2423 Q6 step 2: "Cancelled · Refund pending $4.52" next to an item the store cancelled. The
@@ -310,10 +306,11 @@ export function itemCancellationText(cancellation: ItemCancellation): string {
       ? " " +
         formatMoney(cancellation.refundAmount.amountMinor, cancellation.refundAmount.currencyCode)
       : "";
-  return (
-    "Cancelled · " +
-    (cancellation.refundStatus === "Refunded" ? "Refunded" : "Refund pending") +
-    amount
+  return orderStatusText.itemCancelled(
+    cancellation.refundStatus === "Refunded"
+      ? orderStatusText.itemRefunded
+      : orderStatusText.itemRefundPending,
+    amount,
   );
 }
 /** WP-2423 Q6 step 2: where the money for cancelled items is (tax included, tip not refunded). */
@@ -332,16 +329,8 @@ export function itemRefundSummary(cancellations: readonly ItemCancellation[]): s
   const refunded = sum("Refunded");
   const pending = sum("Pending");
   return [
-    ...(refunded === null
-      ? []
-      : [
-          `Cancelled items: ${refunded} refunded to your original payment (tax included, tip not refunded).`,
-        ]),
-    ...(pending === null
-      ? []
-      : [
-          `Cancelled items: a refund of ${pending} to your original payment is pending (tax included, tip not refunded).`,
-        ]),
+    ...(refunded === null ? [] : [orderStatusText.cancelledItemsRefunded(refunded)]),
+    ...(pending === null ? [] : [orderStatusText.cancelledItemsRefundPending(pending)]),
   ];
 }
 /** WP-2423 Q6: the store cancelled the whole order (a pickup, or every dine-in round). */
@@ -569,89 +558,61 @@ function StatusContent({
         : view.order.canonicalPhase === "Submitted"
           ? "Submitted"
           : "Accepted";
+  const progress = orderStatusText.progress;
   const [progressHeading, progressMessage] = storeCancelled
-    ? ["Order cancelled by the store", staffCancellationReasonText[storeCancelled.reason]]
+    ? [progress.storeCancelledHeading, staffCancellationReasonText[storeCancelled.reason]]
     : notAccepted
       ? [
-          "Order not accepted",
+          progress.notAcceptedHeading,
           notAccepted.refundStatus === "Refunded"
-            ? "The store couldn't accept your order, so your payment was refunded to your original payment method."
-            : "The store couldn't accept your order, so your payment is being refunded to your original payment method.",
+            ? progress.notAcceptedRefunded
+            : progress.notAcceptedRefunding,
         ]
       : awaitingStore
-        ? [
-            "Waiting for the store",
-            "The store hasn't confirmed your order yet. Please wait or contact the store.",
-          ]
+        ? [progress.awaitingStoreHeading, progress.awaitingStore]
         : unpaidPickupCancelled
-          ? [
-              "Order cancelled",
-              "Payment wasn't completed within 30 minutes, so this order was cancelled. If a payment still goes through, it will be refunded automatically.",
-            ]
+          ? [progress.cancelledHeading, progress.unpaidPickupCancelled]
           : complete
-            ? ["Order collected", "Your order has been collected. Enjoy!"]
+            ? [progress.collectedHeading, progress.collected]
             : // A pickup the store closed as not collected is reported as Cancelled; say why.
               notCollected
-              ? [
-                  "Not collected",
-                  "The store closed this pickup after the pickup time ended. Contact the store about your order or a refund.",
-                ]
+              ? [progress.notCollectedHeading, progress.notCollected]
               : view.order.canonicalPhase === "Cancelled"
-                ? ["Order cancelled", "Your order has been cancelled."]
+                ? [progress.cancelledHeading, progress.cancelled]
                 : view.order.canonicalPhase === "Rejected"
-                  ? ["Order not accepted", "Your order was not accepted."]
+                  ? [progress.notAcceptedHeading, progress.rejected]
                   : remakes.length > 0
                     ? pickup
-                      ? [
-                          "Remaking part of your order",
-                          "We're remaking part of your order. We'll have it ready shortly — please wait before collecting it.",
-                        ]
-                      : [
-                          "Remaking an item",
-                          "We're remaking an item for you. It will be brought to your table shortly.",
-                        ]
+                      ? [progress.remakingPickupHeading, progress.remakingPickup]
+                      : [progress.remakingDineInHeading, progress.remakingDineIn]
                     : allServed
-                      ? ["Items served", "All listed items have been served."]
+                      ? [progress.servedHeading, progress.served]
                       : view.order.canonicalPhase === "Fulfilled"
                         ? pickup
-                          ? ["Order complete", "Your order is complete. Thank you for visiting!"]
+                          ? [progress.completeHeading, progress.complete]
                           : // Dine-in: everything was served; the table may still order more.
-                            ["Items served", "All listed items have been served."]
+                            [progress.servedHeading, progress.served]
                         : kitchenLabel === "AwaitingPayment"
                           ? [
-                              "Waiting for payment",
+                              progress.awaitingPaymentHeading,
                               someServed
-                                ? "Everything paid for has been served. The kitchen starts the next round once it's paid."
-                                : "The kitchen starts your order once it's paid.",
+                                ? progress.awaitingPaymentSomeServed
+                                : progress.awaitingPayment,
                             ]
                           : someServed
-                            ? [
-                                "Serving your order",
-                                "Some items have been served. Check the remaining items below.",
-                              ]
+                            ? [progress.servingHeading, progress.serving]
                             : stage === "Ready"
                               ? pickup
-                                ? [
-                                    "Ready for pickup",
-                                    "Your order is ready. Collect it at the counter.",
-                                  ]
-                                : [
-                                    "Your order is ready",
-                                    "Your food is ready and will be brought to your table shortly.",
-                                  ]
+                                ? [progress.readyPickupHeading, progress.readyPickup]
+                                : [progress.readyDineInHeading, progress.readyDineIn]
                               : stage === "Preparing"
-                                ? ["Preparing your order", "The kitchen is preparing your order."]
+                                ? [progress.preparingHeading, progress.preparing]
                                 : stage === "Accepted"
                                   ? [
-                                      "Order accepted",
-                                      pickup
-                                        ? "The store has your order and will start preparing it soon."
-                                        : "The kitchen has your order and will start preparing it soon.",
+                                      progress.acceptedHeading,
+                                      pickup ? progress.acceptedPickup : progress.acceptedDineIn,
                                     ]
-                                  : [
-                                      "Order submitted",
-                                      "We have your order. The store will confirm it shortly.",
-                                    ];
+                                  : [progress.submittedHeading, progress.submitted];
   const payments = view.sources?.payments;
   const paid = paidTotal(view);
   const paymentLabel =
@@ -660,18 +621,24 @@ function StatusContent({
         null
       : paid && storeCancelled
         ? // WP-2423 Q6: a store-cancelled order says where the money is, not that it was received.
-          (storeCancelled.refundStatus === "Refunded" ? "Refunded " : "Refund pending · ") +
-          formatMoney(paid.amountMinor, paid.currencyCode)
+          (storeCancelled.refundStatus === "Refunded"
+            ? orderStatusText.payment.refunded
+            : orderStatusText.payment.refundPending)(
+            formatMoney(paid.amountMinor, paid.currencyCode),
+          )
         : paid && notAccepted
-          ? (notAccepted.refundStatus === "Refunded" ? "Refunded " : "Refund pending · ") +
-            formatMoney(paid.amountMinor, paid.currencyCode)
+          ? (notAccepted.refundStatus === "Refunded"
+              ? orderStatusText.payment.refunded
+              : orderStatusText.payment.refundPending)(
+              formatMoney(paid.amountMinor, paid.currencyCode),
+            )
           : paid
-            ? `Payment received ${formatMoney(paid.amountMinor, paid.currencyCode)}`
+            ? orderStatusText.payment.received(formatMoney(paid.amountMinor, paid.currencyCode))
             : unpaidPickupCancelled
-              ? "Not paid"
+              ? orderStatusText.payment.notPaid
               : payments.some((payment) => payment.status === "Failed")
-                ? "Payment attempt failed"
-                : "Payment pending";
+                ? orderStatusText.payment.attemptFailed
+                : orderStatusText.payment.pending;
   // The kitchen has no ticket for this order yet: the order is in, preparation hasn't started.
   // Once the order has ended (cancelled, not paid, collected, closed) the row says nothing useful.
   const orderEnded =
@@ -682,26 +649,29 @@ function StatusContent({
     notCollected ||
     unpaidPickupCancelled ||
     view.order.batches.every((batch) => notPaid.has(batch.orderBatchReference));
+  const kitchenWords = orderStatusText.kitchen;
   const kitchenText =
     storeCancelled || notAccepted
-      ? "Cancelled"
+      ? kitchenWords.cancelled
       : remakes.length > 0 && !complete
-        ? "Remaking an item"
+        ? kitchenWords.remaking
         : kitchenLabel === "Unknown"
           ? orderEnded
             ? null
             : view.order.canonicalPhase === "Ready"
-              ? "Ready"
+              ? kitchenWords.ready
               : view.order.canonicalPhase === "In Progress"
-                ? "Preparing"
-                : "Not started yet"
+                ? kitchenWords.preparing
+                : kitchenWords.notStarted
           : kitchenLabel === "Queued"
-            ? "In the queue"
+            ? kitchenWords.inQueue
             : kitchenLabel === "AwaitingPayment"
-              ? "Waiting for payment"
+              ? kitchenWords.awaitingPayment
               : kitchenLabel === "Served"
-                ? "Done"
-                : kitchenLabel;
+                ? kitchenWords.done
+                : kitchenLabel === "Ready"
+                  ? kitchenWords.ready
+                  : kitchenWords.preparing;
   const multipleBatches = view.order.batches.length > 1;
   // WP-2423: a round whose payment didn't go through is never charged (cancelled, or about to be).
   const summary = orderMoneySummary(view, (reference) => !notPaid.has(reference));
@@ -715,7 +685,7 @@ function StatusContent({
         className="order-status__card order-status__summary"
         aria-labelledby="order-progress-heading"
       >
-        <p className="bop-eyebrow">Order {view.order.orderNumber}</p>
+        <p className="bop-eyebrow">{orderStatusText.orderEyebrow(view.order.orderNumber)}</p>
         <h2 id="order-progress-heading">{progressHeading}</h2>
         <p>{progressMessage}</p>
         {storeCancelled ? (
@@ -723,18 +693,22 @@ function StatusContent({
         ) : null}
         <dl>
           <div>
-            <dt>Order type</dt>
-            <dd>{view.order.orderType === "DineIn" ? "Dine in" : "Pickup"}</dd>
+            <dt>{orderStatusText.orderTypeLabel}</dt>
+            <dd>
+              {view.order.orderType === "DineIn"
+                ? orderStatusText.orderTypeDineIn
+                : orderStatusText.orderTypePickup}
+            </dd>
           </div>
           {kitchenText === null ? null : (
             <div>
-              <dt>Kitchen status</dt>
+              <dt>{orderStatusText.kitchenStatusLabel}</dt>
               <dd>{kitchenText}</dd>
             </div>
           )}
           {paymentLabel === null ? null : (
             <div>
-              <dt>Payment</dt>
+              <dt>{orderStatusText.paymentLabel}</dt>
               <dd>{paymentLabel}</dd>
             </div>
           )}
@@ -759,26 +733,26 @@ function StatusContent({
 
       {payments && payments.some((payment) => payment.freshnessStatus !== "Fresh") ? (
         <section className="order-status__warning" role="status">
-          <h2>Payment update may be delayed</h2>
-          <p>This payment update may be out of date. Refresh to check again.</p>
+          <h2>{orderStatusText.paymentDelayedHeading}</h2>
+          <p>{orderStatusText.paymentDelayed}</p>
         </section>
       ) : null}
 
       {view.freshnessStatus !== "Fresh" ? (
         <section className="order-status__warning" role="status">
-          <h2>Status may be delayed</h2>
+          <h2>{orderStatusText.statusDelayedHeading}</h2>
           <p>
             {view.freshnessStatus === "Rebuilding"
-              ? "We are updating your order status. Check again shortly."
+              ? orderStatusText.statusRebuilding
               : view.freshnessStatus === "Failed"
-                ? "We could not update your order status. The details below may be out of date."
-                : "The details below may be out of date. Refresh to check for an update."}
+                ? orderStatusText.statusFailed
+                : orderStatusText.statusStale}
           </p>
         </section>
       ) : null}
 
       <section className="order-status__batches" aria-labelledby="order-items-heading">
-        <h2 id="order-items-heading">Your items</h2>
+        <h2 id="order-items-heading">{orderStatusText.itemsHeading}</h2>
         {view.order.batches.map((batch, index) => {
           const batchKitchen = kitchen?.batches.find(
             (entry) => entry.orderBatchReference === batch.orderBatchReference,
@@ -794,49 +768,49 @@ function StatusContent({
               key={batch.orderBatchReference}
               className="order-status__card order-status__batch"
             >
-              {multipleBatches ? <h3>Round {index + 1}</h3> : null}
+              {multipleBatches ? <h3>{orderStatusText.roundHeading(index + 1)}</h3> : null}
               {unpaidCancelled.has(batch.orderBatchReference) ? (
                 <p className="order-status__batch-cancelled">
                   {cancelledByStore.has(batch.orderBatchReference)
                     ? multipleBatches
-                      ? "This round was cancelled by the store. Nobody was charged for it."
-                      : "This order was cancelled by the store. Nobody was charged for it."
+                      ? orderStatusText.roundCancelledByStoreUnpaid
+                      : orderStatusText.orderCancelledByStoreUnpaid
                     : multipleBatches
-                      ? "This round was cancelled because its payment didn't go through. You were not charged for it."
-                      : "This order was cancelled because its payment didn't go through. You were not charged for it."}
+                      ? orderStatusText.roundCancelledUnpaid
+                      : orderStatusText.orderCancelledUnpaid}
                 </p>
               ) : failedPayment(batch.orderBatchReference) !== null ? (
                 <p className="order-status__warning" role="status">
                   {multipleBatches
-                    ? "Payment for this round didn't go through. "
-                    : "Payment for your order didn't go through. "}
-                  It will be cancelled at{" "}
-                  {endSentence(formatClockTime(failedPayment(batch.orderBatchReference) ?? ""))} Ask
-                  a staff member if you need help.
+                    ? orderStatusText.roundPaymentFailed
+                    : orderStatusText.orderPaymentFailed}
+                  {orderStatusText.cancelsAt(
+                    endSentence(formatClockTime(failedPayment(batch.orderBatchReference) ?? "")),
+                  )}
                 </p>
               ) : batchCancellation ? (
                 <p className="order-status__batch-cancelled">
                   {multipleBatches
-                    ? "This round was cancelled by the store. "
-                    : "Cancelled by the store. "}
+                    ? orderStatusText.roundCancelledByStore
+                    : orderStatusText.orderCancelledByStore}
                   {staffCancellationReasonText[batchCancellation.reason]}{" "}
                   {staffRefundText(batchCancellation)}
                 </p>
               ) : multipleBatches && awaitingPayment.has(batch.orderBatchReference) ? (
-                <p>Waiting for payment</p>
+                <p>{orderStatusText.roundAwaitingPayment}</p>
               ) : multipleBatches && roundServing(view, batch) === "All" ? (
-                <p>Served</p>
+                <p>{orderStatusText.roundServed}</p>
               ) : multipleBatches && roundServing(view, batch) === "Some" ? (
-                <p>Partly served</p>
+                <p>{orderStatusText.roundPartlyServed}</p>
               ) : kitchen && multipleBatches ? (
                 <p>
                   {batchKitchen?.status === "Ready"
-                    ? "Ready"
+                    ? kitchenWords.ready
                     : batchKitchen?.status === "InProgress"
-                      ? "Preparing"
+                      ? kitchenWords.preparing
                       : batchKitchen
-                        ? "In the queue"
-                        : "Not started yet"}
+                        ? kitchenWords.inQueue
+                        : kitchenWords.notStarted}
                 </p>
               ) : null}
               <ul>
@@ -871,7 +845,8 @@ function StatusContent({
                         ) : null}
                         {itemDetails.get(item.orderItemReference)?.customerNote ? (
                           <span className="order-status__item-note">
-                            Note: {itemDetails.get(item.orderItemReference)?.customerNote}
+                            {commonText.notePrefix}{" "}
+                            {itemDetails.get(item.orderItemReference)?.customerNote}
                           </span>
                         ) : null}
                       </span>
@@ -886,22 +861,27 @@ function StatusContent({
                           {itemCancellationText(itemCancellation)}
                         </span>
                       ) : batchCancelled ? (
-                        <span className="order-status__item-cancelled">Cancelled</span>
+                        <span className="order-status__item-cancelled">
+                          {orderStatusText.itemCancelledLabel}
+                        </span>
                       ) : notPaid.has(batch.orderBatchReference) ? (
-                        <span className="order-status__item-cancelled">Not paid</span>
+                        <span className="order-status__item-cancelled">
+                          {orderStatusText.itemNotPaid}
+                        </span>
                       ) : remaking(item.orderItemReference) && !complete ? (
-                        <span className="order-status__item-remake">Being remade</span>
+                        <span className="order-status__item-remake">
+                          {orderStatusText.itemBeingRemade}
+                        </span>
                       ) : view.sources?.dining ? (
                         <span>
-                          Served{" "}
-                          {
+                          {orderStatusText.itemServedOf(
                             view.sources.dining.items.find(
                               (entry) =>
                                 entry.orderItemReference === item.orderItemReference &&
                                 entry.orderBatchReference === batch.orderBatchReference,
-                            )?.servedQuantity
-                          }{" "}
-                          of {item.quantity}
+                            )?.servedQuantity,
+                            item.quantity,
+                          )}
                         </span>
                       ) : null}
                     </li>
@@ -914,29 +894,29 @@ function StatusContent({
         {summary.subtotal === null ? null : (
           <dl className="order-status__money">
             <div>
-              <dt>Subtotal</dt>
+              <dt>{commonText.subtotal}</dt>
               <dd>{formatMoney(summary.subtotal, currency)}</dd>
             </div>
             {summary.adjustments !== null && summary.adjustments !== 0n ? (
               <div>
-                <dt>Discounts and fees</dt>
+                <dt>{orderStatusText.discountsAndFees}</dt>
                 <dd>{formatMoney(summary.adjustments, currency)}</dd>
               </div>
             ) : null}
             <div>
-              <dt>Tax</dt>
+              <dt>{commonText.tax}</dt>
               <dd>{formatMoney(summary.tax ?? 0n, currency)}</dd>
             </div>
           </dl>
         )}
         <p className="order-status__total">
-          <span>{summary.subtotal === null ? "Total including tax" : "Total"}</span>
+          <span>
+            {summary.subtotal === null ? orderStatusText.totalIncludingTax : commonText.total}
+          </span>
           <span>{formatMoney(summary.total, currency)}</span>
         </p>
         {notPaid.size > 0 ? (
-          <p className="order-status__item-refund">
-            Rounds that weren&apos;t paid are not included.
-          </p>
+          <p className="order-status__item-refund">{orderStatusText.unpaidRoundsExcluded}</p>
         ) : null}
         {/* A whole store cancellation states its own full refund; the item note would contradict it. */}
         {(storeCancelled ? [] : itemRefundSummary(itemCancellations)).map((line) => (
@@ -956,18 +936,11 @@ function StatusContent({
 export function VisitEndedNotice() {
   return (
     <section className="order-status__card order-status__visit-ended" role="alert">
-      <h2>Your visit on this phone has ended</h2>
-      <p>
-        At a table: your table visit ended or expired. Scan the table QR code again and ask a staff
-        member for the table code to continue. While your table is still open, your earlier orders
-        are on your table page.
-      </p>
-      <p>
-        For a pickup order: the store still has your order. Give your name or order number at the
-        counter.
-      </p>
+      <h2>{orderStatusText.visitEnded.heading}</h2>
+      <p>{orderStatusText.visitEnded.atTable}</p>
+      <p>{orderStatusText.visitEnded.pickup}</p>
       <Link className="order-status__retry" to="/">
-        Go to the start
+        {orderStatusText.visitEnded.start}
       </Link>
     </section>
   );
@@ -1018,55 +991,47 @@ export function OrderStatusPage({
       className="order-status"
     >
       <header className="customer-heading">
-        <p className="bop-eyebrow">Order status</p>
-        <h2>Track your order</h2>
+        <p className="bop-eyebrow">{orderStatusText.pageEyebrow}</p>
+        <h2>{orderStatusText.pageHeading}</h2>
       </header>
 
       {state.status === "loading" ? (
         <section role="status">
-          <h2>Loading order status</h2>
+          <h2>{orderStatusText.loadingHeading}</h2>
         </section>
       ) : null}
       {state.status === "received" ? (
         // WP-2423 (v15 2026-10-16): the order is in; its progress shows here within seconds.
         <section className="order-status__received" role="status">
-          <h2>Order received</h2>
-          <p>
-            Order {state.received.orderNumber} is in. Its progress will show here in a few seconds —
-            this page updates by itself.
-          </p>
-          <p>If nothing changes after a minute, give your order number to a staff member.</p>
+          <h2>{orderStatusText.receivedHeading}</h2>
+          <p>{orderStatusText.received(state.received.orderNumber)}</p>
+          <p>{orderStatusText.receivedNoChange}</p>
         </section>
       ) : null}
       {state.status === "invalid-reference" ? (
         <section role="alert">
-          <h2>Order link is invalid</h2>
-          <p>Use the exact link provided after checkout.</p>
+          <h2>{orderStatusText.invalidHeading}</h2>
+          <p>{orderStatusText.invalid}</p>
         </section>
       ) : null}
       {state.status === "permission-denied" ? <VisitEndedNotice /> : null}
       {state.status === "not-found" ? (
         <section className="order-status__unavailable" role="alert">
-          <h2>We can&apos;t show this order here yet</h2>
-          <p>
-            If you just paid, your order can take a few seconds to appear. Try again in a moment.
-          </p>
+          <h2>{orderStatusText.notFoundHeading}</h2>
+          <p>{orderStatusText.notFoundJustPaid}</p>
           <button
             className="order-status__retry"
             type="button"
             onClick={() => void controller.refresh()}
           >
-            Try again
+            {commonText.tryAgain}
           </button>
-          <p>
-            This page only opens orders placed on this phone or browser. If it still doesn&apos;t
-            open, ask a staff member with your order number.
-          </p>
+          <p>{orderStatusText.notFoundThisPhone}</p>
         </section>
       ) : null}
       {state.status === "feature-disabled" ? (
         <section role="alert">
-          <h2>Order tracking is disabled</h2>
+          <h2>{orderStatusText.disabledHeading}</h2>
         </section>
       ) : null}
       {state.status === "unavailable" ? (
@@ -1074,51 +1039,49 @@ export function OrderStatusPage({
           <span className="order-status__unavailable-icon" aria-hidden="true">
             !
           </span>
-          <h2>Order status is not available</h2>
-          <p>We could not load your order status. Please try again.</p>
+          <h2>{orderStatusText.unavailableHeading}</h2>
+          <p>{orderStatusText.unavailable}</p>
           <button
             className="order-status__retry"
             type="button"
             onClick={() => void controller.refresh()}
           >
-            Try loading status
+            {orderStatusText.tryLoadingStatus}
           </button>
         </section>
       ) : null}
       {state.status === "offline" ? (
         <section role="status" className="order-status__warning">
-          <h2>You’re offline</h2>
+          <h2>{commonText.offlineHeading}</h2>
           <p>
-            {view
-              ? "Showing the last status loaded on this page."
-              : "Connect to the internet to load your order status."}{" "}
-            Reconnect and refresh to check again.
+            {view ? orderStatusText.offlineShowingLast : orderStatusText.offlineConnect}{" "}
+            {orderStatusText.offlineReconnect}
           </p>
           <button
             className="order-status__retry"
             type="button"
             onClick={() => void controller.refresh()}
           >
-            Try loading status
+            {orderStatusText.tryLoadingStatus}
           </button>
         </section>
       ) : null}
       {view ? <StatusContent view={view} pickupController={pickupController} /> : null}
       {state.status === "ready" ? (
-        <section className="order-status__actions" aria-label="Updates">
+        <section className="order-status__actions" aria-label={orderStatusText.updatesLabel}>
           <p>
             {state.realtime === "available"
-              ? "Live updates are on."
+              ? orderStatusText.liveUpdatesOn
               : isOrderSettled(state.view)
-                ? "This order is complete."
-                : "This page checks for updates every few seconds."}
+                ? orderStatusText.orderComplete
+                : orderStatusText.checksEveryFewSeconds}
           </p>
           <button
             type="button"
             disabled={state.refreshing}
             onClick={() => void controller.refresh()}
           >
-            {state.refreshing ? "Refreshing…" : "Refresh now"}
+            {state.refreshing ? orderStatusText.refreshing : orderStatusText.refreshNow}
           </button>
         </section>
       ) : null}
@@ -1138,16 +1101,16 @@ export function OrderStatusPage({
       {view?.order.orderType === "DineIn" ? (
         // WP-2423 Q8: every round at the table, including other guests', and what is still due.
         <Link className="order-status__receipt" to="/dine-in/session">
-          See everything your table ordered
+          {orderStatusText.seeTableOrders}
         </Link>
       ) : null}
       {view ? (
         <Link className="order-status__receipt" to={`/orders/${view.order.orderReference}/receipt`}>
-          View receipt and support
+          {orderStatusText.viewReceipt}
         </Link>
       ) : null}
       <Link className="order-status__back" to="/menu">
-        Back to menu
+        {orderStatusText.backToMenu}
       </Link>
     </CustomerPage>
   );

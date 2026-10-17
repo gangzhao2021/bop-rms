@@ -2,7 +2,7 @@ import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
-import { newOperationReference } from "./RoleAdministrationPages.js";
+import { newOperationReference } from "./operation-reference.js";
 import { SourceTime } from "./StoreTime.js";
 import { FULL_SIGN_IN_REQUIRED } from "./full-sign-in.js";
 import {

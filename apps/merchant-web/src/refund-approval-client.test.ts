@@ -7,7 +7,8 @@ import {
   RefundApprovalClientError,
   StepUpError,
 } from "./refund-approval-client.js";
-import { describeRefundReason, escalationReasonLabel, formatCad } from "./refund-reasons.js";
+import { describeRefundReason, escalationReasonLabel } from "./refund-reasons.js";
+import { formatCad } from "./order-money.js";
 import { StepUpVerification } from "./StepUpVerification.js";
 import { ApprovalFailureNotice } from "./RefundApprovalsPage.js";
 

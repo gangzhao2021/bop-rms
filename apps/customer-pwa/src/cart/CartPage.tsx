@@ -19,6 +19,8 @@ import { formatMinutesUntil } from "../journey/format.js";
 import {
   cartIssueMessage,
   cartItemWarningMessage,
+  cartText,
+  commonText,
   lineEstimateLabel,
   quoteIssueMessage,
 } from "../journey/messages.js";
@@ -85,7 +87,9 @@ function CartItem({
           <h3 id={`cart-item-${item.cartItemReference}`}>{item.displayName}</h3>
           {configuration ? <p className="cart-item__configuration">{configuration}</p> : null}
           {item.customerNote === null || foreign ? null : (
-            <p className="cart-item__note">Note: {item.customerNote}</p>
+            <p className="cart-item__note">
+              {commonText.notePrefix} {item.customerNote}
+            </p>
           )}
         </div>
         <p className="cart-item__estimate">
@@ -96,7 +100,7 @@ function CartItem({
       </div>
       {foreign ? (
         <p className="cart-warning" id={ownershipDescription}>
-          Added by another guest. Only they can change this item.
+          {cartText.line.addedByAnotherGuest}
         </p>
       ) : null}
       {warnings.map((warning) => (
@@ -104,24 +108,27 @@ function CartItem({
           {warning}
         </p>
       ))}
-      <div className="cart-item__actions" aria-label={`Quantity for ${item.displayName}`}>
+      <div
+        className="cart-item__actions"
+        aria-label={cartText.line.quantityGroupLabel(item.displayName)}
+      >
         <button
           type="button"
           aria-describedby={foreign ? ownershipDescription : undefined}
           disabled={readOnly || foreign || pending || item.quantity <= 1}
-          aria-label={`Decrease ${item.displayName} quantity`}
+          aria-label={cartText.line.decreaseLabel(item.displayName)}
           onClick={() => void updateQuantity(item.quantity - 1)}
         >
           −
         </button>
-        <output aria-live="off" aria-label={`${item.displayName} quantity`}>
+        <output aria-live="off" aria-label={cartText.line.quantityLabel(item.displayName)}>
           {item.quantity}
         </output>
         <button
           type="button"
           aria-describedby={foreign ? ownershipDescription : undefined}
           disabled={readOnly || foreign || pending || item.quantity >= 100}
-          aria-label={`Increase ${item.displayName} quantity`}
+          aria-label={cartText.line.increaseLabel(item.displayName)}
           onClick={() => void updateQuantity(item.quantity + 1)}
         >
           +
@@ -133,7 +140,7 @@ function CartItem({
           disabled={readOnly || foreign || pending}
           onClick={() => void controller.removeItem(item.cartItemReference)}
         >
-          Remove
+          {cartText.line.remove}
         </button>
       </div>
     </article>
@@ -144,52 +151,52 @@ function CartSummary({ cart, now }: { readonly cart: CartView; readonly now: () 
   if (cart.cart.lifecycle.status !== "Active")
     return (
       <section className="cart-summary" aria-labelledby="cart-summary-heading">
-        <h2 id="cart-summary-heading">Order summary</h2>
-        <p>Checkout is unavailable for this cart.</p>
+        <h2 id="cart-summary-heading">{cartText.summary.heading}</h2>
+        <p>{cartText.summary.checkoutUnavailable}</p>
       </section>
     );
   const quote = cart.cart.quote;
   if (quote === null || quote.cartVersion !== cart.cart.version)
     return (
       <section className="cart-summary" aria-labelledby="cart-summary-heading">
-        <h2 id="cart-summary-heading">Order summary</h2>
-        <p>Your total, including tax, is calculated at checkout.</p>
+        <h2 id="cart-summary-heading">{cartText.summary.heading}</h2>
+        <p>{cartText.summary.totalAtCheckout}</p>
       </section>
     );
   const remaining = formatMinutesUntil(quote.expiresAt, now());
   return (
     <section className="cart-summary" aria-labelledby="cart-summary-heading">
-      <h2 id="cart-summary-heading">Order summary</h2>
+      <h2 id="cart-summary-heading">{cartText.summary.heading}</h2>
       <dl>
         <div>
-          <dt>Subtotal</dt>
+          <dt>{commonText.subtotal}</dt>
           <dd>{formatCartMoney(quote.subtotal)}</dd>
         </div>
         {quote.discount.amountMinor !== "0" ? (
           <div>
-            <dt>Discount</dt>
+            <dt>{commonText.discount}</dt>
             <dd>{formatCartMoney(quote.discount)}</dd>
           </div>
         ) : null}
         <div>
-          <dt>Tax</dt>
+          <dt>{commonText.tax}</dt>
           <dd>{formatCartMoney(quote.tax)}</dd>
         </div>
         {quote.fee.amountMinor !== "0" ? (
           <div>
-            <dt>Fees</dt>
+            <dt>{commonText.fees}</dt>
             <dd>{formatCartMoney(quote.fee)}</dd>
           </div>
         ) : null}
         <div className="cart-summary__total">
-          <dt>Total</dt>
+          <dt>{commonText.total}</dt>
           <dd>{formatCartMoney(quote.total)}</dd>
         </div>
       </dl>
       <p className="cart-summary__validity">
         {remaining === null
-          ? "These prices have expired. Checkout will price your order again."
-          : `Prices confirmed for ${remaining}.`}
+          ? cartText.summary.pricesExpired
+          : commonText.pricesConfirmedFor(remaining)}
       </p>
       {[
         ...quote.blockingReasons.map((code) => quoteIssueMessage(code, true)),
@@ -212,42 +219,29 @@ function ErrorState({
 }) {
   if (!("cart" in state) || !("issueCodes" in state)) return null;
   const retry = state.status === "command-failed" && state.canRetrySameOperation;
+  const failure = cartText.failure;
   const messages = {
-    "replacement-forbidden": [
-      "Cart replacement not permitted",
-      "This session isn’t part of the table any more, or only the person who started the table can restart this cart. Scan the table QR code again or ask staff for help.",
-    ],
-    "session-expired": [
-      "Session expired",
-      "Scan the location QR code again to continue your order.",
-    ],
-    "not-found": ["Cart unavailable", "This cart is not available in your current session."],
-    conflict: [
-      "Cart changed",
-      "The latest cart was loaded. Review your change before submitting again.",
-    ],
-    validation: ["Review this item", "This choice can’t be ordered as selected."],
-    "rate-limited": [
-      "Please wait",
-      `Try again${state.retryAfterSeconds === null ? " shortly" : ` in ${state.retryAfterSeconds} seconds`}.`,
-    ],
+    "replacement-forbidden": failure.replacementForbidden,
+    "session-expired": failure.sessionExpired,
+    "not-found": failure.notFound,
+    conflict: failure.conflict,
+    validation: failure.validation,
+    "rate-limited": [failure.rateLimitedHeading, failure.rateLimited(state.retryAfterSeconds)],
     expired: [
-      "Cart expired",
-      state.cart?.cart.orderType === "DineIn"
-        ? "This cart timed out. Return to the menu and add an item; your table continues with a new cart."
-        : "This cart cannot accept more items. Ask staff for help continuing your order.",
+      failure.expiredHeading,
+      state.cart?.cart.orderType === "DineIn" ? failure.expiredDineIn : failure.expiredOther,
     ],
-    abandoned: ["Cart closed", "This cart was abandoned and cannot be changed."],
-    "order-processing": ["Order still processing", orderProcessingMessage(state.retryAfterSeconds)],
+    abandoned: failure.abandoned,
+    "order-processing": [
+      commonText.orderProcessingHeading,
+      orderProcessingMessage(state.retryAfterSeconds),
+    ],
     "checkout-in-progress": [
-      "Another guest is checking out",
+      commonText.checkoutInProgressHeading,
       checkoutInProgressMessage(state.retryAfterSeconds),
     ],
-    "command-failed": [
-      "Outcome not confirmed",
-      "The connection dropped before we could confirm your change.",
-    ],
-    unavailable: ["Cart temporarily unavailable", "Nothing was changed. Try loading it again."],
+    "command-failed": failure.commandFailed,
+    unavailable: failure.unavailable,
   } as const;
   const message = messages[state.status as keyof typeof messages];
   if (message === undefined) return null;
@@ -262,7 +256,7 @@ function ErrorState({
         );
   if (short !== null)
     return (
-      <StateMessage heading="Not enough left" tone="warning">
+      <StateMessage heading={failure.notEnoughLeftHeading} tone="warning">
         <p>{short}</p>
       </StateMessage>
     );
@@ -278,14 +272,14 @@ function ErrorState({
       <div className="cart-state__actions">
         {retry ? (
           <button type="button" onClick={() => void controller.retry()}>
-            Retry the same operation
+            {failure.retrySameOperation}
           </button>
         ) : (
           <button type="button" onClick={() => void controller.load()}>
-            Refresh cart
+            {failure.refreshCart}
           </button>
         )}
-        <Link to="/menu">Return to menu</Link>
+        <Link to="/menu">{commonText.returnToMenu}</Link>
       </div>
     </StateMessage>
   );
@@ -302,8 +296,8 @@ function CartContent({
 }) {
   if (state.status === "loading")
     return (
-      <StateMessage heading="Loading cart">
-        <p>Checking your cart…</p>
+      <StateMessage heading={cartText.loadingHeading}>
+        <p>{commonText.checkingYourCart}</p>
       </StateMessage>
     );
   if (
@@ -314,10 +308,10 @@ function CartContent({
       state.cart.cart.warnings.length === 0)
   )
     return (
-      <StateMessage heading="Your cart is empty">
-        <p>Add something from the menu to get started.</p>
+      <StateMessage heading={commonText.emptyCartHeading}>
+        <p>{cartText.emptyBody}</p>
         <Link className="cart-primary-link" to="/menu">
-          Browse menu
+          {commonText.browseMenu}
         </Link>
       </StateMessage>
     );
@@ -325,21 +319,21 @@ function CartContent({
   if (cart === null) {
     if (state.status === "offline-readonly")
       return (
-        <StateMessage heading="You’re offline" tone="warning">
-          <p>Reconnect to load your cart.</p>
+        <StateMessage heading={commonText.offlineHeading} tone="warning">
+          <p>{cartText.offline.reconnectToLoad}</p>
           <button type="button" onClick={() => void controller.load()}>
-            Refresh after reconnecting
+            {cartText.offline.refreshAfterReconnecting}
           </button>
-          <Link to="/menu">Return to menu</Link>
+          <Link to="/menu">{commonText.returnToMenu}</Link>
         </StateMessage>
       );
     return <ErrorState state={state} controller={controller} />;
   }
   if (cart.cart.warnings.includes("FEATURE_DISABLED"))
     return (
-      <StateMessage heading="Cart unavailable" tone="warning">
-        <p>Cart ordering is not enabled at this location right now.</p>
-        <Link to="/menu">Return to menu</Link>
+      <StateMessage heading={cartText.featureDisabled.heading} tone="warning">
+        <p>{cartText.featureDisabled.body}</p>
+        <Link to="/menu">{commonText.returnToMenu}</Link>
       </StateMessage>
     );
   const readOnly = state.status === "offline-readonly";
@@ -350,16 +344,20 @@ function CartContent({
     <>
       {terminal ? (
         <StateMessage
-          heading={cart.cart.lifecycle.status === "Expired" ? "Cart expired" : "Cart closed"}
+          heading={
+            cart.cart.lifecycle.status === "Expired"
+              ? cartText.closed.expiredHeading
+              : cartText.closed.closedHeading
+          }
           tone="warning"
         >
-          <p>This cart cannot accept more items. Your previously paid orders remain unchanged.</p>
+          <p>{cartText.closed.body}</p>
           {cart.cart.orderType === "DineIn" && controller.replaceExpiredCart !== undefined ? (
             <>
               <p>
                 {cart.cart.lifecycle.status === "Expired"
-                  ? "Anyone at your table can start an empty cart to keep ordering. Items that weren’t ordered are not copied."
-                  : "The person who started the table can start an empty cart to continue ordering. Previous items will not be copied."}
+                  ? cartText.closed.anyoneCanRestart
+                  : cartText.closed.starterCanRestart}
               </p>
               <button
                 type="button"
@@ -372,19 +370,19 @@ function CartContent({
                 }
                 onClick={() => void controller.replaceExpiredCart?.()}
               >
-                Start an empty cart
+                {cartText.closed.startEmptyCart}
               </button>
             </>
           ) : (
-            <p>Ask staff for help continuing your order.</p>
+            <p>{cartText.closed.askStaff}</p>
           )}
         </StateMessage>
       ) : null}
       {readOnly ? (
         <div className="cart-offline" role="status">
-          You’re offline. Changes and checkout are paused; nothing will replay on reconnect.
+          {cartText.offline.paused}
           <button type="button" onClick={() => void controller.load()}>
-            Refresh after reconnecting
+            {cartText.offline.refreshAfterReconnecting}
           </button>
         </div>
       ) : null}
@@ -393,19 +391,19 @@ function CartContent({
       ) : null}
       {cart.cart.warnings.includes("PROJECTION_STALE") ? (
         <div className="cart-stale" role="status">
-          Your cart may be out of date. Refresh before making a change.
+          {cartText.stale}
         </div>
       ) : null}
       {cart.cart.warnings.includes("QUOTE_EXPIRED") ? (
         <div className="cart-stale" role="status">
-          Prices have expired. Checkout will price your order again.
+          {cartText.quoteExpired}
         </div>
       ) : null}
       <div className="cart-layout" aria-busy={pending}>
         <section className="cart-items" aria-labelledby="cart-items-heading">
           <div className="cart-page__subheading">
-            <h2 id="cart-items-heading">Items</h2>
-            <span>{count === 1 ? "1 item" : `${count} items`}</span>
+            <h2 id="cart-items-heading">{cartText.itemsHeading}</h2>
+            <span>{cartText.itemCount(count)}</span>
           </div>
           {cart.cart.items.map((item) => (
             <CartItem
@@ -424,11 +422,11 @@ function CartContent({
         </section>
         <CartSummary cart={cart} now={now} />
       </div>
-      <section className="cart-next-actions" aria-label="Cart actions">
-        <Link to="/menu">{terminal ? "Browse menu" : "Continue shopping"}</Link>
+      <section className="cart-next-actions" aria-label={cartText.actionsLabel}>
+        <Link to="/menu">{terminal ? commonText.browseMenu : cartText.continueShopping}</Link>
         {!terminal && !readOnly ? (
           <Link className="cart-checkout-link" to="/checkout">
-            Checkout
+            {cartText.checkout}
           </Link>
         ) : null}
       </section>
@@ -476,12 +474,14 @@ export function CartPage({
       : undefined);
   return (
     <CustomerPage step="cart" store={resolvedStore} className="cart-page">
-      <PageHeading title="Your cart" />
+      <PageHeading title={cartText.pageHeading} />
       <div id="cart-content">
         <CartContent state={state} controller={controller} now={now} />
       </div>
       <div className="sr-only" role="status" aria-live="polite">
-        {state.status === "command-pending" ? "Cart change pending" : `Cart state ${state.status}`}
+        {state.status === "command-pending"
+          ? cartText.changePendingAnnouncement
+          : cartText.stateAnnouncement(state.status)}
       </div>
     </CustomerPage>
   );

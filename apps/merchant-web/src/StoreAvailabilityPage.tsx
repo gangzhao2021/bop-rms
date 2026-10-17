@@ -11,7 +11,7 @@ import {
 } from "./KitchenBoardPages.js";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { KitchenBoardView } from "./kitchen-board.js";
-import { newOperationReference } from "./RoleAdministrationPages.js";
+import { newOperationReference } from "./operation-reference.js";
 import {
   AvailabilityPageError,
   availabilityActions,

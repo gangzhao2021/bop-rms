@@ -7,7 +7,7 @@ import {
 } from "./reconciliation-follow-up-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { SourceTime } from "./StoreTime.js";
-import { formatSettlementMoney } from "./SettlementPage.js";
+import { formatCad } from "./order-money.js";
 const client = createReconciliationFollowUpClient();
 /** Staff words for the follow-up states (never the record's version). */
 const followUpLabel: Record<FollowUpView["followUpStatus"], string> = {
@@ -286,7 +286,7 @@ function ChargeDetails({ evidence }: { evidence: CaptureEvidenceSummary | null }
   return (
     <section aria-label="Charge details">
       <p>
-        Charge of {formatSettlementMoney(evidence.amountMinor)} taken{" "}
+        Charge of {formatCad(evidence.amountMinor)} taken{" "}
         <SourceTime instant={evidence.occurredAt} />
         {evidence.environment === "Test" ? " (test payment, no real money)" : ""}.
       </p>
