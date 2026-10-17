@@ -148,6 +148,150 @@ async function advance(page: Page, server: { pending: number }, ms: number, step
   }
 }
 
+/**
+ * v15 cbff9d6f: the registered tablet's re-check without a sign-in. `waiting` holds the orders still
+ * waiting for acceptance (number → deadline); `registered: false` answers like any other browser.
+ */
+async function tabletRecheck(page: Page, waiting: Record<string, string>, registered = true) {
+  const tablet = { calls: 0, asked: [] as string[][], waiting, registered };
+  await page.route("**/merchant/staff-switch/refund-recheck", async (route) => {
+    tablet.calls++;
+    expect(route.request().method()).toBe("POST");
+    expect(route.request().headers()["x-bop-csrf"]).toBeUndefined();
+    const { orderNumbers } = route.request().postDataJSON() as { orderNumbers: string[] };
+    tablet.asked.push(orderNumbers);
+    if (!tablet.registered)
+      return route.fulfill({ status: 404, json: { error: "device_not_registered" } });
+    const at = await page.evaluate(() => Date.now());
+    return route.fulfill({
+      headers,
+      json: {
+        checkedAt: new Date(at).toISOString(),
+        orders: orderNumbers.map((orderNumber) => ({
+          orderNumber,
+          acceptBy: tablet.waiting[orderNumber] ?? null,
+        })),
+      },
+    });
+  });
+  return tablet;
+}
+
+/** Counts the screen's periodic reads that need a sign-in. */
+function signedInReads(page: Page) {
+  const reads = { count: 0 };
+  const watched = new Set([
+    "/merchant/orders",
+    "/merchant/order-exceptions",
+    "/merchant/operations-alerts",
+    "/merchant/business-day",
+  ]);
+  page.on("request", (request) => {
+    if (watched.has(new URL(request.url()).pathname)) reads.count++;
+  });
+  return reads;
+}
+
+/** Counts the chime's tones instead of playing them. */
+async function countChimes(page: Page) {
+  await page.addInitScript(() => {
+    const tones = { count: 0 };
+    (window as unknown as { __tones: typeof tones }).__tones = tones;
+    const ignore = () => undefined;
+    const node = () => ({
+      connect: (next: unknown) => next ?? node(),
+      frequency: { value: 0 },
+      gain: { setValueAtTime: ignore, exponentialRampToValueAtTime: ignore },
+      type: "sine",
+      start: ignore,
+      stop: ignore,
+    });
+    class FakeAudioContext {
+      state = "running";
+      currentTime = 0;
+      destination = {};
+      createOscillator() {
+        tones.count += 1;
+        return node();
+      }
+      createGain() {
+        return node();
+      }
+      resume() {
+        return Promise.resolve();
+      }
+    }
+    (window as unknown as { AudioContext: unknown }).AudioContext = FakeAudioContext;
+  });
+  return async () =>
+    (await page.evaluate(
+      () => (window as unknown as { __tones: { count: number } }).__tones.count,
+    )) / 2;
+}
+
+/** Home with order 15 waiting for acceptance (refunded at T0 + 8 min); ends the sign-in on cue. */
+async function homeWithWaitingOrder(page: Page, entryPath: string) {
+  await page.clock.install({ time: T0 });
+  await workspace(page, [
+    { screenId: "HOME-OVERVIEW", label: "Overview", href: "/app", permission: "merchant.access" },
+    {
+      screenId: "OPS-ORDER-QUEUE",
+      label: "Orders",
+      href: "/operations/orders",
+      permission: "ordering.operate",
+    },
+  ]);
+  await page.route("**/merchant/sign-in-entry", (route) =>
+    route.fulfill({
+      headers,
+      json: { path: entryPath, testOnly: entryPath !== "/operations/switch-staff" },
+    }),
+  );
+  const server = await identity(page);
+  const acceptBy = new Date(T0 + 8 * minute).toISOString();
+  await page.route("**/merchant/orders", (route) =>
+    server.ended
+      ? route.fulfill({ status: 401, json: { error: "session_ended" } })
+      : route.fulfill({
+          headers,
+          json: {
+            items: [
+              {
+                orderReference: id(15),
+                orderNumber: "15",
+                orderType: "Pickup",
+                sourceChannel: "Web",
+                submittedAt: new Date(T0 - 22 * minute).toISOString(),
+                observedAt: new Date(T0).toISOString(),
+                initialBatchReference: id(65),
+                batches: [
+                  {
+                    orderBatchReference: id(65),
+                    sequence: 1,
+                    acceptanceStatus: "NotAccepted",
+                    canRequestAcceptance: true,
+                    canCancel: false,
+                    staffCancellation: null,
+                    canCancelItems: false,
+                  },
+                ],
+                canRequestAcceptance: true,
+                currentPhase: "Submitted",
+                currentVersion: 1,
+                unfulfillable: null,
+                pickupNotCollected: false,
+                acceptBy,
+                acceptanceHold: null,
+                awaitingPayment: false,
+              },
+            ],
+            nextAfterOrderReference: null,
+          },
+        }),
+  );
+  return { server, acceptBy };
+}
+
 async function noOverflow(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
@@ -500,6 +644,9 @@ test("@production an order waiting for acceptance keeps Home signed in, and a si
   const server = await identity(page);
   // Order 15: paid, nobody accepted it, refunded automatically at 18:08Z (14:08 in the Store).
   const acceptBy = new Date(T0 + 8 * minute).toISOString();
+  // v15 cbff9d6f: this is a registered tablet; with nobody signed in it re-checks order 15 only.
+  const tablet = await tabletRecheck(page, { "15": acceptBy });
+  const reads = signedInReads(page);
   await page.route("**/merchant/orders", (route) =>
     server.ended
       ? route.fulfill({ status: 401, json: { error: "session_ended" } })
@@ -563,7 +710,13 @@ test("@production an order waiting for acceptance keeps Home signed in, and a si
     "Order 15 will be refunded automatically in 4 min unless someone accepts it.",
   );
   await expect(kept).toContainText("Sign in to accept it.");
-  await expect(kept).toContainText(/Last checked at 14:0\d, before this screen signed out\./u);
+  // Checked again by the tablet after the sign-out (not only "before this screen signed out").
+  await expect.poll(() => tablet.calls).toBeGreaterThanOrEqual(1);
+  expect(tablet.asked.every((numbers) => numbers.join() === "15")).toBe(true);
+  await expect(kept).toContainText(/Last checked at 14:0\d\.$/u);
+  // Nothing reads with the ended sign-in any more: no Orders, alerts or business-day polling.
+  await advance(page, server, 5_000);
+  const readsAtCover = reads.count;
   // No link that cannot work without a sign-in; the cover's own sign-in goes to the PIN screen.
   await expect(kept.getByRole("link")).toHaveCount(0);
   await expect(signedOut.getByRole("link", { name: "Sign in again" })).toHaveAttribute(
@@ -600,6 +753,8 @@ test("@production an order waiting for acceptance keeps Home signed in, and a si
   await expect.poll(chimes).toBe(1);
   expect(await onTop()).toBe(true);
   await expect(signedOut.getByRole("alert").filter({ hasText: "in 2 min" })).toHaveCount(1);
+  expect(reads.count).toBe(readsAtCover);
+  expect(tablet.calls).toBeGreaterThanOrEqual(8);
 
   // Sign in again: the PIN screen shows the same countdown (last known, labelled) while the next
   // person enters their PIN.
@@ -625,7 +780,7 @@ test("@production an order waiting for acceptance keeps Home signed in, and a si
     "Order 15 will be refunded automatically in 2 min unless someone accepts it.",
   );
   await expect(pinScreen).toContainText("Sign in to accept it.");
-  await expect(pinScreen).toContainText(/Last checked at 14:0\d, before this screen signed out\./u);
+  await expect(pinScreen).toContainText(/Last checked at 14:0\d\.$/u);
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     await expect(pinScreen).toBeVisible();
@@ -637,4 +792,93 @@ test("@production an order waiting for acceptance keeps Home signed in, and a si
   // Past the deadline the remembered countdown is gone; nothing sounds without it.
   await page.clock.runFor(3 * minute);
   await expect(pinScreen).toHaveCount(0);
+});
+
+test("@production an order accepted on another screen leaves the signed-out countdown and the PIN screen at once", async ({
+  page,
+}) => {
+  const chimes = await countChimes(page);
+  const { server, acceptBy } = await homeWithWaitingOrder(page, "/operations/switch-staff");
+  const tablet = await tabletRecheck(page, { "15": acceptBy });
+  await page.goto("/app");
+  await expect(page.getByRole("heading", { level: 1, name: "Synthetic Store" })).toBeVisible();
+  await advance(page, server, 3 * minute + 30_000);
+  // Signed out on another screen inside the warning window: the cover keeps the countdown.
+  server.ended = true;
+  await advance(page, server, 70_000);
+  const signedOut = page.getByRole("dialog", { name: "You’ve been signed out" });
+  await expect(signedOut).toBeVisible();
+  const kept = signedOut.getByRole("region", { name: "Orders about to be refunded" });
+  await expect(kept).toContainText("Order 15 will be refunded automatically in 4 min");
+  // Someone accepts order 15 at the counter: the next tablet check removes it, nothing sounds.
+  delete tablet.waiting["15"];
+  await advance(page, server, 16_000);
+  await expect(kept).toHaveCount(0);
+  await advance(page, server, 2 * minute);
+  expect(await chimes()).toBe(0);
+  await expect(page.getByRole("region", { name: "Orders about to be refunded" })).toHaveCount(0);
+  // The PIN screen remembers the answer, not the old countdown.
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({ status: 401, json: { error: "session_required" } }),
+  );
+  await page.route("**/merchant/staff-switch", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        storeLabel: "Synthetic Store",
+        timeZone: "America/Toronto",
+        staff: [{ choice: "ch-ana", name: "Ana Lopez" }],
+        fullSignIn: { path: "/internal-test/staff", testOnly: true },
+      },
+    }),
+  );
+  await signedOut.getByRole("link", { name: "Sign in again" }).click();
+  await expect(page.getByRole("button", { name: "Ana Lopez" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Orders about to be refunded" })).toHaveCount(0);
+});
+
+test("@production a browser that is not a registered tablet says a signed-out countdown may be out of date and stays silent", async ({
+  page,
+}) => {
+  const chimes = await countChimes(page);
+  const { server, acceptBy } = await homeWithWaitingOrder(page, "/internal-test/staff");
+  const tablet = await tabletRecheck(page, { "15": acceptBy }, false);
+  const reads = signedInReads(page);
+  await page.goto("/app");
+  await expect(page.getByRole("heading", { level: 1, name: "Synthetic Store" })).toBeVisible();
+  await advance(page, server, 3 * minute + 30_000);
+  server.ended = true;
+  await advance(page, server, 70_000);
+  const signedOut = page.getByRole("dialog", { name: "You’ve been signed out" });
+  await expect(signedOut).toBeVisible();
+  const kept = signedOut.getByRole("region", { name: "Orders about to be refunded" });
+  // The last check is more than 30 seconds old and cannot be repeated without a sign-in.
+  await expect(kept).toContainText(
+    /Order 15 may already have been accepted\. If not, it will be refunded automatically in 4 min\./u,
+  );
+  await expect(kept).toContainText(
+    /Sign in to check\. Last checked at 14:0\d, before this screen signed out\./u,
+  );
+  await expect(kept).not.toContainText("unless someone accepts it");
+  await expect(kept.getByRole("link")).toHaveCount(0);
+  // Asked once, told this is no tablet, and never asked again.
+  expect(tablet.calls).toBe(1);
+  await advance(page, server, 5_000);
+  const readsAtCover = reads.count;
+  // Past the 2-minute and 30-second points: no chime and no announcement for an order that may
+  // already be handled.
+  await advance(page, server, 2 * minute + 40_000);
+  await expect(kept).toContainText("in less than a minute.");
+  expect(await chimes()).toBe(0);
+  await expect(signedOut.getByRole("alert").filter({ hasText: "Order 15" })).toHaveCount(0);
+  expect(tablet.calls).toBe(1);
+  expect(reads.count).toBe(readsAtCover);
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await expect(kept).toBeVisible();
+    await noOverflow(page);
+    await page.screenshot({ path: `test-results/staff-session-signed-out-unsure-${width}.png` });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expectNoInternalText(page);
 });

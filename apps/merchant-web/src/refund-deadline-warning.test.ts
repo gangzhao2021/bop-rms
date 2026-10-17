@@ -4,7 +4,10 @@ import {
   loadLastKnownRefundDeadlines,
   refundAlertsDue,
   refundClockMs,
+  refundCountdownUnsure,
+  REFUND_SIGNED_OUT_TRUST_MS,
   refundWarningText,
+  refundWarningUnsureText,
   refundWarnings,
   refundWarningTier,
   saveLastKnownRefundDeadlines,
@@ -157,5 +160,26 @@ describe("v15 c9b377cb: the last known countdown for a signed-out or PIN screen"
         timeZone: null,
       }),
     ).not.toThrow();
+  });
+});
+
+describe("v15 cbff9d6f: a signed-out countdown that can no longer be checked", () => {
+  it("is trusted for 30 seconds after the last check, and always while signed in", () => {
+    expect(REFUND_SIGNED_OUT_TRUST_MS).toBe(30_000);
+    expect(refundCountdownUnsure(false, null, now)).toBe(false);
+    expect(refundCountdownUnsure(false, now - 10 * 60_000, now)).toBe(false);
+    expect(refundCountdownUnsure(true, now - 30_000, now)).toBe(false);
+    expect(refundCountdownUnsure(true, now - 30_001, now)).toBe(true);
+    expect(refundCountdownUnsure(true, null, now)).toBe(true);
+  });
+
+  it("never tells staff the order still waits, in plain words without internal terms", () => {
+    expect(refundWarningUnsureText("16", 3 * 60_000)).toBe(
+      "Order 16 may already have been accepted. If not, it will be refunded automatically in 3 min.",
+    );
+    expect(refundWarningUnsureText("16", 40_000)).toBe(
+      "Order 16 may already have been accepted. If not, it will be refunded automatically in less than a minute.",
+    );
+    expect(findInternalText([refundWarningUnsureText("16", 40_000)])).toEqual([]);
   });
 });

@@ -1,5 +1,6 @@
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useStaffSessionLive } from "./staff-session-reads.js";
 import { Link, useSearchParams } from "react-router";
 import { createDiningSessionClient } from "./dining-session-client.js";
 import { validSlipReference } from "./CardMachineRefundAction.js";
@@ -338,8 +339,10 @@ export function StaffOrderEntryPage({
   }, [client, tableMode]);
   useEffect(() => () => menuRefresh.current?.abort(), []);
   const menuReady = menu.kind === "Ready";
+  // v15 cbff9d6f: no menu re-reads once this screen's sign-in has ended.
+  const live = useStaffSessionLive();
   useEffect(() => {
-    if (!menuReady || phase !== "Building") return;
+    if (!menuReady || !live || phase !== "Building") return;
     const timer = setInterval(refreshMenu, MENU_REFRESH_MS);
     const onVisible = () => {
       if (document.visibilityState === "visible") refreshMenu();
@@ -351,7 +354,7 @@ export function StaffOrderEntryPage({
       window.removeEventListener("focus", refreshMenu);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [menuReady, phase, refreshMenu]);
+  }, [live, menuReady, phase, refreshMenu]);
 
   // Any change to what is ordered is a new order intent.
   const changeLines = (next: readonly Line[]) => {

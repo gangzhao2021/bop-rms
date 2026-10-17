@@ -8,6 +8,7 @@ import {
   resolveStaffSignInEntry,
   staffPinFullSignInGate,
   staffSwitchPath,
+  TABLET_RECHECKS_PER_MINUTE,
 } from "./merchant-staff-pin-http.js";
 
 /** WP-2423 Q18 option A: the shared-tablet staff PIN HTTP contract (ports stubbed). */
@@ -21,10 +22,15 @@ afterEach(async () => {
   server = null;
   if (current) await new Promise((resolve) => current.close(resolve));
 });
-async function start(port: Partial<Port>) {
+async function start(port: Partial<Port>, now?: () => number) {
   const app = express();
   const router = express.Router();
-  const options = { exactOrigin: origin, fullSignIn, staffPin: port as Port };
+  const options = {
+    exactOrigin: origin,
+    fullSignIn,
+    staffPin: port as Port,
+    ...(now === undefined ? {} : { now }),
+  };
   router.use(staffPinFullSignInGate(options));
   installMerchantStaffPinRoutes(router, options);
   router.post("/payments/refunds/request", (_request, response) => response.json({ ok: true }));
@@ -231,5 +237,128 @@ describe("staff PIN HTTP", () => {
       body: { pin: "482913", confirmation: "482913" },
     });
     expect([pin.status, await pin.json()]).toEqual([403, { error: "full_sign_in_required" }]);
+  });
+});
+
+describe("v15 cbff9d6f: a registered tablet re-checks remembered refund countdowns", () => {
+  const device = "__Host-bop-store-device=" + tablet;
+  const answer = {
+    checkedAt: "2026-10-17T16:14:20.000Z",
+    orders: [
+      { orderNumber: "16", acceptBy: null },
+      { orderNumber: "17", acceptBy: "2026-10-17T16:30:00.000Z" },
+    ],
+  };
+
+  it("answers only for the asked orders, by the tablet cookie, without a session", async () => {
+    const asked: unknown[] = [];
+    const call = await start({
+      refundRecheck: async (cookie, orderNumbers) => {
+        asked.push([cookie, orderNumbers]);
+        return answer;
+      },
+    });
+    const response = await call("/staff-switch/refund-recheck", {
+      cookie: device,
+      body: { orderNumbers: ["16", "17"] },
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual(answer);
+    expect(asked).toEqual([[tablet, ["16", "17"]]]);
+  });
+
+  it("refuses cross-site use, query strings and bodies other than the order numbers", async () => {
+    let calls = 0;
+    const call = await start({
+      refundRecheck: async () => {
+        calls++;
+        return answer;
+      },
+    });
+    for (const init of [
+      { from: "https://evil.invalid" },
+      { site: "cross-site" },
+      { body: { orderNumbers: ["16"], customer: "x" } },
+      { body: ["16"] },
+    ]) {
+      const response = await call("/staff-switch/refund-recheck", {
+        cookie: device,
+        body: { orderNumbers: ["16"] },
+        ...init,
+      });
+      expect(response.status).toBe(403);
+    }
+    expect(
+      (await call("/staff-switch/refund-recheck?order=16", { cookie: device, body: {} })).status,
+    ).toBe(403);
+    expect(calls).toBe(0);
+  });
+
+  it("needs a registered tablet: no cookie or a revoked one is not registered (and cleared)", async () => {
+    const call = await start({
+      refundRecheck: async () => {
+        throw new MerchantStaffPinError("DeviceNotRegistered");
+      },
+    });
+    const none = await call("/staff-switch/refund-recheck", { body: { orderNumbers: ["16"] } });
+    expect(none.status).toBe(404);
+    expect(await none.json()).toEqual({ error: "device_not_registered" });
+    const revoked = await call("/staff-switch/refund-recheck", {
+      cookie: device,
+      body: { orderNumbers: ["16"] },
+    });
+    expect(revoked.status).toBe(404);
+    expect(revoked.headers.get("set-cookie")).toMatch(/^__Host-bop-store-device=;.*Max-Age=0/u);
+  });
+
+  it("maps refused input to 403 and an unreadable store to 503 without details", async () => {
+    let code: "Denied" | "Unavailable" = "Denied";
+    const call = await start({
+      refundRecheck: async () => {
+        throw new MerchantStaffPinError(code);
+      },
+    });
+    const refused = await call("/staff-switch/refund-recheck", {
+      cookie: device,
+      body: { orderNumbers: ["<script>"] },
+    });
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: "request_denied" });
+    code = "Unavailable";
+    const down = await call("/staff-switch/refund-recheck", {
+      cookie: device,
+      body: { orderNumbers: ["16"] },
+    });
+    expect(down.status).toBe(503);
+    expect(await down.json()).toEqual({ error: "refund_recheck_unavailable" });
+  });
+
+  it("limits each tablet to a few re-checks a minute; other tablets are unaffected", async () => {
+    let clock = Date.parse("2026-10-17T16:00:00.000Z");
+    let calls = 0;
+    const call = await start(
+      {
+        refundRecheck: async () => {
+          calls++;
+          return answer;
+        },
+      },
+      () => clock,
+    );
+    const ask = (cookie: string) =>
+      call("/staff-switch/refund-recheck", { cookie, body: { orderNumbers: ["16"] } });
+    for (let index = 0; index < TABLET_RECHECKS_PER_MINUTE; index++) {
+      expect((await ask(device)).status).toBe(200);
+      clock += 1_000;
+    }
+    const busy = await ask(device);
+    expect(busy.status).toBe(429);
+    expect(busy.headers.get("retry-after")).toBe("48");
+    expect(await busy.json()).toEqual({ error: "device_busy", retryAfterSeconds: 48 });
+    expect((await ask("__Host-bop-store-device=" + "u".repeat(43))).status).toBe(200);
+    clock += 49_000;
+    expect((await ask(device)).status).toBe(200);
+    expect(calls).toBe(TABLET_RECHECKS_PER_MINUTE + 2);
   });
 });

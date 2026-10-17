@@ -6,6 +6,7 @@ import { StatePanel } from "@bop-rms/ui";
 import { Freshness } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { useCallback, useEffect, useState, useMemo, useRef, type RefObject } from "react";
+import { useStaffSessionLive } from "./staff-session-reads.js";
 import { createPickupClient } from "./pickup-client.js";
 import { Link } from "react-router";
 import {
@@ -602,13 +603,15 @@ export function PickupQueuePage(props: {
   useBrowserOffline(() => setStored(pickupOfflineState));
   // Re-read on its own while visible, like the Kitchen board, so an outage is noticed.
   const live = state.kind === "Found" && stale === undefined;
+  // v15 cbff9d6f: no reads once this screen's sign-in has ended.
+  const signedIn = useStaffSessionLive();
   useEffect(() => {
-    if (!live || typeof window === "undefined") return;
+    if (!live || !signedIn || typeof window === "undefined") return;
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") setRevision((value) => value + 1);
     }, pickupRefreshIntervalMs);
     return () => window.clearInterval(timer);
-  }, [live]);
+  }, [live, signedIn]);
   useEffect(() => {
     if (current && state.kind !== "Loading" && focusAfterLoad.current) {
       refreshButtonRef.current?.focus();

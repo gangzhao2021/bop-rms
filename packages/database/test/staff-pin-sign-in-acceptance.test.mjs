@@ -269,6 +269,7 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
           actor,
         );
       };
+      const waitingAsked = [];
       const staffPin = createMerchantStaffPin({
         persistence: {
           transactions: api,
@@ -285,6 +286,18 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
           timeZone: "America/Toronto",
         }),
         issueSession: async (actor, finalize) => ({ sessionCookie: await signIn(actor, finalize) }),
+        // v15 cbff9d6f: the Store's paid pickups waiting for acceptance (Ordering/Fulfillment
+        // reads are their owners' tests; here only the tablet binding and the answer shape).
+        awaitingPickupDeadlines: async (_tx, scope) => {
+          waitingAsked.push(scope);
+          return scope.storeReference === store
+            ? [
+                { orderNumber: "17", acceptBy: T(40) },
+                { orderNumber: "17", acceptBy: T(35) },
+                { orderNumber: "18", acceptBy: T(45) },
+              ]
+            : [{ orderNumber: "16", acceptBy: T(50) }];
+        },
         retentionPolicyCode: "SECURITY_AUDIT",
         retentionPolicyVersion: 1,
       });
@@ -448,6 +461,44 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
         "DeviceNotRegistered",
       );
       await rejects(staffPin.switchScreen(null), "DeviceNotRegistered");
+
+      // ── 3b. v15 cbff9d6f: with nobody signed in, the tablet re-checks the orders it was warning
+      //        about. Only the asked numbers are answered (18 waits too but was not asked); 16 was
+      //        accepted elsewhere (null); a repeated number takes its soonest deadline.
+      const recheck = await at(4.6, () => staffPin.refundRecheck(tablet, ["16", "17"]));
+      assert.deepEqual(recheck, {
+        checkedAt: T(4.6),
+        orders: [
+          { orderNumber: "16", acceptBy: null },
+          { orderNumber: "17", acceptBy: T(35) },
+        ],
+      });
+      assert.deepEqual(waitingAsked.at(-1), {
+        brandReference: brand,
+        storeReference: store,
+        timeZone: "America/Toronto",
+        at: T(4.6),
+      });
+      for (const value of [brand, store, ava, manager])
+        assert.ok(!JSON.stringify(recheck).includes(value), "no reference reaches the browser");
+      const askedBefore = waitingAsked.length;
+      for (const numbers of [
+        [],
+        ["16", "16"],
+        ["<b>"],
+        "16",
+        [16],
+        Array(11)
+          .fill("1")
+          .map((v, i) => v + i),
+      ])
+        await rejects(staffPin.refundRecheck(tablet, numbers), "Denied");
+      await rejects(
+        staffPin.refundRecheck(randomBytes(32).toString("base64url"), ["16"]),
+        "DeviceNotRegistered",
+      );
+      await rejects(staffPin.refundRecheck(null, ["16"]), "DeviceNotRegistered");
+      assert.equal(waitingAsked.length, askedBefore, "no Store read without a registered tablet");
 
       // ── 4. Switch: a correct PIN starts the person's ordinary session and ends the tablet's
       //       previous session (here Mia's full sign-in held by this browser).
@@ -910,6 +961,11 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
         at(55, () => staffPin.switchScreen(kitchenTablet)),
         "DeviceNotRegistered",
       );
+      // A removed tablet can no longer re-check anything.
+      await rejects(
+        at(55, () => staffPin.refundRecheck(kitchenTablet, ["17"])),
+        "DeviceNotRegistered",
+      );
       await rejects(
         at(55, () => unlock(cole, "730419", null, kitchenTablet)),
         "DeviceNotRegistered",
@@ -1019,6 +1075,15 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
         staffPin.registerDevice({ sessionCookie: omar, csrf, deviceCookie: null, label: "Other" }),
       );
       assert.deepEqual((await at(57, () => staffPin.switchScreen(other.deviceCookie))).staff, []);
+      // Another Store's tablet reads its own Store only: its 17 is not this Store's 17.
+      assert.deepEqual(
+        (await at(57, () => staffPin.refundRecheck(other.deviceCookie, ["16", "17"]))).orders,
+        [
+          { orderNumber: "16", acceptBy: T(50) },
+          { orderNumber: "17", acceptBy: null },
+        ],
+      );
+      assert.equal(waitingAsked.at(-1).storeReference, otherStore);
       // Ava is not one of that Store's people: no token there names her, no PIN is checked.
       await rejects(
         at(57, () => unlock(ava, "604827", null, other.deviceCookie)),

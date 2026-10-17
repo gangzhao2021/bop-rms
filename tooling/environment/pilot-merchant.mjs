@@ -81,6 +81,7 @@ import { createInternalStoreConfiguration } from "./pilot-store-configuration.mj
 import { createInternalStoreSetupBff } from "./pilot-store-setup.mjs";
 import { createMerchantMfaStepUp } from "../../apps/api/dist/merchant-mfa-step-up.js";
 import { createMerchantStaffPin } from "../../apps/api/dist/merchant-staff-pin.js";
+import { createStoreAwaitingPickupDeadlines } from "../../apps/api/dist/pickup-acceptance-deadline.js";
 import {
   createPostgresMerchantOrganizationSource,
   parseStoreReference,
@@ -977,6 +978,21 @@ export async function createInternalMerchant(
               if (!store) throw new Error("INTERNAL_STAFF_PIN_STORE_UNAVAILABLE");
               return { label: store.displayName, timeZone: store.timeZone };
             },
+            // v15 cbff9d6f: a registered tablet re-checks the refund countdowns it shows.
+            awaitingPickupDeadlines: (() => {
+              const read = createStoreAwaitingPickupDeadlines({
+                persistence,
+                tenantReference: selected.tenantReference,
+              });
+              return async (tx, scope) => {
+                if (
+                  scope.brandReference !== selected.brandReference ||
+                  scope.storeReference !== selected.storeReference
+                )
+                  throw new Error("INTERNAL_STAFF_PIN_STORE_DENIED");
+                return read(tx, scope);
+              };
+            })(),
             issueSession: (actorReference, finalize) =>
               session.issueForPin(actorReference, finalize),
             retentionPolicyCode: "SECURITY_AUDIT",

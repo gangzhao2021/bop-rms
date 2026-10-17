@@ -31,7 +31,13 @@ import { KitchenBoardPage, KitchenWorkItemPage } from "./KitchenBoardPages.js";
 import { createKitchenBoardClient } from "./kitchen-board-client.js";
 import { parseKitchenBoardView } from "./kitchen-board.js";
 import { createCurrentOrderQueueClient } from "./current-order-queue-client.js";
-import { RefundDeadlineWatch, refundDeadlinesFromOrders } from "./RefundDeadlineWatch.js";
+import {
+  RefundDeadlineWatch,
+  refundDeadlinesFromOrders,
+  type RefundRecheckResult,
+} from "./RefundDeadlineWatch.js";
+import { createStaffPinClient, StaffPinError } from "./staff-pin-client.js";
+import { useStaffSessionLive } from "./staff-session-reads.js";
 import { loadLastKnownRefundDeadlines, type RefundDeadline } from "./refund-deadline-warning.js";
 import type { MerchantDemoClients } from "./merchant-demo.js";
 import type { MerchantBrandWorkspaceClient } from "./merchant-brand-workspace.js";
@@ -552,13 +558,34 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         : null,
     [demo, pathname, state.kind],
   );
-  const rememberedRead = useMemo(
-    () =>
-      remembered === null
-        ? null
-        : async (): Promise<readonly RefundDeadline[]> => remembered.deadlines,
-    [remembered],
-  );
+  // v15 cbff9d6f: without a sign-in, a registered Store tablet re-checks only the orders it shows
+  // (numbers and times, no Customer details); anywhere else the countdown says it may be out of date.
+  const tabletRecheck = useMemo(() => {
+    if (demo !== null) return undefined;
+    const pins = createStaffPinClient();
+    return async (
+      orderNumbers: readonly string[],
+      signal: AbortSignal,
+    ): Promise<RefundRecheckResult> => {
+      try {
+        const result = await pins.refundRecheck(orderNumbers, signal);
+        return {
+          kind: "Checked",
+          deadlines: result.orders.flatMap((order) =>
+            order.acceptBy === null
+              ? []
+              : [{ orderNumber: order.orderNumber, acceptBy: order.acceptBy }],
+          ),
+        };
+      } catch (error) {
+        return error instanceof StaffPinError && error.code === "NotRegistered"
+          ? { kind: "NoTablet" }
+          : { kind: "Failed" };
+      }
+    };
+  }, [demo]);
+  // v15 cbff9d6f: nothing reads with a sign-in that has ended (the business-day check included).
+  const sessionLive = useStaffSessionLive();
 
   useEffect(() => {
     let active = true;
@@ -1994,7 +2021,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         scopeKey={
           state.kind === "Ready" ? state.workspace.selectedScope.storeReference + state.csrf : ""
         }
-        enabled={state.kind === "Ready" && !state.switching && demo === null}
+        enabled={state.kind === "Ready" && !state.switching && demo === null && sessionLive}
       >
         {/* WP-2423 "Warn before timeouts": above every screen, before its own header. */}
         {refundRead !== null && pathname !== "/operations/switch-staff" ? (
@@ -2004,20 +2031,23 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
             ordersHref={watchOrdersHref}
             onOrdersPage={pathname === "/operations/orders"}
             signedOut={coverSlot !== null}
+            {...(tabletRecheck === undefined ? {} : { recheck: tabletRecheck })}
             portal={coverSlot}
             timeZone={state.kind === "Ready" ? state.workspace.selectedScope.timeZone : undefined}
             remember
             onDeadlines={onRefundDeadlines}
           />
-        ) : remembered !== null && rememberedRead !== null ? (
+        ) : remembered !== null ? (
           <RefundDeadlineWatch
-            read={rememberedRead}
+            read={null}
             ordersHref={null}
             onOrdersPage={false}
             signedOut
             canAccept={remembered.canAccept}
-            lastCheckedAt={remembered.checkedAt}
+            initial={remembered}
+            {...(tabletRecheck === undefined ? {} : { recheck: tabletRecheck })}
             timeZone={remembered.timeZone ?? undefined}
+            remember
           />
         ) : null}
         {state.kind === "Ready" && usesWorkspaceLayout(pathname) && !soldOutFromKitchen ? (

@@ -1,6 +1,7 @@
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { storeTime } from "./StoreTime.js";
+import { setStaffSessionEnded } from "./staff-session-reads.js";
 import {
   activityRecorded,
   activityRetryMs,
@@ -315,6 +316,11 @@ export function StaffSessionGuard({
     onCover?.(ended === null ? null : slot);
   }, [ended, onCover, slot]);
   useEffect(() => () => onCover?.(null), [onCover]);
+  // v15 cbff9d6f: nothing on this screen reads with a sign-in that has ended.
+  useEffect(() => {
+    setStaffSessionEnded(ended !== null);
+  }, [ended]);
+  useEffect(() => () => setStaffSessionEnded(false), []);
 
   const checkAgain = async () => {
     setChecking(true);

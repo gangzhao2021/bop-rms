@@ -56,6 +56,39 @@ export interface MerchantStaffPinRouteOptions {
   readonly staffPin?: ReturnType<typeof createMerchantStaffPin>;
   /** Where to sign in fully (the default sign-in entry). */
   readonly fullSignIn: { readonly path: string; readonly testOnly: boolean };
+  /** Clock for the tablet re-check limit (tests). */
+  readonly now?: () => number;
+}
+
+/** Re-checks one tablet may make per minute (a screen asks every 15 s; a few tabs fit). */
+export const TABLET_RECHECKS_PER_MINUTE = 12;
+const TABLET_RECHECK_WINDOW_MS = 60_000;
+const TABLET_RECHECK_KEYS = 2_000;
+/**
+ * Per-tablet limit on refund re-checks, keyed by the tablet cookie (kept in memory only, never
+ * logged). Returns null when allowed, else the seconds until the oldest request leaves the window.
+ * Bounded: when too many distinct cookies are tracked the oldest are forgotten first.
+ */
+export function createTabletRecheckLimit(now: () => number) {
+  const seen = new Map<string, number[]>();
+  return (key: string): number | null => {
+    const at = now();
+    const recent = (seen.get(key) ?? []).filter((time) => at - time < TABLET_RECHECK_WINDOW_MS);
+    seen.delete(key);
+    if (recent.length >= TABLET_RECHECKS_PER_MINUTE) {
+      seen.set(key, recent);
+      const oldest = recent[0] ?? at;
+      return Math.max(1, Math.ceil((oldest + TABLET_RECHECK_WINDOW_MS - at) / 1_000));
+    }
+    recent.push(at);
+    seen.set(key, recent);
+    while (seen.size > TABLET_RECHECK_KEYS) {
+      const first = seen.keys().next().value;
+      if (first === undefined) break;
+      seen.delete(first);
+    }
+    return null;
+  };
 }
 
 function rawHeaderValues(request: Request, name: string): string[] {
@@ -325,6 +358,50 @@ export function installMerchantStaffPinRoutes(
           return;
         }
         unavailable(response, "staff_switch_unavailable");
+      });
+  });
+
+  // v15 cbff9d6f: the lock screen / signed-out cover re-checks the refund countdowns it shows.
+  const recheckLimit = createTabletRecheckLimit(options.now ?? Date.now);
+  router.post("/staff-switch/refund-recheck", mutationGuard(options), json, (request, response) => {
+    response.set("Cache-Control", NO_STORE);
+    const staffPin = port();
+    if (staffPin === undefined) {
+      unavailable(response, "refund_recheck_unavailable");
+      return;
+    }
+    const input = body(request, ["orderNumbers"]);
+    if (input === null) {
+      denied(response);
+      return;
+    }
+    const secret = requestCookie(request, storeDeviceCookieName);
+    if (secret === null) {
+      response.status(404).json({ error: "device_not_registered" });
+      return;
+    }
+    const wait = recheckLimit(secret);
+    if (wait !== null) {
+      response
+        .status(429)
+        .set("Retry-After", String(wait))
+        .json({ error: "device_busy", retryAfterSeconds: wait });
+      return;
+    }
+    void retryTransactionConflict(() => staffPin.refundRecheck(secret, input.orderNumbers))
+      .then((result) => response.json(result))
+      .catch((error: unknown) => {
+        if (error instanceof MerchantStaffPinError && error.code === "DeviceNotRegistered") {
+          response.set("Set-Cookie", clearDeviceCookie).status(404).json({
+            error: "device_not_registered",
+          });
+          return;
+        }
+        if (error instanceof MerchantStaffPinError && error.code === "Denied") {
+          denied(response);
+          return;
+        }
+        unavailable(response, "refund_recheck_unavailable");
       });
   });
 

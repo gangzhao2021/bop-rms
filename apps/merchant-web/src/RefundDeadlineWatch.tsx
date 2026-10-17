@@ -6,6 +6,8 @@ import type { CurrentOrderQueue } from "./current-order-queue-client.js";
 import {
   refundAlertsDue,
   refundClockMs,
+  refundCountdownUnsure,
+  refundWarningUnsureText,
   refundWarnings,
   saveLastKnownRefundDeadlines,
   type RefundDeadline,
@@ -24,6 +26,13 @@ export function refundDeadlinesFromOrders(view: CurrentOrderQueue): readonly Ref
   );
 }
 
+/** A signed-out screen's re-check of the orders it shows (a registered Store tablet only). */
+export type RefundRecheckResult =
+  | { readonly kind: "Checked"; readonly deadlines: readonly RefundDeadline[] }
+  /** This browser is not a registered Store tablet: nothing can be checked without a sign-in. */
+  | { readonly kind: "NoTablet" }
+  | { readonly kind: "Failed" };
+
 /**
  * WP-2423 pilot rule "Warn before timeouts": shown on every merchant screen (Home, Orders, Kitchen,
  * Tables and the rest) so staff working anywhere hear and see that a paid order nobody accepted is
@@ -34,6 +43,11 @@ export function refundDeadlinesFromOrders(view: CurrentOrderQueue): readonly Ref
  * warning stays in view where staff are looking — inside the signed-out cover via `portal` — with
  * the time it was last checked and "Sign in to accept it" instead of a link that cannot work. It
  * never sounds or announces without the same words on screen.
+ *
+ * v15 cbff9d6f: without a sign-in nothing is read with the old one. A registered Store tablet
+ * re-checks only the orders it shows (`recheck`), so an order accepted on another screen leaves
+ * the countdown at once. Anywhere else, or when checks fail, once the last check is older than
+ * 30 seconds the warning says the order may already have been accepted and stops sounding.
  */
 export function RefundDeadlineWatch({
   read,
@@ -43,13 +57,15 @@ export function RefundDeadlineWatch({
   readIntervalMs = REFUND_WATCH_READ_MS,
   signedOut = false,
   canAccept = ordersHref !== null,
-  lastCheckedAt,
+  initial = null,
+  recheck,
   portal = null,
   timeZone,
   remember = false,
   onDeadlines,
 }: {
-  readonly read: (signal: AbortSignal) => Promise<readonly RefundDeadline[] | null>;
+  /** The signed-in read; never used while `signedOut`. */
+  readonly read: ((signal: AbortSignal) => Promise<readonly RefundDeadline[] | null>) | null;
   /** Where this person accepts orders; null when they cannot (the kitchen display role). */
   readonly ordersHref: string | null;
   readonly onOrdersPage: boolean;
@@ -59,46 +75,88 @@ export function RefundDeadlineWatch({
   readonly signedOut?: boolean;
   /** Whether whoever signs in here can accept (signed-out screens without a workspace). */
   readonly canAccept?: boolean;
-  /** When the deadlines were last read (signed-out screens showing a remembered copy). */
-  readonly lastCheckedAt?: number;
+  /** What this tab last knew and when it was checked (signed-out screens). */
+  readonly initial?: {
+    readonly deadlines: readonly RefundDeadline[];
+    readonly checkedAt: number;
+  } | null;
+  /** Re-checks the shown orders without a sign-in (registered Store tablets). */
+  readonly recheck?: (
+    orderNumbers: readonly string[],
+    signal: AbortSignal,
+  ) => Promise<RefundRecheckResult>;
   /** Where to show the warning instead of the top of the page (the signed-out cover). */
   readonly portal?: HTMLElement | null;
   readonly timeZone?: string | undefined;
   /** Keep the last read for this tab so a later signed-out or PIN screen can still show it. */
   readonly remember?: boolean;
-  /** Each successful read (for the Session keep-alive while orders wait for acceptance). */
+  /** Each successful signed-in read (for the Session keep-alive while orders wait). */
   readonly onDeadlines?: (deadlines: readonly RefundDeadline[]) => void;
 }) {
-  const [deadlines, setDeadlines] = useState<readonly RefundDeadline[]>([]);
-  const [checkedAt, setCheckedAt] = useState<number | null>(null);
+  const [deadlines, setDeadlines] = useState<readonly RefundDeadline[]>(
+    () => initial?.deadlines ?? [],
+  );
+  const [checkedAt, setCheckedAt] = useState<number | null>(() => initial?.checkedAt ?? null);
+  // Whether a check succeeded since this screen signed out (else "before this screen signed out").
+  const [checkedSignedOut, setCheckedSignedOut] = useState(false);
+  const [noTablet, setNoTablet] = useState(false);
   const [now, setNow] = useState(clock);
-  const latest = useRef({ remember, canAccept, timeZone, onDeadlines });
-  latest.current = { remember, canAccept, timeZone, onDeadlines };
+  const latest = useRef({ remember, canAccept, timeZone, onDeadlines, deadlines, recheck });
+  latest.current = { remember, canAccept, timeZone, onDeadlines, deadlines, recheck };
   const [announcement, setAnnouncement] = useState("");
   const alerted = useRef(new Set<string>());
   const audio = useRef<AudioContext | null>(null);
   useEffect(() => {
+    if (!signedOut) return;
+    setCheckedSignedOut(false);
+    setNoTablet(false);
+  }, [signedOut]);
+  const canRecheck = recheck !== undefined;
+  useEffect(() => {
+    // Signed out: only the tablet re-check, and only while it can answer.
+    if (signedOut ? !canRecheck || noTablet : read === null) return;
     let active: AbortController | null = null;
+    const accept = (next: readonly RefundDeadline[]) => {
+      const at = clock();
+      setDeadlines(next);
+      setCheckedAt(at);
+      const options = latest.current;
+      if (options.remember)
+        saveLastKnownRefundDeadlines({
+          deadlines: next,
+          checkedAt: at,
+          canAccept: options.canAccept,
+          timeZone: options.timeZone ?? null,
+        });
+      return at;
+    };
     const load = () => {
       if (active !== null) return;
+      const options = latest.current;
+      const at = clock();
+      const shown = options.deadlines
+        .filter((deadline) => Date.parse(deadline.acceptBy) > at)
+        .map((deadline) => deadline.orderNumber);
+      if (signedOut && (shown.length === 0 || options.recheck === undefined)) return;
       const controller = new AbortController();
       active = controller;
-      void read(controller.signal)
-        .then((next) => {
-          if (controller.signal.aborted || next === null) return;
-          const at = clock();
-          setDeadlines(next);
-          setCheckedAt(at);
-          const options = latest.current;
-          options.onDeadlines?.(next);
-          if (options.remember)
-            saveLastKnownRefundDeadlines({
-              deadlines: next,
-              checkedAt: at,
-              canAccept: options.canAccept,
-              timeZone: options.timeZone ?? null,
-            });
-        })
+      const work: Promise<unknown> =
+        signedOut && options.recheck !== undefined
+          ? options.recheck([...new Set(shown)].slice(0, 10), controller.signal).then((result) => {
+              if (controller.signal.aborted) return;
+              if (result.kind === "NoTablet") setNoTablet(true);
+              if (result.kind !== "Checked") return;
+              accept(result.deadlines);
+              setCheckedSignedOut(true);
+            })
+          : read === null
+            ? Promise.resolve()
+            : read(controller.signal).then((next) => {
+                if (controller.signal.aborted || next === null) return;
+                accept(next);
+                latest.current.onDeadlines?.(next);
+              });
+      void work
         .catch(() => undefined)
         .finally(() => {
           if (active === controller) active = null;
@@ -118,7 +176,7 @@ export function RefundDeadlineWatch({
       document.removeEventListener("visibilitychange", visible);
       active?.abort();
     };
-  }, [clock, read, readIntervalMs]);
+  }, [canRecheck, clock, noTablet, read, readIntervalMs, signedOut]);
   // Browsers play sound only after someone touched the page; any tap or key on any screen allows it.
   useEffect(() => {
     const unlock = () => {
@@ -144,7 +202,10 @@ export function RefundDeadlineWatch({
     return () => clearInterval(timer);
   }, [clock, tickMs]);
   const warnings = refundWarnings(deadlines, now);
+  // Out of date without a sign-in: no sound or announcement for an order that may be handled.
+  const unsure = refundCountdownUnsure(signedOut, checkedAt, now);
   useEffect(() => {
+    if (unsure) return;
     const due = refundAlertsDue(warnings, alerted.current);
     if (due.keys.length === 0) return;
     for (const key of due.keys) alerted.current.add(key);
@@ -153,33 +214,40 @@ export function RefundDeadlineWatch({
   });
   if (warnings.length === 0) return null;
   const them = warnings.length === 1 ? "it" : "them";
-  const checked = lastCheckedAt ?? checkedAt;
+  const checked =
+    checkedAt === null
+      ? ""
+      : ` Last checked at ${storeTime(new Date(checkedAt).toISOString(), timeZone)}${
+          checkedSignedOut ? "." : ", before this screen signed out."
+        }`;
   const section = (
     <section
       className="refund-deadline-warning"
-      data-tier={warnings[0]?.tier}
+      data-tier={unsure ? "unsure" : warnings[0]?.tier}
       data-signed-out={signedOut ? "true" : undefined}
       aria-label="Orders about to be refunded"
     >
       {/* Heard once per new step (5 min, 2 min, 30 s); the countdown itself stays quiet. */}
       <p className="visually-hidden" role="alert">
-        {announcement}
+        {unsure ? "" : announcement}
       </p>
       <ul>
         {warnings.map((warning) => (
           <li key={warning.orderNumber + warning.acceptBy} data-tier={warning.tier}>
-            {warning.text}
+            {unsure ? refundWarningUnsureText(warning.orderNumber, warning.leftMs) : warning.text}
           </li>
         ))}
       </ul>
       {signedOut ? (
         <p>
-          {canAccept
-            ? `Sign in to accept ${them}.`
-            : `Ask someone at the counter to accept ${them} on Orders.`}
-          {checked === null
-            ? null
-            : ` Last checked at ${storeTime(new Date(checked).toISOString(), timeZone)}, before this screen signed out.`}
+          {unsure
+            ? canAccept
+              ? "Sign in to check."
+              : "Ask someone at the counter to check Orders."
+            : canAccept
+              ? `Sign in to accept ${them}.`
+              : `Ask someone at the counter to accept ${them} on Orders.`}
+          {checked}
         </p>
       ) : ordersHref === null ? (
         <p>Ask someone at the counter to accept {them} on Orders.</p>

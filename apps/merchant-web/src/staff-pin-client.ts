@@ -264,6 +264,35 @@ export interface StaffPinClient {
   registerDevice(label: string): Promise<StoreDevice>;
   revokeDevice(device: string): Promise<{ readonly signedOut: number }>;
   resetPin(staff: string): Promise<PinRecord>;
+  /**
+   * v15 cbff9d6f: on a registered tablet with nobody signed in, whether the orders this screen was
+   * warning about still wait for acceptance (`acceptBy` null once they no longer do).
+   */
+  refundRecheck(orderNumbers: readonly string[], signal?: AbortSignal): Promise<RefundRecheck>;
+}
+
+export interface RefundRecheck {
+  readonly checkedAt: string;
+  readonly orders: readonly { readonly orderNumber: string; readonly acceptBy: string | null }[];
+}
+const ORDER_NUMBER = /^[A-Za-z0-9-]{1,20}$/u;
+/** The tablet re-check answer, as a closed record naming only the asked orders. */
+export function parseRefundRecheck(value: unknown, asked: readonly string[]): RefundRecheck {
+  const raw = record(value, ["checkedAt", "orders"]);
+  const orders = list(raw.orders, (entry) => {
+    const order = record(entry, ["orderNumber", "acceptBy"]);
+    const orderNumber =
+      typeof order.orderNumber === "string" && ORDER_NUMBER.test(order.orderNumber)
+        ? order.orderNumber
+        : invalid();
+    return Object.freeze({ orderNumber, acceptBy: optionalInstant(order.acceptBy) });
+  });
+  if (
+    orders.length !== asked.length ||
+    orders.some((order, index) => order.orderNumber !== asked[index])
+  )
+    return invalid();
+  return Object.freeze({ checkedAt: instant(raw.checkedAt), orders });
 }
 
 export function createStaffPinClient(
@@ -352,6 +381,26 @@ export function createStaffPinClient(
       if (status === 404 && code === "device_not_registered")
         throw new StaffPinError("NotRegistered");
       if (status === 409 && code === "staff_not_listed") throw new StaffPinError("NotListed");
+      throw new StaffPinError("Unavailable");
+    },
+    async refundRecheck(orderNumbers: readonly string[], signal?: AbortSignal) {
+      if (
+        orderNumbers.length === 0 ||
+        orderNumbers.length > 10 ||
+        orderNumbers.some((value) => !ORDER_NUMBER.test(value))
+      )
+        throw new StaffPinError("Invalid");
+      const asked = [...orderNumbers];
+      const { status, data } = await send(
+        "/merchant/staff-switch/refund-recheck",
+        { method: "POST", body: { orderNumbers: asked }, csrf: false },
+        signal,
+      );
+      if (status === 200) return guard(() => parseRefundRecheck(data, asked));
+      const code = errorCode(data);
+      if (status === 404 && code === "device_not_registered")
+        throw new StaffPinError("NotRegistered");
+      if (status === 429) throw new StaffPinError("Busy");
       throw new StaffPinError("Unavailable");
     },
     async pinStatus(signal?: AbortSignal) {

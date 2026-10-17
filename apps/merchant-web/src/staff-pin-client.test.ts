@@ -4,6 +4,7 @@ import {
   createStaffPinClient,
   isTrivialPin,
   parsePinStatus,
+  parseRefundRecheck,
   parseStaffSwitch,
   parseStoreDevices,
   StaffPinError,
@@ -248,5 +249,52 @@ describe("requests", () => {
     expect((await failure(createStaffPinClient(null, respond(200, {})).resetPin("s-1"))).code).toBe(
       "Unavailable",
     );
+  });
+});
+
+describe("v15 cbff9d6f: tablet re-check of remembered refund countdowns", () => {
+  const answer = {
+    checkedAt: at,
+    orders: [
+      { orderNumber: "16", acceptBy: null },
+      { orderNumber: "17", acceptBy: "2026-10-14T20:00:00.000Z" },
+    ],
+  };
+  it("posts only the order numbers, without the session token, and reads the closed answer", async () => {
+    const fetcher = respond(200, answer);
+    await expect(createStaffPinClient(null, fetcher).refundRecheck(["16", "17"])).resolves.toEqual(
+      answer,
+    );
+    const [url, init] = fetcher.mock.calls[0] ?? [];
+    expect(url).toBe("/merchant/staff-switch/refund-recheck");
+    expect(init?.method).toBe("POST");
+    expect(init?.credentials).toBe("same-origin");
+    expect((init?.headers as Record<string, string>)["X-BOP-CSRF"]).toBeUndefined();
+    expect(JSON.parse(String(init?.body))).toEqual({ orderNumbers: ["16", "17"] });
+  });
+  it("accepts only an answer for exactly the asked orders, with no extra fields", () => {
+    expect(parseRefundRecheck(answer, ["16", "17"])).toEqual(answer);
+    expect(() => parseRefundRecheck(answer, ["17", "16"])).toThrow(StaffPinError);
+    expect(() => parseRefundRecheck(answer, ["16"])).toThrow(StaffPinError);
+    expect(() =>
+      parseRefundRecheck(
+        { ...answer, orders: [{ orderNumber: "16", acceptBy: null, customer: "x" }] },
+        ["16"],
+      ),
+    ).toThrow(StaffPinError);
+    expect(() => parseRefundRecheck({ ...answer, extra: 1 }, ["16", "17"])).toThrow(StaffPinError);
+  });
+  it("maps a browser that is not a registered tablet, a busy tablet and failures", async () => {
+    const recheck = (status: number, body: unknown) =>
+      failure(createStaffPinClient(null, respond(status, body)).refundRecheck(["16"]));
+    expect((await recheck(404, { error: "device_not_registered" })).code).toBe("NotRegistered");
+    expect((await recheck(429, { error: "device_busy", retryAfterSeconds: 30 })).code).toBe("Busy");
+    expect((await recheck(503, { error: "refund_recheck_unavailable" })).code).toBe("Unavailable");
+    expect((await recheck(404, null)).code).toBe("Unavailable");
+    const fetcher = respond(200, answer);
+    const client = createStaffPinClient(null, fetcher);
+    expect((await failure(client.refundRecheck([]))).code).toBe("Invalid");
+    expect((await failure(client.refundRecheck(["<b>"]))).code).toBe("Invalid");
+    expect(fetcher).not.toHaveBeenCalled();
   });
 });

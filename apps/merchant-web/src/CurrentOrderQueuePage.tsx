@@ -36,6 +36,7 @@ import { businessDateLabel, openedEarlierText, useStoreBusinessDay } from "./Sto
 import { WorkspacePage } from "./WorkspacePage.js";
 export { storeTime } from "./StoreTime.js";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useStaffSessionLive } from "./staff-session-reads.js";
 import { Link, useParams } from "react-router";
 import { StaffRoundPaymentAction } from "./StaffRoundPaymentAction.js";
 import {
@@ -1259,8 +1260,10 @@ export function CurrentOrderQueuePage({
   // WP-2423 Q1: re-read in the background so new and expiring orders surface without a tap. An
   // in-flight serving command pauses it; a failed read keeps the last view and says so.
   const ready = state.kind === "Ready";
+  // v15 cbff9d6f: no reads once this screen's sign-in has ended.
+  const live = useStaffSessionLive();
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || !live) return;
     const tick = () => {
       setNow(Date.now());
       if (servingOrders.current.size > 0 || background.current !== null) return;
@@ -1292,7 +1295,7 @@ export function CurrentOrderQueuePage({
       background.current?.abort();
       background.current = null;
     };
-  }, [ready, after, orderReference, client]);
+  }, [ready, live, after, orderReference, client]);
   // WP-2423 Q1: chime for orders that arrived since the previous read and once when an order
   // enters its last five minutes, when the operator turned sound on.
   useEffect(() => {

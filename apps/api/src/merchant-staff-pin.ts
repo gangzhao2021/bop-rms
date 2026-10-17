@@ -87,6 +87,15 @@ export type StaffSwitchResult =
   | { readonly status: "Throttled"; readonly retryAfterSeconds: number };
 
 const DEVICE_COOKIE = /^[A-Za-z0-9_-]{43}$/u;
+/** A Store order number as staff see it (the browser keeps only these and deadlines). */
+const ORDER_NUMBER = /^[A-Za-z0-9-]{1,20}$/u;
+/** At most this many remembered orders are re-checked in one request. */
+export const REFUND_RECHECK_MAX_ORDERS = 10;
+export interface TabletRefundRecheck {
+  readonly checkedAt: string;
+  /** Each asked order; `acceptBy` is null once it no longer waits (accepted, refunded, closed). */
+  readonly orders: readonly { readonly orderNumber: string; readonly acceptBy: string | null }[];
+}
 const CHOICE = /^[A-Za-z0-9_-]{43}$/u;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const active = (member: StoreMember) =>
@@ -118,6 +127,20 @@ export function createMerchantStaffPin(options: {
     actorReference: string,
     finalize: (tx: Query, session: AuthenticationSession) => Promise<void>,
   ): Promise<{ readonly sessionCookie: string }>;
+  /**
+   * v15 cbff9d6f: today's paid pickup orders still waiting for acceptance at the tablet's Store,
+   * with their refund deadlines (see `createStoreAwaitingPickupDeadlines`). Without it the tablet
+   * cannot re-check a remembered refund countdown and the screen says it may be out of date.
+   */
+  awaitingPickupDeadlines?(
+    tx: Query,
+    scope: {
+      readonly brandReference: string;
+      readonly storeReference: string;
+      readonly timeZone: string;
+      readonly at: string;
+    },
+  ): Promise<readonly { readonly orderNumber: string; readonly acceptBy: string }[]>;
   readonly retentionPolicyCode: string;
   readonly retentionPolicyVersion: number;
 }) {
@@ -282,6 +305,56 @@ export function createMerchantStaffPin(options: {
               }),
             )
             .sort((a, b) => a.name.localeCompare(b.name, "en")),
+        });
+      });
+    },
+
+    /**
+     * v15 cbff9d6f (DEC-STAFF-SESSION-CONTINUITY 2026-10-17 correction): with nobody signed in, a
+     * registered Store tablet asks whether the paid orders it was already warning about still wait
+     * for acceptance, so its lock screen or signed-out cover stops counting down (and chiming) for
+     * an order someone accepted elsewhere. Authorized only by the tablet binding; answers only for
+     * the order numbers asked (no list of the Store's orders), with numbers and times only — no
+     * Customer, item or payment details. A read: not audited (the HTTP route rate-limits it).
+     */
+    async refundRecheck(
+      deviceCookie: unknown,
+      orderNumbers: unknown,
+    ): Promise<TabletRefundRecheck> {
+      if (
+        !Array.isArray(orderNumbers) ||
+        orderNumbers.length === 0 ||
+        orderNumbers.length > REFUND_RECHECK_MAX_ORDERS ||
+        orderNumbers.some((value) => typeof value !== "string" || !ORDER_NUMBER.test(value)) ||
+        new Set(orderNumbers).size !== orderNumbers.length
+      )
+        return fail("Denied");
+      const asked = orderNumbers as readonly string[];
+      const read = options.awaitingPickupDeadlines;
+      if (read === undefined) return fail("Unavailable");
+      return run(async (tx) => {
+        const device = await tablet(tx, deviceCookie);
+        if (device === null) return fail("DeviceNotRegistered");
+        const scope = {
+          brandReference: device.brandReference,
+          storeReference: device.storeReference,
+        };
+        const at = now();
+        const profile = await options.describeStore(tx, { ...scope, at });
+        const waiting = await read(tx, { ...scope, timeZone: profile.timeZone, at });
+        const soonest = new Map<string, string>();
+        for (const order of waiting) {
+          const known = soonest.get(order.orderNumber);
+          if (known === undefined || Date.parse(order.acceptBy) < Date.parse(known))
+            soonest.set(order.orderNumber, order.acceptBy);
+        }
+        return Object.freeze({
+          checkedAt: at,
+          orders: Object.freeze(
+            asked.map((orderNumber) =>
+              Object.freeze({ orderNumber, acceptBy: soonest.get(orderNumber) ?? null }),
+            ),
+          ),
         });
       });
     },

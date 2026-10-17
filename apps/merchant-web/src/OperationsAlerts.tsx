@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useStaffSessionLive } from "./staff-session-reads.js";
 import { storeTime } from "./StoreTime.js";
 
 /**
@@ -326,7 +327,10 @@ export function OperationsAlerts({
       if (!controller.signal.aborted) setBusy(false);
     }
   }, [client]);
+  // v15 cbff9d6f: no reads once this screen's sign-in has ended; again at once if it is live.
+  const live = useStaffSessionLive();
   useEffect(() => {
+    if (!live) return;
     void load();
     timer.current = setInterval(() => {
       if (document.visibilityState === "visible") void load();
@@ -336,7 +340,7 @@ export function OperationsAlerts({
       timer.current = null;
       active.current?.abort();
     };
-  }, [load]);
+  }, [live, load]);
   return (
     <OperationsAlertsCard
       read={read}

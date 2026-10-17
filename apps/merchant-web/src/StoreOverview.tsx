@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useStaffSessionLive } from "./staff-session-reads.js";
 import { Link } from "react-router";
 import {
   createCurrentOrderQueueClient,
@@ -313,7 +314,10 @@ export function StoreOverview({
       setBusy(false);
     }
   }, [clients, permitted]);
+  // v15 cbff9d6f: no reads once this screen's sign-in has ended; again at once if it is live.
+  const live = useStaffSessionLive();
   useEffect(() => {
+    if (!live) return;
     if (!permitted.orders && !permitted.pickups && !permitted.exceptions) return;
     void load();
     // WP-2423 Q1: keep "Right now" current while the home page is open and visible.
@@ -324,7 +328,7 @@ export function StoreOverview({
       clearInterval(timer);
       active.current?.abort();
     };
-  }, [load, permitted]);
+  }, [live, load, permitted]);
   return (
     <>
       {/* WP-2423 Q13: store system alerts. The server decides who may read them (Owner, Store

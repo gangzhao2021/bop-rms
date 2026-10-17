@@ -2,6 +2,7 @@ import { UnpaidRoundCancelAction } from "./UnpaidRoundCancelAction.js";
 import { paidRoundWait, tableRoundWaitText, type PaidRoundWaitTier } from "./paid-round-wait.js";
 import { DiningHostTransferAction } from "./DiningHostTransferAction.js";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useStaffSessionLive } from "./staff-session-reads.js";
 import { AppFrame } from "@bop-rms/ui";
 import { Link } from "react-router";
 import {
@@ -305,8 +306,10 @@ export function DiningSessionWorkspace({
   const loadRef = useRef(load);
   loadRef.current = load;
   useStaleRetry(stale?.attempts ?? null, () => void loadRef.current(false, true));
+  // v15 cbff9d6f: no reads once this screen's sign-in has ended.
+  const live = useStaffSessionLive();
   useEffect(() => {
-    if (!awaitingPayment) return;
+    if (!awaitingPayment || !live) return;
     setNow(Date.now());
     let ticks = 0;
     const timer = setInterval(() => {
@@ -316,7 +319,7 @@ export function DiningSessionWorkspace({
       if (ticks % 2 === 0 && !paused) void loadRef.current(false, true);
     }, 15_000);
     return () => clearInterval(timer);
-  }, [awaitingPayment, paused]);
+  }, [awaitingPayment, live, paused]);
   // IDR-0039: the browser saying the network is gone is enough to go read-only at once.
   useBrowserOffline(() => {
     const lastLoadedAt = loadedAt.current;

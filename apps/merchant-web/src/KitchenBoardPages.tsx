@@ -470,6 +470,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { useStaffSessionLive } from "./staff-session-reads.js";
 import { Link, useLocation, useParams } from "react-router";
 import {
   KitchenBoardClientError,
@@ -1846,13 +1847,15 @@ function KitchenBoardContent(
   // M3: re-read the queue on its own while the board is visible and no action is in flight.
   const submitting = actions.state.kind === "Submitting";
   const found = state.kind === "Found" && stale === undefined;
+  // v15 cbff9d6f: no reads once this screen's sign-in has ended.
+  const live = useStaffSessionLive();
   useEffect(() => {
-    if (!found || typeof window === "undefined") return;
+    if (!found || !live || typeof window === "undefined") return;
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible" && !submitting) setRevision((value) => value + 1);
     }, kitchenRefreshIntervalMs);
     return () => window.clearInterval(timer);
-  }, [found, submitting]);
+  }, [found, live, submitting]);
   // IDR-0039: after a failed read, keep trying with backoff (and at once when the network returns).
   useStaleRetry(retryAttempts(state), () => setRevision((value) => value + 1));
   // M3: chime once for work that arrived since the previous read, when the operator asked for it.

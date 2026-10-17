@@ -1,4 +1,5 @@
 import { useContext, useEffect, useRef } from "react";
+import { useStaffSessionLive } from "./staff-session-reads.js";
 import { StatePanel } from "@bop-rms/ui";
 import { StoreTimeZoneContext, storeTime } from "./StoreTime.js";
 
@@ -37,8 +38,10 @@ export function staleRetryDelayMs(attempts: number): number {
 export function useStaleRetry(attempts: number | null, retry: () => void): void {
   const retryRef = useRef(retry);
   retryRef.current = retry;
+  // v15 cbff9d6f: no retries with a sign-in that has ended; they resume if it is still live.
+  const live = useStaffSessionLive();
   useEffect(() => {
-    if (attempts === null || typeof window === "undefined") return;
+    if (attempts === null || !live || typeof window === "undefined") return;
     const timer = window.setTimeout(() => retryRef.current(), staleRetryDelayMs(attempts));
     const online = () => retryRef.current();
     window.addEventListener("online", online);
@@ -46,7 +49,7 @@ export function useStaleRetry(attempts: number | null, retry: () => void): void 
       window.clearTimeout(timer);
       window.removeEventListener("online", online);
     };
-  }, [attempts]);
+  }, [attempts, live]);
 }
 
 /** True when the browser itself reports no network; a command must not be sent then. */

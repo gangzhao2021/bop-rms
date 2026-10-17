@@ -28,6 +28,8 @@ import { parsePickupQueueView } from "../../../apps/merchant-web/src/pickup.js";
 import { createDiningSessionClient } from "../../../apps/merchant-web/src/dining-session-client.js";
 import { createSettlementClient } from "../../../apps/merchant-web/src/settlement-client.js";
 import { createPickupClient } from "../../../apps/merchant-web/src/pickup-client.js";
+import { createStaffPinClient } from "../../../apps/merchant-web/src/staff-pin-client.js";
+import type { createMerchantStaffPin } from "../../../apps/api/src/merchant-staff-pin.js";
 
 /** The read model's output with every optional field present (nullable fields stay nullable). */
 type Full<T> = T extends string
@@ -112,6 +114,9 @@ const stub = (key: keyof MerchantBffRouterOptions) => {
   if (mock === undefined) throw new Error("read model stub missing");
   return mock;
 };
+type StaffPinPort = ReturnType<typeof createMerchantStaffPin>;
+const tabletRecheck = vi.fn<StaffPinPort["refundRecheck"]>();
+const deviceCookie = Buffer.alloc(32, 4).toString("base64url");
 let root = "";
 let server: import("node:http").Server;
 beforeAll(async () => {
@@ -132,6 +137,8 @@ beforeAll(async () => {
         diningTables: read("diningTables"),
         settlement: read("settlement"),
         pickupQuery: read("pickupQuery"),
+        // v15 cbff9d6f: the tablet re-check is the staff PIN port's (the rest is never called).
+        staffPin: { refundRecheck: tabletRecheck } as unknown as StaffPinPort,
       },
     }),
   );
@@ -150,7 +157,7 @@ const fetcher = (async (path: string, init: RequestInit = {}) => {
     Host: "merchant.invalid",
     Origin: origin,
     "Sec-Fetch-Site": "same-origin",
-    Cookie: `__Host-bop-merchant=${sessionCookie}`,
+    Cookie: `__Host-bop-merchant=${sessionCookie}; __Host-bop-store-device=${deviceCookie}`,
   };
   for (const [key, value] of Object.entries((init.headers ?? {}) as Record<string, string>))
     headers[key] = value;
@@ -776,6 +783,23 @@ describe("merchant BFF responses carry every read-model field the browser parses
     );
     expect(dropped(pickupView)).toEqual([]);
     expect(pickups.items).toHaveLength(1);
+  });
+
+  it("tablet refund re-check (signed-out cover and PIN screen)", async () => {
+    const model = {
+      checkedAt: at(41),
+      orders: [
+        { orderNumber: "16", acceptBy: null },
+        { orderNumber: "17", acceptBy: at(50) },
+      ],
+    } satisfies Full<Awaited<ReturnType<StaffPinPort["refundRecheck"]>>>;
+    tabletRecheck.mockResolvedValue(model);
+    const answer = await throughClient(() =>
+      createStaffPinClient(null, fetcher).refundRecheck(["16", "17"], signal()),
+    );
+    expect(dropped(model)).toEqual([]);
+    expect(answer).toEqual(model);
+    expect(tabletRecheck).toHaveBeenCalledWith(deviceCookie, ["16", "17"]);
   });
 
   it("the recorder sees a field the BFF drops", async () => {

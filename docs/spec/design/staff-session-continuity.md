@@ -158,6 +158,38 @@ account"。PIN 会话时侧栏常显"Signed in with PIN…"并提供"Verify it's
    与无会话的员工页同样显示该倒计时，过期即消失；PIN 登录后直接进入订单页。完整登录页（试点 TEST-ONLY 登录页、生产 Cognito）不属于本应用，
    不显示该倒计时，登录后首页仍有提醒与"Accept on Orders"。
 
+## 修正（2026-10-17，v15 `cbff9d6f` 实测）：退出后倒计时不知道订单已被接、退出的标签页仍在轮询
+
+现象：退出覆盖层与 PIN 锁屏按退出前最后已知期限继续倒计时，另一人已在 Orders 接单后仍播报"less than a minute"并响铃，直到期限过去；
+退出后的标签页仍每 15 s 读取 `/merchant/orders`、`/merchant/order-exceptions`、`/merchant/operations-alerts` 并得 403。
+
+决定（按商用原则自定，与第 5.1 节设备绑定 PIN、Owner"方案 A"一致）：
+
+1. **已登记的门店平板**（持 `__Host-bop-store-device` Cookie，柜台共享平板的常态）在无人登录时可复查它已经在提醒的订单：
+   `POST /merchant/staff-switch/refund-recheck`，体 `{"orderNumbers":[…]}`（1–10 个、去重；订单号只在 POST 体中，不进 URL）。
+   授权只靠平板绑定（与锁屏同一 Cookie、精确 Origin 与 `Sec-Fetch-Site: same-origin`），不需要会话；只回答所问订单号
+   `{"checkedAt","orders":[{"orderNumber","acceptBy"|null}]}`——`null` 表示已不再等待接单（已接、已退款或已关闭），不列出门店其他订单，
+   不含顾客、菜品或付款信息。期限定义与厨房屏相同（当前营业日、已付款待接单的取餐单、无断网暂停或已选退款）；同号多单取最早期限。
+   这是读取，不写审计；每台平板每分钟最多 12 次（页面每 15 s 一次，可容几个标签页），超出答 `429 device_busy` 与 `Retry-After`；
+   未登记或已移除的平板答 `404 device_not_registered`（并清除失效 Cookie），无 Cookie 不查库。
+2. 覆盖层与锁屏每 15 s 复查一次：已接的订单立即从倒计时消失、不再响铃，并同步本标签页保存的最后已知期限（锁屏随之不再显示）；
+   期限被延后时按新期限计时。复查成功后显示"Last checked at HH:MM."（不再写"before this screen signed out"）。
+3. **其他浏览器**（未登记的电脑或手机）或复查失败（断网、服务器不可达、平板忙）时，最后一次成功检查超过 30 秒即改为
+   "Order N may already have been accepted. If not, it will be refunded automatically in N min." 与"Sign in to check."（厨房屏角色为
+   "Ask someone at the counter to check Orders."），并停止提示音与读屏播报；得知不是登记平板后不再复查。仍在登录的屏幕（Orders、
+   首页、厨房屏）照常提醒并响铃，自动退款由服务器按期限执行，不受影响。
+4. 会话结束（覆盖层出现）后，本标签页不再用该会话做任何周期读取：首页概览与系统提醒、Orders、厨房与取餐看板、餐桌付款读取、
+   点单菜单刷新、读取失败重试与营业日检查全部停止；"Check again"确认会话仍有效即恢复并立即重读，重新登录则整页重新加载。
+
+运行连续性：断网或云主机不可达时复查失败，30 秒后屏幕如实写"may already have been accepted"并静音，店员按 Q9 运行手册在任何可用
+设备登录后在 Orders 查看；平板被移除时复查答 404，屏幕同样降级。
+
+检查：api 路由单元（只答所问、跨站/查询串/多余字段拒绝、无 Cookie 与已移除平板、403/503 映射、每台平板限速且互不影响）、隔离
+PostgreSQL 受限 NOBYPASSRLS 角色 + 渲染的试点授权 `staff-pin-sign-in`（平板绑定、只答所问、同号取最早、非法输入不查库、已移除平板与
+他店平板）、BFF 响应契约（复查答复经浏览器客户端解析不丢字段）、商户单元（复查客户端、"可能已接"文案与 30 秒信任期、会话结束读取开关）、
+商户生产浏览器 `staff-session-continuity`（登记平板复查保持提醒与响铃且退出后无会话读取、他处接单后倒计时与锁屏立即消失且不响铃、
+非登记浏览器降级文案且不响铃不复查；1440/390 截图、无横向溢出）。结果记录在 WP-2423。
+
 ## 其他影响
 
 - 厨房屏换班（IDR-0039）：开始班次时记录的 `session_valid_until` 是开始时刻的期限；未"Release"就离开的操作员，其班次结束时间按

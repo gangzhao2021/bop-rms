@@ -39,6 +39,28 @@ export function refundWarningText(orderNumber: string, leftMs: number): string {
   return `Order ${orderNumber} will be refunded automatically ${when} unless someone accepts it.`;
 }
 
+/**
+ * v15 cbff9d6f: how long a signed-out screen trusts its last check. After this the countdown may
+ * be out of date (someone may have accepted the order on another screen), so it says so and stops
+ * sounding until a check succeeds again.
+ */
+export const REFUND_SIGNED_OUT_TRUST_MS = 30_000;
+
+/** Whether a signed-out screen can no longer vouch for its countdown (see above). */
+export function refundCountdownUnsure(
+  signedOut: boolean,
+  checkedAt: number | null,
+  now: number,
+): boolean {
+  return signedOut && (checkedAt === null || now - checkedAt > REFUND_SIGNED_OUT_TRUST_MS);
+}
+
+/** Plain wording when the countdown may be out of date: it never tells staff an order still waits. */
+export function refundWarningUnsureText(orderNumber: string, leftMs: number): string {
+  const when = leftMs <= 60_000 ? "in less than a minute" : `in ${Math.ceil(leftMs / 60_000)} min`;
+  return `Order ${orderNumber} may already have been accepted. If not, it will be refunded automatically ${when}.`;
+}
+
 /** Orders inside their last five minutes, soonest first. */
 export function refundWarnings(
   deadlines: readonly RefundDeadline[],
