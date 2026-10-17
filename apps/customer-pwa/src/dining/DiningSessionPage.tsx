@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import { endSentence, formatClockTime, formatMoney } from "../journey/format.js";
@@ -13,6 +13,8 @@ import {
   type DiningSessionClient,
   type DiningSessionView,
 } from "./dining-session-client.js";
+import { DiningInvitationPanel } from "./DiningInvitationPanel.js";
+import type { DiningInvitationClient } from "./dining-invitation-client.js";
 
 /**
  * WP-2423 D5: when a round was sent. Today's rounds show the time; a round from another day (a
@@ -288,9 +290,12 @@ export function isDiningSessionActive(view: DiningSessionView | null): boolean {
 export function DiningSessionPage({
   store,
   client: provided,
+  invitationClient,
 }: {
   readonly store?: CustomerStoreContext | undefined;
   readonly client?: DiningSessionClient | undefined;
+  /** WP-2423 DEC-DINING-GUEST-INVITATION (tests inject; the page uses HTTP by default). */
+  readonly invitationClient?: DiningInvitationClient | undefined;
 }) {
   const [client] = useState(() => provided ?? createHttpDiningSessionClient());
   const [state, setState] = useState<DiningSessionState>({ status: "loading" });
@@ -346,17 +351,33 @@ export function DiningSessionPage({
       document.removeEventListener("visibilitychange", tick);
     };
   }, [active, load]);
-  return <DiningSessionScreen state={state} store={store} onRefresh={() => void load()} />;
+  return (
+    <DiningSessionScreen
+      state={state}
+      store={store}
+      onRefresh={() => void load()}
+      invitation={
+        // Stays mounted while a table is shown (also during a failed refresh), so a code on
+        // screen is not lost; it is never stored.
+        state.status === "ready" || (state.status === "unavailable" && state.view !== null) ? (
+          <DiningInvitationPanel client={invitationClient} />
+        ) : null
+      }
+    />
+  );
 }
 
 export function DiningSessionScreen({
   state,
   store,
   onRefresh,
+  invitation = null,
 }: {
   readonly state: DiningSessionState;
   readonly store?: CustomerStoreContext | undefined;
   readonly onRefresh: () => void;
+  /** WP-2423 DEC-DINING-GUEST-INVITATION: the host's "Invite someone at your table". */
+  readonly invitation?: ReactNode;
 }) {
   const view = state.status === "ready" || state.status === "unavailable" ? state.view : null;
   const active = isDiningSessionActive(view);
@@ -377,8 +398,9 @@ export function DiningSessionScreen({
         <section className="order-status__card" role="alert">
           <h2>Join your table first</h2>
           <p>
-            Ask a staff member for your table&apos;s code and enter it after scanning the
-            table&apos;s QR code. Then you can see what your table has ordered.
+            Ask a staff member, or the person who joined your table first, for your table&apos;s
+            code and enter it after scanning the table&apos;s QR code. Then you can see what your
+            table has ordered.
           </p>
           <Link className="order-status__back" to="/">
             Go to the start
@@ -401,6 +423,7 @@ export function DiningSessionScreen({
           </button>
         </section>
       ) : null}
+      {invitation}
       {view && view.rounds.length === 0 ? (
         <section className="order-status__card">
           <h2>No one at this table has ordered yet</h2>

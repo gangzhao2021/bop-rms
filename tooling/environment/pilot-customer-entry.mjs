@@ -70,5 +70,16 @@ export async function createInternalCustomerEntry(
       binding: bindingOptions,
       resolveRequestContext: async () => createInternalDiningJoinRequestContext(resources, owner),
     },
+    // WP-2423 DEC-DINING-GUEST-INVITATION: the table's Host issues the next one-time table code
+    // with the same Dining credentials, pepper and owner scope as staff issuance and Join.
+    diningInvitation: {
+      tenantReference: owner.scope.tenantReference,
+      transactions: resources.transactions,
+      binding: (tx) => binding({ run: (work) => work(tx) }),
+      dining: { credentials: owner.credentials, pepperVersion: 1 },
+      retentionPolicyCode: "AUDIT_DEFAULT",
+      retentionPolicyVersion: 1,
+      newReference: resources.credentials.reference,
+    },
   };
 }

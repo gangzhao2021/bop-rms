@@ -71,6 +71,7 @@ function dependencies() {
       createInternalCustomerEntry: async () => ({
         entry: port("entry"),
         diningAdmission: port("diningAdmission"),
+        diningInvitation: port("diningInvitation"),
         binding: port("binding"),
       }),
       createInternalTestItems: async () => ({ catalogCartItems }),

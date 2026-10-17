@@ -19,8 +19,9 @@ export type DiningAdmissionUiState =
 /** The server definitively refused the code: nothing to recover, a new code is needed. */
 export type DiningAdmissionRefusedState = "CodeUsed" | "CodeNotAccepted" | "TooManyAttempts";
 const refusalText: Readonly<Record<DiningAdmissionRefusedState, string>> = {
-  CodeUsed: "This code was already used. Ask staff for a new one.",
-  CodeNotAccepted: "That code didn’t work. Check it and try again, or ask staff for a new one.",
+  CodeUsed: "This code was already used. Ask staff, or the person who invited you, for a new one.",
+  CodeNotAccepted:
+    "That code didn’t work. Check it and try again, or ask staff or the person who invited you for a new one.",
   TooManyAttempts: "Too many tries. Wait a few minutes before trying again, or ask staff for help.",
 };
 /** Maps a failed attempt: a definitive refusal returns to entry, anything else stays recoverable. */
@@ -194,8 +195,8 @@ export function DiningAdmissionView({
       {entry && (
         <form onSubmit={onSubmit} noValidate>
           <p id="dining-admission-help">
-            Ask staff for a join code or invitation. Scanning the table QR code alone does not join
-            the table.
+            Ask staff, or the person who joined your table first, for the table’s code. Scanning the
+            table QR code alone does not join the table.
           </p>
           <label htmlFor="dining-join-credential">Join code or invitation</label>
           <input
@@ -216,7 +217,7 @@ export function DiningAdmissionView({
           />
           {state === "Invalid" && (
             <p id="dining-admission-error" role="alert">
-              Enter the six-digit code or the invitation supplied by staff.
+              Enter the six-digit code you were given.
             </p>
           )}
           {refused(state) && (

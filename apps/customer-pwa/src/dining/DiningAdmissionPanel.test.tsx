@@ -37,8 +37,14 @@ describe("contextual Dining admission screen", () => {
     if (state === "Unknown") expect(html).toContain('role="alert"');
   });
   it.each([
-    ["CodeUsed", "This code was already used. Ask staff for a new one."],
-    ["CodeNotAccepted", "Check it and try again, or ask staff for a new one."],
+    [
+      "CodeUsed",
+      "This code was already used. Ask staff, or the person who invited you, for a new one.",
+    ],
+    [
+      "CodeNotAccepted",
+      "Check it and try again, or ask staff or the person who invited you for a new one.",
+    ],
     ["TooManyAttempts", "Wait a few minutes before trying again, or ask staff for help."],
   ] as const)("returns to code entry with plain guidance for refused %s", (state, text) => {
     const html = renderToStaticMarkup(<DiningAdmissionView state={state} online />);

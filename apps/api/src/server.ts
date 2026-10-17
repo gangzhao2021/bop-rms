@@ -33,6 +33,7 @@ import {
 import { createCustomerOrderStatusRead } from "./customer-order-status-read.js";
 import { createCustomerDiningSessionRead } from "./customer-dining-session-read.js";
 import { CustomerDiningSessionHandler } from "./customer-dining-session.js";
+import type { CustomerDiningInvitationHandler } from "./customer-dining-invitation.js";
 import { CustomerOrderStatusHandler } from "./customer-order-status.js";
 import {
   createCustomerPaymentResultHandler,
@@ -119,6 +120,8 @@ export interface ApiServerRuntimeOptions {
   customerCartBinding?: CustomerCartBindingHandler;
   customerDiningJoin?: CustomerDiningJoinHandler;
   customerDiningBinding?: CustomerDiningBindingHandler;
+  /** WP-2423 DEC-DINING-GUEST-INVITATION: the table's Host invites the next guest. */
+  customerDiningInvitation?: CustomerDiningInvitationHandler;
   customerEntry?: CustomerEntryHandler;
   customerMenu?: CustomerMenuHandler;
   customerQuote?: CustomerQuoteHandler;
@@ -198,6 +201,7 @@ export function createApiServerRuntime({
   customerCartBinding,
   customerDiningJoin,
   customerDiningBinding,
+  customerDiningInvitation,
   customerEntry,
   customerMenu,
   customerQuote,
@@ -322,6 +326,7 @@ export function createApiServerRuntime({
     ...(customerCartBinding === undefined ? {} : { customerCartBinding }),
     ...(customerDiningJoin === undefined ? {} : { customerDiningJoin }),
     ...(customerDiningBinding === undefined ? {} : { customerDiningBinding }),
+    ...(customerDiningInvitation === undefined ? {} : { customerDiningInvitation }),
     ...(customerEntry === undefined ? {} : { customerEntry }),
     healthReadiness,
     ...(customerMenu === undefined ? {} : { customerMenu }),

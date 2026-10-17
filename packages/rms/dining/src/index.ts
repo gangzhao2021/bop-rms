@@ -74,5 +74,7 @@ export { createPostgresDiningTableReleaseStore } from "./infrastructure/persiste
 
 export * from "./domain/dining-host-transfer.js";
 export * from "./infrastructure/persistence/dining-host-transfer-store.js";
+export * from "./domain/dining-guest-invitation.js";
+export * from "./infrastructure/persistence/dining-guest-invitation-store.js";
 
 export { createDiningExceptionEpisodeResolution } from "./application/dining-exception-episode-resolution.js";

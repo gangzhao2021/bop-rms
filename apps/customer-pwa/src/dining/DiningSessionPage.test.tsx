@@ -228,7 +228,7 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
   it("tells a guest who has not joined how to join, and offers retry when the table can't load", () => {
     const notJoined = render({ status: "not-joined" });
     expect(notJoined).toContain("Join your table first");
-    expect(notJoined).toContain("Ask a staff member for your table");
+    expect(notJoined).toContain("Ask a staff member, or the person who joined your table first");
     expect(notJoined).not.toContain("Round");
     const failed = render({ status: "unavailable", view: null, offline: false });
     expect(failed).toContain("We couldn’t load your table");

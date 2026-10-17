@@ -64,6 +64,7 @@ export async function createRuntime(
       cartReplacement: createInternalCartReplacement(resources, configuredEntry),
       ...diningCart,
       diningAdmission: configuredEntry.diningAdmission,
+      diningInvitation: configuredEntry.diningInvitation,
       pickupCode: {
         readiness: ready.storeOptions,
         proof: proof.storeOptions,

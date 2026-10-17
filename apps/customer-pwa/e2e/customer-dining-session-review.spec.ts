@@ -105,6 +105,14 @@ async function enterTable(page: Page, onSession: () => { status: number; json: u
     const { status, json } = onSession();
     return route.fulfill({ status, headers: { "cache-control": "no-store" }, json });
   });
+  // WP-2423 DEC-DINING-GUEST-INVITATION: this guest is not the table's host (no invite control).
+  await page.route("**/api/v1/dine-in/invitation", (route) =>
+    route.fulfill({
+      status: 200,
+      headers: { "cache-control": "no-store" },
+      json: { schemaVersion: 1, invitation: { canInvite: false } },
+    }),
+  );
   await page.goto("/#qr=aaa.bbb.ccc");
   await expect(
     page.getByRole("heading", { name: "Synthetic Noodle Bar", exact: true }),

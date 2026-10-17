@@ -3,6 +3,14 @@ const databaseAccessManifestInput = {
   module: { moduleName: "dining", packageName: "@rms/dining", layer: "RMS" },
   tables: [
     {
+      table: "dining_guest_invitation_operation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/dining" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier", "credential"],
+    },
+    {
       table: "dining_table_qr_issue",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/dining" },
@@ -201,6 +209,33 @@ const databaseAccessManifestInput = {
       principal: { kind: "module", id: "@rms/dining" },
       readPattern: "owner-repository",
       source: "packages/rms/dining/src/infrastructure/persistence/dining-host-transfer-store.ts",
+    },
+    {
+      id: "guest-invitation.read.dining_guest_invitation_operation",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_dining", table: "dining_guest_invitation_operation" },
+      principal: { kind: "module", id: "@rms/dining" },
+      readPattern: "owner-repository",
+      source: "packages/rms/dining/src/infrastructure/persistence/dining-guest-invitation-store.ts",
+    },
+    {
+      id: "guest-invitation.write.dining_guest_invitation_operation",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_dining", table: "dining_guest_invitation_operation" },
+      principal: { kind: "module", id: "@rms/dining" },
+      readPattern: null,
+      source: "packages/rms/dining/src/infrastructure/persistence/dining-guest-invitation-store.ts",
+    },
+    {
+      id: "guest-invitation.write.dining_join_capability",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_dining", table: "dining_join_capability" },
+      principal: { kind: "module", id: "@rms/dining" },
+      readPattern: null,
+      source: "packages/rms/dining/src/infrastructure/persistence/dining-guest-invitation-store.ts",
     },
   ],
 } as const;

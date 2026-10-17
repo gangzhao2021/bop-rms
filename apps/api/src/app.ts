@@ -27,6 +27,11 @@ import {
   unavailableCustomerDiningSessionHandler,
 } from "./customer-dining-session.js";
 import {
+  customerDiningInvitationRoute,
+  type CustomerDiningInvitationHandler,
+  unavailableCustomerDiningInvitationHandler,
+} from "./customer-dining-invitation.js";
+import {
   CustomerPaymentResultHandler,
   customerPaymentResultRoute,
   unavailableCustomerPaymentResultHandler,
@@ -150,6 +155,8 @@ export interface AppOptions {
   customerOrderStatus?: CustomerOrderStatusHandler;
   /** WP-2423 Q8: the dine-in guest's own table view (CUST-DINE-IN-SESSION). */
   customerDiningSession?: CustomerDiningSessionHandler;
+  /** WP-2423 DEC-DINING-GUEST-INVITATION: the table's Host invites the next guest. */
+  customerDiningInvitation?: CustomerDiningInvitationHandler;
   customerSessionBootstrap?: ReturnType<typeof createCustomerSessionBootstrapHandler>;
   customerPickupCode?: CustomerPickupCodeHandler;
   customerReceipt?: CustomerReceiptHandler;
@@ -227,6 +234,7 @@ export function createApp({
   customerOrderSubmission,
   customerOrderStatus,
   customerDiningSession,
+  customerDiningInvitation,
   customerSessionBootstrap,
   customerPickupCode,
   customerReceipt,
@@ -389,6 +397,14 @@ export function createApp({
   app.get(
     customerDiningSessionRoute,
     customerDiningSession?.handler() ?? unavailableCustomerDiningSessionHandler,
+  );
+  app.get(
+    customerDiningInvitationRoute,
+    customerDiningInvitation?.read() ?? unavailableCustomerDiningInvitationHandler,
+  );
+  app.post(
+    customerDiningInvitationRoute,
+    customerDiningInvitation?.issue() ?? unavailableCustomerDiningInvitationHandler,
   );
   app.post(
     customerOrderSubmissionRoute,

@@ -1461,6 +1461,50 @@
 .dining-session .menu-help {
   margin-top: var(--bop-space-4);
 }
+/* WP-2423 DEC-DINING-GUEST-INVITATION: the host's one-time code for the next guest. */
+.dining-invitation__code {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--bop-space-2);
+  margin: var(--bop-space-3) 0;
+}
+.dining-invitation__label {
+  color: var(--bop-color-text-muted);
+  font-size: 0.875rem;
+}
+.dining-invitation__digits {
+  color: var(--bop-color-text-default);
+  font-size: 2.25rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+.dining-invitation__note {
+  font-size: 0.875rem;
+}
+.dining-invitation__action {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  margin-top: var(--bop-space-2);
+  border: 1px solid var(--bop-color-brand-primary);
+  border-radius: var(--bop-radius-control);
+  color: var(--bop-color-on-primary);
+  background: var(--bop-color-brand-primary);
+  font: inherit;
+  font-weight: 600;
+}
+.dining-invitation__action--secondary {
+  color: var(--bop-color-text-default);
+  background: var(--bop-color-surface-default);
+  border-color: var(--bop-color-border-strong);
+}
+.dining-invitation__action:disabled {
+  opacity: 0.6;
+}
 @media (max-width: 24rem) {
   .dining-session__round-facts,
   .dining-session__summary dl {
