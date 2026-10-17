@@ -1,5 +1,6 @@
 import { SkipLinkProvidedContext } from "@bop-rms/ui";
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
+import { Link } from "react-router";
 import type { MerchantNavigationItem } from "./merchant-workspace.js";
 
 /** Pages that render their own full-screen chrome (kitchen display, dining floor) or must guard leaving. */
@@ -44,11 +45,22 @@ export function WorkspaceLayout({
   readonly footer?: ReactNode;
 }) {
   const current = currentNavigationItem(items, path);
+  // WP-2423 (v15 run): in-app navigation stays inside the loaded app. A plain link reloaded the
+  // whole app on every click (re-checking every script) and showed the browser's own "No
+  // internet" page offline even when the page was already downloaded. The real href stays for
+  // open-in-new-tab, copy link and assistive technology.
+  const closeCompactMenu = (event: MouseEvent<HTMLAnchorElement>) => {
+    event.currentTarget.closest("details")?.removeAttribute("open");
+  };
   const links = (
     <>
-      <a href="/app" aria-current={path === "/app" ? "page" : undefined}>
+      <Link
+        to="/app"
+        aria-current={path === "/app" ? "page" : undefined}
+        onClick={closeCompactMenu}
+      >
         Home
-      </a>
+      </Link>
       {items
         // WP-2423 Q5: one link per destination even if a screen is listed twice.
         .filter(
@@ -56,13 +68,14 @@ export function WorkspaceLayout({
             item.href !== "/app" && items.findIndex((other) => other.href === item.href) === index,
         )
         .map((item) => (
-          <a
+          <Link
             key={item.screenId}
-            href={item.href}
+            to={item.href}
             aria-current={item.screenId === current ? "page" : undefined}
+            onClick={closeCompactMenu}
           >
             {item.label}
-          </a>
+          </Link>
         ))}
     </>
   );

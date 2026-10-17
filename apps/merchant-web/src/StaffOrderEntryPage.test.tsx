@@ -5,6 +5,7 @@ import {
   choicesComplete,
   estimatedLineMinor,
   paidAtInstant,
+  placeErrorText,
   StaffOrderEntryPage,
   paymentWindowNotice,
 } from "./StaffOrderEntryPage.js";
@@ -130,6 +131,25 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
     expect(choicesComplete(item, { [id(7)]: [id(9)] })).toBe(true);
   });
 
+  it("v15 run: names a short item, how many are left and how many were ordered", () => {
+    const item = parseCounterMenu(counterMenuResponse()).sections[0]?.items[0];
+    if (!item) throw new Error("fixture");
+    const oat = [{ optionReference: id(10), name: "Oat milk", quantity: 1 }];
+    const lines = [
+      { key: "a", item, quantity: 1, options: oat },
+      { key: "b", item, quantity: 1, options: [] },
+      { key: "c", item, quantity: 2, options: oat },
+    ];
+    const text = placeErrorText(new CounterOrderClientError("ItemShort", 0, null, [], 1), lines);
+    expect(text).toBe(
+      "Only 1 Flat White left, 3 in this order. Remove Flat White and add 1 back, then send again. Nothing was sent or charged.",
+    );
+    expect(text).not.toMatch(/item_short|409|[0-9a-f]{8}-/u);
+    expect(placeErrorText(new CounterOrderClientError("ItemShort", 9, null, [], 2), lines)).toBe(
+      "An item has only 2 left. Remove it and add 2 back, then send again. Nothing was sent or charged.",
+    );
+  });
+
   it("accepts a paper order's paid time only within the last three days", () => {
     const now = Date.parse("2026-10-13T18:00:00");
     expect(paidAtInstant("2026-10-13T14:05", now)).toBe(new Date("2026-10-13T14:05").toISOString());
@@ -162,6 +182,7 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
     expect(() => parsePlacedCounterOrder({ ...placed, totalMinor: "1281" })).toThrow();
     const responses: [number, unknown][] = [
       [409, { error: "item_unavailable", lineIndex: 1 }],
+      [409, { error: "item_short", lineIndex: 0, available: 1 }],
       [409, { error: "store_not_taking_pickup_orders" }],
       [503, { error: "counter_order_unavailable" }],
     ];
@@ -179,6 +200,11 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
     await expect(client.placeOrder(command)).rejects.toMatchObject({
       code: "ItemUnavailable",
       lineIndex: 1,
+    });
+    await expect(client.placeOrder(command)).rejects.toMatchObject({
+      code: "ItemShort",
+      lineIndex: 0,
+      available: 1,
     });
     await expect(client.placeOrder(command)).rejects.toMatchObject({
       code: "StoreNotTakingOrders",

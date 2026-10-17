@@ -16,6 +16,7 @@ export class CounterOrderClientError extends Error {
       | "TableCartHasItems"
       | "TableCheckoutInProgress"
       | "ItemUnavailable"
+      | "ItemShort"
       | "NotPriced"
       | "NotFinished"
       | "InProgress"
@@ -27,12 +28,14 @@ export class CounterOrderClientError extends Error {
       | "Conflict"
       | "Unavailable"
       | "OutcomeUnknown",
-    /** ItemUnavailable: the line the store cannot sell now. */
+    /** ItemUnavailable: the line the store cannot sell now. ItemShort: the short item's first line. */
     readonly lineIndex: number | null = null,
     /** AmountChanged: the amount to charge now. */
     readonly totalMinor: string | null = null,
     /** TableCartHasItems: what guests put in the table's shared cart and haven't sent. */
     readonly pendingItems: readonly { readonly name: string; readonly quantity: number }[] = [],
+    /** ItemShort: how many of the item the store's stock covers now. */
+    readonly available: number | null = null,
   ) {
     super("Counter order request failed");
     this.name = "CounterOrderClientError";
@@ -432,6 +435,17 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
           "ItemUnavailable",
           typeof body.lineIndex === "number" ? body.lineIndex : null,
         );
+      // v15 run: too few in stock for the quantity ordered; nothing was placed or charged.
+      const { lineIndex, available } = body;
+      if (
+        code === "item_short" &&
+        typeof lineIndex === "number" &&
+        Number.isSafeInteger(lineIndex) &&
+        typeof available === "number" &&
+        Number.isSafeInteger(available) &&
+        available > 0
+      )
+        throw new CounterOrderClientError("ItemShort", lineIndex, null, [], available);
       if (code === "store_not_taking_pickup_orders")
         throw new CounterOrderClientError("StoreNotTakingOrders");
       if (code === "order_not_priced") throw new CounterOrderClientError("NotPriced");

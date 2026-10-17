@@ -2909,6 +2909,12 @@ it("WP-2423 Q7: protects counter order and card-machine transport and maps refus
   const soldOut = await submit("/counter/orders");
   expect(soldOut.status).toBe(409);
   expect(await soldOut.json()).toEqual({ error: "item_unavailable", lineIndex: 1 });
+  // v15 run: too few in stock is a specific answer naming the line and how many are left.
+  counterOrder.mockRejectedValueOnce(new CounterOrderError("COUNTER_ORDER_STOCK_SHORT", 0, 1));
+  const short = await submit("/counter/orders");
+  expect(short.status).toBe(409);
+  expect(short.headers.get("cache-control")).toBe("no-store");
+  expect(await short.json()).toEqual({ error: "item_short", lineIndex: 0, available: 1 });
 
   const paidResponse = await submit("/orders/card-machine-payment");
   expect(paidResponse.status).toBe(200);

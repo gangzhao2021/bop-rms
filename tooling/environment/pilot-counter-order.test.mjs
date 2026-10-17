@@ -69,6 +69,14 @@ for (const [path, name] of [
     "createCustomerIntactReservationPaymentAction",
   ],
   ["../../apps/api/dist/merchant-counter-menu.js", "createMerchantCounterMenu"],
+  [
+    "../../apps/api/dist/customer-cart-selection-inventory.js",
+    "createCustomerCartSelectionInventory",
+  ],
+  [
+    "../../apps/api/dist/customer-pickup-cart-inventory-authorization.js",
+    "createCustomerPickupCartInventoryAuthorization",
+  ],
 ])
   vi.doMock(path, () => ({ [name]: named(name) }));
 vi.mock("../../apps/api/dist/persistent-customer-entry.js", () => ({
@@ -190,7 +198,15 @@ const customer = {
       persistent: { profile: "profile", transactions: "tx", sources: async () => sources },
     },
   }),
-  createInternalTestItems: async (_r, channel) => ({ catalogCartItems: { channel } }),
+  createInternalTestItems: async (_r, channel) => ({
+    catalogCartItems: {
+      channel,
+      catalogTransactions: "catalogReads",
+      catalogScope: { sourceChannel: channel ?? "Qr" },
+      catalogSafety: { killSwitch: "killSwitch", inventory: "menuStock" },
+      selectedInventory: { scope: "stockSite" },
+    },
+  }),
   createInternalTestCart: () => ({ cartBinding: { ordering: { sourceChannel: "Qr" } } }),
   createInternalDiningCart: () => "diningCart",
   createInternalChannelQuote: async () => ({ configuredCartQuote: { pickup: "pickupQuote" } }),
@@ -242,6 +258,20 @@ it("composes the counter with the customer's checkout details owner (every picku
     expect.objectContaining({ session: { name: "session" } }),
   );
   expect(seen.pipeline.details).toBe(details);
+});
+
+it("v15 run: checks a short item's stock with the counter Cart's own check, as the walk-up guest", async () => {
+  await compose();
+  const { scope: stockScope, catalog } = seen.pipeline.stock;
+  expect(stockScope).toEqual(expect.objectContaining(scope));
+  expect(catalog.name).toBe("createCustomerCartSelectionInventory");
+  const [reads, catalogScope, safety, selected] = catalog.args;
+  expect(reads).toBe("catalogReads");
+  expect(catalogScope).toMatchObject({ sourceChannel: "Pos", orderType: "Pickup", ...scope });
+  expect(safety).toMatchObject({ killSwitch: "killSwitch", inventory: "menuStock" });
+  expect(selected.scope).toBe("stockSite");
+  expect(selected.authorize.name).toBe("createCustomerPickupCartInventoryAuthorization");
+  expect(selected.authorize.args[0]).toEqual(expect.objectContaining(scope));
 });
 
 it("keeps taking counter orders while online ordering is paused, not after pickup hours", async () => {

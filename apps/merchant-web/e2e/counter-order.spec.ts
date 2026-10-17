@@ -470,3 +470,63 @@ test("@production counter order fails closed without the staff ordering permissi
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Send order" })).toHaveCount(0);
 });
+
+// v15 run: two of an item with one left returned "try again" without saying why. Staff are told
+// which item is short and how many are left; the order stays on the page to fix and send.
+test("@production a short item names how many are left and the order stays editable", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.route("**/merchant/counter/menu", (route) => route.fulfill({ headers, json: menu }));
+  const sent: { sellableReference: string; quantity: number }[][] = [];
+  await page.route("**/merchant/counter/orders", (route) => {
+    const lines = (route.request().postDataJSON() as { lines: (typeof sent)[number] }).lines;
+    sent.push(lines);
+    const flatWhites = lines
+      .filter((line) => line.sellableReference === id(5))
+      .reduce((sum, line) => sum + line.quantity, 0);
+    if (flatWhites > 1)
+      return route.fulfill({
+        status: 409,
+        headers,
+        json: { error: "item_short", lineIndex: 0, available: 1 },
+      });
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Placed",
+        orderReference: id(20),
+        orderBatchReference: id(21),
+        orderNumber: "14",
+        orderVersion: 1,
+        orderMinor: "932",
+        tipMinor: "0",
+        totalMinor: "932",
+        payBy: new Date(Date.now() + 30 * 60_000).toISOString(),
+        recordedAfterOutage: false,
+      },
+    });
+  });
+  await page.goto("/operations/order-entry");
+  for (let count = 0; count < 2; count++) {
+    await page.getByRole("button", { name: "Add Flat White" }).click();
+    await page.getByRole("button", { name: "Add to order" }).click();
+  }
+  await page.getByRole("button", { name: "Add Banana Bread" }).click();
+  await page.getByRole("button", { name: "Add to order" }).click();
+  await page.getByRole("button", { name: "Send order" }).click();
+  await expect(page.getByRole("alert")).toHaveText(
+    "Only 1 Flat White left, 2 in this order. Remove Flat White and add 1 back, then send again. Nothing was sent or charged.",
+  );
+  await expect(page.getByText(/item_short|counter_order|409|503/u)).toHaveCount(0);
+  const ticket = page.getByRole("list", { name: "Items in this order" });
+  await expect(ticket.getByRole("listitem")).toHaveCount(3);
+  await expect(page.getByRole("button", { name: "Send order" })).toBeEnabled();
+  await page.getByRole("button", { name: "Remove Flat White" }).first().click();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await page.getByRole("button", { name: "Send order" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Charge $9.32 on the card machine" }),
+  ).toBeVisible();
+  expect(sent.map((lines) => lines.length)).toEqual([3, 2]);
+});

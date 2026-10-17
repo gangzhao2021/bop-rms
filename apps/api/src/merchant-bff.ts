@@ -10980,6 +10980,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             COUNTER_ORDER_PERMISSION_DENIED: [403, "counter_order_permission_denied"],
             COUNTER_ORDER_STORE_NOT_TAKING_ORDERS: [409, "store_not_taking_pickup_orders"],
             COUNTER_ORDER_ITEM_UNAVAILABLE: [409, "item_unavailable"],
+            COUNTER_ORDER_STOCK_SHORT: [409, "item_short"],
             COUNTER_ORDER_NOT_PRICED: [409, "order_not_priced"],
             COUNTER_ORDER_NOT_FINISHED: [409, "counter_order_not_finished"],
             COUNTER_ORDER_IN_PROGRESS: [409, "counter_order_in_progress"],
@@ -10993,7 +10994,9 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           .json(
             error.code === "COUNTER_ORDER_ITEM_UNAVAILABLE"
               ? { error: code, lineIndex: error.lineIndex }
-              : { error: code },
+              : error.code === "COUNTER_ORDER_STOCK_SHORT"
+                ? { error: code, lineIndex: error.lineIndex, available: error.available }
+                : { error: code },
           );
       });
   });

@@ -150,6 +150,47 @@ describe("counter guest pipeline — WP-2423 Q7", () => {
     await expect(p.addItem(guest, line)).rejects.toThrow();
   });
 
+  it("v15 run: checks stock for a quantity as the walk-up guest, against its own Cart", async () => {
+    expect(pipeline().pipeline.canSell).toBeUndefined();
+    const validateSelection = vi.fn(async (_input: unknown, context: { quantity: number }) =>
+      context.quantity <= 1 ? { status: "Accepted" } : { status: "Rejected" },
+    );
+    const { pipeline: p, options } = pipeline({
+      stock: {
+        scope: { brandReference: id(1), storeReference: id(2) },
+        catalog: { validateSelection },
+      },
+    });
+    const input = {
+      cartReference: id(6),
+      cartVersion: 3,
+      sellableReference: id(11),
+      quantity: 2,
+      optionSelections: [{ optionReference: id(12), quantity: 1 }],
+      requestedAt: "2026-10-13T18:00:00.000Z",
+    };
+    expect(await p.canSell?.(guest, input)).toBe(false);
+    expect(await p.canSell?.(guest, { ...input, quantity: 1 })).toBe(true);
+    expect(options.sessions.authorize).toHaveBeenCalledWith(expect.objectContaining(guest));
+    expect(validateSelection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        brandReference: id(1),
+        storeReference: id(2),
+        sourceChannel: "Pos",
+        orderType: "Pickup",
+        sellableReference: id(11),
+        optionSelections: input.optionSelections,
+      }),
+      {
+        diningSessionReference: null,
+        cartReference: id(6),
+        cartVersion: 3,
+        guestSessionReference: id(5),
+        quantity: 2,
+      },
+    );
+  });
+
   it("prices only an unblocked quote of exactly this cart version", async () => {
     const { pipeline: p, options } = pipeline();
     const input = {

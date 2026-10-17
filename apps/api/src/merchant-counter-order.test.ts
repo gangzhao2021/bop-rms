@@ -228,6 +228,80 @@ describe("counter order command — WP-2423 Q7", () => {
     expect(onUnexpected).not.toHaveBeenCalled();
   });
 
+  describe("v15 run: an item with too little stock", () => {
+    const stockOf = (left: number) =>
+      vi.fn(async (_c: unknown, input: { quantity: number }) => input.quantity <= left);
+    const twoLines = {
+      lines: [
+        { sellableReference: id(2), quantity: 1, optionSelections: [] },
+        { sellableReference: id(3), quantity: 1, optionSelections: [] },
+        { sellableReference: id(2), quantity: 1, optionSelections: [] },
+      ],
+    };
+
+    it("names the item and how many are left when the same item on several lines is short", async () => {
+      const { pipeline, send, onUnexpected } = setup();
+      const canSell = stockOf(1);
+      Object.assign(pipeline, { canSell });
+      await expect(send(twoLines)).rejects.toMatchObject({
+        code: "COUNTER_ORDER_STOCK_SHORT",
+        lineIndex: 0,
+        available: 1,
+      });
+      // Checked as the walk-up guest against its Cart, for both lines together.
+      expect(canSell).toHaveBeenCalledWith(
+        guest,
+        expect.objectContaining({
+          cartReference: id(6),
+          cartVersion: 2,
+          sellableReference: id(2),
+          quantity: 2,
+        }),
+      );
+      // Nothing was priced, checked out or charged; it is a business answer, not an outage.
+      expect(pipeline.quote).not.toHaveBeenCalled();
+      expect(pipeline.startCheckout).not.toHaveBeenCalled();
+      expect(onUnexpected).not.toHaveBeenCalled();
+    });
+
+    it("finds how many are left when a line's own quantity is refused", async () => {
+      const { pipeline, send } = setup();
+      Object.assign(pipeline, { canSell: stockOf(3) });
+      pipeline.addItem.mockResolvedValueOnce({ status: "NotAvailable" } as never);
+      await expect(
+        send({ lines: [{ sellableReference: id(2), quantity: 7, optionSelections: [] }] }),
+      ).rejects.toMatchObject({ code: "COUNTER_ORDER_STOCK_SHORT", lineIndex: 0, available: 3 });
+    });
+
+    it("keeps the sold-out answer when none can be sold, and places a covered order", async () => {
+      const { pipeline, send } = setup();
+      Object.assign(pipeline, { canSell: stockOf(0) });
+      pipeline.addItem.mockResolvedValueOnce({ status: "NotAvailable" } as never);
+      await expect(send()).rejects.toMatchObject({
+        code: "COUNTER_ORDER_ITEM_UNAVAILABLE",
+        lineIndex: 0,
+      });
+      Object.assign(pipeline, { canSell: stockOf(2) });
+      expect(await send({ ...twoLines, operationReference: id(32) })).toMatchObject({
+        status: "Placed",
+      });
+    });
+
+    it("never hides the refusal when the stock cannot be read", async () => {
+      const { pipeline, send } = setup();
+      Object.assign(pipeline, {
+        canSell: vi.fn(async () => {
+          throw new Error("INVENTORY_UNAVAILABLE");
+        }),
+      });
+      pipeline.addItem.mockResolvedValueOnce({ status: "NotAvailable" } as never);
+      await expect(send()).rejects.toMatchObject({
+        code: "COUNTER_ORDER_ITEM_UNAVAILABLE",
+        lineIndex: 0,
+      });
+    });
+  });
+
   it("WP-2423: each counter transaction resolves the caller twice; owner callbacks take its guard", async () => {
     const { send } = setup();
     expect(await send()).toMatchObject({ status: "Placed" });

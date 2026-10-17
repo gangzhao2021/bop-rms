@@ -4,6 +4,7 @@ import {
   parseCheckoutSession,
   type CheckoutSession,
   type OrderPaymentPreparationEvidence,
+  type PickupCartItemOptions,
 } from "@rms/ordering";
 import type { Money } from "@rms/pricing";
 import type { CustomerCartBindingPort } from "./customer-cart-binding.js";
@@ -100,6 +101,15 @@ export function createCounterGuestPipeline(options: {
   /** The counter's opening rule on the Store's current status (checked again at payment). */
   takesOrder(input: { readonly recordedAfterOutage: boolean }): Promise<boolean>;
   payment: (credentials: CounterGuestCredentials) => PaymentOptions;
+  /**
+   * WP-2423 (v15 run): the stock check the counter Cart's item command makes (the Catalog
+   * selection with the Store's stock for a quantity), used to tell staff how many of a short
+   * item are left. Its authorization takes the walk-up guest's Cart as context.
+   */
+  stock?: {
+    readonly scope: { readonly brandReference: string; readonly storeReference: string };
+    readonly catalog: PickupCartItemOptions["catalog"];
+  };
   nextReference(): string;
   now(): string;
 }): CounterGuestPipeline {
@@ -194,6 +204,36 @@ export function createCounterGuestPipeline(options: {
       });
     },
     ...steps,
+    ...(options.stock === undefined
+      ? {}
+      : {
+          async canSell(credentials, input) {
+            const stock = options.stock as NonNullable<typeof options.stock>;
+            const guest = await options.sessions.authorize({
+              ...credentials,
+              observedAt: options.now(),
+            });
+            const result = await stock.catalog.validateSelection(
+              {
+                brandReference: stock.scope.brandReference as never,
+                storeReference: stock.scope.storeReference as never,
+                sourceChannel: "Pos",
+                orderType: "Pickup",
+                sellableReference: input.sellableReference as never,
+                optionSelections: input.optionSelections as never,
+                observedAt: input.requestedAt as never,
+              },
+              Object.freeze({
+                diningSessionReference: null,
+                cartReference: input.cartReference as never,
+                cartVersion: input.cartVersion,
+                guestSessionReference: String(guest.sessionReference) as never,
+                quantity: input.quantity,
+              }),
+            );
+            return result.status === "Accepted";
+          },
+        }),
     async preparePayment(credentials, input): Promise<OrderPaymentPreparationEvidence> {
       if (!(await options.takesOrder({ recordedAfterOutage: input.recordedAfterOutage })))
         throw new CheckoutSessionServiceError("STORE_CLOSED");

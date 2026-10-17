@@ -10,6 +10,7 @@ import { request } from "node:http";
 import { readFile, lstat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
+import { createPilotStaticAssets, missingPilotAsset } from "./pilot-static-assets.mjs";
 const require = createRequire(new URL("../../apps/api/package.json", import.meta.url));
 const express = require("express");
 export async function startInternalCustomerServer({
@@ -173,22 +174,13 @@ export async function startInternalCustomerServer({
       });
       req.pipe(upstream);
     });
+    // WP-2423 (v15 run): hashed build files are cached for a year and sent compressed; the app
+    // pages and other unhashed files are revalidated so a deploy is picked up.
     const assets = resolve("apps/customer-pwa/dist");
-    app.use(
-      express.static(assets, {
-        dotfiles: "deny",
-        index: false,
-        setHeaders: (res) => res.setHeader("Cache-Control", "no-cache"),
-      }),
-    );
+    app.use(createPilotStaticAssets(assets));
     const merchantAssets = resolve("apps/merchant-web/dist");
-    app.use(
-      express.static(merchantAssets, {
-        dotfiles: "deny",
-        index: false,
-        setHeaders: (res) => res.setHeader("Cache-Control", "no-cache"),
-      }),
-    );
+    app.use(createPilotStaticAssets(merchantAssets));
+    app.use("/assets", missingPilotAsset);
     app.get(["/app", "/app/{*path}", "/operations/{*path}"], (_req, res) =>
       res.set("Cache-Control", "no-store").sendFile(resolve(merchantAssets, "index.html")),
     );

@@ -32,3 +32,74 @@ test("@production a screen whose code does not arrive reloads once, then offers 
   expect(documents).toBe(3);
   await expect(page.getByRole("heading", { name: "This page didn't load" })).toHaveCount(0);
 });
+
+// v15 run: the workspace links move inside the loaded app. A plain link reloaded the whole app on
+// every click, and offline showed the browser's "No internet" page even though the screen had
+// already been fetched in the background.
+test("@production offline, a workspace link opens an already-fetched screen without reloading the app", async ({
+  page,
+}) => {
+  const scope = {
+    brandLabel: "Training Brand",
+    storeLabel: "Training Store",
+    storeReference: "01909985-0000-7000-8000-000000000099",
+    timeZone: "America/Toronto",
+  };
+  let documents = 0;
+  page.on("request", (request) => {
+    if (request.resourceType() === "document") documents += 1;
+  });
+  await page.route("**/merchant/**", (route) =>
+    route.fulfill({ status: 503, json: { error: "unavailable" } }),
+  );
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers: { "cache-control": "no-store" },
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-09-19",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "OPS-ORDER-QUEUE",
+              label: "Orders",
+              href: "/operations/orders",
+              permission: "ordering.operate",
+            },
+            {
+              screenId: "FUL-PICKUP-QUEUE",
+              label: "Pickup",
+              href: "/operations/pickup",
+              permission: "fulfillment.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  const pickupCode = page.waitForResponse(/\/assets\/PickupPages-[^/]+\.js$/u);
+  await page.goto("/app");
+  const workspace = page.getByRole("navigation", { name: "Workspace" });
+  const pickupLink = workspace.locator(".workspace-sidebar__links").getByRole("link", {
+    name: "Pickup",
+  });
+  await expect(pickupLink).toHaveAttribute("href", "/operations/pickup");
+  expect((await pickupCode).ok()).toBe(true);
+  await page.context().setOffline(true);
+  await pickupLink.click();
+  await expect(page).toHaveURL(/\/operations\/pickup$/u);
+  await expect(page.getByRole("heading", { level: 1, name: "Pickup" })).toBeVisible();
+  await expect(pickupLink).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("heading", { name: "This page didn't load" })).toHaveCount(0);
+  await workspace.locator(".workspace-sidebar__links").getByRole("link", { name: "Home" }).click();
+  await expect(page).toHaveURL(/\/app$/u);
+  expect(documents).toBe(1);
+  await page.context().setOffline(false);
+});

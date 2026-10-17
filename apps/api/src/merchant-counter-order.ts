@@ -28,6 +28,7 @@ export const counterOrderErrorCodes = [
   "COUNTER_ORDER_PERMISSION_DENIED",
   "COUNTER_ORDER_STORE_NOT_TAKING_ORDERS",
   "COUNTER_ORDER_ITEM_UNAVAILABLE",
+  "COUNTER_ORDER_STOCK_SHORT",
   "COUNTER_ORDER_NOT_PRICED",
   "COUNTER_ORDER_NOT_FINISHED",
   "COUNTER_ORDER_IN_PROGRESS",
@@ -37,17 +38,31 @@ export const counterOrderErrorCodes = [
 export type CounterOrderErrorCode = (typeof counterOrderErrorCodes)[number];
 export class CounterOrderError extends Error {
   readonly code: CounterOrderErrorCode;
-  /** For COUNTER_ORDER_ITEM_UNAVAILABLE: the zero-based line the store cannot sell now. */
+  /**
+   * For COUNTER_ORDER_ITEM_UNAVAILABLE: the zero-based line the store cannot sell now. For
+   * COUNTER_ORDER_STOCK_SHORT: the first line of the item (same options) there is too little of.
+   */
   readonly lineIndex: number | null;
-  constructor(code: CounterOrderErrorCode, lineIndex: number | null = null) {
+  /** For COUNTER_ORDER_STOCK_SHORT: how many of that item the Store's stock covers now (1 or more). */
+  readonly available: number | null;
+  constructor(
+    code: CounterOrderErrorCode,
+    lineIndex: number | null = null,
+    available: number | null = null,
+  ) {
     super("counter order is unavailable");
     this.name = "CounterOrderError";
     this.code = code;
     this.lineIndex = lineIndex;
+    this.available = available;
   }
 }
-const fail = (code: CounterOrderErrorCode, lineIndex: number | null = null): never => {
-  throw new CounterOrderError(code, lineIndex);
+const fail = (
+  code: CounterOrderErrorCode,
+  lineIndex: number | null = null,
+  available: number | null = null,
+): never => {
+  throw new CounterOrderError(code, lineIndex, available);
 };
 
 /** What the counter reads from the Store's current operating status. */
@@ -120,6 +135,22 @@ export interface CounterGuestPipeline {
     /** Another guest at the table is paying for the table's Cart (dine-in only). */
     | { readonly status: "CheckoutInProgress" }
   >;
+  /**
+   * WP-2423 (v15 run): whether the Store's stock covers this quantity of one item (with these
+   * options) now: the stock check adding an item makes, as the walk-up guest against its Cart.
+   * Without it a short item is reported as not available.
+   */
+  canSell?(
+    credentials: CounterGuestCredentials,
+    input: {
+      readonly cartReference: string;
+      readonly cartVersion: number;
+      readonly sellableReference: string;
+      readonly quantity: number;
+      readonly optionSelections: readonly { optionReference: string; quantity: number }[];
+      readonly requestedAt: string;
+    },
+  ): Promise<boolean>;
   quote(
     credentials: CounterGuestCredentials,
     input: {
@@ -184,6 +215,17 @@ export interface CounterOrderLine {
   readonly sellableReference: string;
   readonly quantity: number;
   readonly optionSelections: readonly { optionReference: string; quantity: number }[];
+}
+
+/** The same item with the same options: stock is checked for their combined quantity. */
+export function sameCounterConfiguration(a: CounterOrderLine, b: CounterOrderLine): boolean {
+  const options = (line: CounterOrderLine) =>
+    JSON.stringify(
+      [...line.optionSelections]
+        .map((option) => [option.optionReference, option.quantity] as const)
+        .sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)),
+    );
+  return a.sellableReference === b.sellableReference && options(a) === options(b);
 }
 
 export interface CounterOrderResult {
@@ -497,6 +539,51 @@ export function createMerchantCounterOrder(options: {
       // A concurrent retry recorded the same command first: it owns its own guest Cart.
       if (entry.status === "AlreadyRecorded") return await earlier(entry.record);
       let cartVersion = bound.cartVersion;
+      /**
+       * WP-2423 (v15 run): when an item is short, staff are told which one and how many the
+       * stock covers now, so they change the quantity instead of seeing "try again". Nothing is
+       * placed or charged; the order on the page stays as entered.
+       */
+      const shortage = async (index: number) => {
+        const canSell = options.pipeline.canSell?.bind(options.pipeline);
+        const line = command.lines[index];
+        if (canSell === undefined || line === undefined) return null;
+        const group = [...command.lines.entries()].filter(([, other]) =>
+          sameCounterConfiguration(line, other),
+        );
+        const ordered = group.reduce((sum, [, other]) => sum + other.quantity, 0);
+        const sells = (quantity: number) =>
+          canSell(credentials, {
+            cartReference: bound.cartReference,
+            cartVersion,
+            sellableReference: line.sellableReference,
+            quantity,
+            optionSelections: line.optionSelections,
+            requestedAt: now(),
+          });
+        try {
+          if (await sells(ordered)) return null;
+          // The most the stock covers now, below what was ordered (stock demand grows with
+          // quantity, so a binary search finds it).
+          let low = 0,
+            high = ordered - 1;
+          while (low < high) {
+            const middle = Math.ceil((low + high) / 2);
+            if (await sells(middle)) low = middle;
+            else high = middle - 1;
+          }
+          return { lineIndex: group[0]?.[0] ?? index, available: low };
+        } catch {
+          // An explanation that cannot be read never hides the original answer.
+          return null;
+        }
+      };
+      const notSellable = async (index: number): Promise<never> => {
+        const short = await shortage(index);
+        return short !== null && short.available > 0
+          ? fail("COUNTER_ORDER_STOCK_SHORT", short.lineIndex, short.available)
+          : fail("COUNTER_ORDER_ITEM_UNAVAILABLE", short?.lineIndex ?? index);
+      };
       for (const [index, line] of command.lines.entries()) {
         const added = await options.pipeline.addItem(credentials, {
           operationReference: options.nextReference(),
@@ -507,9 +594,25 @@ export function createMerchantCounterOrder(options: {
           optionSelections: line.optionSelections,
           requestedAt: now(),
         });
-        if (added.status !== "Applied") return fail("COUNTER_ORDER_ITEM_UNAVAILABLE", index);
+        if (added.status !== "Applied") return await notSellable(index);
         cartVersion = added.cartVersion;
       }
+      // Each line was checked on its own as it was added; the same item on several lines is
+      // checked again for the quantity of all of them together (as checkout does).
+      if (options.pipeline.canSell !== undefined)
+        for (const [index, line] of command.lines.entries()) {
+          const first = command.lines.findIndex((other) => sameCounterConfiguration(line, other));
+          const repeated = command.lines.some(
+            (other, at) => at > index && sameCounterConfiguration(line, other),
+          );
+          if (first === index && repeated) {
+            const short = await shortage(index);
+            if (short !== null)
+              return short.available > 0
+                ? fail("COUNTER_ORDER_STOCK_SHORT", short.lineIndex, short.available)
+                : fail("COUNTER_ORDER_ITEM_UNAVAILABLE", short.lineIndex);
+          }
+        }
       const quoted = await options.pipeline.quote(credentials, {
         operationReference: options.nextReference(),
         cartReference: bound.cartReference,

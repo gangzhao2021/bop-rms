@@ -484,6 +484,10 @@ Existing loopback Host/origin and simulation-confirmation rules are preserved.
 Partial startup failures close acquired simulator/database resources; three
 focused tests cover environment denial and failures during simulator/entry setup.
 Clean-install configuration and assembled runtime acceptance remain separate.
+It serves the customer and merchant builds through `pilot-static-assets.mjs`:
+content-hashed `/assets` files carry a one-year immutable cache, other files are
+`no-cache`, text files are sent brotli or gzip compressed (compressed once per
+file version, held in memory), and a missing `/assets` file is a 404.
 
 `pilot-credentials.mjs`, `pilot-dining-credentials.mjs` and `pilot-qr.mjs`
 provide configured credential/QR loader factories. Private wrappers supply

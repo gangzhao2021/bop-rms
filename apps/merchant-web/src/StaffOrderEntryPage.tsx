@@ -84,7 +84,7 @@ const menuError: Record<string, [string, string]> = {
   ],
 };
 
-function placeErrorText(
+export function placeErrorText(
   error: CounterOrderClientError,
   lines: readonly Line[],
   table: string | null = null,
@@ -112,6 +112,25 @@ function placeErrorText(
       return line
         ? `${line.item.name} can't be sold right now (sold out or off the menu). Remove it and send again.`
         : "An item can't be sold right now. Check the order and send again.";
+    }
+    case "ItemShort": {
+      // v15 run: name the short item and how many are left; the order stays as entered.
+      const line = error.lineIndex === null ? undefined : lines[error.lineIndex];
+      const left = error.available ?? 0;
+      if (line === undefined)
+        return `An item has only ${left} left. Remove it and add ${left} back, then send again. Nothing was sent or charged.`;
+      const options = (entry: Line) =>
+        JSON.stringify(
+          entry.options.map((option) => [option.optionReference, option.quantity]).sort(),
+        );
+      const ordered = lines
+        .filter(
+          (other) =>
+            other.item.sellableReference === line.item.sellableReference &&
+            options(other) === options(line),
+        )
+        .reduce((sum, other) => sum + other.quantity, 0);
+      return `Only ${left} ${line.item.name} left, ${ordered} in this order. Remove ${line.item.name} and add ${left} back, then send again. Nothing was sent or charged.`;
     }
     case "StoreNotTakingOrders":
       return table !== null

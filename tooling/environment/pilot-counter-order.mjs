@@ -19,6 +19,8 @@ import { createPersistentCustomerEntryComposition } from "../../apps/api/dist/pe
 import { createPersistentPublicStoreProfileReader } from "../../apps/api/dist/persistent-public-store-profile.js";
 import { createCustomerCartBindingComposition } from "../../apps/api/dist/customer-cart-binding-composition.js";
 import { createCustomerCartItemWithCatalogComposition } from "../../apps/api/dist/customer-cart-item-composition.js";
+import { createCustomerCartSelectionInventory } from "../../apps/api/dist/customer-cart-selection-inventory.js";
+import { createCustomerPickupCartInventoryAuthorization } from "../../apps/api/dist/customer-pickup-cart-inventory-authorization.js";
 import { createCustomerCartReadPort } from "../../apps/api/dist/customer-cart-read-composition.js";
 import { createCustomerCheckoutSessionComposition } from "../../apps/api/dist/customer-checkout-session-composition.js";
 import { createCustomerCheckoutSessionRead } from "../../apps/api/dist/customer-checkout-session-read.js";
@@ -198,6 +200,29 @@ export async function createInternalCounterOrder(
       read: (value) => checkoutRead.read(value),
     },
     takesOrder: async (input) => counterTakesOrder(await operatingNow(), input),
+    // The same stock check the counter Cart makes when an item is added (its own Cart as context),
+    // so staff are told how many of a short item are left.
+    stock: {
+      scope,
+      catalog: createCustomerCartSelectionInventory(
+        items.catalogCartItems.catalogTransactions,
+        {
+          ...items.catalogCartItems.catalogScope,
+          brandReference: scope.brandReference,
+          storeReference: scope.storeReference,
+          orderType: "Pickup",
+        },
+        {
+          killSwitch: items.catalogCartItems.catalogSafety.killSwitch,
+          inventory: items.catalogCartItems.catalogSafety.inventory,
+          clock: { now },
+        },
+        {
+          ...items.catalogCartItems.selectedInventory,
+          authorize: createCustomerPickupCartInventoryAuthorization(scope, now),
+        },
+      ),
+    },
     payment: (guest) => ({
       access: checkout.accessOptions,
       tenantReference,
