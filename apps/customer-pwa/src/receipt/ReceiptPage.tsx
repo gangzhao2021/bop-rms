@@ -5,11 +5,17 @@ import {
   createUnavailableReceiptClient,
   type ReceiptController,
 } from "./receipt-controller.js";
-import type { ReceiptMoneyView, ReceiptRecordView, ReceiptView } from "./types.js";
+import type {
+  ReceiptMoneyView,
+  ReceiptRecordView,
+  ReceiptRefundView,
+  ReceiptView,
+} from "./types.js";
 
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import {
   describeChosenOption,
+  endSentence,
   formatDateTime,
   formatLocalityLine,
   formatMoney,
@@ -45,6 +51,105 @@ export const receiptReasonText: Readonly<Record<string, string>> = {
   ORDER_ADDITIONAL_PAYMENT_CAPTURED: "An additional payment was added to this order.",
   PAYMENT_REFUND_STATUS_CHANGED: "A refund on this order was updated.",
 };
+
+/** WP-2423 (v15 3cd0f8dd M4): what kind of refund each stated refund is, in the guest's words. */
+export const receiptRefundKindText: Record<ReceiptRefundView["kind"], string> = {
+  Refund: "Refund",
+  ItemCancellation: "Cancelled items",
+  RoundRefund: "Refunded in full",
+  Other: "Refund",
+};
+
+/**
+ * WP-2423 (v15 3cd0f8dd M4): a refund version states every confirmed refund to date — the items,
+ * tax and tip each returned — then what was refunded in total and what the order cost after it.
+ */
+function ReceiptRefunds({
+  snapshot,
+  version,
+}: {
+  readonly snapshot: ReceiptRecordView["snapshot"];
+  readonly version: number;
+}) {
+  const refunds = snapshot.refunds;
+  if (!refunds || refunds.length === 0) return null;
+  const currencyCode = snapshot.total.currencyCode;
+  return (
+    <section
+      className="receipt-page__refunds"
+      aria-labelledby={`receipt-version-${version}-refunds`}
+    >
+      <h3 id={`receipt-version-${version}-refunds`}>What was refunded</h3>
+      {refunds.map((refund, index) => (
+        <div className="receipt-page__refund" key={index}>
+          <p>
+            <strong>{receiptRefundKindText[refund.kind]}</strong>
+            {refund.newInThisVersion ? " · new on this version" : ""}
+          </p>
+          {refund.lines.length > 0 ? (
+            <ul className="receipt-page__lines">
+              {refund.lines.map((line) => (
+                <li key={line.lineReference}>
+                  <span>
+                    {line.quantity} × {line.displayName}
+                  </span>
+                  <span>{money(line.amount)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <dl className="receipt-page__totals">
+            {refund.tax.amountMinor > 0n ? (
+              <div>
+                <dt>Tax</dt>
+                <dd>{money(refund.tax)}</dd>
+              </div>
+            ) : null}
+            {refund.tip.amountMinor > 0n ? (
+              <div>
+                <dt>Tip</dt>
+                <dd>{money(refund.tip)}</dd>
+              </div>
+            ) : null}
+            {refund.other.amountMinor > 0n ? (
+              <div>
+                <dt>{refund.lines.length > 0 ? "Fees" : "Amount"}</dt>
+                <dd>{money(refund.other)}</dd>
+              </div>
+            ) : null}
+            <div>
+              <dt>Refunded</dt>
+              <dd>{money(refund.total)}</dd>
+            </div>
+          </dl>
+        </div>
+      ))}
+      <dl className="receipt-page__totals">
+        <div>
+          <dt>Refunded in total</dt>
+          <dd>{money(snapshot.refundedTotal)}</dd>
+        </div>
+        <div>
+          <dt>Total after refunds</dt>
+          <dd>
+            {money({
+              amountMinor: snapshot.total.amountMinor - snapshot.refundedTotal.amountMinor,
+              currencyCode,
+            })}
+          </dd>
+        </div>
+      </dl>
+    </section>
+  );
+}
+
+/** Why this version was issued, in the guest's words (null when there is no reviewed wording). */
+export function receiptVersionReason(record: ReceiptRecordView): string | null {
+  // WP-2423 (v15 3cd0f8dd M4): a refund version that states a new refund says so plainly.
+  if (record.kind === "Refund" && record.snapshot.refunds?.some((entry) => entry.newInThisVersion))
+    return "A refund was made to your original payment.";
+  return record.reasonCode ? (receiptReasonText[record.reasonCode] ?? null) : null;
+}
 
 const kindText: Record<ReceiptRecordView["kind"], string> = {
   Original: "Receipt",
@@ -86,9 +191,7 @@ function ReceiptVersion({ record }: { readonly record: ReceiptRecordView }) {
         Version {record.version}: {kindText[record.kind]}
       </h2>
       <p>Recorded {formatDateTime(record.recordedAt, snapshot.locale)}</p>
-      {record.reasonCode && receiptReasonText[record.reasonCode] ? (
-        <p>Reason: {receiptReasonText[record.reasonCode]}</p>
-      ) : null}
+      {receiptVersionReason(record) ? <p>Reason: {receiptVersionReason(record)}</p> : null}
       <ul className="receipt-page__lines">
         {snapshot.lines.map((line) => (
           <li key={line.lineReference}>
@@ -164,6 +267,7 @@ function ReceiptVersion({ record }: { readonly record: ReceiptRecordView }) {
           <dd>{money(snapshot.refundedTotal)}</dd>
         </div>
       </dl>
+      <ReceiptRefunds snapshot={snapshot} version={record.version} />
     </article>
   );
 }
@@ -180,6 +284,16 @@ function ReceiptContent({
   const financial = online ? view.financial : null;
   return (
     <>
+      {/* WP-2423 (v15 3cd0f8dd M5): the visit ended; the receipt is still here, read only. */}
+      {view.visitEnded ? (
+        <section className="receipt-page__state" role="status">
+          <h2>Your visit has ended</h2>
+          <p>
+            You can still view and save this receipt on this phone until{" "}
+            {endSentence(formatDateTime(view.visitEnded.receiptAvailableUntil, current.locale))}
+          </p>
+        </section>
+      ) : null}
       <section className="receipt-page__merchant" aria-labelledby="receipt-merchant-heading">
         <h2 id="receipt-merchant-heading">Merchant and order</h2>
         <p>{current.operatingEntityDisplayName}</p>
@@ -216,6 +330,30 @@ function ReceiptContent({
                   })}
                 </dd>
               </div>
+              {/* WP-2423 (v15 3cd0f8dd H1): a table that paid rounds both ways sees each. */}
+              {financial.paidOnCardMachineMinor !== undefined &&
+              financial.paidOnCardMachineMinor > 0n ? (
+                <>
+                  <div>
+                    <dt>Paid online</dt>
+                    <dd>
+                      {money({
+                        amountMinor: financial.paidOnlineMinor ?? 0n,
+                        currencyCode: financial.currencyCode,
+                      })}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Paid on the store’s card machine</dt>
+                    <dd>
+                      {money({
+                        amountMinor: financial.paidOnCardMachineMinor,
+                        currencyCode: financial.currencyCode,
+                      })}
+                    </dd>
+                  </div>
+                </>
+              ) : null}
               <div>
                 <dt>Confirmed refunds</dt>
                 <dd>
@@ -315,9 +453,10 @@ export function ReceiptPage({
     loading: ["Loading receipt", "Retrieving your receipt."],
     "invalid-reference": ["Receipt link is invalid", "Use the exact link supplied for this order."],
     // WP-2423 Q10: the visit on this phone ended; say so and point to the counter.
+    // WP-2423 (v15 3cd0f8dd M5): receipts stay readable for 24 hours after the visit started.
     "permission-denied": [
-      "Your visit on this phone has ended",
-      "This receipt can only be opened while your visit is active. Ask a staff member for a copy.",
+      "This receipt is no longer available on this phone",
+      "Receipts stay available on the phone that ordered for 24 hours after the visit started. Ask a staff member for a copy.",
     ],
     "not-found": ["Receipt not found", "No authorized receipt was found."],
     "feature-disabled": ["Digital receipt is disabled", "Contact the Store for support."],

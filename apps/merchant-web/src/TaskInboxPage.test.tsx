@@ -80,6 +80,7 @@ it("provides a clear permission-denied state", () => {
       <TaskInboxStatePanel state="PermissionDenied" />
     </MemoryRouter>,
   );
-  expect(html).toContain("Permission denied");
-  expect(html).toContain("workflow.operate");
+  expect(html).toContain("No access");
+  expect(html).toContain("You don&#x27;t have access to this page. Ask the owner or a manager.");
+  expect(html).not.toContain("workflow.operate");
 });

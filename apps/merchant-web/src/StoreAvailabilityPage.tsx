@@ -1,3 +1,4 @@
+import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { Link } from "react-router";
 import { CheckedTime } from "./StoreTime.js";
@@ -142,11 +143,11 @@ export function StoreAvailabilityPage({
   if (state.kind !== "Found") {
     const panel = (
       <StatePanel
-        heading="Item availability"
+        heading={state.kind === "PermissionDenied" ? noAccessHeading : "Item availability"}
         tone={state.kind === "Loading" ? "neutral" : "error"}
         status
       >
-        <p>{copy[state.kind]}</p>
+        <p>{state.kind === "PermissionDenied" ? pageAccessDeniedText : copy[state.kind]}</p>
       </StatePanel>
     );
     // From the kitchen display there is no workspace frame around the page; keep the way back.

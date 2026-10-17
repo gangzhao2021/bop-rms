@@ -465,8 +465,9 @@ test("@production counter order fails closed without the staff ordering permissi
     route.fulfill({ status: 403, headers, json: { error: "request_denied" } }),
   );
   await page.goto("/operations/order-entry");
+  await expect(page.getByRole("heading", { name: "No access", exact: true })).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Counter orders are not available to you" }),
+    page.getByText("You don't have access to this page. Ask the owner or a manager."),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Send order" })).toHaveCount(0);
 });

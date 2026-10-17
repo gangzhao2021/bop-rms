@@ -16,8 +16,8 @@ export interface PickupQueueItem {
   /** WP-2423 Q26: the order's business day (order numbers restart every business day). */
   readonly businessDate?: string;
   /**
-   * WP-2423: staff took this order at the counter. No pickup code is sent; staff hand it over in
-   * person by name or order number as soon as it is ready.
+   * WP-2423: staff took this order at the counter. No pickup code is sent and the order has no
+   * customer name, so staff call the order number and hand it over as soon as it is ready.
    */
   readonly takenAtCounter?: true;
   readonly execution?: PickupExecution;

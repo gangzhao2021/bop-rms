@@ -196,6 +196,9 @@ function parseSources(
     ...(value !== null && typeof value === "object" && Object.hasOwn(value, "itemPrices")
       ? ["itemPrices"]
       : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "refunds")
+      ? ["refunds"]
+      : []),
   ]);
   const checkedAt = parseInstant(raw.checkedAt);
   if (Date.parse(checkedAt) < Date.parse(submittedAt)) return invalid();
@@ -380,10 +383,25 @@ function parseSources(
     if (!Array.isArray(raw.payments) || raw.payments.length > 100) return invalid();
     payments = Object.freeze(
       raw.payments.map((value: unknown) => {
-        const payment = exact(value, ["status", "occurredAt", "amount", "freshnessStatus"]);
+        // WP-2423 (v15 3cd0f8dd H1): a round paid on the Store's card machine names its round.
+        const machine =
+          value !== null && typeof value === "object" && Object.hasOwn(value, "method");
+        const payment = exact(value, [
+          "status",
+          "occurredAt",
+          "amount",
+          "freshnessStatus",
+          ...(machine ? ["method", "orderBatchReference"] : []),
+        ]);
         if (
           !["Succeeded", "Failed"].includes(String(payment.status)) ||
-          !["Fresh", "Stale", "Rebuilding", "Failed"].includes(String(payment.freshnessStatus))
+          !["Fresh", "Stale", "Rebuilding", "Failed"].includes(String(payment.freshnessStatus)) ||
+          (machine &&
+            (payment.method !== "CardMachine" ||
+              payment.status !== "Succeeded" ||
+              !batches.some(
+                (batch) => batch.orderBatchReference === String(payment.orderBatchReference),
+              )))
         )
           return invalid();
         const amount = payment.amount === null ? null : parseMoney(payment.amount);
@@ -398,6 +416,12 @@ function parseSources(
           occurredAt: sourceInstant(payment.occurredAt),
           amount,
           freshnessStatus: payment.freshnessStatus as OrderStatusView["freshnessStatus"],
+          ...(machine
+            ? {
+                method: "CardMachine" as const,
+                orderBatchReference: parseReference(payment.orderBatchReference),
+              }
+            : {}),
         });
       }),
     );
@@ -656,10 +680,67 @@ function parseSources(
       }),
     );
   }
+  // WP-2423 (v15 3cd0f8dd M3): confirmed refunds as the latest receipt states them; each entry
+  // names only items of this order and the entries never exceed what was refunded.
+  let refunds: OrderStatusSources["refunds"];
+  if (Object.hasOwn(raw, "refunds")) {
+    const entry = exact(raw.refunds, ["refunded", "entries"]);
+    const refunded = parseMoney(entry.refunded);
+    const items = new Set(
+      batches.flatMap((batch) => batch.items.map((item) => item.orderItemReference)),
+    );
+    if (
+      refunded.amountMinor <= 0n ||
+      refunded.currencyCode !== "CAD" ||
+      !Array.isArray(entry.entries) ||
+      entry.entries.length > 200
+    )
+      return invalid();
+    const entries = Object.freeze(
+      entry.entries.map((value: unknown) => {
+        const refund = exact(value, ["kind", "orderItemReferences", "total", "tip"]);
+        if (
+          !["Refund", "ItemCancellation", "RoundRefund", "Other"].includes(String(refund.kind)) ||
+          !Array.isArray(refund.orderItemReferences) ||
+          refund.orderItemReferences.length > 200
+        )
+          return invalid();
+        const orderItemReferences = Object.freeze(
+          refund.orderItemReferences.map((item: unknown) => {
+            const orderItemReference = parseReference(item);
+            if (!items.has(orderItemReference)) return invalid();
+            return orderItemReference;
+          }),
+        );
+        const total = parseMoney(refund.total);
+        const tip = parseMoney(refund.tip);
+        if (
+          total.amountMinor <= 0n ||
+          tip.amountMinor < 0n ||
+          tip.amountMinor > total.amountMinor ||
+          total.currencyCode !== refunded.currencyCode ||
+          tip.currencyCode !== refunded.currencyCode
+        )
+          return invalid();
+        return Object.freeze({
+          kind: refund.kind as NonNullable<
+            OrderStatusSources["refunds"]
+          >["entries"][number]["kind"],
+          orderItemReferences,
+          total,
+          tip,
+        });
+      }),
+    );
+    if (entries.reduce((sum, refund) => sum + refund.total.amountMinor, 0n) > refunded.amountMinor)
+      return invalid();
+    refunds = Object.freeze({ refunded, entries });
+  }
   return Object.freeze({
     checkedAt,
     kitchen,
     payments,
+    ...(refunds === undefined ? {} : { refunds }),
     ...(tips === undefined ? {} : { tips }),
     ...(remakes === undefined ? {} : { remakes }),
     ...(itemPrices === undefined ? {} : { itemPrices }),

@@ -98,7 +98,10 @@ test("@production Reports show sales, items, hours and tips for a period, downlo
   ).toHaveAttribute("aria-current", "page");
   // Opens on the Store's current business day.
   await expect.poll(() => requested[0]).toBe("2026-10-14..2026-10-14");
-  await expect(page.getByText("Matches the day-end settlement", { exact: false })).toBeVisible();
+  // v15 store-day L6: the range includes today's open day, so it is checked at day end.
+  await expect(
+    page.getByText("Today is checked against it when the day closes.", { exact: false }),
+  ).toBeVisible();
   await expect(page.getByRole("heading", { name: "Sales summary" })).toBeVisible();
   await expect(page.getByRole("table", { name: "Sales by payment" })).toContainText(
     "Store card machine",
@@ -145,6 +148,9 @@ test("@production Reports show sales, items, hours and tips for a period, downlo
 
   denied = true;
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Permission denied" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "No access", exact: true })).toBeVisible();
+  await expect(
+    page.getByText("You don't have access to this page. Ask the owner or a manager."),
+  ).toBeVisible();
   await expect(page.getByRole("table", { name: "Item sales" })).toHaveCount(0);
 });

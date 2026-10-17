@@ -25,16 +25,28 @@ interface ReceiptPort {
     storeContact?: CustomerStoreContact | null;
     /** WP-2423 Q16: the Store's privacy notice link (absent until the Owner enters one). */
     privacyNoticeUrl?: string | null;
+    /**
+     * WP-2423 (v15 3cd0f8dd M5): the visit has ended; this device can still open the receipt (read
+     * only) until this instant.
+     */
+    visitEnded?: { receiptAvailableUntil: string };
   }>;
 }
 function financialJson(value: CustomerReceiptFinancialView | null) {
   if (value === null) return null;
-  const amounts = [value.capturedMinor, value.confirmedRefundMinor, value.pendingRefundMinor];
+  const amounts = [
+    value.capturedMinor,
+    value.confirmedRefundMinor,
+    value.pendingRefundMinor,
+    value.paidOnlineMinor,
+    value.paidOnCardMachineMinor,
+  ];
   if (
     amounts.some(
       (amount) => typeof amount !== "bigint" || amount < 0n || amount > 9223372036854775807n,
     ) ||
     value.confirmedRefundMinor + value.pendingRefundMinor > value.capturedMinor ||
+    value.paidOnlineMinor + value.paidOnCardMachineMinor !== value.capturedMinor ||
     !Number.isSafeInteger(value.unresolvedAttemptCount) ||
     value.unresolvedAttemptCount < 0 ||
     !/^[A-Z]{3}$/u.test(value.currencyCode) ||
@@ -49,6 +61,9 @@ function financialJson(value: CustomerReceiptFinancialView | null) {
     confirmedRefundMinor: value.confirmedRefundMinor.toString(),
     pendingRefundMinor: value.pendingRefundMinor.toString(),
     unresolvedAttemptCount: value.unresolvedAttemptCount,
+    // WP-2423 (v15 3cd0f8dd H1): how the amount paid was paid (online, on the card machine).
+    paidOnlineMinor: value.paidOnlineMinor.toString(),
+    paidOnCardMachineMinor: value.paidOnCardMachineMinor.toString(),
   };
 }
 const credential = /^[A-Za-z0-9_-]{43}$/u;
@@ -134,6 +149,12 @@ export class CustomerReceiptHandler {
           /^https:\/\/[A-Za-z0-9.-]+(:[0-9]{1,5})?(\/[^\s<>"]*)?$/u.test(view.privacyNoticeUrl)
             ? { privacyNoticeUrl: view.privacyNoticeUrl }
             : {}),
+          ...(view?.visitEnded &&
+          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(
+            view.visitEnded.receiptAvailableUntil,
+          )
+            ? { visitEnded: { receiptAvailableUntil: view.visitEnded.receiptAvailableUntil } }
+            : {}),
           // No current financial, delivery or support source is inferred from immutable history.
           freshnessStatus: "Stale",
           deliveryStatus: "Unavailable",
@@ -178,6 +199,35 @@ export class CustomerReceiptHandler {
                 total: money(snapshot.total),
                 refundedTotal: money(snapshot.refundedTotal),
                 paymentStatus: snapshot.paymentStatus,
+                // WP-2423 (v15 3cd0f8dd M4): what each confirmed refund returned (versions since).
+                ...(snapshot.refunds
+                  ? {
+                      refunds: snapshot.refunds.map((refund) => ({
+                        kind: refund.kind,
+                        lines: refund.lines.map((item) => ({
+                          lineReference: item.lineReference,
+                          displayName: item.displayName,
+                          quantity: item.quantity,
+                          amount: money(item.amount),
+                        })),
+                        tax: money(refund.tax),
+                        tip: money(refund.tip),
+                        other: money(refund.other),
+                        total: money(refund.total),
+                        // Whether this version is the first to state it (earlier versions are
+                        // compared by the internal reference, which is never sent).
+                        newInThisVersion: !chain.records
+                          .slice(0, chain.records.indexOf(record))
+                          .some((earlier) =>
+                            earlier.snapshot.refunds?.some(
+                              (prior) =>
+                                prior.refundReference === refund.refundReference &&
+                                prior.total.amountMinor === refund.total.amountMinor,
+                            ),
+                          ),
+                      })),
+                    }
+                  : {}),
                 // WP-2423 Q15: issuer address, registrations, one line per tax type and rate.
                 ...(snapshot.taxDetails
                   ? {

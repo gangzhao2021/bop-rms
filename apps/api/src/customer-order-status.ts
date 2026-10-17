@@ -180,6 +180,14 @@ export class CustomerOrderStatusHandler {
                                   amountMinor: payment.amount.amountMinor.toString(),
                                   currencyCode: payment.amount.currencyCode,
                                 },
+                          // WP-2423 (v15 3cd0f8dd H1): a round paid on the Store's card machine.
+                          ...(payment.method === "CardMachine" &&
+                          typeof payment.orderBatchReference === "string"
+                            ? {
+                                method: "CardMachine",
+                                orderBatchReference: payment.orderBatchReference,
+                              }
+                            : {}),
                         })),
                   ...(sources.pickup === undefined
                     ? {}
@@ -233,6 +241,29 @@ export class CustomerOrderStatusHandler {
                           orderItemReference: remake.orderItemReference,
                           quantity: remake.quantity,
                         })),
+                      }),
+                  // WP-2423 (v15 3cd0f8dd M3): confirmed refunds, as the latest receipt states them.
+                  ...(sources.refunds === undefined
+                    ? {}
+                    : {
+                        refunds: {
+                          refunded: {
+                            amountMinor: sources.refunds.refunded.amountMinor.toString(),
+                            currencyCode: sources.refunds.refunded.currencyCode,
+                          },
+                          entries: sources.refunds.entries.map((entry) => ({
+                            kind: entry.kind,
+                            orderItemReferences: [...entry.orderItemReferences],
+                            total: {
+                              amountMinor: entry.total.amountMinor.toString(),
+                              currencyCode: entry.total.currencyCode,
+                            },
+                            tip: {
+                              amountMinor: entry.tip.amountMinor.toString(),
+                              currencyCode: entry.tip.currencyCode,
+                            },
+                          })),
+                        },
                       }),
                   // WP-2423 D5: each item's price before tax and its tax, from the frozen order.
                   ...(sources.itemPrices === undefined

@@ -483,3 +483,26 @@ export function assertGuestSessionUsable(
   }
   return session;
 }
+
+/**
+ * WP-2423 (v15 3cd0f8dd M5): a visit whose table was closed (or that sat idle) has ended, but the
+ * guest who left still needs their receipt. The same device may read its own receipt — read only,
+ * never order — while the Session is Active (not signed out, rotated or revoked) and before its
+ * absolute expiry: 24 hours after the visit started, the guest cookie's own lifetime, so nothing is
+ * kept or reachable longer than the visit's Session already is. Idle, closure and table binding
+ * limits do not apply to this read.
+ */
+export function assertGuestSessionReceiptReadable(
+  session: GuestSession,
+  observedAtInput: unknown,
+): GuestSession {
+  const observedAt = instant(observedAtInput);
+  if (
+    session.status !== "Active" ||
+    Date.parse(observedAt) >= Date.parse(session.absoluteExpiresAt) ||
+    Date.parse(observedAt) < Date.parse(session.createdAt)
+  ) {
+    throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+  }
+  return session;
+}

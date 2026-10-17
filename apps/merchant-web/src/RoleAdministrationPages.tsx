@@ -22,12 +22,13 @@ import {
   type RoleCatalogEntryView,
   type RoleCommandRequest,
 } from "./role-administration-pages.js";
+import { actionAccessDeniedText, noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 type State =
   | { readonly kind: "Loading" | RoleAdministrationPageErrorCode }
   | { readonly kind: "Found"; readonly view: RoleAdministrationPageView };
 const copy = {
   Loading: "Loading authorized role metadata…",
-  PermissionDenied: "Role administration permission is required.",
+  PermissionDenied: actionAccessDeniedText,
   FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
   NotFound: "The requested role is unavailable in this scope.",
   FeatureDisabled: "Role administration is disabled.",
@@ -58,11 +59,17 @@ const reasonCodes: Record<RoleAdministrationOperation, string> = {
 function Status({ state }: { readonly state: Exclude<State["kind"], "Found"> }) {
   return (
     <StatePanel
-      heading={state === "Loading" ? "Loading roles" : "Role administration unavailable"}
+      heading={
+        state === "Loading"
+          ? "Loading roles"
+          : state === "PermissionDenied"
+            ? noAccessHeading
+            : "Role administration unavailable"
+      }
       tone={state === "Loading" ? "neutral" : "error"}
       status
     >
-      <p>{copy[state]}</p>
+      <p>{state === "PermissionDenied" ? pageAccessDeniedText : copy[state]}</p>
     </StatePanel>
   );
 }

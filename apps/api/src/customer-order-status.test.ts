@@ -364,6 +364,76 @@ it("WP-2423 (v15 aa3d9fac D2): serializes each paid round's tip as an exact deci
   ]);
   expect(JSON.stringify(body)).not.toContain("private");
 });
+it("WP-2423 (v15 3cd0f8dd H1/M3): serializes card-machine rounds and confirmed refunds as decimals", async () => {
+  const f = await setup();
+  f.read.mockResolvedValue({
+    ...f.result,
+    sources: {
+      checkedAt: "2026-09-12T12:00:00.000Z",
+      kitchen: null,
+      payments: [
+        {
+          status: "Succeeded",
+          occurredAt: "2026-09-12T11:00:00.000Z",
+          amount: { amountMinor: 544n, currencyCode: "CAD" },
+          freshnessStatus: "Fresh",
+        },
+        {
+          status: "Succeeded",
+          occurredAt: "2026-09-12T11:05:00.000Z",
+          amount: { amountMinor: 537n, currencyCode: "CAD" },
+          freshnessStatus: "Fresh",
+          method: "CardMachine",
+          orderBatchReference: id(3),
+          slipReference: "private",
+        },
+      ],
+      refunds: {
+        refunded: { amountMinor: 736n, currencyCode: "CAD" },
+        entries: [
+          {
+            kind: "Refund",
+            orderItemReferences: [id(4)],
+            total: { amountMinor: 736n, currencyCode: "CAD" },
+            tip: { amountMinor: 86n, currencyCode: "CAD" },
+            refundReference: "private",
+          },
+        ],
+      },
+    },
+  });
+  const body = (await (await f.send()).json()) as {
+    status: { sources: Record<string, unknown> };
+  };
+  expect(body.status.sources.payments).toEqual([
+    {
+      status: "Succeeded",
+      occurredAt: "2026-09-12T11:00:00.000Z",
+      freshnessStatus: "Fresh",
+      amount: { amountMinor: "544", currencyCode: "CAD" },
+    },
+    {
+      status: "Succeeded",
+      occurredAt: "2026-09-12T11:05:00.000Z",
+      freshnessStatus: "Fresh",
+      amount: { amountMinor: "537", currencyCode: "CAD" },
+      method: "CardMachine",
+      orderBatchReference: id(3),
+    },
+  ]);
+  expect(body.status.sources.refunds).toEqual({
+    refunded: { amountMinor: "736", currencyCode: "CAD" },
+    entries: [
+      {
+        kind: "Refund",
+        orderItemReferences: [id(4)],
+        total: { amountMinor: "736", currencyCode: "CAD" },
+        tip: { amountMinor: "86", currencyCode: "CAD" },
+      },
+    ],
+  });
+  expect(JSON.stringify(body)).not.toContain("private");
+});
 it("WP-2423: serializes each item's chosen options with what they added, and the guest's note", async () => {
   const f = await setup();
   f.read.mockResolvedValue({

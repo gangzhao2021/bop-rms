@@ -363,7 +363,8 @@ const refundCheckText: Record<
   string
 > = {
   Checking: "Checking the refund…",
-  Pending: "The refund is still pending with the payment provider. Check again later.",
+  Pending:
+    "The refund hasn't gone through yet. If the payment provider or the internet is down, press Check refund again once it is back: the refund is sent then, never twice.",
   Refunded: "Refunded.",
   Failed: "The refund did not go through. Check this order's payment in Payments.",
   Denied: "Only a store manager or owner can check this refund.",

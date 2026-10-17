@@ -8,8 +8,11 @@ import {
   type SettlementOutcome,
   type SettlementReconciliation,
   type SettlementView,
+  unfinishedGuestPayment,
 } from "./settlement-client.js";
+export { unfinishedGuestPayment };
 import { orderMoney } from "./order-money.js";
+import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { businessDateText, useStoreBusinessDay } from "./StoreBusinessDay.js";
 import { Freshness, storeTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
@@ -143,6 +146,9 @@ export function SettlementReport({
   const reconciliation = view.reconciliation;
   const settlement = reconciliation?.settlement ?? null;
   const operational = reconciliation?.operational ?? null;
+  const differences = reconciliation?.differences ?? [];
+  const unfinished = differences.filter(unfinishedGuestPayment);
+  const attention = differences.filter((check) => !unfinishedGuestPayment(check));
   const money = (amount: SettlementView["captured"]) =>
     amount === null
       ? "Could not be read"
@@ -455,7 +461,15 @@ export function SettlementReport({
                 ? "No payment checks in this day yet."
                 : `${plural(operational.paymentCount, "payment")} checked in ${plural(operational.runCount, "run")} · last ${storeTime(operational.latestRun.completedAt, zone, true)} · ${summarizeOutcomes(operational.outcomes)}`}
             </p>
-            {reconciliation.differences.length > 0 ? (
+            {unfinished.length > 0 ? (
+              <p role="note" className="bop-muted settlement__unfinished">
+                {unfinished.length === 1
+                  ? "1 online payment was started by a guest but not finished"
+                  : `${unfinished.length} online payments were started by guests but not finished`}{" "}
+                (the guest left or is still paying). Nothing was charged, so there is nothing to do.
+              </p>
+            ) : null}
+            {attention.length > 0 ? (
               <>
                 <h4 id="settlement-attention">Payments needing attention</h4>
                 <table className="settlement__differences" aria-labelledby="settlement-attention">
@@ -469,7 +483,7 @@ export function SettlementReport({
                     </tr>
                   </thead>
                   <tbody>
-                    {reconciliation.differences.map((d) => (
+                    {attention.map((d) => (
                       <tr key={d.checkReference}>
                         <td data-label="Checked">{storeTime(d.checkedAt, zone)}</td>
                         <td data-label="Result">{resultLabel(d)}</td>
@@ -651,8 +665,8 @@ export function SettlementPage({
           <p>Reading the day…</p>
         </StatePanel>
       ) : state.kind === "PermissionDenied" ? (
-        <StatePanel heading="Permission denied" tone="error" status>
-          <p>Your permissions do not allow the settlement view for this Store.</p>
+        <StatePanel heading={noAccessHeading} tone="error" status>
+          <p>{pageAccessDeniedText}</p>
         </StatePanel>
       ) : state.kind === "Busy" ? (
         <StatePanel heading="Busy for a moment" tone="neutral" status>

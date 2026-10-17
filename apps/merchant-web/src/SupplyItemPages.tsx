@@ -1,3 +1,4 @@
+import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
@@ -63,8 +64,12 @@ function routeReference(value: unknown): string | null {
 }
 function Failure({ code, onRefresh }: { code: SupplyItemErrorCode; onRefresh?: () => void }) {
   return (
-    <StatePanel heading="Inventory items" tone="error" status>
-      <p>{copy[code]}</p>
+    <StatePanel
+      heading={code === "PermissionDenied" ? noAccessHeading : "Inventory items"}
+      tone="error"
+      status
+    >
+      <p>{code === "PermissionDenied" ? pageAccessDeniedText : copy[code]}</p>
       {onRefresh ? <button onClick={onRefresh}>Refresh</button> : null}
     </StatePanel>
   );

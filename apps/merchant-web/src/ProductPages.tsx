@@ -1,3 +1,4 @@
+import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useId, useRef, useState, type Ref } from "react";
@@ -90,8 +91,12 @@ function useProductView<V>(
 }
 function Failure({ code }: { readonly code: ProductErrorCode | "Loading" }) {
   return (
-    <StatePanel heading="Products" tone={code === "Loading" ? "neutral" : "error"} status>
-      <p>{copy[code]}</p>
+    <StatePanel
+      heading={code === "PermissionDenied" ? noAccessHeading : "Products"}
+      tone={code === "Loading" ? "neutral" : "error"}
+      status
+    >
+      <p>{code === "PermissionDenied" ? pageAccessDeniedText : copy[code]}</p>
     </StatePanel>
   );
 }

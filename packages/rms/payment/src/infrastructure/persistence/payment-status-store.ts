@@ -454,6 +454,50 @@ export async function listStoreOrderOnlinePaidTotals(
 }
 
 /**
+ * WP-2423: the tip an Order's succeeded online payments carried — the tip frozen on each payment
+ * intent whose active status projection succeeded (the same payments `listStoreOrderOnlinePaidTotals`
+ * sums), so staff read an order's total as what was paid. Zero when nothing was paid online.
+ * Read only; the caller authorizes the Order and owns the transaction.
+ */
+export async function readStoreOrderOnlinePaidTip(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReference: string,
+): Promise<bigint> {
+  const brand = parsePaymentReference(scope.brandReference),
+    store = parsePaymentReference(scope.storeReference),
+    order = parsePaymentReference(orderReference);
+  try {
+    await transaction.query(
+      "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+      [brand, store],
+    );
+    const found = await transaction.query(
+      "SELECT COALESCE(sum(i.tip_minor),0)::text AS tip_minor FROM rms_payment.payment_intent i " +
+        "WHERE i.brand_id=$1 AND i.store_id=$2 AND i.order_id=$3 AND i.currency_code='CAD' AND EXISTS (" +
+        "SELECT 1 FROM rms_payment.payment_status_projection p WHERE p.brand_id=i.brand_id AND p.store_id=i.store_id " +
+        "AND p.payment_intent_id=i.payment_intent_id AND p.order_id=i.order_id AND p.is_active AND p.terminal_status='Succeeded')",
+      [brand, store, order],
+    );
+    if (!Array.isArray(found.rows) || found.rows.length !== 1) return unavailable();
+    const row: unknown = found.rows[0];
+    if (row === null || typeof row !== "object" || Object.keys(row).length !== 1)
+      return unavailable();
+    const tip = (row as Record<string, unknown>).tip_minor;
+    if (
+      typeof tip !== "string" ||
+      !/^(0|[1-9][0-9]{0,18})$/u.test(tip) ||
+      BigInt(tip) > 9223372036854775807n
+    )
+      return unavailable();
+    return BigInt(tip);
+  } catch (error) {
+    if (error instanceof PaymentStatusProjectionError) throw error;
+    return unavailable();
+  }
+}
+
+/**
  * WP-2423: which of the given Orders have any refund recorded against their online payment — an
  * ordinary refund request (staff refunds and item-cancellation refunds) or a compensation refund
  * (whole-batch cancellations and automatic refunds). Lets the Orders list read the exact refund

@@ -6,7 +6,14 @@ export interface DigitalReceiptQueryPorts {
     authorizeGuest(input: {
       readonly orderReference: string;
       readonly observedAt: string;
-    }): Promise<{ readonly guestSession: GuestSession } | null>;
+    }): Promise<{
+      readonly guestSession: GuestSession;
+      /**
+       * WP-2423 (v15 3cd0f8dd M5): the visit has ended (table closed or idle) and the device is
+       * reading its own receipt within the Session's absolute lifetime; read only.
+       */
+      readonly endedVisit?: true;
+    } | null>;
     authorizeResume(input: {
       readonly orderReference: string;
       readonly observedAt: string;

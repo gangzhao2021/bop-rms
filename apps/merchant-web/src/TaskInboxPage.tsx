@@ -1,3 +1,4 @@
+import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
@@ -28,11 +29,7 @@ export function TaskInboxStatePanel({ state }: { readonly state: PageState["kind
     readonly [string, string, "neutral" | "error" | "offline"]
   > = {
     Loading: ["Loading Task Inbox", "Loading the authorized Task queue for this Store…", "neutral"],
-    PermissionDenied: [
-      "Permission denied",
-      "A current Merchant session and workflow.operate permission are required.",
-      "error",
-    ],
+    PermissionDenied: [noAccessHeading, pageAccessDeniedText, "error"],
     NotFound: [
       "Task Inbox unavailable",
       "The requested Task Inbox route was not found.",

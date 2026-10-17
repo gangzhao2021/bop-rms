@@ -77,6 +77,7 @@ export async function createInternalCounterOrder(
     loadPickupQrToken,
     expectedDatabaseName,
     diningClosing,
+    issueRefundReceipt,
   },
 ) {
   const saved = await loadPickupWorkflow();
@@ -340,6 +341,8 @@ export async function createInternalCounterOrder(
       authentication,
       nextReference: reference,
       onUnexpected: (error) => reportUnexpected("INTERNAL_CARD_MACHINE_REFUND_UNAVAILABLE", error),
+      // WP-2423 (v15 3cd0f8dd M4): the table's receipt states the refunded round.
+      ...(issueRefundReceipt === undefined ? {} : { issueRefundReceipt }),
     }),
   };
 }

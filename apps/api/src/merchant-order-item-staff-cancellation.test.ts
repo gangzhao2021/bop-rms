@@ -147,6 +147,8 @@ function setup(whole = vi.fn()) {
   d.fulfillmentCancel.mockResolvedValue({ status: "Recorded" });
   d.releaseFactory.mockReturnValue({ releaseLines: d.releaseLines });
   d.releaseLines.mockResolvedValue({ status: "Released", entryCount: 1 });
+  const issueRefundReceipt = vi.fn(async () => "Issued");
+  const onUnexpected = vi.fn();
   const operation = createMerchantOrderItemStaffCancellation({
     persistence: { transactions: { run }, now: () => at } as unknown as Options["persistence"],
     authentication: { authorize } as unknown as Options["authentication"],
@@ -159,6 +161,8 @@ function setup(whole = vi.fn()) {
     }),
     businessDate: async () => "2026-10-11",
     provider: { refundPayment: vi.fn(), lookupRefund: vi.fn() },
+    issueRefundReceipt,
+    onUnexpected,
   });
   const input = {
     sessionCookie: "synthetic-cookie",
@@ -172,7 +176,7 @@ function setup(whole = vi.fn()) {
       reasonCode: "SOLD_OUT",
     },
   };
-  return { operation, input, allowed, run, tx, whole };
+  return { operation, input, allowed, run, tx, whole, issueRefundReceipt, onUnexpected };
 }
 beforeEach(() => vi.resetAllMocks());
 
@@ -257,6 +261,24 @@ it("keeps the cancellation when dispatch fails after commit (refund pending, nev
   const f = setup();
   d.drive.mockRejectedValue(new Error("provider down"));
   expect((await f.operation.cancel(f.input)).refund.status).toBe("Pending");
+});
+
+it("WP-2423 (v15 3cd0f8dd M4): a confirmed item refund gives the receipt its refund version", async () => {
+  const f = setup();
+  await f.operation.cancel(f.input);
+  expect(f.issueRefundReceipt).toHaveBeenCalledWith({ orderReference: id(5) });
+  expect(f.issueRefundReceipt.mock.invocationCallOrder[0]).toBeGreaterThan(
+    d.drive.mock.invocationCallOrder[0] as number,
+  );
+  // A refund still pending issues nothing; a receipt failure never fails the cancellation.
+  const pending = setup();
+  d.drive.mockResolvedValue({ status: "Pending", amountMinor: 565n });
+  expect((await pending.operation.cancel(pending.input)).refund.status).toBe("Pending");
+  expect(pending.issueRefundReceipt).not.toHaveBeenCalled();
+  const failing = setup();
+  failing.issueRefundReceipt.mockRejectedValue(new Error("receipt store down"));
+  expect((await failing.operation.cancel(failing.input)).refund.status).toBe("Refunded");
+  expect(failing.onUnexpected).toHaveBeenCalledTimes(1);
 });
 
 it("WP-2423 Q7: items of a card-machine payment are not cancelled one by one", async () => {

@@ -36,7 +36,7 @@ describe("customer text catalog", () => {
   function sentences(value: unknown): string[] {
     if (typeof value === "string") return [value];
     if (typeof value === "function")
-      return sentences((value as (...args: unknown[]) => unknown)("$5.00", "$1.00"));
+      return sentences((value as (...args: unknown[]) => unknown)("$5.00", "$1.00", "$0.50"));
     if (Array.isArray(value)) return value.flatMap(sentences);
     if (value !== null && typeof value === "object") return Object.values(value).flatMap(sentences);
     return [];

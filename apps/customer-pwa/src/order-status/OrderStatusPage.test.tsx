@@ -1,7 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { describe, expect, it } from "vitest";
-import { OrderStatusPage, isOrderSettled, orderMoneySummary } from "./OrderStatusPage.js";
+import {
+  OrderStatusPage,
+  VisitEndedNotice,
+  isOrderSettled,
+  orderMoneySummary,
+} from "./OrderStatusPage.js";
 import type { OrderStatusController } from "./order-status-controller.js";
 import type { OrderStatusState, OrderStatusView } from "./types.js";
 import { endSentence, formatClockTime } from "../journey/format.js";
@@ -1080,10 +1085,21 @@ describe("WP-2423 Q10 plain guidance when the visit has ended", () => {
   it("explains the expired table visit, the way back and the pickup counter, without internal wording", () => {
     const html = render({ status: "permission-denied" });
     expect(html).toContain("Scan the table QR code again");
-    expect(html).toContain("your earlier orders are on your table page");
     expect(html).toContain("the store still has your order");
     expect(html).toContain('href="/"');
     expect(html).not.toMatch(/access denied|browser you used at checkout|session/iu);
+    // WP-2423 (v15 3cd0f8dd M5): a guest who left is not told to ask for a table code first.
+    expect(html).not.toMatch(/ask a staff member for the table code to continue/iu);
+  });
+  it("WP-2423 (v15 3cd0f8dd M5): offers the receipt of this order after the visit ended", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <VisitEndedNotice orderReference={id(1)} />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("You can still view and save your receipt on this phone");
+    expect(html).toContain(`href="/orders/${id(1)}/receipt"`);
+    expect(html).toContain("View your receipt");
   });
   it("says a just-paid order was received while its status is prepared, in plain words", () => {
     const html = render({
@@ -1410,5 +1426,134 @@ describe("WP-2423 D5: item prices before tax, then subtotal, tax and total", () 
     expect((summary.subtotal ?? 0n) + (summary.adjustments ?? 0n) + (summary.tax ?? 0n)).toBe(
       summary.total,
     );
+  });
+});
+
+describe("WP-2423 (v15 3cd0f8dd) payments and refunds the guest sees", () => {
+  const cad = (amountMinor: bigint) => ({ amountMinor, currencyCode: "CAD" });
+  function dineIn(sources: Partial<NonNullable<OrderStatusView["sources"]>>): OrderStatusState {
+    const state = readyState();
+    if (state.status !== "ready") throw new Error("missing fixture");
+    return {
+      ...state,
+      view: {
+        ...state.view,
+        order: {
+          ...state.view.order,
+          orderType: "DineIn",
+          canonicalPhase: "Accepted",
+          batches: [
+            {
+              orderBatchReference: id(3),
+              submittedAt: "2026-08-11T13:55:00.000Z",
+              items: [
+                {
+                  orderItemReference: id(4),
+                  displayName: "Flat White — Small (8 oz)",
+                  quantity: 1,
+                  lineTotal: cad(480n),
+                },
+              ],
+            },
+            {
+              orderBatchReference: id(5),
+              submittedAt: "2026-08-11T13:57:00.000Z",
+              items: [
+                {
+                  orderItemReference: id(6),
+                  displayName: "Mocha — Small (8 oz)",
+                  quantity: 1,
+                  lineTotal: cad(537n),
+                },
+              ],
+            },
+          ],
+        },
+        sources: {
+          checkedAt: "2026-08-11T14:00:00.000Z",
+          kitchen: null,
+          payments: [
+            {
+              status: "Succeeded",
+              occurredAt: "2026-08-11T13:56:00.000Z",
+              amount: cad(544n),
+              freshnessStatus: "Fresh",
+            },
+            {
+              status: "Succeeded",
+              occurredAt: "2026-08-11T13:58:00.000Z",
+              amount: cad(537n),
+              freshnessStatus: "Fresh",
+              method: "CardMachine",
+              orderBatchReference: id(5),
+            },
+          ],
+          tips: [{ orderBatchReference: id(3), amount: cad(64n) }],
+          ...sources,
+        },
+      },
+    };
+  }
+
+  it("H1: counts the round paid on the store's card machine, so the guest owes nothing", () => {
+    const html = render(dineIn({}));
+    expect(html).toContain(
+      "Payment received $10.81 ($5.44 online, $5.37 on the store’s card machine)",
+    );
+    expect(html).toContain("$10.81");
+    expect(html).not.toContain("Payment received $5.44<");
+  });
+
+  it("M3: shows a confirmed refund, the item it returned and its tip share", () => {
+    const html = render(
+      dineIn({
+        refunds: {
+          refunded: cad(736n),
+          entries: [
+            {
+              kind: "Refund",
+              orderItemReferences: [id(6)],
+              total: cad(736n),
+              tip: cad(86n),
+            },
+          ],
+        },
+      }),
+    );
+    expect(html).toContain("<dt>Refunded</dt><dd>$7.36</dd>");
+    expect(html).toContain("Refund: $7.36 returned to your original payment, including $0.86");
+    expect(html).toContain('class="order-status__item-refunded">Refunded</span>');
+    expect(findInternalText([staticText(html)])).toEqual([]);
+  });
+
+  it("M3: an item cancellation keeps its own wording and only adds the refunded total", () => {
+    const html = render(
+      dineIn({
+        itemCancellations: [
+          {
+            orderBatchReference: id(5),
+            orderItemReferences: [id(6)],
+            cancelledAt: "2026-08-11T13:59:00.000Z",
+            reason: "SoldOut",
+            refundStatus: "Refunded",
+            refundAmount: cad(537n),
+          },
+        ],
+        refunds: {
+          refunded: cad(537n),
+          entries: [
+            {
+              kind: "ItemCancellation",
+              orderItemReferences: [id(6)],
+              total: cad(537n),
+              tip: cad(0n),
+            },
+          ],
+        },
+      }),
+    );
+    expect(html).toContain("<dt>Refunded</dt><dd>$5.37</dd>");
+    expect(html).toContain("Cancelled items: $5.37 refunded");
+    expect(html).not.toContain("Refund: $5.37 returned");
   });
 });

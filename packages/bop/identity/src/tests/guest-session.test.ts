@@ -808,6 +808,66 @@ it("rejects recovery and derived authorization for expired, revoked or unavailab
   }
 });
 
+describe("WP-2423 (v15 3cd0f8dd M5) ended visit receipt access", () => {
+  it("lets a closed or idle visit read its receipt until the absolute expiry, nothing longer", async () => {
+    // The table was closed (binding no longer current) and the guest left hours ago (idle).
+    for (const [binding, at] of [
+      ["Unavailable", now],
+      ["Current", "2026-07-29T20:00:00.000Z"],
+      ["Unavailable", "2026-07-30T11:59:59.999Z"],
+    ] as const) {
+      const f = await recoveryFixture({}, binding, at);
+      const before = JSON.stringify([...f.store.records.values()]);
+      await expect(f.service.recoverForegroundCsrf({ sessionCredential })).rejects.toThrow(
+        new GuestSessionError("GUEST_SESSION_UNAVAILABLE"),
+      );
+      const ended = await f.service.recoverEndedVisitCsrf({ sessionCredential });
+      expect(ended.session.sessionReference).toBe(ids.session);
+      expect(ended.csrfCredential).toBe(f.credentials.deriveForegroundCsrf?.(sessionCredential));
+      // Ordering and every other action still require a current visit.
+      await expect(
+        f.service.authorize({ sessionCredential, csrfCredential: ended.csrfCredential }),
+      ).rejects.toThrow(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
+      expect(
+        (
+          await f.service.authorizeEndedVisit({
+            sessionCredential,
+            csrfCredential: ended.csrfCredential,
+          })
+        ).sessionReference,
+      ).toBe(ids.session);
+      // Read only: nothing renewed or stored.
+      expect(f.store.touches).toBe(0);
+      expect(JSON.stringify([...f.store.records.values()])).toBe(before);
+    }
+  });
+  it("refuses a signed-out or revoked visit, a wrong CSRF and anything past the 24 h bound", async () => {
+    for (const [changes, at] of [
+      [{}, "2026-07-30T12:00:00.000Z"],
+      [{ status: "Revoked", revocationReason: "Logout", revokedAt: now, version: 2 }, now],
+      [{ status: "Revoked", revocationReason: "Rotated", revokedAt: now, version: 2 }, now],
+    ] as const) {
+      const f = await recoveryFixture(changes, "Unavailable", at);
+      await expect(f.service.recoverEndedVisitCsrf({ sessionCredential })).rejects.toThrow(
+        new GuestSessionError("GUEST_SESSION_UNAVAILABLE"),
+      );
+      await expect(
+        f.service.authorizeEndedVisit({ sessionCredential, csrfCredential }),
+      ).rejects.toThrow(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
+    }
+    const f = await recoveryFixture({}, "Unavailable", now);
+    await expect(
+      f.service.authorizeEndedVisit({
+        sessionCredential,
+        csrfCredential: f.credentials.deriveForegroundCsrf?.(nextSessionCredential),
+      }),
+    ).rejects.toThrow(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
+    await expect(
+      f.service.recoverEndedVisitCsrf({ sessionCredential: nextSessionCredential }),
+    ).rejects.toThrow(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
+  });
+});
+
 describe("WP-2423 Q10 Guest cookie continuity", () => {
   it("keeps the cookie across a browser restart for exactly the absolute Session lifetime", () => {
     const credential = "S".repeat(43);

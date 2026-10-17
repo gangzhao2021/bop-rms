@@ -300,7 +300,10 @@ export {
 
 export { createPostgresOrderRefundBasisReader } from "./infrastructure/persistence/order-refund-basis-reader.js";
 
-export { createRefundReceiptSnapshot } from "./application/refund-receipt-snapshot.js";
+export {
+  createRefundReceiptSnapshot,
+  type RefundReceiptItemization,
+} from "./application/refund-receipt-snapshot.js";
 
 export {
   createPostgresMerchantOrderIndex,

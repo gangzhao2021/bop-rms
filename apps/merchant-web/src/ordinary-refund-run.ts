@@ -306,7 +306,7 @@ export function refundRunFailureText(error: RefundRunError): string {
           : "The refund request is recorded but was not sent: sending refunds is not set up for this store. Contact the pilot operator.";
   if (error.step === "Send")
     return uncertain
-      ? "It is not confirmed that the card provider received this refund. Continue sending this refund: the same refund is reused and the customer is never refunded twice."
+      ? "It is not confirmed that the card provider received this refund. Continue sending this refund: the same refund is reused and the customer is never refunded twice. If the card provider or the internet is down, the refund stays recorded here as not sent: open this order again once it is back and send it then."
       : code === "PermissionDenied" || code === "Denied"
         ? "The refund was not sent: your session or permissions no longer allow sending refunds. Sign in again, then continue."
         : "The refund was not sent: sending refunds is not set up for this store. Contact the pilot operator.";

@@ -1,3 +1,4 @@
+import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
@@ -362,11 +363,11 @@ export function StockLocationListPage({
   if (state.kind !== "Found")
     return (
       <StatePanel
-        heading="Stock locations"
+        heading={state.kind === "PermissionDenied" ? noAccessHeading : "Stock locations"}
         tone={state.kind === "Loading" ? "neutral" : "error"}
         status
       >
-        <p>{copy[state.kind]}</p>
+        <p>{state.kind === "PermissionDenied" ? pageAccessDeniedText : copy[state.kind]}</p>
         {state.kind !== "Loading" ? <button onClick={reload}>Refresh</button> : null}
       </StatePanel>
     );

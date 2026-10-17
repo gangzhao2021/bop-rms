@@ -92,6 +92,25 @@ describe("WP-1805 Pickup screens", () => {
     expect(html).toContain("Data may be out of date");
     expect(html).toContain("The handoff was not confirmed");
   });
+  it("v15 store-day L4: says plainly who can help when the queue is not allowed", () => {
+    const denied = renderToStaticMarkup(
+      <MemoryRouter>
+        <PickupStatePanel state="PermissionDenied" />
+      </MemoryRouter>,
+    );
+    expect(denied).toContain("No access");
+    expect(denied).toContain(
+      "You don&#x27;t have access to this page. Ask the owner or a manager.",
+    );
+    expect(denied).not.toMatch(/permission|scope/iu);
+    // A real failure keeps its own message.
+    const offline = renderToStaticMarkup(
+      <MemoryRouter>
+        <PickupStatePanel state="Offline" />
+      </MemoryRouter>,
+    );
+    expect(offline).not.toContain("No access");
+  });
 });
 
 it("WP-2423: offers an in-person handoff when the pickup code expired or was never sent", () => {
@@ -157,13 +176,11 @@ it("WP-2423: a counter order is handed over in person at once, never by pickup c
     return html.slice(html.indexOf("<article"), html.indexOf("</article>"));
   };
   const counter = render("NotIssued", true);
-  expect(counter).toContain(
-    "Taken at the counter — hand over to the customer by name or order number.",
-  );
+  expect(counter).toContain("Taken at the counter — call the order number and hand it over.");
   expect(counter).toContain("Not needed · taken at the counter");
   expect(counter).toContain(">Hand over</button>");
   expect(counter).toContain("This order was taken at the counter, so no pickup code was sent.");
-  expect(counter).toContain("Order number or the name they gave at the counter");
+  expect(counter).toContain("Order number called at the counter");
   for (const text of ["Check pickup code", "No code sent", "check in person"])
     expect(counter).not.toContain(text);
   // A guest's QR pickup order keeps the code flow.

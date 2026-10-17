@@ -1,4 +1,5 @@
 export {
+  assertGuestSessionReceiptReadable,
   assertGuestSessionUsable,
   createGuestSession,
   createGuestSessionRecord,

@@ -2,6 +2,7 @@ import { boundedFetch } from "../network/bounded-fetch.js";
 import {
   captureCustomerCsrfContext,
   getCustomerCsrfCredential,
+  getEndedVisitReceiptAccess,
   subscribeCustomerCsrfContext,
 } from "../session/customer-transaction-context.js";
 import { ReceiptClientError, type CustomerReceiptClient } from "./receipt-controller.js";
@@ -15,7 +16,12 @@ export function createHttpReceiptClient(
     subscribeContextChange: subscribeCustomerCsrfContext,
     async load(orderReference: string): Promise<unknown> {
       if (!reference.test(orderReference)) throw new ReceiptClientError("service_unavailable");
-      const csrf = getCustomerCsrfCredential(),
+      // WP-2423 (v15 3cd0f8dd M5): after the visit ended, its own order's receipt is still read
+      // with the ended visit's credential (the server allows nothing else with it).
+      const csrf =
+          getCustomerCsrfCredential() ??
+          getEndedVisitReceiptAccess(orderReference)?.csrfToken ??
+          null,
         current = captureCustomerCsrfContext();
       if (csrf === null || !credential.test(csrf))
         throw new ReceiptClientError("permission_denied");

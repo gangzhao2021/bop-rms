@@ -59,6 +59,8 @@ import { standardRefundRoleMapping } from "../../../tooling/environment/pilot-re
 import { createCustomerAdditionalDiningSubmissionStore } from "../../../apps/api/src/customer-additional-dining-submission-store.ts";
 import { createCustomerAdditionalDiningPaymentAdmission } from "../../../apps/api/src/customer-additional-dining-payment-store.ts";
 import { createCustomerDiningSessionRead } from "../../../apps/api/src/customer-dining-session-read.ts";
+import { createCustomerOrderStatusRead } from "../../../apps/api/src/customer-order-status-read.ts";
+import { readCustomerReceiptFinancial } from "../../../apps/api/src/customer-receipt-financial.ts";
 import {
   createMerchantCardMachinePayment,
   withPaidBatchAcceptance,
@@ -1040,6 +1042,17 @@ it("enters a dine-in round by staff, takes its card-machine payment and marks it
 
       // ── After payment: "Entered by staff" and the card-machine payment on every screen.
       const after = await queued();
+      // WP-2423 (3cd0f8dd M1): the order detail carries the tip its payments took (the tip staff
+      // keyed on the card machine, plus any online tip), so staff read a total equal to what was paid.
+      const afterDetail = await queue({
+        sessionCookie: staffSession.sessionCookie,
+        afterOrderReference: null,
+        orderReference,
+      });
+      assert.deepEqual(afterDetail.lines.totals.tip, {
+        amountMinor: String(tipMinor),
+        currencyCode: "CAD",
+      });
       assert.deepEqual(after.batches[1].staffRound, {
         recordedAfterOutage: false,
         amountDueMinor: null,
@@ -1112,6 +1125,84 @@ it("enters a dine-in round by staff, takes its card-machine payment and marks it
         record: cardPayment(staffSession),
         payInput: payInput(staffSession),
       });
+
+      // ── WP-2423 (v15 3cd0f8dd H1): the guest's order page, read by the restricted API role,
+      // counts round 2 (paid on the Store's card machine, with the tip staff keyed) with round 1
+      // (paid online), so the table is never shown as owing money.
+      const hostStatus = await createCustomerOrderStatusRead({
+        scope,
+        transactions: transactions(),
+        credentials: host.identity.session.credentials,
+        diningScope: ownerScope,
+        paymentScope,
+        itemRefundScope: {
+          tenantReference: tenant,
+          providerAccountReference: provider,
+          environment: "Test",
+        },
+        now,
+        binding: (transaction) => ({
+          validate: async (session, observedAt) => {
+            const evidence = await createDiningGuestBindingQuery({
+              scope,
+              now: () => observedAt,
+              repository: createPostgresDiningGuestBindingStore(
+                { run: (work) => work(transaction) },
+                ownerScope,
+              ),
+            }).resolve({
+              purpose: "GuestSessionBinding",
+              diningSessionReference: session.diningSessionReference,
+              participantReference: session.diningParticipantReference,
+              tableReference: dining.table.tableReference,
+            });
+            return evidence ? "Current" : "Unavailable";
+          },
+        }),
+      }).read({
+        sessionCredential: host.sessionCredential,
+        csrfCredential: host.csrfCredential,
+        orderReference,
+      });
+      const machinePaid = hostStatus.sources.payments.filter(
+        (payment) => payment.method === "CardMachine",
+      );
+      assert.deepEqual(
+        machinePaid.map((payment) => [
+          payment.status,
+          payment.amount.amountMinor,
+          payment.orderBatchReference,
+        ]),
+        [["Succeeded", round2Total + tipMinor, R2.batch.orderBatchReference]],
+      );
+      const onlinePaid = hostStatus.sources.payments
+        .filter((payment) => payment.status === "Succeeded" && payment.method === undefined)
+        .reduce((sum, payment) => sum + payment.amount.amountMinor, 0n);
+      assert.ok(onlinePaid > 0n, "round 1 was paid online");
+      // The round's tip is part of what was paid (the page's total is what was paid).
+      assert.deepEqual(
+        hostStatus.sources.tips.find(
+          (entry) => entry.orderBatchReference === R2.batch.orderBatchReference,
+        )?.amount,
+        { amountMinor: tipMinor, currencyCode: "CAD" },
+      );
+      // The receipt's payment section reads the same two tenders (Payment's settlement figures).
+      const receiptPaid = await transactions().run((tx) =>
+        readCustomerReceiptFinancial(
+          tx,
+          { scope: ownerScope, providerAccountReference: provider, environment: "Test" },
+          { orderReference, observedAt: now() },
+          async () => true,
+        ),
+      );
+      assert.deepEqual(
+        [
+          receiptPaid.capturedMinor,
+          receiptPaid.paidOnlineMinor,
+          receiptPaid.paidOnCardMachineMinor,
+        ],
+        [onlinePaid + round2Total + tipMinor, onlinePaid, round2Total + tipMinor],
+      );
 
       // ── v15 2026-10-15: round 2 was paid while a third round staff entered was still unpaid
       // (Ordering facts of round 3 seeded by the owner, test-only: the round writer path is the
@@ -1751,6 +1842,27 @@ async function exerciseCardMachinePartialRefund({
       refunded: String(amountA),
     },
   ]);
+  // WP-2423 (v15 3cd0f8dd M4): the refund version says what the machine refund returned — the
+  // round-2 item, its tax and its share of the tip — and adds up to the refund.
+  const [{ refunds: statedA }] = await one(
+    "SELECT receipt_record_json#>'{snapshot,refunds}' AS refunds FROM rms_ordering.digital_receipt_record WHERE order_id=$1 ORDER BY version DESC LIMIT 1",
+    [orderReference],
+  );
+  assert.equal(statedA.length, 1);
+  assert.equal(statedA[0].kind, "Refund");
+  assert.equal(statedA[0].refundReference, commandA.requestReference);
+  assert.equal(statedA[0].total.amountMinor, String(amountA));
+  assert.deepEqual(
+    statedA[0].lines.map((line) => line.lineReference),
+    commandA.items.map((item) => item.orderItemReference),
+  );
+  assert.equal(
+    statedA[0].lines.reduce((sum, line) => sum + BigInt(line.amount.amountMinor), 0n) +
+      BigInt(statedA[0].tax.amountMinor) +
+      BigInt(statedA[0].tip.amountMinor) +
+      BigInt(statedA[0].other.amountMinor),
+    amountA,
+  );
   assert.equal((await machineRefund()(recordA())).status, "AlreadyRecorded");
   await assert.rejects(machineRefund()(recordA({ operationReference: id(0xb02) })), {
     code: "CARD_MACHINE_REFUND_NOTHING_OWED",

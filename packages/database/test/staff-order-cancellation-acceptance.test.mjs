@@ -1835,7 +1835,19 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
         },
         authentication: { authorize: async () => ({ sessionReference: id(12) }) },
         nextReference: fresh,
+        // WP-2423 (v15 3cd0f8dd M4): the receipt follow-up runs once the refund is committed.
+        issueRefundReceipt: async (request) => {
+          const [{ n }] = (
+            await admin.query(
+              "SELECT count(*)::int AS n FROM rms_payment.card_machine_refund WHERE order_id=$1",
+              [request.orderReference],
+            )
+          ).rows;
+          receiptFollowUps.push([request.orderReference, n]);
+          return "NoDigitalReceipt";
+        },
       });
+      const receiptFollowUps = [];
       const refundOperation = fresh();
       const refundInput = (overrides = {}) => ({
         sessionCookie: "synthetic-session",
@@ -1875,7 +1887,10 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       merchant.allowed = () => true;
       assert.equal(machineRefund.status, "Recorded");
       assert.equal(machineRefund.amountMinor, cardTotal);
+      // Called after commit (the refund is visible to another connection), once per new refund.
+      assert.deepEqual(receiptFollowUps, [[machineRefund.orderReference, 1]]);
       assert.equal((await refundOnMachine(refundInput())).status, "AlreadyRecorded");
+      assert.equal(receiptFollowUps.length, 1);
       await assert.rejects(refundOnMachine(refundInput({ operationReference: fresh() })), {
         code: "CARD_MACHINE_REFUND_NOTHING_OWED",
       });

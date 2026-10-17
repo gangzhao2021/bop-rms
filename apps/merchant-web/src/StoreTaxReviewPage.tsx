@@ -1,3 +1,4 @@
+import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime, StoreDate } from "./StoreTime.js";
 import { useEffect, useState } from "react";
@@ -202,8 +203,12 @@ export function StoreTaxReviewPage({
   }, [client]);
   if (state.kind !== "Found")
     return (
-      <StatePanel heading="Tax review" tone={state.kind === "Loading" ? "neutral" : "error"} status>
-        <p>{copy[state.kind]}</p>
+      <StatePanel
+        heading={state.kind === "PermissionDenied" ? noAccessHeading : "Tax review"}
+        tone={state.kind === "Loading" ? "neutral" : "error"}
+        status
+      >
+        <p>{state.kind === "PermissionDenied" ? pageAccessDeniedText : copy[state.kind]}</p>
       </StatePanel>
     );
   const view = state.view;

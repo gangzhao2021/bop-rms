@@ -129,6 +129,21 @@ export function wasteQuantityAllowed(value: string, precision: number, available
   };
   return scaled(value.trim()) <= scaled(available);
 }
+/**
+ * v15 store-day L3: an available stock quantity as staff read it: at most two decimals, trailing
+ * zeros dropped ("100.6959" -> "100.69", "4.500" -> "4.5"). It rounds down, so the amount shown can
+ * always be recorded; a non-zero amount below 0.01 is shown exactly rather than as "0". Display
+ * only: what staff type is sent exactly as typed.
+ */
+export function availableQuantityText(value: string): string {
+  const match = /^(\d+)(?:\.(\d+))?$/u.exec(value.trim());
+  if (!match) return value;
+  const whole = match[1] as string;
+  const fraction = (match[2] ?? "").replace(/0+$/u, "");
+  const shown = fraction.slice(0, 2).replace(/0+$/u, "");
+  if (fraction.length > 2 && /^0+$/u.test(whole) && shown === "") return `${whole}.${fraction}`;
+  return shown === "" ? whole : `${whole}.${shown}`;
+}
 export const centsText = (minor: number) =>
   (minor < 0 ? "-" : "") +
   Math.floor(Math.abs(minor) / 100) +

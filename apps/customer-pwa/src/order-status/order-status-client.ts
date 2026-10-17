@@ -115,6 +115,23 @@ function decodeStatus(value: unknown, orderReference: string): OrderStatusView |
         }),
       };
     }
+    // WP-2423 (v15 3cd0f8dd M3): the confirmed refunds are money too.
+    if (Object.hasOwn(sources, "refunds")) {
+      const refunds = record(sources.refunds);
+      if (!Array.isArray(refunds.entries) || refunds.entries.length > 200)
+        throw new Error("invalid status");
+      sources = {
+        ...sources,
+        refunds: {
+          ...refunds,
+          refunded: decodeMoney(refunds.refunded),
+          entries: refunds.entries.map((value: unknown) => {
+            const entry = record(value);
+            return { ...entry, total: decodeMoney(entry.total), tip: decodeMoney(entry.tip) };
+          }),
+        },
+      };
+    }
     if (sources.payments !== null) {
       if (!Array.isArray(sources.payments) || sources.payments.length > 100)
         throw new Error("invalid status");

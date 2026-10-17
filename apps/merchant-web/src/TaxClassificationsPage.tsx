@@ -1,3 +1,4 @@
+import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
@@ -416,11 +417,11 @@ export function TaxClassificationsPage({
   if (view === null)
     return (
       <StatePanel
-        heading="Tax classifications"
+        heading={loadError === "PermissionDenied" ? noAccessHeading : "Tax classifications"}
         tone={loadError === "Loading" ? "neutral" : "error"}
         status
       >
-        <p>{loadCopy[loadError]}</p>
+        <p>{loadError === "PermissionDenied" ? pageAccessDeniedText : loadCopy[loadError]}</p>
       </StatePanel>
     );
   const submit = (change: Change) => {

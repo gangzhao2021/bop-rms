@@ -97,6 +97,49 @@ export function createCustomerSessionBootstrapRead(
         };
       });
     },
+    /**
+     * WP-2423 (v15 3cd0f8dd M5): a visit that ended (its table closed, or it sat idle) and placed an
+     * order: the CSRF credential that lets this device read that order's receipt (read only, until
+     * the Session's absolute expiry) and which order it is. Nothing else is restored: no menu, cart
+     * or checkout. A visit without an order, or past that bound, has nothing to restore.
+     */
+    async readEndedVisit(sessionCredential: string) {
+      return options.transactions.run(async (transaction) => {
+        const identity = new GuestSessionService({
+          store: createPostgresGuestSessionEntryStore(
+            { run: async (work) => work(transaction) },
+            options.scope,
+          ),
+          credentials: options.credentials,
+          binding: options.binding(transaction),
+          now: options.now,
+          admission: { consume: async () => null },
+        });
+        const ended = await identity.recoverEndedVisitCsrf({
+          sessionCredential,
+          observedAt: options.now(),
+        });
+        if (
+          ended.session.brandReference !== options.scope.brandReference ||
+          ended.session.storeReference !== options.scope.storeReference
+        )
+          throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+        const order = await findLatestGuestSessionOrder(transaction, options.scope, {
+          guestSessionReference: String(ended.session.sessionReference),
+          observedAt: options.now(),
+        });
+        if (order === null) throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+        return {
+          csrfToken: ended.csrfCredential,
+          order: {
+            orderReference: order.orderReference,
+            orderNumber: order.orderNumber,
+            orderType: order.orderType,
+          },
+          receiptAvailableUntil: String(ended.session.absoluteExpiresAt),
+        };
+      });
+    },
   };
 }
 export function createCustomerSessionBootstrapHandler(options?: {
@@ -121,6 +164,12 @@ export function createCustomerSessionBootstrapHandler(options?: {
           };
         }
     >;
+    /** WP-2423 (v15 3cd0f8dd M5): receipt-only access for a visit that ended (absent: none). */
+    readEndedVisit?(sessionCredential: string): Promise<{
+      csrfToken: string;
+      order: { orderReference: string; orderNumber: string; orderType: "Pickup" | "DineIn" };
+      receiptAvailableUntil: string;
+    }>;
   };
 }): RequestHandler {
   const origin = options && new URL(options.allowedOrigin).origin;
@@ -161,6 +210,31 @@ export function createCustomerSessionBootstrapHandler(options?: {
       reject(400);
       return;
     }
+    /** The ended visit's receipt access, validated; null when there is none to give. */
+    const readEndedVisit = async (sessionCredential: string) => {
+      if (options.port.readEndedVisit === undefined) return null;
+      try {
+        const ended = await options.port.readEndedVisit(sessionCredential);
+        const until = ended.receiptAvailableUntil;
+        if (
+          !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(until) ||
+          !/^[1-9][0-9]{0,18}$/u.test(ended.order.orderNumber) ||
+          (ended.order.orderType !== "Pickup" && ended.order.orderType !== "DineIn")
+        )
+          return null;
+        return {
+          csrfToken: parseGuestRawCredential(ended.csrfToken),
+          order: {
+            orderReference: String(parseOrderingReference(ended.order.orderReference)),
+            orderNumber: ended.order.orderNumber,
+            orderType: ended.order.orderType,
+          },
+          receiptAvailableUntil: until,
+        };
+      } catch {
+        return null;
+      }
+    };
     try {
       const result = await options.port.read(credential);
       const csrfToken = parseGuestRawCredential(
@@ -212,7 +286,10 @@ export function createCustomerSessionBootstrapHandler(options?: {
       // restore, exactly like a first visit: an empty 204 with no CSRF token, so the guest page
       // does not log a failed request. Every other Session failure still says so.
       if (error instanceof GuestSessionError && error.code === "GUEST_SESSION_UNAVAILABLE") {
-        response.status(204).end();
+        // WP-2423 (v15 3cd0f8dd M5): a guest who left can still open their receipt here.
+        const ended = await readEndedVisit(credential);
+        if (ended === null) response.status(204).end();
+        else response.status(200).json({ schemaVersion: 1, endedVisit: ended });
         return;
       }
       reject(error instanceof GuestSessionError ? 401 : 503);

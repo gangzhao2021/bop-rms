@@ -1,3 +1,4 @@
+import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime, StaffTime } from "./StoreTime.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -61,8 +62,12 @@ function useReceipts(
 }
 function Failure({ code }: { code: StoreReceiptErrorCode | "Loading" }) {
   return (
-    <StatePanel heading="Receiving" tone={code === "Loading" ? "neutral" : "error"} status>
-      <p>{copy[code]}</p>
+    <StatePanel
+      heading={code === "PermissionDenied" ? noAccessHeading : "Receiving"}
+      tone={code === "Loading" ? "neutral" : "error"}
+      status
+    >
+      <p>{code === "PermissionDenied" ? pageAccessDeniedText : copy[code]}</p>
     </StatePanel>
   );
 }

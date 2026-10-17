@@ -4,6 +4,7 @@ import {
   getCustomerCsrfCredential,
   setCustomerCsrfCredential,
   setCheckoutSessionReference,
+  setEndedVisitReceiptAccess,
 } from "./customer-transaction-context.js";
 function menuContext(value: unknown): MenuJourneyContext | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
@@ -55,6 +56,28 @@ function currentOrder(value: unknown): CustomerCurrentOrder | null {
     orderReference: raw.orderReference,
     orderNumber: raw.orderNumber,
     orderType: raw.orderType,
+  });
+}
+/** WP-2423 (v15 3cd0f8dd M5): the ended visit's receipt access, or null when malformed. */
+function endedVisit(value: unknown) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  const keys = ["csrfToken", "order", "receiptAvailableUntil"];
+  if (Object.keys(raw).length !== keys.length || keys.some((key) => !(key in raw))) return null;
+  const order = currentOrder(raw.order);
+  if (
+    order === null ||
+    typeof raw.csrfToken !== "string" ||
+    !/^[A-Za-z0-9_-]{43}$/u.test(raw.csrfToken) ||
+    typeof raw.receiptAvailableUntil !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(raw.receiptAvailableUntil) ||
+    Number.isNaN(Date.parse(raw.receiptAvailableUntil))
+  )
+    return null;
+  return Object.freeze({
+    csrfToken: raw.csrfToken,
+    ...order,
+    receiptAvailableUntil: raw.receiptAvailableUntil,
   });
 }
 /** Restore foreground CSRF and current public menu context in memory only. */
@@ -111,6 +134,22 @@ export async function restoreCustomerSession(
       offset += chunk.byteLength;
     }
     const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    // WP-2423 (v15 3cd0f8dd M5): the visit ended but placed an order; its receipt stays readable
+    // here for a while. Nothing else is restored (no menu, cart or checkout).
+    if (
+      current() &&
+      value !== null &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.keys(value).length === 2 &&
+      "schemaVersion" in value &&
+      value.schemaVersion === 1 &&
+      "endedVisit" in value
+    ) {
+      const ended = endedVisit(value.endedVisit);
+      if (ended !== null) setEndedVisitReceiptAccess(ended);
+      return false;
+    }
     if (
       !current() ||
       value === null ||

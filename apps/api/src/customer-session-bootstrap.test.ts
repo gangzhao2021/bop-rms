@@ -13,13 +13,16 @@ afterEach(async () => {
 });
 async function setup(enabled = true) {
   const read = vi.fn().mockResolvedValue("B".repeat(43));
+  const readEndedVisit = vi
+    .fn()
+    .mockRejectedValue(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
   const server = createServer(
     createApp(
       enabled
         ? {
             customerSessionBootstrap: createCustomerSessionBootstrapHandler({
               allowedOrigin: "https://store.example",
-              port: { read },
+              port: { read, readEndedVisit },
             }),
           }
         : {},
@@ -36,6 +39,7 @@ async function setup(enabled = true) {
   };
   return {
     read,
+    readEndedVisit,
     request: (extra: Record<string, string> = {}, suffix = "") =>
       fetch(url + suffix, { headers: { ...headers, ...extra } }),
   };
@@ -84,6 +88,44 @@ it("answers an ended or expired visit like a first visit: an empty 204 with no t
   expect(r.headers.get("set-cookie")).toBeNull();
   expect(await r.text()).toBe("");
   expect(f.read).toHaveBeenCalledTimes(1);
+});
+it("WP-2423 (v15 3cd0f8dd M5): gives a visit that ended its receipt access, nothing else", async () => {
+  const f = await setup();
+  f.read.mockRejectedValue(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
+  const order = {
+    orderReference: "018f8a00-0000-7000-8000-000000000016",
+    orderNumber: "22",
+    orderType: "DineIn",
+  };
+  f.readEndedVisit.mockResolvedValue({
+    csrfToken: "C".repeat(43),
+    order,
+    receiptAvailableUntil: "2026-10-18T18:01:49.437Z",
+  });
+  const r = await f.request();
+  expect(r.status).toBe(200);
+  expect(r.headers.get("cache-control")).toBe("no-store");
+  expect(r.headers.get("set-cookie")).toBeNull();
+  // No csrfToken at the top level: an older page treats it as nothing to restore.
+  expect(await r.json()).toEqual({
+    schemaVersion: 1,
+    endedVisit: {
+      csrfToken: "C".repeat(43),
+      order,
+      receiptAvailableUntil: "2026-10-18T18:01:49.437Z",
+    },
+  });
+  expect(f.readEndedVisit).toHaveBeenCalledWith("A".repeat(43));
+  // Malformed owner output is never passed on.
+  f.readEndedVisit.mockResolvedValue({
+    csrfToken: "C".repeat(43),
+    order: { ...order, orderType: "Delivery" },
+    receiptAvailableUntil: "2026-10-18T18:01:49.437Z",
+  });
+  expect((await f.request()).status).toBe(204);
+  // A visit with no order (or past the 24 h bound) has nothing to restore.
+  f.readEndedVisit.mockRejectedValue(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
+  expect((await f.request()).status).toBe(204);
 });
 it("conceals other Session failures and fails safely without configuration", async () => {
   const f = await setup();

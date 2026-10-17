@@ -36,6 +36,7 @@ import { createCustomerAdditionalDiningHistoryAuthorization } from "../../../app
 import { createCustomerAdditionalDiningSubmissionStore } from "../../../apps/api/src/customer-additional-dining-submission-store.ts";
 import { createDiningCheckoutExpiryDispatcher } from "../../../apps/api/src/dining-checkout-expiry-dispatcher.ts";
 import { createCustomerOrderStatusRead } from "../../../apps/api/src/customer-order-status-read.ts";
+import { createCustomerReceiptRead } from "../../../apps/api/src/customer-receipt-read.ts";
 import { createCustomerDiningSessionRead } from "../../../apps/api/src/customer-dining-session-read.ts";
 import { CustomerDiningSessionHandler } from "../../../apps/api/src/customer-dining-session.ts";
 import { parseDiningSessionView } from "../../../apps/customer-pwa/src/dining/dining-session-client.ts";
@@ -2605,6 +2606,139 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         refundReceipt.record.snapshot.lines.every(
           (line) => line.lineReference !== items2[0].orderItemReference,
         ),
+      );
+
+      // ── 7b. WP-2423 (v15 3cd0f8dd M4): the refund version states what the refund returned —
+      // round 1's items (price before tax), their tax and any tip — adding up to the refund; the
+      // original version is unchanged (append-only).
+      const stated = refundReceipt.record.snapshot.refunds;
+      assert.equal(stated.length, 1);
+      assert.equal(stated[0].kind, "Refund");
+      assert.equal(stated[0].refundReference, round1Refund.requestReference);
+      assert.equal(stated[0].total.amountMinor, roundTotal);
+      assert.deepEqual(
+        stated[0].lines.map((line) => [line.lineReference, line.quantity]).sort(),
+        items1.map((item) => [item.orderItemReference, item.quantity]).sort(),
+      );
+      assert.equal(
+        stated[0].lines.reduce((sum, line) => sum + line.amount.amountMinor, 0n) +
+          stated[0].tax.amountMinor +
+          stated[0].tip.amountMinor +
+          stated[0].other.amountMinor,
+        roundTotal,
+      );
+      assert.equal(original.record.snapshot.refunds, undefined);
+      // M3: the guest's order page shows the same confirmed refund (read from that version).
+      const refundedStatus = await statusRead.read({
+        sessionCredential: guest.sessionCredential,
+        csrfCredential: guest.csrfCredential,
+        orderReference,
+      });
+      assert.deepEqual(refundedStatus.sources.refunds.refunded, {
+        amountMinor: roundTotal,
+        currencyCode: "CAD",
+      });
+      assert.deepEqual(
+        refundedStatus.sources.refunds.entries.map((entry) => [
+          entry.kind,
+          entry.total.amountMinor,
+          [...entry.orderItemReferences].sort(),
+        ]),
+        [["Refund", roundTotal, items1.map((item) => item.orderItemReference).sort()]],
+      );
+      // Every round here was paid online: no card-machine payment is reported.
+      assert.ok(refundedStatus.sources.payments.every((payment) => payment.method === undefined));
+      // M5: the receipt of the guest who placed the order, read by the restricted API role while
+      // the visit is current, and after it ended (test-only stand-in for the table closing: the
+      // Host's participation ends inside the read's transaction, rolled back).
+      const hostBinding = (transaction) => ({
+        validate: async (session, observedAt) => {
+          const evidence = await createDiningGuestBindingQuery({
+            scope,
+            now: () => observedAt,
+            repository: createPostgresDiningGuestBindingStore(
+              { run: (work) => work(transaction) },
+              ownerScope,
+            ),
+          }).resolve({
+            purpose: "GuestSessionBinding",
+            diningSessionReference: session.diningSessionReference,
+            participantReference: session.diningParticipantReference,
+            tableReference: dining.table.tableReference,
+          });
+          return evidence ? "Current" : "Unavailable";
+        },
+      });
+      const tableClosed = (client) =>
+        client.query(
+          "UPDATE rms_dining.dining_participant SET status='Left',version=version+1,participant_snapshot=participant_snapshot||jsonb_build_object('status','Left','version',version+1,'leftAt',$2::text) WHERE participant_id=$1",
+          [dining.host.participantReference, now()],
+        );
+      const receiptRead = ({ ended = false, at = now } = {}) =>
+        createCustomerReceiptRead({
+          scope,
+          transactions: ended
+            ? transactions(api, { before: tableClosed, rollback: true })
+            : transactions(api),
+          credentials: guest.identity.session.credentials,
+          binding: hostBinding,
+          now: at,
+          financial: { scope: ownerScope, providerAccountReference: provider, environment: "Test" },
+        });
+      const ownCredentials = {
+        sessionCredential: guest.sessionCredential,
+        csrfCredential: guest.csrfCredential,
+        orderReference,
+      };
+      const currentReceipt = await receiptRead().readView(ownCredentials);
+      assert.equal(currentReceipt.visitEnded, undefined);
+      // H1: what the order was paid across tenders (all online here) and what was refunded.
+      assert.deepEqual(
+        [
+          currentReceipt.financial.capturedMinor,
+          currentReceipt.financial.paidOnlineMinor,
+          currentReceipt.financial.paidOnCardMachineMinor,
+          currentReceipt.financial.confirmedRefundMinor,
+        ],
+        [2n * roundTotal, 2n * roundTotal, 0n, roundTotal],
+      );
+      const [{ absolute }] = await one(
+        "SELECT to_char(absolute_expires_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS absolute FROM bop_identity.guest_session WHERE guest_session_id=$1",
+        [guestSession],
+      );
+      // The table closed: no ordering (the status read refuses), but the receipt still opens.
+      await assert.rejects(
+        createCustomerOrderStatusRead({
+          scope,
+          transactions: transactions(api, { before: tableClosed, rollback: true }),
+          credentials: guest.identity.session.credentials,
+          diningScope: ownerScope,
+          paymentScope,
+          now,
+          binding: hostBinding,
+        }).read(ownCredentials),
+        { code: "ORDER_STATUS_PERMISSION_DENIED" },
+      );
+      const endedReceipt = await receiptRead({ ended: true }).readView(ownCredentials);
+      assert.deepEqual(endedReceipt.visitEnded, { receiptAvailableUntil: absolute });
+      assert.equal(endedReceipt.chain.records.length, currentReceipt.chain.records.length);
+      assert.equal(endedReceipt.chain.records.at(-1).snapshot.refunds.length, 1);
+      // Another guest of the table never reads the Host's receipt, and nothing opens past the
+      // visit's 24 h bound.
+      await assert.rejects(
+        receiptRead({ ended: true }).readView({
+          sessionCredential: tableGuestP.sessionCredential,
+          csrfCredential: tableGuestP.csrfCredential,
+          orderReference,
+        }),
+        { code: "DIGITAL_RECEIPT_PERMISSION_DENIED" },
+      );
+      await assert.rejects(
+        receiptRead({
+          ended: true,
+          at: () => new Date(Date.parse(absolute) + 1).toISOString(),
+        }).readView(ownCredentials),
+        { code: "DIGITAL_RECEIPT_PERMISSION_DENIED" },
       );
 
       // ── 8. WP-2423 Q26: the kitchen remakes a finished round-3 dish; the table is told which.

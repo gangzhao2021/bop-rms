@@ -80,6 +80,37 @@ export interface ReceiptTaxDetails {
   readonly paymentMethod: "Card";
 }
 
+/**
+ * WP-2423 (v15 3cd0f8dd M4): one item a confirmed refund returned (price before tax, and how many
+ * of the receipt line). `lineReference` is a line of the same receipt version.
+ */
+export interface ReceiptRefundLine {
+  readonly lineReference: string;
+  readonly displayName: string;
+  readonly quantity: number;
+  readonly amount: ReceiptMoney;
+}
+
+/**
+ * WP-2423 (v15 3cd0f8dd M4): what one confirmed refund returned, so a refund version states it:
+ * - "Refund": a refund staff made at the customer's request (items, their tax, any tip share);
+ * - "ItemCancellation": items the Store cancelled after payment (their price and tax, and any tip
+ *   the refund returned);
+ * - "RoundRefund": a whole paid round (or order) returned in full (what was left of its items,
+ *   their tax and its tip);
+ * - "Other": an amount refunded on a payment that its owner did not split into items.
+ * `total` is `lines` + `tax` + `tip` + `other`; `refundReference` is internal, never shown.
+ */
+export interface ReceiptRefund {
+  readonly refundReference: string;
+  readonly kind: "Refund" | "ItemCancellation" | "RoundRefund" | "Other";
+  readonly lines: readonly ReceiptRefundLine[];
+  readonly tax: ReceiptMoney;
+  readonly tip: ReceiptMoney;
+  readonly other: ReceiptMoney;
+  readonly total: ReceiptMoney;
+}
+
 export interface DigitalReceiptSnapshot {
   readonly receiptReference: string;
   readonly orderReference: string;
@@ -107,6 +138,11 @@ export interface DigitalReceiptSnapshot {
   readonly total: ReceiptMoney;
   readonly paymentStatus: ReceiptPaymentStatus;
   readonly refundedTotal: ReceiptMoney;
+  /**
+   * WP-2423 (v15 3cd0f8dd M4): every confirmed refund to date and what it returned; their totals add
+   * up to `refundedTotal`. Absent on versions issued before it was recorded (printed as issued).
+   */
+  readonly refunds?: readonly ReceiptRefund[];
 }
 
 export interface DigitalReceiptRecord {
@@ -349,12 +385,61 @@ function taxDetails(value: unknown): ReceiptTaxDetails {
   });
 }
 
+const refundKinds = ["Refund", "ItemCancellation", "RoundRefund", "Other"] as const;
+
+function refundEntry(value: unknown): ReceiptRefund {
+  const raw = exact(value, ["refundReference", "kind", "lines", "tax", "tip", "other", "total"]);
+  if (
+    typeof raw.kind !== "string" ||
+    !refundKinds.includes(raw.kind as ReceiptRefund["kind"]) ||
+    !Array.isArray(raw.lines) ||
+    raw.lines.length > 200
+  )
+    return fail();
+  const lines = raw.lines.map((item: unknown) => {
+    const entry = exact(item, ["lineReference", "displayName", "quantity", "amount"]);
+    if (
+      !Number.isSafeInteger(entry.quantity) ||
+      (entry.quantity as number) < 1 ||
+      (entry.quantity as number) > 999
+    )
+      return fail();
+    return Object.freeze({
+      lineReference: reference(entry.lineReference),
+      displayName: text(entry.displayName),
+      quantity: entry.quantity as number,
+      amount: money(entry.amount),
+    });
+  });
+  const parsed = Object.freeze({
+    refundReference: reference(raw.refundReference),
+    kind: raw.kind as ReceiptRefund["kind"],
+    lines: Object.freeze(lines),
+    tax: money(raw.tax),
+    tip: money(raw.tip),
+    other: money(raw.other),
+    total: money(raw.total),
+  });
+  if (
+    parsed.lines.reduce((sum, item) => sum + item.amount.amountMinor, 0n) +
+      parsed.tax.amountMinor +
+      parsed.tip.amountMinor +
+      parsed.other.amountMinor !==
+      parsed.total.amountMinor ||
+    parsed.total.amountMinor === 0n ||
+    (parsed.kind !== "Other" && parsed.lines.length === 0 && parsed.tip.amountMinor === 0n)
+  )
+    return fail();
+  return parsed;
+}
+
 export function parseDigitalReceiptSnapshot(value: unknown): DigitalReceiptSnapshot {
   const has = (key: string) =>
     value !== null && typeof value === "object" && Object.prototype.hasOwnProperty.call(value, key);
   const hasAdjustments = has("adjustments");
   const hasTaxDetails = has("taxDetails");
   const hasTemplateVersionReference = has("templateVersionReference");
+  const hasRefunds = has("refunds");
   const raw = exact(value, [
     "receiptReference",
     "orderReference",
@@ -378,6 +463,7 @@ export function parseDigitalReceiptSnapshot(value: unknown): DigitalReceiptSnaps
     ...(hasAdjustments ? ["adjustments"] : []),
     ...(hasTaxDetails ? ["taxDetails"] : []),
     ...(hasTemplateVersionReference ? ["templateVersionReference"] : []),
+    ...(hasRefunds ? ["refunds"] : []),
   ]);
   if (!Array.isArray(raw.lines) || raw.lines.length < 1 || raw.lines.length > 200) return fail();
   if (typeof raw.locale !== "string" || !localePattern.test(raw.locale)) return fail();
@@ -390,6 +476,8 @@ export function parseDigitalReceiptSnapshot(value: unknown): DigitalReceiptSnaps
     return fail();
   const adjustments = hasAdjustments ? exact(raw.adjustments, ["discount", "fee"]) : null;
   const parsedTaxDetails = hasTaxDetails ? taxDetails(raw.taxDetails) : null;
+  if (hasRefunds && (!Array.isArray(raw.refunds) || raw.refunds.length > 200)) return fail();
+  const refunds = hasRefunds ? Object.freeze((raw.refunds as unknown[]).map(refundEntry)) : null;
   const parsed = Object.freeze({
     ...(parsedTaxDetails === null ? {} : { taxDetails: parsedTaxDetails }),
     ...(hasTemplateVersionReference
@@ -422,6 +510,7 @@ export function parseDigitalReceiptSnapshot(value: unknown): DigitalReceiptSnaps
     total: money(raw.total),
     paymentStatus: raw.paymentStatus as ReceiptPaymentStatus,
     refundedTotal: money(raw.refundedTotal),
+    ...(refunds === null ? {} : { refunds }),
   });
   const currency = parsed.total.currencyCode;
   if (
@@ -434,6 +523,13 @@ export function parseDigitalReceiptSnapshot(value: unknown): DigitalReceiptSnaps
       ...parsed.lines.map((item) => item.lineTotal),
       ...parsed.lines.flatMap((item) => (item.lineSubtotal ? [item.lineSubtotal] : [])),
       ...(parsed.taxDetails?.taxLines.map((item) => item.amount) ?? []),
+      ...(parsed.refunds ?? []).flatMap((refund) => [
+        refund.tax,
+        refund.tip,
+        refund.other,
+        refund.total,
+        ...refund.lines.map((item) => item.amount),
+      ]),
     ].some((amount) => amount.currencyCode !== currency) ||
     (parsed.taxDetails !== undefined &&
       parsed.taxDetails.taxLines.reduce((sum, item) => sum + item.amount.amountMinor, 0n) !==
@@ -457,6 +553,25 @@ export function parseDigitalReceiptSnapshot(value: unknown): DigitalReceiptSnaps
         parsed.subtotal.amountMinor)
   )
     return fail();
+  // WP-2423 (v15 3cd0f8dd M4): the refunds stated add up to what was refunded, each once, and only
+  // return items of this receipt, never more of one than it lists.
+  if (parsed.refunds !== undefined) {
+    const returned = new Map<string, number>();
+    for (const refund of parsed.refunds)
+      for (const item of refund.lines)
+        returned.set(item.lineReference, (returned.get(item.lineReference) ?? 0) + item.quantity);
+    if (
+      parsed.refunds.reduce((sum, refund) => sum + refund.total.amountMinor, 0n) !==
+        parsed.refundedTotal.amountMinor ||
+      new Set(parsed.refunds.map((refund) => refund.refundReference)).size !==
+        parsed.refunds.length ||
+      [...returned].some(([lineReference, quantity]) => {
+        const sold = parsed.lines.find((item) => item.lineReference === lineReference);
+        return sold === undefined || quantity > sold.quantity;
+      })
+    )
+      return fail();
+  }
   return parsed;
 }
 

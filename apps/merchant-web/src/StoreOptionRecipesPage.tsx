@@ -1,3 +1,4 @@
+import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
@@ -108,11 +109,11 @@ export function StoreOptionRecipesPage({
   if (state.kind !== "Found")
     return (
       <StatePanel
-        heading="Option recipes"
+        heading={state.kind === "PermissionDenied" ? noAccessHeading : "Option recipes"}
         tone={state.kind === "Loading" ? "neutral" : "error"}
         status
       >
-        <p>{copy[state.kind]}</p>
+        <p>{state.kind === "PermissionDenied" ? pageAccessDeniedText : copy[state.kind]}</p>
       </StatePanel>
     );
   const view = state.view;

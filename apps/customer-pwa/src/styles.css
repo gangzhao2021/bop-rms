@@ -1398,6 +1398,13 @@
   color: var(--bop-color-text-muted);
   font-size: 0.875rem;
 }
+/* WP-2423 (v15 3cd0f8dd M3): an item a refund returned stays listed (it was served) and says so. */
+.order-status__batch li > .order-status__item-refunded {
+  grid-column: 1 / -1;
+  color: var(--bop-color-text-default);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
 /* WP-2423 D5: subtotal and tax above the order total, like the receipt. */
 .order-status__money {
   margin: var(--bop-space-3) 0 0;
@@ -1581,6 +1588,19 @@
   margin-top: var(--bop-space-2);
   padding-top: var(--bop-space-2);
   border-top: 1px solid var(--bop-color-border-default);
+}
+/* WP-2423 (v15 3cd0f8dd M4): what each refund returned, under the version's totals. */
+.receipt-page__refunds {
+  margin-top: var(--bop-space-3);
+  padding-top: var(--bop-space-2);
+  border-top: 1px solid var(--bop-color-border-default);
+}
+.receipt-page__refunds h3 {
+  margin: 0 0 var(--bop-space-2);
+  font-size: 1rem;
+}
+.receipt-page__refund + .receipt-page__refund {
+  margin-top: var(--bop-space-3);
 }
 .receipt-page__actions {
   display: flex;

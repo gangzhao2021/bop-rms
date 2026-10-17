@@ -255,6 +255,7 @@ it("WP-2423: shows what was ordered with options, notes and totals", () => {
           tax: money("182"),
           fee: money("0"),
           total: money("1582"),
+          tip: money("237"),
         },
       }}
     />,
@@ -262,8 +263,30 @@ it("WP-2423: shows what was ordered with options, notes and totals", () => {
   expect(html).toContain("2 ×");
   expect(html).toContain("Oat milk · Extra shot × 2");
   expect(html).toContain("Note: Extra hot");
-  expect(html).toContain("$15.82");
   expect(html).not.toContain("Discount");
+  // WP-2423 (3cd0f8dd M1): the tip the payment carried, and a total equal to what was paid.
+  expect(html).toContain("<dt>Tip</dt><dd>$2.37</dd>");
+  expect(html).toContain("<dt>Total</dt><dd>$18.19</dd>");
+  const untipped = (tip: { amountMinor: string; currencyCode: string } | null) =>
+    renderToStaticMarkup(
+      <CurrentOrderLines
+        lines={{
+          items: [],
+          totals: {
+            subtotal: money("1400"),
+            discount: money("0"),
+            tax: money("182"),
+            fee: money("0"),
+            total: money("1582"),
+            tip,
+          },
+        }}
+      />,
+    );
+  for (const tip of [null, money("0")]) {
+    expect(untipped(tip)).not.toContain("Tip");
+    expect(untipped(tip)).toContain("<dt>Total</dt><dd>$15.82</dd>");
+  }
   expect(orderMoney({ amountMinor: "5", currencyCode: "CAD" })).toBe("$0.05");
   expect(orderMoney({ amountMinor: "500", currencyCode: "JPY" })).toBe("JPY 500");
 });

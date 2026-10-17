@@ -188,8 +188,25 @@ export function createMerchantOrderItemStaffCancellation(options: {
   ): Promise<RefundConfiguration>;
   businessDate: CancellationRefundRuntimeOptions["businessDate"];
   provider: Provider;
+  /**
+   * WP-2423 (v15 3cd0f8dd M4): once the items' refund is confirmed, the order's digital receipt
+   * gains a refund version stating what was refunded (System issuance after commit; a failure
+   * leaves the refund as it is and the next refund event issues it).
+   */
+  issueRefundReceipt?(request: { orderReference: string }): Promise<unknown>;
+  /** Reports an unexpected failure of the receipt follow-up (never shown to staff). */
+  onUnexpected?(error: unknown): void;
 }) {
   const resolveScope = createMerchantStoreScope(options.persistence);
+  /** After a confirmed item refund: the receipt's refund version (never fails the command). */
+  async function followReceipt(orderReference: string, status: CancellationRefundStatus) {
+    if (status !== "Refunded" || options.issueRefundReceipt === undefined) return;
+    try {
+      await options.issueRefundReceipt({ orderReference });
+    } catch (error) {
+      options.onUnexpected?.(error);
+    }
+  }
   const retention = { retentionPolicyCode: "FINANCIAL_COMPLIANCE", retentionPolicyVersion: 1 };
 
   function parse(command: unknown, withOperation: boolean) {
@@ -671,6 +688,7 @@ export function createMerchantOrderItemStaffCancellation(options: {
       } catch {
         refundStatus = "Pending";
       }
+      await followReceipt(String(outcome.record.orderReference), refundStatus);
       return itemsResult(
         outcome.kind === "Created" ? "Cancelled" : "AlreadyCancelled",
         outcome.record,
@@ -705,6 +723,7 @@ export function createMerchantOrderItemStaffCancellation(options: {
           readItemCancellationRefundStatus(context.tx, context.refund, found.record, context.guard),
         );
       }
+      await followReceipt(orderReference, status);
       return Object.freeze({
         refund: Object.freeze({
           status,

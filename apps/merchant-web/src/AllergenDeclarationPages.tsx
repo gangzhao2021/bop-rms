@@ -1,3 +1,4 @@
+import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime, StoreDate } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
@@ -81,8 +82,12 @@ function useAllergenView<V>(
 }
 function Failure({ code }: { readonly code: AllergenErrorCode | "Loading" }) {
   return (
-    <StatePanel heading="Allergens" tone={code === "Loading" ? "neutral" : "error"} status>
-      <p>{copy[code]}</p>
+    <StatePanel
+      heading={code === "PermissionDenied" ? noAccessHeading : "Allergens"}
+      tone={code === "Loading" ? "neutral" : "error"}
+      status
+    >
+      <p>{code === "PermissionDenied" ? pageAccessDeniedText : copy[code]}</p>
     </StatePanel>
   );
 }

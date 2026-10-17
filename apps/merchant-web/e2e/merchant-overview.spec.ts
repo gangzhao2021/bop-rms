@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
+import { settlementViewFixture } from "../src/settlement.fixtures";
 
 test("@production Merchant Overview uses the authorized workspace snapshot at desktop and mobile widths", async ({
   page,
@@ -56,6 +57,18 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
               href: "/operations/order-exceptions",
               permission: "operations.order-exception.manage",
             },
+            {
+              screenId: "DIN-FLOOR-BOARD",
+              label: "Tables",
+              href: "/operations/dining",
+              permission: "dining.operate",
+            },
+            {
+              screenId: "PAY-RECONCILIATION",
+              label: "Settlement",
+              href: "/app/operations/payment-reconciliation",
+              permission: "operations.order-exception.manage",
+            },
           ],
         },
       },
@@ -104,6 +117,8 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
         // WP-2423: the table's Order is not Ready as a whole (another round is still being made),
         // but one item waits at the pass: the server's count, as on the Tables page, is used.
         items: [
+          // WP-2423 (3cd0f8dd M7): a table whose order is all served, still open.
+          { ...order(4, "Accepted", 4, "DineIn"), currentPhase: "Fulfilled" },
           { ...order(3, "Accepted", 3, "DineIn"), readyToServeItemCount: 1 },
           order(2, "Submitted", 1),
           order(1, "Accepted", 2),
@@ -122,6 +137,25 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
         observedAt: "2026-09-23T14:01:00.000Z",
         nextAfterFulfillmentReference: null,
         items: [
+          // WP-2423 (3cd0f8dd L7): an order from an earlier business day, apart from today's.
+          {
+            fulfillmentReference: id(22),
+            orderReference: id(5),
+            phase: "Ready",
+            aggregateVersion: "2",
+            readyAt: "2026-09-21T13:50:00.000Z",
+            businessDate: "2026-09-21",
+            publicOrderReference: "B".repeat(22),
+            proof: { kind: "HumanCode", generation: 1, expiresAt: "2026-09-21T15:00:00.000Z" },
+            items: [
+              {
+                fulfillmentItemReference: id(23),
+                orderedQuantity: 1,
+                readyQuantity: 1,
+                handedOverQuantity: 0,
+              },
+            ],
+          },
           {
             fulfillmentReference: id(20),
             orderReference: id(1),
@@ -189,6 +223,54 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
     }),
   );
 
+  // WP-2423 (3cd0f8dd M7): one table open with its order served, for a manager who closes tables.
+  await page.route("**/merchant/dining/tables", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        canOperateTables: true,
+        canCloseSessions: true,
+        canTransferHost: true,
+        canCancelUnpaidRounds: true,
+        nextAfterTableReference: null,
+        items: [
+          {
+            tableReference: id(40),
+            stableLabel: "T1",
+            areaCode: "MAIN",
+            capacity: 4,
+            lifecycle: "Published",
+            operationalState: "Available",
+            aggregateVersion: 3,
+            currentDiningSessionReference: id(41),
+            elapsedMinutes: 55,
+            qrCodeValidUntil: "2027-03-01T00:00:00.000Z",
+            session: { phase: "Active", version: 2, orderReference: id(4) },
+            guestRoundsAwaitingPayment: [],
+            roundsAwaitingAcceptance: [],
+            staffRoundsAwaitingPayment: [],
+          },
+        ],
+      },
+    }),
+  );
+  // WP-2423 (3cd0f8dd M6): the last closed day's settlement for the opening checklist.
+  await page.route("**/merchant/settlement", (route) =>
+    route.fulfill({ headers, json: settlementViewFixture() }),
+  );
+  await page.route("**/merchant/business-day", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        businessDate: "2026-09-23",
+        startsAt: "2026-09-23T08:00:00.000Z",
+        endsAt: "2026-09-24T08:00:00.000Z",
+        timeZone: "America/Toronto",
+        observedAt: "2026-09-23T14:01:00.000Z",
+      },
+    }),
+  );
+
   await page.goto("/app");
   await expect(page.getByRole("heading", { level: 1, name: "Training Store" })).toBeVisible();
   const workspace = page.getByRole("navigation", { name: "Workspace" });
@@ -206,6 +288,22 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
   const now = page.getByRole("region", { name: "Right now" });
   await expect(now.getByText("1 awaiting acceptance · 1 ready to serve")).toBeVisible();
   await expect(now.getByText("Ready for collection")).toBeVisible();
+  // L7: today's pickups apart from an earlier day's, with the way to check and close it.
+  await expect(now.getByText("Pickups from earlier days")).toBeVisible();
+  await expect(now.getByRole("link", { name: "Check and close" })).toHaveAttribute(
+    "href",
+    "/operations/pickup",
+  );
+  // M7: the served table shows as waiting to be closed.
+  await expect(now.getByText("1 table served — close when the guests have left")).toBeVisible();
+  // M6: the opening and closing checklist from the same reads and the last closed day's settlement.
+  const checklist = page.getByRole("region", { name: "Opening and closing" });
+  await expect(checklist.getByText("Settlement for Mon, Sep 21")).toBeVisible();
+  await expect(checklist.getByText("1 payment to look at")).toBeVisible();
+  await expect(checklist.getByRole("link", { name: "Go to Settlement" })).toHaveAttribute(
+    "href",
+    "/app/operations/payment-reconciliation",
+  );
   await expectNoInternalText(page);
   await expect(now.getByText("1 overdue")).toBeVisible();
   await expect(
@@ -235,13 +333,13 @@ test("@production Home reads only the summaries the staff member's screens permi
     brandLabel: "Synthetic Brand",
     storeLabel: "Training Store",
     storeReference: "01909968-0000-7000-8000-000000000099",
+    timeZone: "America/Toronto",
   };
   const navigation = (screens: readonly [string, string, string, string][]) =>
     screens.map(([screenId, label, href, permission]) => ({ screenId, label, href, permission }));
   let screens = navigation([
     ["HOME-OVERVIEW", "Overview", "/app", "merchant.access"],
     ["OPS-ORDER-ENTRY", "Counter order", "/operations/order-entry", "ordering.order.create_staff"],
-    ["DIN-FLOOR-BOARD", "Tables", "/operations/dining", "dining.operate"],
   ]);
   await page.route("**/merchant/session", (route) =>
     route.fulfill({
@@ -352,4 +450,49 @@ test("@production Home reads only the summaries the staff member's screens permi
   await expect(page.getByText("Open exceptions")).toHaveCount(0);
   expect(new Set(requested)).toEqual(new Set(["/merchant/orders", "/merchant/operations-alerts"]));
   await expect(page.getByRole("region", { name: "Store system" })).toHaveCount(0);
+
+  // WP-2423 (3cd0f8dd M7): a cashier with Tables sees the open tables and who closes them.
+  await page.route("**/merchant/dining/tables", (route) => {
+    requested.push(new URL(route.request().url()).pathname);
+    return route.fulfill({
+      headers: { "cache-control": "no-store" },
+      json: {
+        canOperateTables: true,
+        canCloseSessions: false,
+        nextAfterTableReference: null,
+        items: [
+          {
+            tableReference: "01909968-0000-7000-8000-000000000040",
+            stableLabel: "T1",
+            areaCode: "MAIN",
+            capacity: 4,
+            lifecycle: "Published",
+            operationalState: "Available",
+            aggregateVersion: 3,
+            currentDiningSessionReference: "01909968-0000-7000-8000-000000000041",
+            elapsedMinutes: 55,
+            qrCodeValidUntil: "2027-03-01T00:00:00.000Z",
+            guestRoundsAwaitingPayment: [],
+            roundsAwaitingAcceptance: [],
+            staffRoundsAwaitingPayment: [],
+          },
+        ],
+      },
+    });
+  });
+  requested.length = 0;
+  screens = navigation([
+    ["HOME-OVERVIEW", "Overview", "/app", "merchant.access"],
+    ["DIN-FLOOR-BOARD", "Tables", "/operations/dining", "dining.operate"],
+  ]);
+  await page.reload();
+  const now = page.getByRole("region", { name: "Right now" });
+  await expect(
+    now.getByText("A manager or the owner closes tables when the guests have left"),
+  ).toBeVisible();
+  await expect(now.getByText("Open orders")).toHaveCount(0);
+  expect(new Set(requested)).toEqual(
+    new Set(["/merchant/dining/tables", "/merchant/operations-alerts"]),
+  );
+  await expectNoInternalText(page);
 });

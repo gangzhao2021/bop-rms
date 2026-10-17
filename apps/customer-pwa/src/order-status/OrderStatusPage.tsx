@@ -487,6 +487,53 @@ export function paidTotal(
   };
 }
 
+/**
+ * WP-2423 (v15 3cd0f8dd H1): what was paid and how — a table can pay some rounds online and staff
+ * take others on the store's card machine; both are this order's payments.
+ */
+export function paymentReceivedText(
+  view: OrderStatusView,
+  paid: { readonly amountMinor: bigint; readonly currencyCode: string },
+): string {
+  const succeeded = (view.sources?.payments ?? []).filter(
+    (payment) =>
+      payment.status === "Succeeded" &&
+      payment.amount !== null &&
+      payment.amount.currencyCode === paid.currencyCode,
+  );
+  const machine = succeeded
+    .filter((payment) => payment.method === "CardMachine")
+    .reduce((sum, payment) => sum + (payment.amount?.amountMinor ?? 0n), 0n);
+  const total = formatMoney(paid.amountMinor, paid.currencyCode);
+  if (machine === 0n) return orderStatusText.payment.received(total);
+  if (machine === paid.amountMinor) return orderStatusText.payment.receivedMachine(total);
+  return orderStatusText.payment.receivedBoth(
+    total,
+    formatMoney(paid.amountMinor - machine, paid.currencyCode),
+    formatMoney(machine, paid.currencyCode),
+  );
+}
+
+/**
+ * WP-2423 (v15 3cd0f8dd M3): the confirmed refunds the page explains in its own words. Item
+ * cancellations and whole-round refunds already say so where they happened; a refund staff made
+ * (or an amount refunded without items) gets its own line, with any share of the tip it returned.
+ */
+export function refundLines(view: OrderStatusView): string[] {
+  return (view.sources?.refunds?.entries ?? [])
+    .filter((entry) => entry.kind === "Refund" || entry.kind === "Other")
+    .map((entry) =>
+      entry.tip.amountMinor > 0n
+        ? orderStatusText.refundReturnedWithTip(
+            formatMoney(entry.total.amountMinor, entry.total.currencyCode),
+            formatMoney(entry.tip.amountMinor, entry.tip.currencyCode),
+          )
+        : orderStatusText.refundReturned(
+            formatMoney(entry.total.amountMinor, entry.total.currencyCode),
+          ),
+    );
+}
+
 function StatusContent({
   view,
   pickupController,
@@ -626,6 +673,13 @@ function StatusContent({
                                   : [progress.submittedHeading, progress.submitted];
   const payments = view.sources?.payments;
   const paid = paidTotal(view);
+  const refunded = view.sources?.refunds?.refunded ?? null;
+  // WP-2423 (v15 3cd0f8dd M3): items a refund returned (staff refunds, rounds refunded in full).
+  const refundedItems = new Set(
+    (view.sources?.refunds?.entries ?? [])
+      .filter((entry) => entry.kind === "Refund" || entry.kind === "RoundRefund")
+      .flatMap((entry) => entry.orderItemReferences),
+  );
   const paymentLabel =
     payments == null
       ? // No payment result could be read for this order: say nothing rather than guess.
@@ -644,7 +698,7 @@ function StatusContent({
               formatMoney(paid.amountMinor, paid.currencyCode),
             )
           : paid
-            ? orderStatusText.payment.received(formatMoney(paid.amountMinor, paid.currencyCode))
+            ? paymentReceivedText(view, paid)
             : unpaidPickupCancelled
               ? orderStatusText.payment.notPaid
               : payments.some((payment) => payment.status === "Failed")
@@ -723,6 +777,14 @@ function StatusContent({
               <dd>{paymentLabel}</dd>
             </div>
           )}
+          {/* WP-2423 (v15 3cd0f8dd M3): confirmed refunds, as the receipt states them. A whole
+              store cancellation's payment line already says the payment was refunded. */}
+          {refunded && !storeCancelled && !notAccepted ? (
+            <div>
+              <dt>{orderStatusText.refundedLabel}</dt>
+              <dd>{formatMoney(refunded.amountMinor, refunded.currencyCode)}</dd>
+            </div>
+          ) : null}
         </dl>
       </section>
 
@@ -879,6 +941,10 @@ function StatusContent({
                         <span className="order-status__item-cancelled">
                           {orderStatusText.itemNotPaid}
                         </span>
+                      ) : refundedItems.has(item.orderItemReference) ? (
+                        <span className="order-status__item-refunded">
+                          {orderStatusText.itemRefundedTag}
+                        </span>
                       ) : remaking(item.orderItemReference) && !complete ? (
                         <span className="order-status__item-remake">
                           {orderStatusText.itemBeingRemade}
@@ -949,6 +1015,11 @@ function StatusContent({
             {line}
           </p>
         ))}
+        {(storeCancelled || notAccepted ? [] : refundLines(view)).map((line, index) => (
+          <p key={`refund-${index}`} className="order-status__item-refund">
+            {line}
+          </p>
+        ))}
       </section>
     </>
   );
@@ -958,10 +1029,19 @@ function StatusContent({
  * WP-2423 Q10: the browser no longer holds this visit (it expired, the table closed, or the app was
  * opened somewhere else). Say so plainly and give the way back instead of "access denied".
  */
-export function VisitEndedNotice() {
+export function VisitEndedNotice({ orderReference }: { readonly orderReference?: string }) {
   return (
     <section className="order-status__card order-status__visit-ended" role="alert">
       <h2>{orderStatusText.visitEnded.heading}</h2>
+      {/* WP-2423 (v15 3cd0f8dd M5): the receipt stays readable on this phone for a while. */}
+      {orderReference ? (
+        <>
+          <p>{orderStatusText.visitEnded.receipt}</p>
+          <Link className="order-status__retry" to={`/orders/${orderReference}/receipt`}>
+            {orderStatusText.visitEnded.viewReceipt}
+          </Link>
+        </>
+      ) : null}
       <p>{orderStatusText.visitEnded.atTable}</p>
       <p>{orderStatusText.visitEnded.pickup}</p>
       <Link className="order-status__retry" to="/">
@@ -1039,7 +1119,9 @@ export function OrderStatusPage({
           <p>{orderStatusText.invalid}</p>
         </section>
       ) : null}
-      {state.status === "permission-denied" ? <VisitEndedNotice /> : null}
+      {state.status === "permission-denied" ? (
+        <VisitEndedNotice orderReference={orderReference} />
+      ) : null}
       {state.status === "not-found" ? (
         <section className="order-status__unavailable" role="alert">
           <h2>{orderStatusText.notFoundHeading}</h2>

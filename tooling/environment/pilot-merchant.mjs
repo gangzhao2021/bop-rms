@@ -766,6 +766,11 @@ export async function createInternalMerchant(
             authorize: async (_tx, at) => at <= resources.now(),
           }),
           provider: cancellationRefundProvider,
+          // WP-2423 (v15 3cd0f8dd M4): a confirmed item-cancellation refund gives the order's
+          // digital receipt a refund version stating the cancelled items, as other refunds do.
+          issueRefundReceipt: (request) => issueOrderRefundReceipt(request),
+          onUnexpected: (error) =>
+            reportUnexpected("INTERNAL_ITEM_CANCELLATION_RECEIPT_UNAVAILABLE", error),
         });
   const ordinaryRefundStatus = createMerchantOrdinaryRefundStatus({
     persistence,
@@ -800,8 +805,9 @@ export async function createInternalMerchant(
   // WP-2423 item 4: staff record an item refund of a card-machine payment made on the machine.
   // When the Order has a digital receipt (a dine-in table that also paid rounds online), the
   // receipt gains a refund version afterwards, as after an online refund (System, TEST-ONLY audit
-  // reason as the online receipt path).
-  const issueCardMachineRefundReceipt = async ({ orderReference }) => {
+  // reason as the online receipt path). WP-2423 (v15 3cd0f8dd M4): item cancellations use it too.
+  // The item cancellation above calls it only at run time, after this declaration has run.
+  const issueOrderRefundReceipt = async ({ orderReference }) => {
     const active = async () => resources.now() < resources.publicProfile.binding.validUntil;
     const receiptScope = { ...selected, providerAccountReference, environment: "Test" };
     const has = await persistence.transactions.run((tx) =>
@@ -854,7 +860,7 @@ export async function createInternalMerchant(
     resolveConfiguration: refundConfiguration,
     businessDate: refundBusinessDate,
     nextReference: () => resources.credentials.reference(),
-    issueRefundReceipt: issueCardMachineRefundReceipt,
+    issueRefundReceipt: issueOrderRefundReceipt,
     onUnexpected: (error) =>
       reportUnexpected("INTERNAL_CARD_MACHINE_ORDINARY_REFUND_UNAVAILABLE", error),
   });
@@ -1382,6 +1388,8 @@ export async function createInternalMerchant(
         : await (async () => {
             const counter = await createInternalCounterOrder(resources, persistence, service, {
               diningClosing,
+              // WP-2423 (v15 3cd0f8dd M4): a machine refund of a cancelled round is on the receipt.
+              issueRefundReceipt: issueOrderRefundReceipt,
             });
             return {
               ...counter,

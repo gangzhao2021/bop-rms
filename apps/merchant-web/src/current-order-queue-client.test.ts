@@ -422,6 +422,17 @@ it("WP-2423: reads one order's detail with its lines and refuses a different ord
   expect(parsed.order.orderNumber).toBe("ORD-1001");
   expect(parsed.lines.items[0]?.options).toEqual([{ name: "Oat milk", quantity: 1 }]);
   expect(parsed.lines.totals.total).toEqual(money("678"));
+  expect(parsed.lines.totals.tip).toBeNull();
+  // WP-2423 (3cd0f8dd M1): the tip the order's payments carried, when the server sends it.
+  const tipped = (tip: unknown) => ({
+    ...detail(),
+    lines: { ...detail().lines, totals: { ...detail().lines.totals, tip } },
+  });
+  expect(parseCurrentOrderDetail(tipped(money("102")), id(1)).lines.totals.tip).toEqual(
+    money("102"),
+  );
+  for (const invalid of [money("-1"), { amountMinor: "102", currencyCode: "USD" }, null, "102"])
+    expect(() => parseCurrentOrderDetail(tipped(invalid), id(1))).toThrow();
   expect(() => parseCurrentOrderDetail(detail(), id(2))).toThrow();
   expect(() =>
     parseCurrentOrderDetail(

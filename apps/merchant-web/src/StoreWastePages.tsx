@@ -1,10 +1,12 @@
+import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
-import { SourceTime, StaffTime } from "./StoreTime.js";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { SourceTime, StaffTime, StoreTimeZoneContext, storeDate } from "./StoreTime.js";
+import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./operation-reference.js";
 import {
   StoreWastePageError,
+  availableQuantityText,
   centsText,
   parseStoreWasteView,
   unavailableStoreWasteClient,
@@ -64,8 +66,12 @@ function useWaste(
 }
 function Failure({ code }: { code: StoreWasteErrorCode | "Loading" }) {
   return (
-    <StatePanel heading="Waste" tone={code === "Loading" ? "neutral" : "error"} status>
-      <p>{copy[code]}</p>
+    <StatePanel
+      heading={code === "PermissionDenied" ? noAccessHeading : "Waste"}
+      tone={code === "Loading" ? "neutral" : "error"}
+      status
+    >
+      <p>{code === "PermissionDenied" ? pageAccessDeniedText : copy[code]}</p>
     </StatePanel>
   );
 }
@@ -181,6 +187,7 @@ export function StoreWasteFormPage({
 }) {
   const { state } = useWaste(client, "INV-WASTE-LIST", null, false);
   const navigate = useNavigate();
+  const timeZone = useContext(StoreTimeZoneContext);
   const [lines, setLines] = useState<EditableLine[]>([]),
     [busy, setBusy] = useState(false),
     [error, setError] = useState<{ code: StoreWasteErrorCode; line: string | null } | null>(null),
@@ -353,15 +360,17 @@ export function StoreWasteFormPage({
                     {lots.map((row) => (
                       <option key={row.lotReference ?? "none"} value={row.lotReference ?? ""}>
                         {row.lotCode}
-                        {row.expiryDate ? ` (exp. ${row.expiryDate})` : ""} · {row.available}{" "}
-                        available
+                        {row.expiryDate
+                          ? ` (exp. ${storeDate(row.expiryDate, timeZone)})`
+                          : ""} · {availableQuantityText(row.available)} available
                       </option>
                     ))}
                   </select>
                 </label>
               ) : null}
               <label>
-                Quantity ({item?.unitCode}){selected ? ` — ${selected.available} available` : ""}
+                Quantity ({item?.unitCode})
+                {selected ? ` — ${availableQuantityText(selected.available)} available` : ""}
                 <input
                   required
                   inputMode="decimal"

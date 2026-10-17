@@ -149,7 +149,7 @@ test("@production Hours & ordering shows one clear state to a role without acces
   );
   await page.goto("/app/organization/stores/" + store + "/service");
   await expect(page.getByRole("heading", { name: "No access" })).toBeVisible();
-  await expect(page.getByText(/Ask a manager or owner/u)).toBeVisible();
+  await expect(page.getByText(/Ask the owner or a manager/u)).toBeVisible();
   await expect(page.getByRole("heading", { name: "Service controls" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Refresh service status" })).toHaveCount(0);
   await expect(page.getByText(/Check access and refresh/u)).toHaveCount(0);

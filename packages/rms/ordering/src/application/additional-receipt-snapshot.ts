@@ -75,5 +75,13 @@ export function createAdditionalReceiptSnapshot(previousValue: unknown, currentV
     current.tip.amountMinor < old.tip.amountMinor
   )
     return fail();
+  // WP-2423 (v15 3cd0f8dd M4): the refunds the previous version stated stay stated while nothing
+  // more was refunded, so a later round does not drop what an earlier refund returned.
+  if (
+    old.refunds !== undefined &&
+    current.refunds === undefined &&
+    current.refundedTotal.amountMinor === old.refundedTotal.amountMinor
+  )
+    return parseDigitalReceiptSnapshot({ ...current, refunds: old.refunds });
   return current;
 }

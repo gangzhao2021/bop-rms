@@ -1,4 +1,5 @@
 import {
+  assertGuestSessionReceiptReadable,
   assertGuestSessionUsable,
   createGuestSession,
   createGuestSessionRecord,
@@ -371,6 +372,82 @@ export class GuestSessionService {
       const session = assertGuestSessionUsable(this.#record(record).session, observedAt);
       await this.#assertCurrent(session, observedAt);
       return session;
+    } catch {
+      throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+    }
+  }
+
+  /**
+   * WP-2423 (v15 3cd0f8dd M5): the foreground CSRF credential of a visit that has ended (its table
+   * closed, or it sat idle) so the same device can still read its own receipt. Read only: the
+   * Session must be Active and within its absolute lifetime (assertGuestSessionReceiptReadable);
+   * no binding is checked, nothing is renewed, and every other action still requires `authorize`.
+   */
+  async recoverEndedVisitCsrf(input: {
+    readonly sessionCredential: unknown;
+    readonly observedAt?: unknown;
+  }): Promise<{ readonly csrfCredential: GuestRawCredential; readonly session: GuestSession }> {
+    const raw = command(input, ["sessionCredential"], ["observedAt"]);
+    const observedAt = this.#at(raw.observedAt);
+    const sessionCredential = parseGuestRawCredential(raw.sessionCredential);
+    try {
+      if (!this.#credentials.deriveForegroundCsrf)
+        throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+      const record = await this.#storeCall(() =>
+        this.#store.resolve(this.#credentials.hashCredential("Session", sessionCredential)),
+      );
+      if (record === null) throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+      const session = assertGuestSessionReceiptReadable(this.#record(record).session, observedAt);
+      return Object.freeze({
+        csrfCredential: parseGuestRawCredential(
+          this.#credentials.deriveForegroundCsrf(sessionCredential),
+        ),
+        session,
+      });
+    } catch {
+      throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+    }
+  }
+
+  /**
+   * WP-2423 (v15 3cd0f8dd M5): authorizes reading this visit's own receipt after the visit ended.
+   * The same credential and CSRF checks as `authorize`; the Session must be Active and within its
+   * absolute lifetime, but its table binding, idle and closure limits are not required. Grants
+   * nothing else: callers use it for the receipt read only.
+   */
+  async authorizeEndedVisit(input: {
+    readonly sessionCredential: unknown;
+    readonly csrfCredential: unknown;
+    readonly observedAt?: unknown;
+  }): Promise<GuestSession> {
+    const raw = command(input, ["sessionCredential", "csrfCredential"], ["observedAt"]);
+    const observedAt = this.#at(raw.observedAt);
+    const sessionCredential = parseGuestRawCredential(raw.sessionCredential);
+    const csrfCredential = parseGuestRawCredential(raw.csrfCredential);
+    try {
+      const record = await this.#storeCall(() =>
+        this.#store.resolve(this.#credentials.hashCredential("Session", sessionCredential)),
+      );
+      if (
+        record === null ||
+        (!this.#credentials.equals(
+          this.#credentials.hashCredential("Csrf", csrfCredential),
+          record.csrfSelectorHash,
+        ) &&
+          !(
+            this.#credentials.deriveForegroundCsrf &&
+            this.#credentials.equals(
+              this.#credentials.hashCredential("Csrf", csrfCredential),
+              this.#credentials.hashCredential(
+                "Csrf",
+                parseGuestRawCredential(this.#credentials.deriveForegroundCsrf(sessionCredential)),
+              ),
+            )
+          ))
+      ) {
+        throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+      }
+      return assertGuestSessionReceiptReadable(this.#record(record).session, observedAt);
     } catch {
       throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
     }

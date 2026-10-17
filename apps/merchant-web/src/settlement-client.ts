@@ -454,3 +454,20 @@ export function createSettlementClient(fetcher: typeof fetch = fetch) {
     },
   });
 }
+
+/**
+ * WP-2423 (3cd0f8dd L2): an online payment a guest started but did not finish — still waiting for
+ * the guest, with nothing charged or refunded at the store or the provider. Not a payment needing
+ * attention: it is explained apart and never listed as a $0.00 difference.
+ */
+export function unfinishedGuestPayment(check: SettlementCheck): boolean {
+  return (
+    check.outcome === "Unresolved" &&
+    (check.internalStatus === "RequiresCustomerAction" ||
+      check.internalStatus === "RequiresPaymentMethod") &&
+    check.internalCapturedMinor === "0" &&
+    (check.providerCapturedMinor === null || check.providerCapturedMinor === "0") &&
+    check.internalRefundedMinor === "0" &&
+    (check.providerRefundedMinor === null || check.providerRefundedMinor === "0")
+  );
+}

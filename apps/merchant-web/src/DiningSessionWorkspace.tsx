@@ -8,6 +8,7 @@ import { Link } from "react-router";
 import {
   createDiningSessionClient,
   DiningSessionClientError,
+  longOpenSessionMinutes,
   type StaffDiningTable,
 } from "./dining-session-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
@@ -42,8 +43,7 @@ export function elapsedText(minutes: number): string {
   const days = Math.floor(hours / 24);
   return `${String(days)} day${days === 1 ? "" : "s"}`;
 }
-/** A session open longer than this is most likely a table nobody closed. */
-export const longOpenSessionMinutes = 12 * 60;
+export { longOpenSessionMinutes };
 /** What staff see on the floor: free, blocked, seated, or seated so long the guests have likely left. */
 export type TableFloorState = "Available" | "Unavailable" | "Seated" | "LongOpen";
 /**
@@ -612,7 +612,7 @@ export function DiningSessionWorkspace({
                             <p className="dining-table-tile__notice">
                               {canCloseSessions
                                 ? "Open for a long time — if the guests have left, select the table and close it."
-                                : "Open for a long time — if the guests have left, ask an Owner or Store Manager to close the table."}
+                                : "Open for a long time — if the guests have left, ask a manager or the owner to close the table."}
                             </p>
                           ) : null}
                           <button
@@ -733,6 +733,12 @@ export function DiningSessionWorkspace({
                     }}
                     onRefresh={() => void loadRef.current(false, true)}
                   />
+                ) : selected.currentDiningSessionReference !== null && !canCloseSessions ? (
+                  // WP-2423 (3cd0f8dd M7): closing a table stays with the Owner and Store Manager;
+                  // say who, so staff know whom to tell when the guests have left.
+                  <p role="note" className="dining-close-who">
+                    A manager or the owner closes the table. Tell them when the guests have left.
+                  </p>
                 ) : null}
                 {canTakeOrders && eligible ? (
                   // WP-2423 Q7 slice 2: a round for guests who can't or won't order on a phone.

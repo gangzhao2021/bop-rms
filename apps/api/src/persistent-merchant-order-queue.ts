@@ -26,6 +26,7 @@ import {
   listStoreOrderBatchesWithOnlinePayment,
   listStoreOrderOnlinePaidTotals,
   listStoreOrdersWithOnlineRefunds,
+  readStoreOrderOnlinePaidTip,
 } from "@rms/payment";
 import { createPostgresCurrentBrowserSessionSource } from "@bop/identity";
 import { randomBytes } from "node:crypto";
@@ -365,6 +366,21 @@ export function createPersistentMerchantOrderQueue(options: {
               amountDueMinor: string | null;
             }
           >();
+          /**
+           * WP-2423 (3cd0f8dd M1): the tip each Order's card-machine payments took (staff keyed it),
+           * so the order detail's total is what was paid.
+           */
+          const cardMachineTips = new Map<string, bigint>();
+          const cardMachineTipped = new Set<string>();
+          const addCardMachineTip = (payment: CardMachinePaymentRecord) => {
+            if (cardMachineTipped.has(payment.cardMachinePaymentReference)) return;
+            cardMachineTipped.add(payment.cardMachinePaymentReference);
+            const order = String(payment.orderReference);
+            cardMachineTips.set(
+              order,
+              (cardMachineTips.get(order) ?? 0n) + payment.preparation.tip.amountMinor,
+            );
+          };
           let confirmed: ReadonlySet<string> = new Set<string>();
           const started = new Set<string>();
           const itemCancellations = new Map<
@@ -417,6 +433,7 @@ export function createPersistentMerchantOrderQueue(options: {
             ]);
             for (const [order, entry] of entries) {
               const paid = counterPayments.get(order)?.[0];
+              if (paid !== undefined) addCardMachineTip(paid.payment);
               counter.set(order, {
                 recordedAfterOutage: entry.recordedAfterOutage,
                 paidOnCardMachine:
@@ -447,11 +464,13 @@ export function createPersistentMerchantOrderQueue(options: {
                 ...new Set([...rounds.values()].map((round) => String(round.orderReference))),
               ])
             ).values())
-              for (const { payment, refunds } of recorded)
+              for (const { payment, refunds } of recorded) {
+                addCardMachineTip(payment);
                 roundPayments.set(String(payment.orderBatchReference), {
                   payment,
                   refundedMinor: refunds.reduce((sum, refund) => sum + refund.amountMinor, 0n),
                 });
+              }
             for (const [batch, round] of rounds) {
               const machine = roundPayments.get(batch) ?? null;
               const paid = machine?.payment ?? null;
@@ -584,11 +603,31 @@ export function createPersistentMerchantOrderQueue(options: {
             const batch = cancellableLines.get(line);
             return batch !== undefined && openBatches.has(batch);
           };
+          // WP-2423 (3cd0f8dd M1): the tip the order's payments carried (online and card machine),
+          // on the detail only, so staff read a total equal to what was paid, as the guest's page and
+          // receipt do. Refunds are shown apart, against the payment.
+          const tipMinor =
+            lines === null || only === undefined || ownerScope === null
+              ? 0n
+              : (paidOnline.has(only.orderReference) && !counter.has(only.orderReference)
+                  ? await readStoreOrderOnlinePaidTip(
+                      businessTransaction,
+                      ownerScope,
+                      only.orderReference,
+                    )
+                  : 0n) + (cardMachineTips.get(only.orderReference) ?? 0n);
           const detailLines =
             lines === null || only === undefined
               ? lines
               : Object.freeze({
                   ...lines,
+                  totals: Object.freeze({
+                    ...lines.totals,
+                    tip: Object.freeze({
+                      amountMinor: tipMinor.toString(),
+                      currencyCode: lines.totals.total.currencyCode,
+                    }),
+                  }),
                   items: Object.freeze(
                     lines.items.map((line) => {
                       const cancelled = itemCancellations.get(line.orderItemReference) ?? null;

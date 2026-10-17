@@ -80,7 +80,9 @@ describe("WP-2423 Q14 store reports page", () => {
     const html = render(storeReportsViewFixture());
     expect(html).toContain("Tue, Oct 13 – Wed, Oct 14");
     expect(html).toContain("Today so far");
-    expect(html).toContain("Matches the day-end settlement: $50.97 collected, $19.22 refunded.");
+    expect(html).toContain(
+      "Closed days match the day-end settlement. Today is checked against it when the day closes.",
+    );
     for (const text of [
       "Gross sales",
       "Net sales",
@@ -105,6 +107,20 @@ describe("WP-2423 Q14 store reports page", () => {
     expect(html).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}/u);
     expect(html).not.toContain("CardMachine");
     expect(html).not.toContain("DineIn");
+  });
+  it("says an open day is checked at day end and a closed range matches the settlement", () => {
+    const fixture = storeReportsViewFixture();
+    const days = fixture.days as readonly Record<string, unknown>[];
+    const today = render({ ...fixture, days: days.filter((day) => day.status === "Open") });
+    expect(today).toContain("Checked against the day-end settlement when the day closes.");
+    expect(today).not.toContain("Matches the day-end settlement");
+    const closed = render({
+      ...fixture,
+      includesOpenDay: false,
+      days: days.map((day) => ({ ...day, status: "Closed" })),
+    });
+    expect(closed).toContain("Matches the day-end settlement: $50.97 collected, $19.22 refunded.");
+    expect(closed).not.toContain("when the day closes");
   });
   it("says when the totals differ from the settlement and when refunds await confirmation", () => {
     const fixture = storeReportsViewFixture();

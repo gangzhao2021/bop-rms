@@ -245,9 +245,15 @@ export function CurrentOrderLines({
           <dt>Tax</dt>
           <dd>{orderMoney(t.tax)}</dd>
         </div>
+        {t.tip !== null && t.tip.amountMinor !== "0" ? (
+          <div>
+            <dt>Tip</dt>
+            <dd>{orderMoney(t.tip)}</dd>
+          </div>
+        ) : null}
         <div>
           <dt>Total</dt>
-          <dd>{orderMoney(t.total)}</dd>
+          <dd>{orderMoney(orderTotalWithTip(t))}</dd>
         </div>
       </dl>
       {unpaid !== null ? (
@@ -275,6 +281,18 @@ export function CurrentOrderLines({
 }
 
 /**
+ * WP-2423 (3cd0f8dd M1): the order's total with the tip its payments carried, so staff read what
+ * was paid (as the guest's page and receipt do). Minor units only.
+ */
+export function orderTotalWithTip(totals: CurrentOrderDetail["lines"]["totals"]) {
+  return Object.freeze({
+    amountMinor: (
+      BigInt(totals.total.amountMinor) + BigInt(totals.tip?.amountMinor ?? "0")
+    ).toString(),
+    currencyCode: totals.total.currencyCode,
+  });
+}
+/**
  * WP-2423: what the rounds cancelled automatically for a failed payment came to, and the order total
  * without them (null when there are none). Minor units only; lines already cancelled one by one keep
  * their own refund line.
@@ -294,7 +312,7 @@ export function unpaidCancelledTotal(
   return Object.freeze({
     cancelled: Object.freeze({ amountMinor: amount.toString(), currencyCode }),
     remaining: Object.freeze({
-      amountMinor: (BigInt(lines.totals.total.amountMinor) - amount).toString(),
+      amountMinor: (BigInt(orderTotalWithTip(lines.totals).amountMinor) - amount).toString(),
       currencyCode,
     }),
   });

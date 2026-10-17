@@ -2,6 +2,7 @@ import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { formatCad } from "./order-money.js";
+import { actionAccessDeniedText, noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import {
   createStoreReportsClient,
   StoreReportsClientError,
@@ -198,7 +199,14 @@ export function StoreReports({
           day it was paid and a refund on the day the money went back, the same as the day-end
           settlement. Orders cancelled before payment are not sales.
         </p>
-        {r.matchesSettlement ? (
+        {r.matchesSettlement && view.includesOpenDay ? (
+          // v15 store-day L6: an open business day has no day-end settlement yet.
+          <p role="status" className="store-reports__match">
+            {view.days.some((day) => day.status === "Closed")
+              ? "Closed days match the day-end settlement. Today is checked against it when the day closes."
+              : "Checked against the day-end settlement when the day closes."}
+          </p>
+        ) : r.matchesSettlement ? (
           <p role="status" className="store-reports__match">
             Matches the day-end settlement: {money(r.settlementCollectedMinor)} collected,{" "}
             {money(r.settlementRefundedMinor)} refunded.
@@ -486,7 +494,7 @@ export function StoreReportsPage({
       .catch((error: unknown) => {
         setDownloadError(
           error instanceof StoreReportsClientError && error.code === "PermissionDenied"
-            ? "Your permissions do not allow downloading reports."
+            ? actionAccessDeniedText
             : error instanceof StoreReportsClientError && error.code === "Busy"
               ? "The store's records are busy with orders and payments. Try the download again in a minute."
               : "The download failed. Check your connection and try again.",
@@ -576,8 +584,8 @@ export function StoreReportsPage({
           <p>Reading the store&apos;s sales…</p>
         </StatePanel>
       ) : state.kind === "PermissionDenied" ? (
-        <StatePanel heading="Permission denied" tone="error" status>
-          <p>Your permissions do not allow the sales reports for this Store.</p>
+        <StatePanel heading={noAccessHeading} tone="error" status>
+          <p>{pageAccessDeniedText}</p>
         </StatePanel>
       ) : state.kind === "Busy" ? (
         <StatePanel heading="Busy for a moment" tone="neutral" status>

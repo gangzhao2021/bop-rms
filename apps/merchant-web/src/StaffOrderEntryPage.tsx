@@ -1,3 +1,4 @@
+import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStaffSessionLive } from "./staff-session-reads.js";
@@ -66,10 +67,7 @@ export function choicesComplete(item: CounterMenuItem, choices: Record<string, s
 }
 
 const menuError: Record<string, [string, string]> = {
-  PermissionDenied: [
-    "Counter orders are not available to you",
-    "Taking an order for a customer needs the staff ordering permission at this store.",
-  ],
+  PermissionDenied: [noAccessHeading, pageAccessDeniedText],
   TableUnavailable: [
     "This table can't take an order now",
     "It may be marked unavailable or its session may be closing. Check it on the Tables page.",

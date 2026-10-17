@@ -2,6 +2,7 @@ import { parseStoreContact } from "../journey/StoreContact.js";
 import { parsePrivacyNoticeUrl } from "../journey/PrivacyNotice.js";
 import type {
   ReceiptRecordKind,
+  ReceiptRefundView,
   ReceiptState,
   ReceiptTaxDetailsView,
   ReceiptView,
@@ -32,6 +33,7 @@ export interface ReceiptController {
 const reference = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const currency = /^[A-Z]{3}$/u;
 const kinds = ["Original", "Correction", "Void", "Refund", "Reissue"] as const;
+const refundKinds = ["Refund", "ItemCancellation", "RoundRefund", "Other"] as const;
 const payments = ["Paid", "RefundPending", "PartiallyRefunded", "Refunded"] as const;
 const deliveries = [
   "NotRequested",
@@ -107,6 +109,7 @@ function record(value: unknown, expectedVersion: number) {
     "refundedTotal",
     ...(Object.hasOwn(raw.snapshot, "adjustments") ? ["adjustments"] : []),
     ...(Object.hasOwn(raw.snapshot, "taxDetails") ? ["taxDetails"] : []),
+    ...(Object.hasOwn(raw.snapshot, "refunds") ? ["refunds"] : []),
   ]);
   const amount = (candidate: unknown) => {
     const money = exact(candidate, ["amountMinor", "currencyCode"]);
@@ -302,7 +305,76 @@ function record(value: unknown, expectedVersion: number) {
       paymentMethod: "Card" as const,
     });
   }
+  // WP-2423 (v15 3cd0f8dd M4): what each confirmed refund returned (versions issued since).
+  let refunds: ReceiptRefundView[] | undefined;
+  if (Object.hasOwn(snapshot, "refunds")) {
+    if (!Array.isArray(snapshot.refunds) || snapshot.refunds.length > 200) return invalid();
+    refunds = snapshot.refunds.map((candidate: unknown) => {
+      const entry = exact(candidate, [
+        "kind",
+        "lines",
+        "tax",
+        "tip",
+        "other",
+        "total",
+        "newInThisVersion",
+      ]);
+      if (
+        !refundKinds.includes(entry.kind as ReceiptRefundView["kind"]) ||
+        !Array.isArray(entry.lines) ||
+        entry.lines.length > 200 ||
+        typeof entry.newInThisVersion !== "boolean"
+      )
+        return invalid();
+      const refundLines = entry.lines.map((value: unknown) => {
+        const item = exact(value, ["lineReference", "displayName", "quantity", "amount"]);
+        if (
+          !lines.some((line) => line.lineReference === item.lineReference) ||
+          !Number.isSafeInteger(item.quantity) ||
+          (item.quantity as number) < 1 ||
+          (item.quantity as number) > 999
+        )
+          return invalid();
+        return Object.freeze({
+          lineReference: String(item.lineReference),
+          displayName: text(item.displayName, 160),
+          quantity: item.quantity as number,
+          amount: amount(item.amount),
+        });
+      });
+      const parsed = Object.freeze({
+        kind: entry.kind as ReceiptRefundView["kind"],
+        lines: Object.freeze(refundLines),
+        tax: amount(entry.tax),
+        tip: amount(entry.tip),
+        other: amount(entry.other),
+        total: amount(entry.total),
+        newInThisVersion: entry.newInThisVersion,
+      });
+      if (
+        parsed.lines.reduce((sum, line) => sum + line.amount.amountMinor, 0n) +
+          parsed.tax.amountMinor +
+          parsed.tip.amountMinor +
+          parsed.other.amountMinor !==
+        parsed.total.amountMinor
+      )
+        return invalid();
+      return parsed;
+    });
+    if (
+      refunds.reduce((sum, refund) => sum + refund.total.amountMinor, 0n) !==
+      refundedTotal.amountMinor
+    )
+      return invalid();
+  }
   const amounts = [
+    ...(refunds ?? []).flatMap((refund) => [
+      refund.tax,
+      refund.tip,
+      refund.other,
+      refund.total,
+      ...refund.lines.map((line) => line.amount),
+    ]),
     ...(taxDetails ? taxDetails.taxLines.map((line) => line.amount) : []),
     subtotal,
     tax,
@@ -358,6 +430,7 @@ function record(value: unknown, expectedVersion: number) {
       ...(taxDetails ? { taxDetails } : {}),
       paymentStatus: snapshot.paymentStatus as (typeof payments)[number],
       refundedTotal,
+      ...(refunds === undefined ? {} : { refunds: Object.freeze(refunds) }),
     }),
   });
 }
@@ -371,6 +444,10 @@ function financial(value: unknown) {
     "confirmedRefundMinor",
     "pendingRefundMinor",
     "unresolvedAttemptCount",
+    // WP-2423 (v15 3cd0f8dd H1): how it was paid (absent from an older server).
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "paidOnlineMinor")
+      ? ["paidOnlineMinor", "paidOnCardMachineMinor"]
+      : []),
   ]);
   const amount = (v: unknown) => {
     if (
@@ -397,6 +474,14 @@ function financial(value: unknown) {
     confirmedRefundMinor + pendingRefundMinor > capturedMinor
   )
     return invalid();
+  const tenders = Object.hasOwn(raw, "paidOnlineMinor")
+    ? {
+        paidOnlineMinor: amount(raw.paidOnlineMinor),
+        paidOnCardMachineMinor: amount(raw.paidOnCardMachineMinor),
+      }
+    : null;
+  if (tenders && tenders.paidOnlineMinor + tenders.paidOnCardMachineMinor !== capturedMinor)
+    return invalid();
   return Object.freeze({
     observedAt: raw.observedAt,
     currencyCode: raw.currencyCode,
@@ -404,6 +489,7 @@ function financial(value: unknown) {
     confirmedRefundMinor,
     pendingRefundMinor,
     unresolvedAttemptCount: raw.unresolvedAttemptCount,
+    ...(tenders ?? {}),
   });
 }
 
@@ -424,7 +510,22 @@ export function parseReceiptView(value: unknown, expectedReference: string): Rec
     ...(value !== null && typeof value === "object" && Object.hasOwn(value, "privacyNoticeUrl")
       ? ["privacyNoticeUrl"]
       : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "visitEnded")
+      ? ["visitEnded"]
+      : []),
   ]);
+  // WP-2423 (v15 3cd0f8dd M5): until when an ended visit can still open this receipt here.
+  let visitEnded: ReceiptView["visitEnded"];
+  if (Object.hasOwn(raw, "visitEnded")) {
+    const ended = exact(raw.visitEnded, ["receiptAvailableUntil"]);
+    if (
+      typeof ended.receiptAvailableUntil !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(ended.receiptAvailableUntil) ||
+      Number.isNaN(Date.parse(ended.receiptAvailableUntil))
+    )
+      return invalid();
+    visitEnded = Object.freeze({ receiptAvailableUntil: ended.receiptAvailableUntil });
+  }
   let storeContact: ReceiptView["storeContact"];
   let privacyNoticeUrl: string | undefined;
   try {
@@ -449,6 +550,7 @@ export function parseReceiptView(value: unknown, expectedReference: string): Rec
     ...(Object.hasOwn(raw, "financial") ? { financial: financial(raw.financial) } : {}),
     ...(storeContact === undefined ? {} : { storeContact }),
     ...(privacyNoticeUrl === undefined ? {} : { privacyNoticeUrl }),
+    ...(visitEnded === undefined ? {} : { visitEnded }),
     freshnessStatus: raw.freshnessStatus as "Fresh" | "Stale",
     deliveryStatus: raw.deliveryStatus as ReceiptView["deliveryStatus"],
     supportEligible: raw.supportEligible,

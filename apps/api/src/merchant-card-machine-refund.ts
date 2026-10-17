@@ -142,8 +142,39 @@ export function createMerchantCardMachineCancellationRefund(options: {
   nextReference(): string;
   /** Told the original error of an unexpected failure (the pilot logs code and frames only). */
   onUnexpected?(error: unknown): void;
+  /**
+   * WP-2423 (v15 3cd0f8dd M4): after the machine refund of a cancelled round is recorded, the
+   * order's digital receipt (a dine-in table that also paid rounds online) gains a refund version
+   * stating what was refunded. After commit; a failure never changes the recorded refund.
+   */
+  issueRefundReceipt?(request: { orderReference: string }): Promise<unknown>;
 }) {
   const resolveScope = createMerchantStoreScope(options.persistence);
+  const record = createRecord(options, resolveScope);
+  return async (input: {
+    sessionCookie: unknown;
+    csrf: unknown;
+    command: unknown;
+  }): Promise<CardMachineRefundResult> => {
+    const result = await record(input);
+    if (result.status === "Recorded" && options.issueRefundReceipt !== undefined)
+      try {
+        await options.issueRefundReceipt({ orderReference: result.orderReference });
+      } catch (error) {
+        try {
+          options.onUnexpected?.(error);
+        } catch {
+          // Reporting never changes the answer.
+        }
+      }
+    return result;
+  };
+}
+
+function createRecord(
+  options: Parameters<typeof createMerchantCardMachineCancellationRefund>[0],
+  resolveScope: ReturnType<typeof createMerchantStoreScope>,
+) {
   return async (input: {
     sessionCookie: unknown;
     csrf: unknown;

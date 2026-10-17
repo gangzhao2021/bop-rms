@@ -535,10 +535,10 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   // Denied reads clear the board and keep the Store frame; nothing is cached.
   denied = true;
   await page.getByRole("link", { name: "Synthetic rice", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Permission denied" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "No access", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Training Store", exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Return to Kitchen queue" }).click();
-  await expect(page.getByRole("heading", { name: "Permission denied" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "No access", exact: true })).toBeVisible();
   denied = false;
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
@@ -551,7 +551,7 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   await tabTo(page, keyboardRefresh);
   await expect(keyboardRefresh).toHaveCSS("outline-style", "solid");
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("heading", { name: "Permission denied" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "No access", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Refresh", exact: true })).toBeFocused();
   denied = false;

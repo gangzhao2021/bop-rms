@@ -100,7 +100,7 @@ export function PickupHandoffForm({
   >("Idle");
   const inPerson = verification === null;
   // WP-2423: taken at the counter: no pickup code was ever sent and the walk-up customer left no
-  // contact, so staff call the order number (or the name they gave) and hand it over.
+  // contact (counter orders carry no name), so staff call the order number and hand it over.
   const counter = inPerson && item.takenAtCounter === true && item.proofReadiness === "NotIssued";
   const [identityCheck, setIdentityCheck] = useState<
     "" | "OrderNumberAndName" | "OrderNumberAndPhoneLast4"
@@ -262,7 +262,7 @@ export function PickupHandoffForm({
         {counter ? (
           <p>
             This order was taken at the counter, so no pickup code was sent. Call the order number
-            or the name the customer gave, and hand it over to the customer who answers.
+            and hand it over to the customer who answers.
           </p>
         ) : inPerson ? (
           <p>
@@ -296,7 +296,7 @@ export function PickupHandoffForm({
                   <option value="">Select what you checked</option>
                   <option value="OrderNumberAndName">
                     {counter
-                      ? "Order number or the name they gave at the counter"
+                      ? "Order number called at the counter"
                       : "Order number and name on the order"}
                   </option>
                   <option value="OrderNumberAndPhoneLast4" disabled={phoneUnavailable}>

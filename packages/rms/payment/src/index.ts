@@ -87,6 +87,7 @@ export {
   listStoreOrderBatchesWithOnlinePayment,
   listStoreOrderOnlinePaidTotals,
   listStoreOrdersWithOnlineRefunds,
+  readStoreOrderOnlinePaidTip,
 } from "./infrastructure/persistence/payment-status-store.js";
 
 export {

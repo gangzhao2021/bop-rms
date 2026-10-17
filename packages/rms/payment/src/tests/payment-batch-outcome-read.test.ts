@@ -4,6 +4,7 @@ import {
   listStoreOrderBatchPaymentOutcomes,
   listStoreOrderOnlinePaidTotals,
   listStoreOrdersWithOnlineRefunds,
+  readStoreOrderOnlinePaidTip,
 } from "../infrastructure/persistence/payment-status-store.js";
 
 const id = (n: number) => "0198a106-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -99,6 +100,31 @@ it("WP-2423: sums each Order's active succeeded online payments for the Orders p
       Array.from({ length: 101 }, (_, n) => id(1000 + n)),
     ),
   ).rejects.toThrow();
+});
+
+it("WP-2423 (3cd0f8dd M1): reads the tip of an Order's succeeded online payments", async () => {
+  const f = fixture([{ tip_minor: "176" }]);
+  expect(await readStoreOrderOnlinePaidTip(f.transaction, scope, id(50))).toBe(176n);
+  expect(f.query.mock.calls[0]?.[1]).toEqual([id(1), id(2)]);
+  const sql = String(f.query.mock.calls[1]?.[0]);
+  expect(sql).toContain("sum(i.tip_minor)");
+  expect(sql).toContain("p.is_active AND p.terminal_status='Succeeded'");
+  expect(sql).toContain("i.brand_id=$1 AND i.store_id=$2 AND i.order_id=$3");
+  expect(f.query.mock.calls[1]?.[1]).toEqual([id(1), id(2), id(50)]);
+  expect(
+    await readStoreOrderOnlinePaidTip(fixture([{ tip_minor: "0" }]).transaction, scope, id(50)),
+  ).toBe(0n);
+  for (const rows of [
+    [],
+    [{ tip_minor: "1.76" }],
+    [{ tip_minor: "-1" }],
+    [{ tip_minor: 176 }],
+    [{ tip_minor: "1", extra: 1 }],
+    [{ tip_minor: "1" }, { tip_minor: "2" }],
+  ])
+    await expect(
+      readStoreOrderOnlinePaidTip(fixture(rows).transaction, scope, id(50)),
+    ).rejects.toMatchObject({ code: "PAYMENT_STATUS_DEPENDENCY_UNAVAILABLE" });
 });
 
 it("WP-2423: lists the scoped Orders with an ordinary or compensation refund", async () => {

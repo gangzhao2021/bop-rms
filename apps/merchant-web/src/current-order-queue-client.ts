@@ -866,7 +866,23 @@ export function parseCurrentOrderDetail(value: unknown, orderReference: string) 
       items.some((item) => item.canCancel && item.orderBatchReference === batch.orderBatchReference)
     )
       return fail();
-  const totals = exact(lines.totals, ["subtotal", "discount", "tax", "fee", "total"]);
+  // WP-2423 (3cd0f8dd M1): the tip the order's payments carried (absent from an older server).
+  const withTip =
+    lines.totals !== null && typeof lines.totals === "object" && Object.hasOwn(lines.totals, "tip");
+  const totals = exact(lines.totals, [
+    "subtotal",
+    "discount",
+    "tax",
+    "fee",
+    "total",
+    ...(withTip ? ["tip"] : []),
+  ]);
+  const tip = withTip ? money(totals.tip) : null;
+  if (
+    tip !== null &&
+    (tip.amountMinor.startsWith("-") || tip.currencyCode !== money(totals.total).currencyCode)
+  )
+    return fail();
   const paymentPosition = parsePaymentPosition(raw.paymentPosition);
   if (
     paymentPosition !== null &&
@@ -889,6 +905,8 @@ export function parseCurrentOrderDetail(value: unknown, orderReference: string) 
         tax: money(totals.tax),
         fee: money(totals.fee),
         total: money(totals.total),
+        /** What the order's payments carried as tip (null from an older server). */
+        tip,
       }),
     }),
   });

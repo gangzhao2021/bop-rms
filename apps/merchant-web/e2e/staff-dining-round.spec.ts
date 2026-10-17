@@ -456,6 +456,8 @@ test("@production the order queue marks a round entered by staff and its card-ma
             tax: { amountMinor: "195", currencyCode: "CAD" },
             fee: { amountMinor: "0", currencyCode: "CAD" },
             total: { amountMinor: "1695", currencyCode: "CAD" },
+            // WP-2423 (3cd0f8dd M1): the tip the order's payments carried.
+            tip: { amountMinor: "270", currencyCode: "CAD" },
           },
         },
       },
@@ -495,6 +497,10 @@ test("@production the order queue marks a round entered by staff and its card-ma
     entry.locator(".order-counter-paid", { hasText: "Paid on card machine $23.04" }),
   ).toBeVisible();
   await expect(entry.getByText(/the guest has not paid/u)).toHaveCount(0);
+  // WP-2423 (3cd0f8dd M1): the order's tip, and a total that includes it (what was paid).
+  const totals = entry.locator(".order-lines-totals").first();
+  await expect(totals).toContainText("Tip$2.70");
+  await expect(totals).toContainText("Total$19.65");
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     expect(

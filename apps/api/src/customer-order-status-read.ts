@@ -11,6 +11,7 @@ import {
   listOpenKitchenReworkItems,
 } from "@rms/kitchen";
 import {
+  createPostgresCardMachinePaymentStore,
   createPostgresPaymentStatusStore,
   listOrderPaymentTerminalOutcomes,
   listStoreOrderBatchPaymentOutcomes,
@@ -37,6 +38,7 @@ import {
   loadOrderNotAcceptedClosure,
   loadPickupPaymentWindowClosure,
   createPostgresOrderStatusProjectionStore,
+  createPostgresDigitalReceiptStore,
   findGuestSessionOrder,
   loadOrderCanonicalPhase,
   OrderStatusProjectionError,
@@ -296,6 +298,9 @@ export function createCustomerOrderStatusRead(
                 occurredAt: string;
                 amount: { amountMinor: bigint; currencyCode: string } | null;
                 freshnessStatus: "Fresh" | "Stale" | "Rebuilding" | "Failed";
+                /** WP-2423 (v15 3cd0f8dd H1): set for a payment taken on the Store's card machine. */
+                method?: "CardMachine";
+                orderBatchReference?: string;
               }[] = null;
           let tips:
             | null
@@ -359,6 +364,44 @@ export function createCustomerOrderStatusRead(
                     amount: fact.amount,
                     freshnessStatus: "Fresh",
                   });
+              // WP-2423 (v15 3cd0f8dd H1): a round staff took payment for on the Store's card
+              // machine is paid too. Payment owns both tenders and the staff order view reads the
+              // same records, so the guest sees everything paid for the order (and that round's
+              // tip in the total), never an online-only amount that looks like money is owed.
+              if (await stillAuthorized()) {
+                const machine = await createPostgresCardMachinePaymentStore({
+                  scope: {
+                    brandReference: options.paymentScope.brandReference,
+                    storeReference: options.paymentScope.storeReference,
+                  },
+                  authorize: async (_tx, query) =>
+                    query.orderReference === orderReference && (await stillAuthorized()),
+                }).listByOrder(transaction, orderReference);
+                for (const { payment } of machine) {
+                  const batch = String(payment.orderBatchReference);
+                  if (!expectedBatches.has(batch)) continue;
+                  payments.push({
+                    status: "Succeeded",
+                    occurredAt: String(payment.recordedAt),
+                    amount: {
+                      amountMinor: payment.preparation.total.amountMinor,
+                      currencyCode: payment.preparation.total.currencyCode,
+                    },
+                    freshnessStatus: "Fresh",
+                    method: "CardMachine",
+                    orderBatchReference: batch,
+                  });
+                  if (payment.preparation.tip.amountMinor > 0n)
+                    tipByBatch.set(
+                      batch,
+                      (tipByBatch.get(batch) ?? 0n) + payment.preparation.tip.amountMinor,
+                    );
+                }
+                tips = [...tipByBatch].map(([orderBatchReference, amountMinor]) => ({
+                  orderBatchReference,
+                  amount: { amountMinor, currencyCode: "CAD" },
+                }));
+              }
             }
           }
           // WP-2423: a pickup the Store closed as not collected (Fulfillment's fact).
@@ -447,6 +490,51 @@ export function createCustomerOrderStatusRead(
                   currencyCode: record.currencyCode,
                 },
               });
+          // WP-2423 (v15 3cd0f8dd M3): the refunds confirmed on this order and what each returned,
+          // as the order's latest receipt version states them (Ordering's receipt, issued from the
+          // Payment owner's confirmed refunds), so this page and the receipt never disagree. A
+          // receipt that can't be read leaves the page as it was rather than failing it.
+          let refunds: null | {
+            refunded: { amountMinor: bigint; currencyCode: string };
+            entries: {
+              kind: "Refund" | "ItemCancellation" | "RoundRefund" | "Other";
+              orderItemReferences: string[];
+              total: { amountMinor: bigint; currencyCode: string };
+              tip: { amountMinor: bigint; currencyCode: string };
+            }[];
+          } = null;
+          if (await stillAuthorized()) {
+            await transaction.query("SAVEPOINT customer_order_refunds", []);
+            try {
+              const chain = await createPostgresDigitalReceiptStore({
+                ...options.scope,
+                authorize: async (_tx, access) =>
+                  access.action === "Read" &&
+                  access.orderReference === orderReference &&
+                  (await stillAuthorized()),
+                validateSources: async () => false,
+              }).load({ transaction, orderReference });
+              const latest = chain?.records.at(-1);
+              if (latest !== undefined && latest.kind !== "Void") {
+                const snapshot = latest.snapshot;
+                if (snapshot.refundedTotal.amountMinor > 0n)
+                  refunds = {
+                    refunded: snapshot.refundedTotal,
+                    entries: (snapshot.refunds ?? []).map((refund) => ({
+                      kind: refund.kind,
+                      orderItemReferences: refund.lines.map((line) => line.lineReference),
+                      total: refund.total,
+                      tip: refund.tip,
+                    })),
+                  };
+              }
+              await transaction.query("RELEASE SAVEPOINT customer_order_refunds", []);
+            } catch {
+              refunds = null;
+              await transaction.query("ROLLBACK TO SAVEPOINT customer_order_refunds", []);
+              await transaction.query("RELEASE SAVEPOINT customer_order_refunds", []);
+            }
+          }
           // WP-2423 Q26: dishes the kitchen is remaking (Kitchen's public Query, by Order item), so
           // the customer is not told the order is ready while part of it is being made again.
           const remakes: { orderItemReference: string; quantity: number }[] = [];
@@ -614,6 +702,7 @@ export function createCustomerOrderStatusRead(
               ...(staffCancellations.length === 0 ? {} : { staffCancellations }),
               ...(itemCancellations.length === 0 ? {} : { itemCancellations }),
               ...(remakes.length === 0 ? {} : { remakes }),
+              ...(refunds === null ? {} : { refunds }),
               ...(itemPrices === null ? {} : { itemPrices }),
               ...(tips === null ? {} : { tips }),
               ...(batchPayments.length === 0 ? {} : { batchPayments }),

@@ -16,10 +16,11 @@ import {
   type StaffPageErrorCode,
   type StaffPageView,
 } from "./staff-administration-pages.js";
+import { actionAccessDeniedText, noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 
 const copy: Record<StaffPageErrorCode | "Loading", string> = {
   Loading: "Loading Store staff…",
-  PermissionDenied: "Staff administration permission is required for this action.",
+  PermissionDenied: actionAccessDeniedText,
   FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
   NotFound: "This staff member is not assigned to the selected Store.",
   Conflict: "The staff or role state changed. Refresh and try again.",
@@ -309,11 +310,17 @@ function Page({
   if (state.kind !== "Found")
     return (
       <StatePanel
-        heading={state.kind === "Loading" ? "Loading staff" : "Staff unavailable"}
+        heading={
+          state.kind === "Loading"
+            ? "Loading staff"
+            : state.kind === "PermissionDenied"
+              ? noAccessHeading
+              : "Staff unavailable"
+        }
         tone={state.kind === "Loading" ? "neutral" : "error"}
         status
       >
-        <p>{copy[state.kind]}</p>
+        <p>{state.kind === "PermissionDenied" ? pageAccessDeniedText : copy[state.kind]}</p>
       </StatePanel>
     );
   const view = state.view;

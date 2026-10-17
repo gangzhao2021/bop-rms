@@ -71,8 +71,14 @@ export function createCustomerReceiptRead(
           now,
           admission: { consume: async () => null },
         });
+        // WP-2423 (v15 3cd0f8dd M5): a visit that ended (its table closed, or it sat idle) can
+        // still read its own receipt on the same device, read only, within the Session's absolute
+        // lifetime. Decided once per read: the current visit first, then the ended visit.
+        let endedVisit = false;
         const authorize = async () => {
-          const guest = await identity.authorize({ ...credentials, observedAt: now() });
+          const guest = endedVisit
+            ? await identity.authorizeEndedVisit({ ...credentials, observedAt: now() })
+            : await identity.authorize({ ...credentials, observedAt: now() });
           if (
             guest.brandReference !== options.scope.brandReference ||
             guest.storeReference !== options.scope.storeReference
@@ -80,7 +86,19 @@ export function createCustomerReceiptRead(
             throw new DigitalReceiptError("DIGITAL_RECEIPT_PERMISSION_DENIED");
           return guest;
         };
-        const guest = await authorize();
+        await transaction.query("SAVEPOINT customer_receipt_visit", []);
+        let current: Awaited<ReturnType<typeof authorize>>;
+        try {
+          current = await authorize();
+          await transaction.query("RELEASE SAVEPOINT customer_receipt_visit", []);
+        } catch (error) {
+          if (!(error instanceof GuestSessionError)) throw error;
+          await transaction.query("ROLLBACK TO SAVEPOINT customer_receipt_visit", []);
+          await transaction.query("RELEASE SAVEPOINT customer_receipt_visit", []);
+          endedVisit = true;
+          current = await authorize();
+        }
+        const guest = current;
         const fingerprint = JSON.stringify(guest);
         const stillAuthorized = async () => JSON.stringify(await authorize()) === fingerprint;
         const store = createPostgresDigitalReceiptStore({
@@ -95,7 +113,9 @@ export function createCustomerReceiptRead(
           authorization: {
             authorizeGuest: async (input) =>
               input.orderReference === orderReference && (await stillAuthorized())
-                ? { guestSession: guest }
+                ? endedVisit
+                  ? { guestSession: guest, endedVisit: true as const }
+                  : { guestSession: guest }
                 : null,
             authorizeResume: async () => null,
           },
@@ -142,7 +162,14 @@ export function createCustomerReceiptRead(
             null;
         if (!(await stillAuthorized()))
           throw new DigitalReceiptError("DIGITAL_RECEIPT_PERMISSION_DENIED");
-        return { chain, financial, storeContact, privacyNoticeUrl };
+        return {
+          chain,
+          financial,
+          storeContact,
+          privacyNoticeUrl,
+          // WP-2423 (v15 3cd0f8dd M5): until when this device can still open the receipt.
+          ...(endedVisit ? { visitEnded: { receiptAvailableUntil: guest.absoluteExpiresAt } } : {}),
+        };
       });
     } catch (error) {
       if (error instanceof DigitalReceiptError) throw error;

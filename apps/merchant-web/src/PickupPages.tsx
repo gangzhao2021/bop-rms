@@ -1,3 +1,4 @@
+import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { PickupProofForm, pickupCodeLockedText } from "./PickupProofForm.js";
 import { PickupHandoffForm } from "./PickupHandoffForm.js";
 import { PickupNotCollectedAction, pickupHoldMinutes } from "./PickupNotCollectedAction.js";
@@ -41,10 +42,7 @@ type State =
 export function PickupStatePanel({ state }: { readonly state: Exclude<State["kind"], "Found"> }) {
   const copy = {
     Loading: ["Loading", "Loading pickups…"],
-    PermissionDenied: [
-      "Permission denied",
-      "Your permissions or Store scope do not allow the pickup queue.",
-    ],
+    PermissionDenied: [noAccessHeading, pageAccessDeniedText],
     NotFound: ["Pickup unavailable", "This pickup is not at the selected Store."],
     Offline: ["You’re offline", "Reconnect and refresh before handing over a pickup."],
     Conflict: ["Pickup changed", "Refresh to see the current pickup before trying again."],
@@ -218,7 +216,7 @@ function PickupCard({
       </dl>
       {!completed && counter ? (
         <p className="pickup-queue__counter" role="note">
-          Taken at the counter — hand over to the customer by name or order number.
+          Taken at the counter — call the order number and hand it over.
         </p>
       ) : null}
       {!completed && item.proofReadiness === "Locked" ? (

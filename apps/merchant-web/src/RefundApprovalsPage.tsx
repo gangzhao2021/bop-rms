@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { StatePanel } from "@bop-rms/ui";
 import { WorkspacePage } from "./WorkspacePage.js";
+import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { SourceTime } from "./StoreTime.js";
 import { StepUpVerification } from "./StepUpVerification.js";
 import {
@@ -571,8 +572,8 @@ export function RefundApprovalsPage({
             <p>Checking refunds awaiting approval…</p>
           </StatePanel>
         ) : state === "Denied" ? (
-          <StatePanel heading="Not available for your role" tone="error" status>
-            <p>Only staff who may request or approve refunds can see this list.</p>
+          <StatePanel heading={noAccessHeading} tone="error" status>
+            <p>{pageAccessDeniedText}</p>
           </StatePanel>
         ) : state === "Unavailable" ? (
           <StatePanel heading="Refunds could not be loaded" tone="error" status>

@@ -13,6 +13,7 @@ import {
   createPostgresStoreBusinessDateSource,
 } from "@rms/store";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import {
   createMerchantStoreBusinessDay,
   merchantBusinessDayView,
@@ -119,66 +120,88 @@ export function createMerchantServiceControl(options: {
       })({ ...request, actorReference, purposeCode: "STORE_SERVICE" });
     });
   };
+  // WP-2423 L1: the caller is resolved in full once at the start and once before the reply; the
+  // owner reads in between (publication proof, business date, version, and every recorded pause
+  // or resume with its audit binding) take the run's guard. Before, each recorded operation
+  // re-resolved the caller twice (~30 queries each), so the panel's refresh after a pause or
+  // resume grew with the Store's pause history (2.3 s at 20 operations on v15).
   const read = async (sessionCookie: unknown) =>
-    source.transactions.run(async (tx) => {
-      const { selected, context, store, allowed } = await resolveScope(
-        tx,
-        sessionCookie,
-        "store.service.read",
-      );
-      const at = context.resolvedAt;
-      let published:
-        | Awaited<ReturnType<ReturnType<typeof createPostgresCurrentStorePublicationProof>>>
-        | undefined;
-      await createPostgresStoreBusinessDateSource({
-        brandReference: context.brand.brandReference,
-        storeReference: store.storeReference,
-        timeZone: store.timeZone,
-        authorize: allowed,
-        publicationProof: async (transaction, candidate, observedAt) => {
-          published = await createPostgresCurrentStorePublicationProof({
-            ...source.publication,
-            tenantReference: selected.tenantReference,
-            brandReference: context.brand.brandReference,
-            storeReference: store.storeReference,
-            configurationReference: candidate.configurationReference,
-            authorize: allowed,
-            ...storeConfigurationProofHashing,
-          })(transaction, observedAt);
-          return {
-            contentDigest: published.contentDigest,
-            businessDayStartSource: published.businessDayStartSource,
-          };
+    source.transactions.run((tx) =>
+      withMerchantTransactionAuthorization(
+        {
+          transaction: tx,
+          resolve: async () => {
+            const scope = await resolveScope(tx, sessionCookie, "store.service.read");
+            if ((await scope.allowed()) !== true)
+              throw new Error("STORE_SERVICE_PERMISSION_DENIED");
+            return scope;
+          },
+          recheck: async (scope) => (await scope.allowed()) === true,
+          denied: () => {
+            throw new Error("STORE_SERVICE_PERMISSION_DENIED");
+          },
         },
-      })(tx, at);
-      if (!published) throw new Error("STORE_SERVICE_CONFIGURATION_UNAVAILABLE");
-      const state = await createPostgresStoreServiceControlState({
-        brandReference: context.brand.brandReference,
-        storeReference: store.storeReference,
-        authorize: allowed,
-        verifyOperation: createMerchantServicePauseProof({
+        (authority) => readState(tx, authority.scope, () => authority.guard()),
+      ),
+    );
+  const readState = async (
+    tx: Parameters<Parameters<typeof source.transactions.run>[0]>[0],
+    { selected, context, store }: Awaited<ReturnType<typeof resolveScope>>,
+    allowed: () => Promise<boolean>,
+  ) => {
+    const at = context.resolvedAt;
+    let published:
+      | Awaited<ReturnType<ReturnType<typeof createPostgresCurrentStorePublicationProof>>>
+      | undefined;
+    await createPostgresStoreBusinessDateSource({
+      brandReference: context.brand.brandReference,
+      storeReference: store.storeReference,
+      timeZone: store.timeZone,
+      authorize: allowed,
+      publicationProof: async (transaction, candidate, observedAt) => {
+        published = await createPostgresCurrentStorePublicationProof({
+          ...source.publication,
+          tenantReference: selected.tenantReference,
           brandReference: context.brand.brandReference,
           storeReference: store.storeReference,
+          configurationReference: candidate.configurationReference,
           authorize: allowed,
-        }),
-      })(tx, at);
-      return Object.freeze({
-        screenId: "STORE-HOURS-SERVICE" as const,
+          ...storeConfigurationProofHashing,
+        })(transaction, observedAt);
+        return {
+          contentDigest: published.contentDigest,
+          businessDayStartSource: published.businessDayStartSource,
+        };
+      },
+    })(tx, at);
+    if (!published) throw new Error("STORE_SERVICE_CONFIGURATION_UNAVAILABLE");
+    const state = await createPostgresStoreServiceControlState({
+      brandReference: context.brand.brandReference,
+      storeReference: store.storeReference,
+      authorize: allowed,
+      verifyOperation: createMerchantServicePauseProof({
+        brandReference: context.brand.brandReference,
         storeReference: store.storeReference,
-        configurationReference: published.configuration.configurationReference,
-        enabledServiceModes: published.configuration.enabledServiceModes,
-        timeZone: store.timeZone,
-        hours: Object.freeze({
-          configurationSource: published.configuration.source,
-          effectiveFrom: published.configuration.effectiveFrom,
-          effectiveUntil: published.configuration.effectiveUntil,
-          businessDayStartLocalTime: published.configuration.businessDayStartLocalTime,
-          weeklySchedule: published.configuration.weeklySchedule,
-          exceptions: published.configuration.exceptions,
-        }),
-        ...state,
-      });
+        authorize: allowed,
+      }),
+    })(tx, at);
+    return Object.freeze({
+      screenId: "STORE-HOURS-SERVICE" as const,
+      storeReference: store.storeReference,
+      configurationReference: published.configuration.configurationReference,
+      enabledServiceModes: published.configuration.enabledServiceModes,
+      timeZone: store.timeZone,
+      hours: Object.freeze({
+        configurationSource: published.configuration.source,
+        effectiveFrom: published.configuration.effectiveFrom,
+        effectiveUntil: published.configuration.effectiveUntil,
+        businessDayStartLocalTime: published.configuration.businessDayStartLocalTime,
+        weeklySchedule: published.configuration.weeklySchedule,
+        exceptions: published.configuration.exceptions,
+      }),
+      ...state,
     });
+  };
   // WP-2423 Q21: the selected Store's current business day, for every staff member who may enter.
   const businessDay = async (sessionCookie: unknown) =>
     source.transactions.run(async (tx) => {

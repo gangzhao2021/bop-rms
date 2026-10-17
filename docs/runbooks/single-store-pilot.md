@@ -396,6 +396,57 @@ permission `dining.table.qr.manage`); see
   key and point at `https://127.0.0.1:4443`, so phones cannot scan them. After the managed QR key and
   the public customer domain arrive, replace and reprint every code.
 
+## Opening and closing the store (WP-2423)
+
+Added after the 2026-10-17 store-day rehearsal (WP-2423 `3cd0f8dd` M6). Home shows the same lists
+as an **Opening and closing** card, each line with what the store's records say now ("Done", "3
+left") and a link to the screen where it is done; lines for screens a staff member does not have
+are left out. The card reads the same sources as **Right now** (orders, pickups, tables,
+exceptions) and the last closed day's settlement.
+
+**TEST-ONLY store hours.** The DEMO store's published hours are **12:00 AM–11:59 PM every day**, a
+test value so the internal-test store is always "Open" whenever someone tests it. Guests see these
+hours (for example on the "isn't taking orders right now" page while ordering is paused). They are
+not the store's real hours. Before real customers, the Owner sets the real opening hours in
+`Store setup` → hours and publishes them; until then, whether guests can order is controlled only
+with `Hours & ordering` → `Pause service` / `Resume`.
+
+### When you open
+
+1. Sign in on the counter tablet and open **Home**. The **Store system** card (Owner, Store
+   Manager) must say "Everything is working"; if not, see
+   [What each alert means and what to do](#what-each-alert-means-and-what-to-do) or the
+   [outage procedure](#store-outage-procedure-wp-2423-q9).
+2. If online ordering was paused at closing: `Hours & ordering` → `Resume`.
+3. **Settlement for the last closed day** (Owner, Store Manager): Home shows "Matches the payment
+   provider", "N payments to look at" or "Not checked yet". Anything but a match: open
+   `Settlement` for that day and follow its "What to do".
+4. **Pickups from earlier days**: Home shows them apart from today's. On `Pickup` → "From earlier
+   days — check and close": hand over any the customer is collecting now; a manager marks the rest
+   `Mark not collected`.
+5. **Tables still open from before**: on `Tables`, a manager or the owner closes each table whose
+   guests have left.
+6. Open `Orders` and `Kitchen` (kitchen display) and leave them on for the day; the Orders screen
+   must stay open whenever the store is open (paid pickups have 30 minutes to be accepted).
+
+### Before you close
+
+1. **Stop new orders**: when you stop taking orders, `Hours & ordering` → `Pause service` → `All
+services` for the hours until opening. Guests who scan then see "isn't taking orders right now".
+   Tables already seated can still order on their phones: tell them it is last orders.
+2. **Every order made and served or handed over**: `Orders` shows nothing left open. A paid pickup
+   still waiting at the end of the day: call the customer if the order shows contact details; if it
+   was not collected, a manager presses `Mark not collected`.
+3. **Tables closed once the guests have left**: only the Owner or a Store Manager closes a table
+   (cashiers see "A manager or the owner closes the table"). Home shows how many open tables are
+   served and waiting to be closed.
+4. **Exceptions handled or noted for tomorrow**: Home "Open exceptions" → `View exceptions`.
+5. **Settlement**: today's online payments are checked against the payment provider automatically
+   after the business day ends; look at the result when you open (step 3 above). Compare
+   `Settlement` "Store card machine" with the card machine's own batch report for the day.
+6. Leave the counter tablet charging. Signing out is not required; a staff screen signs itself out
+   after 30 minutes without use.
+
 ## Store outage procedure (WP-2423 Q9)
 
 What staff do when the store network, the pilot host, the payment Provider, the card machine or a
@@ -680,6 +731,32 @@ Do these in order, before resuming online ordering.
   [Daily settlement handover](#daily-settlement-handover)) on the next day.
 - Keep the incident sheet and paper slips with the day's card machine batch report.
 
+### 7. Refunds and item cancellations while the Provider or network is down
+
+Added after the 2026-10-17 store-day rehearsal (WP-2423 `3cd0f8dd` M8). What the product does today:
+
+- **Online payment, refund asked for by the customer** (`Orders` → order → `Payment` → refund
+  request): the request is recorded first, then sent to the payment provider. If the provider or
+  the internet is down, the page says it is not confirmed the provider received it and that the
+  refund stays recorded as not sent. Nothing is lost and it is never sent twice. When the provider
+  is back, open the order again: the refund shows "Recorded, not sent yet" or "Not sent yet" with
+  the send button; send it then. Nothing sends it automatically, so write the order number on the
+  incident sheet ("refund to send") and do it in recovery.
+- **Online payment, cancelling items** (`Cancel item and refund`): the items are cancelled at once
+  (the kitchen stops them) and the refund stays "refund pending". When the provider is back, a
+  manager or the owner presses `Check refund` on the cancelled item; it sends the refund then (never
+  twice). Write the order number on the incident sheet.
+- **Online payment, cancelling a whole order or round**: the refund is retried automatically by the
+  store system until the provider answers; check the order shows "refunded in full" after recovery.
+- **Card-machine payment** (counter orders and staff-entered table rounds): refund on the store card
+  machine when it works, then record it on the order (`Record card-machine refund` or the refund
+  request's card-machine step) with the machine's reference. If the card machine is down too, write
+  the order number, amount and reason on the incident sheet, tell the customer the refund will be
+  made on their card as soon as the machine works, and do it then.
+- **Never** refund an online payment in cash or on the card machine, and never refund the same thing
+  twice by two routes. If the store network is down but a phone on mobile data can reach the store
+  system, a manager may send pending refunds from that phone.
+
 ### One-page checklist (print)
 
 ```text
@@ -707,7 +784,9 @@ STORE OUTAGE CHECKLIST                       keep at the counter
 [ ] 13 Refund any duplicate on the card machine, then record it.
 [ ] 14 Tables: close sessions of guests who left.
 [ ] 15 Resume online ordering. Remove signs.
-[ ] 16 Day end: Settlement "Store card machine" = card machine batch.
+[ ] 16 Refunds "not sent yet" / item refunds "pending" on the incident sheet:
+       send them (order > Payment, or Check refund on the item).
+[ ] 17 Day end: Settlement "Store card machine" = card machine batch.
 ```
 
 ### Rehearsal before UAT (external gate: not done)

@@ -26,7 +26,18 @@ export interface OrderStatusSources {
         readonly occurredAt: string;
         readonly amount: null | { readonly amountMinor: bigint; readonly currencyCode: string };
         readonly freshnessStatus: OrderStatusFreshness;
+        /**
+         * WP-2423 (v15 3cd0f8dd H1): set for a round staff took payment for on the Store's card
+         * machine (with that round); absent for an online payment.
+         */
+        readonly method?: "CardMachine";
+        readonly orderBatchReference?: string;
       }[];
+  /**
+   * WP-2423 (v15 3cd0f8dd M3): the refunds confirmed on this order, as its latest receipt states
+   * them (absent when nothing was refunded).
+   */
+  readonly refunds?: OrderRefunds;
   /** WP-2423: a pickup the Store closed as not collected after the pickup time (Pickup only). */
   readonly pickup?: null | { readonly notCollectedAt: string };
   /** WP-2423 Q12: when a pickup was cancelled because payment was not completed in time. */
@@ -85,6 +96,17 @@ export interface OrderStatusSources {
         readonly closedAt: string;
         readonly refundStatus: "Pending" | "Refunded";
       };
+}
+
+/** WP-2423 (v15 3cd0f8dd M3): what was refunded on the order and, where known, what for. */
+export interface OrderRefunds {
+  readonly refunded: { readonly amountMinor: bigint; readonly currencyCode: string };
+  readonly entries: readonly {
+    readonly kind: "Refund" | "ItemCancellation" | "RoundRefund" | "Other";
+    readonly orderItemReferences: readonly string[];
+    readonly total: { readonly amountMinor: bigint; readonly currencyCode: string };
+    readonly tip: { readonly amountMinor: bigint; readonly currencyCode: string };
+  }[];
 }
 
 export interface BatchPayment {

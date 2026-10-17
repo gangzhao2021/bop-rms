@@ -341,3 +341,96 @@ describe("WP-2423: chosen option lines", () => {
     expect(() => parseReceiptView(body, id(1))).toThrow("invalid receipt");
   });
 });
+
+describe("WP-2423 (v15 3cd0f8dd) refunds, tenders and ended visits", () => {
+  const amount = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+  const refunded = (refunds: unknown[], total = "565") => {
+    const value = payload();
+    const original = value.records[0];
+    if (original === undefined) throw new Error("fixture");
+    return {
+      ...value,
+      records: [
+        original,
+        {
+          ...original,
+          recordReference: id(9),
+          version: 2,
+          kind: "Refund",
+          reasonCode: "PAYMENT_REFUND_STATUS_CHANGED",
+          snapshot: {
+            ...original.snapshot,
+            paymentStatus: "PartiallyRefunded",
+            refundedTotal: amount(total),
+            refunds,
+          },
+        },
+      ],
+    };
+  };
+  const refund = {
+    kind: "ItemCancellation",
+    lines: [
+      { lineReference: id(4), displayName: "Synthetic bowl", quantity: 1, amount: amount("500") },
+    ],
+    tax: amount("65"),
+    tip: amount("0"),
+    other: amount("0"),
+    total: amount("565"),
+    newInThisVersion: true,
+  };
+  it("reads what each refund returned and refuses refunds that don't add up", () => {
+    const parsed = parseReceiptView(refunded([refund]), id(1));
+    expect(parsed.records[1]?.snapshot.refunds?.[0]?.total.amountMinor).toBe(565n);
+    expect(parsed.records[0]?.snapshot.refunds).toBeUndefined();
+    expect(() => parseReceiptView(refunded([refund], "600"), id(1))).toThrow("invalid receipt");
+    expect(() =>
+      parseReceiptView(refunded([{ ...refund, total: amount("566") }], "566"), id(1)),
+    ).toThrow("invalid receipt");
+    expect(() =>
+      parseReceiptView(
+        refunded([{ ...refund, lines: [{ ...refund.lines[0], lineReference: id(77) }] }]),
+        id(1),
+      ),
+    ).toThrow("invalid receipt");
+  });
+  it("reads how the order was paid and an ended visit's bound", () => {
+    const parsed = parseReceiptView(
+      {
+        ...payload(),
+        financial: {
+          observedAt: "2026-08-12T14:10:00.000Z",
+          currencyCode: "CAD",
+          capturedMinor: "1667",
+          confirmedRefundMinor: "0",
+          pendingRefundMinor: "0",
+          unresolvedAttemptCount: 0,
+          paidOnlineMinor: "1130",
+          paidOnCardMachineMinor: "537",
+        },
+        visitEnded: { receiptAvailableUntil: "2026-08-13T12:00:00.000Z" },
+      },
+      id(1),
+    );
+    expect(parsed.financial?.paidOnCardMachineMinor).toBe(537n);
+    expect(parsed.visitEnded?.receiptAvailableUntil).toBe("2026-08-13T12:00:00.000Z");
+    expect(() =>
+      parseReceiptView(
+        {
+          ...payload(),
+          financial: {
+            observedAt: "2026-08-12T14:10:00.000Z",
+            currencyCode: "CAD",
+            capturedMinor: "1667",
+            confirmedRefundMinor: "0",
+            pendingRefundMinor: "0",
+            unresolvedAttemptCount: 0,
+            paidOnlineMinor: "1130",
+            paidOnCardMachineMinor: "500",
+          },
+        },
+        id(1),
+      ),
+    ).toThrow("invalid receipt");
+  });
+});

@@ -1,3 +1,4 @@
+import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
@@ -88,8 +89,12 @@ function useRecipeView<V>(
 }
 function Failure({ code }: { code: RecipeErrorCode | "Loading" }) {
   return (
-    <StatePanel heading="Recipes" tone={code === "Loading" ? "neutral" : "error"} status>
-      <p>{copy[code]}</p>
+    <StatePanel
+      heading={code === "PermissionDenied" ? noAccessHeading : "Recipes"}
+      tone={code === "Loading" ? "neutral" : "error"}
+      status
+    >
+      <p>{code === "PermissionDenied" ? pageAccessDeniedText : copy[code]}</p>
     </StatePanel>
   );
 }

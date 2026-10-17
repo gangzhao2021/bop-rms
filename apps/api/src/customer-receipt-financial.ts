@@ -12,6 +12,12 @@ export interface CustomerReceiptFinancialView {
   readonly confirmedRefundMinor: bigint;
   readonly pendingRefundMinor: bigint;
   readonly unresolvedAttemptCount: number;
+  /**
+   * WP-2423 (v15 3cd0f8dd H1): of `capturedMinor`, what was paid online and what staff took on the
+   * Store's card machine (a dine-in table can pay rounds both ways).
+   */
+  readonly paidOnlineMinor: bigint;
+  readonly paidOnCardMachineMinor: bigint;
 }
 /** Optional current evidence, separate from immutable receipt history. */
 export async function readCustomerReceiptFinancial(
@@ -34,13 +40,17 @@ export async function readCustomerReceiptFinancial(
       authorize: async (_tx, query) =>
         query.orderReference === input.orderReference && (await authorize()),
     })(transaction, input);
+    // WP-2423 (v15 3cd0f8dd H1): what the order was paid and refunded across both tenders (the
+    // settlement figures staff reconcile), not the online payments alone.
     result = {
       observedAt: position.observedAt,
       currencyCode: position.currencyCode,
-      capturedMinor: position.capturedMinor,
-      confirmedRefundMinor: position.confirmedRefundMinor,
-      pendingRefundMinor: position.pendingRefundMinor,
+      capturedMinor: position.settlement.capturedMinor,
+      confirmedRefundMinor: position.settlement.confirmedRefundMinor,
+      pendingRefundMinor: position.settlement.pendingRefundMinor,
       unresolvedAttemptCount: position.unresolvedAttemptCount,
+      paidOnlineMinor: position.capturedMinor,
+      paidOnCardMachineMinor: position.settlement.capturedMinor - position.capturedMinor,
     };
   } catch {
     await transaction.query("ROLLBACK TO SAVEPOINT customer_receipt_financial", []);

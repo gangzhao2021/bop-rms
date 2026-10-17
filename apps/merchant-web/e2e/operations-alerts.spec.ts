@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
+import { settlementViewFixture } from "../src/settlement.fixtures";
 
 // The real pilot navigation shape (tooling/environment/pilot-merchant.mjs), trimmed per role the
 // way the BFF trims it by permission. The card must not depend on any one of these entries: the
@@ -192,6 +193,21 @@ async function pilotHome(
         items: [],
       },
     }),
+  );
+  // WP-2423 (3cd0f8dd M6/M7): the open tables and the last closed day's settlement on Home.
+  await page.route("**/merchant/dining/tables", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        canOperateTables: true,
+        canCloseSessions: role !== "front-of-house",
+        nextAfterTableReference: null,
+        items: [],
+      },
+    }),
+  );
+  await page.route("**/merchant/settlement", (route) =>
+    route.fulfill({ headers, json: settlementViewFixture() }),
   );
   // WP-2423: Home asks a member with no recorded name to add one.
   let named = ownName === "Recorded";

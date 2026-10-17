@@ -196,7 +196,10 @@ test("@production Settlement shows the day's totals, the run result and differen
 
   denied = true;
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Permission denied" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "No access", exact: true })).toBeVisible();
+  await expect(
+    page.getByText("You don't have access to this page. Ask the owner or a manager."),
+  ).toBeVisible();
   await expect(page.getByText("$1,234.50")).toHaveCount(0);
 });
 
@@ -412,7 +415,7 @@ test("@production WP-2423 Settlement keeps a day settled twice readable and answ
   await expect(
     page.getByText(/Sat, Sep 19 is before the store started using this system/),
   ).toBeVisible();
-  await expect(page.getByText("Permission denied")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "No access", exact: true })).toHaveCount(0);
   await expectNoInternalText(page);
   await page.getByRole("button", { name: "Show Sun, Sep 20" }).click();
   await expect(page.getByRole("heading", { name: "Business day: Sun, Sep 20" })).toBeVisible();

@@ -1,3 +1,4 @@
+import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { SourceTime, StaffTime } from "./StoreTime.js";
@@ -99,11 +100,17 @@ function Failure({ code }: { readonly code: MenuErrorCode | "Loading" }) {
   return (
     <WorkspacePage title="Menus">
       <StatePanel
-        heading={code === "Loading" ? "Loading" : "Unavailable"}
+        heading={
+          code === "PermissionDenied"
+            ? noAccessHeading
+            : code === "Loading"
+              ? "Loading"
+              : "Unavailable"
+        }
         tone={code === "Loading" ? "neutral" : "error"}
         status
       >
-        <p>{copy[code]}</p>
+        <p>{code === "PermissionDenied" ? pageAccessDeniedText : copy[code]}</p>
       </StatePanel>
     </WorkspacePage>
   );

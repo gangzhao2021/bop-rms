@@ -527,5 +527,277 @@ for (const viewport of [
       );
       await noOverflowOrBlockingAxe(page);
     });
+
+    // WP-2423 (v15 3cd0f8dd M3/M4): a refund confirmed after payment. The receipt gains a version
+    // that says what the refund returned (and keeps version 1 as issued); the order page shows the
+    // same refund. TEST-ONLY: $10.00 + $1.30 tax + $1.50 tip paid; $5.00 item, $0.65 tax and $0.75
+    // of the tip refunded.
+    test("a refund version says what was refunded, and the order page shows the refund", async ({
+      page,
+    }) => {
+      const issued = receipt(true);
+      const first = issued.receipt.records[0];
+      if (!first) throw new Error("fixture");
+      const line = first.snapshot.lines[0];
+      if (!line) throw new Error("fixture");
+      Object.assign(line, { quantity: 2 });
+      Object.assign(first.snapshot, { tip: money("150"), total: money("1280") });
+      const refunded = {
+        ...first,
+        recordReference: id(30),
+        version: 2,
+        kind: "Refund",
+        recordedAt: "2026-10-14T14:20:00.000Z",
+        reasonCode: "PAYMENT_REFUND_STATUS_CHANGED",
+        snapshot: {
+          ...first.snapshot,
+          paymentStatus: "PartiallyRefunded",
+          refundedTotal: money("640"),
+          refunds: [
+            {
+              kind: "Refund",
+              lines: [
+                {
+                  lineReference: id(4),
+                  displayName: "Synthetic bowl",
+                  quantity: 1,
+                  amount: money("500"),
+                },
+              ],
+              tax: money("65"),
+              tip: money("75"),
+              other: money("0"),
+              total: money("640"),
+              newInThisVersion: true,
+            },
+          ],
+        },
+      };
+      const body = {
+        ...issued,
+        receipt: {
+          ...issued.receipt,
+          records: [first, refunded],
+          financial: {
+            observedAt: "2026-10-14T14:21:00.000Z",
+            currencyCode: "CAD",
+            capturedMinor: "1280",
+            confirmedRefundMinor: "640",
+            pendingRefundMinor: "0",
+            unresolvedAttemptCount: 0,
+            paidOnlineMinor: "1280",
+            paidOnCardMachineMinor: "0",
+          },
+        },
+      };
+      const current = status("Stored");
+      const batch = current.status.order.batches[0];
+      const payment = current.status.sources.payments[0];
+      if (!batch?.items[0] || !payment) throw new Error("fixture");
+      Object.assign(batch.items[0], { quantity: 2, lineTotal: money("1130") });
+      payment.amount = money("1280");
+      Object.assign(current.status.sources, {
+        tips: [{ orderBatchReference: id(9), amount: money("150") }],
+        refunds: {
+          refunded: money("640"),
+          entries: [
+            {
+              kind: "Refund",
+              orderItemReferences: [id(10)],
+              total: money("640"),
+              tip: money("75"),
+            },
+          ],
+        },
+      });
+      await bootstrap(page);
+      await page.route("**/api/v1/orders/*/receipt", (route) =>
+        route.fulfill({ headers: json, body: JSON.stringify(body) }),
+      );
+      await page.route("**/api/v1/orders/*/status", (route) =>
+        route.fulfill({ headers: json, body: JSON.stringify(current) }),
+      );
+      await page.goto("/orders/" + orderReference + "/receipt");
+      await expect(page.getByText("Confirmed refunds$6.40")).toBeVisible();
+      const version2 = page.getByRole("article", { name: "Version 2: Refund" });
+      await expect(
+        version2.getByText("Reason: A refund was made to your original payment."),
+      ).toBeVisible();
+      const what = version2.getByRole("region", { name: "What was refunded" });
+      await expect(what.getByText("Refund · new on this version")).toBeVisible();
+      await expect(what.locator(".receipt-page__lines li")).toHaveText(["1 × Synthetic bowl$5.00"]);
+      await expect(what.locator(".receipt-page__totals div", { hasText: "Tax" })).toHaveText(
+        "Tax$0.65",
+      );
+      await expect(what.locator(".receipt-page__totals div", { hasText: "Tip" })).toHaveText(
+        "Tip$0.75",
+      );
+      await expect(
+        what.locator(".receipt-page__totals div", { hasText: "Total after refunds" }),
+      ).toHaveText("Total after refunds$6.40");
+      // Version 1 is printed as it was issued: nothing refunded on it.
+      const version1 = page.getByRole("article", { name: "Version 1: Receipt" });
+      await expect(version1.getByRole("region", { name: "What was refunded" })).toHaveCount(0);
+      await expect(
+        version1.locator(".receipt-page__totals div", { hasText: /^Refunded/u }),
+      ).toHaveText("Refunded$0.00");
+      await expectNoInternalText(page);
+      await noOverflowOrBlockingAxe(page);
+      await page.goto("/orders/" + orderReference);
+      await expect(page.getByText("Payment received $12.80")).toBeVisible();
+      await expect(
+        page.locator(".order-status__summary dl div", { hasText: "Refunded" }),
+      ).toHaveText("Refunded$6.40");
+      await expect(
+        page.getByText(
+          "Refund: $6.40 returned to your original payment, including $0.75 of the tip.",
+        ),
+      ).toBeVisible();
+      await expect(page.locator(".order-status__item-refunded")).toHaveText("Refunded");
+      await expectNoInternalText(page);
+      await noOverflowOrBlockingAxe(page);
+    });
+
+    // WP-2423 (v15 3cd0f8dd H1): a table that paid round 1 online and round 2 with staff on the
+    // Store's card machine owes nothing; both pages say what was paid and how. TEST-ONLY amounts.
+    test("a round paid on the store's card machine counts on the order page and the receipt", async ({
+      page,
+    }) => {
+      const current = status("Stored");
+      const order = current.status.order;
+      const first = order.batches[0];
+      const payment = current.status.sources.payments[0];
+      if (!first?.items[0] || !payment) throw new Error("fixture");
+      Object.assign(order, { orderType: "DineIn", canonicalPhase: "Accepted" });
+      first.items[0].lineTotal = money("480");
+      payment.amount = money("544");
+      order.batches.push({
+        orderBatchReference: id(20),
+        submittedAt: "2026-10-14T13:58:00.000Z",
+        items: [
+          {
+            orderItemReference: id(21),
+            displayName: "Synthetic mocha",
+            quantity: 1,
+            lineTotal: money("537"),
+          },
+        ],
+      });
+      current.status.sources.payments.push({
+        status: "Succeeded",
+        occurredAt: "2026-10-14T13:59:00.000Z",
+        amount: money("537"),
+        freshnessStatus: "Fresh",
+        ...{ method: "CardMachine", orderBatchReference: id(20) },
+      });
+      Object.assign(current.status.sources, {
+        tips: [{ orderBatchReference: id(9), amount: money("64") }],
+      });
+      const issued = receipt(true);
+      Object.assign(issued.receipt, {
+        financial: {
+          observedAt: "2026-10-14T14:01:00.000Z",
+          currencyCode: "CAD",
+          capturedMinor: "1081",
+          confirmedRefundMinor: "0",
+          pendingRefundMinor: "0",
+          unresolvedAttemptCount: 0,
+          paidOnlineMinor: "544",
+          paidOnCardMachineMinor: "537",
+        },
+      });
+      await bootstrap(page);
+      await page.route("**/api/v1/orders/*/status", (route) =>
+        route.fulfill({ headers: json, body: JSON.stringify(current) }),
+      );
+      await page.route("**/api/v1/orders/*/receipt", (route) =>
+        route.fulfill({ headers: json, body: JSON.stringify(issued) }),
+      );
+      await page.goto("/orders/" + orderReference);
+      await expect(
+        page.getByText("Payment received $10.81 ($5.44 online, $5.37 on the store’s card machine)"),
+      ).toBeVisible();
+      await expect(page.locator(".order-status__total")).toHaveText(
+        "Total including tax and tip$10.81",
+      );
+      await expectNoInternalText(page);
+      await noOverflowOrBlockingAxe(page);
+      await page.goto("/orders/" + orderReference + "/receipt");
+      const paid = page.getByRole("region", { name: "Payment and refunds" });
+      await expect(paid.locator(".receipt-page__totals div", { hasText: /^Paid\$/u })).toHaveText(
+        "Paid$10.81",
+      );
+      await expect(paid.getByText("Paid online$5.44")).toBeVisible();
+      await expect(paid.getByText("Paid on the store’s card machine$5.37")).toBeVisible();
+      await expectNoInternalText(page);
+      await noOverflowOrBlockingAxe(page);
+    });
+
+    // WP-2423 (v15 3cd0f8dd M5): the table was closed after the guest left. The order page says the
+    // visit ended (no ordering) and opens the receipt, read only, with the ended visit's credential.
+    test("after the visit ended, the guest still opens their receipt from the order page", async ({
+      page,
+    }) => {
+      const ended = "e".repeat(43);
+      // The receipt stays readable on this phone until 24 hours after the visit started.
+      const until = new Date(Date.now() + 20 * 60 * 60 * 1000).toISOString();
+      await page.route("**/api/v1/customer/session/csrf", (route) =>
+        route.fulfill({
+          status: 200,
+          headers: json,
+          body: JSON.stringify({
+            schemaVersion: 1,
+            endedVisit: {
+              csrfToken: ended,
+              order: { orderReference, orderNumber: "12", orderType: "DineIn" },
+              receiptAvailableUntil: until,
+            },
+          }),
+        }),
+      );
+      const statusCalls: string[] = [];
+      await page.route("**/api/v1/orders/*/status", (route) => {
+        statusCalls.push(route.request().url());
+        return route.fulfill({ status: 404, headers: json, body: "{}" });
+      });
+      const receiptTokens: (string | undefined)[] = [];
+      await page.route("**/api/v1/orders/*/receipt", (route) => {
+        receiptTokens.push(route.request().headers()["x-csrf-token"]);
+        return route.fulfill({
+          headers: json,
+          body: JSON.stringify({
+            ...receipt(true),
+            receipt: {
+              ...receipt(true).receipt,
+              visitEnded: { receiptAvailableUntil: until },
+            },
+          }),
+        });
+      });
+      await page.goto("/orders/" + orderReference);
+      const notice = page.getByRole("alert");
+      await expect(
+        notice.getByRole("heading", { name: "Your visit on this phone has ended" }),
+      ).toBeVisible();
+      await expect(
+        notice.getByText(
+          "You can still view and save your receipt on this phone for 24 hours after your visit started.",
+        ),
+      ).toBeVisible();
+      await expect(notice).not.toContainText("ask a staff member for the table code to continue");
+      // No order status (and nothing to order with) is read for an ended visit.
+      expect(statusCalls).toEqual([]);
+      await expectNoInternalText(page);
+      await noOverflowOrBlockingAxe(page);
+      await notice.getByRole("link", { name: "View your receipt" }).click();
+      await expect(page.getByRole("heading", { name: "Your visit has ended" })).toBeVisible();
+      await expect(
+        page.getByText(/You can still view and save this receipt on this phone until/u),
+      ).toBeVisible();
+      await expect(page.getByText("HST 13%", { exact: true })).toBeVisible();
+      expect(receiptTokens).toEqual([ended]);
+      await expectNoInternalText(page);
+      await noOverflowOrBlockingAxe(page);
+    });
   });
 }

@@ -10,9 +10,41 @@ export interface CheckoutTipSelection {
 }
 let checkoutTipSelection: CheckoutTipSelection | null = null;
 
+/**
+ * WP-2423 (v15 3cd0f8dd M5): a visit on this device ended (its table closed, or it sat idle) after
+ * it placed an order. The guest can still open that order's receipt — read only — until
+ * `receiptAvailableUntil`; nothing else uses this credential. Held in memory only.
+ */
+export interface EndedVisitReceiptAccess {
+  readonly csrfToken: string;
+  readonly orderReference: string;
+  readonly orderNumber: string;
+  readonly orderType: "Pickup" | "DineIn";
+  readonly receiptAvailableUntil: string;
+}
+let endedVisitReceipt: EndedVisitReceiptAccess | null = null;
+
+export function setEndedVisitReceiptAccess(value: EndedVisitReceiptAccess | null): void {
+  endedVisitReceipt = value === null ? null : Object.freeze({ ...value });
+}
+
+/** The ended visit's receipt access for this order, while it lasts (else null). */
+export function getEndedVisitReceiptAccess(
+  orderReference: string,
+  now: number = Date.now(),
+): EndedVisitReceiptAccess | null {
+  return endedVisitReceipt !== null &&
+    endedVisitReceipt.orderReference === orderReference &&
+    now < Date.parse(endedVisitReceipt.receiptAvailableUntil)
+    ? endedVisitReceipt
+    : null;
+}
+
 export function setCustomerCsrfCredential(value: string | null): void {
   csrfContext = Symbol();
   csrfCredential = value;
+  // A new visit replaces the ended one on this device (its cookie replaces the old Session).
+  if (value !== null) endedVisitReceipt = null;
   paymentOperationReference = null;
   checkoutSessionReference = null;
   checkoutTipSelection = null;

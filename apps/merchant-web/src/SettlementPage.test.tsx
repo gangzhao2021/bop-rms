@@ -57,10 +57,28 @@ describe("WP-2423 P1 settlement report", () => {
     expect(html).toContain("12 matched · 1 unresolved · 1 difference");
     expect(html).toContain("Payments needing attention");
     expect(html).toContain("Difference · Refund differs");
-    expect(html).toContain("Unresolved · Awaiting customer action");
+    // WP-2423 (3cd0f8dd L2): a $0.00 payment a guest started but did not finish is explained in
+    // plain words, not listed as a payment needing attention.
+    expect(html).not.toContain("Unresolved · Awaiting customer action");
+    expect(html).toContain(
+      "1 online payment was started by a guest but not finished (the guest left or is still paying). Nothing was charged, so there is nothing to do.",
+    );
     expect(html).toContain('href="/operations/order-exceptions"');
     expect(html).not.toContain("Showing the latest");
     expect(html).not.toContain("018f7700");
+  });
+  it("WP-2423 (3cd0f8dd L2): keeps an unfinished payment with money at either side in the attention list", () => {
+    const view = settlementViewFixture();
+    const unfinished = view.reconciliation.differences[1];
+    Object.assign(unfinished ?? {}, { providerCapturedMinor: "1130" });
+    const html = render(view);
+    expect(html).toContain("Unresolved · Awaiting customer action");
+    expect(html).not.toContain("started by a guest but not finished");
+    Object.assign(unfinished ?? {}, { providerCapturedMinor: "0" });
+    view.reconciliation.differences.splice(0, 1);
+    const only = render(view);
+    expect(only).not.toContain("Payments needing attention");
+    expect(only).toContain("1 online payment was started by a guest but not finished");
   });
   it("names a statement difference and a truncated list", () => {
     const view = settlementViewFixture();

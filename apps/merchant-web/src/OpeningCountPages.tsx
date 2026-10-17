@@ -1,3 +1,4 @@
+import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -409,11 +410,11 @@ export function OpeningCountPage({
   if (state.kind !== "Found")
     return (
       <StatePanel
-        heading="Opening count"
+        heading={state.kind === "PermissionDenied" ? noAccessHeading : "Opening count"}
         tone={state.kind === "Loading" ? "neutral" : "error"}
         status
       >
-        <p>{copy[state.kind]}</p>
+        <p>{state.kind === "PermissionDenied" ? pageAccessDeniedText : copy[state.kind]}</p>
       </StatePanel>
     );
   const view = state.view;

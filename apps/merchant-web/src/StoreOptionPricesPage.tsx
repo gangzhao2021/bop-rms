@@ -1,3 +1,4 @@
+import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
@@ -87,11 +88,11 @@ export function StoreOptionPricesPage({
   if (state.kind !== "Found")
     return (
       <StatePanel
-        heading="Option prices"
+        heading={state.kind === "PermissionDenied" ? noAccessHeading : "Option prices"}
         tone={state.kind === "Loading" ? "neutral" : "error"}
         status
       >
-        <p>{copy[state.kind]}</p>
+        <p>{state.kind === "PermissionDenied" ? pageAccessDeniedText : copy[state.kind]}</p>
       </StatePanel>
     );
   const view = state.view;

@@ -1,3 +1,4 @@
+import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { kitchenActionNotice, kitchenStepText, useKitchenActions } from "./use-kitchen-actions.js";
 import { useKitchenClock } from "./kitchen-clock.js";
 import {
@@ -598,10 +599,7 @@ export function KitchenBoardStatePanel({
 }) {
   const copy = {
     Loading: ["Loading", "Loading the kitchen queue…"],
-    PermissionDenied: [
-      "Permission denied",
-      "Your kitchen permission or Store scope does not allow this board.",
-    ],
+    PermissionDenied: [noAccessHeading, pageAccessDeniedText],
     NotFound: ["Work item unavailable", "This work item is not at the selected Store."],
     Offline: ["You’re offline", "Reconnect and refresh before taking an action."],
     Conflict: ["Work item changed", "Refresh to see its current state before trying again."],

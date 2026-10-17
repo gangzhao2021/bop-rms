@@ -316,7 +316,7 @@ test("@production Pickup paging, current scope and permission recovery", async (
   denied = true;
   await refresh.focus();
   await page.keyboard.press("Enter");
-  await expect(heading("Permission denied")).toBeVisible();
+  await expect(heading("No access")).toBeVisible();
   await expect(page.locator("article")).toHaveCount(0);
   await expect(refresh).toBeFocused();
   denied = false;
@@ -325,7 +325,7 @@ test("@production Pickup paging, current scope and permission recovery", async (
   // Another Store's answer is a scope loss: the queue clears rather than going stale (IDR-0039).
   foreign = true;
   await refresh.click();
-  await expect(heading("Permission denied")).toBeVisible();
+  await expect(heading("No access")).toBeVisible();
   await expect(page.locator("article")).toHaveCount(0);
   expect(
     await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length })),
@@ -765,7 +765,7 @@ test("@production Pickup accepts the typed six-digit code, explains wrong codes 
 });
 
 // WP-2423: an order staff took at the counter gets no guest pickup code. Its card says so and
-// offers the in-person handover at once (by name or order number); a guest's QR order on the same
+// offers the in-person handover at once (call the order number); a guest's QR order on the same
 // queue keeps the pickup code check.
 test("@production Pickup hands a counter order over in person at once while a guest order keeps its code check", async ({
   page,
@@ -887,9 +887,7 @@ test("@production Pickup hands a counter order over in person at once while a gu
     .filter({ has: page.getByRole("heading", { name: "Order 8", exact: true }) });
   await expect(counterCard).toBeVisible();
   await expect(
-    counterCard.getByText(
-      "Taken at the counter — hand over to the customer by name or order number.",
-    ),
+    counterCard.getByText("Taken at the counter — call the order number and hand it over."),
   ).toBeVisible();
   await expect(counterCard.getByText("Not needed · taken at the counter")).toBeVisible();
   await expect(counterCard.getByRole("button", { name: "Check pickup code" })).toHaveCount(0);
@@ -922,7 +920,7 @@ test("@production Pickup hands a counter order over in person at once while a gu
   expect(identityReads).toEqual([]);
   await dialog
     .getByLabel("Checked in person")
-    .selectOption({ label: "Order number or the name they gave at the counter" });
+    .selectOption({ label: "Order number called at the counter" });
   await dialog.getByLabel("Collected by").selectOption("Customer");
   await dialog.getByLabel("Collector’s initial").fill("S***");
   await dialog.getByLabel("I matched this order", { exact: false }).check();

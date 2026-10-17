@@ -357,6 +357,10 @@ export const orderStatusText = Object.freeze({
     refunded: (amount: string) => `Refunded ${amount}`,
     refundPending: (amount: string) => `Refund pending · ${amount}`,
     received: (amount: string) => `Payment received ${amount}`,
+    /** WP-2423 (v15 3cd0f8dd H1): a table that paid some rounds online and some with staff. */
+    receivedBoth: (amount: string, online: string, machine: string) =>
+      `Payment received ${amount} (${online} online, ${machine} on the store’s card machine)`,
+    receivedMachine: (amount: string) => `Payment received ${amount} on the store’s card machine`,
     notPaid: "Not paid",
     attemptFailed: "Payment attempt failed",
     pending: "Payment pending",
@@ -378,6 +382,12 @@ export const orderStatusText = Object.freeze({
   orderTypePickup: "Pickup",
   kitchenStatusLabel: "Kitchen status",
   paymentLabel: "Payment",
+  /** WP-2423 (v15 3cd0f8dd M3): confirmed refunds on the order. */
+  refundedLabel: "Refunded",
+  itemRefundedTag: "Refunded",
+  refundReturned: (amount: string) => `Refund: ${amount} returned to your original payment.`,
+  refundReturnedWithTip: (amount: string, tip: string) =>
+    `Refund: ${amount} returned to your original payment, including ${tip} of the tip.`,
   paymentDelayedHeading: "Payment update may be delayed",
   paymentDelayed: "This payment update may be out of date. Refresh to check again.",
   statusDelayedHeading: "Status may be delayed",
@@ -413,8 +423,12 @@ export const orderStatusText = Object.freeze({
   /** The visit on this browser has ended. */
   visitEnded: Object.freeze({
     heading: "Your visit on this phone has ended",
+    /** WP-2423 (v15 3cd0f8dd M5): a guest who left still gets their receipt. */
+    receipt:
+      "You can still view and save your receipt on this phone for 24 hours after your visit started.",
+    viewReceipt: "View your receipt",
     atTable:
-      "At a table: your table visit ended or expired. Scan the table QR code again and ask a staff member for the table code to continue. While your table is still open, your earlier orders are on your table page.",
+      "Still at your table and want to order more? Scan the table QR code again. If it asks for a table code, a staff member can give it to you.",
     pickup:
       "For a pickup order: the store still has your order. Give your name or order number at the counter.",
     start: "Go to the start",

@@ -41,6 +41,8 @@ const kind = (v: unknown): "HumanCode" | "Invitation" => {
   if (v !== "HumanCode" && v !== "Invitation") return fail();
   return v;
 };
+/** A session open longer than this is most likely a table nobody closed. */
+export const longOpenSessionMinutes = 12 * 60;
 export interface StaffDiningTable {
   tableReference: string;
   stableLabel: string;

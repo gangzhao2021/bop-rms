@@ -174,6 +174,8 @@ it("serializes separate financial facts without rewriting immutable receipts", a
     confirmedRefundMinor: 10n,
     pendingRefundMinor: 20n,
     unresolvedAttemptCount: 1,
+    paidOnlineMinor: 100n,
+    paidOnCardMachineMinor: 14n,
   });
   const response = await test.send();
   expect(response.status).toBe(200);
@@ -187,6 +189,8 @@ it("serializes separate financial facts without rewriting immutable receipts", a
         confirmedRefundMinor: "10",
         pendingRefundMinor: "20",
         unresolvedAttemptCount: 1,
+        paidOnlineMinor: "100",
+        paidOnCardMachineMinor: "14",
       },
       records: [{ snapshot: { refundedTotal: { amountMinor: "0" } } }],
       freshnessStatus: "Stale",
@@ -318,4 +322,80 @@ it("serializes each line's chosen options with what they added, and older lines 
   // A version issued before options were recorded is served exactly as issued.
   const legacy = (await (await (await setup()).send()).json()) as Body;
   expect(legacy.receipt.records[0]?.snapshot.lines[0]).not.toHaveProperty("options");
+});
+
+it("WP-2423 (v15 3cd0f8dd M4/M5): states each refund once as new, and an ended visit's bound", async () => {
+  const test = await setup(true, null);
+  const original = test.chain.records[0];
+  if (original === undefined) throw new Error("fixture");
+  const refund = {
+    refundReference: id(40),
+    kind: "ItemCancellation" as const,
+    lines: [
+      {
+        lineReference: id(8),
+        displayName: "Synthetic item",
+        quantity: 1,
+        amount: money(100n),
+      },
+    ],
+    tax: money(13n),
+    tip: money(0n),
+    other: money(0n),
+    total: money(113n),
+  };
+  const refunded = (version: number, reference: number, refunds: (typeof refund)[]) => ({
+    recordReference: id(reference),
+    version,
+    kind: "Refund",
+    recordedAt: "2026-09-12T12:0" + String(version) + ":00.000Z",
+    previousRecordReference: id(reference - 1),
+    reasonCode: "PAYMENT_REFUND_STATUS_CHANGED",
+    snapshot: {
+      ...original.snapshot,
+      paymentStatus: "PartiallyRefunded",
+      refundedTotal: money(refunds.reduce((sum, entry) => sum + entry.total.amountMinor, 0n)),
+      refunds,
+    },
+  });
+  const chain = parseDigitalReceiptChain({
+    orderReference: id(1),
+    records: [original, refunded(2, 3, [refund]), refunded(3, 4, [refund])],
+  });
+  test.readView.mockImplementation(async () => ({
+    chain,
+    financial: null,
+    visitEnded: { receiptAvailableUntil: "2026-09-13T11:00:00.000Z" },
+  }));
+  const response = await test.send();
+  expect(response.status).toBe(200);
+  const body = (await response.json()) as {
+    receipt: {
+      visitEnded?: unknown;
+      records: { snapshot: { refunds?: { newInThisVersion: boolean }[] } }[];
+    };
+  };
+  expect(body.receipt.visitEnded).toEqual({ receiptAvailableUntil: "2026-09-13T11:00:00.000Z" });
+  expect(body.receipt.records[0]?.snapshot.refunds).toBeUndefined();
+  expect(body.receipt.records[1]?.snapshot.refunds).toEqual([
+    {
+      kind: "ItemCancellation",
+      lines: [
+        {
+          lineReference: id(8),
+          displayName: "Synthetic item",
+          quantity: 1,
+          amount: { amountMinor: "100", currencyCode: "CAD" },
+        },
+      ],
+      tax: { amountMinor: "13", currencyCode: "CAD" },
+      tip: { amountMinor: "0", currencyCode: "CAD" },
+      other: { amountMinor: "0", currencyCode: "CAD" },
+      total: { amountMinor: "113", currencyCode: "CAD" },
+      newInThisVersion: true,
+    },
+  ]);
+  expect(body.receipt.records[2]?.snapshot.refunds?.[0]?.newInThisVersion).toBe(false);
+  // The internal refund reference is never sent.
+  expect(JSON.stringify(body)).not.toContain(id(40));
 });

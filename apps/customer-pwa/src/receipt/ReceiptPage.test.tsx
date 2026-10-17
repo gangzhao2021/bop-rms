@@ -90,7 +90,8 @@ describe("CUST-RECEIPT-SUPPORT screen contract", () => {
   it.each([
     [{ status: "loading" }, "Loading receipt"],
     [{ status: "invalid-reference" }, "Receipt link is invalid"],
-    [{ status: "permission-denied" }, "Your visit on this phone has ended"],
+    // WP-2423 (v15 3cd0f8dd M5): past the 24 h bound the receipt says so and where to get a copy.
+    [{ status: "permission-denied" }, "This receipt is no longer available on this phone"],
     [{ status: "not-found" }, "Receipt not found"],
     [{ status: "feature-disabled" }, "Digital receipt is disabled"],
     [{ status: "unavailable" }, "We couldn’t load your receipt"],
@@ -352,5 +353,96 @@ describe("WP-2423 D5/D6: item prices before tax and plain payment wording", () =
     });
     expect(html).toContain("<dt>Paid</dt><dd>$11.30</dd>");
     expect(html).not.toContain("Captured");
+  });
+});
+
+describe("WP-2423 (v15 3cd0f8dd) receipt payments, refunds and ended visits", () => {
+  const amount = (amountMinor: bigint) => ({ amountMinor, currencyCode: "CAD" });
+  function withRefund(): ReceiptState {
+    const state = ready();
+    if (state.status !== "ready") throw new Error("missing fixture");
+    const original = state.view.records[0];
+    if (!original) throw new Error("missing fixture");
+    return {
+      ...state,
+      view: {
+        ...state.view,
+        financial: {
+          observedAt: "2026-08-12T14:10:00.000Z",
+          currencyCode: "CAD",
+          capturedMinor: 1667n,
+          confirmedRefundMinor: 565n,
+          pendingRefundMinor: 0n,
+          unresolvedAttemptCount: 0,
+          paidOnlineMinor: 1130n,
+          paidOnCardMachineMinor: 537n,
+        },
+        records: [
+          original,
+          {
+            ...original,
+            recordReference: id(9),
+            version: 2,
+            kind: "Refund",
+            recordedAt: "2026-08-12T14:05:00.000Z",
+            reasonCode: "PAYMENT_REFUND_STATUS_CHANGED",
+            snapshot: {
+              ...original.snapshot,
+              paymentStatus: "PartiallyRefunded",
+              refundedTotal: amount(565n),
+              refunds: [
+                {
+                  kind: "ItemCancellation",
+                  lines: [
+                    {
+                      lineReference: id(4),
+                      displayName: "Synthetic bowl",
+                      quantity: 1,
+                      amount: amount(500n),
+                    },
+                  ],
+                  tax: amount(65n),
+                  tip: amount(0n),
+                  other: amount(0n),
+                  total: amount(565n),
+                  newInThisVersion: true,
+                },
+              ],
+            },
+          },
+        ],
+      },
+    };
+  }
+
+  it("H1: shows what was paid online and on the store's card machine", () => {
+    const html = render(withRefund());
+    expect(html).toContain("<dt>Paid</dt><dd>$16.67</dd>");
+    expect(html).toContain("<dt>Paid online</dt><dd>$11.30</dd>");
+    expect(html).toContain("<dt>Paid on the store’s card machine</dt><dd>$5.37</dd>");
+  });
+
+  it("M4: a refund version states what was refunded and the total after it; version 1 is unchanged", () => {
+    const html = render(withRefund());
+    expect(html).toContain("Reason: A refund was made to your original payment.");
+    expect(html).toContain("What was refunded");
+    expect(html).toContain("<strong>Cancelled items</strong> · new on this version");
+    expect(html).toContain("<dt>Refunded in total</dt><dd>$5.65</dd>");
+    expect(html).toContain("<dt>Total after refunds</dt><dd>$5.65</dd>");
+    // The original version still prints as issued: nothing refunded, no refund section.
+    const first = html.slice(0, html.indexOf("Version 2"));
+    expect(first).toContain("<dt>Refunded</dt><dd>$0.00</dd>");
+    expect(first).not.toContain("What was refunded");
+  });
+
+  it("M5: says until when an ended visit can still open the receipt here", () => {
+    const state = withRefund();
+    if (state.status !== "ready") throw new Error("missing fixture");
+    const html = render({
+      ...state,
+      view: { ...state.view, visitEnded: { receiptAvailableUntil: "2026-08-13T12:00:00.000Z" } },
+    });
+    expect(html).toContain("Your visit has ended");
+    expect(html).toContain("You can still view and save this receipt on this phone until");
   });
 });

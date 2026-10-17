@@ -1,4 +1,8 @@
-import { assertGuestSessionUsable, createGuestSession } from "@bop/identity";
+import {
+  assertGuestSessionReceiptReadable,
+  assertGuestSessionUsable,
+  createGuestSession,
+} from "@bop/identity";
 import { parseOrderingInstant, parseOrderingReference } from "../domain/cart.js";
 import { DigitalReceiptError, parseDigitalReceiptChain } from "../domain/digital-receipt.js";
 import type { DigitalReceiptQueryPorts } from "./ports/digital-receipt-ports.js";
@@ -74,10 +78,12 @@ export function createDigitalReceiptQueryService(ports: DigitalReceiptQueryPorts
             observedAt: request.observedAt,
           });
           if (result) {
-            const session = assertGuestSessionUsable(
-              createGuestSession(result.guestSession),
-              request.observedAt,
-            );
+            // WP-2423 (v15 3cd0f8dd M5): an ended visit reads its own receipt, nothing else.
+            const session = (
+              result.endedVisit === true
+                ? assertGuestSessionReceiptReadable
+                : assertGuestSessionUsable
+            )(createGuestSession(result.guestSession), request.observedAt);
             authorization = {
               guestSessionReference: parseOrderingReference(session.sessionReference),
               brandReference: parseOrderingReference(session.brandReference),

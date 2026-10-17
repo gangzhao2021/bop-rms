@@ -3,9 +3,14 @@ import { restoreCustomerSession } from "./session-bootstrap.js";
 import {
   getCustomerCsrfCredential,
   getCheckoutSessionReference,
+  getEndedVisitReceiptAccess,
   setCustomerCsrfCredential,
+  setEndedVisitReceiptAccess,
 } from "./customer-transaction-context.js";
-afterEach(() => setCustomerCsrfCredential(null));
+afterEach(() => {
+  setCustomerCsrfCredential(null);
+  setEndedVisitReceiptAccess(null);
+});
 const response = (
   value: unknown = { schemaVersion: 1, csrfToken: "B".repeat(43) },
   cache = "no-store",
@@ -189,4 +194,37 @@ it("treats a first visit or an ended visit (204, no usable Guest Session) as not
     );
   expect(await restoreCustomerSession(fetcher)).toBe(false);
   expect(getCustomerCsrfCredential()).toBeNull();
+});
+
+it("WP-2423 (v15 3cd0f8dd M5): keeps an ended visit's receipt access apart, restoring nothing else", async () => {
+  const order = {
+    orderReference: "018f8a00-0000-7000-8000-000000000016",
+    orderNumber: "22",
+    orderType: "DineIn",
+  };
+  const fetcher = vi.fn().mockResolvedValue(
+    response({
+      schemaVersion: 1,
+      endedVisit: {
+        csrfToken: "C".repeat(43),
+        order,
+        receiptAvailableUntil: "2026-10-18T18:01:49.437Z",
+      },
+    }),
+  );
+  const menu = vi.fn(),
+    current = vi.fn();
+  expect(await restoreCustomerSession(fetcher, menu, current)).toBe(false);
+  expect(getCustomerCsrfCredential()).toBeNull();
+  expect(menu).not.toHaveBeenCalled();
+  expect(current).not.toHaveBeenCalled();
+  const before = Date.parse("2026-10-18T18:00:00.000Z");
+  expect(getEndedVisitReceiptAccess(order.orderReference, before)?.csrfToken).toBe("C".repeat(43));
+  // Only for that order, only until its bound, and gone once a new visit starts.
+  expect(getEndedVisitReceiptAccess("018f8a00-0000-7000-8000-000000000017", before)).toBeNull();
+  expect(
+    getEndedVisitReceiptAccess(order.orderReference, Date.parse("2026-10-18T18:01:49.437Z")),
+  ).toBeNull();
+  setCustomerCsrfCredential("D".repeat(43));
+  expect(getEndedVisitReceiptAccess(order.orderReference, before)).toBeNull();
 });

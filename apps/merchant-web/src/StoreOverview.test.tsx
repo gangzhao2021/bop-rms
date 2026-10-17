@@ -15,7 +15,16 @@ import {
   summarizeExceptions,
   summarizeOrders,
   summarizePickups,
+  summarizeTables,
+  dayChecklist,
+  DayChecklist,
+  settlementStatusText,
+  type OverviewTodayState,
+  type TablesRead,
 } from "./StoreOverview.js";
+import type { StaffDiningTable } from "./dining-session-client.js";
+import { settlementViewFixture } from "./settlement.fixtures.js";
+import { parseSettlementView } from "./settlement-client.js";
 import {
   awaitingAcceptanceText,
   paidRoundWaitText,
@@ -34,6 +43,7 @@ describe("WP-2423 P2 store overview", () => {
       readyToServe: 0,
       dineIn: true,
       more: false,
+      servedDineIn: new Set(),
     });
   });
   it("counts a table whose later round awaits acceptance, the same way the Orders page does", () => {
@@ -165,7 +175,7 @@ describe("WP-2423 P2 store overview", () => {
         ],
         nextAfterFulfillmentReference: "018f0f58-767a-7f3b-a1d0-000000000001",
       }),
-    ).toEqual({ waiting: 2, remaking: 1, more: true });
+    ).toEqual({ waiting: 2, earlierDays: 0, remaking: 1, more: true });
     const view = parseOrderExceptionView({
       screenId: "OPS-ORDER-EXCEPTION",
       projectionName: "merchant_order_exception_v1",
@@ -225,10 +235,12 @@ describe("WP-2423 P2 store overview", () => {
                 readyToServe: 2,
                 dineIn: true,
                 more: true,
+                servedDineIn: new Set(),
               },
             },
             pickups: { kind: "Unavailable" },
             exceptions: { kind: "Ready", value: { open: 0, overdue: 0 } },
+            tables: { kind: "Hidden" },
             updatedAt: "2026-08-12T16:30:00.000Z",
           }}
         />
@@ -259,6 +271,7 @@ describe("WP-2423 P2 store overview", () => {
             orders: { kind: "Unavailable" },
             pickups: { kind: "Unavailable" },
             exceptions: { kind: "Ready", value: { open: 15, overdue: 15 } },
+            tables: { kind: "Hidden" },
             updatedAt: "2026-08-12T16:30:00.000Z",
           }}
         />
@@ -282,10 +295,15 @@ describe("WP-2423 P2 store overview", () => {
                 readyToServe: 0,
                 dineIn: false,
                 more: false,
+                servedDineIn: new Set(),
               },
             },
-            pickups: { kind: "Ready", value: { waiting: 4, remaking: 1, more: false } },
+            pickups: {
+              kind: "Ready",
+              value: { waiting: 4, earlierDays: 0, remaking: 1, more: false },
+            },
             exceptions: { kind: "Hidden" },
+            tables: { kind: "Hidden" },
             updatedAt: null,
           }}
         />
@@ -308,12 +326,23 @@ describe("WP-2423 Q11 follow-up: Home reads only what the role's screens permit"
     );
   it("leaves out counts for screens the role does not have, and the card when none remain", () => {
     const hidden = { kind: "Hidden" } as const;
-    const ordersOnly = render({ ...initialOverviewState, pickups: hidden, exceptions: hidden });
+    const ordersOnly = render({
+      ...initialOverviewState,
+      pickups: hidden,
+      exceptions: hidden,
+      tables: hidden,
+    });
     expect(ordersOnly).toContain("Open orders");
     expect(ordersOnly).not.toContain("Pickups waiting");
     expect(ordersOnly).not.toContain("Open exceptions");
     expect(
-      render({ ...initialOverviewState, orders: hidden, pickups: hidden, exceptions: hidden }),
+      render({
+        ...initialOverviewState,
+        orders: hidden,
+        pickups: hidden,
+        exceptions: hidden,
+        tables: hidden,
+      }),
     ).toBe("");
   });
 });
@@ -352,5 +381,191 @@ describe("v15 finding: the store system card follows the server's answer, not th
     expect(tableRoundWaitText(2, paidAt, at(11))).toBe(
       "Round 2 paid 11 min ago and still not accepted · accept it on the Orders page now",
     );
+  });
+});
+
+describe("WP-2423 3cd0f8dd: tables to close, earlier-day pickups and the day checklist", () => {
+  const order = "01909985-0000-7000-8000-000000000101";
+  const table = (overrides: Partial<StaffDiningTable> = {}): StaffDiningTable => ({
+    tableReference: "01909985-0000-7000-8000-000000000201",
+    stableLabel: "T1",
+    areaCode: "MAIN",
+    capacity: 4,
+    lifecycle: "Published",
+    operationalState: "Available",
+    aggregateVersion: 1,
+    currentDiningSessionReference: "01909985-0000-7000-8000-000000000301",
+    elapsedMinutes: 40,
+    qrCodeValidUntil: null,
+    staffRoundsAwaitingPayment: [],
+    guestRoundsAwaitingPayment: [],
+    roundsAwaitingAcceptance: [],
+    session: { phase: "Active", version: 2, orderReference: order },
+    ...overrides,
+  });
+  const read = (tables: StaffDiningTable[], canClose = true): TablesRead => ({
+    tables,
+    canClose,
+    more: false,
+  });
+  it("M7: a served table with nothing waiting is to be closed; only for staff who close tables", () => {
+    const served = new Set([order]);
+    expect(summarizeTables(read([table()]), served)).toEqual({ open: 1, toClose: 1, more: false });
+    // Still eating (order not served), a round waiting for payment, or no session: not to close.
+    expect(summarizeTables(read([table()]), new Set()).toClose).toBe(0);
+    expect(
+      summarizeTables(
+        read([table({ staffRoundsAwaitingPayment: [{ payBy: "2026-10-17T20:00:00.000Z" }] })]),
+        served,
+      ).toClose,
+    ).toBe(0);
+    expect(
+      summarizeTables(
+        read([table({ currentDiningSessionReference: null, elapsedMinutes: null, session: null })]),
+        served,
+      ),
+    ).toEqual({ open: 0, toClose: 0, more: false });
+    // Open so long the guests most likely left.
+    expect(summarizeTables(read([table({ elapsedMinutes: 13 * 60 })]), null).toClose).toBe(1);
+    expect(summarizeTables(read([table()], false), served).toClose).toBeNull();
+    const html = (canClose: boolean) =>
+      renderToStaticMarkup(
+        <MemoryRouter>
+          <OverviewToday
+            state={{
+              ...initialOverviewState,
+              orders: { kind: "Hidden" },
+              pickups: { kind: "Hidden" },
+              exceptions: { kind: "Hidden" },
+              tables: {
+                kind: "Ready",
+                value: read([table({ elapsedMinutes: 13 * 60 })], canClose),
+              },
+            }}
+          />
+        </MemoryRouter>,
+      );
+    expect(html(true)).toContain("1 table served — close when the guests have left");
+    expect(html(true)).toContain('href="/operations/dining"');
+    expect(html(false)).toContain("A manager or the owner closes tables when the guests have left");
+  });
+  it("L7: counts today's pickups apart from earlier days' and points to check and close", () => {
+    const summary = summarizePickups(
+      {
+        items: [
+          { phase: "Ready", businessDate: "2026-10-17" },
+          { phase: "Ready", businessDate: "2026-10-15" },
+          { phase: "Ready", businessDate: "2026-10-14", remakeQuantity: 1 },
+          { phase: "Completed", businessDate: "2026-10-14" },
+        ],
+      },
+      "2026-10-17",
+    );
+    expect(summary).toEqual({ waiting: 1, earlierDays: 2, remaking: 0, more: false });
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <OverviewToday
+          state={{
+            ...initialOverviewState,
+            orders: { kind: "Hidden" },
+            exceptions: { kind: "Hidden" },
+            tables: { kind: "Hidden" },
+            pickups: { kind: "Ready", value: summary },
+          }}
+        />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("Pickups from earlier days");
+    expect(html).toContain("Check and close");
+    expect(html).toContain('<strong class="overview-count__value">1</strong>');
+    expect(html).toContain('<strong class="overview-count__value">2</strong>');
+    // Without the business day every waiting pickup counts as today's (no false split).
+    expect(summarizePickups({ items: [{ phase: "Ready", businessDate: "2026-10-15" }] })).toEqual({
+      waiting: 1,
+      earlierDays: 0,
+      remaking: 0,
+      more: false,
+    });
+  });
+  it("M6: the opening and closing checklist reads the same sources and leaves out hidden ones", () => {
+    const state: OverviewTodayState = {
+      orders: {
+        kind: "Ready",
+        value: {
+          open: 2,
+          awaitingAcceptance: 0,
+          awaitingRounds: 0,
+          urgentRounds: 0,
+          readyToServe: 0,
+          dineIn: true,
+          more: false,
+          servedDineIn: new Set([order]),
+        },
+      },
+      pickups: { kind: "Ready", value: { waiting: 1, earlierDays: 3, remaking: 0, more: false } },
+      exceptions: { kind: "Ready", value: { open: 0, overdue: 0 } },
+      tables: { kind: "Ready", value: read([table()]) },
+      updatedAt: null,
+    };
+    const settlement = {
+      kind: "Ready",
+      value: { businessDate: "2026-10-16", text: "Matches the payment provider" },
+    } as const;
+    const list = dayChecklist(state, settlement, "/app/organization/stores/x/service");
+    const status = (items: typeof list.opening) =>
+      Object.fromEntries(items.map((item) => [item.key, item.status]));
+    expect(status(list.opening)).toEqual({
+      "ordering-on": null,
+      settlement: "Matches the payment provider",
+      "earlier-pickups": "3 left",
+      "tables-left-open": "1 left",
+    });
+    expect(status(list.closing)).toEqual({
+      orders: "2 left",
+      pickups: "4 left",
+      tables: "1 left",
+      exceptions: "Done",
+      "ordering-off": null,
+      "settlement-later": null,
+    });
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <DayChecklist state={state} settlement={settlement} serviceHref={null} />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("Opening and closing");
+    expect(html).toContain("Settlement for Fri, Oct 16");
+    expect(html).not.toContain("Hours &amp; ordering");
+    const hidden = { kind: "Hidden" } as const;
+    expect(
+      renderToStaticMarkup(
+        <MemoryRouter>
+          <DayChecklist
+            state={{
+              ...state,
+              orders: hidden,
+              pickups: hidden,
+              exceptions: hidden,
+              tables: hidden,
+            }}
+            settlement={hidden}
+            serviceHref={null}
+          />
+        </MemoryRouter>,
+      ),
+    ).toBe("");
+  });
+  it("M6: says the last closed day's settlement in staff words", () => {
+    const parsed = parseSettlementView(settlementViewFixture());
+    // The fixture: one refund difference and one unfinished guest payment (nothing charged).
+    expect(settlementStatusText(parsed)).toBe("1 payment to look at");
+    const reconciliation = parsed.reconciliation;
+    if (reconciliation === null) throw new Error("fixture");
+    const view = {
+      ...parsed,
+      reconciliation: { ...reconciliation, differences: reconciliation.differences.slice(1) },
+    };
+    expect(settlementStatusText(view)).toBe("Matches the payment provider");
+    expect(settlementStatusText({ ...view, reconciliation: null })).toBe("Not checked yet");
   });
 });

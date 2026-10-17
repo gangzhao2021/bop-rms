@@ -1,6 +1,7 @@
 import { StatePanel } from "@bop-rms/ui";
 import { StoreConfigurationEditor } from "./StoreConfigurationEditor.js";
 import { WorkspacePage } from "./WorkspacePage.js";
+import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { createStoreConfigurationClient } from "./store-configuration-client.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
@@ -256,11 +257,8 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
   if (noAccess)
     return (
       <WorkspacePage title="Hours & ordering">
-        <StatePanel heading="No access" tone="error" status>
-          <p>
-            Your role cannot view or change opening hours and online ordering. Ask a manager or
-            owner.
-          </p>
+        <StatePanel heading={noAccessHeading} tone="error" status>
+          <p>{pageAccessDeniedText}</p>
         </StatePanel>
       </WorkspacePage>
     );

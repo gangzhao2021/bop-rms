@@ -8,8 +8,15 @@ import {
   parseOrderingReference,
   parseOrderingInstant,
   DigitalReceiptError,
+  type ReceiptOrderSnapshot,
+  type RefundReceiptItemization,
 } from "@rms/ordering";
-import { createPostgresPaymentReceiptCoverageSource } from "@rms/payment";
+import {
+  createPostgresOrdinaryRefundRequestContextSource,
+  createPostgresOrdinaryRefundRequestStatusSource,
+  createPostgresPaymentReceiptCoverageSource,
+} from "@rms/payment";
+import { v7 as uuidV7 } from "uuid";
 import type { createOriginalReceiptIssuance } from "./original-receipt-issuance.js";
 import { receiptChargedOrder } from "./receipt-charged-order.js";
 type Original = Parameters<typeof createOriginalReceiptIssuance>[0];
@@ -110,7 +117,16 @@ export function createRefundReceiptIssuance(options: {
               .reduce((sum, item) => sum + item.pricing.total.amountMinor, 0n),
           })),
         });
-        const snapshot = createRefundReceiptSnapshot(previous, financial);
+        // WP-2423 (v15 3cd0f8dd M4): what each confirmed refund returned, so the version says it.
+        const itemization = await readRefundItemization(transaction, {
+          scope: options.scope,
+          orderReference: request.orderReference,
+          observedAt: request.observedAt,
+          order,
+          batches: financial.batches,
+          authorize,
+        });
+        const snapshot = createRefundReceiptSnapshot(previous, financial, itemization);
         await authorize();
         if (snapshot === null) return null;
         const identities = options.identities();
@@ -123,7 +139,15 @@ export function createRefundReceiptIssuance(options: {
           reasonCode: "PAYMENT_REFUND_STATUS_CHANGED",
           snapshot,
         });
-        const sourceDigest = "sha256:" + sha256Hex(encode({ previous, order, financial, record }));
+        const sourceDigest =
+          "sha256:" +
+          sha256Hex(
+            encode(
+              itemization === undefined
+                ? { previous, order, financial, record }
+                : { previous, order, financial, itemization, record },
+            ),
+          );
         prepared = { encoded: encode(record), sourceDigest };
         return {
           record,
@@ -134,6 +158,116 @@ export function createRefundReceiptIssuance(options: {
       },
     });
   };
+}
+
+/**
+ * WP-2423 (v15 3cd0f8dd M4): the confirmed refunds of the Order's charged rounds split into what
+ * each returned, from the Payment owner's refund requests (customer-requested refunds and item
+ * cancellations, online or on the card machine) and each round's captured and refunded amounts.
+ * Read under the Order's refund fence the coverage read already holds. When anything can't be read
+ * the refund version states the refunded amount only (undefined), as before.
+ */
+async function readRefundItemization(
+  transaction: ConsumerTransaction,
+  input: {
+    scope: Parameters<typeof createPostgresPaymentReceiptCoverageSource>[0]["scope"];
+    orderReference: string;
+    observedAt: string;
+    order: ReceiptOrderSnapshot;
+    batches: readonly {
+      orderBatchReference: string;
+      paymentIntentReference: string;
+      captured: { amountMinor: bigint };
+      refunded: { amountMinor: bigint };
+      tip: { amountMinor: bigint };
+    }[];
+    authorize(): Promise<boolean>;
+  },
+): Promise<RefundReceiptItemization | undefined> {
+  const scope = {
+    tenantReference: input.scope.tenantReference,
+    brandReference: input.scope.brandReference,
+    storeReference: input.scope.storeReference,
+  };
+  const allowed = async () => (await input.authorize()) === true;
+  await transaction.query("SAVEPOINT refund_receipt_itemization", []);
+  try {
+    const context = await createPostgresOrdinaryRefundRequestContextSource({
+      scope,
+      fence: "OrderOnly",
+      authorize: allowed,
+    })(transaction, {
+      orderReference: input.orderReference,
+      operationReference: uuidV7(),
+      observedAt: input.observedAt,
+    });
+    const status = createPostgresOrdinaryRefundRequestStatusSource({
+      scope,
+      providerAccountReference: input.scope.providerAccountReference,
+      environment: input.scope.environment,
+      authorize: allowed,
+    });
+    const itemized: RefundReceiptItemization["itemized"][number][] = [];
+    for (const request of context.history) {
+      if (context.declines.has(request.requestReference)) continue;
+      const current = await status(transaction, {
+        orderReference: input.orderReference,
+        operationReference: request.operationReference,
+        observedAt: input.observedAt,
+      });
+      const payments = [];
+      for (const payment of request.payments) {
+        const state = current.payments.find(
+          (entry) =>
+            entry.paymentIntentReference === payment.paymentIntentReference &&
+            entry.paymentAttemptReference === payment.paymentAttemptReference,
+        );
+        if (state?.state !== "Confirmed") continue;
+        const round = input.batches.find(
+          (batch) => batch.paymentIntentReference === payment.paymentIntentReference,
+        );
+        if (round === undefined) throw new Error("REFUND_ITEMIZATION_ROUND_UNKNOWN");
+        payments.push({
+          orderBatchReference: round.orderBatchReference,
+          items: payment.items.map((item) => ({
+            orderItemReference: item.orderItemReference,
+            quantity: item.refundUnitOrdinals.length,
+            netMinor: item.components.netAmountMinor,
+            taxMinor: item.components.taxAmountMinor,
+            tipMinor: item.components.tipAmountMinor,
+            otherMinor:
+              item.components.serviceChargeAmountMinor +
+              item.components.serviceChargeTaxAmountMinor,
+          })),
+        });
+      }
+      if (payments.length > 0)
+        itemized.push({
+          refundReference: request.requestReference,
+          kind: request.claim === undefined ? "Refund" : "ItemCancellation",
+          payments,
+        });
+    }
+    await transaction.query("RELEASE SAVEPOINT refund_receipt_itemization", []);
+    return {
+      itemized,
+      rounds: input.batches.map((batch) => ({
+        orderBatchReference: batch.orderBatchReference,
+        capturedMinor: batch.captured.amountMinor,
+        refundedMinor: batch.refunded.amountMinor,
+        tipMinor: batch.tip.amountMinor,
+        lineReferences: input.order.items
+          .filter((item) => item.snapshot.orderBatchReference === batch.orderBatchReference)
+          .map((item) => String(item.snapshot.orderItemReference)),
+      })),
+    };
+  } catch {
+    await transaction.query("ROLLBACK TO SAVEPOINT refund_receipt_itemization", []);
+    await transaction.query("RELEASE SAVEPOINT refund_receipt_itemization", []);
+    if ((await input.authorize()) !== true)
+      throw new DigitalReceiptError("DIGITAL_RECEIPT_PERMISSION_DENIED");
+    return undefined;
+  }
 }
 
 /**

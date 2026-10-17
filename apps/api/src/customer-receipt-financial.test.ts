@@ -19,6 +19,16 @@ const position = {
   unresolvedAttemptCount: 0,
   captures: [{ paymentTransactionReference: id(6) }],
   snapshotDigest: "private",
+  // WP-2423 (v15 3cd0f8dd H1): a dine-in round staff took on the card machine ($5.37) and a
+  // refund recorded on it ($1.00) are part of what the order was paid and refunded.
+  settlement: {
+    capturedMinor: 1667n,
+    capturedOrderAllocationMinor: 1667n,
+    capturedTipMinor: 0n,
+    confirmedRefundMinor: 100n,
+    pendingRefundMinor: 600n,
+    refundAllocation: { orderMinor: 100n, tipMinor: 0n, unallocatedMinor: 0n },
+  },
 };
 beforeEach(() => {
   vi.resetAllMocks();
@@ -37,10 +47,12 @@ it("uses exact scoped owner query and exposes only customer financial facts", as
   expect(await readCustomerReceiptFinancial(f.tx, options, input, f.auth)).toEqual({
     observedAt: input.observedAt,
     currencyCode: "CAD",
-    capturedMinor: 1130n,
-    confirmedRefundMinor: 0n,
+    capturedMinor: 1667n,
+    confirmedRefundMinor: 100n,
     pendingRefundMinor: 600n,
     unresolvedAttemptCount: 0,
+    paidOnlineMinor: 1130n,
+    paidOnCardMachineMinor: 537n,
   });
   expect(d.factory).toHaveBeenCalledWith({ ...options, authorize: expect.any(Function) });
   expect(d.read).toHaveBeenCalledWith(f.tx, input);

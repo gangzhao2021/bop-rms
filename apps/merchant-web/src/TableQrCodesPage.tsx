@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { serviceOperationReference } from "./service-control-client.js";
 import { createTableQrClient, TableQrClientError, type TableQrRow } from "./table-qr-client.js";
 import { WorkspacePage } from "./WorkspacePage.js";
+import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 
 /**
  * WP-2423 Q11 (Section 88 DIN-TABLE-LIST): the Store Manager prints each table's QR code once,
@@ -301,8 +302,8 @@ export function TableQrCodesPage({
       {load.kind === "Loading" ? (
         <p role="status">Loading tables…</p>
       ) : load.kind === "PermissionDenied" ? (
-        <StatePanel heading="No access" tone="error" status>
-          <p>Your role can&apos;t manage table codes. Ask the Store owner or manager.</p>
+        <StatePanel heading={noAccessHeading} tone="error" status>
+          <p>{pageAccessDeniedText}</p>
         </StatePanel>
       ) : load.kind === "Unavailable" ? (
         <StatePanel heading="Tables unavailable" tone="error" status>
