@@ -562,7 +562,8 @@ export async function exerciseCurrentPinnedOptionProductDraft({
       clockOverride = null;
       optionAllowed = true;
       const initial = await counts();
-      let lose = true;
+      let lose = true,
+        lostReply;
       const bodies = [];
       const fetcher = async (url, request) => {
         assert.equal(url, path);
@@ -573,8 +574,9 @@ export async function exerciseCurrentPinnedOptionProductDraft({
           path,
         );
         if (lose) {
-          assert.equal(reply.status, 200);
-          lose = false;
+          // Recorded, not asserted here: the client reports any fetch failure, an assertion
+          // included, as OutcomeUnknown, which would hide the server's actual reply.
+          lostReply = reply;
           throw new TypeError("SYNTHETIC_PINNED_OPTION_REPLY_LOST");
         }
         return new globalThis.Response(JSON.stringify(reply.body), {
@@ -583,7 +585,23 @@ export async function exerciseCurrentPinnedOptionProductDraft({
         });
       };
       const pending = createProductCommandClient(fetcher).prepareDraft(command, scope);
-      await assert.rejects(pending.execute(editorSession.csrf), { code: "OutcomeUnknown" });
+      // A save whose own transaction outlives its 5 s freshness budget (app clock against the
+      // database statement time) fails closed: 503, nothing written. A loaded host can cause that
+      // here (root stayed 10 in the 2026-10-16/17 regressions); it is verified, then the same
+      // pending command is sent again until the server applies it and that reply is lost.
+      let attempts = 0;
+      for (;;) {
+        attempts++;
+        await assert.rejects(pending.execute(editorSession.csrf), { code: "OutcomeUnknown" });
+        if (lostReply.status === 200) break;
+        assert.equal(lostReply.status, 503, JSON.stringify(lostReply.body));
+        assert.deepEqual(lostReply.body, { error: "product_draft_unavailable" });
+        assert.deepEqual(await counts(), initial);
+        assert.ok(attempts < 5, "five consecutive budget expiries");
+      }
+      lose = false;
+      assert.equal(lostReply.body.status, "Applied");
+      assert.equal(lostReply.body.aggregateVersion, 11);
       const after = await counts();
       assert.equal(after.root, 11);
       assert.ok(optionHolds > 0);
@@ -618,7 +636,7 @@ export async function exerciseCurrentPinnedOptionProductDraft({
       assert.equal(brandReads, 0);
       assert.equal(policyReads, 0);
       assert.deepEqual(await state(), before);
-      assert.ok(bodies.length === 3 && bodies.every((x) => x === bodies[0]));
+      assert.ok(bodies.length === attempts + 2 && bodies.every((x) => x === bodies[0]));
     },
     { productDraft: native.productDraft },
   );
