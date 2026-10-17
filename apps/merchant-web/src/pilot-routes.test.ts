@@ -61,6 +61,30 @@ describe("merchant route classification", () => {
     expect(pilotHiddenRedirect("/app/organization/stores/x/capabilities", null)).toBe("/app");
   });
 
+  it("serves the Brand and Platform consoles only where the session lists them", () => {
+    // v15 9b2b3f21 B4: the pilot Store session lists neither; its Owner went to pages that never
+    // loaded ("Brand access could not be confirmed").
+    const pilot = ["HOME-OVERVIEW", "STORE-SETUP", "OPS-ORDER-QUEUE", "IAM-USER-LIST"];
+    for (const path of [
+      "/app/organization/brands",
+      "/app/organization/brands/x",
+      "/platform/tenants",
+    ])
+      expect(pilotHiddenRedirect(path, pilot), path).toBe("/app");
+    expect(
+      pilotHiddenRedirect("/app/organization/brands", [...pilot, "ORG-BRAND-LIST"]),
+    ).toBeNull();
+    expect(
+      pilotHiddenRedirect("/app/organization/brands/x", [...pilot, "ORG-BRAND-DETAIL"]),
+    ).toBeNull();
+    expect(pilotHiddenRedirect("/platform/tenants", ["PLT-TENANT-LIST"])).toBeNull();
+    // The Brand and Platform sign-ins run without a Store session; their pages show their own state.
+    expect(pilotHiddenRedirect("/app/organization/brands", null)).toBeNull();
+    expect(pilotHiddenRedirect("/platform/tenants", null)).toBeNull();
+    for (const path of ["/platform/tenants/x", "/platform/live-gates", "/platform/support-cases"])
+      expect(pilotHiddenRedirect(path, pilot), path).toBe("/app");
+  });
+
   it("sends each hidden screen to a working screen", () => {
     for (const entry of merchantRoutes.filter((candidate) => candidate.hiddenTo)) {
       expect(pilotHiddenRedirect(entry.sample), entry.path).toBe(entry.hiddenTo);

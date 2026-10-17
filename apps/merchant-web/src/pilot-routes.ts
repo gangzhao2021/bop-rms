@@ -25,7 +25,6 @@ export interface MerchantRoute {
 const ref = "01909985-0000-7000-8000-000000000042";
 const home = "/app";
 const reports = "/app/reports/operations";
-const platform = "/platform/tenants";
 
 function route(path: string, hiddenTo?: string): MerchantRoute {
   const sample = path.replace(/:[A-Za-z]+/gu, ref);
@@ -46,10 +45,14 @@ export const merchantRoutes: readonly MerchantRoute[] = Object.freeze([
   route("/app/organization/users/:id"),
   route("/app/organization/roles"),
   route("/app/organization/roles/:id"),
-  route("/app/organization/brands"),
-  route("/app/organization/brands/:id"),
   route("/app/organization/sessions"),
-  route("/platform/tenants"),
+  // v15 9b2b3f21 B4: the Brand and Platform consoles have their own sign-in and sources, which a
+  // Store workspace composes only where its navigation lists them (the pilot lists neither: the
+  // Brand pages said "Brand access could not be confirmed" without loading anything). There the
+  // address goes Home; a Brand or Platform deployment that lists the screen keeps it.
+  listedRoute("/app/organization/brands", "ORG-BRAND-LIST", home),
+  listedRoute("/app/organization/brands/:id", "ORG-BRAND-DETAIL", home),
+  listedRoute("/platform/tenants", "PLT-TENANT-LIST", home),
   route("/app/commerce/option-sets"),
   route("/app/commerce/option-sets/:optionSetId"),
   route("/app/commerce/products"),
@@ -110,9 +113,9 @@ export const merchantRoutes: readonly MerchantRoute[] = Object.freeze([
   route("/app/organization/features", home),
   route("/app/organization/entities", home),
   route("/app/organization/entities/:id", home),
-  route("/platform/live-gates", platform),
-  route("/platform/tenants/:id", platform),
-  route("/platform/support-cases", platform),
+  route("/platform/live-gates", home),
+  route("/platform/tenants/:id", home),
+  route("/platform/support-cases", home),
   route("/app/exports", home),
   route("/app/commerce/bundles", home),
   route("/app/commerce/bundles/:id/edit", home),

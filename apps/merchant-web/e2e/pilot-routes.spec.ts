@@ -60,7 +60,8 @@ async function signedIn(page: Page) {
 const placeholderText =
   /design review|\bphase \d\b|\bprojection\b|placeholder|review layout|source values|\b[A-Z]{2,5}(?:-[A-Z]{2,})+\b/u;
 
-// The pilot session lists neither TAX-CONFIG nor any other conditional screen.
+// The pilot session lists neither TAX-CONFIG nor any other conditional screen (v15 9b2b3f21 B4:
+// nor the Brand and Platform consoles, ORG-BRAND-LIST, ORG-BRAND-DETAIL and PLT-TENANT-LIST).
 const hidden = merchantRoutes.flatMap((entry) =>
   entry.hiddenTo !== undefined
     ? [{ path: entry.path, sample: entry.sample, to: entry.hiddenTo }]
